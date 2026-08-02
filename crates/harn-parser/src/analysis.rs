@@ -4,7 +4,7 @@ use std::path::Path;
 
 use harn_lexer::{Lexer, LexerError, Token};
 
-use crate::InlayHintInfo;
+use crate::{InlayHintInfo, TypeCheckFacts};
 use crate::{Parser, ParserError, SNode, TypeChecker, TypeDiagnostic};
 
 /// Stable source identity used by the incremental analysis cache.
@@ -182,6 +182,11 @@ impl TypeCheckConfig {
             checker = checker.with_namespace_imports(self.namespace_imports.clone());
         }
         checker
+    }
+
+    /// Run the configured checker while retaining semantic binding facts.
+    pub fn check_with_facts(&self, program: &[SNode], source: &str) -> TypeCheckFacts {
+        self.build_checker().check_with_facts(program, source)
     }
 }
 
@@ -554,5 +559,23 @@ mod tests {
             .any(|diag| diag.severity == DiagnosticSeverity::Error));
         assert_eq!(first.diagnostics.len(), second.diagnostics.len());
         assert_eq!(db.stats().typecheck_runs, 1);
+    }
+
+    #[test]
+    fn typecheck_facts_keep_shadowed_inferred_bindings_distinct() {
+        let source = "pipeline main(agent: HarnessAgent) {\n  const value = agent\n  if true {\n    const value = \"session\"\n    log(value)\n  }\n  log(value)\n}\n";
+        let program = crate::parse_source(source).expect("parse");
+
+        let facts = TypeCheckConfig::new().check_with_facts(&program, source);
+        let values = facts
+            .binding_types
+            .iter()
+            .filter(|binding| binding.name == "value")
+            .collect::<Vec<_>>();
+
+        assert_eq!(values.len(), 2, "{:#?}", facts.binding_types);
+        assert_ne!(values[0].span, values[1].span);
+        assert_eq!(crate::format_type(&values[0].type_expr), "HarnessAgent");
+        assert_eq!(crate::format_type(&values[1].type_expr), "string");
     }
 }

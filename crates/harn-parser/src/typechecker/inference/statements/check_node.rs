@@ -107,6 +107,14 @@ impl TypeChecker {
                         }
                     }
                     let ty = type_ann.clone().or(inferred);
+                    if let Some(type_expr) = &ty {
+                        self.binding_types
+                            .push(super::super::super::BindingTypeInfo {
+                                name: name.clone(),
+                                span,
+                                type_expr: type_expr.clone(),
+                            });
+                    }
                     scope.define_var(name, ty);
                     if type_ann.is_some() {
                         scope.mark_annotated(name);
@@ -179,6 +187,14 @@ impl TypeChecker {
                     let inferred_is_nil =
                         type_ann.is_none() && inferred.as_ref().is_some_and(Self::is_nil_type);
                     let ty = type_ann.clone().or(inferred);
+                    if let Some(type_expr) = &ty {
+                        self.binding_types
+                            .push(super::super::super::BindingTypeInfo {
+                                name: name.clone(),
+                                span,
+                                type_expr: type_expr.clone(),
+                            });
+                    }
                     scope.define_var_mutable(name, ty);
                     if type_ann.is_some() {
                         scope.mark_annotated(name);

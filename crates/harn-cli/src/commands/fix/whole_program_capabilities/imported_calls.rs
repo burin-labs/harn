@@ -6,12 +6,12 @@
 //! omission observable; ambiguous capability-producing expressions are left
 //! untouched for the type checker or a future typed repair.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 
 use harn_builtin_meta::CapabilityId;
 use harn_lexer::FixEdit;
-use harn_parser::{BindingPattern, Node, SNode, TypeExpr, TypedParam};
+use harn_parser::{Node, SNode, TypeExpr, TypedParam};
 
 use super::edits::{add_call_arguments_at_index_edit, argument_for_kind};
 use super::{capability_carrier_kind, Carrier, CarrierKind, ProgramCallable, ProgramFile};
@@ -24,12 +24,41 @@ pub(super) struct Signature {
     has_rest: bool,
 }
 
+#[derive(Debug, Clone)]
+pub(super) struct PrefixRepair {
+    insertions: Vec<PrefixInsertion>,
+}
+
+#[derive(Debug, Clone)]
+struct PrefixInsertion {
+    argument_index: usize,
+    prefix_start: usize,
+    prefix_end: usize,
+}
+
+impl PrefixRepair {
+    pub(super) fn missing_kinds<'a>(
+        &'a self,
+        signature: &'a Signature,
+    ) -> impl Iterator<Item = &'a CarrierKind> {
+        self.insertions.iter().flat_map(|insertion| {
+            signature.prefix[insertion.prefix_start..insertion.prefix_end].iter()
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ArgumentEvidence {
     Carrier,
     Identifier,
     DefinitelyOrdinary,
     Ambiguous,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum BindingEvidence {
+    Capability(CarrierKind),
+    Ordinary,
 }
 
 pub(super) fn signatures(
@@ -82,33 +111,85 @@ pub(super) fn signatures(
         .collect()
 }
 
-pub(super) fn missing_prefix(
+pub(super) fn prefix_repair(
     source: &str,
     carriers: &[Carrier],
-    ordinary_bindings: &BTreeSet<String>,
+    bindings: &BTreeMap<harn_parser::lexical::BindingId, BindingEvidence>,
+    resolutions: &HashMap<(usize, usize), harn_parser::lexical::BindingId>,
     call: &super::super::CallSite,
     signature: &Signature,
-) -> Option<usize> {
+) -> Option<PrefixRepair> {
     if !signature.has_rest && call.args.len() >= signature.total_params {
         return None;
     }
 
-    let first_missing = signature
-        .prefix
-        .iter()
-        .zip(&call.args)
-        .take_while(|(expected, span)| {
-            source
-                .get(span.start..span.end)
-                .map(str::trim)
-                .is_some_and(|actual| argument_supplies(actual, carriers, expected))
-        })
-        .count();
-    if first_missing == signature.prefix.len() {
+    let mut expected_index = 0;
+    let mut argument_index = 0;
+    let mut insertions = Vec::new();
+    while expected_index < signature.prefix.len() {
+        let Some(argument_span) = call.args.get(argument_index) else {
+            insertions.push(PrefixInsertion {
+                argument_index,
+                prefix_start: expected_index,
+                prefix_end: signature.prefix.len(),
+            });
+            break;
+        };
+        let actual = source
+            .get(argument_span.start..argument_span.end)
+            .map(str::trim)?;
+        let evidence = classify_argument(
+            actual,
+            carriers,
+            bindings,
+            resolutions,
+            argument_span,
+            &signature.prefix[expected_index],
+        );
+        if evidence == ArgumentEvidence::Carrier {
+            expected_index += 1;
+            argument_index += 1;
+            continue;
+        }
+        if let Some(later_index) = ((expected_index + 1)..signature.prefix.len()).find(|index| {
+            classify_argument(
+                actual,
+                carriers,
+                bindings,
+                resolutions,
+                argument_span,
+                &signature.prefix[*index],
+            ) == ArgumentEvidence::Carrier
+        }) {
+            insertions.push(PrefixInsertion {
+                argument_index,
+                prefix_start: expected_index,
+                prefix_end: later_index,
+            });
+            expected_index = later_index;
+            continue;
+        }
+        match evidence {
+            ArgumentEvidence::DefinitelyOrdinary => {
+                insertions.push(PrefixInsertion {
+                    argument_index,
+                    prefix_start: expected_index,
+                    prefix_end: signature.prefix.len(),
+                });
+                break;
+            }
+            ArgumentEvidence::Identifier | ArgumentEvidence::Ambiguous => return None,
+            ArgumentEvidence::Carrier => unreachable!(),
+        }
+    }
+    if insertions.is_empty() {
         return None;
     }
 
-    let missing_count = signature.prefix.len() - first_missing;
+    let missing_count = insertions
+        .iter()
+        .map(|insertion| insertion.prefix_end - insertion.prefix_start)
+        .sum::<usize>();
     let required_without_missing = signature.required_params.saturating_sub(missing_count);
     let total_without_missing = signature.total_params.saturating_sub(missing_count);
     let minimum_without_missing = if signature.has_rest {
@@ -119,19 +200,7 @@ pub(super) fn missing_prefix(
     if call.args.len() < minimum_without_missing {
         return None;
     }
-
-    let Some(first_missing_arg) = call.args.get(first_missing) else {
-        return Some(first_missing);
-    };
-    let actual = source
-        .get(first_missing_arg.start..first_missing_arg.end)
-        .map(str::trim)?;
-
-    match classify_argument(actual, carriers, &signature.prefix[first_missing]) {
-        ArgumentEvidence::Carrier | ArgumentEvidence::Ambiguous => None,
-        ArgumentEvidence::DefinitelyOrdinary => Some(first_missing),
-        ArgumentEvidence::Identifier => ordinary_bindings.contains(actual).then_some(first_missing),
-    }
+    Some(PrefixRepair { insertions })
 }
 
 pub(super) fn argument_edits(
@@ -146,49 +215,65 @@ pub(super) fn argument_edits(
         .iter()
         .filter_map(|call| {
             let signature = file.imported_capability_signatures.get(&call.callee)?;
-            let first_missing = missing_prefix(
+            let repair = prefix_repair(
                 &file.source,
                 &callable.carriers,
-                &callable.ordinary_bindings,
+                &callable.imported_binding_evidence,
+                &callable.resolved_imported_bindings,
                 call,
                 signature,
             )?;
-            let arguments = signature
-                .prefix
-                .iter()
-                .skip(first_missing)
-                .map(|kind| argument_for_kind(callable, desired, additions, kind))
-                .collect::<Result<Vec<_>, _>>()
-                .ok()?;
-            add_call_arguments_at_index_edit(&file.source, call, first_missing, &arguments)
+            Some(repair.insertions.into_iter().filter_map(|insertion| {
+                let arguments = signature.prefix[insertion.prefix_start..insertion.prefix_end]
+                    .iter()
+                    .map(|kind| argument_for_kind(callable, desired, additions, kind))
+                    .collect::<Result<Vec<_>, _>>()
+                    .ok()?;
+                add_call_arguments_at_index_edit(
+                    &file.source,
+                    call,
+                    insertion.argument_index,
+                    &arguments,
+                )
+            }))
         })
+        .flatten()
         .collect()
 }
 
-pub(super) fn ordinary_bindings(
+pub(super) fn binding_evidence(
     params: &[TypedParam],
     body: &[SNode],
     type_aliases: &BTreeMap<String, TypeExpr>,
-) -> BTreeSet<String> {
+    binding_types: &[harn_parser::BindingTypeInfo],
+) -> BTreeMap<harn_parser::lexical::BindingId, BindingEvidence> {
     let mut bindings = params
         .iter()
-        .filter(|param| {
-            param.type_expr.as_ref().is_some_and(|type_expr| {
-                definitely_ordinary_type(type_expr, type_aliases, &mut BTreeSet::new())
+        .filter_map(|param| {
+            let type_expr = param.type_expr.as_ref()?;
+            evidence_for_type(type_expr, type_aliases).map(|evidence| {
+                (
+                    harn_parser::lexical::BindingId::from_declaration(
+                        param.name.clone(),
+                        param.span,
+                    ),
+                    evidence,
+                )
             })
         })
-        .map(|param| param.name.clone())
-        .collect::<BTreeSet<_>>();
-    for node in body {
-        let (Node::LetBinding { pattern, value, .. } | Node::ConstBinding { pattern, value, .. }) =
-            &node.node
-        else {
-            continue;
-        };
-        if definitely_ordinary(&value.node) {
-            if let BindingPattern::Identifier(name) = pattern {
-                bindings.insert(name.clone());
-            }
+        .collect::<BTreeMap<_, _>>();
+    for binding in binding_types.iter().filter(|binding| {
+        body.iter()
+            .any(|node| node.span.start <= binding.span.start && binding.span.end <= node.span.end)
+    }) {
+        if let Some(evidence) = evidence_for_type(&binding.type_expr, type_aliases) {
+            bindings.insert(
+                harn_parser::lexical::BindingId::from_declaration(
+                    binding.name.clone(),
+                    binding.span,
+                ),
+                evidence,
+            );
         }
     }
     bindings
@@ -218,6 +303,9 @@ fn argument_supplies(actual: &str, carriers: &[Carrier], expected: &CarrierKind)
 fn classify_argument(
     actual: &str,
     carriers: &[Carrier],
+    bindings: &BTreeMap<harn_parser::lexical::BindingId, BindingEvidence>,
+    resolutions: &HashMap<(usize, usize), harn_parser::lexical::BindingId>,
+    argument_span: &harn_lexer::Span,
     expected: &CarrierKind,
 ) -> ArgumentEvidence {
     if argument_supplies(actual, carriers, expected) {
@@ -228,10 +316,33 @@ fn classify_argument(
         return ArgumentEvidence::Ambiguous;
     };
     match expression.node {
-        Node::Identifier(_) => ArgumentEvidence::Identifier,
+        Node::Identifier(_) => match resolutions
+            .get(&(argument_span.start, argument_span.end))
+            .and_then(|binding| bindings.get(binding))
+        {
+            Some(BindingEvidence::Capability(actual)) if actual == expected => {
+                ArgumentEvidence::Carrier
+            }
+            Some(BindingEvidence::Capability(_) | BindingEvidence::Ordinary) => {
+                ArgumentEvidence::DefinitelyOrdinary
+            }
+            None => ArgumentEvidence::Identifier,
+        },
         node if definitely_ordinary(&node) => ArgumentEvidence::DefinitelyOrdinary,
         _ => ArgumentEvidence::Ambiguous,
     }
+}
+
+fn evidence_for_type(
+    type_expr: &TypeExpr,
+    type_aliases: &BTreeMap<String, TypeExpr>,
+) -> Option<BindingEvidence> {
+    capability_carrier_kind(type_expr, type_aliases, &mut BTreeSet::new())
+        .map(BindingEvidence::Capability)
+        .or_else(|| {
+            definitely_ordinary_type(type_expr, type_aliases, &mut BTreeSet::new())
+                .then_some(BindingEvidence::Ordinary)
+        })
 }
 
 fn definitely_ordinary_type(

@@ -745,7 +745,7 @@ fn capability_plan_preserves_explicit_imported_capability_expressions() {
     let script = temp.path().join("main.harn");
     fs::write(
         &script,
-        "import { terminal_width } from \"std/tui\"\n\nfn custom_term(term: HarnessTerm) -> HarnessTerm {\n  return term\n}\n\npipeline main(harness: Harness, task) {\n  const term = harness.term\n  return [terminal_width(custom_term(harness.term)), terminal_width(term)]\n}\n",
+        "import { terminal_width } from \"std/tui\"\n\nfn custom_term(term: HarnessTerm) -> HarnessTerm {\n  return term\n}\n\npipeline main(harness: Harness, task) {\n  const term = custom_term(harness.term)\n  return [terminal_width(custom_term(harness.term)), terminal_width(term)]\n}\n",
     )
     .unwrap();
     let files = vec![script];
@@ -779,6 +779,60 @@ fn capability_plan_preserves_an_unknown_capability_identifier_when_ordinary_args
             .flat_map(|repair| &repair.edits)
             .any(|edit| edit.replacement == "harness.agent, "),
         "an unknown identifier may already be the carrier; adding one would shift it into the missing session slot: {repairs:#?}"
+    );
+}
+
+#[test]
+fn capability_plan_uses_inferred_capability_types_to_repair_a_different_missing_carrier() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let library = temp.path().join("library.harn");
+    let entrypoint = temp.path().join("main.harn");
+    fs::write(
+        &library,
+        "pub fn run_with_root(harness: Harness, agent: HarnessAgent) {\n  return {root: harness, agent: agent}\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        &entrypoint,
+        "import { run_with_root } from \"./library\"\n\nfn custom_agent(harness: Harness) -> HarnessAgent {\n  return harness.agent\n}\n\npipeline main(harness: Harness, task) {\n  const agent = custom_agent(harness)\n  return run_with_root(agent)\n}\n",
+    )
+    .unwrap();
+    let files = vec![entrypoint, library];
+    let graph = commands::check::build_module_graph(&files);
+
+    let repairs = whole_program_capabilities::plan(&files, &graph, &[]).unwrap();
+
+    assert!(
+        repairs
+            .iter()
+            .flat_map(|repair| &repair.edits)
+            .any(|edit| edit.replacement == "harness, "),
+        "an inferred Agent cannot occupy a root Harness slot, so the missing root carrier is observable: {repairs:#?}"
+    );
+}
+
+#[test]
+fn capability_plan_disambiguates_shadowed_inferred_bindings_by_declaration() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("main.harn");
+    fs::write(
+        &script,
+        "import { agent_session_messages } from \"std/agent/state\"\n\nfn custom_agent(harness: Harness) -> HarnessAgent {\n  return harness.agent\n}\n\npipeline main(harness: Harness, task) {\n  const value = custom_agent(harness)\n  const before = agent_session_messages(value, \"outer-before\")\n  const nested = [1].map({ _ ->\n    const value = \"nested-session\"\n    return agent_session_messages(value)\n  })\n  const after = agent_session_messages(value, \"outer-after\")\n  return {before: before, nested: nested, after: after}\n}\n",
+    )
+    .unwrap();
+    let files = vec![script];
+    let graph = commands::check::build_module_graph(&files);
+
+    let repairs = whole_program_capabilities::plan(&files, &graph, &[]).unwrap();
+
+    assert_eq!(
+        repairs
+            .iter()
+            .flat_map(|repair| &repair.edits)
+            .filter(|edit| edit.replacement == "harness.agent, ")
+            .count(),
+        1,
+        "only the string-valued shadow should receive the missing Agent carrier: {repairs:#?}"
     );
 }
 

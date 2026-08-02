@@ -4,7 +4,7 @@
 //! diagnostics into one program-wide edit graph so a narrowed signature and
 //! every reachable caller move in the same apply pass.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 
 use harn_builtin_meta::CapabilityId;
@@ -65,7 +65,9 @@ struct ProgramCallable {
     flow_predicate: bool,
     carrier: Option<Carrier>,
     carriers: Vec<Carrier>,
-    ordinary_bindings: BTreeSet<String>,
+    imported_binding_evidence:
+        BTreeMap<harn_parser::lexical::BindingId, imported_calls::BindingEvidence>,
+    resolved_imported_bindings: HashMap<(usize, usize), harn_parser::lexical::BindingId>,
     has_split_capability_params: bool,
     root_attenuation: Option<BTreeSet<CapabilityId>>,
     direct_requirements: BTreeSet<CapabilityId>,
@@ -150,6 +152,12 @@ pub(super) fn plan(
             })
             .collect::<BTreeMap<_, _>>();
         let type_aliases = capability_type_aliases(&program, file, module_graph);
+        let type_facts = crate::commands::check::typecheck_config(
+            file,
+            &crate::package::CheckConfig::default(),
+            module_graph,
+        )
+        .check_with_facts(&program, &source);
         let infos = collect_callable_infos(&program, &source, &exported);
         let imported_capability_signatures = imported_signatures(file, module_graph, &type_aliases);
         for info in infos {
@@ -159,7 +167,14 @@ pub(super) fn plan(
                 continue;
             };
             let carriers = capability_carriers(params, &type_aliases);
-            let ordinary_bindings = imported_calls::ordinary_bindings(params, body, &type_aliases);
+            let imported_binding_evidence = imported_calls::binding_evidence(
+                params,
+                body,
+                &type_aliases,
+                &type_facts.binding_types,
+            );
+            let resolved_imported_bindings =
+                harn_parser::lexical::resolved_identifier_bindings(params, body);
             let has_split_capability_params = carriers.len() > 1
                 || matches!(
                     carriers.first().map(|carrier| &carrier.kind),
@@ -181,16 +196,17 @@ pub(super) fn plan(
                 let Some(signature) = imported_capability_signatures.get(&call.callee) else {
                     continue;
                 };
-                let Some(first_missing) = imported_calls::missing_prefix(
+                let Some(repair) = imported_calls::prefix_repair(
                     &source,
                     &carriers,
-                    &ordinary_bindings,
+                    &imported_binding_evidence,
+                    &resolved_imported_bindings,
                     call,
                     signature,
                 ) else {
                     continue;
                 };
-                for kind in &signature.prefix[first_missing..] {
+                for kind in repair.missing_kinds(signature) {
                     match kind {
                         CarrierKind::Root => direct_root_requirement = true,
                         CarrierKind::Narrow(capability) => {
@@ -223,7 +239,8 @@ pub(super) fn plan(
                 flow_predicate,
                 carrier,
                 carriers,
-                ordinary_bindings,
+                imported_binding_evidence,
+                resolved_imported_bindings,
                 has_split_capability_params,
                 root_attenuation,
                 direct_requirements,
@@ -310,10 +327,11 @@ pub(super) fn plan(
             file.imported_capability_signatures
                 .get(&call.callee)
                 .is_some_and(|signature| {
-                    imported_calls::missing_prefix(
+                    imported_calls::prefix_repair(
                         &file.source,
                         &callable.carriers,
-                        &callable.ordinary_bindings,
+                        &callable.imported_binding_evidence,
+                        &callable.resolved_imported_bindings,
                         call,
                         signature,
                     )

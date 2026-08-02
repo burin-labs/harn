@@ -14,7 +14,7 @@ use crate::ast::{is_discard_name, BindingPattern, Node, SNode, TypedParam};
 /// Stable identity for a source binding. Patterns do not carry individual
 /// spans, so the declaration span plus the bound name is the narrowest source
 /// identity available without changing the AST.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BindingId {
     pub name: String,
     pub declaration_start: usize,
@@ -272,6 +272,26 @@ pub fn nested_callable_reassigned_names(
     analysis.reassigned.into_iter().collect()
 }
 
+/// Resolve identifier-use spans to their exact lexical declarations.
+///
+/// This is the semantic bridge for consumers that combine source-local facts
+/// with type facts. Declaration identity preserves source order and nested
+/// shadowing; a name-only map cannot.
+pub fn resolved_identifier_bindings(
+    params: &[TypedParam],
+    body: &[SNode],
+) -> HashMap<(usize, usize), BindingId> {
+    let mut analysis = LexicalAnalysis::new(&MatchPatternCatalog::default());
+    analysis.walk_body_with_bindings(
+        body,
+        Vec::new(),
+        false,
+        BindingOwner::Current,
+        parameter_scope(params, &BindingOwner::Current),
+    );
+    analysis.resolved
+}
+
 #[derive(Debug, Clone)]
 enum BindingOwner {
     Current,
@@ -281,7 +301,7 @@ enum BindingOwner {
 #[derive(Debug, Clone)]
 enum ScopeBinding {
     Current(BindingId),
-    Nested,
+    Nested(Option<BindingId>),
 }
 
 type Scope = HashMap<String, ScopeBinding>;
@@ -289,6 +309,7 @@ type Scope = HashMap<String, ScopeBinding>;
 struct LexicalAnalysis {
     captured: HashSet<BindingId>,
     reassigned: BTreeSet<String>,
+    resolved: HashMap<(usize, usize), BindingId>,
     match_patterns: MatchPatternCatalog,
 }
 
@@ -297,6 +318,7 @@ impl LexicalAnalysis {
         Self {
             captured: HashSet::new(),
             reassigned: BTreeSet::new(),
+            resolved: HashMap::new(),
             match_patterns: match_patterns.clone(),
         }
     }
@@ -351,12 +373,14 @@ impl LexicalAnalysis {
         owner: &BindingOwner,
     ) {
         match &node.node {
-            Node::Identifier(name) => self.record_reference(name, scopes, inside_nested_callable),
+            Node::Identifier(name) => {
+                self.record_reference(name, node.span, scopes, inside_nested_callable);
+            }
             Node::FunctionCall { name, .. } => {
                 // Bare calls resolve a user binding before falling back to a
                 // builtin. Keep the complete name intact so dotted builtin
                 // names do not become references to their first component.
-                self.record_reference(name, scopes, inside_nested_callable);
+                self.record_reference(name, node.span, scopes, inside_nested_callable);
                 self.walk_children(node, scopes, inside_nested_callable, owner);
             }
             Node::Assignment { target, .. } => {
@@ -714,18 +738,32 @@ impl LexicalAnalysis {
         }
     }
 
-    fn record_reference(&mut self, name: &str, scopes: &[Scope], inside_nested_callable: bool) {
-        if !inside_nested_callable {
-            return;
-        }
-        if let Some(ScopeBinding::Current(binding)) = resolve(scopes, name) {
-            self.captured.insert(binding.clone());
+    fn record_reference(
+        &mut self,
+        name: &str,
+        span: Span,
+        scopes: &[Scope],
+        inside_nested_callable: bool,
+    ) {
+        match resolve(scopes, name) {
+            Some(ScopeBinding::Current(binding)) => {
+                self.resolved
+                    .insert((span.start, span.end), binding.clone());
+                if inside_nested_callable {
+                    self.captured.insert(binding.clone());
+                }
+            }
+            Some(ScopeBinding::Nested(Some(binding))) => {
+                self.resolved
+                    .insert((span.start, span.end), binding.clone());
+            }
+            Some(ScopeBinding::Nested(None)) | None => {}
         }
     }
 
     fn record_reassignment(&mut self, name: &str, scopes: &[Scope]) {
         match resolve(scopes, name) {
-            Some(ScopeBinding::Nested) => {}
+            Some(ScopeBinding::Nested(_)) => {}
             Some(ScopeBinding::Current(binding)) => {
                 self.reassigned.insert(binding.name.clone());
             }
@@ -740,7 +778,7 @@ fn hoisted_callable_scope(body: &[SNode]) -> Scope {
     let mut scope = Scope::new();
     for node in body {
         if let Some(name) = hoisted_callable_name(node) {
-            scope.insert(name.to_string(), ScopeBinding::Nested);
+            scope.insert(name.to_string(), ScopeBinding::Nested(None));
         }
     }
     scope
@@ -800,7 +838,7 @@ fn extend_scope_with_value_declaration(scope: &mut Scope, node: &SNode, owner: &
         let name = binding.name.clone();
         let entry = match owner {
             BindingOwner::Current => ScopeBinding::Current(binding),
-            BindingOwner::Nested => ScopeBinding::Nested,
+            BindingOwner::Nested => ScopeBinding::Nested(Some(binding)),
         };
         scope.insert(name, entry);
     }
@@ -812,7 +850,7 @@ fn pattern_scope(pattern: &BindingPattern, declaration: Span, owner: &BindingOwn
         let name = binding.name.clone();
         let entry = match owner {
             BindingOwner::Current => ScopeBinding::Current(binding),
-            BindingOwner::Nested => ScopeBinding::Nested,
+            BindingOwner::Nested => ScopeBinding::Nested(Some(binding)),
         };
         scope.insert(name, entry);
     }
@@ -823,7 +861,22 @@ fn names_scope(names: impl IntoIterator<Item = String>) -> Scope {
     names
         .into_iter()
         .filter(|name| !is_discard_name(name))
-        .map(|name| (name, ScopeBinding::Nested))
+        .map(|name| (name, ScopeBinding::Nested(None)))
+        .collect()
+}
+
+fn parameter_scope(params: &[TypedParam], owner: &BindingOwner) -> Scope {
+    params
+        .iter()
+        .filter(|param| !is_discard_name(&param.name))
+        .map(|param| {
+            let binding = BindingId::from_declaration(param.name.clone(), param.span);
+            let entry = match owner {
+                BindingOwner::Current => ScopeBinding::Current(binding),
+                BindingOwner::Nested => ScopeBinding::Nested(Some(binding)),
+            };
+            (param.name.clone(), entry)
+        })
         .collect()
 }
 

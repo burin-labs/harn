@@ -15,14 +15,11 @@ use super::super::scope::{
     DeclOrigin, EnumDeclInfo, ImplMethodSig, InterfaceDeclInfo, StructDeclInfo, TypeAliasInfo,
     TypeScope,
 };
-use super::super::{InlayHintInfo, TypeChecker, TypeDiagnostic};
+use super::super::{TypeCheckFacts, TypeChecker};
 use super::decls::CallableDeclarationContext;
 
 impl TypeChecker {
-    pub(in crate::typechecker) fn check_inner(
-        mut self,
-        program: &[SNode],
-    ) -> (Vec<TypeDiagnostic>, Vec<InlayHintInfo>) {
+    pub(in crate::typechecker) fn check_inner(mut self, program: &[SNode]) -> TypeCheckFacts {
         // Pre-pass mutations: nobody else holds an `Rc` to `self.scope`
         // yet, so `Rc::make_mut` resolves to a direct `&mut TypeScope`
         // without copying. Once body children start to share the root
@@ -237,7 +234,11 @@ impl TypeChecker {
             }
         }
 
-        (self.diagnostics, self.hints)
+        TypeCheckFacts {
+            diagnostics: self.diagnostics,
+            inlay_hints: self.hints,
+            binding_types: self.binding_types,
+        }
     }
 
     /// Validate the entrypoint convention: a top-level `fn main` must take

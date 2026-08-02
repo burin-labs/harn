@@ -40,6 +40,26 @@ pub struct InlayHintInfo {
     pub label: String,
 }
 
+/// Semantic type inferred or declared for one plain local binding.
+///
+/// Consumers such as codemods use the declaration span as stable identity;
+/// the display-oriented inlay-hint stream intentionally omits obvious types
+/// and therefore is not a semantic analysis surface.
+#[derive(Debug, Clone)]
+pub struct BindingTypeInfo {
+    pub name: String,
+    pub span: Span,
+    pub type_expr: TypeExpr,
+}
+
+/// Typed facts produced by one complete checker walk.
+#[derive(Debug, Clone)]
+pub struct TypeCheckFacts {
+    pub diagnostics: Vec<TypeDiagnostic>,
+    pub inlay_hints: Vec<InlayHintInfo>,
+    pub binding_types: Vec<BindingTypeInfo>,
+}
+
 /// Static info for one `import * as alias from "path"` binding.
 #[derive(Debug, Clone)]
 pub struct NamespaceImportBinding {
@@ -145,6 +165,7 @@ pub struct TypeChecker {
     scope: Rc<TypeScope>,
     source: Option<String>,
     hints: Vec<InlayHintInfo>,
+    binding_types: Vec<BindingTypeInfo>,
     /// When true, flag unvalidated boundary-API values used in field access.
     strict_types: bool,
     /// Explicit process-bound compatibility mode for pre-Harness callers.
@@ -359,6 +380,7 @@ impl TypeChecker {
             scope: Rc::new(TypeScope::new()),
             source: None,
             hints: Vec::new(),
+            binding_types: Vec::new(),
             strict_types: false,
             legacy_ambient_capabilities: crate::legacy_ambient_capabilities_enabled(),
             privileged_wire_builtins: false,
@@ -384,6 +406,7 @@ impl TypeChecker {
             scope: Rc::new(TypeScope::new()),
             source: None,
             hints: Vec::new(),
+            binding_types: Vec::new(),
             strict_types: strict,
             legacy_ambient_capabilities: crate::legacy_ambient_capabilities_enabled(),
             privileged_wire_builtins: false,
@@ -481,7 +504,7 @@ impl TypeChecker {
     /// Check a program with source text for autofix generation.
     pub fn check_with_source(mut self, program: &[SNode], source: &str) -> Vec<TypeDiagnostic> {
         self.source = Some(source.to_string());
-        self.check_inner(program).0
+        self.check_inner(program).diagnostics
     }
 
     /// Check a program with strict types mode and source text.
@@ -492,12 +515,12 @@ impl TypeChecker {
     ) -> Vec<TypeDiagnostic> {
         self.source = Some(source.to_string());
         self.strict_types = true;
-        self.check_inner(program).0
+        self.check_inner(program).diagnostics
     }
 
     /// Check a program and return diagnostics.
     pub fn check(self, program: &[SNode]) -> Vec<TypeDiagnostic> {
-        self.check_inner(program).0
+        self.check_inner(program).diagnostics
     }
 
     /// Check whether a function call value is a boundary source that produces
@@ -571,6 +594,13 @@ impl TypeChecker {
         program: &[SNode],
         source: &str,
     ) -> (Vec<TypeDiagnostic>, Vec<InlayHintInfo>) {
+        self.source = Some(source.to_string());
+        let facts = self.check_inner(program);
+        (facts.diagnostics, facts.inlay_hints)
+    }
+
+    /// Check a program and retain semantic binding types for typed consumers.
+    pub fn check_with_facts(mut self, program: &[SNode], source: &str) -> TypeCheckFacts {
         self.source = Some(source.to_string());
         self.check_inner(program)
     }
