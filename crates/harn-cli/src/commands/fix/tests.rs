@@ -710,6 +710,107 @@ fn apply_preserves_separate_narrow_capability_parameters() {
 }
 
 #[test]
+fn apply_rewrites_ambient_call_through_root_first_split_boundary() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("root_first_split.harn");
+    fs::write(
+        &script,
+        "fn helper(harness: Harness, clock: HarnessClock) {\n  println(\"hi\")\n  clock.now_ms()\n}\n\nfn main(harness: Harness) {\n  helper(harness, harness.clock)\n}\n",
+    )
+    .unwrap();
+
+    let result = apply_repairs_with_options(
+        &script,
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions {
+            capability_migrations_only: true,
+        },
+    )
+    .unwrap();
+    assert!(!result.applied.is_empty(), "{result:#?}");
+
+    let updated = fs::read_to_string(&script).unwrap();
+    assert!(
+        updated.contains("fn helper(harness: Harness, clock: HarnessClock)"),
+        "the split signature must remain intact: {updated}"
+    );
+    assert!(
+        updated.contains("harness.stdio.println(\"hi\")"),
+        "the root carrier should own the ambient rewrite: {updated}"
+    );
+}
+
+#[test]
+fn apply_extends_narrow_first_split_boundary_with_missing_handle() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("narrow_first_split.harn");
+    fs::write(
+        &script,
+        "fn helper(clock: HarnessClock, secrets: HarnessSecrets, config) {\n  println(\"hi\")\n  return {time: clock.now_ms(), key: secrets.read(\"key\", nil), config: config}\n}\n\nfn main(harness: Harness) {\n  helper(harness.clock, harness.secrets, {})\n}\n",
+    )
+    .unwrap();
+
+    let first = apply_repairs_with_options(
+        &script,
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions {
+            capability_migrations_only: true,
+        },
+    )
+    .unwrap();
+    assert!(!first.applied.is_empty(), "{first:#?}");
+
+    let updated = fs::read_to_string(&script).unwrap();
+    assert!(
+        updated.contains(
+            "fn helper(clock: HarnessClock, secrets: HarnessSecrets, stdio: HarnessStdio, config)"
+        ),
+        "the split boundary should gain only the missing handle: {updated}"
+    );
+    assert!(
+        updated.contains("stdio.println(\"hi\")"),
+        "the new narrow handle should own the ambient rewrite: {updated}"
+    );
+    assert!(
+        updated.contains("helper(harness.clock, harness.secrets, harness.stdio, {})"),
+        "the caller should project the added handle at the matching position: {updated}"
+    );
+
+    let second = apply_repairs_with_options(
+        &script,
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions {
+            capability_migrations_only: true,
+        },
+    )
+    .unwrap();
+    assert!(second.applied.is_empty(), "{second:#?}");
+}
+
+#[test]
+fn apply_does_not_widen_narrow_caller_of_split_boundary() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("split_callee.harn");
+    let source = "fn mint(clock: HarnessClock, secrets: HarnessSecrets) {\n  return {time: clock.now_ms(), key: secrets.read(\"key\", nil)}\n}\n\nfn wrap(clock: HarnessClock, secrets) {\n  mint(clock, secrets)\n}\n\nfn main(harness: Harness) {\n  wrap(harness.clock, harness.secrets)\n}\n";
+    fs::write(&script, source).unwrap();
+
+    let result = apply_repairs_with_options(
+        &script,
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions {
+            capability_migrations_only: true,
+        },
+    )
+    .unwrap();
+    assert!(result.applied.is_empty(), "{result:#?}");
+    assert_eq!(fs::read_to_string(&script).unwrap(), source);
+}
+
+#[test]
 fn apply_thread_params_threads_harness_for_non_stdio_capabilities() {
     let cases = [
         (
