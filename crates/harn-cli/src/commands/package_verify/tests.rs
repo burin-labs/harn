@@ -86,6 +86,28 @@ fn package_gate_stderr_label_matches_gate_status() {
 }
 
 #[test]
+fn package_source_gate_commands_add_only_the_typed_strict_flag() {
+    let files = vec!["lib.harn".to_string(), "tests/contract.harn".to_string()];
+
+    assert_eq!(
+        PackageSourceGate::Check.command(&files, false),
+        ["check", "lib.harn", "tests/contract.harn"]
+    );
+    assert_eq!(
+        PackageSourceGate::Check.command(&files, true),
+        ["check", "--strict-types", "lib.harn", "tests/contract.harn"]
+    );
+    assert_eq!(
+        PackageSourceGate::Lint.command(&files, false),
+        ["lint", "lib.harn", "tests/contract.harn"]
+    );
+    assert_eq!(
+        PackageSourceGate::Lint.command(&files, true),
+        ["lint", "--strict", "lib.harn", "tests/contract.harn"]
+    );
+}
+
+#[test]
 fn package_dependency_path_canonicalizes_relative_package_dir() {
     let cwd = std::env::current_dir().unwrap();
     let dir = tempfile::Builder::new()
