@@ -416,10 +416,11 @@ jobs:
           # NO Linux lane ever saved (`save` defaulted off at every call site),
           # so every hosted run restored nothing and compiled from scratch.
           save: "true"
-      - name: Generate release/package CLI AOT payload
-        run: make gen-cli-aot && make check-cli-aot
       - name: Check published crate packages
         id: release-audit-package
+        # The verifier resolves one exact current-tree Harn binary first, then
+        # generates/checks AOT against its warm dependency graph. Keeping both
+        # operations in one owner prevents two serial cold workspace builds.
         run: ./scripts/verify_crate_packages.sh
       - name: Summarize and stop sccache
         if: always()

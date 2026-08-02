@@ -431,6 +431,7 @@ test-pr-gate-scripts:
 	./scripts/tests/rust_artifact_test.sh
 	./scripts/tests/ci_harn_bin_warm_test.sh
 	./scripts/tests/harn_bin_resolver_test.sh
+	./scripts/tests/package_verify_bootstrap_test.sh
 	./scripts/tests/harn_launcher_python_cutover_test.sh
 	./scripts/tests/lint_harn_gate_test.sh
 	./scripts/tests/build_revision_workflow_test.sh

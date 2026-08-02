@@ -3,6 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
+# shellcheck source=scripts/lib/package_verify_bootstrap.sh
+source "$ROOT_DIR/scripts/lib/package_verify_bootstrap.sh"
 
 VERIFY_CLI=0
 while [[ $# -gt 0 ]]; do
@@ -44,7 +46,13 @@ trap 'rm -rf "$tmp" "$metadata_tmp"' EXIT
 metadata_file="$metadata_tmp/cargo-metadata.json"
 printf '%s\n' "$metadata" >"$metadata_file"
 
-plan_rows="$("./scripts/harn_bin.sh" run "$ROOT_DIR/scripts/verify_crate_packages_plan.harn" -- --metadata "$metadata_file" --root "$ROOT_DIR")"
+# Resolve once and export the exact current-tree executable. Every typed plan
+# and package inspection below then reuses it without another Cargo probe.
+# On a cold worker this intentionally happens before AOT generation: harn-cli's
+# broader graph warms the harn-vm/harn-stdlib dependencies of harn-cli-aot-gen.
+package_verify_resolve_harn_bin "$ROOT_DIR"
+plan_rows="$("$HARN_BIN" run "$ROOT_DIR/scripts/verify_crate_packages_plan.harn" -- --metadata "$metadata_file" --root "$ROOT_DIR")"
+package_verify_ensure_cli_aot "$ROOT_DIR"
 target_dir=""
 publishable_crates=()
 publishable_package_rows=()
@@ -116,7 +124,7 @@ inspect_packaged_includes() {
   # Extracted crates must stay outside the workspace so Cargo checks them as
   # publish artifacts; the inspector therefore needs explicit out-of-root read
   # access.
-  "./scripts/harn_bin.sh" run --no-sandbox "$ROOT_DIR/scripts/verify_crate_package_includes.harn" -- \
+  "$HARN_BIN" run --no-sandbox "$ROOT_DIR/scripts/verify_crate_package_includes.harn" -- \
     --package-dir "$package_dir" \
     --crate "$crate"
 }
