@@ -209,11 +209,12 @@ harn_resolve_binary() {
     if [[ "$status" -ne 124 ]]; then
       return "$status"
     fi
-    harn_print_probe_timeout_hints
     if ! harn_compiler_wrapper_configured; then
+      harn_print_probe_timeout_hints
       return "$status"
     fi
     if [[ "$retry_without_wrapper" != "1" ]]; then
+      harn_print_probe_timeout_hints
       echo "hint: a compiler wrapper may be waiting behind active sibling builds." >&2
       echo "hint: retry without it only when the wrapper is genuinely wedged:" >&2
       echo "hint:   HARN_BIN_RETRY_WITHOUT_WRAPPER=1 <command>" >&2

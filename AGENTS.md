@@ -61,7 +61,9 @@ autonomy, cross-surface convergence, and operationally complete launches.
 - A raw `git worktree add` has no `.cargo/config.toml`; without setup, cold
   Cargo probes can time out. Reuse an existing binary with
   `HARN_BIN=<path> HARN_BIN_NO_BUILD=1` or explicitly allow a cold probe with
-  `HARN_BIN_CARGO_TIMEOUT_SECONDS=3600`.
+  `HARN_BIN_CARGO_TIMEOUT_SECONDS=3600`. Only when the compiler wrapper is
+  genuinely wedged, opt into one wrapper-disabled retry with
+  `HARN_BIN_RETRY_WITHOUT_WRAPPER=1`.
 - Never share a mutable Cargo `target-dir` or `build-dir` across concurrent
   worktrees. Setup derives a stable per-worktree target under
   `$TMPDIR/harn-target/` and configures sccache for cross-worktree object reuse.

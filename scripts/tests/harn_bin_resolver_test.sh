@@ -45,7 +45,10 @@ set -euo pipefail
   printf 'CARGO_TARGET_DIR=%s\n' "${CARGO_TARGET_DIR-__unset__}"
   printf 'CARGO_BUILD_BUILD_DIR=%s\n' "${CARGO_BUILD_BUILD_DIR-__unset__}"
   printf 'RUSTC_WRAPPER=%s\n' "${RUSTC_WRAPPER-__unset__}"
+  printf 'RUSTC_WORKSPACE_WRAPPER=%s\n' "${RUSTC_WORKSPACE_WRAPPER-__unset__}"
   printf 'CARGO_BUILD_RUSTC_WRAPPER=%s\n' "${CARGO_BUILD_RUSTC_WRAPPER-__unset__}"
+  printf 'CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER=%s\n' "${CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER-__unset__}"
+  printf 'SCCACHE_DISABLE=%s\n' "${SCCACHE_DISABLE-__unset__}"
 } >> "$FAKE_CARGO_RECORD"
 
 case "${FAKE_CARGO_MODE:-success}" in
@@ -68,6 +71,11 @@ case "${FAKE_CARGO_MODE:-success}" in
       echo "retry cargo failure" >&2
       exit 19
     fi
+    ;;
+  wrapper-timeout-always)
+    tail -f /dev/null &
+    printf '%s\n' "$!" >> "${FAKE_CARGO_CHILD_PID_FILE:?}"
+    wait "$!"
     ;;
 esac
 
@@ -306,11 +314,56 @@ if ! grep -Fxq "RUSTC_WRAPPER=" "$record"; then
   cat "$record" >&2
   exit 1
 fi
+for cleared in \
+  "RUSTC_WORKSPACE_WRAPPER=" \
+  "CARGO_BUILD_RUSTC_WRAPPER=" \
+  "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER=" \
+  "SCCACHE_DISABLE=1"; do
+  if ! grep -Fxq "$cleared" "$record"; then
+    echo "compiler-wrapper timeout retry did not set $cleared" >&2
+    cat "$record" >&2
+    exit 1
+  fi
+done
 timed_out_child_pid=$(cat "$child_pid_file")
 if kill -0 "$timed_out_child_pid" 2>/dev/null; then
   echo "compiler-wrapper timeout left a descendant process alive: $timed_out_child_pid" >&2
   exit 1
 fi
+
+: > "$record"
+child_pid_file="$tmp_root/retry-timeout-children.pid"
+if RUSTC_WORKSPACE_WRAPPER=sccache \
+  CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" \
+  FAKE_CARGO_MODE=wrapper-timeout-always \
+  FAKE_CARGO_CHILD_PID_FILE="$child_pid_file" \
+  HARN_BIN_CARGO_TIMEOUT_SECONDS=0.1 \
+  HARN_BIN_RETRY_WITHOUT_WRAPPER=1 \
+  PATH="$fake_cargo_bin:$PATH" \
+  "$repo_root/scripts/harn_bin.sh" --print \
+  > "$tmp_root/retry-timeout.out" \
+  2> "$tmp_root/retry-timeout.err"; then
+  echo "harn_bin resolver accepted a timed-out wrapper-disabled retry" >&2
+  exit 1
+else
+  exit_code=$?
+fi
+if [[ "$exit_code" -ne 124 ]]; then
+  echo "wrapper-disabled retry timeout status changed: expected 124, got $exit_code" >&2
+  exit 1
+fi
+if [[ "$(grep -Fc 'hint: to reuse a binary you already built:' "$tmp_root/retry-timeout.err")" -ne 1 ]]; then
+  echo "wrapper-disabled retry timeout did not print one terminal hint block" >&2
+  cat "$tmp_root/retry-timeout.err" >&2
+  exit 1
+fi
+while IFS= read -r timed_out_child_pid; do
+  if kill -0 "$timed_out_child_pid" 2>/dev/null; then
+    echo "wrapper-disabled retry timeout left a descendant alive: $timed_out_child_pid" >&2
+    exit 1
+  fi
+done < "$child_pid_file"
 
 : > "$record"
 child_pid_file="$tmp_root/retry-failure-child.pid"
@@ -389,6 +442,7 @@ if [[ "$status" -ne 2 ]] || ! grep -Fq "must be a positive number" "$tmp_root/in
   exit 1
 fi
 
+: > "$record"
 if HARN_BIN_RETRY_WITHOUT_WRAPPER=invalid \
   CARGO_TARGET_DIR="$target_dir" \
   FAKE_CARGO_RECORD="$record" \
@@ -406,5 +460,19 @@ if [[ "$exit_code" -ne 2 ]] || ! grep -Fq "must be 0 or 1" "$tmp_root/invalid-re
   cat "$tmp_root/invalid-retry.err" >&2
   exit 1
 fi
+if [[ -s "$record" ]]; then
+  echo "invalid wrapper retry policy invoked Cargo before validation" >&2
+  cat "$record" >&2
+  exit 1
+fi
+
+registry="$repo_root/crates/harn-vm/src/environment_registry_names.txt"
+for name in $(rg --no-filename -o 'HARN_[A-Z0-9_]+' \
+  "$repo_root/scripts/harn_bin.sh" "$repo_root/scripts/lib/harn_bin.sh" | sort -u); do
+  if ! grep -Fxq "$name" "$registry"; then
+    echo "harn_bin environment control is absent from the registry: $name" >&2
+    exit 1
+  fi
+done
 
 echo "harn_bin_resolver_test: ok"
