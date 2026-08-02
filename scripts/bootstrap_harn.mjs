@@ -8,6 +8,13 @@ import { fileURLToPath } from "node:url";
 export const RECEIPT_SCHEMA = "harn-bootstrap-v1";
 
 const INSTALL_MANIFEST_SCHEMA = "harn-bootstrap-install-v1";
+const INSTALL_LOCK_SCHEMA = "harn-bootstrap-install-lock-v1";
+const INSTALL_LOCK_POLL_MS = 10;
+const INSTALL_LOCK_TIMEOUT_MS = 30_000;
+const INSTALL_LOCK_TOTAL_TIMEOUT_MULTIPLIER = 4;
+const INSTALL_LOCK_STALE_MS = 5 * 60_000;
+const INSTALL_MUTATION_ATTEMPTS = 6;
+const INSTALL_MUTATION_RETRY_MS = 25;
 const SEMVER = /^(?:v)?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const CHECKSUM_LINE = /^([0-9a-fA-F]{64})[ \t]+\*?([^/\\\0]+)$/;
@@ -19,6 +26,14 @@ const SUPPORTED_TARGETS = new Set([
   "x86_64-pc-windows-msvc",
   "x86_64-unknown-linux-gnu",
 ]);
+
+class InstallLockTimeoutError extends Error {
+  constructor(installRoot) {
+    super(`timed out waiting for Harn installation at ${installRoot}`);
+    this.name = "InstallLockTimeoutError";
+    this.code = "HARN_INSTALL_LOCK_TIMEOUT";
+  }
+}
 
 export function normalizeVersion(value) {
   const text = String(value ?? "").trim();
@@ -349,29 +364,217 @@ function readValidInstall(installRoot, expected) {
   }
 }
 
-function commitInstall(temporary, installRoot, expected) {
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    const current = readValidInstall(installRoot, expected);
-    if (current) {
-      fs.rmSync(temporary, { recursive: true, force: true });
-      return current;
-    }
-    discardInvalid(installRoot);
-    try {
-      fs.renameSync(temporary, installRoot);
-      return readValidInstall(installRoot, expected);
-    } catch (error) {
-      if (!["EEXIST", "ENOTEMPTY", "ENOENT", "EPERM"].includes(error.code)) {
-        throw error;
-      }
-    }
+function processIsRunning(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code !== "ESRCH";
   }
-  throw new Error(
-    `could not atomically publish Harn installation at ${installRoot}`,
+}
+
+function retryableInstallMutation(error) {
+  return ["EACCES", "EBUSY", "EEXIST", "ENOTEMPTY", "ENOENT", "EPERM"].includes(
+    error.code,
   );
 }
 
-function installVerifiedArchive(options) {
+function inspectInstallLock(lockPath) {
+  let owner = null;
+  try {
+    const ownerPath = path.join(lockPath, "owner.json");
+    owner = JSON.parse(fs.readFileSync(ownerPath, "utf8"));
+  } catch {
+    // A creator can be between mkdir and owner publication. The directory's
+    // filesystem identity still lets waiters distinguish that owner from a
+    // later one without treating an incomplete record as abandoned.
+  }
+  try {
+    const stat = fs.statSync(lockPath);
+    const token =
+      owner?.schema_version === INSTALL_LOCK_SCHEMA &&
+      typeof owner.token === "string" &&
+      owner.token.length > 0
+        ? owner.token
+        : null;
+    return {
+      ageMs: Date.now() - stat.mtimeMs,
+      identity: token ?? `${stat.dev}:${stat.ino}:${stat.mtimeMs}`,
+      owner,
+      token,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function discardInstallLock(lockPath, expectedIdentity) {
+  for (let attempt = 1; attempt <= INSTALL_MUTATION_ATTEMPTS; attempt += 1) {
+    const current = inspectInstallLock(lockPath);
+    if (!current) return true;
+    if (current.identity !== expectedIdentity) return false;
+    try {
+      discardInvalid(lockPath);
+      return true;
+    } catch (error) {
+      if (
+        !retryableInstallMutation(error) ||
+        attempt === INSTALL_MUTATION_ATTEMPTS
+      ) {
+        throw error;
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, INSTALL_MUTATION_RETRY_MS * 2 ** (attempt - 1)),
+      );
+    }
+  }
+}
+
+async function reclaimAbandonedInstallLock(lockPath, expectedIdentity = null) {
+  const inspected = inspectInstallLock(lockPath);
+  if (!inspected) return true;
+  const { ageMs, identity, owner } = inspected;
+  const localOwner =
+    owner?.schema_version === INSTALL_LOCK_SCHEMA &&
+    owner.hostname === os.hostname() &&
+    Number.isSafeInteger(owner.pid) &&
+    owner.pid > 0;
+  // Hostname equality is useful evidence only for ordinary host processes;
+  // the age ceiling remains authoritative for shared container mounts where
+  // PID namespaces can differ despite equal configured hostnames.
+  const abandoned =
+    ageMs >= INSTALL_LOCK_STALE_MS ||
+    (localOwner && !processIsRunning(owner.pid));
+  if (!abandoned && identity !== expectedIdentity) return false;
+  return discardInstallLock(lockPath, identity);
+}
+
+// Lock invariants: identity changes reset only the per-owner eviction deadline;
+// the total wait remains bounded; token checks fence every destructive install
+// mutation; and a waiter accepts a peer publication only after full manifest
+// and binary validation.
+async function withInstallLock(
+  installRoot,
+  callback,
+  timeoutMs = INSTALL_LOCK_TIMEOUT_MS,
+) {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new Error("install lock timeout must be a positive number");
+  }
+  const lockPath = `${installRoot}.lock`;
+  const absoluteDeadline =
+    Date.now() + timeoutMs * INSTALL_LOCK_TOTAL_TIMEOUT_MULTIPLIER;
+  let deadline = Date.now() + timeoutMs;
+  let observedIdentity = null;
+  const token = crypto.randomUUID();
+  for (;;) {
+    try {
+      fs.mkdirSync(lockPath);
+      try {
+        fs.writeFileSync(
+          path.join(lockPath, "owner.json"),
+          `${JSON.stringify({
+            schema_version: INSTALL_LOCK_SCHEMA,
+            hostname: os.hostname(),
+            pid: process.pid,
+            token,
+          })}\n`,
+        );
+      } catch (error) {
+        fs.rmSync(lockPath, { recursive: true, force: true });
+        throw error;
+      }
+      break;
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      if (Date.now() >= absoluteDeadline) {
+        throw new InstallLockTimeoutError(installRoot);
+      }
+      const inspected = inspectInstallLock(lockPath);
+      if (inspected) {
+        if (inspected.identity !== observedIdentity) {
+          observedIdentity = inspected.identity;
+          deadline = Date.now() + timeoutMs;
+        }
+        if (Date.now() >= deadline) {
+          // A critical section should finish in milliseconds. At the owner
+          // deadline, evict only the exact identity observed for that wait.
+          // Rotation gets a fresh owner deadline but not a fresh total bound.
+          await reclaimAbandonedInstallLock(lockPath, observedIdentity);
+          continue;
+        }
+        if (await reclaimAbandonedInstallLock(lockPath)) continue;
+      }
+      await new Promise((resolve) => setTimeout(resolve, INSTALL_LOCK_POLL_MS));
+    }
+  }
+  const assertOwned = () => {
+    if (inspectInstallLock(lockPath)?.token !== token) {
+      throw new Error(`lost Harn installation lock at ${installRoot}`);
+    }
+  };
+  try {
+    return await callback(assertOwned);
+  } finally {
+    try {
+      const owner = JSON.parse(
+        fs.readFileSync(path.join(lockPath, "owner.json"), "utf8"),
+      );
+      if (owner.token === token) {
+        fs.rmSync(lockPath, { recursive: true, force: true });
+      }
+    } catch {
+      // A stale-lock recovery may already have replaced this ownership token.
+    }
+  }
+}
+
+async function commitInstall(temporary, installRoot, expected, lockTimeoutMs) {
+  try {
+    return await withInstallLock(
+      installRoot,
+      async (assertOwned) => {
+        const current = readValidInstall(installRoot, expected);
+        if (current) return current;
+        for (
+          let attempt = 1;
+          attempt <= INSTALL_MUTATION_ATTEMPTS;
+          attempt += 1
+        ) {
+          try {
+            assertOwned();
+            discardInvalid(installRoot);
+            assertOwned();
+            fs.renameSync(temporary, installRoot);
+            return readValidInstall(installRoot, expected);
+          } catch (error) {
+            if (
+              !retryableInstallMutation(error) ||
+              attempt === INSTALL_MUTATION_ATTEMPTS
+            ) {
+              throw error;
+            }
+            await new Promise((resolve) =>
+              setTimeout(
+                resolve,
+                INSTALL_MUTATION_RETRY_MS * 2 ** (attempt - 1),
+              ),
+            );
+          }
+        }
+        return null;
+      },
+      lockTimeoutMs,
+    );
+  } catch (error) {
+    if (error?.code !== "HARN_INSTALL_LOCK_TIMEOUT") throw error;
+    const winner = readValidInstall(installRoot, expected);
+    if (winner) return winner;
+    throw error;
+  }
+}
+
+async function installVerifiedArchive(options) {
   const expected = {
     version: options.version,
     target: options.target,
@@ -380,7 +583,6 @@ function installVerifiedArchive(options) {
   };
   const existing = readValidInstall(options.installRoot, expected);
   if (existing) return existing;
-  discardInvalid(options.installRoot);
 
   const parent = path.dirname(options.installRoot);
   fs.mkdirSync(parent, { recursive: true });
@@ -413,16 +615,20 @@ function installVerifiedArchive(options) {
       path.join(temporary, "install-manifest.json"),
       `${JSON.stringify(installManifest, null, 2)}\n`,
     );
-    const committed = commitInstall(temporary, options.installRoot, expected);
+    const committed = await commitInstall(
+      temporary,
+      options.installRoot,
+      expected,
+      options.lockTimeoutMs,
+    );
     if (!committed) {
       throw new Error(
         `installed manifest failed validation at ${manifestPath}`,
       );
     }
     return committed;
-  } catch (error) {
+  } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
-    throw error;
   }
 }
 
@@ -510,13 +716,14 @@ export async function bootstrap(options = {}) {
     delay: options.delay,
     fetchImpl: options.fetchImpl,
   });
-  const installed = installVerifiedArchive({
+  const installed = await installVerifiedArchive({
     archivePath,
     installRoot: resolved.install_dir,
     version: resolved.version,
     target: resolved.target,
     checksum: expectedChecksum,
     source: sourceUrl,
+    lockTimeoutMs: options.installLockTimeoutMs,
   });
   return {
     schema_version: RECEIPT_SCHEMA,

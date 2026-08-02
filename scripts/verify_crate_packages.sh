@@ -3,6 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
+# shellcheck source=scripts/lib/package_verify_bootstrap.sh
+source "$ROOT_DIR/scripts/lib/package_verify_bootstrap.sh"
 
 VERIFY_CLI=0
 while [[ $# -gt 0 ]]; do
@@ -44,7 +46,10 @@ trap 'rm -rf "$tmp" "$metadata_tmp"' EXIT
 metadata_file="$metadata_tmp/cargo-metadata.json"
 printf '%s\n' "$metadata" >"$metadata_file"
 
-plan_rows="$("./scripts/harn_bin.sh" run "$ROOT_DIR/scripts/verify_crate_packages_plan.harn" -- --metadata "$metadata_file" --root "$ROOT_DIR")"
+# Build Harn and the AOT generator in one Cargo feature-unification boundary,
+# generate/check the payload directly, and export the exact Harn executable.
+package_verify_prepare_tools "$ROOT_DIR"
+plan_rows="$("$HARN_BIN" run "$ROOT_DIR/scripts/verify_crate_packages_plan.harn" -- --metadata "$metadata_file" --root "$ROOT_DIR")"
 target_dir=""
 publishable_crates=()
 publishable_package_rows=()
@@ -116,7 +121,7 @@ inspect_packaged_includes() {
   # Extracted crates must stay outside the workspace so Cargo checks them as
   # publish artifacts; the inspector therefore needs explicit out-of-root read
   # access.
-  "./scripts/harn_bin.sh" run --no-sandbox "$ROOT_DIR/scripts/verify_crate_package_includes.harn" -- \
+  "$HARN_BIN" run --no-sandbox "$ROOT_DIR/scripts/verify_crate_package_includes.harn" -- \
     --package-dir "$package_dir" \
     --crate "$crate"
 }

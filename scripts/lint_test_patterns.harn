@@ -245,6 +245,11 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   "crates/harn-cli/src/commands/agents_conformance.rs",
   "crates/harn-cli/src/commands/agents_conformance/wire.rs",
   "crates/harn-cli/src/commands/bench.rs",
+  // Portable-kernel receipts report sub-millisecond compile, decode, and
+  // dispatch latency. The host monotonic clock is the measured subject here,
+  // not runtime scheduling policy; the command's deterministic semantics are
+  // tested separately from these observations.
+  "crates/harn-cli/src/commands/bench/portable.rs",
   "crates/harn-cli/src/commands/connect.rs",
   // `harn connect` waits for real browser OAuth callbacks and stamps
   // persisted connector credential metadata with host Unix time; those

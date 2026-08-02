@@ -3,10 +3,10 @@
 //!
 //! Every call-site validation in the VM funnels through three entry points:
 //!
-//! - [`assert_value_matches_type`] — given a [`VmValue`] and a
-//!   [`TypeExpr`], decide whether the value satisfies the type. The
-//!   single source of runtime truth for `int`/`string`/`list<T>`/...
-//!   compatibility, mirroring the static [`TypeChecker::types_compatible`]
+//! - [`assert_value_matches_type`] — project a [`VmValue`] through the shared
+//!   `harn_kernel::type_contract` matcher. That matcher is the runtime source
+//!   of truth for native and portable `int`/`string`/`list<T>`/... value
+//!   compatibility and mirrors static `TypeChecker::types_compatible`
 //!   semantics on values rather than type expressions.
 //! - [`validate_user_call`] — arity check + per-arg declared-type
 //!   assertion for compiled user-defined functions
@@ -23,6 +23,7 @@
 //! site (e.g. derived from the chunk's PC→span table); when omitted the
 //! error renders without a positional suffix.
 
+use harn_kernel::type_contract::{RuntimeTypeKind, TypeContractValue};
 use harn_lexer::Span;
 use harn_parser::builtin_signatures::{self, BuiltinSignature, TyExt};
 use harn_parser::typechecker::format_type;
@@ -33,11 +34,93 @@ use crate::runtime_guards::RuntimeParamGuard;
 use crate::value::{ArgTypeMismatchError, ArityExpect, ArityMismatchError, VmError, VmValue};
 use crate::vm::CallArgs;
 
+impl TypeContractValue for VmValue {
+    fn runtime_type_kind(&self) -> RuntimeTypeKind {
+        match self {
+            Self::Int(_) => RuntimeTypeKind::Int,
+            Self::Float(_) => RuntimeTypeKind::Float,
+            Self::Decimal(_) => RuntimeTypeKind::Decimal,
+            Self::String(_) => RuntimeTypeKind::String,
+            Self::Bytes(_) => RuntimeTypeKind::Bytes,
+            Self::Bool(_) => RuntimeTypeKind::Bool,
+            Self::Nil => RuntimeTypeKind::Nil,
+            Self::List(_) => RuntimeTypeKind::List,
+            Self::Dict(_) => RuntimeTypeKind::Dict,
+            Self::Closure(_) | Self::BuiltinRef(_) | Self::BuiltinRefId(_) => {
+                RuntimeTypeKind::Closure
+            }
+            Self::Duration(_) => RuntimeTypeKind::Duration,
+            Self::EnumVariant(_) => RuntimeTypeKind::Enum,
+            Self::StructInstance(_) => RuntimeTypeKind::Struct,
+            Self::TaskHandle(_) => RuntimeTypeKind::TaskHandle,
+            Self::Channel(_) => RuntimeTypeKind::Channel,
+            Self::Atomic(_) => RuntimeTypeKind::Atomic,
+            Self::Rng(_) => RuntimeTypeKind::Rng,
+            Self::SyncPermit(_) => RuntimeTypeKind::SyncPermit,
+            Self::Resource(_) => RuntimeTypeKind::Resource,
+            Self::ResourceGuard(_) => RuntimeTypeKind::ResourceGuard,
+            Self::McpClient(_) => RuntimeTypeKind::McpClient,
+            Self::VerdictReceipt(_) => RuntimeTypeKind::VerdictReceipt,
+            Self::Set(_) => RuntimeTypeKind::Set,
+            Self::Generator(_) => RuntimeTypeKind::Generator,
+            Self::Stream(_) => RuntimeTypeKind::Stream,
+            Self::Range(_) => RuntimeTypeKind::Range,
+            Self::Iter(_) => RuntimeTypeKind::Iter,
+            Self::Pair(_) => RuntimeTypeKind::Pair,
+            Self::Harness(_) => RuntimeTypeKind::Harness,
+        }
+    }
+
+    fn list_items(&self) -> Option<&[Self]> {
+        match self {
+            Self::List(items) => Some(items),
+            _ => None,
+        }
+    }
+
+    fn record_field(&self, name: &str) -> Option<&Self> {
+        match self {
+            Self::Dict(fields) => fields.get(name),
+            Self::StructInstance(_) => self.struct_field(name),
+            _ => None,
+        }
+    }
+
+    fn record_values_match(&self, predicate: &mut dyn FnMut(&Self) -> bool) -> Option<bool> {
+        match self {
+            Self::Dict(fields) => Some(fields.values().all(predicate)),
+            _ => None,
+        }
+    }
+
+    fn string_literal(&self) -> Option<&str> {
+        match self {
+            Self::String(value) => Some(value.as_str()),
+            _ => None,
+        }
+    }
+
+    fn int_literal(&self) -> Option<i64> {
+        match self {
+            Self::Int(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    fn nominal_type_name(&self) -> Option<&str> {
+        match self {
+            Self::StructInstance(value) => Some(value.layout.struct_name()),
+            Self::EnumVariant(value) => Some(value.enum_name.as_str()),
+            _ => None,
+        }
+    }
+}
+
 /// Validate that `value` satisfies `expected`. Returns `Ok(())` when the
 /// value is acceptable, otherwise an [`VmError::ArgTypeMismatch`] tagged
 /// with `callee` / `param` / `span` for the caller's diagnostic.
 ///
-/// The dispatch table mirrors the static checker's `types_compatible`
+/// The shared kernel matcher mirrors the static checker's `types_compatible`
 /// rules:
 /// - `Named("any")` and the special generic-parameter sentinel skip
 ///   validation (any value passes).
@@ -119,148 +202,7 @@ fn matches_type_with_generics(
     type_params: &[String],
     nominal_type_names: &[String],
 ) -> bool {
-    match expected {
-        TypeExpr::Named(name) => match name.as_str() {
-            _ if type_params.iter().any(|param| param == name) => true,
-            "any" | "unknown" => true,
-            "int" => matches!(value, VmValue::Int(_)),
-            "float" => matches!(value, VmValue::Float(_) | VmValue::Int(_)),
-            // `decimal` is strict (no Int/Float coercion) to match its
-            // equality/arithmetic island semantics; convert with `decimal(x)`.
-            "decimal" => matches!(value, VmValue::Decimal(_)),
-            "number" => matches!(value, VmValue::Int(_) | VmValue::Float(_)),
-            "string" => matches!(value, VmValue::String(_)),
-            "bool" => matches!(value, VmValue::Bool(_)),
-            "nil" => matches!(value, VmValue::Nil),
-            "list" => matches!(value, VmValue::List(_)),
-            "dict" => matches!(value, VmValue::Dict(_)),
-            "bytes" => matches!(value, VmValue::Bytes(_)),
-            "duration" => matches!(value, VmValue::Duration(_)),
-            "set" => matches!(value, VmValue::Set(_)),
-            "range" => matches!(value, VmValue::Range(_)),
-            "iter" => matches!(value, VmValue::Iter(_)),
-            "generator" | "Generator" => matches!(value, VmValue::Generator(_)),
-            "stream" | "Stream" => matches!(value, VmValue::Stream(_)),
-            "channel" => matches!(value, VmValue::Channel(_)),
-            "task_handle" => matches!(value, VmValue::TaskHandle(_)),
-            "atomic" => matches!(value, VmValue::Atomic(_)),
-            "rng" => matches!(value, VmValue::Rng(_)),
-            "sync_permit" => matches!(value, VmValue::SyncPermit(_)),
-            "resource" => matches!(value, VmValue::Resource(_)),
-            "resource_guard" => matches!(value, VmValue::ResourceGuard(_)),
-            "mcp_client" => matches!(value, VmValue::McpClient(_)),
-            "verdict_receipt" => matches!(value, VmValue::VerdictReceipt(_)),
-            "pair" => matches!(value, VmValue::Pair(_)),
-            "enum" => matches!(value, VmValue::EnumVariant(_)),
-            "struct" => matches!(value, VmValue::StructInstance(_)),
-            "closure" => matches!(
-                value,
-                VmValue::Closure(_) | VmValue::BuiltinRef(_) | VmValue::BuiltinRefId(_)
-            ),
-            _ => {
-                if !nominal_type_names.iter().any(|ty| ty == name) {
-                    true
-                } else {
-                    value
-                        .struct_name()
-                        .is_some_and(|struct_name| struct_name == name)
-                        || matches!(value, VmValue::EnumVariant(enum_variant) if enum_variant.has_enum_name(name))
-                }
-            }
-        },
-        TypeExpr::Union(members) => members
-            .iter()
-            .any(|m| matches_type_with_generics(value, m, type_params, nominal_type_names)),
-        TypeExpr::Intersection(members) => members
-            .iter()
-            .all(|m| matches_type_with_generics(value, m, type_params, nominal_type_names)),
-        TypeExpr::List(inner) => match value {
-            VmValue::List(items) => items
-                .iter()
-                .all(|v| matches_type_with_generics(v, inner, type_params, nominal_type_names)),
-            _ => false,
-        },
-        TypeExpr::Tuple(elements) => match value {
-            VmValue::List(items) if items.len() == elements.len() => {
-                items.iter().zip(elements).all(|(value, expected)| {
-                    matches_type_with_generics(value, expected, type_params, nominal_type_names)
-                })
-            }
-            _ => false,
-        },
-        TypeExpr::DictType(_, vt) => match value {
-            VmValue::Dict(map) => map
-                .values()
-                .all(|v| matches_type_with_generics(v, vt, type_params, nominal_type_names)),
-            _ => false,
-        },
-        TypeExpr::Iter(_) | TypeExpr::Generator(_) | TypeExpr::Stream(_) => match value {
-            // Lazy / async sequences: only check the container shape;
-            // element-level validation would force evaluation.
-            VmValue::List(_) | VmValue::Generator(_) | VmValue::Stream(_) => true,
-            _ => false,
-        },
-        // An open shape `{a: T, ...R}` checks its explicit fields exactly like
-        // a closed shape; the row tail just means "and possibly more fields,"
-        // which any dict already satisfies — so no extra runtime constraint.
-        TypeExpr::Shape(fields) | TypeExpr::OpenShape { fields, .. } => match value {
-            VmValue::Dict(map) => fields.iter().all(|f| match map.get(f.name.as_str()) {
-                // Optional fields treat an explicit `nil` value the same as
-                // "field missing" so callers can write `{flag: nil}` to mean
-                // "default" without having to omit the key entirely.
-                Some(VmValue::Nil) if f.optional => true,
-                Some(v) => {
-                    matches_type_with_generics(v, &f.type_expr, type_params, nominal_type_names)
-                }
-                None => f.optional,
-            }),
-            VmValue::StructInstance(_) => {
-                fields.iter().all(|f| match value.struct_field(&f.name) {
-                    Some(VmValue::Nil) if f.optional => true,
-                    Some(v) => {
-                        matches_type_with_generics(v, &f.type_expr, type_params, nominal_type_names)
-                    }
-                    None => f.optional,
-                })
-            }
-            _ => false,
-        },
-        TypeExpr::Applied { name, args } => match (name.as_str(), args.as_slice()) {
-            ("list", [inner]) => matches_type_with_generics(
-                value,
-                &TypeExpr::List(Box::new(inner.clone())),
-                type_params,
-                nominal_type_names,
-            ),
-            ("dict", [k, v]) => matches_type_with_generics(
-                value,
-                &TypeExpr::DictType(Box::new(k.clone()), Box::new(v.clone())),
-                type_params,
-                nominal_type_names,
-            ),
-            ("Option", [inner]) => {
-                matches!(value, VmValue::Nil)
-                    || matches_type_with_generics(value, inner, type_params, nominal_type_names)
-            }
-            // Result<T, E>, custom user-applied generics, Schema<T>, etc.
-            // fall through to permissive — runtime can't determine the
-            // active variant without more semantic knowledge.
-            _ => true,
-        },
-        TypeExpr::FnType { .. } => matches!(
-            value,
-            VmValue::Closure(_) | VmValue::BuiltinRef(_) | VmValue::BuiltinRefId(_)
-        ),
-        TypeExpr::Never => false,
-        TypeExpr::LitString(s) => matches!(value, VmValue::String(rs) if rs.as_str() == s),
-        TypeExpr::LitInt(i) => matches!(value, VmValue::Int(rv) if rv == i),
-        TypeExpr::Owned(inner) => {
-            // `owned<T>` is transparent at runtime — only the wrapped type
-            // shape is checked. Ownership semantics live in lints and the
-            // compiler's auto-drop lowering.
-            matches_type_with_generics(value, inner, type_params, nominal_type_names)
-        }
-    }
+    harn_kernel::type_contract::matches_type(value, expected, type_params, nominal_type_names)
 }
 
 /// Validate a user-defined function call: arity (respecting defaults +

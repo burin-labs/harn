@@ -315,13 +315,14 @@ than a primitive shipping into a release without a runnable example.
 |---|---|
 | `harn-lexer` | Tokenizer with span tracking |
 | `harn-parser` | Recursive-descent parser, AST, type checker |
-| `harn-vm` | Async bytecode compiler and virtual machine |
+| `harn-kernel` | Canonical bytecode compiler, portable artifact, and deterministic execution kernel |
+| `harn-vm` | Hostful async VM adapter and standard-library integration |
 | `harn-fmt` | Code formatter |
 | `harn-lint` | Linter (5 rules) |
 | `harn-cli` | CLI entry point (run, test, repl, fmt, lint, init) |
 | `harn-lsp` | Language Server Protocol implementation |
 | `harn-dap` | Debug Adapter Protocol implementation |
-| `harn-wasm` | WebAssembly target (built separately with wasm-pack) |
+| `harn-wasm` | Workspace-owned browser adapter (packaged with `make wasm-build`) |
 
 ## Adding a stdlib builtin
 

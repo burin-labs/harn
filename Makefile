@@ -1,5 +1,6 @@
 .PHONY: setup setup-rust setup-bootstrap clean-stale-targets install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-app-host fmt-harn fmt-harn-fix lint lint-md lint-actions lint-actions-source lint-actions-harn lint-harn check-app-host spec-lint gen-openapi-snapshot check-openapi-snapshot test test-one test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance mechanism-contracts protocol-conformance mcp-rc-conformance replay-oracle replay-bench eval-tool-calls bench bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak check-test-case-performance bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-cli-aot check-cli-aot gen-highlight check-highlight gen-prompt-grammar check-prompt-grammar gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs lint-no-rust-prompt-prose lint-agent-path-normalization lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc check-source-file-lengths update-source-file-length-baseline check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-dependabot-groups gen-tree-sitter-keywords check-tree-sitter-keywords gen-tree-sitter-parser check-tree-sitter-parser check-grammar-keywords gen-grammar-fitness check-grammar-fitness check-loud-boundaries check-generated-registry check-release-audit-contract check-ci-cache-policy check-binary-size-policy check-all-features
 .PHONY: test-pr-gate-post-warm-integrations test-rust-lint-lane-cache
+.PHONY: setup-wasm setup-wasm-tools gen-wasm-wit check-wasm-wit wasm-build wasm-audit-imports wasm-test-browser wasm-check wasm-demo kernel-check kernel-test kernel-vm-parity vm-check cli-check cli-test gen-portable-benchmark-schema check-portable-benchmark-schema
 
 HARN_BIN ?=
 HARN_PROTOCOL_ARTIFACT_VERSION ?=
@@ -18,12 +19,21 @@ HARN_CMD_VERBOSE = $(HARN_CMD)
 HARN_CLI_CMD = $(HARN_CMD)
 HARN_BIN_ASSIGN = harn_bin="$$($(HARN_BIN_PRINT_CMD))"
 HARN_PROTOCOL_ARTIFACT_CHECK_ARGS = $(if $(strip $(HARN_PROTOCOL_ARTIFACT_VERSION)),--artifact-version "$(HARN_PROTOCOL_ARTIFACT_VERSION)" --check,--check)
+HARN_WASM_PACK_VERSION ?= 0.15.0
+HARN_WASM_PACK_DIR ?= $(or $(TMPDIR),/tmp)/harn-tools/wasm-pack-$(HARN_WASM_PACK_VERSION)
+HARN_WASM_PACK = $(HARN_WASM_PACK_DIR)/bin/wasm-pack
+HARN_WASM_TOOLS_VERSION ?= 1.255.0
+HARN_WASM_COMPONENT_TOOLS_DIR ?= $(or $(TMPDIR),/tmp)/harn-tools/wasm-tools-$(HARN_WASM_TOOLS_VERSION)
+HARN_WASM_TOOLS ?= $(HARN_WASM_COMPONENT_TOOLS_DIR)/bin/wasm-tools
+HARN_WASM_OUT_DIR ?= pkg
+HARN_WASM_BINARY ?= crates/harn-wasm/$(HARN_WASM_OUT_DIR)/harn_wasm_bg.wasm
+HARN_CHROMEDRIVER ?=
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
 #        make all           (sequential, also works)
 all: fmt
-	$(MAKE) lint lint-md lint-actions lint-harn check-app-host spec-lint check-openapi-snapshot fmt-harn test test-harn-scripts test-agent-scripts test-pr-gate-scripts test-rust-lint-lane-cache conformance protocol-conformance mcp-rc-conformance replay-oracle replay-bench check-highlight check-prompt-grammar check-protocol-artifacts check-connector-schemas check-bindings check-session-bundle-schema check-run-view-fixtures check-language-spec check-trigger-quickref check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs check-provider-catalog-drift check-source-file-lengths check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-dependabot-groups check-tree-sitter-keywords check-tree-sitter-parser check-grammar-keywords check-grammar-fitness check-loud-boundaries check-generated-registry check-release-audit-contract check-ci-cache-policy portal-check
+	$(MAKE) lint lint-md lint-actions lint-harn check-app-host spec-lint check-openapi-snapshot fmt-harn test test-harn-scripts test-agent-scripts test-pr-gate-scripts test-rust-lint-lane-cache conformance protocol-conformance mcp-rc-conformance replay-oracle replay-bench check-highlight check-portable-benchmark-schema check-prompt-grammar check-protocol-artifacts check-connector-schemas check-bindings check-session-bundle-schema check-run-view-fixtures check-language-spec check-trigger-quickref check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs check-provider-catalog-drift check-source-file-lengths check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-dependabot-groups check-tree-sitter-keywords check-tree-sitter-parser check-grammar-keywords check-grammar-fitness check-loud-boundaries check-generated-registry check-release-audit-contract check-ci-cache-policy portal-check
 
 check: all
 
@@ -41,6 +51,78 @@ setup-rust:
 # single setup build instead of compiling both checkouts.
 setup-bootstrap:
 	HARN_DEV_SETUP_PROFILE=bootstrap HARN_DEV_TARGET_WORKTREE_PATH="$(CURDIR)" ./scripts/dev_setup.sh
+
+# Install the pinned browser-Wasm toolchain outside the checkout so every
+# worktree keeps its mutable build products private while reusing one immutable
+# tool binary. wasm-pack installs the matching wasm-bindgen test runner.
+setup-wasm:
+	rustup target add wasm32-unknown-unknown
+	@if [ ! -x "$(HARN_WASM_PACK)" ] || [ "$$($(HARN_WASM_PACK) --version)" != "wasm-pack $(HARN_WASM_PACK_VERSION)" ]; then \
+		cargo install --locked --root "$(HARN_WASM_PACK_DIR)" --version "=$(HARN_WASM_PACK_VERSION)" wasm-pack; \
+	fi
+
+setup-wasm-tools:
+	@if [ ! -x "$(HARN_WASM_TOOLS)" ] || [ "$$($(HARN_WASM_TOOLS) --version)" != "wasm-tools $(HARN_WASM_TOOLS_VERSION)" ]; then \
+		cargo install --locked --root "$(HARN_WASM_COMPONENT_TOOLS_DIR)" --version "=$(HARN_WASM_TOOLS_VERSION)" wasm-tools; \
+	fi
+
+# WIT is the stable Component Model contract even while browsers consume the
+# core-Wasm wasm-bindgen Adapter. wasm-tools is pinned in the browser CI lane;
+# override HARN_WASM_TOOLS locally when it is outside PATH.
+gen-wasm-wit: setup-wasm-tools
+	@command -v "$(HARN_WASM_TOOLS)" >/dev/null || { echo "wasm-tools is required (CI pins 1.255.0)" >&2; exit 1; }
+	"$(HARN_WASM_TOOLS)" component wit crates/harn-wasm/wit --json > crates/harn-wasm/wit/harn-kernel.json
+
+check-wasm-wit: setup-wasm-tools
+	@command -v "$(HARN_WASM_TOOLS)" >/dev/null || { echo "wasm-tools is required (CI pins 1.255.0)" >&2; exit 1; }
+	@actual="$$(mktemp)"; trap 'rm -f "$$actual"' EXIT; \
+		"$(HARN_WASM_TOOLS)" component wit crates/harn-wasm/wit --json > "$$actual"; \
+		diff -u crates/harn-wasm/wit/harn-kernel.json "$$actual"
+
+# Core-Wasm ES modules are the immediate browser Adapter. Override
+# HARN_WASM_OUT_DIR for a disposable baseline or a packaging lane.
+wasm-build: setup-wasm
+	cd crates/harn-wasm && "$(HARN_WASM_PACK)" build --target web --release --out-dir "$(HARN_WASM_OUT_DIR)"
+
+# Core Wasm must import only the tiny generated wasm-bindgen exception Adapter.
+# Any other host import is an authority change and fails closed for review.
+wasm-audit-imports: wasm-build
+	node scripts/check_wasm_imports.mjs "$(HARN_WASM_BINARY)"
+
+# Browser tests are intentionally a real dedicated-worker path, not Node.
+wasm-test-browser: setup-wasm
+	@driver="$${HARN_CHROMEDRIVER:-$$(./scripts/resolve_chromedriver.sh)}"; \
+	cd crates/harn-wasm && "$(HARN_WASM_PACK)" test --headless --chrome --chromedriver "$$driver"
+
+wasm-check: check-wasm-wit wasm-build wasm-audit-imports wasm-test-browser
+
+# Serve the standalone reducer with correct Wasm MIME types on every Node
+# platform. The worker remains the execution owner; this process only serves
+# immutable files from crates/harn-wasm.
+wasm-demo: wasm-build
+	node scripts/serve_wasm_demo.mjs
+
+kernel-check:
+	$(HARN_CARGO_CMD) check -p harn-kernel
+
+kernel-test:
+	$(HARN_CARGO_CMD) nextest run -p harn-kernel $(KERNEL_TEST_ARGS)
+
+# The corpus is included from harn-kernel/testdata by both this native-VM test
+# and the browser-Wasm tests. It must stay one data source with three adapters.
+kernel-vm-parity:
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run -p harn-vm --test portable_kernel_parity
+
+vm-check:
+	$(HARN_CARGO_CMD) check -p harn-vm
+
+# Focused CLI wrappers keep local iteration off the full workspace gate. Pass
+# native nextest filters through CLI_TEST_ARGS when only one surface changed.
+cli-check:
+	$(HARN_CARGO_CMD) check -p harn-cli
+
+cli-test:
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run -p harn-cli $(CLI_TEST_ARGS)
 
 # Reclaim orphaned per-worktree Cargo target dirs under known setup storage
 # roots (left behind when an agent/codex worktree is removed). Add
@@ -429,10 +511,12 @@ test-pr-gate-scripts:
 	./scripts/tests/macos_nightly_test_env_test.sh
 	./scripts/tests/ci_finalize_sccache_test.sh
 	./scripts/tests/ci_preemption_recover_test.sh
+	./scripts/tests/cancel_superseded_merge_groups_test.sh
 	./scripts/tests/audit_gates_parallel_test.sh
 	./scripts/tests/rust_artifact_test.sh
 	./scripts/tests/ci_harn_bin_warm_test.sh
 	./scripts/tests/harn_bin_resolver_test.sh
+	./scripts/tests/package_verify_bootstrap_test.sh
 	./scripts/tests/harn_launcher_python_cutover_test.sh
 	./scripts/tests/lint_harn_gate_test.sh
 	./scripts/tests/build_revision_workflow_test.sh
@@ -542,6 +626,15 @@ check-highlight:
 	@echo "=== Checking docs/theme/harn-keywords.js is up to date ==="
 	@$(HARN_CLI_CMD) dump-highlight-keywords --check
 	@echo "    Harn keyword file OK."
+
+# The Rust receipt type and its validation constants own this public schema.
+gen-portable-benchmark-schema:
+	$(HARN_CLI_CMD) dump-portable-benchmark-schema
+
+check-portable-benchmark-schema:
+	@echo "=== Checking Portable Kernel benchmark schema ==="
+	@$(HARN_CLI_CMD) dump-portable-benchmark-schema --check
+	@echo "    Portable Kernel benchmark schema OK."
 
 # Regenerate the VS Code `.harn.prompt` TextMate grammar from the live
 # prompt-template keyword, filter, and section vocabulary. Run this whenever

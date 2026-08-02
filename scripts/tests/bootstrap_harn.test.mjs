@@ -77,6 +77,54 @@ function bootstrapOptions(root, fetchImpl) {
   };
 }
 
+function writeInstallLock(root, owner) {
+  const lockRoot = path.join(root, "install.lock");
+  fs.mkdirSync(lockRoot);
+  fs.writeFileSync(
+    path.join(lockRoot, "owner.json"),
+    `${JSON.stringify({
+      schema_version: "harn-bootstrap-install-lock-v1",
+      token: crypto.randomUUID(),
+      ...owner,
+    })}\n`,
+  );
+  return lockRoot;
+}
+
+function replaceInstallLockOwner(lockRoot, owner) {
+  const ownerPath = path.join(lockRoot, "owner.json");
+  const temporary = path.join(lockRoot, `owner-${crypto.randomUUID()}.tmp`);
+  fs.writeFileSync(
+    temporary,
+    `${JSON.stringify({
+      schema_version: "harn-bootstrap-install-lock-v1",
+      token: crypto.randomUUID(),
+      ...owner,
+    })}\n`,
+  );
+  fs.renameSync(temporary, ownerPath);
+}
+
+function publishValidInstall(root, archive) {
+  const installRoot = path.join(root, "install");
+  const binaryPath = path.join(installRoot, "harn");
+  const binary = Buffer.from("fake harn binary\n");
+  fs.mkdirSync(installRoot);
+  fs.writeFileSync(binaryPath, binary);
+  fs.writeFileSync(
+    path.join(installRoot, "install-manifest.json"),
+    `${JSON.stringify({
+      schema_version: "harn-bootstrap-install-v1",
+      version: TEST_VERSION,
+      target: TEST_TARGET,
+      binary_path: binaryPath,
+      source: `https://github.com/burin-labs/harn/releases/download/v${TEST_VERSION}/${TEST_ASSET}`,
+      checksum: sha256(archive),
+      binary_sha256: sha256(binary),
+    })}\n`,
+  );
+}
+
 function runChild(script, arguments_) {
   return new Promise((resolve, reject) => {
     const child = spawn(
@@ -422,6 +470,167 @@ test("interrupted temporary files never become cache or install state", async (c
   assert.equal(result.checksum, sha256(archive));
 });
 
+test("an abandoned install lock is reclaimed before publication", async (context) => {
+  const root = temporaryRoot(context);
+  const archive = makeArchive(root);
+  const release = fakeRelease(archive);
+  const lockRoot = writeInstallLock(root, {
+    hostname: os.hostname(),
+    pid: 2_147_483_647,
+  });
+
+  const result = await bootstrap(bootstrapOptions(root, release.fetchImpl));
+  assert.equal(fs.existsSync(lockRoot), false);
+  assert.equal(
+    fs.readFileSync(result.binary_path, "utf8"),
+    "fake harn binary\n",
+  );
+});
+
+test("a live install owner holds the publication boundary", async (context) => {
+  const root = temporaryRoot(context);
+  const archive = makeArchive(root);
+  const release = fakeRelease(archive);
+  const lockRoot = writeInstallLock(root, {
+    hostname: os.hostname(),
+    pid: process.pid,
+  });
+  const startedAt = Date.now();
+  const pending = bootstrap(bootstrapOptions(root, release.fetchImpl));
+  setTimeout(() => fs.rmSync(lockRoot, { recursive: true, force: true }), 150);
+
+  const result = await pending;
+  assert.ok(Date.now() - startedAt >= 100);
+  assert.equal(
+    fs.readFileSync(result.binary_path, "utf8"),
+    "fake harn binary\n",
+  );
+});
+
+test("the wait deadline recovers a foreign abandoned lock", async (context) => {
+  const root = temporaryRoot(context);
+  const archive = makeArchive(root);
+  const release = fakeRelease(archive);
+  const lockRoot = writeInstallLock(root, {
+    hostname: "foreign-bootstrap-host",
+    pid: 1,
+  });
+  const startedAt = Date.now();
+  const result = await bootstrap({
+    ...bootstrapOptions(root, release.fetchImpl),
+    installLockTimeoutMs: 50,
+  });
+
+  assert.ok(Date.now() - startedAt >= 40);
+  assert.equal(fs.existsSync(lockRoot), false);
+  assert.equal(
+    fs.readFileSync(result.binary_path, "utf8"),
+    "fake harn binary\n",
+  );
+});
+
+test("a wait deadline does not evict a newly rotated owner", async (context) => {
+  const root = temporaryRoot(context);
+  const archive = makeArchive(root);
+  const release = fakeRelease(archive);
+  const lockRoot = writeInstallLock(root, {
+    hostname: "foreign-bootstrap-host",
+    pid: 1,
+    token: "foreign-owner",
+  });
+  let rotatedOwnerSurvived = false;
+  let rotationPrecededInstall = false;
+  const startedAt = Date.now();
+  const pending = bootstrap({
+    ...bootstrapOptions(root, release.fetchImpl),
+    installLockTimeoutMs: 50,
+  });
+  setTimeout(() => {
+    rotationPrecededInstall = !fs.existsSync(path.join(root, "install"));
+    fs.rmSync(lockRoot, { recursive: true, force: true });
+    writeInstallLock(root, {
+      hostname: os.hostname(),
+      pid: process.pid,
+      token: "rotated-live-owner",
+    });
+  }, 35);
+  setTimeout(() => {
+    rotatedOwnerSurvived = fs.existsSync(lockRoot);
+    fs.rmSync(lockRoot, { recursive: true, force: true });
+  }, 70);
+
+  const result = await pending;
+  assert.equal(rotationPrecededInstall, true);
+  assert.equal(rotatedOwnerSurvived, true);
+  assert.ok(Date.now() - startedAt >= 60);
+  assert.equal(
+    fs.readFileSync(result.binary_path, "utf8"),
+    "fake harn binary\n",
+  );
+});
+
+test("rapid owner rotation still has an overall wait bound", async (context) => {
+  const root = temporaryRoot(context);
+  const archive = makeArchive(root);
+  const release = fakeRelease(archive);
+  const lockRoot = writeInstallLock(root, {
+    hostname: "foreign-bootstrap-host",
+    pid: 1,
+  });
+  const rotation = setInterval(() => {
+    replaceInstallLockOwner(lockRoot, {
+      hostname: "foreign-bootstrap-host",
+      pid: 1,
+    });
+  }, 8);
+  context.after(() => clearInterval(rotation));
+
+  await assert.rejects(
+    bootstrap({
+      ...bootstrapOptions(root, release.fetchImpl),
+      installLockTimeoutMs: 25,
+    }),
+    /timed out waiting for Harn installation/,
+  );
+  clearInterval(rotation);
+});
+
+test("a peer install published at the total deadline wins", async (context) => {
+  const root = temporaryRoot(context);
+  const archive = makeArchive(root);
+  const release = fakeRelease(archive);
+  const lockRoot = writeInstallLock(root, {
+    hostname: os.hostname(),
+    pid: process.pid,
+  });
+  const rotation = setInterval(() => {
+    replaceInstallLockOwner(lockRoot, {
+      hostname: os.hostname(),
+      pid: process.pid,
+    });
+  }, 8);
+  context.after(() => clearInterval(rotation));
+  setTimeout(() => publishValidInstall(root, archive), 50);
+
+  const startedAt = Date.now();
+  const result = await bootstrap({
+    ...bootstrapOptions(root, release.fetchImpl),
+    installLockTimeoutMs: 50,
+  });
+  clearInterval(rotation);
+
+  assert.ok(Date.now() - startedAt >= 150);
+  assert.equal(
+    fs.existsSync(lockRoot),
+    true,
+    "the waiter must accept the peer install without evicting or acquiring its lock",
+  );
+  assert.equal(
+    fs.readFileSync(result.binary_path, "utf8"),
+    "fake harn binary\n",
+  );
+});
+
 test("independent processes safely converge on one atomic install", async (context) => {
   const root = temporaryRoot(context);
   const archive = makeArchive(root);
@@ -460,12 +669,19 @@ test("independent processes safely converge on one atomic install", async (conte
     path.join(root, "cache"),
     path.join(root, "install"),
   ];
-  const [left, right] = await Promise.all([
-    runChild(childScript, childArguments),
-    runChild(childScript, childArguments),
-  ]);
-  const receipts = [JSON.parse(left), JSON.parse(right)];
-  assert.equal(receipts[0].binary_path, receipts[1].binary_path);
+  const installRoot = path.join(root, "install");
+  fs.mkdirSync(installRoot);
+  fs.writeFileSync(
+    path.join(installRoot, "install-manifest.json"),
+    "corrupt\n",
+  );
+  const outputs = await Promise.all(
+    Array.from({ length: 8 }, () => runChild(childScript, childArguments)),
+  );
+  const receipts = outputs.map((output) => JSON.parse(output));
+  for (const receipt of receipts.slice(1)) {
+    assert.equal(receipt.binary_path, receipts[0].binary_path);
+  }
   assert.equal(
     fs.readFileSync(receipts[0].binary_path, "utf8"),
     "fake harn binary\n",

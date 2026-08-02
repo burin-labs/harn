@@ -1,10 +1,9 @@
-//! `harn dump-highlight-keywords` — regenerate `docs/theme/harn-keywords.js`.
+//! Generate the portable Harn language vocabulary and projection adapters.
 //!
 //! The mdBook documentation site (`docs/`) uses a custom highlight.js language
-//! definition to render ```` ```harn ```` code blocks. To keep the highlighter
-//! in sync with the actual language and stdlib without hand-maintaining a
-//! duplicate keyword list, this command emits a small JS file that the
-//! highlight.js module consumes at runtime.
+//! definition to render ```` ```harn ```` code blocks. TypeScript, browser,
+//! docs, and editor consumers share the machine-readable JSON artifact rather
+//! than embedding their own keyword or builtin subsets.
 //!
 //! Sources of truth:
 //!
@@ -23,18 +22,56 @@ use std::fs;
 use std::path::Path;
 use std::process;
 
-use harn_lexer::KEYWORDS;
+use harn_lexer::{KEYWORDS, LITERAL_KEYWORDS};
 use harn_vm::stdlib::stdlib_builtin_names;
+use serde::Serialize;
 
-/// Literals that render as `hljs-literal` rather than `hljs-keyword`.
-/// Hand-maintained against `KEYWORDS`; update both this list and the test
-/// below if a new literal keyword is added.
-const LITERALS: &[&str] = &["true", "false", "nil"];
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LanguageVocabulary {
+    schema_version: u32,
+    keywords: Vec<String>,
+    literals: Vec<String>,
+    builtins: Vec<String>,
+    token_categories: TokenCategories,
+}
 
-pub(crate) fn run(output_path: &str, check_only: bool) {
-    let generated = generate_file();
-    let path = Path::new(output_path);
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TokenCategories {
+    keyword: &'static str,
+    literal: &'static str,
+    builtin: &'static str,
+    type_name: &'static str,
+    string: &'static str,
+    number: &'static str,
+    comment: &'static str,
+}
 
+pub(crate) fn run(
+    output_path: &str,
+    json_output_path: &str,
+    wasm_json_output_path: &str,
+    check_only: bool,
+) {
+    let vocabulary = language_vocabulary();
+    let json = format!(
+        "{}\n",
+        serde_json::to_string_pretty(&vocabulary)
+            .expect("language vocabulary is JSON serializable")
+    );
+    let outputs = [
+        (Path::new(output_path), generate_file(&vocabulary)),
+        (Path::new(json_output_path), json.clone()),
+        (Path::new(wasm_json_output_path), json),
+    ];
+
+    for (path, generated) in outputs {
+        write_or_check(path, &generated, check_only);
+    }
+}
+
+fn write_or_check(path: &Path, generated: &str, check_only: bool) {
     if check_only {
         let existing = match fs::read_to_string(path) {
             Ok(s) => s,
@@ -44,7 +81,7 @@ pub(crate) fn run(output_path: &str, check_only: bool) {
                 process::exit(1);
             }
         };
-        if normalize_line_endings(&existing) != normalize_line_endings(&generated) {
+        if normalize_line_endings(&existing) != normalize_line_endings(generated) {
             eprintln!(
                 "error: {} is stale relative to the lexer/stdlib.",
                 path.display()
@@ -61,7 +98,7 @@ pub(crate) fn run(output_path: &str, check_only: bool) {
             process::exit(1);
         }
     }
-    if let Err(e) = fs::write(path, &generated) {
+    if let Err(e) = fs::write(path, generated) {
         eprintln!("error: cannot write {}: {e}", path.display());
         process::exit(1);
     }
@@ -69,13 +106,14 @@ pub(crate) fn run(output_path: &str, check_only: bool) {
 }
 
 /// Build the full file contents. Pure so it's easy to unit-test.
-fn generate_file() -> String {
-    let literals: BTreeSet<&str> = LITERALS.iter().copied().collect();
+fn language_vocabulary() -> LanguageVocabulary {
+    let literals: BTreeSet<&str> = LITERAL_KEYWORDS.iter().copied().collect();
 
-    let keywords: Vec<&str> = KEYWORDS
+    let keywords: Vec<String> = KEYWORDS
         .iter()
         .copied()
         .filter(|k| !literals.contains(k))
+        .map(str::to_string)
         .collect();
 
     // Builtins: names registered on a fully-initialized VM, minus anything
@@ -90,9 +128,30 @@ fn generate_file() -> String {
     let mut builtins: BTreeSet<&str> = builtin_owned.iter().map(String::as_str).collect();
     builtins.remove("");
 
-    let keyword_line = keywords.join(" ");
-    let literal_line = LITERALS.join(" ");
-    let builtin_line = builtins.into_iter().collect::<Vec<_>>().join(" ");
+    LanguageVocabulary {
+        schema_version: 1,
+        keywords,
+        literals: LITERAL_KEYWORDS
+            .iter()
+            .map(|value| (*value).to_string())
+            .collect(),
+        builtins: builtins.into_iter().map(str::to_string).collect(),
+        token_categories: TokenCategories {
+            keyword: "harn-keyword",
+            literal: "harn-literal",
+            builtin: "harn-builtin",
+            type_name: "harn-type",
+            string: "harn-string",
+            number: "harn-number",
+            comment: "harn-comment",
+        },
+    }
+}
+
+fn generate_file(vocabulary: &LanguageVocabulary) -> String {
+    let keyword_line = vocabulary.keywords.join(" ");
+    let literal_line = vocabulary.literals.join(" ");
+    let builtin_line = vocabulary.builtins.join(" ");
 
     format!(
         "// GENERATED by `harn dump-highlight-keywords` — do not edit by hand.\n\
@@ -121,7 +180,7 @@ mod tests {
 
     #[test]
     fn generated_file_contains_core_keywords() {
-        let out = generate_file();
+        let out = generate_file(&language_vocabulary());
         assert!(out.contains("pipeline"));
         assert!(out.contains("parallel"));
         assert!(out.contains("defer"));
@@ -130,7 +189,7 @@ mod tests {
 
     #[test]
     fn generated_file_contains_known_builtins() {
-        let out = generate_file();
+        let out = generate_file(&language_vocabulary());
         for name in &["log", "read_file", "llm_call", "http_choose"] {
             assert!(
                 out.contains(name),
@@ -169,13 +228,44 @@ mod tests {
                 path.display()
             )
         });
-        let generated = generate_file();
+        let generated = generate_file(&language_vocabulary());
         assert_eq!(
             normalize_line_endings(&on_disk),
             normalize_line_endings(&generated),
             "docs/theme/harn-keywords.js is stale relative to the lexer/stdlib.\n\
              Run `make gen-highlight` to regenerate."
         );
+    }
+
+    #[test]
+    fn committed_vocabulary_manifest_matches_generator() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let path = std::path::Path::new(manifest_dir)
+            .join("..")
+            .join("..")
+            .join("spec")
+            .join("language-vocabulary.json");
+        let on_disk = std::fs::read_to_string(&path).unwrap_or_else(|error| {
+            panic!(
+                "failed to read {}: {error}\n\
+                 hint: run `make gen-highlight` to regenerate.",
+                path.display()
+            )
+        });
+        let generated = format!(
+            "{}\n",
+            serde_json::to_string_pretty(&language_vocabulary()).unwrap()
+        );
+        assert_eq!(normalize_line_endings(&on_disk), generated);
+
+        let wasm_path = std::path::Path::new(manifest_dir)
+            .join("..")
+            .join("harn-wasm")
+            .join("demo")
+            .join("language-vocabulary.json");
+        let wasm_projection = std::fs::read_to_string(&wasm_path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", wasm_path.display()));
+        assert_eq!(normalize_line_endings(&wasm_projection), generated);
     }
 
     #[test]
@@ -191,7 +281,7 @@ mod tests {
 
     #[test]
     fn literals_are_not_also_keywords() {
-        let out = generate_file();
+        let out = generate_file(&language_vocabulary());
         // Literals must live in the literal field, not bleed into the
         // keyword string.
         let keyword_section_start = out.find("keyword: \"").expect("keyword field");
@@ -201,7 +291,7 @@ mod tests {
             .unwrap();
         let keyword_section =
             &out[keyword_section_start..keyword_section_start + keyword_section_end + 20];
-        for lit in LITERALS {
+        for lit in LITERAL_KEYWORDS {
             assert!(
                 !keyword_section.contains(&format!(" {lit} ")),
                 "literal `{lit}` leaked into keyword list"

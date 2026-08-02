@@ -739,26 +739,30 @@ impl LexicalAnalysis {
 fn hoisted_callable_scope(body: &[SNode]) -> Scope {
     let mut scope = Scope::new();
     for node in body {
-        match &node.node {
-            Node::FnDecl { name, .. }
-            | Node::ToolDecl { name, .. }
-            | Node::Pipeline { name, .. }
-            | Node::OverrideDecl { name, .. } => {
-                scope.insert(name.clone(), ScopeBinding::Nested);
-            }
-            Node::AttributedDecl { inner, .. } => {
-                if let Node::FnDecl { name, .. }
-                | Node::ToolDecl { name, .. }
-                | Node::Pipeline { name, .. }
-                | Node::OverrideDecl { name, .. } = &inner.node
-                {
-                    scope.insert(name.clone(), ScopeBinding::Nested);
-                }
-            }
-            _ => {}
+        if let Some(name) = hoisted_callable_name(node) {
+            scope.insert(name.to_string(), ScopeBinding::Nested);
         }
     }
     scope
+}
+
+/// Name introduced at block entry by a function-like declaration.
+///
+/// Capture analysis, type checking, and bytecode lowering consume this one
+/// predicate so a forward callable reference cannot be accepted by one layer
+/// and omitted by another.
+pub fn hoisted_callable_name(node: &SNode) -> Option<&str> {
+    let declaration = match &node.node {
+        Node::AttributedDecl { inner, .. } => inner.as_ref(),
+        _ => node,
+    };
+    match &declaration.node {
+        Node::FnDecl { name, .. }
+        | Node::ToolDecl { name, .. }
+        | Node::Pipeline { name, .. }
+        | Node::OverrideDecl { name, .. } => Some(name),
+        _ => None,
+    }
 }
 
 /// Whether module compilation defers this declaration until after executable

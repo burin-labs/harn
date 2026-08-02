@@ -33,7 +33,6 @@ pub(crate) mod aws_sigv4;
 pub mod boundary;
 pub mod bridge;
 pub use bridge::inject_leading_authority;
-mod builtin_id;
 pub mod builtin_profile;
 pub mod bytecode_cache;
 pub mod call_budget;
@@ -97,6 +96,7 @@ pub mod op_interrupt;
 pub mod orchestration;
 mod persistent_state;
 pub mod personas;
+pub mod portable;
 mod prepared_module;
 pub mod process_sandbox;
 pub mod profile;
@@ -201,7 +201,6 @@ pub use actor_chain::{
     ActorChain, ActorChainEntry, ActorChainError, Principal, ScopeAttenuationMode,
     ScopeAttenuationPolicy, ScopeAttenuationViolation,
 };
-pub use builtin_id::BuiltinId;
 pub use call_budget::{
     charge_mcp_call, charge_pg_query, install_mcp_call_budget, install_pg_query_budget,
     McpCallBudgetGuard, PgQueryBudgetGuard,
@@ -233,6 +232,7 @@ pub use corrections::{
     CorrectionQueryFilters, CorrectionRecord, CorrectionScope, CORRECTIONS_TOPIC,
     CORRECTION_EVENT_KIND, CORRECTION_SCHEMA_V0,
 };
+pub use harn_kernel::BuiltinId;
 pub use harness::{
     DenyEvent, Harness, HarnessAgent, HarnessCall, HarnessChannels, HarnessClock, HarnessEnv,
     HarnessFs, HarnessKind, HarnessLlm, HarnessMemory, HarnessNet, HarnessObs, HarnessPostgres,

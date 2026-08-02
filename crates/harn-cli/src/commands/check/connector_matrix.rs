@@ -269,10 +269,14 @@ fn should_skip_dir(path: &Path) -> bool {
     if !path.is_dir() {
         return false;
     }
-    matches!(
-        path.file_name().and_then(|name| name.to_str()),
-        Some(".git" | ".harn" | "node_modules" | "target")
-    )
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            crate::path_policy::is_harn_internal_entry(
+                name,
+                crate::path_policy::PathEntryKind::Directory,
+            ) || matches!(name, ".git" | "node_modules" | "target")
+        })
 }
 
 fn rows_from_manifest(

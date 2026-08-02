@@ -2,7 +2,7 @@
 //
 // The `## Grammar` section of the language spec (assembled into
 // `spec/HARN_SPEC.md`) writes keywords as single-quoted EBNF literals
-// (`'fn'`, `'where'`, ...). The lexer's `pub const KEYWORDS` in
+// (`'fn'`, `'where'`, ...). The lexer's declarative keyword vocabulary in
 // `crates/harn-lexer/src/token.rs` is the source of truth for reserved
 // words, and `make check-tree-sitter-keywords` already keeps the tree-sitter
 // grammar in sync with it. Nothing checked that the *spec grammar* stayed in
@@ -73,7 +73,7 @@ pipeline main(harness: Harness, task) {
   }
   const lexer = lexer_keywords(harness.fs.read_text(TOKEN_RS))
   if lexer == nil {
-    harness.stdio.eprintln("error: could not find `pub const KEYWORDS` in ${TOKEN_RS}")
+    harness.stdio.eprintln("error: could not find the lexer keyword vocabulary in ${TOKEN_RS}")
     return 1
   }
   const known = lexer + CONTEXTUAL

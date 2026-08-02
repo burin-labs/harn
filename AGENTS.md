@@ -94,8 +94,10 @@ autonomy, cross-surface convergence, and operationally complete launches.
 - `spec/chapters/*.md`: canonical spec sources.
 - `docs/src/`, `website/`: documentation sources and harnlang.com.
 - `tree-sitter-harn/`, `editors/vscode/`: grammar and VS Code extension.
-- `crates/harn-wasm` is outside the workspace; build it with
-  `(cd crates/harn-wasm && wasm-pack build)`.
+- `crates/harn-kernel`: canonical compiler, versioned program artifact,
+  deterministic portable runtime, and runtime type contract.
+- `crates/harn-wasm`: workspace-owned browser adapter; verify its generated
+  bindings, authority imports, and real worker path with `make wasm-check`.
 
 ## Source ownership and generated files
 

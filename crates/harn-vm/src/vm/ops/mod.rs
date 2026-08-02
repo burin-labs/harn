@@ -42,6 +42,8 @@ use pin_project_lite::pin_project;
 
 use crate::value::{VmError, VmValue};
 
+pub use harn_kernel::Op;
+
 pin_project! {
     /// Keeps the large generated async-opcode state machine out of each caller
     /// without moving the future off the stack.

@@ -188,9 +188,6 @@ fn expand(opcodes: &Opcodes) -> syn::Result<TokenStream2> {
         ));
     }
 
-    let variants = opcodes.entries.iter().map(|e| &e.variant);
-    let all_variants: Vec<_> = opcodes.entries.iter().map(|e| &e.variant).collect();
-
     // Sync dispatch arms.
     let sync_arms = opcodes.entries.iter().map(|e| {
         let v = &e.variant;
@@ -260,33 +257,7 @@ fn expand(opcodes: &Opcodes) -> syn::Result<TokenStream2> {
         )
     });
 
-    let opcode_count = all_variants.len();
-
     let out = quote! {
-        /// Bytecode opcodes for the Harn VM. Defined by
-        /// `define_opcodes!`; the `u8` representation is the on-disk
-        /// bytecode encoding.
-        #[derive(::core::fmt::Debug, ::core::clone::Clone, ::core::marker::Copy, ::core::cmp::PartialEq, ::core::cmp::Eq)]
-        #[repr(u8)]
-        pub enum Op {
-            #(#variants),*
-        }
-
-        impl Op {
-            /// Every opcode in declaration order. The index is the
-            /// canonical `u8` representation; `from_byte` is the
-            /// inverse mapping.
-            pub(crate) const ALL: &'static [Self] = &[#(Op::#all_variants),*];
-
-            /// Number of declared opcodes (== `ALL.len()`).
-            pub(crate) const COUNT: usize = #opcode_count;
-
-            #[inline]
-            pub(crate) fn from_byte(byte: u8) -> ::core::option::Option<Self> {
-                Self::ALL.get(byte as usize).copied()
-            }
-        }
-
         impl crate::vm::Vm {
             /// Sync dispatch table. Returns `Some(Ok(()))` / `Some(Err(_))`
             /// when the opcode completed synchronously and `None` when

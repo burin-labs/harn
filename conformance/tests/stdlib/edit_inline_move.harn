@@ -96,7 +96,31 @@ pipeline default(harness: Harness) {
   harness.stdio.println(contains(b_after, "def helper(x):"))
   harness.stdio.println(contains(b_after, "    return x + 1"))
   harness.stdio.println(len(mv.warnings) >= 1)
-  // 6) move_decl conflict: symbol not present.
+  // 6) Harn module bindings use the same structural move contract.
+  const constants_path = write_fixture(
+    harness.fs,
+    root,
+    "constants.harn",
+    "const API_URL: string = \"https://api.example.com\"\n\nfn endpoint() {\n  return API_URL\n}\n",
+  )
+  const config_path = write_fixture(harness.fs, root, "config.harn", "")
+  const moved_constant = edit_move_decl(
+    harness.fs,
+    harness.random,
+    harness.ast,
+    {path: constants_path, symbol: {name: "API_URL"}, target_file: config_path},
+  )
+  harness.stdio.println(moved_constant.result)
+  harness.stdio.println(moved_constant.summary.files_touched == 2)
+  harness.stdio.println(!contains(harness.fs.read_text(constants_path), "const API_URL"))
+  harness.stdio.println(contains(harness.fs.read_text(constants_path), "fn endpoint"))
+  harness.stdio.println(
+    contains(
+      harness.fs.read_text(config_path),
+      "const API_URL: string = \"https://api.example.com\"",
+    ),
+  )
+  // 7) move_decl conflict: symbol not present.
   harness.stdio.println(
     edit_move_decl(
       harness.fs,

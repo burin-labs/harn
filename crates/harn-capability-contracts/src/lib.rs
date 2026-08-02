@@ -19,8 +19,11 @@ pub struct CapabilityMethodDef {
     pub signature_text: Option<&'static str>,
 }
 
-#[linkme::distributed_slice]
-pub static ALL_CAPABILITY_METHOD_DEFS: [&'static CapabilityMethodDef];
+/// Build-generated projection of the source declarations. A plain static
+/// slice works on native and `wasm32-unknown-unknown`, unlike linker-section
+/// discovery, while the macro declarations remain the single contract owner.
+pub static ALL_CAPABILITY_METHOD_DEFS: &[&CapabilityMethodDef] =
+    include!(concat!(env!("OUT_DIR"), "/capability_method_defs.rs"));
 
 /// Proc-macro support paths kept in one deliberately boring module.
 #[doc(hidden)]
@@ -33,7 +36,6 @@ pub mod support {
         TY_INT, TY_INT_OR_NIL, TY_LIST, TY_NEVER, TY_NIL, TY_NUMBER, TY_RESOURCE, TY_STRING,
         TY_STRING_OR_NIL,
     };
-    pub use linkme::distributed_slice;
 }
 
 use harn_builtin_macros::harn_capability_contract as capability_method;
@@ -49,10 +51,7 @@ pub fn manifest() -> &'static [&'static BuiltinManifestEntry] {
     static MANIFEST: OnceLock<Vec<&'static BuiltinManifestEntry>> = OnceLock::new();
     MANIFEST
         .get_or_init(|| {
-            let mut defs = ALL_CAPABILITY_METHOD_DEFS
-                .iter()
-                .copied()
-                .collect::<Vec<_>>();
+            let mut defs = ALL_CAPABILITY_METHOD_DEFS.to_vec();
             defs.sort_by_key(|def| def.signature.name);
             defs.into_iter()
                 .map(|def| {

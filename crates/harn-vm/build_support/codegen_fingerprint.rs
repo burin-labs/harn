@@ -20,9 +20,10 @@ pub fn compiler_inputs(manifest_dir: &Path) -> Vec<CompilerInput> {
         ),
         (crates_dir.join("harn-ir").join("src"), "harn-ir/src"),
         (
-            manifest_dir.join("src").join("compiler"),
-            "harn-vm/src/compiler",
+            crates_dir.join("harn-kernel").join("src"),
+            "harn-kernel/src",
         ),
+        (manifest_dir.join("src").join("chunk"), "harn-vm/src/chunk"),
     ];
     for (root, logical_prefix) in roots {
         collect_rs_files(&root, logical_prefix, &mut inputs);
@@ -31,6 +32,7 @@ pub fn compiler_inputs(manifest_dir: &Path) -> Vec<CompilerInput> {
     for (file_name, logical_path) in [
         ("bytecode_cache.rs", "harn-vm/src/bytecode_cache.rs"),
         ("chunk.rs", "harn-vm/src/chunk.rs"),
+        ("compiler.rs", "harn-vm/src/compiler.rs"),
         ("module_artifact.rs", "harn-vm/src/module_artifact.rs"),
     ] {
         let disk_path = manifest_dir.join("src").join(file_name);
@@ -52,7 +54,8 @@ pub fn watch_roots(manifest_dir: &Path) -> Vec<PathBuf> {
         crates_dir.join("harn-lexer").join("src"),
         crates_dir.join("harn-parser").join("src"),
         crates_dir.join("harn-ir").join("src"),
-        manifest_dir.join("src").join("compiler"),
+        crates_dir.join("harn-kernel").join("src"),
+        manifest_dir.join("src").join("chunk"),
     ]
 }
 

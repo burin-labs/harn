@@ -166,6 +166,7 @@ jobs:
               - 'Cargo.toml'
               - 'crates/**'
               - 'scripts/harn_bin.sh'
+              - 'scripts/lib/package_verify_bootstrap.sh'
               - 'scripts/release_audit_contract.harn'
               - 'scripts/release_audit_contract.json'
               - 'scripts/tests/release_audit_contract_test.harn'
@@ -371,6 +372,10 @@ jobs:
     timeout-minutes: 30
     env:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      # Keep this lane on the combined Harn/AOT-generator Cargo invocation.
+      # Supplying a warmed HARN_BIN selects the narrow release-gate path and
+      # forfeits feature unification across the shared cold dependency graph.
+      HARN_BIN: ""
       SCCACHE_CACHE_SIZE: 40G
       SCCACHE_SERVER_PORT: "4227"
       # Which rung of the ladder above this job actually landed on.
@@ -416,10 +421,10 @@ jobs:
           # NO Linux lane ever saved (`save` defaulted off at every call site),
           # so every hosted run restored nothing and compiled from scratch.
           save: "true"
-      - name: Generate release/package CLI AOT payload
-        run: make gen-cli-aot && make check-cli-aot
       - name: Check published crate packages
         id: release-audit-package
+        # The verifier builds Harn and its AOT generator in one Cargo invocation
+        # so their shared feature graph compiles once, then runs both directly.
         run: ./scripts/verify_crate_packages.sh
       - name: Summarize and stop sccache
         if: always()
@@ -1146,6 +1151,7 @@ jobs:
       # Makefile `all:` recipe and the workflows. Harn-backed guards reuse the
       # warm HARN_BIN; pure shell/Python guards stay cheap either way.
       - run: make check-receipt-structs
+      - run: make check-portable-benchmark-schema
       - run: make check-docs-links
       - run: make check-agent-guidance
       - run: make check-tree-sitter-keywords

@@ -7,6 +7,7 @@
 - [Start here](./concepts/index.md)
 - [Mental model](./concepts/mental-model.md)
 - [Glossary](./concepts/glossary.md)
+- [Portable execution](./concepts/portable-execution.md)
 - [Choosing an agent abstraction](./concepts/abstraction-ladder.md)
 - [The expressiveness spectrum](./concepts/expressiveness-spectrum.md)
 - [Steering seams](./concepts/steering-seams.md)
@@ -51,6 +52,7 @@
 - [Debugging agent runs](./debugging.md)
 - [Editor setup (VS Code, Neovim, Zed)](./editor-setup.md)
 - [Use Harn from ACP editor hosts](./acp-editor-hosts.md)
+- [Run a portable reducer in a browser](./portable-kernel-browser.md)
 
 # Reference
 
@@ -200,6 +202,7 @@
 - [MCP, ACP, and A2A integration](./mcp-and-acp.md)
 - [Outbound workflow server](./harn-serve.md)
 - [Embedding Harn in Rust](./embedding-rust.md)
+- [Portable kernel contract](./portable-kernel-reference.md)
 - [Bridge protocol](./bridge-protocol.md)
 - [Generated protocol artifacts](./protocol-artifacts.md)
 - [Host tools over the bridge](./bridge/host-tools.md)
@@ -266,6 +269,7 @@
 ## CLI and tooling
 
 - [CLI reference](./cli-reference.md)
+- [Benchmark the portable kernel](./portable-kernel-benchmarking.md)
 - [CLI `--json` contract](./cli-json-contract.md)
 - [Extending the CLI in `.harn`](./cli-extending-in-harn.md)
 - [`std/cli/argparse`](./cli-argparse-reference.md)
@@ -340,10 +344,11 @@
 - [Annotation tape format](./dev/annotation-tape-format.md)
 - [DES runtime mode](./dev/des-mode.md)
 - [VM and stdlib perf notes](./dev/vm-stdlib-perf-notes.md)
-- [Native code generation (experimental)](./dev/native-codegen.md)
 - [Bytecode cache](./perf/bytecode-cache.md)
 
 # Migrations
+
+- [Portable kernel v1](./migrations/portable-kernel-v1.md)
 
 - [0.6.x → 0.7.0](./migrations/v0.7.md)
 - [Migrating to 0.10](./migrations/v0.10.md)
