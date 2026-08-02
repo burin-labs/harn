@@ -425,7 +425,8 @@ pipeline main(harness: Harness, task) {
     if e == "release-notes-failed" {
       return 1
     }
-    harness.stdio.eprintln("${e}")
+    const message = to_string(e)
+    harness.stdio.eprintln(message.starts_with("error: ") ? message : "error: " + message)
     return 1
   }
 }

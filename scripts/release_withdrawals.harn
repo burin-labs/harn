@@ -78,6 +78,11 @@ pub fn parse_release_withdrawals(text: string) -> list<ReleaseWithdrawal> {
         + " distribution_version names another withdrawn release: v"
         + withdrawal.distribution_version
     }
+    if seen.contains(withdrawal.replacement) {
+      throw "release withdrawal v" + withdrawal.version
+        + " replacement names another withdrawn release: v"
+        + withdrawal.replacement
+    }
   }
   return releases
 }

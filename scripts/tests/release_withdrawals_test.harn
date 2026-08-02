@@ -172,31 +172,36 @@ pipeline test_release_withdrawal_supports_minor_or_major_candidate(harness: Harn
 
 @test
 pipeline test_release_withdrawal_rejects_withdrawn_distribution(harness: Harness, task) {
-  assert_rejected(
-    { ->
-      parse_release_withdrawals(
-        json_stringify(
-          {
-            schema_version: 1,
-            releases: [
-              {
-                version: "0.10.51",
-                tag_commit: TAG_COMMIT,
-                distribution_version: "0.10.50",
-                replacement: "0.10.52",
-                reason: "invalid_tagged_candidate",
-              },
-              {
-                version: "0.10.52",
-                tag_commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                distribution_version: "0.10.51",
-                replacement: "0.10.53",
-                reason: "invalid_tagged_candidate",
-              },
-            ],
-          },
-        ),
-      )
-    },
+  const result = try {
+    parse_release_withdrawals(
+      json_stringify(
+        {
+          schema_version: 1,
+          releases: [
+            {
+              version: "0.10.51",
+              tag_commit: TAG_COMMIT,
+              distribution_version: "0.10.50",
+              replacement: "0.10.52",
+              reason: "invalid_tagged_candidate",
+            },
+            {
+              version: "0.10.52",
+              tag_commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              distribution_version: "0.10.51",
+              replacement: "0.10.53",
+              reason: "invalid_tagged_candidate",
+            },
+          ],
+        },
+      ),
+    )
+    "accepted"
+  } catch (e) {
+    to_string(e)
+  }
+  assert_eq(
+    result,
+    "release withdrawal v0.10.51 replacement names another withdrawn release: v0.10.52",
   )
 }

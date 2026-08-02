@@ -84,6 +84,30 @@ write_registry "$tag_commit"
 git -C "$fixture_repo" add .github/release-withdrawals.json
 git -C "$fixture_repo" -c commit.gpgsign=false commit -q -m "Record v0.10.51 withdrawal"
 
+# Prove the standalone publish-tools layout resolves the new sibling module.
+release_tools="$tmp_root/release-tools"
+mkdir -p "$release_tools"
+cp "$repo_root/scripts/release_metadata.harn" "$release_tools/release_metadata.harn"
+cp "$repo_root/scripts/release_withdrawals.harn" "$release_tools/release_withdrawals.harn"
+(
+  cd "$fixture_repo"
+  "$harn_bin" run \
+    --read-only-root "$release_tools" \
+    "$release_tools/release_metadata.harn" \
+    -- current --root "$fixture_repo"
+) >"$tmp_root/standalone.out" 2>"$tmp_root/standalone.err"
+sandbox_notice="sandbox active; extra read-only root: $(cd "$release_tools" && pwd -P)"
+if [[ "$(<"$tmp_root/standalone.out")" != "0.10.51" ]]; then
+  echo "FAIL: standalone release-tools metadata command did not resolve" >&2
+  cat "$tmp_root/standalone.out" "$tmp_root/standalone.err" >&2
+  exit 1
+fi
+if [[ "$(<"$tmp_root/standalone.err")" != "$sandbox_notice" ]]; then
+  echo "FAIL: standalone release-tools metadata command emitted unexpected stderr" >&2
+  cat "$tmp_root/standalone.err" >&2
+  exit 1
+fi
+
 run_verifier() {
   local case_name="$1"
   (
@@ -139,6 +163,19 @@ $sandbox_notice"
 if [[ "$(<"$tmp_root/unrelated.err")" != "$expected_lineage" ]]; then
   echo "FAIL: withdrawal-lineage diagnostic drifted" >&2
   cat "$tmp_root/unrelated.err" >&2
+  exit 1
+fi
+
+mv "$fixture_repo/.github/release-withdrawals.json" "$tmp_root/release-withdrawals.json"
+if run_verifier missing-registry; then
+  echo "FAIL: missing withdrawal registry passed verification" >&2
+  exit 1
+fi
+expected_missing_registry="error: release withdrawal registry is missing: .github/release-withdrawals.json
+$sandbox_notice"
+if [[ "$(<"$tmp_root/missing-registry.err")" != "$expected_missing_registry" ]]; then
+  echo "FAIL: missing-registry diagnostic drifted" >&2
+  cat "$tmp_root/missing-registry.err" >&2
   exit 1
 fi
 
