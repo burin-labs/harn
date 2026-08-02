@@ -1122,14 +1122,10 @@ fn collect_repo_files(root: &Path, dir: &Path, limit: usize, out: &mut Vec<PathB
 fn should_skip_scan_dir(name: &str) -> bool {
     matches!(
         name,
-        ".git"
-            | "target"
-            | "node_modules"
-            | "docs/dist"
-            | ".harn"
-            | ".harn-runs"
-            | ".claude"
-            | ".burin"
+        ".git" | "target" | "node_modules" | ".claude" | ".burin"
+    ) || crate::path_policy::is_harn_internal_entry(
+        name,
+        crate::path_policy::PathEntryKind::Directory,
     )
 }
 

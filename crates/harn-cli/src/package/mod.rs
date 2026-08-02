@@ -48,6 +48,7 @@ mod validation;
 #[allow(unused_imports)]
 pub use errors::{PackageError, PackageResult};
 
+pub(crate) use crate::path_policy::PathEntryKind;
 pub use extensions::*;
 pub(crate) use generations::*;
 pub(crate) use git_cwd::Cwd;
@@ -67,7 +68,7 @@ pub use maturity::{
 };
 pub(crate) use mutation::*;
 pub use package_ops::*;
-pub(crate) use path_policy::is_harn_internal_directory_name;
+pub(crate) use path_policy::should_exclude_package_entry;
 pub use persona_activation::*;
 pub(crate) use persona_runtime::*;
 pub(crate) use registry::*;

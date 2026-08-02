@@ -272,8 +272,10 @@ fn should_skip_dir(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
         .is_some_and(|name| {
-            crate::package::is_harn_internal_directory_name(name)
-                || matches!(name, ".git" | "node_modules" | "target")
+            crate::path_policy::is_harn_internal_entry(
+                name,
+                crate::path_policy::PathEntryKind::Directory,
+            ) || matches!(name, ".git" | "node_modules" | "target")
         })
 }
 

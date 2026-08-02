@@ -74,9 +74,9 @@ fn package_dir_from_anchor_finds_manifest_for_nested_file() {
 }
 
 #[test]
-fn package_gates_exclude_harn_internal_directories() {
+fn package_gates_share_exact_input_exclusions() {
     let dir = tempfile::tempdir().unwrap();
-    for relative in [".harn/workflow-policy", ".harn-runs/session"] {
+    for relative in [".harn/workflow-policy", "src/.harn-runs/session"] {
         let internal = dir.path().join(relative);
         fs::create_dir_all(&internal).unwrap();
         fs::write(internal.join("invalid.harn"), "this is not Harn").unwrap();
@@ -87,6 +87,15 @@ fn package_gates_exclude_harn_internal_directories() {
         .unwrap();
         fs::write(internal.join("payload.txt"), "internal").unwrap();
     }
+    let generated_docs = dir.path().join("docs/dist");
+    fs::create_dir_all(&generated_docs).unwrap();
+    fs::write(generated_docs.join("invalid.harn"), "this is not Harn").unwrap();
+    fs::write(
+        generated_docs.join("guide.md"),
+        "```harn\nthis is not Harn\n```\n",
+    )
+    .unwrap();
+    fs::write(generated_docs.join("payload.txt"), "generated").unwrap();
     fs::write(dir.path().join("lib.harn"), "pub fn value() { return 1 }\n").unwrap();
     fs::write(dir.path().join("README.md"), "# Package\n").unwrap();
     fs::write(dir.path().join("payload.txt"), "public").unwrap();
@@ -94,7 +103,7 @@ fn package_gates_exclude_harn_internal_directories() {
     assert_eq!(package_harn_file_args(dir.path()), ["lib.harn"]);
 
     let mut markdown = Vec::new();
-    collect_markdown_files(dir.path(), &mut markdown);
+    collect_markdown_files(dir.path(), dir.path(), &mut markdown);
     let markdown = markdown
         .into_iter()
         .map(|path| path.strip_prefix(dir.path()).unwrap().to_path_buf())

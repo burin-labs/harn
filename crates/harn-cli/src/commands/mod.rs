@@ -147,7 +147,10 @@ pub(crate) fn should_skip_recursive_source_dir(dir: &Path) -> bool {
         return false;
     };
     GENERATED_SOURCE_WALK_DIRS.contains(&name)
-        || crate::package::is_harn_internal_directory_name(name)
+        || crate::path_policy::is_harn_internal_entry(
+            name,
+            crate::path_policy::PathEntryKind::Directory,
+        )
 }
 
 pub(crate) fn should_skip_recursive_source_file(file: &Path) -> bool {
