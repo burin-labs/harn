@@ -1,4 +1,5 @@
 import {
+  connector_http_header,
   connector_http_json,
   connector_http_rate_limit,
   connector_http_request,
@@ -72,6 +73,42 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(len(paged.items))
   harness.stdio.println(paged.items[1].id)
   harness.stdio.println(paged.complete)
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
+    "GET",
+    "https://api.example.com/shared/request-compat",
+    {status: 204, body: "", headers: {"X-Compat": "shared"}},
+  )
+  const shared_request = connector_http_request(
+    harness.clock,
+    harness.net,
+    "GET",
+    "https://api.example.com/shared/request-compat",
+  )
+  assert_eq(shared_request.ok, true, "shared re-export request succeeds")
+  assert_eq(
+    connector_http_header(shared_request, "x-compat"),
+    "shared",
+    "shared re-export header lookup is case insensitive",
+  )
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
+    "GET",
+    "https://api.example.com/shared/json-compat",
+    {status: 200, body: "{\"ok\":true}", headers: {"Retry-After": "2"}},
+  )
+  const shared_json = connector_http_json(
+    harness.clock,
+    harness.net,
+    "GET",
+    "https://api.example.com/shared/json-compat",
+  )
+  assert_eq(shared_json.json.ok, true, "shared re-export parses JSON")
+  assert_eq(
+    connector_http_rate_limit(harness.clock, shared_json).retry_after_ms,
+    2000,
+    "shared re-export exposes rate-limit metadata",
+  )
   const github_forge = unwrap(
     git_forge_pull_request_event(
       "github",
@@ -148,6 +185,7 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(gitea_forge.lifecycle)
   harness.stdio.println(gitea_forge.writeback.provider)
   assert_eq(gitea_forge.pull_request.author, "sam", "forge author string")
+  harness.testing.http_mock_clear()
   harness.testing.http_mock(
     "POST",
     "https://auth.example/token",

@@ -204,6 +204,10 @@ Connector package helpers for common provider plumbing:
 | `rate_limit_token_bucket(state?, config?, now_ms?)` | Pure token-bucket transition for package-local quota decisions |
 | `paginate_cursor(initial_url, fetch_fn, cursor_path, options?)` | Collect cursor-paginated pages from a package-supplied fetch closure |
 
+The four `connector_http_*` helpers remain compatibility re-exports from this
+module. New code should import their single implementation from
+`std/connectors/http`.
+
 ### std/connectors/http
 
 HTTP transport policy for connector packages:
@@ -213,7 +217,7 @@ HTTP transport policy for connector packages:
 | `connector_http_request(clock, net, method, url, options?)` | Capability-attenuated, non-throwing request wrapper with normalized retry, idempotency, error categories, and bounded failure envelopes |
 | `connector_http_json(clock, net, method, url, options?)` | `connector_http_request` plus response JSON parsing; invalid JSON returns `error.category == "invalid_json"` |
 | `connector_http_header(headers_or_response, name)` | Case-insensitive header lookup for response envelopes or raw header dicts |
-| `connector_http_rate_limit(headers_or_response)` | Extract `Retry-After`, `RateLimit-*`, and `X-RateLimit-*` metadata, including `retry_after_ms` when parseable |
+| `connector_http_rate_limit(clock, headers_or_response)` | Extract `Retry-After`, `RateLimit-*`, and `X-RateLimit-*` metadata, including `retry_after_ms` when parseable |
 
 ### std/oauth/providers
 
