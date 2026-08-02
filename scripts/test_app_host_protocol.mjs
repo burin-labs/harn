@@ -120,3 +120,128 @@ test("non-tool requests receive only their JSON-RPC response", async () => {
 
   assert.deepEqual(sent, [response]);
 });
+
+test("View startup requires the stable handshake and preserves retry", () => {
+  const connection = protocol.createViewConnection();
+
+  assert.deepEqual(
+    plain(connection.initialize({ protocolVersion: "2026-01-26" })),
+    {
+      ok: false,
+      code: -32602,
+      message: "ui/initialize requires appInfo.name and appInfo.version",
+    },
+  );
+  assert.deepEqual(
+    plain(
+      connection.initialize({
+        protocolVersion: "2026-01-26",
+        appInfo: { name: "test-view", version: "1" },
+      }),
+    ),
+    {
+      ok: false,
+      code: -32602,
+      message: "ui/initialize requires appCapabilities",
+    },
+  );
+  assert.equal(connection.isReady(), false);
+  assert.deepEqual(
+    plain(
+      connection.initialize({
+        protocolVersion: "2026-01-26",
+        appInfo: { name: "test-view", version: "1" },
+        appCapabilities: { availableDisplayModes: ["inline"] },
+      }),
+    ),
+    {
+      ok: false,
+      code: -32602,
+      message: "Standalone apps require fullscreen display support",
+    },
+  );
+  assert.deepEqual(
+    plain(
+      connection.initialize({
+        protocolVersion: "2026-01-26",
+        appInfo: { name: "test-view", version: "1" },
+        appCapabilities: { availableDisplayModes: ["fullscreen"] },
+      }),
+    ),
+    { ok: true, protocolVersion: protocol.appProtocolVersion },
+  );
+  assert.equal(connection.isReady(), false);
+  assert.equal(connection.markReady(), true);
+  assert.equal(connection.isReady(), true);
+  assert.equal(connection.markReady(), false);
+  assert.equal(
+    plain(
+      connection.initialize({
+        protocolVersion: "2026-01-26",
+        appInfo: { name: "test-view", version: "1" },
+        appCapabilities: {},
+      }),
+    ).code,
+    -32600,
+  );
+});
+
+test("only reserved sandbox methods are classified as sandbox messages", () => {
+  assert.equal(
+    protocol.isSandboxMessage({
+      method: "ui/notifications/sandbox-proxy-ready",
+    }),
+    true,
+  );
+  assert.equal(
+    protocol.isSandboxMessage({ method: "ui/notifications/initialized" }),
+    false,
+  );
+  assert.equal(protocol.isSandboxMessage(null), false);
+});
+
+test("only server requests supported by the standalone host are forwarded", () => {
+  for (const method of ["ping", "tools/call", "resources/read"]) {
+    assert.equal(protocol.isServerRequestMethod(method), true, method);
+  }
+  assert.equal(protocol.isServerRequestMethod("tools/list"), false);
+  assert.equal(protocol.isServerRequestMethod("resources/list"), false);
+  assert.equal(protocol.isServerRequestMethod("sampling/createMessage"), false);
+  assert.equal(
+    protocol.isServerRequestMethod("notifications/cancelled"),
+    false,
+  );
+  assert.equal(protocol.isServerRequestMethod(null), false);
+});
+
+test("request IDs use the MCP string-or-number shape", () => {
+  assert.equal(protocol.hasRequestId({ id: "call-1" }), true);
+  assert.equal(protocol.hasRequestId({ id: 1 }), true);
+  assert.equal(protocol.hasRequestId({ id: null }), false);
+  assert.equal(protocol.hasRequestId({ id: {} }), false);
+  assert.equal(protocol.hasRequestId({}), false);
+});
+
+test("View notifications are identified by method and omit IDs", () => {
+  for (const method of [
+    "ui/notifications/sandbox-proxy-ready",
+    "ui/notifications/initialized",
+    "ui/notifications/size-changed",
+    "notifications/message",
+  ]) {
+    assert.equal(protocol.isViewNotificationMethod(method), true, method);
+  }
+  assert.equal(protocol.isViewNotificationMethod("tools/call"), false);
+  assert.equal(
+    protocol.isNotification({ method: "notifications/message" }),
+    true,
+  );
+  assert.equal(
+    protocol.isNotification({ id: 1, method: "notifications/message" }),
+    false,
+  );
+  assert.equal(
+    protocol.isNotification({ id: null, method: "notifications/message" }),
+    false,
+  );
+});

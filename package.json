@@ -4,8 +4,8 @@
   "version": "0.0.0",
   "description": "Local development tooling for the Harn repository",
   "scripts": {
-    "app-host:check": "prettier --check \"crates/harn-cli/src/commands/app_host/*.{html,css,js,json,d.ts}\" scripts/test_app_host_protocol.mjs eslint.config.mjs && eslint \"crates/harn-cli/src/commands/app_host/*.js\" scripts/test_app_host_protocol.mjs && tsc -p crates/harn-cli/src/commands/app_host/jsconfig.json && node --check crates/harn-cli/src/commands/app_host/host.js && node --check crates/harn-cli/src/commands/app_host/protocol.js && node --check crates/harn-cli/src/commands/app_host/sandbox.js && node --test scripts/test_app_host_protocol.mjs",
-    "app-host:format": "prettier --write \"crates/harn-cli/src/commands/app_host/*.{html,css,js,json,d.ts}\" scripts/test_app_host_protocol.mjs eslint.config.mjs",
+    "app-host:check": "prettier --check \"crates/harn-cli/src/commands/app_host/*.{html,css,js,json,d.ts}\" \"scripts/*app_host*.mjs\" eslint.config.mjs && eslint \"crates/harn-cli/src/commands/app_host/*.js\" \"scripts/*app_host*.mjs\" && tsc -p crates/harn-cli/src/commands/app_host/jsconfig.json && node --test scripts/test_app_host_*.mjs",
+    "app-host:format": "prettier --write \"crates/harn-cli/src/commands/app_host/*.{html,css,js,json,d.ts}\" \"scripts/*app_host*.mjs\" eslint.config.mjs",
     "eval:librarian-nl": "cargo run --quiet --bin harn -- run evals/librarian_nl/recall_eval.harn",
     "lint:md": "markdownlint-cli2 \"**/*.md\"",
     "portal": "cargo run --bin harn -- portal",

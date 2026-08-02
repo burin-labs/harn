@@ -15,7 +15,8 @@ pub(crate) fn host_document(title: &str, sandbox_origin: &str) -> String {
 }
 
 pub(crate) fn sandbox_document() -> String {
-    render_document(SANDBOX_DOCUMENT, SANDBOX_STYLE, SANDBOX_SCRIPT)
+    let script = format!("{HOST_PROTOCOL_SCRIPT}\n{SANDBOX_SCRIPT}");
+    render_document(SANDBOX_DOCUMENT, SANDBOX_STYLE, &script)
 }
 
 fn render_document(template: &str, style: &str, script: &str) -> String {
