@@ -15,6 +15,7 @@ trap 'rm -rf "$tmp_root"' EXIT
 
 release_root="$tmp_root/release-root"
 mkdir -p \
+  "$release_root/.github" \
   "$release_root/crates/example" \
   "$release_root/crates/excluded" \
   "$release_root/crates/harn-hostlib/data/grammar-fitness" \
@@ -30,6 +31,9 @@ resolver = "2"
 EOF
 cat > "$release_root/Cargo.lock" <<'EOF'
 # fake lock
+EOF
+cat > "$release_root/.github/release-withdrawals.json" <<'EOF'
+{"schema_version":1,"releases":[]}
 EOF
 cat > "$release_root/crates/example/Cargo.toml" <<'EOF'
 [package]
@@ -247,7 +251,10 @@ fi
 # This falsifier fails on the old prepare implementation: Cargo.toml advances,
 # but the local package entry in Cargo.lock remains at the previous version.
 real_release_root="$tmp_root/real-release-root"
-mkdir -p "$real_release_root/crates/example/src" "$real_release_root/docs/src"
+mkdir -p \
+  "$real_release_root/.github" \
+  "$real_release_root/crates/example/src" \
+  "$real_release_root/docs/src"
 cat > "$real_release_root/Cargo.toml" <<'EOF'
 [workspace]
 members = ["crates/example"]
@@ -264,6 +271,9 @@ edition = "2021"
 EOF
 cat > "$real_release_root/crates/example/src/lib.rs" <<'EOF'
 pub fn example() {}
+EOF
+cat > "$real_release_root/.github/release-withdrawals.json" <<'EOF'
+{"schema_version":1,"releases":[]}
 EOF
 cat > "$real_release_root/docs/src/embedding-rust.md" <<'EOF'
 tag = "v1.2.3"
