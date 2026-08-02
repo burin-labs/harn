@@ -1506,25 +1506,21 @@ fn main(harness: Harness) {
   for path in harness.fs.glob(WORKFLOW_GLOB).sorted() {
     workflows[workflow_name(path)] = read_yaml(harness.fs, path, nil)
   }
-  const errors = ci_cache_policy_errors(policy, action, node_action, workflows)
-    + release_warm_cache_path_policy_errors(
-    release_warm_cache_path_policy,
-    workflows[RELEASE_BINARY_WORKFLOW],
-  )
-    + release_warm_cache_concurrency_errors(workflows[RELEASE_BINARY_WORKFLOW])
-    + release_warm_cache_prune_errors(
-    workflows[RELEASE_BINARY_WORKFLOW],
-  )
-    + setup_harn_cache_action_errors(setup_harn_action)
-    + sccache_install_action_errors(
-    sccache_install_action,
-  )
-    + ci_sccache_policy_errors(sccache_action, workflows["ci.yml"])
-    + windows_shared_cache_errors(
-    workflows["ci.yml"],
-    workflows["windows-nightly.yml"],
-  )
-    + macos_shared_cache_errors(workflows["ci.yml"], workflows["macos-nightly.yml"])
+  const error_groups: list<list<string>> = [
+    ci_cache_policy_errors(policy, action, node_action, workflows),
+    release_warm_cache_path_policy_errors(
+      release_warm_cache_path_policy,
+      workflows[RELEASE_BINARY_WORKFLOW],
+    ),
+    release_warm_cache_concurrency_errors(workflows[RELEASE_BINARY_WORKFLOW]),
+    release_warm_cache_prune_errors(workflows[RELEASE_BINARY_WORKFLOW]),
+    setup_harn_cache_action_errors(setup_harn_action),
+    sccache_install_action_errors(sccache_install_action),
+    ci_sccache_policy_errors(sccache_action, workflows["ci.yml"]),
+    windows_shared_cache_errors(workflows["ci.yml"], workflows["windows-nightly.yml"]),
+    macos_shared_cache_errors(workflows["ci.yml"], workflows["macos-nightly.yml"]),
+  ]
+  const errors = error_groups.flat_map({ group -> group }).to_list()
   if len(errors) > 0 {
     harness.stdio.eprintln("CI cache policy violations:")
     for error in errors {
