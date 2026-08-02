@@ -68,7 +68,7 @@ jq -e '
     (keys == ["release_codegen_units", "runners", "target", "use_sccache"]) and
     (.runners | keys == ["fast", "primary", "recovery", "standard", "warm"]) and
     (.target | type == "string" and length > 0) and
-    (.release_codegen_units | type == "number") and
+    (.release_codegen_units | type == "number" and floor == . and . >= 1 and . <= 256) and
     (.use_sccache == "true" or .use_sccache == "false"))
 ' "$POLICY" >/dev/null
 
