@@ -416,14 +416,14 @@ pub(super) fn policy_for_mode(
         if !sandbox.is_configured() {
             return None;
         }
-        // The embedder opted into confinement (sandbox.json /
-        // BURIN_SANDBOX_CONFIG). Honor it as a `Worktree`-level OS sandbox
-        // seeded from the config's roots/presets, while keeping ActAuto's
-        // approval semantics (no approval gate -> `side_effect_level: network`,
-        // no recursion clamp). This is the seam that stops the "config loaded
-        // then ignored" theater for the default coding mode.
+        // Preserve every configured filesystem axis in code mode. Read-only
+        // roots by themselves are a Harn file-read grant, not an instruction
+        // to confine child processes. Only explicit process config selects the
+        // Worktree OS sandbox and its network backstop.
         let mut policy = harn_vm::policy_for_autonomy_tier(AutonomyTier::ActAuto);
-        policy.sandbox_profile = harn_vm::orchestration::SandboxProfile::Worktree;
+        if sandbox.has_process_confinement() {
+            policy.sandbox_profile = harn_vm::orchestration::SandboxProfile::Worktree;
+        }
         apply_sandbox_config(&mut policy, sandbox);
         return Some(policy);
     }
@@ -448,9 +448,9 @@ fn apply_sandbox_config(policy: &mut CapabilityPolicy, sandbox: &AcpSandboxConfi
 }
 
 /// RAII guard that pushes a CapabilityPolicy on construction and pops it on
-/// drop, and (when the embedder opted into sandboxing) installs the SSRF
-/// private-address egress guard for the turn. The no-config `code` mode has no
-/// extra policy to push and no SSRF guard, leaving egress exactly as before.
+/// drop. Explicit process confinement also installs the SSRF private-address
+/// egress guard for the turn. Read-only roots retain their file policy without
+/// changing process or network behavior.
 ///
 /// The serve adapter runs the whole prompt turn — including the agent's model
 /// HTTP calls — on a single current-thread `LocalSet` runtime (see
@@ -467,7 +467,7 @@ pub(super) struct ModePolicyGuard {
 
 impl ModePolicyGuard {
     pub(super) fn enter(mode_id: &str, sandbox: &AcpSandboxConfig) -> Self {
-        // Install the SSRF guard only when the embedder opted into sandboxing.
+        // Install the SSRF guard only with explicit process confinement.
         // It blocks PRIVATE/loopback/link-local/metadata egress while leaving
         // public traffic (model APIs, web_search/web_fetch to public hosts)
         // ALLOWED. Local model servers on loopback are reached via the
@@ -476,7 +476,7 @@ impl ModePolicyGuard {
         // stays blocked regardless. With no sandbox config we install nothing,
         // so egress is byte-identical to today's default.
         let ssrf_guard = sandbox
-            .is_configured()
+            .has_process_confinement()
             .then(harn_vm::egress::require_ssrf_guard_for_host);
         match policy_for_mode(mode_id, sandbox) {
             Some(policy) => {
@@ -701,20 +701,19 @@ mod tests {
     }
 
     #[test]
-    fn policy_for_code_with_only_read_only_roots_does_not_enable_worktree() {
-        // Burin always registers bundled pipeline roots (and other dependency
-        // roots) as `read_only_roots` on every session, regardless of whether
-        // the user asked for process-level OS sandboxing. Treating that as an
-        // opt-in signal accidentally armed Worktree confinement for every TUI
-        // session and broke child-process network access (e.g. `git fetch`
-        // DNS resolution). `read_only_roots` alone must NOT enable Worktree —
-        // this is the historical ambient-behavior no-config path.
+    fn policy_for_code_with_only_read_only_roots_preserves_file_policy_without_process_confinement()
+    {
         let roots = vec!["/work/project".to_string()];
-        let sandbox = AcpSandboxConfig::with_read_only_roots(roots);
-        assert!(!sandbox.is_configured());
-        assert!(
-            policy_for_mode("code", &sandbox).is_none(),
-            "read_only_roots alone must not install a confinement policy"
+        let sandbox = AcpSandboxConfig::with_read_only_roots(roots.clone());
+        assert!(sandbox.is_configured());
+        assert!(!sandbox.has_process_confinement());
+        let policy = policy_for_mode("code", &sandbox)
+            .expect("read-only roots must survive the code-mode policy boundary");
+        assert_eq!(policy.read_only_roots, roots);
+        assert_eq!(
+            policy.sandbox_profile,
+            harn_vm::orchestration::SandboxProfile::Unrestricted,
+            "read-only roots alone must not arm process confinement"
         );
     }
 
@@ -863,8 +862,7 @@ mod tests {
         // A process-sandbox-configured embedder gets Worktree confinement
         // with its declared read-only roots still applied, even in
         // full-access ACP code mode. `read_only_roots` alone (no process
-        // config) is covered by
-        // `policy_for_code_with_only_read_only_roots_does_not_enable_worktree`.
+        // config) is covered by the read-only-roots-only regression above.
         let mut sandbox =
             AcpSandboxConfig::with_process(harn_vm::orchestration::ProcessSandboxPolicy {
                 presets: Some(vec![
@@ -937,6 +935,28 @@ mod tests {
         assert!(
             guard._ssrf_guard.is_none(),
             "no-config code mode must not install an SSRF guard scope"
+        );
+    }
+
+    #[test]
+    fn read_only_roots_code_mode_installs_policy_without_ssrf_guard() {
+        let sandbox =
+            AcpSandboxConfig::with_read_only_roots(vec!["/opt/shared/prompts".to_string()]);
+        let guard = ModePolicyGuard::enter("code", &sandbox);
+        assert!(guard.pushed, "read-only roots must install a turn policy");
+        assert!(
+            guard._ssrf_guard.is_none(),
+            "read-only roots must not change network behavior"
+        );
+        let effective = harn_vm::orchestration::current_execution_policy()
+            .expect("turn policy must be visible");
+        assert_eq!(
+            effective.read_only_roots,
+            vec!["/opt/shared/prompts".to_string()]
+        );
+        assert_eq!(
+            effective.sandbox_profile,
+            harn_vm::orchestration::SandboxProfile::Unrestricted
         );
     }
 
