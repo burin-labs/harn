@@ -507,20 +507,21 @@ fn seed_ambient_requirements(
         );
     }
 
-    let file_indices = files
-        .iter()
-        .enumerate()
-        .map(|(idx, file)| (file.path.clone(), idx))
-        .collect::<BTreeMap<_, _>>();
+    let mut file_indices = BTreeMap::new();
+    for (idx, file) in files.iter().enumerate() {
+        file_indices.entry(file.path.clone()).or_insert(idx);
+    }
+    let mut callable_indices_by_file = vec![Vec::new(); files.len()];
+    for (idx, callable) in callables.iter().enumerate() {
+        callable_indices_by_file[callable.file_idx].push(idx);
+    }
     for (path, diagnostics) in diagnostics_by_file {
         let Some(file_idx) = file_indices.get(path).copied() else {
             continue;
         };
         for (code, start, end) in &diagnostics.ambient_spans {
-            for callable in callables
-                .iter_mut()
-                .filter(|callable| callable.file_idx == file_idx)
-            {
+            for callable_idx in &callable_indices_by_file[file_idx] {
+                let callable = &mut callables[*callable_idx];
                 let Some(call) = callable.info.ambient_capability_calls.iter().find(|call| {
                     call.span.start == *start && call.span.end == *end && call.code == *code
                 }) else {
@@ -545,22 +546,25 @@ fn seed_ambient_requirements(
             let Some(capability) = diagnostic_capability(diagnostic) else {
                 continue;
             };
-            if let Some(callable) = callables
-                .iter_mut()
-                .filter(|callable| {
-                    callable.file_idx == file_idx
-                        && callable.info.span.start <= span.start
-                        && callable.info.span.end >= span.end
+            let callable_idx = callable_indices_by_file[file_idx]
+                .iter()
+                .copied()
+                .filter(|callable_idx| {
+                    let callable = &callables[*callable_idx];
+                    callable.info.span.start <= span.start && callable.info.span.end >= span.end
                 })
-                .min_by_key(|callable| {
+                .min_by_key(|callable_idx| {
+                    let callable = &callables[*callable_idx];
                     callable
                         .info
                         .span
                         .end
                         .saturating_sub(callable.info.span.start)
-                })
-            {
-                callable.direct_requirements.insert(capability);
+                });
+            if let Some(callable_idx) = callable_idx {
+                callables[callable_idx]
+                    .direct_requirements
+                    .insert(capability);
             }
         }
     }
@@ -1086,6 +1090,12 @@ mod tests {
             ),
             diagnostic(
                 "b.harn",
+                Code::LintAmbientClockBuiltin,
+                "bindings/thread-harness-clock",
+                None,
+            ),
+            diagnostic(
+                "c.harn",
                 Code::FormatterWouldReformat,
                 "format/reformat",
                 None,
@@ -1098,10 +1108,11 @@ mod tests {
             path.to_path_buf()
         });
 
-        assert_eq!(normalizations.get(), 1);
+        assert_eq!(normalizations.get(), 2);
         let indexed = index.get(Path::new("a.harn")).unwrap();
         assert_eq!(indexed.ambient_spans.len(), 1);
         assert_eq!(indexed.missing_capability_arguments.len(), 1);
-        assert!(!index.contains_key(Path::new("b.harn")));
+        assert_eq!(index[Path::new("b.harn")].ambient_spans.len(), 1);
+        assert!(!index.contains_key(Path::new("c.harn")));
     }
 }
