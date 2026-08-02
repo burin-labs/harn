@@ -1,6 +1,5 @@
 use super::*;
 use super::{resume::*, resume_conditions::*};
-
 use crate::orchestration::MutationSessionRecord;
 use std::path::Path;
 use std::sync::OnceLock;
@@ -34,6 +33,7 @@ fn seed_test_worker(name: &str) -> (String, std::path::PathBuf) {
         created_at: uuid::Uuid::now_v7().to_string(),
         started_at: uuid::Uuid::now_v7().to_string(),
         finished_at: None,
+        joined_at_ms: None,
         awaiting_started_at: None,
         awaiting_since: None,
         mode: "sub_agent".to_string(),

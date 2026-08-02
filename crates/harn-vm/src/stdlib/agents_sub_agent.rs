@@ -9,7 +9,8 @@ use crate::value::VmDictExt;
 use crate::value::{VmError, VmValue};
 use crate::vm::AsyncBuiltinCtx;
 use lifecycle::{
-    emit_subagent_stop_once, stop_details_for_error, stop_details_for_result, SubagentStopDetails,
+    finish_sub_agent, normalize_run_identity, stop_details_for_error, stop_details_for_result,
+    SubagentStopDetails,
 };
 
 const SUB_AGENT_RUN_FN: &str = "sub_agent_run";
@@ -128,8 +129,8 @@ pub(super) fn parse_sub_agent_request(args: &[VmValue]) -> Result<ParsedSubAgent
         prepare_sub_agent_options(&mut parser, &session_id, policies.requested_policy.as_ref())?;
     let name = non_empty_raw_string(parser.optional_string_raw("name")?)
         .unwrap_or_else(|| "sub-agent".to_string());
-    let parent_session_id = crate::llm::current_agent_session_id();
-    lifecycle::annotate_subagent_session(&mut options, &name, parent_session_id.as_deref());
+    let (run_id, parent_session_id, parent_run_id) =
+        lifecycle::initialize_run_identity(&mut options, &name);
     let reminder_propagation = match parser.optional_list("reminder_propagation")? {
         Some(reminders) => reminders
             .iter()
@@ -154,7 +155,9 @@ pub(super) fn parse_sub_agent_request(args: &[VmValue]) -> Result<ParsedSubAgent
             options,
             returns_schema,
             session_id,
+            run_id,
             parent_session_id,
+            parent_run_id,
             reminder_propagation,
             workspace_anchor,
             stop_emitted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -813,23 +816,11 @@ fn parse_structured_sub_agent_data(
     })
 }
 
-fn finish_sub_agent(
-    spec: &SubAgentRunSpec,
-    payload: serde_json::Value,
-    transcript: VmValue,
-    details: SubagentStopDetails,
-) -> SubAgentExecutionResult {
-    emit_subagent_stop_once(spec, details);
-    SubAgentExecutionResult {
-        payload,
-        transcript,
-    }
-}
-
 pub(super) async fn execute_sub_agent(
     ctx: &AsyncBuiltinCtx,
-    spec: SubAgentRunSpec,
+    mut spec: SubAgentRunSpec,
 ) -> Result<SubAgentExecutionResult, VmError> {
+    normalize_run_identity(&mut spec);
     if let Some(parent_session_id) = spec.parent_session_id.as_deref() {
         crate::agent_sessions::open_child_session_with_actor(
             parent_session_id,
@@ -851,6 +842,7 @@ pub(super) async fn execute_sub_agent(
 
     let mut loop_options = spec.options.clone();
     loop_options.put_str("session_id", spec.session_id.clone());
+    loop_options.put_str("run_id", spec.run_id.clone());
     let harness = ctx.child_vm().root_harness_value().ok_or_else(|| {
         VmError::Runtime("sub_agent_run: execution has no root Harness authority".to_string())
     })?;
@@ -931,6 +923,10 @@ pub(super) async fn execute_sub_agent(
         return Ok(SubAgentExecutionResult {
             payload: result,
             transcript,
+            identity: crate::agent_events::AgentRunRef {
+                session_id: spec.session_id.clone(),
+                run_id: spec.run_id.clone(),
+            },
         });
     }
     let terminal_details = stop_details_for_result(&result);
@@ -1607,7 +1603,9 @@ mod tests {
             options,
             returns_schema: None,
             session_id: "child-budget".to_string(),
+            run_id: "agent_run_child_budget".to_string(),
             parent_session_id: Some(parent.clone()),
+            parent_run_id: Some("agent_run_parent_budget".to_string()),
             reminder_propagation: Vec::new(),
             workspace_anchor: None,
             stop_emitted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),

@@ -251,6 +251,16 @@ async fn execute_worker_config(
                 transcript,
                 artifacts,
                 execution,
+                child_run_id: dict
+                    .get("run")
+                    .and_then(|run| run.as_dict())
+                    .and_then(|run| run.get("id"))
+                    .map(VmValue::display)
+                    .filter(|value| !value.is_empty()),
+                child_run_path: dict
+                    .get("path")
+                    .map(VmValue::display)
+                    .filter(|value| !value.is_empty()),
             })
         }
         WorkerConfig::Stage {
@@ -283,6 +293,8 @@ async fn execute_worker_config(
                 transcript: next_transcript,
                 artifacts: produced,
                 execution,
+                child_run_id: None,
+                child_run_path: None,
             })
         }
         WorkerConfig::SubAgent { spec } => {
@@ -292,6 +304,8 @@ async fn execute_worker_config(
                 transcript: Some(result.transcript),
                 artifacts: Vec::new(),
                 execution,
+                child_run_id: Some(result.identity.run_id),
+                child_run_path: None,
             })
         }
     }
@@ -427,17 +441,8 @@ pub(in super::super) fn spawn_worker_task(
                             worker.transcript = executed.transcript.clone();
                             worker.artifacts = executed.artifacts.clone();
                             worker.execution = executed.execution.clone();
-                            worker.child_run_id = executed
-                                .payload
-                                .get("run")
-                                .and_then(|run| run.get("id"))
-                                .and_then(|value| value.as_str())
-                                .map(|value| value.to_string());
-                            worker.child_run_path = executed
-                                .payload
-                                .get("path")
-                                .and_then(|value| value.as_str())
-                                .map(|value| value.to_string());
+                            worker.child_run_id = executed.child_run_id.clone();
+                            worker.child_run_path = executed.child_run_path.clone();
                             if let Some(run_id) = &worker.child_run_id {
                                 worker.audit.run_id = Some(run_id.clone());
                             }
@@ -611,6 +616,7 @@ pub(in super::super) async fn execute_delegated_stage(
         created_at: uuid::Uuid::now_v7().to_string(),
         started_at: uuid::Uuid::now_v7().to_string(),
         finished_at: None,
+        joined_at_ms: None,
         awaiting_started_at: None,
         awaiting_since: None,
         mode: "delegated_stage".to_string(),

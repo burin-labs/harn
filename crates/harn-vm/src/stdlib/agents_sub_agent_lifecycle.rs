@@ -1,17 +1,34 @@
-use super::SubAgentRunSpec;
+use super::{SubAgentExecutionResult, SubAgentRunSpec};
 use crate::orchestration::{annotate_nested_execution_options, NestedExecutionKind};
-use crate::value::{DictMap, VmDictExt, VmError};
+use crate::value::{DictMap, VmDictExt, VmError, VmValue};
 
-pub(super) fn annotate_subagent_session(
-    options: &mut DictMap,
-    name: &str,
-    parent_session_id: Option<&str>,
-) {
+fn annotate_subagent_session(options: &mut DictMap, name: &str, parent_session_id: Option<&str>) {
     annotate_nested_execution_options(options, NestedExecutionKind::SubAgentRun, name);
     if let Some(parent_session_id) = parent_session_id {
         options.put_str("parent_session_id", parent_session_id);
     }
     options.put_str("session_type", "subagent");
+}
+
+pub(super) fn initialize_run_identity(
+    options: &mut DictMap,
+    name: &str,
+) -> (String, Option<String>, Option<String>) {
+    let run_id = format!("agent_run_{}", uuid::Uuid::now_v7());
+    let active_parent = crate::runtime_context::current_agent_run_ref();
+    let parent_session_id = active_parent
+        .as_ref()
+        .map(|parent| parent.session_id.clone())
+        .or_else(crate::llm::current_agent_session_id);
+    let parent_run_id = active_parent.map(|parent| parent.run_id).or_else(|| {
+        crate::orchestration::current_mutation_session().and_then(|session| session.run_id)
+    });
+    options.put_str("run_id", run_id.clone());
+    annotate_subagent_session(options, name, parent_session_id.as_deref());
+    if let Some(parent_run_id) = parent_run_id.as_deref() {
+        options.put_str("parent_run_id", parent_run_id);
+    }
+    (run_id, parent_session_id, parent_run_id)
 }
 
 #[derive(Clone)]
@@ -48,7 +65,9 @@ impl SubagentStopDetails {
 pub(super) fn emit_subagent_stop_once(spec: &SubAgentRunSpec, details: SubagentStopDetails) {
     use std::sync::atomic::Ordering;
 
-    let Some(parent_run_id) = spec.parent_session_id.as_ref() else {
+    let (Some(parent_session_id), Some(parent_run_id)) =
+        (spec.parent_session_id.as_ref(), spec.parent_run_id.as_ref())
+    else {
         return;
     };
     if spec
@@ -58,10 +77,14 @@ pub(super) fn emit_subagent_stop_once(spec: &SubAgentRunSpec, details: SubagentS
     {
         return;
     }
+    let Some(lineage) = delegated_run_lineage(spec) else {
+        return;
+    };
     crate::agent_events::emit_event(&crate::agent_events::AgentEvent::SubagentStop {
-        session_id: parent_run_id.clone(),
+        session_id: parent_session_id.clone(),
+        lineage: Some(lineage),
         parent_run_id: parent_run_id.clone(),
-        child_run_id: spec.session_id.clone(),
+        child_run_id: spec.run_id.clone(),
         terminal_status: details.status,
         terminal_class: details.terminal_class,
         reason: details.reason,
@@ -74,6 +97,64 @@ pub(super) fn emit_subagent_stop_once(spec: &SubAgentRunSpec, details: SubagentS
         timeout: details.timeout,
         completed_at_ms: crate::clock_mock::now_ms(),
     });
+}
+
+pub(super) fn delegated_run_lineage(
+    spec: &SubAgentRunSpec,
+) -> Option<crate::agent_events::DelegatedRunLineage> {
+    let parent_session_id = spec.parent_session_id.as_ref()?;
+    let parent_run_id = spec.parent_run_id.as_ref()?;
+    if spec.session_id.is_empty() || spec.run_id.is_empty() {
+        return None;
+    }
+    Some(crate::agent_events::DelegatedRunLineage {
+        parent: crate::agent_events::AgentRunRef {
+            session_id: parent_session_id.clone(),
+            run_id: parent_run_id.clone(),
+        },
+        child: crate::agent_events::AgentRunRef {
+            session_id: spec.session_id.clone(),
+            run_id: spec.run_id.clone(),
+        },
+    })
+}
+
+pub(super) fn normalize_run_identity(spec: &mut SubAgentRunSpec) {
+    if spec.run_id.trim().is_empty() {
+        spec.run_id = format!("agent_run_{}", uuid::Uuid::now_v7());
+    }
+    if spec.parent_run_id.is_none() {
+        spec.parent_run_id = crate::runtime_context::current_agent_run_ref()
+            .filter(|parent| spec.parent_session_id.as_deref() == Some(parent.session_id.as_str()))
+            .map(|parent| parent.run_id)
+            .or_else(|| {
+                crate::orchestration::current_mutation_session().and_then(|session| session.run_id)
+            });
+    }
+    spec.options.put_str("run_id", spec.run_id.clone());
+    if let Some(parent_run_id) = spec.parent_run_id.as_deref() {
+        spec.options.put_str("parent_run_id", parent_run_id);
+    }
+}
+
+pub(super) fn finish_sub_agent(
+    spec: &SubAgentRunSpec,
+    mut payload: serde_json::Value,
+    transcript: VmValue,
+    details: SubagentStopDetails,
+) -> SubAgentExecutionResult {
+    if let Some(object) = payload.as_object_mut() {
+        object.insert("run_id".into(), spec.run_id.clone().into());
+    }
+    emit_subagent_stop_once(spec, details);
+    SubAgentExecutionResult {
+        payload,
+        transcript,
+        identity: crate::agent_events::AgentRunRef {
+            session_id: spec.session_id.clone(),
+            run_id: spec.run_id.clone(),
+        },
+    }
 }
 
 pub(super) fn stop_details_for_error(error: &VmError) -> SubagentStopDetails {

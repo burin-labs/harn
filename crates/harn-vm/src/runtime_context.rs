@@ -111,6 +111,14 @@ fn current_overlay() -> RuntimeContextOverlay {
     })
 }
 
+/// Canonical session/run association for the active agent invocation.
+pub(crate) fn current_agent_run_ref() -> Option<crate::agent_events::AgentRunRef> {
+    let session_id = crate::agent_sessions::current_session_id()?;
+    let run_id = crate::llm::active_agent_run_id(&session_id)
+        .or_else(|| crate::agent_sessions::active_run_id(&session_id))?;
+    Some(crate::agent_events::AgentRunRef { session_id, run_id })
+}
+
 pub(crate) fn runtime_context_get(
     vm: &crate::vm::Vm,
     args: &[VmValue],

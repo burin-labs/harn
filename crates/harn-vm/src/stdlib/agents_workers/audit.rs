@@ -9,18 +9,25 @@ pub(super) fn parse_worker_audit(
         .cloned()
         .unwrap_or_else(|| VmValue::dict_map(Default::default()));
     let parent_session = crate::orchestration::current_mutation_session();
+    let active_parent_session_id = crate::agent_sessions::current_session_id();
     let mut audit: MutationSessionRecord =
         serde_json::from_value(crate::llm::vm_value_to_json(&audit_value))
             .map_err(|e| VmError::Runtime(format!("worker audit parse error: {e}")))?;
     if audit.parent_session_id.is_none() {
         audit.parent_session_id = parent_session
             .as_ref()
-            .map(|session| session.session_id.clone());
+            .map(|session| session.session_id.clone())
+            .or_else(|| active_parent_session_id.clone());
     }
     if audit.run_id.is_none() {
         audit.run_id = parent_session
             .as_ref()
-            .and_then(|session| session.run_id.clone());
+            .and_then(|session| session.run_id.clone())
+            .or_else(|| {
+                active_parent_session_id
+                    .as_deref()
+                    .and_then(crate::agent_sessions::active_run_id)
+            });
     }
     if audit.execution_kind.is_none() {
         audit.execution_kind = Some("worker".to_string());
@@ -48,13 +55,20 @@ pub(super) fn parse_worker_audit(
 
 pub(in super::super) fn inherited_worker_audit(execution_kind: &str) -> MutationSessionRecord {
     let parent_session = crate::orchestration::current_mutation_session();
+    let active_parent_session_id = crate::agent_sessions::current_session_id();
     MutationSessionRecord {
         parent_session_id: parent_session
             .as_ref()
-            .map(|session| session.session_id.clone()),
+            .map(|session| session.session_id.clone())
+            .or_else(|| active_parent_session_id.clone()),
         run_id: parent_session
             .as_ref()
-            .and_then(|session| session.run_id.clone()),
+            .and_then(|session| session.run_id.clone())
+            .or_else(|| {
+                active_parent_session_id
+                    .as_deref()
+                    .and_then(crate::agent_sessions::active_run_id)
+            }),
         execution_kind: Some(execution_kind.to_string()),
         mutation_scope: parent_session
             .as_ref()

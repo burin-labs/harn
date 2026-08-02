@@ -71,7 +71,9 @@ async fn execute_sub_agent_persists_one_stop_with_lineage() {
         ]),
         returns_schema: None,
         session_id: "child-subagent".to_string(),
+        run_id: "agent_run_child_subagent".to_string(),
         parent_session_id: Some(parent.clone()),
+        parent_run_id: Some("agent_run_parent_subagent".to_string()),
         reminder_propagation: Vec::new(),
         workspace_anchor: None,
         stop_emitted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -82,6 +84,11 @@ async fn execute_sub_agent_persists_one_stop_with_lineage() {
     let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
     let result = execute_sub_agent(&ctx, spec).await.unwrap();
     assert_eq!(result.payload["ok"].as_bool(), Some(true));
+    let child_run_id = result.payload["run_id"]
+        .as_str()
+        .expect("sub-agent result must expose its canonical run id")
+        .to_string();
+    assert_eq!(child_run_id, "agent_run_child_subagent");
 
     let child_messages = crate::agent_sessions::messages_json("child-subagent");
     assert!(!child_messages
@@ -133,14 +140,21 @@ async fn execute_sub_agent_persists_one_stop_with_lineage() {
         serde_json::from_value(stops[0].1.payload["event"].clone()).unwrap();
     match replayed {
         crate::agent_events::AgentEvent::SubagentStop {
+            lineage,
             parent_run_id,
-            child_run_id,
+            child_run_id: stopped_child_run_id,
             terminal_status,
             completed_at_ms,
             ..
         } => {
-            assert_eq!(parent_run_id, parent);
-            assert_eq!(child_run_id, "child-subagent");
+            let lineage = lineage.expect("current stop events carry typed lineage");
+            assert_eq!(lineage.parent.session_id, parent);
+            assert_eq!(lineage.parent.run_id, "agent_run_parent_subagent");
+            assert_eq!(lineage.child.session_id, "child-subagent");
+            assert_eq!(lineage.child.run_id, child_run_id);
+            assert_eq!(parent_run_id, "agent_run_parent_subagent");
+            assert_eq!(stopped_child_run_id, child_run_id);
+            assert_ne!(stopped_child_run_id, "child-subagent");
             assert_eq!(
                 terminal_status,
                 crate::agent_events::SubagentTerminalStatus::Success

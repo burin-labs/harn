@@ -4,8 +4,9 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use super::agents_workers::{
-    apply_worker_artifact_policy, apply_worker_transcript_policy, ensure_worker_config_session_ids,
-    persist_worker_state_snapshot, spawn_worker_task, worker_wait_blocks, SuspendInitiator,
+    apply_worker_artifact_policy, apply_worker_transcript_policy, emit_subagent_join,
+    ensure_worker_config_session_ids, persist_worker_state_snapshot, spawn_worker_task,
+    worker_event_snapshot, worker_timestamp_unix_ms, worker_wait_blocks, SuspendInitiator,
     WorkerConfig, WorkerState,
 };
 use super::SubAgentRunSpec;
@@ -291,7 +292,9 @@ pub(super) fn apply_sub_agent_replay_config(
     spec.task = next_task.to_string();
     if reset_session {
         spec.session_id = format!("sub_agent_session_{}", uuid::Uuid::now_v7());
+        spec.run_id = format!("agent_run_{}", uuid::Uuid::now_v7());
         spec.options.put_str("session_id", spec.session_id.clone());
+        spec.options.put_str("run_id", spec.run_id.clone());
     }
 }
 
@@ -313,15 +316,48 @@ pub(super) async fn wait_for_worker_terminal(
     state: Arc<parking_lot::Mutex<WorkerState>>,
     context: &str,
 ) -> Result<(), VmError> {
+    let mut execution_error = None;
     loop {
         let handle = state.lock().handle.take();
         if let Some(handle) = handle {
-            let _ = handle
+            match handle
                 .await
-                .map_err(|error| VmError::Runtime(format!("{context} join error: {error}")))??;
+                .map_err(|error| VmError::Runtime(format!("{context} join error: {error}")))?
+            {
+                Ok(_) => {}
+                Err(error) => execution_error = Some(error),
+            }
             continue;
         }
         if !worker_wait_blocks(&state.lock().status) {
+            let join_receipt = {
+                let mut worker = state.lock();
+                if worker.joined_at_ms.is_some() {
+                    None
+                } else {
+                    let joined_at_ms = crate::clock_mock::now_ms();
+                    let completed_at_ms = worker
+                        .finished_at
+                        .as_deref()
+                        .and_then(worker_timestamp_unix_ms)
+                        .unwrap_or(joined_at_ms);
+                    worker.joined_at_ms = Some(joined_at_ms);
+                    if worker.carry_policy.persist_state {
+                        persist_worker_state_snapshot(&worker)?;
+                    }
+                    Some((
+                        worker_event_snapshot(&worker),
+                        completed_at_ms,
+                        joined_at_ms,
+                    ))
+                }
+            };
+            if let Some((snapshot, completed_at_ms, joined_at_ms)) = join_receipt {
+                emit_subagent_join(&snapshot, completed_at_ms, joined_at_ms);
+            }
+            if let Some(error) = execution_error {
+                return Err(error);
+            }
             return Ok(());
         }
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;

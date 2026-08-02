@@ -11,6 +11,7 @@ use harn_vm::agent_events::AgentEvent;
 
 pub(super) fn subagent_stop(event: &AgentEvent) -> serde_json::Value {
     let AgentEvent::SubagentStop {
+        lineage,
         parent_run_id,
         child_run_id,
         terminal_status,
@@ -29,6 +30,8 @@ pub(super) fn subagent_stop(event: &AgentEvent) -> serde_json::Value {
     serde_json::json!({
         "parentRunId": parent_run_id,
         "childRunId": child_run_id,
+        "parentSessionId": lineage.as_ref().map(|lineage| &lineage.parent.session_id),
+        "childSessionId": lineage.as_ref().map(|lineage| &lineage.child.session_id),
         "terminalStatus": terminal_status,
         "terminalClass": terminal_class,
         "reason": reason,
@@ -37,6 +40,29 @@ pub(super) fn subagent_stop(event: &AgentEvent) -> serde_json::Value {
         "cancellation": cancellation,
         "timeout": timeout,
         "completedAtMs": completed_at_ms,
+    })
+}
+
+pub(super) fn subagent_join(event: &AgentEvent) -> serde_json::Value {
+    let AgentEvent::SubagentJoin {
+        lineage,
+        worker_id,
+        completed_at_ms,
+        joined_at_ms,
+        ..
+    } = event
+    else {
+        return serde_json::json!({});
+    };
+    serde_json::json!({
+        "parentSessionId": lineage.parent.session_id,
+        "parentRunId": lineage.parent.run_id,
+        "childSessionId": lineage.child.session_id,
+        "childRunId": lineage.child.run_id,
+        "workerId": worker_id,
+        "completedAtMs": completed_at_ms,
+        "joinedAtMs": joined_at_ms,
+        "waitMs": joined_at_ms.saturating_sub(*completed_at_ms),
     })
 }
 
@@ -77,6 +103,9 @@ pub(super) fn documented_stdlib_event(
     event: &AgentEvent,
 ) -> (&'static str, &str, serde_json::Value) {
     match event {
+        AgentEvent::SubagentJoin { session_id, .. } => {
+            ("subagent_join", session_id, subagent_join(event))
+        }
         AgentEvent::SubagentStop { session_id, .. } => {
             ("subagent_stop", session_id, subagent_stop(event))
         }
