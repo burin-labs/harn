@@ -16,7 +16,7 @@ fn counts(fs: HarnessFs, root: string, policy) {
 }
 
 fn main(harness: Harness) {
-  const root = harness.fs.mkdtemp("harn-ignore-policy-")
+  const root = harness.fs.mkdtemp_in_workspace("harn-ignore-policy-")
   harness.fs.mkdir(path_join(root, ".git"))
   harness.fs.mkdir(path_join(root, "src"))
   harness.fs.mkdir(path_join(root, "logs"))

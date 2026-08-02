@@ -4,22 +4,6 @@ use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmClosure, VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
 
-struct ScopeGuard {
-    pop: fn(),
-}
-
-impl ScopeGuard {
-    fn new(pop: fn()) -> Self {
-        Self { pop }
-    }
-}
-
-impl Drop for ScopeGuard {
-    fn drop(&mut self) {
-        (self.pop)();
-    }
-}
-
 fn closure_arg(args: &[VmValue], index: usize, label: &str) -> Result<Arc<VmClosure>, VmError> {
     match args.get(index) {
         Some(VmValue::Closure(closure)) => Ok(closure.clone()),
@@ -81,8 +65,11 @@ async fn with_autonomy_policy_impl(
     )
     .map_err(|error| VmError::Runtime(format!("with_autonomy_policy: invalid policy: {error}")))?;
     let closure = closure_arg(&args, 1, "with_autonomy_policy")?;
-    let _guard = crate::autonomy::push_autonomy_policy(policy);
-    call_scoped_closure(&ctx, closure, "with_autonomy_policy").await
+    crate::orchestration::scope_autonomy_policy(
+        policy,
+        call_scoped_closure(&ctx, closure, "with_autonomy_policy"),
+    )
+    .await
 }
 
 #[harn_builtin(
@@ -108,9 +95,11 @@ async fn with_execution_policy_impl(
         Some(outer) => outer.intersect(&requested).map_err(VmError::Runtime)?,
         None => requested,
     };
-    crate::orchestration::push_execution_policy(effective);
-    let _guard = ScopeGuard::new(crate::orchestration::pop_execution_policy);
-    call_scoped_closure(&ctx, closure, "with_execution_policy").await
+    crate::orchestration::scope_execution_policy(
+        effective,
+        call_scoped_closure(&ctx, closure, "with_execution_policy"),
+    )
+    .await
 }
 
 #[harn_builtin(
@@ -137,9 +126,11 @@ async fn harn_with_execution_policy_override_impl(
         ))
     })?;
     let closure = closure_arg(&args, 1, "__harn_with_execution_policy_override")?;
-    crate::orchestration::push_execution_policy(policy);
-    let _guard = ScopeGuard::new(crate::orchestration::pop_execution_policy);
-    call_scoped_closure(&ctx, closure, "__harn_with_execution_policy_override").await
+    crate::orchestration::scope_execution_policy(
+        policy,
+        call_scoped_closure(&ctx, closure, "__harn_with_execution_policy_override"),
+    )
+    .await
 }
 
 #[harn_builtin(
@@ -161,9 +152,11 @@ async fn with_approval_policy_impl(
     )
     .map_err(|error| VmError::Runtime(format!("with_approval_policy: invalid policy: {error}")))?;
     let closure = closure_arg(&args, 1, "with_approval_policy")?;
-    crate::orchestration::push_approval_policy(policy);
-    let _guard = ScopeGuard::new(crate::orchestration::pop_approval_policy);
-    call_scoped_closure(&ctx, closure, "with_approval_policy").await
+    crate::orchestration::scope_approval_policy(
+        policy,
+        call_scoped_closure(&ctx, closure, "with_approval_policy"),
+    )
+    .await
 }
 
 #[harn_builtin(
@@ -181,9 +174,11 @@ async fn with_command_policy_impl(
         crate::orchestration::parse_command_policy_value(args.first(), "with_command_policy")?
             .ok_or_else(|| VmError::Runtime("with_command_policy: policy is required".into()))?;
     let closure = closure_arg(&args, 1, "with_command_policy")?;
-    crate::orchestration::push_command_policy(policy);
-    let _guard = ScopeGuard::new(crate::orchestration::pop_command_policy);
-    call_scoped_closure(&ctx, closure, "with_command_policy").await
+    crate::orchestration::scope_command_policy(
+        policy,
+        call_scoped_closure(&ctx, closure, "with_command_policy"),
+    )
+    .await
 }
 
 #[harn_builtin(
@@ -205,9 +200,11 @@ async fn with_dynamic_permissions_impl(
         VmError::Runtime("with_dynamic_permissions: permissions policy is required".into())
     })?;
     let closure = closure_arg(&args, 1, "with_dynamic_permissions")?;
-    crate::llm::permissions::push_dynamic_permission_policy(permissions);
-    let _guard = ScopeGuard::new(crate::llm::permissions::pop_dynamic_permission_policy);
-    call_scoped_closure(&ctx, closure, "with_dynamic_permissions").await
+    crate::orchestration::scope_dynamic_permissions(
+        permissions,
+        call_scoped_closure(&ctx, closure, "with_dynamic_permissions"),
+    )
+    .await
 }
 
 pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[

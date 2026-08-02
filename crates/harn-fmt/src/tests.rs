@@ -1,4 +1,5 @@
 mod comments;
+mod corpus;
 mod layout;
 mod precedence_regressions;
 mod roundtrip;

@@ -15,7 +15,10 @@ pipeline default(harness: Harness) {
     "HARN_CONFORMANCE_HARN_BIN",
     resolve_harn_bin(harness, repo_root),
   )
-  const root = path_join(harness.fs.temp_dir(), "nested-harn-check-" + harness.random.uuid_v7())
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "nested-harn-check-" + harness.random.uuid_v7(),
+  )
   harness.fs.mkdir(root)
   const script = path_join(root, "child.harn")
   harness.fs.write_text(
@@ -28,7 +31,7 @@ pipeline default(harness: Harness) {
       sandbox_profile: "worktree",
       workspace_roots: [repo_root, root],
       side_effect_level: "process_exec",
-      process_sandbox: {read_roots: [harn_bin_dir]},
+      process_sandbox: {read_roots: [harn_bin_dir, root], write_roots: [root]},
     },
     { ->
       return command_run(

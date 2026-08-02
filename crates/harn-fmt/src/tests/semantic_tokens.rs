@@ -4,35 +4,15 @@
 //! coordinates. Every other token is program text and must survive exactly.
 
 use std::collections::HashSet;
-use std::ffi::OsStr;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Output};
 
 use harn_lexer::{Lexer, StringSegment, TokenKind};
 use harn_parser::Parser;
 
+use super::corpus::{repository_harn_files, workspace_root};
 use crate::format_source;
-
-const CORPUS_ROOTS: &[&str] = &[
-    "crates/harn-stdlib/src/stdlib",
-    "conformance/tests",
-    "crates/harn-cli/assets/demo",
-    "experiments",
-    "scripts",
-    "personas",
-    "tests",
-    "examples",
-    "evals",
-];
-
-const FORMATTER_SYNTAX_FIXTURES: &[&str] = &[
-    "semicolon_statements.harn",
-    "semicolon_if_else_invalid.harn",
-    "semicolon_try_catch_invalid.harn",
-    "semicolon_empty_statement_invalid.harn",
-    "import_broken_module_lib.harn",
-];
 
 #[test]
 fn current_harn_corpus_preserves_semantic_tokens() {
@@ -50,13 +30,8 @@ fn current_harn_corpus_preserves_semantic_tokens() {
 
 fn audit_current_harn_corpus() {
     let root = workspace_root();
-    let mut files = Vec::new();
-    for relative in CORPUS_ROOTS {
-        collect_harn_files(&root.join(relative), &mut files).unwrap_or_else(|error| {
-            panic!("failed to enumerate formatter corpus at {relative}: {error}")
-        });
-    }
-    files.sort();
+    let files = repository_harn_files()
+        .unwrap_or_else(|error| panic!("failed to enumerate formatter corpus: {error}"));
 
     assert!(
         !files.is_empty(),
@@ -152,38 +127,6 @@ fn merge_base_harn_rewrite_preserves_semantic_tokens() {
         failures.join("\n")
     );
     eprintln!("audited {} comparable changed .harn files", pairs.len());
-}
-
-fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .expect("harn-fmt must live under <workspace>/crates")
-        .to_path_buf()
-}
-
-fn collect_harn_files(directory: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
-    let entries = fs::read_dir(directory).map_err(|error| error.to_string())?;
-    for entry in entries {
-        let entry = entry.map_err(|error| error.to_string())?;
-        let path = entry.path();
-        let file_type = entry.file_type().map_err(|error| error.to_string())?;
-        if file_type.is_symlink() {
-            continue;
-        }
-        if file_type.is_dir() {
-            if entry.file_name() != OsStr::new(".harn") {
-                collect_harn_files(&path, files)?;
-            }
-        } else if path.extension() == Some(OsStr::new("harn"))
-            && !FORMATTER_SYNTAX_FIXTURES
-                .iter()
-                .any(|fixture| path.file_name() == Some(OsStr::new(fixture)))
-        {
-            files.push(path);
-        }
-    }
-    Ok(())
 }
 
 fn assert_same_semantic_tokens(before: &str, after: &str) -> Result<(), String> {

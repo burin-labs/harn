@@ -1,7 +1,7 @@
 import "../_common"
 
 pipeline default(harness: Harness) {
-  const root = harness.fs.mkdtemp("harn-mcp-fire-")
+  const root = harness.fs.mkdtemp_in_workspace("harn-mcp-fire-")
   const log_path = path_join(root, "trigger.log")
   harness.fs.write_text(
     path_join(root, "harn.toml"),

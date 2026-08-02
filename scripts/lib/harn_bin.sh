@@ -42,6 +42,26 @@ harn_require_executable_bin() {
   fi
 }
 
+# Copy a resolved Cargo output into a caller-owned immutable execution path.
+# Parallel Cargo invocations may replace or briefly unlink target/debug/harn;
+# long-lived gates must execute a snapshot whose lifetime they control.
+harn_snapshot_binary() {
+  local source_bin="$1"
+  local destination_dir="$2"
+  local suffix=""
+  local snapshot=""
+
+  harn_require_executable_bin "$source_bin" || return $?
+  case "$source_bin" in
+    *.exe) suffix=".exe" ;;
+  esac
+  mkdir -p "$destination_dir" || return $?
+  snapshot="$destination_dir/harn$suffix"
+  cp "$source_bin" "$snapshot" || return $?
+  chmod +x "$snapshot" || return $?
+  printf '%s\n' "$snapshot"
+}
+
 harn_cargo_probe_timeout_seconds() {
   local timeout_seconds="${HARN_BIN_CARGO_TIMEOUT_SECONDS:-600}"
   if [[ ! "$timeout_seconds" =~ ^[0-9]+([.][0-9]+)?$ ]] || [[ "$timeout_seconds" = "0" ]]; then

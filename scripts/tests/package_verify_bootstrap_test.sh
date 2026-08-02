@@ -64,6 +64,10 @@ export FIXTURE_ROOT="$fixture"
 export PATH="$tmp_root/bin:$PATH"
 export CARGO_TARGET_DIR="$fixture/target"
 
+# This case proves the cold bootstrap contract. Keep it independent from the
+# aggregate gate's deliberately warmed Harn execution boundary; explicit-bin
+# behavior has its own case below.
+unset HARN_BIN HARN_BIN_NO_BUILD
 package_verify_prepare_tools "$fixture"
 [[ "$HARN_BIN" == "$fake_harn" ]]
 

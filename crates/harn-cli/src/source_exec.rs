@@ -2,6 +2,8 @@
 //! building the harness it executes against, and the staged error type that
 //! reports where execution stopped.
 
+use std::future::Future;
+
 use crate::*;
 
 /// Exits on error.
@@ -150,25 +152,47 @@ pub(crate) async fn execute_with_skill_dirs(
     source_path: Option<&Path>,
     cli_skill_dirs: &[PathBuf],
 ) -> Result<String, ExecError> {
-    execute_with_skill_dirs_and_optional_harness(source, source_path, cli_skill_dirs, None).await
+    execute_with_skill_dirs_and_options(
+        source,
+        source_path,
+        cli_skill_dirs,
+        SourceExecutionOptions::default(),
+    )
+    .await
 }
 
-pub(crate) async fn execute_with_skill_dirs_and_harness(
+/// Host-owned configuration for one source execution.
+///
+/// Keeping the capability ceiling beside the harness makes embedders pass
+/// execution authority structurally. The VM installs it inside the `LocalSet`
+/// that owns the run, rather than relying on a thread-local guard surviving an
+/// executor boundary.
+#[derive(Default)]
+pub(crate) struct SourceExecutionOptions {
+    pub(crate) harness: Option<harn_vm::Harness>,
+    pub(crate) execution_policy: Option<harn_vm::orchestration::CapabilityPolicy>,
+}
+
+async fn scope_source_execution<F: Future>(
+    policy: Option<harn_vm::orchestration::CapabilityPolicy>,
+    inner: F,
+) -> F::Output {
+    match policy {
+        Some(policy) => harn_vm::orchestration::scope_execution_policy(policy, inner).await,
+        None => inner.await,
+    }
+}
+
+pub(crate) async fn execute_with_skill_dirs_and_options(
     source: &str,
     source_path: Option<&Path>,
     cli_skill_dirs: &[PathBuf],
-    harness: harn_vm::Harness,
+    options: SourceExecutionOptions,
 ) -> Result<String, ExecError> {
-    execute_with_skill_dirs_and_optional_harness(source, source_path, cli_skill_dirs, Some(harness))
-        .await
-}
-
-pub(crate) async fn execute_with_skill_dirs_and_optional_harness(
-    source: &str,
-    source_path: Option<&Path>,
-    cli_skill_dirs: &[PathBuf],
-    harness: Option<harn_vm::Harness>,
-) -> Result<String, ExecError> {
+    let SourceExecutionOptions {
+        harness,
+        execution_policy,
+    } = options;
     let mut lexer = Lexer::new(source);
     let tokens = lexer
         .tokenize()
@@ -208,7 +232,7 @@ pub(crate) async fn execute_with_skill_dirs_and_optional_harness(
 
     let local = tokio::task::LocalSet::new();
     local
-        .run_until(async {
+        .run_until(scope_source_execution(execution_policy, async {
             let mut vm = harn_vm::Vm::new();
             harn_vm::register_vm_stdlib(&mut vm);
             install_default_hostlib(&mut vm);
@@ -328,7 +352,7 @@ pub(crate) async fn execute_with_skill_dirs_and_optional_harness(
             }
             output.push_str(vm.output());
             Ok(output)
-        })
+        }))
         .await
 }
 

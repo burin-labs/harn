@@ -15,7 +15,7 @@ pipeline main(harness: Harness) {
     [llm_text("done ##DONE##")],
     { ->
       const transcript_dir = path_join(
-        harness.fs.temp_dir(),
+        harness.fs.workspace_temp_dir(),
         "harn-context-assembly-manifest-" + harness.random.uuid(),
       )
       const replacement: SystemReplacement = {mode: "replace", content: REPLACEMENT}
