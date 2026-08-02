@@ -241,6 +241,49 @@ pipeline test_apply_normalizes_every_owned_release_surface(harness: Harness, tas
 }
 
 @test
+pipeline test_apply_withdrawn_version_keeps_last_distribution_projection(harness: Harness, task) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      workspace(harness.fs, root)
+      write_fixture(
+        harness.fs,
+        root,
+        ".github/release-withdrawals.json",
+        json_stringify(
+          {
+            schema_version: 1,
+            releases: [
+              {
+                version: "1.2.4",
+                tag_commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                distribution_version: "1.2.3",
+                replacement: "1.2.5",
+                reason: "invalid_tagged_candidate",
+              },
+            ],
+          },
+        ),
+      )
+      apply_release_metadata(harness.fs, root, "1.2.4")
+      assert_eq(current_version(harness.fs, root), "1.2.4")
+      const agent = agent_projection(
+        harness.fs.read_text(path_join(root, "spec/acp-registry/harn/agent.json")),
+      )
+      assert_eq(agent.version, "1.2.3")
+      assert_eq(
+        agent.distribution.binary.linux.archive,
+        "https://example.test/releases/download/v1.2.3/harn.tar.gz",
+      )
+      assert_eq(
+        harness.fs.read_text(path_join(root, "docs/src/embedding-rust.md")),
+        "tag = \"v1.2.3\"\n",
+      )
+    },
+  )
+}
+
+@test
 pipeline test_apply_advances_install_projection_from_withdrawn_version(harness: Harness, task) {
   with_temp_dir(
     harness.fs,
