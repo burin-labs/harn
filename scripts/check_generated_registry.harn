@@ -11,9 +11,10 @@
 //   - a check-* Makefile target that is neither registered nor explicitly
 //     exempted (a new drift guard that could silently escape the audit);
 //   - a registry entry naming a Makefile target that does not exist;
-//   - a registry entry flagged ci = true whose check is not referenced in
+//   - a registry entry flagged ci = true whose check is not reachable from
 //     any .github/workflows/*.yml OR the CI-invoked audit gate runner
-//     scripts/audit_gates.sh (drift would not fail any PR);
+//     scripts/audit_gates.sh through the Make dependency graph (drift would
+//     not fail any PR);
 //   - a registry entry flagged make_all = true whose check is missing from
 //     the all: recipe (so `make all` would not catch it);
 //   - a source-owned declared output file that does not exist on disk;
@@ -52,8 +53,9 @@ fn is_word_or_hyphen(c: string) -> bool {
 }
 
 /**
- * Match `target` as a substring not followed by another word char or hyphen.
- * Prevents `check-provider-catalog` from matching inside
+ * Match `target` as a token not adjacent to another word char or hyphen.
+ * Prevents `all` from matching inside `install` and
+ * `check-provider-catalog` from matching inside
  * `check-provider-catalog-drift`.
  */
 pub fn whole_target_search(target: string, text: string) -> bool {
@@ -68,14 +70,16 @@ pub fn whole_target_search(target: string, text: string) -> bool {
     if idx == -1 {
       return false
     }
-    const abs_end = pos + idx + target.len()
-    if abs_end >= total {
+    const abs_start = pos + idx
+    const abs_end = abs_start + target.len()
+    const starts_at_boundary = abs_start == 0
+      || !is_word_or_hyphen(text.char_at(abs_start - 1))
+    const ends_at_boundary = abs_end >= total
+      || !is_word_or_hyphen(text.char_at(abs_end))
+    if starts_at_boundary && ends_at_boundary {
       return true
     }
-    if !is_word_or_hyphen(text.char_at(abs_end)) {
-      return true
-    }
-    pos = pos + idx + 1
+    pos = abs_start + 1
   }
   return false
 }
@@ -100,6 +104,106 @@ pub fn makefile_targets(text: string) -> list {
     }
   }
   return targets.sorted()
+}
+
+fn target_references(targets: list, text: string) -> list {
+  let referenced = []
+  for target in targets {
+    if whole_target_search(target, text) {
+      referenced = referenced + [target]
+    }
+  }
+  return referenced
+}
+
+fn non_comment_lines(text: string) -> string {
+  let lines = []
+  for line in text.lines() {
+    if !line.trim().starts_with("#") {
+      lines = lines + [line]
+    }
+  }
+  return lines.join("\n")
+}
+
+/**
+ * Make targets explicitly passed to `make`/`$(MAKE)` command lines. Continued
+ * commands remain active until the final line. Comments never seed the graph.
+ */
+pub fn make_invocation_targets(targets: list, text: string) -> list {
+  let referenced = []
+  let continued = false
+  for line in text.lines() {
+    const trimmed = line.trim()
+    if trimmed.starts_with("#") {
+      continued = false
+      continue
+    }
+    const starts = whole_target_search("make", trimmed) || trimmed.contains("$(MAKE)")
+    if starts || continued {
+      for target in target_references(targets, trimmed) {
+        if !referenced.contains(target) {
+          referenced = referenced + [target]
+        }
+      }
+      continued = trimmed.ends_with("\\")
+    }
+  }
+  return referenced
+}
+
+/**
+ * Expand explicit Make invocations through rule prerequisites and
+ * recursive-Make recipe lines. The returned text is suitable for
+ * `whole_target_search`: a check counts as wired when CI names it directly or
+ * reaches it through an aggregate target such as `wasm-check` or `all`.
+ *
+ * This intentionally derives coverage from the Make graph instead of forcing
+ * workflows to repeat leaf checks. `seen` also makes cyclic rules terminate.
+ */
+pub fn expand_make_target_references(make_text: string, invocation_text: string) -> string {
+  const targets = makefile_targets(make_text)
+  let prerequisites: dict<string, string> = {}
+  let recipes: dict<string, string> = {}
+  let current = ""
+  for line in make_text.lines() {
+    const rule = regex_captures(r"^([A-Za-z][A-Za-z0-9_-]*):(.*)$", line)
+    if rule.count > 0 {
+      current = rule[0].groups[0]
+      prerequisites[current] = rule[0].groups[1]
+      recipes[current] = ""
+      continue
+    }
+    if current != "" && line.starts_with("\t") {
+      recipes[current] = (recipes[current] ?? "") + "\n" + line
+      continue
+    }
+    if line.trim() != "" {
+      current = ""
+    }
+  }
+  let queue = make_invocation_targets(targets, invocation_text)
+  let seen = []
+  let index = 0
+  while index < queue.count {
+    const target = queue[index]
+    index = index + 1
+    if seen.contains(target) {
+      continue
+    }
+    seen = seen + [target]
+    const dependencies = target_references(targets, prerequisites[target] ?? "")
+      + make_invocation_targets(
+      targets,
+      recipes[target] ?? "",
+    )
+    for dependency in dependencies {
+      if !seen.contains(dependency) && !queue.contains(dependency) {
+        queue = queue + [dependency]
+      }
+    }
+  }
+  return non_comment_lines(invocation_text) + "\n" + seen.join("\n")
 }
 
 /**
@@ -145,7 +249,7 @@ pub fn artifact_flag_errors(
   if art?.ci && check != "" && !whole_target_search(check, workflow_text) {
     errors = errors
       + [
-      "[${aid}] ci = true but `${check}` is not referenced in any .github/workflows/*.yml — drift here would not fail a PR. Add `make ${check}` to a workflow or set ci = false (with a note).",
+      "[${aid}] ci = true but `${check}` is not reachable from any .github/workflows/*.yml through the Make dependency graph — drift here would not fail a PR. Add it to a CI-invoked Make target or set ci = false (with a note).",
     ]
   }
   // Defensive: only an explicit false, not a missing key, means "should not be
@@ -413,8 +517,8 @@ pipeline main(harness: Harness, task) {
   const dispatch = registry?.preflight?.dispatch ?? {}
   const make_text = harness.fs.read_text(MAKEFILE)
   const targets = makefile_targets(make_text)
-  const all_recipe = make_all_recipe(make_text)
-  const workflow_text = read_workflows(harness.fs)
+  const all_recipe = expand_make_target_references(make_text, make_all_recipe(make_text))
+  const workflow_text = expand_make_target_references(make_text, read_workflows(harness.fs))
   // Precompute which declared outputs are missing on disk so validate stays
   // filesystem free (preserving exact per-artifact error ordering).
   let missing_outputs = []

@@ -4,44 +4,6 @@ use std::path::PathBuf;
 
 use crate::execute;
 
-const REPL_KEYWORDS: &[&str] = &[
-    "pipeline",
-    "fn",
-    "let",
-    "var",
-    "if",
-    "else",
-    "for",
-    "in",
-    "while",
-    "match",
-    "return",
-    "break",
-    "continue",
-    "import",
-    "from",
-    "try",
-    "catch",
-    "throw",
-    "spawn",
-    "parallel",
-    "defer",
-    "retry",
-    "guard",
-    "deadline",
-    "mutex",
-    "enum",
-    "struct",
-    "interface",
-    "type",
-    "pub",
-    "extends",
-    "override",
-    "true",
-    "false",
-    "nil",
-];
-
 /// Harn REPL keyword completer.
 struct HarnCompleter {
     keywords: Vec<String>,
@@ -234,7 +196,7 @@ fn scan_input_state(input: &str) -> InputScanState {
 
 fn repl_completion_entries() -> Vec<String> {
     let mut entries = BTreeSet::new();
-    for keyword in REPL_KEYWORDS {
+    for keyword in harn_lexer::KEYWORDS {
         entries.insert((*keyword).to_string());
     }
     for builtin in repl_builtin_names() {

@@ -186,7 +186,6 @@ fn expand_leaf_capability_contract(input: CapabilityMethodInput) -> syn::Result<
     let contract = contract_expr(&attrs, &support)?;
     let upper = input.rust_name.to_string().to_uppercase();
     let def_ident = format_ident!("{upper}_DEF");
-    let link_ident = format_ident!("__{upper}_LINKME");
     let doc = input.doc.value();
     let signature_text_expr = match signature_text {
         Some(signature) => quote!(::core::option::Option::Some(#signature)),
@@ -201,11 +200,6 @@ fn expand_leaf_capability_contract(input: CapabilityMethodInput) -> syn::Result<
             doc: #doc,
             signature_text: #signature_text_expr,
         };
-
-        #[doc(hidden)]
-        #[allow(non_upper_case_globals)]
-        #[#support::distributed_slice(#support::ALL_CAPABILITY_METHOD_DEFS)]
-        static #link_ident: &'static #support::CapabilityMethodDef = &#def_ident;
     })
 }
 

@@ -83,7 +83,9 @@ mod watch;
 mod workflow;
 
 pub(crate) use app::{AppArgs, AppCommand};
-pub(crate) use bench::{BenchArgs, BenchCommand, BenchReplayArgs};
+pub(crate) use bench::{
+    BenchArgs, BenchCommand, BenchPortableArgs, BenchReplayArgs, PortableEntryKindArg,
+};
 pub(crate) use canon::{CanonArgs, CanonCheckArgs, CanonCommand};
 pub(crate) use check::{CheckArgs, CheckOutputFormat};
 pub(crate) use codemod::CodemodArgs;
@@ -113,7 +115,8 @@ pub(crate) use doc::DocArgs;
 pub(crate) use doctor::DoctorArgs;
 pub(crate) use dump::{
     ConnectorSchemaCodegenArgs, DumpConnectorMatrixArgs, DumpHighlightKeywordsArgs,
-    DumpPromptGrammarArgs, DumpProtocolArtifactsArgs, DumpTriggerQuickrefArgs,
+    DumpPortableBenchmarkSchemaArgs, DumpPromptGrammarArgs, DumpProtocolArtifactsArgs,
+    DumpTriggerQuickrefArgs,
 };
 pub use eval::{
     EvalArgs, EvalCodingAgentArgs, EvalCommand, EvalContextArgs, EvalPromptArgs, EvalPromptMode,
@@ -469,7 +472,7 @@ SCRIPTING
     Eval(EvalArgs),
     /// Start the interactive REPL.
     Repl,
-    /// Benchmark a .harn pipeline over repeated runs.
+    /// Benchmark Harn execution, portable-kernel paths, or deterministic replay.
     Bench(BenchArgs),
     /// Pre-compile `.harn` sources into the content-addressed bytecode
     /// cache so cold-start `harn run` for the same source skips parse
@@ -562,6 +565,10 @@ SCRIPTING
     /// `make gen-highlight` target.
     #[command(hide = true, name = "dump-highlight-keywords")]
     DumpHighlightKeywords(DumpHighlightKeywordsArgs),
+    /// Regenerate the portable benchmark JSON Schema from the kernel-owned
+    /// receipt type and validation constants.
+    #[command(hide = true, name = "dump-portable-benchmark-schema")]
+    DumpPortableBenchmarkSchema(DumpPortableBenchmarkSchemaArgs),
     /// Regenerate the VS Code `.harn.prompt` TextMate grammar from the live
     /// prompt-template keyword, filter, and section vocabulary.
     ///

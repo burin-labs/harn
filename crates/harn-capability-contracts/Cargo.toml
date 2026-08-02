@@ -12,7 +12,10 @@ description = "Canonical typed Harness capability method contracts"
 harn-builtin-macros = { path = "../harn-builtin-macros", version = "=0.10.50" }
 harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.50" }
 harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.50" }
-linkme = "0.3"
+
+[build-dependencies]
+proc-macro2 = "1"
+syn = { version = "2", features = ["full"] }
 
 [lints]
 workspace = true

@@ -654,6 +654,7 @@ fixtures.
 harn bench main.harn
 harn bench main.harn --iterations 25
 harn bench main.harn --iterations 25 --profile-json bench.json
+harn bench portable reducer.harn --entry reduce --input event.json --threads 4 --json
 harn bench replay --json --output replay-benchmark.json
 harn bench replay conformance/replay-oracle/fixtures --filter approval --json
 ```
@@ -665,6 +666,28 @@ total. `--profile` prints the aggregate categorical timing rollup; `--profile-js
 writes a JSON report with `iterations[]`, `mean_ms`, `p50_ms`, `p95_ms`,
 `stddev_ms`, and `rollup`. `HARN_PROFILE=1` and `HARN_PROFILE_JSON=<path>` work
 as environment aliases.
+
+`harn bench portable` measures the canonical portable compiler, artifact
+decoder, and native kernel dispatch as separate sample sets. It accepts a
+function or pipeline entry, one JSON input value, 1 through 100,000 repeated
+compile/decode samples, 1 through 1,000,000 dispatch samples, and 1 through 256
+native operating-system workers. The command records the cold first compile
+separately from repeated compilation. Workers share the immutable program
+artifact but never execution state; they rendezvous before the timed batch, and
+every terminal value must match the first result. The receipt reports both
+per-dispatch latency statistics and batch wall time/throughput.
+
+`--json` prints and `--output <path>` writes the cross-target
+`harn.portable_kernel.benchmark.v1` receipt. It includes artifact and terminal
+digests plus Harn/kernel versions, artifact format and semantic/opcode ABI
+fingerprints, build profile, OS, and architecture. Portable benchmarking is
+host-side measurement: it neither grants a clock to the program nor produces
+full-VM profile spans. Consequently, `--profile`, `--profile-json`,
+`HARN_PROFILE`, and `HARN_PROFILE_JSON` are rejected for this subcommand; use
+the versioned receipt or `harn bench <file> --profile` instead.
+See [Benchmark the portable kernel](./portable-kernel-benchmarking.md) for a
+reproducible native/browser comparison and the relationship to `harn time` and
+`std/timing`.
 
 `harn bench replay` reads `bench/replay/suite.json` by default. It emits
 schema `harn.replay_benchmark.report.v1`, including cloud-platform ingest metadata,

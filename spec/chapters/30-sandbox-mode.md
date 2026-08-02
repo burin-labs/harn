@@ -122,11 +122,20 @@ reads.
 Path-backed `vision_ocr(...)` image inputs follow the same read boundary.
 Process cwd escapes through `exec_at` / `shell_at` are rejected the same way.
 
-Pure-compute handlers can run through the WASM sandbox entrypoint exposed
-by `harn-wasm` as `executePureComponent` and described by
-`crates/harn-wasm/wit/harn-pure.wit`. That component surface has no host
-imports for filesystem, process, network, clock, random, LLM, or async
-effects, so attempted side effects fail inside the component boundary.
+Portable pure programs can run through `harn-wasm`, which projects the
+canonical compiler and Portable Kernel as `compile`, `start`, and `resume`.
+The versioned artifact and typed execution contract are described by
+`crates/harn-wasm/wit/harn-kernel.wit`. Core Wasm receives no ambient
+filesystem, process, network, clock, random, or model authority. A portable
+operation either completes, suspends with a typed capability request, or fails
+with a structured diagnostic; the host decides whether and how to satisfy a
+request.
+
+Portable Kernel v1 is a bounded language and opcode subset, not a second
+implementation of handler sandboxing. Programs that require unsupported VM
+operations fail deterministically instead of falling through to a browser or
+vendor API. The native handler sandbox rules in this chapter continue to own
+full-VM process and filesystem confinement.
 
 Process execution is wrapped in an OS sandbox selected by the active
 `CapabilityPolicy.sandbox_profile`. A profile decides two independent

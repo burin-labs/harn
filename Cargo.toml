@@ -14,7 +14,7 @@ members = [
     "crates/harn-lexer",
     "crates/harn-parser",
     "crates/harn-ir",
-    "crates/harn-codegen",
+    "crates/harn-kernel",
     "crates/harn-cli",
     "crates/harn-cli-aot-gen",
     "crates/harn-sqlite",
@@ -25,6 +25,7 @@ members = [
     "crates/harn-modules",
     "crates/harn-stdlib",
     "crates/harn-vm",
+    "crates/harn-wasm",
     "crates/harn-dap",
     "crates/harn-fmt",
     "crates/harn-guard",
@@ -39,8 +40,6 @@ members = [
     "bench/orchestration",
     "bench/postgres",
 ]
-# Build harn-wasm separately: cd crates/harn-wasm && wasm-pack build
-exclude = ["crates/harn-wasm"]
 resolver = "2"
 
 [workspace.package]

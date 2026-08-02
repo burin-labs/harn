@@ -63,12 +63,6 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
-path = "src/compiler/state.rs"
-statics = ["FORCE_DISCARDED_PRODUCES_VALUE"]
-category = "thread_private"
-plan = "thread_private_cache"
-
-[[thread_local]]
 path = "src/connectors/harn_module.rs"
 statics = ["ACTIVE_HARN_CONNECTOR_CTX"]
 category = "runtime_registry"
