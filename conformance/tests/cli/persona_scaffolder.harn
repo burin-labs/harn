@@ -6,7 +6,7 @@ pipeline default(harness: Harness) {
     "HARN_CONFORMANCE_HARN_BIN",
     resolve_harn_bin(harness, repo_root),
   )
-  const root = harness.fs.mkdtemp("harn-persona-scaffolder-")
+  const root = harness.fs.mkdtemp_in_workspace("harn-persona-scaffolder-")
   const created = harness.process.exec_at(
     root,
     harn_bin,

@@ -42,6 +42,26 @@ harn_require_executable_bin() {
   fi
 }
 
+# Copy a resolved Cargo output into a caller-owned immutable execution path.
+# Parallel Cargo invocations may replace or briefly unlink target/debug/harn;
+# long-lived gates must execute a snapshot whose lifetime they control.
+harn_snapshot_binary() {
+  local source_bin="$1"
+  local destination_dir="$2"
+  local suffix=""
+  local snapshot=""
+
+  harn_require_executable_bin "$source_bin" || return $?
+  case "$source_bin" in
+    *.exe) suffix=".exe" ;;
+  esac
+  mkdir -p "$destination_dir" || return $?
+  snapshot="$destination_dir/harn$suffix"
+  cp "$source_bin" "$snapshot" || return $?
+  chmod +x "$snapshot" || return $?
+  printf '%s\n' "$snapshot"
+}
+
 harn_cargo_probe_timeout_seconds() {
   local timeout_seconds="${HARN_BIN_CARGO_TIMEOUT_SECONDS:-600}"
   if [[ ! "$timeout_seconds" =~ ^[0-9]+([.][0-9]+)?$ ]] || [[ "$timeout_seconds" = "0" ]]; then
@@ -49,6 +69,16 @@ harn_cargo_probe_timeout_seconds() {
     return 2
   fi
   printf '%s\n' "$timeout_seconds"
+}
+
+harn_retry_without_wrapper() {
+  case "${HARN_BIN_RETRY_WITHOUT_WRAPPER:-0}" in
+    0|1) printf '%s\n' "${HARN_BIN_RETRY_WITHOUT_WRAPPER:-0}" ;;
+    *)
+      echo "error: HARN_BIN_RETRY_WITHOUT_WRAPPER must be 0 or 1" >&2
+      return 2
+      ;;
+  esac
 }
 
 harn_kill_process_group() {
@@ -164,6 +194,7 @@ harn_compiler_wrapper_configured() {
 harn_resolve_binary() {
   local mode="${1:-build}"
   local bin=""
+  local retry_without_wrapper=""
   local status=0
 
   if [[ -n "${HARN_BIN:-}" ]]; then
@@ -187,16 +218,26 @@ harn_resolve_binary() {
     return 1
   fi
 
+  retry_without_wrapper="$(harn_retry_without_wrapper)" || return $?
+
   harn_export_cargo_build_dir_for_target "${CARGO_TARGET_DIR:-}" || true
   if harn_worktree_unconfigured; then
     echo "warning: $(harn_repo_root) has no .cargo/config.toml; 'make setup' has not run here, so this build starts cold" >&2
   fi
   bin="$(harn_run_cargo_probe_with_deadline)" || status=$?
   if [[ "$status" -ne 0 ]]; then
-    if [[ "$status" -ne 124 ]] || ! harn_compiler_wrapper_configured; then
-      if [[ "$status" -eq 124 ]]; then
-        harn_print_probe_timeout_hints
-      fi
+    if [[ "$status" -ne 124 ]]; then
+      return "$status"
+    fi
+    if ! harn_compiler_wrapper_configured; then
+      harn_print_probe_timeout_hints
+      return "$status"
+    fi
+    if [[ "$retry_without_wrapper" != "1" ]]; then
+      harn_print_probe_timeout_hints
+      echo "hint: a compiler wrapper may be waiting behind active sibling builds." >&2
+      echo "hint: retry without it only when the wrapper is genuinely wedged:" >&2
+      echo "hint:   HARN_BIN_RETRY_WITHOUT_WRAPPER=1 <command>" >&2
       return "$status"
     fi
     echo "warning: retrying Cargo harn binary probe with the compiler wrapper disabled" >&2

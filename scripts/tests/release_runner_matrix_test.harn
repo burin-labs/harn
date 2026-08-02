@@ -38,6 +38,10 @@ fn cache_prefixes(rows) {
   return rows.map({ row -> row.target + "=" + row.rust_cache_broad_restore_prefix })
 }
 
+fn codegen_units(rows) {
+  return rows.map({ row -> row.target + "=" + to_string(row.release_codegen_units) })
+}
+
 pipeline test_release_runner_policy_pins_every_mode(harness: Harness, task) {
   const standard = [
     "x86_64-apple-darwin=macos-15-intel",
@@ -49,6 +53,16 @@ pipeline test_release_runner_policy_pins_every_mode(harness: Harness, task) {
   assert_eq(runners(matrix(harness.fs, harness.process, "--mode warm")), standard)
   assert_eq(runners(matrix(harness.fs, harness.process, "--mode primary")), standard)
   assert_eq(runners(matrix(harness.fs, harness.process, "--mode recovery")), standard)
+  assert_eq(
+    codegen_units(matrix(harness.fs, harness.process, "--mode primary")),
+    [
+      "x86_64-apple-darwin=16",
+      "aarch64-apple-darwin=16",
+      "x86_64-unknown-linux-gnu=8",
+      "aarch64-unknown-linux-gnu=16",
+      "x86_64-pc-windows-msvc=16",
+    ],
+  )
   assert_eq(
     cache_prefixes(matrix(harness.fs, harness.process, "--mode primary")),
     [
@@ -126,6 +140,23 @@ pipeline test_release_runner_policy_rejects_unsafe_requests(harness: Harness, ta
       {
         ...policy,
         targets: [{...policy.targets[0], runners: {...policy.targets[0].runners, typo: "runner"}}],
+      },
+      "--mode primary",
+    ).success,
+    false,
+  )
+  assert_eq(
+    run_matrix_with_policy(
+      harness.fs,
+      harness.process,
+      harness.random,
+      {
+        ...policy,
+        targets: [{...policy.targets[0], release_codegen_units: 0}]
+          + policy.targets.slice(
+          1,
+          len(policy.targets),
+        ),
       },
       "--mode primary",
     ).success,

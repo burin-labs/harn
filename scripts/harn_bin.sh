@@ -29,6 +29,7 @@ Environment:
   HARN_BIN_NO_BUILD  set to 1 to forbid implicit Cargo builds
   CARGO_TARGET_DIR                 target directory for --no-build worktree lookup
   HARN_BIN_CARGO_TIMEOUT_SECONDS   Cargo probe deadline in seconds (default: 600)
+  HARN_BIN_RETRY_WITHOUT_WRAPPER   opt into one wrapper-disabled retry (0 or 1)
 EOF
 }
 

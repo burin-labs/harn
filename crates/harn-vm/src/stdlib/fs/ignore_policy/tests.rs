@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Mutex;
 
 use ignore::WalkBuilder;
@@ -167,11 +167,36 @@ fn scratch_root_is_exempt_from_the_ignore_stack() {
     write(dir.path(), "scratch/.gitignore", "*\n");
     write(dir.path(), "scratch/data.json", "{}\n");
 
+    assert_eq!(
+        effective_policy(&dir.path().join(".harn-tmp"), IgnorePolicy::Project),
+        IgnorePolicy::Builtin,
+        "the outer repository must not make its managed scratch projection authoritative"
+    );
     let scratch = walk(&dir.path().join(".harn-tmp"), IgnorePolicy::Project);
     assert!(has(&scratch, "data.json"), "{scratch:?}");
 
     let ordinary = walk(&dir.path().join("scratch"), IgnorePolicy::Project);
     assert!(!has(&ordinary, "data.json"), "{ordinary:?}");
+}
+
+#[test]
+fn nested_repository_inside_scratch_owns_its_ignore_stack() {
+    let dir = repo();
+    let nested = dir.path().join(".harn-tmp/nested-repo");
+    write(dir.path(), ".harn-tmp/.gitignore", "*\n");
+    write(&nested, ".git/keep", "\n");
+    write(&nested, ".gitignore", "logs/\n!dist/\n");
+    write(&nested, "logs/ignored.txt", "\n");
+    write(&nested, "dist/reincluded.txt", "\n");
+
+    assert_eq!(
+        effective_policy(&nested, IgnorePolicy::Project),
+        IgnorePolicy::Project,
+        "an explicit nested VCS root supersedes its scratch ancestor"
+    );
+    let entries = walk(&nested, IgnorePolicy::Project);
+    assert!(!has(&entries, "logs/ignored.txt"), "{entries:?}");
+    assert!(has(&entries, "dist/reincluded.txt"), "{entries:?}");
 }
 
 #[test]
@@ -370,15 +395,28 @@ fn ignore_files_above_the_repository_root_do_not_participate() {
 
 #[test]
 fn the_materialized_builtin_layer_is_stable_within_a_process() {
-    let first: PathBuf = super::builtin_ignore_file()
-        .expect("materialize")
-        .to_path_buf();
-    let second: PathBuf = super::builtin_ignore_file()
-        .expect("materialize")
-        .to_path_buf();
+    let first = super::builtin_ignore_file().expect("materialize");
+    let second = super::builtin_ignore_file().expect("materialize");
     assert_eq!(first, second);
     let text = std::fs::read_to_string(&first).expect("read built-in layer");
     assert_eq!(text, super::builtin_ignore_text());
+}
+
+#[test]
+fn a_deleted_cache_owner_rematerializes_the_builtin_layer() {
+    let owner = tempfile::tempdir().expect("cache owner");
+    let stale = owner.path().join("built-in-ignore");
+    std::fs::write(&stale, super::builtin_ignore_text()).expect("stale projection");
+    let cache = std::sync::Mutex::new(Some(stale.clone()));
+    drop(owner);
+    assert!(!stale.exists(), "fixture must remove the cached projection");
+
+    let repaired = super::ensure_builtin_ignore_file(&cache).expect("rematerialize");
+    assert!(repaired.is_file(), "replacement projection must exist");
+    assert_eq!(
+        std::fs::read_to_string(repaired).expect("read replacement"),
+        super::builtin_ignore_text()
+    );
 }
 
 /// The canonical negation receipt, mirroring the shape this repository

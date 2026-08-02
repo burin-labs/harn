@@ -8,7 +8,7 @@ Usage: scripts/update_queued_pr.sh [options]
 Atomically replace the source revision of an open, queued pull request:
   1. dequeue the exact pull request after proving its merge-queue entry;
   2. wait until GitHub reports the entry absent;
-  3. push HEAD to the PR branch and prove the remote OID;
+  3. replace the proven old head under a force-with-lease and prove the remote OID;
   4. wait for a pull_request workflow run on that exact OID;
   5. if GitHub drops synchronize fanout, close/reopen once and prove recovery;
   6. re-enable squash auto-merge only after the exact-head run exists.
@@ -103,9 +103,11 @@ pr_json="$($GH_BIN pr view "$pr_number" --repo "$repo" \
 pr_id="$(jq -r '.id // ""' <<<"$pr_json")"
 pr_state="$(jq -r '.state // ""' <<<"$pr_json")"
 pr_branch="$(jq -r '.headRefName // ""' <<<"$pr_json")"
+old_oid="$(jq -r '.headRefOid // ""' <<<"$pr_json")"
 is_cross_repo="$(jq -r '.isCrossRepository // false' <<<"$pr_json")"
 [[ "$pr_state" == "OPEN" ]] || die "PR #$pr_number is not open"
 [[ -n "$pr_id" ]] || die "could not resolve PR #$pr_number node ID"
+[[ "$old_oid" =~ ^[0-9a-f]{40}$|^[0-9a-f]{64}$ ]] || die "PR #$pr_number head did not resolve to a full object ID"
 [[ "$is_cross_repo" == "false" ]] || die "cross-repository PRs are not supported"
 [[ "$pr_branch" == "$branch" ]] || die "current branch '$branch' is not PR #$pr_number head '$pr_branch'"
 
@@ -187,7 +189,14 @@ new_oid="$($GIT_BIN rev-parse HEAD)"
 [[ "$new_oid" =~ ^[0-9a-f]{40}$|^[0-9a-f]{64}$ ]] || die "HEAD did not resolve to a full object ID"
 
 printf 'push: %s HEAD (%s) -> %s\n' "$remote" "$new_oid" "$branch"
-"$GIT_BIN" push --no-verify "$remote" "HEAD:refs/heads/$branch"
+# The branch may have been intentionally rebased while the queued snapshot was
+# under test. A plain push cannot update that non-fast-forward history; an
+# unqualified force could overwrite a concurrent human update. The head OID
+# proven before dequeue is the exact lease, so both cases are safe.
+"$GIT_BIN" push --no-verify \
+  "--force-with-lease=refs/heads/$branch:$old_oid" \
+  "$remote" \
+  "HEAD:refs/heads/$branch"
 remote_oid="$($GIT_BIN ls-remote --heads "$remote" "refs/heads/$branch" | awk 'NR == 1 {print $1}')"
 [[ "$remote_oid" == "$new_oid" ]] || die "remote branch proof failed: expected $new_oid, observed ${remote_oid:-absent}"
 
@@ -238,6 +247,7 @@ fi
 printf 'result=success\n'
 printf 'pr_number=%s\n' "$pr_number"
 printf 'branch=%s\n' "$branch"
+printf 'previous_head_oid=%s\n' "$old_oid"
 printf 'head_oid=%s\n' "$new_oid"
 printf 'remote_oid=%s\n' "$remote_oid"
 printf 'exact_head_pull_request_run=true\n'

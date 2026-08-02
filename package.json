@@ -28,11 +28,11 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@redocly/cli": "^2.39.0",
-    "concurrently": "^10.0.3",
+    "@redocly/cli": "^2.40.0",
+    "concurrently": "^10.0.4",
     "eslint": "^10.8.0",
     "markdownlint-cli2": "^0.23.1",
     "prettier": "^3.9.6",
-    "typescript": "^6.0.3"
+    "typescript": "^7.0.2"
   }
 }

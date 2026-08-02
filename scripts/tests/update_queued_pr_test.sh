@@ -152,7 +152,8 @@ if grep -Fq -- '-f entryId=' "$immediate/state/calls"; then
   echo 'dequeue mutation must use the pull request node ID, not the queue entry ID' >&2
   exit 1
 fi
-grep -Fq 'git push --no-verify origin HEAD:refs/heads/fix/5949-queued-pr-update' "$immediate/state/calls"
+grep -Fq 'git push --no-verify --force-with-lease=refs/heads/fix/5949-queued-pr-update:1111111111111111111111111111111111111111 origin HEAD:refs/heads/fix/5949-queued-pr-update' "$immediate/state/calls"
+grep -Fq 'previous_head_oid=1111111111111111111111111111111111111111' <<<"$immediate_output"
 
 dropped="$tmp_root/dropped"
 make_fixture "$dropped" dropped

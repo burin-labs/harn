@@ -864,19 +864,13 @@ fn run_package_tests(package_dir: &Path) -> PackageVerifyCheck {
 
 fn package_test_files(package_dir: &Path) -> Vec<PathBuf> {
     let tests_dir = package_dir.join("tests");
-    let mut files = match fs::read_dir(&tests_dir) {
-        Ok(entries) => entries
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .filter(|path| path.extension().is_some_and(|ext| ext == "harn"))
-            .filter(|path| {
-                fs::read_to_string(path)
-                    .map(|source| source.contains("pipeline ") || source.contains("@test"))
-                    .unwrap_or(false)
-            })
-            .collect::<Vec<_>>(),
-        Err(_) => Vec::new(),
-    };
+    let mut files = Vec::new();
+    collect_package_harn_files(package_dir, &tests_dir, &mut files);
+    files.retain(|path| {
+        fs::read_to_string(path)
+            .map(|source| source.contains("pipeline ") || source.contains("@test"))
+            .unwrap_or(false)
+    });
     files.sort();
     files
 }

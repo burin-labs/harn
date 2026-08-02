@@ -289,7 +289,7 @@ impl<'a> Linter<'a> {
                 pattern,
                 type_ann,
                 value,
-                ..
+                is_pub,
             } => {
                 if let Some(name) = Self::simple_binding_name(pattern) {
                     self.record_mcp_registry_binding(name, value);
@@ -299,7 +299,7 @@ impl<'a> Linter<'a> {
                     self.record_type_expr_references(ann);
                     self.check_eager_collection_conversion(ann, value);
                 }
-                self.declare_pattern_variables(pattern, snode.span, true);
+                self.declare_pattern_variables(pattern, snode.span, true, *is_pub);
                 self.lint_binding_pattern_defaults(pattern);
             }
 
@@ -307,7 +307,7 @@ impl<'a> Linter<'a> {
                 pattern,
                 type_ann,
                 value,
-                ..
+                is_pub,
             } => {
                 if let Some(name) = Self::simple_binding_name(pattern) {
                     self.record_mcp_registry_binding(name, value);
@@ -317,7 +317,7 @@ impl<'a> Linter<'a> {
                     self.record_type_expr_references(ann);
                     self.check_eager_collection_conversion(ann, value);
                 }
-                self.declare_pattern_variables(pattern, snode.span, false);
+                self.declare_pattern_variables(pattern, snode.span, false, *is_pub);
                 self.lint_binding_pattern_defaults(pattern);
             }
 
@@ -864,7 +864,7 @@ impl<'a> Linter<'a> {
                         // them in the body).
                         self.declare_parameter(name, snode.span);
                     }
-                    _ => self.declare_pattern_variables(pattern, snode.span, false),
+                    _ => self.declare_pattern_variables(pattern, snode.span, false, false),
                 }
                 self.loop_depth += 1;
                 self.lint_block(body);

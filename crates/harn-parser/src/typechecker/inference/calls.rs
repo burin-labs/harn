@@ -136,156 +136,6 @@ impl TypeChecker {
         collapse_members_opt(members, TypeExpr::Union)
     }
 
-    fn builtin_uses_strict_llm_option_keys(name: &str, param_name: &str) -> bool {
-        param_name == "options"
-            && matches!(
-                name,
-                "llm_call"
-                    | "llm_call_safe"
-                    | "llm_stream_call"
-                    | "llm_call_structured"
-                    | "llm_call_structured_safe"
-                    | "llm_call_structured_result"
-                    | "llm_completion"
-            )
-    }
-
-    fn check_strict_llm_option_keys(
-        &mut self,
-        builtin_name: &str,
-        param_name: &str,
-        expected: &TypeExpr,
-        arg: &SNode,
-    ) {
-        if !Self::builtin_uses_strict_llm_option_keys(builtin_name, param_name) {
-            return;
-        }
-        let TypeExpr::Shape(fields) = expected else {
-            return;
-        };
-        let Node::DictLiteral(entries) = &arg.node else {
-            return;
-        };
-        let candidates: Vec<&str> = fields.iter().map(|field| field.name.as_str()).collect();
-        for entry in entries {
-            if matches!(entry.value.node, Node::Spread(_)) {
-                continue;
-            }
-            let key = match &entry.key.node {
-                Node::StringLiteral(key) | Node::Identifier(key) => key,
-                _ => continue,
-            };
-            if fields.iter().any(|field| field.name == *key) {
-                continue;
-            }
-            let message =
-                match crate::diagnostic::find_closest_match(key, candidates.iter().copied(), 3) {
-                    Some(suggestion) => {
-                        format!(
-                            "unknown `{builtin_name}` option `{key}`; did you mean `{suggestion}`?"
-                        )
-                    }
-                    None => format!("unknown `{builtin_name}` option `{key}`"),
-                };
-            self.warning_at(Code::UnknownLlmOption, message, entry.key.span);
-        }
-    }
-
-    fn option_bag_type_name(ty: &TypeExpr) -> Option<&str> {
-        match ty {
-            TypeExpr::Named(name) | TypeExpr::Applied { name, .. }
-                if name.ends_with("Options") || name.ends_with("Config") =>
-            {
-                Some(name)
-            }
-            TypeExpr::Union(members) => members.iter().find_map(Self::option_bag_type_name),
-            _ => None,
-        }
-    }
-
-    fn is_option_bag_param_name(param_name: &str) -> bool {
-        matches!(param_name, "opts" | "options" | "config")
-            || param_name.ends_with("_opts")
-            || param_name.ends_with("_options")
-            || param_name.ends_with("_config")
-    }
-
-    fn option_bag_shape_fields(
-        &self,
-        param_name: &str,
-        expected: &TypeExpr,
-        scope: &TypeScope,
-    ) -> Option<Vec<ShapeField>> {
-        let option_bag_name = Self::option_bag_type_name(expected);
-        if option_bag_name.is_none() && !Self::is_option_bag_param_name(param_name) {
-            return None;
-        }
-        let resolved = self.resolve_alias(expected, scope);
-        match resolved {
-            TypeExpr::Shape(fields) => Some(fields),
-            TypeExpr::Union(members) => {
-                let mut shapes = members.into_iter().filter_map(|member| match member {
-                    TypeExpr::Named(name) if name == "nil" => None,
-                    TypeExpr::Shape(fields) => Some(fields),
-                    _ => None,
-                });
-                let fields = shapes.next()?;
-                if shapes.next().is_none() {
-                    Some(fields)
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        }
-    }
-
-    fn check_unknown_option_bag_fields(
-        &mut self,
-        context: impl Into<String>,
-        param_name: &str,
-        expected: &TypeExpr,
-        arg: &SNode,
-        scope: &TypeScope,
-    ) {
-        let Node::DictLiteral(entries) = &arg.node else {
-            return;
-        };
-        let Some(fields) = self.option_bag_shape_fields(param_name, expected, scope) else {
-            return;
-        };
-        let known: BTreeSet<&str> = fields.iter().map(|field| field.name.as_str()).collect();
-        if known.is_empty() {
-            return;
-        }
-        let context = context.into();
-        let expected_list = known
-            .iter()
-            .map(|field| format!("`{field}`"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        for entry in entries {
-            if matches!(entry.value.node, Node::Spread(_)) {
-                continue;
-            }
-            let key = match &entry.key.node {
-                Node::StringLiteral(key) | Node::Identifier(key) => key,
-                _ => continue,
-            };
-            if known.contains(key.as_str()) {
-                continue;
-            }
-            let mut message =
-                format!("{context}: unknown option `{key}`; expected one of {expected_list}");
-            if let Some(candidate) =
-                crate::diagnostic::find_closest_match(key, known.iter().copied(), 3)
-            {
-                message.push_str(&format!(" — did you mean `{candidate}`?"));
-            }
-            self.error_at(Code::UnknownOption, message, entry.key.span);
-        }
-    }
-
     fn builtin_call_params(sig: &builtin_signatures::BuiltinSignature) -> Vec<CallParam<'_>> {
         sig.params
             .iter()
@@ -633,20 +483,12 @@ impl TypeChecker {
             let Some(actual) = self.infer_type(arg, scope) else {
                 continue;
             };
-            if matches!(sig.kind, CallKind::Builtin) {
-                self.check_strict_llm_option_keys(sig.name, param_name, expected, arg);
-            }
-            if !matches!(sig.kind, CallKind::Builtin)
-                || !Self::builtin_uses_strict_llm_option_keys(sig.name, param_name)
-            {
-                self.check_unknown_option_bag_fields(
-                    format!("argument {} `{}`", i + 1, param_name),
-                    param_name,
-                    expected,
-                    arg,
-                    call_scope,
-                );
-            }
+            self.check_unknown_closed_record_fields(
+                format!("argument {} `{}`", i + 1, param_name),
+                expected,
+                arg,
+                call_scope,
+            );
             let compatible = contextual_args.get(i).copied().unwrap_or(false)
                 || self.types_compatible(expected, &actual, call_scope)
                 || (*allow_optional_nil

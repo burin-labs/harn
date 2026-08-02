@@ -31,7 +31,7 @@ fn main(harness: Harness) {
     ],
     { ->
       const transcript_dir = path_join(
-        harness.fs.temp_dir(),
+        harness.fs.workspace_temp_dir(),
         "harn-compaction-context-manifest-" + harness.random.uuid(),
       )
       const options: AgentLoopOptions = {

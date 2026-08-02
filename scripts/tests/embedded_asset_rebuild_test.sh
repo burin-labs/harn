@@ -2,51 +2,11 @@
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-cd "$repo_root"
-
-persona_asset="crates/harn-cli/assets/persona-templates/deterministic-sweeper/prompts/system.harn.prompt"
-portal_dist="crates/harn-cli/portal-dist"
-portal_asset="$portal_dist/assets/portal/app.js"
-
-if [[ ! -f "$persona_asset" ]]; then
-  echo "missing embedded persona asset: $persona_asset" >&2
-  exit 1
-fi
-if ! git diff --quiet -- "$persona_asset" || ! git diff --cached --quiet -- "$persona_asset"; then
-  echo "embedded asset rebuild test requires an unmodified persona fixture" >&2
-  exit 1
-fi
+watch_module="$repo_root/crates/harn-cli/build_support/embedded_assets.rs"
 
 tmp_root=$(mktemp -d)
-persona_backup="$tmp_root/persona-asset"
-portal_backup="$tmp_root/portal-dist"
-portal_dist_existed=0
-target_dir="$tmp_root/target"
-build_dir="$tmp_root/build"
-
-# The post-warm gate already owns an executable built from this worktree. Reuse
-# that target when possible so this causality proof only recompiles harn-cli
-# after each mutation. Direct callers still get a private target/build pair.
-if [[ "${HARN_BIN:-}" == "$repo_root/target/"* && -x "$HARN_BIN" ]]; then
-  target_dir=$(cd "$(dirname "$HARN_BIN")/.." && pwd)
-  build_dir=""
-fi
-
-cp -p "$persona_asset" "$persona_backup"
-if [[ -d "$portal_dist" ]]; then
-  portal_dist_existed=1
-  cp -pR "$portal_dist" "$portal_backup"
-fi
-
 cleanup() {
   local status=$?
-  # `run_check` sends Cargo's stdout *and* stderr to a log file, so under
-  # `set -e` a failing check aborts the script with Cargo's status and nothing
-  # printed — the only `cat` of a log lives in `assert_rebuilt_for`, which a
-  # build failure never reaches. That has already cost three PRs a merge-queue
-  # rejection whose entire evidence was `Error 101`. Dump whatever the run
-  # produced before the temp dir goes away; doing it from the trap covers every
-  # failure path rather than the ones anticipated at each call site.
   if [[ "$status" -ne 0 ]]; then
     for log in "$tmp_root"/*.log; do
       [[ -f "$log" ]] || continue
@@ -54,37 +14,62 @@ cleanup() {
       cat "$log" >&2
     done
   fi
-  cp -p "$persona_backup" "$persona_asset"
-  rm -rf "$portal_dist"
-  if [[ "$portal_dist_existed" -eq 1 ]]; then
-    cp -pR "$portal_backup" "$portal_dist"
-  fi
   rm -rf "$tmp_root"
   exit "$status"
 }
 trap cleanup EXIT
 
+fixture="$tmp_root/fixture"
+target_dir="$tmp_root/target"
+persona_root="$fixture/assets/persona-templates"
+portal_root="$fixture/portal-dist"
+persona_asset="$persona_root/example/system.harn.prompt"
+portal_asset="$portal_root/assets/portal/app.js"
+
+mkdir -p "$fixture/src" "$(dirname "$persona_asset")" "$(dirname "$portal_asset")"
+
+cat > "$fixture/Cargo.toml" <<'EOF'
+[package]
+name = "embedded-asset-watch-fixture"
+version = "0.0.0"
+edition = "2021"
+publish = false
+EOF
+
+cat > "$fixture/src/lib.rs" <<'EOF'
+pub fn fixture() {}
+EOF
+
+cat > "$fixture/build.rs" <<'EOF'
+include!(env!("HARN_EMBEDDED_ASSET_WATCH_MODULE"));
+
+fn main() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    emit_watches(manifest_dir);
+}
+EOF
+
+printf '%s\n' '# persona fixture' > "$persona_asset"
+printf '%s\n' '// portal fixture' > "$portal_asset"
+
 run_check() {
   local log_path=$1
   shift
-  local -a cargo_env=(
-    HARN_DISABLE_AUTO_HOOK_SETUP=1
-    CARGO_TERM_COLOR=never
-    "CARGO_TARGET_DIR=$target_dir"
-  )
-  if [[ -n "$build_dir" ]]; then
-    cargo_env+=("CARGO_BUILD_BUILD_DIR=$build_dir")
-  fi
-  env "${cargo_env[@]}" "$repo_root/scripts/cargo_with_worktree_build_dir.sh" "$@" -p harn-cli --bin harn \
-    >"$log_path" 2>&1
+  CARGO_TERM_COLOR=never \
+    HARN_EMBEDDED_ASSET_WATCH_MODULE="$watch_module" \
+    cargo check \
+      --offline \
+      --manifest-path "$fixture/Cargo.toml" \
+      --target-dir "$target_dir" \
+      "$@" >"$log_path" 2>&1
 }
 
 assert_rebuilt_for() {
   local label=$1
   local log_path=$2
   local watched_root=$3
-  if ! grep -Fq "Dirty harn-cli" "$log_path"; then
-    echo "$label asset change did not dirty harn-cli" >&2
+  if ! grep -Fq 'Dirty embedded-asset-watch-fixture' "$log_path"; then
+    echo "$label asset change did not dirty the fixture crate" >&2
     cat "$log_path" >&2
     exit 1
   fi
@@ -95,33 +80,26 @@ assert_rebuilt_for() {
   fi
 }
 
-# Materialize both watched roots before the single baseline build. Cargo tracks
-# rerun-if-changed inputs by mtime, so pin each fixture to the past and make the
-# later mutations distinguishable even on coarse filesystems.
-mkdir -p "$(dirname "$portal_asset")"
-if [[ ! -f "$portal_asset" ]]; then
-  printf '%s\n' '// portal fallback asset for embedded watcher coverage' > "$portal_asset"
-fi
+# Pin the initial fixtures to the past so each later mutation has a distinct
+# Cargo fingerprint even on filesystems with coarse timestamp resolution.
 touch -t 200001010101 "$persona_asset" "$portal_asset"
-run_check "$tmp_root/baseline.log" check --quiet
+run_check "$tmp_root/baseline.log" --quiet
 
 printf '\n# embedded asset rebuild test marker\n' >> "$persona_asset"
-run_check "$tmp_root/persona-dirty.log" -vv check
-assert_rebuilt_for \
-  "persona template" \
-  "$tmp_root/persona-dirty.log" \
-  "crates/harn-cli/assets/persona-templates"
+run_check "$tmp_root/persona-dirty.log" -vv
+assert_rebuilt_for "persona template" "$tmp_root/persona-dirty.log" "$persona_root"
 
-# Leave the persona mutation in place: its fingerprint is now current, so the
-# next Cargo check can attribute the only new change to the portal root without
-# paying for a separate restoration build.
+# The prior check advanced the persona fingerprint. Mutating only the portal
+# now proves the second production watch root independently.
 printf '\n// embedded asset rebuild test marker\n' >> "$portal_asset"
-run_check "$tmp_root/portal-dirty.log" -vv check
-assert_rebuilt_for "portal asset" "$tmp_root/portal-dirty.log" "$portal_dist"
+run_check "$tmp_root/portal-dirty.log" -vv
+assert_rebuilt_for "portal asset" "$tmp_root/portal-dirty.log" "$portal_root"
 
-cp -p "$persona_backup" "$persona_asset"
-if ! git diff --quiet -- "$persona_asset"; then
-  echo "embedded asset rebuild test did not restore $persona_asset" >&2
+if rg -q 'Checking harn-|Compiling harn-' \
+  "$tmp_root/baseline.log" \
+  "$tmp_root/persona-dirty.log" \
+  "$tmp_root/portal-dirty.log"; then
+  echo 'embedded asset proof compiled a Harn crate' >&2
   exit 1
 fi
 

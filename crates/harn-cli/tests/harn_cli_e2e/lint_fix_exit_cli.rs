@@ -126,3 +126,29 @@ fn fix_applies_prompt_template_filter_suggestion() {
         "{{ name | upper }}\n"
     );
 }
+
+#[test]
+fn lint_and_fix_preserve_public_module_bindings() {
+    let dir = temp_root("public-module-binding");
+    let path = dir.join("public.harn");
+    let source = "pub const EXPORTED_SETTING: string = \"configured\"\n";
+    std::fs::write(&path, source).unwrap();
+
+    let (_stdout, stderr, code) = run(&dir, &["lint", "public.harn"]);
+    assert_eq!(code, 0, "public module API must lint cleanly: {stderr}");
+    assert!(
+        !stderr.contains("HARN-LNT-014") && !stderr.contains("unused-variable"),
+        "public module API must not receive an unused diagnostic:\n{stderr}"
+    );
+
+    let (_stdout, stderr, code) = run(&dir, &["lint", "--fix", "public.harn"]);
+    assert_eq!(
+        code, 0,
+        "public module API must remain clean under --fix: {stderr}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(path).unwrap(),
+        source,
+        "--fix must not rename an externally reachable API to the discard binding"
+    );
+}

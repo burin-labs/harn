@@ -7,6 +7,8 @@ cd "$ROOT_DIR"
 PUBLISH_SCRIPT="${HARN_PUBLISH_SCRIPT:-./scripts/publish.sh}"
 # shellcheck source=scripts/lib/cargo_env.sh
 source "$SCRIPT_DIR/lib/cargo_env.sh"
+# shellcheck source=scripts/lib/harn_bin.sh
+source "$SCRIPT_DIR/lib/harn_bin.sh"
 
 release_gate_target_name() {
   printf '%s' "$(basename "$ROOT_DIR")" | tr -c 'A-Za-z0-9._-' '-'
@@ -504,16 +506,9 @@ cmd_audit() {
   if [[ "$PRESERVE_AUDIT_TMP" -eq 1 ]]; then
     AUDIT_TMP_DIR="$tmp"
   fi
-  local stable_bin_dir stable_harn_bin stable_suffix
+  local stable_bin_dir stable_harn_bin
   stable_bin_dir="$tmp/harn-bin"
-  mkdir -p "$stable_bin_dir"
-  stable_suffix=""
-  case "$cargo_harn_bin" in
-    *.exe) stable_suffix=".exe" ;;
-  esac
-  stable_harn_bin="$stable_bin_dir/harn$stable_suffix"
-  cp "$cargo_harn_bin" "$stable_harn_bin"
-  chmod +x "$stable_harn_bin"
+  stable_harn_bin="$(harn_snapshot_binary "$cargo_harn_bin" "$stable_bin_dir")"
   HARN_BIN="$stable_harn_bin"
   HARN_CONFORMANCE_HARN_BIN="$stable_harn_bin"
   export HARN_BIN HARN_CONFORMANCE_HARN_BIN

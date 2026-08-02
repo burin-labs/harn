@@ -7,55 +7,52 @@
 //! outside the redirect entirely, and the escape only ever surfaced as a dirty
 //! worktree, and only when it happened to land inside the repository.
 //!
-//! This module turns that convention into an enforced boundary by pushing a
-//! [`CapabilityPolicy`] whose writable roots are exactly the directories a
-//! case owns. Reads are unrestricted: cases legitimately read the repository,
-//! the stdlib, and their own fixtures, and the failure mode being closed here
-//! is a stray *write*.
+//! This module turns that convention into an enforced boundary by scoping each
+//! case future with a [`CapabilityPolicy`] whose writable roots are exactly the
+//! directories a case owns. Reads are unrestricted: cases legitimately read
+//! the repository, the stdlib, and their own fixtures, and the failure mode
+//! being closed here is a stray *write*.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use harn_vm::orchestration::{CapabilityPolicy, ProcessSandboxPolicy, SandboxProfile};
 
-/// Pops the case policy when the case finishes, whatever the outcome.
-pub(crate) struct ConformanceWriteRoot;
-
-impl Drop for ConformanceWriteRoot {
-    fn drop(&mut self) {
-        harn_vm::orchestration::pop_execution_policy();
-    }
+/// Build the capability ceiling for one conformance case.
+///
+/// `case_root` is the unique directory the runner just created. It is the sole
+/// writable root; runtime state and host/workspace temp projections all derive
+/// paths beneath it.
+///
+/// The case's own fixture directory is deliberately **not** writable. Cases
+/// build scratch through case-owned workspace or host temp projections.
+/// Granting the fixture directory would make accidental source-tree writes
+/// valid by policy.
+///
+/// The source-execution boundary installs the policy inside its VM-owned
+/// `LocalSet`, so the boundary remains attached to the case across awaits and
+/// executor migration.
+pub(crate) fn policy(case_root: &Path) -> CapabilityPolicy {
+    case_policy(case_root)
 }
 
-impl ConformanceWriteRoot {
-    /// Confine the case to the directories it owns.
-    ///
-    /// `state_dir` is the per-case `.harn` the runner just created. The system
-    /// temp directory is writable because a case that asks for a temp dir has
-    /// already isolated itself.
-    ///
-    /// The case's own fixture directory is deliberately **not** writable. An
-    /// earlier draft granted it, on the reasoning that cases legitimately build
-    /// scratch next to themselves. That stopped being true: harn#5583, #5586,
-    /// and #5589 moved every such case to `harness.fs.temp_dir()`. Granting it
-    /// back would re-open by policy precisely the hole those changes closed by
-    /// construction.
-    ///
-    /// Everything else — the repository included — is readable and unwritable,
-    /// so a case that writes there fails with a `HARN-CAP-201` diagnostic
-    /// naming the path.
-    pub(crate) fn install(state_dir: &Path) -> Self {
-        harn_vm::orchestration::push_execution_policy(case_policy(state_dir));
-        Self
-    }
+/// Resolve the one root that all case-owned path projections derive from.
+///
+/// This is security-relevant normalization, not presentation cleanup. macOS
+/// commonly creates a temp directory through `/var` and resolves descendants
+/// through `/private/var`; intersecting those unnormalized aliases would treat
+/// the same directory as two disjoint authority roots.
+pub(crate) fn normalize_owned_root(case_root: &Path) -> std::io::Result<PathBuf> {
+    case_root.canonicalize()
 }
 
-fn case_policy(state_dir: &Path) -> CapabilityPolicy {
-    let mut workspace_roots = vec![root_string(state_dir), root_string(&std::env::temp_dir())];
-    workspace_roots.sort();
-    workspace_roots.dedup();
+fn case_policy(case_root: &Path) -> CapabilityPolicy {
+    let mut process_roots = runner_roots();
+    process_roots.push(root_string(case_root));
+    process_roots.sort();
+    process_roots.dedup();
 
     CapabilityPolicy {
-        workspace_roots,
+        workspace_roots: vec![root_string(case_root)],
         read_only_roots: filesystem_roots(),
         // A case may still launch a subprocess from the runner's directory.
         // That is the launch-cwd check, which is part of the path axis: it
@@ -63,8 +60,8 @@ fn case_policy(state_dir: &Path) -> CapabilityPolicy {
         // a case that shells out would be refused a working directory, since
         // the runner's cwd is deliberately not writable above.
         process_sandbox: ProcessSandboxPolicy {
-            read_roots: runner_roots(),
-            write_roots: runner_roots(),
+            read_roots: process_roots.clone(),
+            write_roots: process_roots,
             ..ProcessSandboxPolicy::default()
         },
         // Confine what a case *writes*, not what it *spawns*.
@@ -123,14 +120,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_case_owns_its_state_dir_but_not_its_fixture_directory() {
-        let policy = case_policy(Path::new("/tmp/harn-conformance-state-x/.harn"));
+    fn the_case_owns_its_root_but_not_its_fixture_directory() {
+        let policy = case_policy(Path::new("/tmp/harn-conformance-case-x"));
 
         assert!(policy
             .workspace_roots
             .iter()
-            .any(|root| root == "/tmp/harn-conformance-state-x/.harn"));
-        // Cases build scratch in `temp_dir()`, never beside themselves.
+            .any(|root| root == "/tmp/harn-conformance-case-x"));
+        // Cases build scratch under their owned root, never beside themselves.
         assert!(
             !policy
                 .workspace_roots
@@ -138,6 +135,38 @@ mod tests {
                 .any(|root| root.contains("conformance/tests")),
             "a fixture directory is not the case's to write: {:?}",
             policy.workspace_roots
+        );
+    }
+
+    #[test]
+    fn a_checkout_below_the_host_temp_root_is_not_writable() {
+        let host_temp = tempfile::tempdir().expect("host temp root");
+        let case_root = host_temp.path().join("case-root");
+        let checkout = host_temp.path().join("runner-checkout");
+        let policy = case_policy(&case_root);
+
+        assert!(
+            policy
+                .workspace_roots
+                .iter()
+                .all(|root| !checkout.starts_with(Path::new(root))),
+            "an ambient temp root must not grant an unrelated checkout: {:?}",
+            policy.workspace_roots
+        );
+    }
+
+    #[test]
+    fn owned_root_is_normalized_before_it_becomes_authority() {
+        let host_temp = tempfile::tempdir().expect("host temp root");
+        let case_root = host_temp.path().join("case-root");
+        let alias_parent = host_temp.path().join("alias-parent");
+        std::fs::create_dir_all(&case_root).expect("case root");
+        std::fs::create_dir_all(&alias_parent).expect("alias parent");
+        let aliased = alias_parent.join("..").join("case-root");
+
+        assert_eq!(
+            normalize_owned_root(&aliased).expect("normalize owned root"),
+            case_root.canonicalize().expect("canonical case root")
         );
     }
 
@@ -159,12 +188,20 @@ mod tests {
 
     #[test]
     fn subprocesses_may_still_start_from_the_runners_directory() {
-        let policy = case_policy(Path::new("/state/.harn"));
+        let case_root = Path::new("/case-root");
+        let policy = case_policy(case_root);
         let cwd = root_string(&std::env::current_dir().unwrap());
         assert!(
             policy.process_sandbox.read_roots.contains(&cwd)
                 && policy.process_sandbox.write_roots.contains(&cwd),
             "cases shell out from the runner's directory: {:?}",
+            policy.process_sandbox
+        );
+        let case_root = root_string(case_root);
+        assert!(
+            policy.process_sandbox.read_roots.contains(&case_root)
+                && policy.process_sandbox.write_roots.contains(&case_root),
+            "cases shell out from their owned scratch root: {:?}",
             policy.process_sandbox
         );
         assert!(

@@ -47,7 +47,7 @@ run_guard() {
     --defer-project-handlers --allow= "$script_dir/agent_shell_guard.harn"
 }
 
-if [[ "${HARN_SHELL_GUARD_DEBUG:-0}" == "1" ]]; then
+if [[ "${AGENT_SHELL_GUARD_DEBUG:-0}" == "1" ]]; then
   printf '%s' "$input" | run_guard || true
 else
   printf '%s' "$input" | run_guard 2>/dev/null || true

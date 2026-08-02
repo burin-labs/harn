@@ -26,7 +26,7 @@
 #   HARN_TARGET_GC_FIND_DEPTH   max depth for nested worktree discovery (default 3)
 #   HARN_TARGET_GC_MIN_AGE_SECS minimum idle age before deletion (default 10800)
 #   HARN_DEV_SETUP_STORAGE_ROOT one base for harn-target; when unset, sweep
-#                               both the legacy $TMPDIR and Rust-only cache roots
+#                               both the legacy $TMPDIR and durable cache roots
 set -euo pipefail
 
 dry_run=0

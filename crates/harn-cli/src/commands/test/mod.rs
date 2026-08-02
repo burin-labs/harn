@@ -18,7 +18,7 @@ use crate::env_guard::ScopedEnvVar;
 use crate::json_envelope::{self, JsonEnvelope, JsonError};
 use crate::test_report::{self, TestCaseReport, TestOutcome, TestReport};
 use crate::test_runner;
-use crate::{execute_with_skill_dirs, execute_with_skill_dirs_and_harness, ExecError};
+use crate::{execute_with_skill_dirs, ExecError};
 
 mod conformance;
 mod reporting;

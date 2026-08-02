@@ -767,13 +767,11 @@ jobs:
       # avoidably missing archives.
       fail-fast: false
       matrix:
-        # release_codegen_units: 16 across the board. A higher unit count
-        # parallelizes codegen, cuts wall-clock, AND lowers peak linker
-        # memory during the LTO final link — the latter is what was OOM-
-        # killing the aarch64 leg mid-link. The binary-size cost vs cgu=1
-        # is a few percent and is more than offset by `strip = symbols`
-        # (set in the Build step env below). Release-recovery dispatches a
-        # subset of this matrix when only one target archive is missing.
+        # release_codegen_units is target policy. Keep 16 where parallel
+        # codegen and lower peak linker memory prevent aarch64 OOMs; x86_64
+        # Linux uses 8 to recover binary-size headroom without serializing the
+        # link at cgu=1. Release-recovery dispatches a subset of this matrix
+        # when only one target archive is missing.
         include: ${{ fromJSON(needs.setup.outputs.build_matrix) }}
 
     steps:
@@ -875,7 +873,7 @@ jobs:
         # benchmarks keep their hard byte/ELF gate but only pay cargo-bloat's
         # tens-of-minutes relink/analysis tail when explicitly requested.
         if: matrix.target == 'x86_64-unknown-linux-gnu' && (needs.setup.outputs.build_mode == 'warm' || (needs.setup.outputs.build_mode == 'benchmark' && inputs.benchmark_cargo_bloat))
-        uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2.84.0
+        uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # v2.85.2
         with:
           tool: cargo-bloat
 
@@ -1468,7 +1466,7 @@ jobs:
           done
 
       - name: Log in to GHCR
-        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4.5.1
         with:
           registry: ghcr.io
           username: ${{ github.actor }}

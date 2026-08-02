@@ -2,6 +2,8 @@
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+# shellcheck source=scripts/lib/harn_bin.sh
+source "$repo_root/scripts/lib/harn_bin.sh"
 
 tmp_root=$(mktemp -d)
 trap 'rm -rf "$tmp_root"' EXIT
@@ -17,6 +19,25 @@ HARN_BIN="$fake_bin" "$repo_root/scripts/harn_bin.sh" --print >"$tmp_root/explic
 if ! grep -Fxq "$fake_bin" "$tmp_root/explicit.out"; then
   echo "harn_bin resolver did not return the explicit executable HARN_BIN" >&2
   cat "$tmp_root/explicit.out" >&2
+  exit 1
+fi
+
+snapshot="$(harn_snapshot_binary "$fake_bin" "$tmp_root/stable/harn-bin")"
+if [[ "$snapshot" != "$tmp_root/stable/harn-bin/harn" ]] || [[ ! -x "$snapshot" ]]; then
+  echo "harn binary snapshot did not produce the canonical executable path" >&2
+  exit 1
+fi
+rm "$fake_bin"
+if [[ "$("$snapshot")" != "fake harn" ]]; then
+  echo "harn binary snapshot still depended on the mutable source path" >&2
+  exit 1
+fi
+
+fake_exe="$tmp_root/harn.exe"
+cp "$snapshot" "$fake_exe"
+exe_snapshot="$(harn_snapshot_binary "$fake_exe" "$tmp_root/stable/windows")"
+if [[ "$exe_snapshot" != "$tmp_root/stable/windows/harn.exe" ]]; then
+  echo "harn binary snapshot did not preserve the Windows executable suffix" >&2
   exit 1
 fi
 
@@ -45,7 +66,10 @@ set -euo pipefail
   printf 'CARGO_TARGET_DIR=%s\n' "${CARGO_TARGET_DIR-__unset__}"
   printf 'CARGO_BUILD_BUILD_DIR=%s\n' "${CARGO_BUILD_BUILD_DIR-__unset__}"
   printf 'RUSTC_WRAPPER=%s\n' "${RUSTC_WRAPPER-__unset__}"
+  printf 'RUSTC_WORKSPACE_WRAPPER=%s\n' "${RUSTC_WORKSPACE_WRAPPER-__unset__}"
   printf 'CARGO_BUILD_RUSTC_WRAPPER=%s\n' "${CARGO_BUILD_RUSTC_WRAPPER-__unset__}"
+  printf 'CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER=%s\n' "${CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER-__unset__}"
+  printf 'SCCACHE_DISABLE=%s\n' "${SCCACHE_DISABLE-__unset__}"
 } >> "$FAKE_CARGO_RECORD"
 
 case "${FAKE_CARGO_MODE:-success}" in
@@ -68,6 +92,11 @@ case "${FAKE_CARGO_MODE:-success}" in
       echo "retry cargo failure" >&2
       exit 19
     fi
+    ;;
+  wrapper-timeout-always)
+    tail -f /dev/null &
+    printf '%s\n' "$!" >> "${FAKE_CARGO_CHILD_PID_FILE:?}"
+    wait "$!"
     ;;
 esac
 
@@ -236,13 +265,52 @@ if [[ "$(grep -Fc 'args=run --quiet --bin harn -- __internal-executable-path' "$
 fi
 
 : > "$record"
-child_pid_file="$tmp_root/timeout-child.pid"
+child_pid_file="$tmp_root/default-timeout-child.pid"
+if RUSTC_WRAPPER=sccache \
+  CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" \
+  FAKE_CARGO_MODE=wrapper-timeout \
+  FAKE_CARGO_CHILD_PID_FILE="$child_pid_file" \
+  HARN_BIN_CARGO_TIMEOUT_SECONDS=0.1 \
+  PATH="$fake_cargo_bin:$PATH" \
+  "$repo_root/scripts/harn_bin.sh" --print \
+  > "$tmp_root/default-timeout.out" \
+  2> "$tmp_root/default-timeout.err"; then
+  echo "harn_bin resolver retried a compiler-wrapper timeout by default" >&2
+  exit 1
+else
+  exit_code=$?
+fi
+if [[ "$exit_code" -ne 124 ]]; then
+  echo "compiler-wrapper timeout status changed: expected 124, got $exit_code" >&2
+  cat "$tmp_root/default-timeout.err" >&2
+  exit 1
+fi
+if [[ "$(grep -Fc 'args=run --quiet --bin harn -- __internal-executable-path' "$record")" -ne 1 ]]; then
+  echo "compiler-wrapper timeout amplified contention with another Cargo probe" >&2
+  cat "$record" >&2
+  exit 1
+fi
+if ! grep -Fq "HARN_BIN_RETRY_WITHOUT_WRAPPER=1" "$tmp_root/default-timeout.err"; then
+  echo "compiler-wrapper timeout did not offer the explicit recovery control" >&2
+  cat "$tmp_root/default-timeout.err" >&2
+  exit 1
+fi
+timed_out_child_pid=$(cat "$child_pid_file")
+if kill -0 "$timed_out_child_pid" 2>/dev/null; then
+  echo "compiler-wrapper timeout left a descendant process alive: $timed_out_child_pid" >&2
+  exit 1
+fi
+
+: > "$record"
+child_pid_file="$tmp_root/explicit-retry-child.pid"
 RUSTC_WRAPPER=sccache \
   CARGO_TARGET_DIR="$target_dir" \
   FAKE_CARGO_RECORD="$record" \
   FAKE_CARGO_MODE=wrapper-timeout \
   FAKE_CARGO_CHILD_PID_FILE="$child_pid_file" \
   HARN_BIN_CARGO_TIMEOUT_SECONDS=0.1 \
+  HARN_BIN_RETRY_WITHOUT_WRAPPER=1 \
   PATH="$fake_cargo_bin:$PATH" \
   "$repo_root/scripts/harn_bin.sh" --print \
   > "$tmp_root/timeout-recovery.out" \
@@ -267,11 +335,61 @@ if ! grep -Fxq "RUSTC_WRAPPER=" "$record"; then
   cat "$record" >&2
   exit 1
 fi
+for cleared in \
+  "RUSTC_WORKSPACE_WRAPPER=" \
+  "CARGO_BUILD_RUSTC_WRAPPER=" \
+  "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER=" \
+  "SCCACHE_DISABLE=1"; do
+  if ! grep -Fxq "$cleared" "$record"; then
+    echo "compiler-wrapper timeout retry did not set $cleared" >&2
+    cat "$record" >&2
+    exit 1
+  fi
+done
 timed_out_child_pid=$(cat "$child_pid_file")
 if kill -0 "$timed_out_child_pid" 2>/dev/null; then
   echo "compiler-wrapper timeout left a descendant process alive: $timed_out_child_pid" >&2
   exit 1
 fi
+
+: > "$record"
+child_pid_file="$tmp_root/retry-timeout-children.pid"
+if RUSTC_WORKSPACE_WRAPPER=sccache \
+  CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" \
+  FAKE_CARGO_MODE=wrapper-timeout-always \
+  FAKE_CARGO_CHILD_PID_FILE="$child_pid_file" \
+  HARN_BIN_CARGO_TIMEOUT_SECONDS=0.1 \
+  HARN_BIN_RETRY_WITHOUT_WRAPPER=1 \
+  PATH="$fake_cargo_bin:$PATH" \
+  "$repo_root/scripts/harn_bin.sh" --print \
+  > "$tmp_root/retry-timeout.out" \
+  2> "$tmp_root/retry-timeout.err"; then
+  echo "harn_bin resolver accepted a timed-out wrapper-disabled retry" >&2
+  exit 1
+else
+  exit_code=$?
+fi
+if [[ "$exit_code" -ne 124 ]]; then
+  echo "wrapper-disabled retry timeout status changed: expected 124, got $exit_code" >&2
+  exit 1
+fi
+if [[ "$(grep -Fc 'hint: to reuse a binary you already built:' "$tmp_root/retry-timeout.err")" -ne 1 ]]; then
+  echo "wrapper-disabled retry timeout did not print one terminal hint block" >&2
+  cat "$tmp_root/retry-timeout.err" >&2
+  exit 1
+fi
+if [[ "$(grep -Fc 'args=run --quiet --bin harn -- __internal-executable-path' "$record")" -ne 2 ]]; then
+  echo "wrapper-disabled retry timeout did not run exactly two probes" >&2
+  cat "$record" >&2
+  exit 1
+fi
+while IFS= read -r timed_out_child_pid; do
+  if kill -0 "$timed_out_child_pid" 2>/dev/null; then
+    echo "wrapper-disabled retry timeout left a descendant alive: $timed_out_child_pid" >&2
+    exit 1
+  fi
+done < "$child_pid_file"
 
 : > "$record"
 child_pid_file="$tmp_root/retry-failure-child.pid"
@@ -281,6 +399,7 @@ if RUSTC_WRAPPER=sccache \
   FAKE_CARGO_MODE=wrapper-timeout-retry-failure \
   FAKE_CARGO_CHILD_PID_FILE="$child_pid_file" \
   HARN_BIN_CARGO_TIMEOUT_SECONDS=0.1 \
+  HARN_BIN_RETRY_WITHOUT_WRAPPER=1 \
   PATH="$fake_cargo_bin:$PATH" \
   "$repo_root/scripts/harn_bin.sh" --print \
   > "$tmp_root/retry-failure.out" \
@@ -348,5 +467,43 @@ if [[ "$status" -ne 2 ]] || ! grep -Fq "must be a positive number" "$tmp_root/in
   cat "$tmp_root/invalid-timeout.err" >&2
   exit 1
 fi
+
+: > "$record"
+if HARN_BIN_RETRY_WITHOUT_WRAPPER=invalid \
+  CARGO_TARGET_DIR="$target_dir" \
+  FAKE_CARGO_RECORD="$record" \
+  PATH="$fake_cargo_bin:$PATH" \
+  "$repo_root/scripts/harn_bin.sh" --print \
+  > "$tmp_root/invalid-retry.out" \
+  2> "$tmp_root/invalid-retry.err"; then
+  echo "harn_bin resolver accepted an invalid wrapper retry policy" >&2
+  exit 1
+else
+  exit_code=$?
+fi
+if [[ "$exit_code" -ne 2 ]] || ! grep -Fq "must be 0 or 1" "$tmp_root/invalid-retry.err"; then
+  echo "invalid wrapper retry policy was not reported with status 2" >&2
+  cat "$tmp_root/invalid-retry.err" >&2
+  exit 1
+fi
+if [[ -s "$record" ]]; then
+  echo "invalid wrapper retry policy invoked Cargo before validation" >&2
+  cat "$record" >&2
+  exit 1
+fi
+
+registry="$repo_root/crates/harn-vm/src/environment_registry_names.txt"
+resolver_names="$(grep -Eho 'HARN_[A-Z0-9_]+' \
+  "$repo_root/scripts/harn_bin.sh" "$repo_root/scripts/lib/harn_bin.sh" | sort -u)"
+if [[ "$(wc -l <<<"$resolver_names" | tr -d ' ')" -lt 4 ]]; then
+  echo "registry guard discovered too few harn_bin environment controls" >&2
+  exit 1
+fi
+while IFS= read -r name; do
+  if ! grep -Fxq "$name" "$registry"; then
+    echo "harn_bin environment control is absent from the registry: $name" >&2
+    exit 1
+  fi
+done <<<"$resolver_names"
 
 echo "harn_bin_resolver_test: ok"

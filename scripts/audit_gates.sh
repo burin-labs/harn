@@ -25,7 +25,10 @@
 # throughput for a measurement that reflects the workload rather than runner
 # contention.
 #
-# Usage: scripts/audit_gates.sh
+# Usage: scripts/audit_gates.sh [--phase all|conformance|audit]
+#   --phase all             run both worker pools together (default; local use)
+#   --phase conformance     run conformance shards, then the performance ratchet
+#   --phase audit           run only the independent audit gate fanout
 #   HARN_BIN                 pre-built binary to reuse (skips the warm build)
 #   AUDIT_GATES_CONCURRENCY  `make -j` cap (default: nproc minus conformance
 #                            shards; see headroom note below). Explicit values
@@ -37,6 +40,36 @@
 #                            (default: 60000 under this parallel fanout)
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+phase="all"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --phase)
+      [ "$#" -ge 2 ] || { echo "error: --phase requires a value" >&2; exit 2; }
+      phase="$2"
+      shift 2
+      ;;
+    --phase=*)
+      phase="${1#--phase=}"
+      shift
+      ;;
+    -h|--help)
+      echo "usage: scripts/audit_gates.sh [--phase all|conformance|audit]"
+      exit 0
+      ;;
+    *)
+      echo "error: unknown argument: $1" >&2
+      exit 2
+      ;;
+  esac
+done
+case "$phase" in
+  all|conformance|audit) ;;
+  *)
+    echo "error: invalid --phase '$phase' (expected all, conformance, or audit)" >&2
+    exit 2
+    ;;
+esac
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
@@ -115,7 +148,7 @@ esac
 # at most half the cores, and the default audit fanout receives the remainder,
 # so the two worker pools never oversubscribe the runner. Explicit shard and
 # concurrency values remain absolute so local scripts/tests keep their knobs.
-if [ -z "$explicit_audit_concurrency" ] && [ "$concurrency" -gt 1 ]; then
+if [ "$phase" = "all" ] && [ -z "$explicit_audit_concurrency" ] && [ "$concurrency" -gt 1 ]; then
   reserved="$conformance_shards"
   if [ "$concurrency" -gt "$reserved" ]; then
     concurrency=$((concurrency - reserved))
@@ -192,83 +225,102 @@ terminate_children() {
   done
   exit "$status"
 }
+forget_child() {
+  local waited_pid="$1"
+  local index
+  for index in "${!child_pids[@]}"; do
+    if [ "${child_pids[$index]}" = "$waited_pid" ]; then
+      child_pids[$index]=""
+      return
+    fi
+  done
+}
 trap cleanup_files EXIT
 trap 'terminate_children 130' INT
 trap 'terminate_children 143' TERM
 
 audit_status=0
-(
-  echo "=== audit gates (make -j$concurrency -k${output_sync:+ $output_sync}, HARN_BIN warm) ==="
-  gate_started="$(date +%s)"
-  if make -j"$concurrency" -k ${output_sync} "${GATES[@]}" 2>&1 | tee "$audit_log"; then
-    echo "ok: audit gates ($(( $(date +%s) - gate_started ))s)"
-    echo "=== all audit gates passed ==="
-  else
-    status=$?
-    echo "FAIL: one or more audit gates failed ($(( $(date +%s) - gate_started ))s)" >&2
-    exit "$status"
-  fi
-) &
-audit_pid=$!
-child_pids+=("$audit_pid")
+audit_pid=""
+if [ "$phase" != "conformance" ]; then
+  (
+    echo "=== audit gates (make -j$concurrency -k${output_sync:+ $output_sync}, HARN_BIN warm) ==="
+    gate_started="$(date +%s)"
+    if make -j"$concurrency" -k ${output_sync} "${GATES[@]}" 2>&1 | tee "$audit_log"; then
+      echo "ok: audit gates ($(( $(date +%s) - gate_started ))s)"
+      echo "=== all audit gates passed ==="
+    else
+      status=$?
+      echo "FAIL: one or more audit gates failed ($(( $(date +%s) - gate_started ))s)" >&2
+      exit "$status"
+    fi
+  ) &
+  audit_pid=$!
+  child_pids+=("$audit_pid")
+fi
 
 conformance_status=0
-conformance_started="$(date +%s)"
-echo "=== conformance ($conformance_shards process-isolated shards, HARN_BIN warm) ==="
 conformance_pids=()
-for shard_index in $(seq 1 "$conformance_shards"); do
-  shard_log="$conformance_log_dir/shard-$shard_index.log"
-  (
-    "$SCRIPT_DIR/harn_test_env.sh" "$HARN_BIN" test conformance \
-      --timeout "$conformance_timeout_ms" \
-      --shard-index "$shard_index" \
-      --shard-total "$conformance_shards"
-  ) >"$shard_log" 2>&1 &
-  shard_pid=$!
-  conformance_pids+=("$shard_pid")
-  child_pids+=("$shard_pid")
-done
-
 conformance_failures=()
-for offset in "${!conformance_pids[@]}"; do
-  shard_index=$((offset + 1))
-  shard_pid="${conformance_pids[$offset]}"
-  if wait "$shard_pid"; then
-    shard_status=0
+if [ "$phase" != "audit" ]; then
+  conformance_started="$(date +%s)"
+  echo "=== conformance ($conformance_shards process-isolated shards, HARN_BIN warm) ==="
+  for shard_index in $(seq 1 "$conformance_shards"); do
+    shard_log="$conformance_log_dir/shard-$shard_index.log"
+    (
+      "$SCRIPT_DIR/harn_test_env.sh" "$HARN_BIN" test conformance \
+        --timeout "$conformance_timeout_ms" \
+        --shard-index "$shard_index" \
+        --shard-total "$conformance_shards"
+    ) >"$shard_log" 2>&1 &
+    shard_pid=$!
+    conformance_pids+=("$shard_pid")
+    child_pids+=("$shard_pid")
+  done
+
+  for offset in "${!conformance_pids[@]}"; do
+    shard_index=$((offset + 1))
+    shard_pid="${conformance_pids[$offset]}"
+    if wait "$shard_pid"; then
+      shard_status=0
+    else
+      shard_status=$?
+      conformance_status="$shard_status"
+      conformance_failures+=("$shard_index:$shard_status")
+    fi
+    forget_child "$shard_pid"
+    echo "=== conformance shard $shard_index/$conformance_shards ==="
+    cat "$conformance_log_dir/shard-$shard_index.log"
+  done
+
+  if [ "$conformance_status" -eq 0 ]; then
+    echo "ok: conformance ($conformance_shards shards, $(( $(date +%s) - conformance_started ))s)"
   else
-    shard_status=$?
-    conformance_status="$shard_status"
-    conformance_failures+=("$shard_index:$shard_status")
+    echo "FAIL: conformance shard(s) ${conformance_failures[*]} failed ($(( $(date +%s) - conformance_started ))s)" >&2
   fi
-  child_pids[offset + 1]=""
-  echo "=== conformance shard $shard_index/$conformance_shards ==="
-  cat "$conformance_log_dir/shard-$shard_index.log"
-done
-
-if [ "$conformance_status" -eq 0 ]; then
-  echo "ok: conformance ($conformance_shards shards, $(( $(date +%s) - conformance_started ))s)"
-else
-  echo "FAIL: conformance shard(s) ${conformance_failures[*]} failed ($(( $(date +%s) - conformance_started ))s)" >&2
 fi
 
-if wait "$audit_pid"; then
-  audit_status=0
-else
-  audit_status=$?
+if [ -n "$audit_pid" ]; then
+  if wait "$audit_pid"; then
+    audit_status=0
+  else
+    audit_status=$?
+  fi
+  forget_child "$audit_pid"
 fi
-child_pids[0]=""
 
 # The performance gate is a benchmark, not a source or artifact consistency
 # check. Run it only after the conformance shards and audit fanout have settled
 # so its resource measurements are comparable to the platform baseline.
 performance_status=0
-performance_started="$(date +%s)"
-echo "=== test-case performance (isolated, HARN_BIN warm) ==="
-if make check-test-case-performance 2>&1 | tee "$performance_log"; then
-  echo "ok: test-case performance ($(( $(date +%s) - performance_started ))s)"
-else
-  performance_status=$?
-  echo "FAIL: test-case performance ($(( $(date +%s) - performance_started ))s)" >&2
+if [ "$phase" != "audit" ]; then
+  performance_started="$(date +%s)"
+  echo "=== test-case performance (isolated, HARN_BIN warm) ==="
+  if make check-test-case-performance 2>&1 | tee "$performance_log"; then
+    echo "ok: test-case performance ($(( $(date +%s) - performance_started ))s)"
+  else
+    performance_status=$?
+    echo "FAIL: test-case performance ($(( $(date +%s) - performance_started ))s)" >&2
+  fi
 fi
 
 # Say at the TAIL what failed, because the tail is where a reader looks.
@@ -281,7 +333,7 @@ fi
 # two-gate failure has been misread as that flake. A log that makes a real
 # failure look like a known flake is a defect even when every gate is correct.
 failure_summary() {
-  local phase="$1"
+  local failure_phase="$1"
   local log_path="${2:-$audit_log}"
   local names
   # `|| true`: a gate can fail WITHOUT emitting `make: *** [target]` (a bare
@@ -292,18 +344,22 @@ failure_summary() {
     | sed -E 's/.*: ([^]]+)\]/\1/' | sort -u | tr '\n' ' ' || true)"
   {
     echo ""
-    echo "=== FAILED: ${phase} ==="
+    echo "=== FAILED: ${failure_phase} ==="
     if [ -n "${names// /}" ]; then
       echo "failing gate(s): ${names}"
     fi
     echo "The failing output is ABOVE, not at this tail."
-    if [ "$log_path" = "$audit_log" ]; then
+    if [ "$phase" = "all" ] && [ "$log_path" = "$audit_log" ]; then
       echo "The audit gates run in parallel with conformance."
-    else
+    elif [ "$phase" = "all" ]; then
       echo "This phase runs after conformance and the audit fanout."
+    else
+      echo "This worker runs independently of the other Harn proof worker."
     fi
     echo "Search this log for 'make: *** ' and 'FAIL:'."
-    echo "'ok: conformance' near the tail does NOT mean this job passed."
+    if [ "$phase" = "all" ]; then
+      echo "'ok: conformance' near the tail does NOT mean this job passed."
+    fi
   } >&2
 }
 
@@ -323,4 +379,8 @@ fi
 if [ "$performance_status" -ne 0 ]; then
   exit "$performance_status"
 fi
-echo "=== conformance and audit gates passed ==="
+case "$phase" in
+  all) echo "=== conformance and audit gates passed ===" ;;
+  conformance) echo "=== conformance and performance gates passed ===" ;;
+  audit) echo "=== audit gates passed ===" ;;
+esac

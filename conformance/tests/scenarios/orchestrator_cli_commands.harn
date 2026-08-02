@@ -9,7 +9,7 @@ fn first_group(pattern, text) {
 }
 
 pipeline test(harness: Harness, task) {
-  const root = harness.fs.mkdtemp("harn-orchestrator-cli-")
+  const root = harness.fs.mkdtemp_in_workspace("harn-orchestrator-cli-")
   const replay_marker = path_join(root, "replay-ready.marker")
   harness.fs.write_text(
     path_join(root, "harn.toml"),

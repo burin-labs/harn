@@ -220,6 +220,7 @@ fn outcome_dict(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::process::{install_spawner, MockProcessConfig, MockSpawner, SpawnerGuard};
     use crate::tools::inspect_test_results::{store_run, RawArtifacts, TestSummaryData};
     use harn_lexer::Lexer;
     use harn_parser::Parser;
@@ -228,6 +229,10 @@ mod tests {
     use std::path::Path;
     use std::sync::Arc;
     use tempfile::TempDir;
+
+    const PASSING_CARGO_OUTPUT: &str = "running 1 test\n\
+test tests::green ... ok\n\n\
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out\n";
 
     /// Build the `issue` arg — a single dict `{result_handle}` — the way the VM
     /// dispatcher passes it.
@@ -274,6 +279,30 @@ mod tests {
         )
         .expect("fixture source");
         dir
+    }
+
+    fn install_passing_cargo_spawner(count: usize) -> (Arc<MockSpawner>, SpawnerGuard) {
+        let spawner = Arc::new(MockSpawner::new());
+        for offset in 0..count {
+            let mut config = MockProcessConfig::with_stdout(0, PASSING_CARGO_OUTPUT);
+            config.pid += u32::try_from(offset).expect("fixture spawn count fits in u32");
+            let _controller = spawner.enqueue(config);
+        }
+        let guard = install_spawner(spawner.clone());
+        (spawner, guard)
+    }
+
+    fn assert_cargo_plan(spawner: &MockSpawner, count: usize, filter: Option<&str>) {
+        let expected_args = match filter {
+            Some(filter) => vec!["test".to_string(), filter.to_string()],
+            None => vec!["test".to_string()],
+        };
+        let captured = spawner.captured();
+        assert_eq!(captured.len(), count, "every expected plan must execute");
+        for spec in captured {
+            assert_eq!(spec.program, "cargo");
+            assert_eq!(spec.args, expected_args);
+        }
     }
 
     fn run_test_in(cwd: &Path, argv: Option<Vec<&str>>, filter: Option<&str>) -> VmValue {
@@ -367,6 +396,7 @@ mod tests {
     fn host_discovered_test_plan_issues_pass() {
         let workspace = TempDir::new().expect("workspace");
         let fixture = cargo_fixture(workspace.path(), "verdict_positive");
+        let (spawner, _spawner_guard) = install_passing_cargo_spawner(1);
         harn_vm::stdlib::process::set_thread_execution_context(Some(RunExecutionRecord {
             cwd: Some(fixture.path().to_string_lossy().into_owned()),
             project_root: Some(fixture.path().to_string_lossy().into_owned()),
@@ -376,6 +406,7 @@ mod tests {
         let res = run_test_in(fixture.path(), None, None);
         let out = verdict_issue_builtin(&issue_arg(&result_handle(&res))).expect("issue ok");
         harn_vm::stdlib::process::set_thread_execution_context(None);
+        assert_cargo_plan(&spawner, 1, None);
         assert_eq!(outcome_of(&out), "pass");
     }
 
@@ -385,6 +416,7 @@ mod tests {
     fn filtered_discovered_test_plan_cannot_issue_pass() {
         let workspace = TempDir::new().expect("workspace");
         let fixture = cargo_fixture(workspace.path(), "verdict_filtered");
+        let (spawner, _spawner_guard) = install_passing_cargo_spawner(1);
         harn_vm::stdlib::process::set_thread_execution_context(Some(RunExecutionRecord {
             cwd: Some(fixture.path().to_string_lossy().into_owned()),
             project_root: Some(fixture.path().to_string_lossy().into_owned()),
@@ -394,6 +426,7 @@ mod tests {
         let res = run_test_in(fixture.path(), None, Some("green"));
         let out = verdict_issue_builtin(&issue_arg(&result_handle(&res))).expect("issue ok");
         harn_vm::stdlib::process::set_thread_execution_context(None);
+        assert_cargo_plan(&spawner, 1, Some("green"));
         assert_eq!(outcome_of(&out), "unavailable");
     }
 
@@ -407,6 +440,7 @@ mod tests {
             .run_until(async {
                 let workspace = TempDir::new().expect("workspace");
                 let fixture = cargo_fixture(workspace.path(), "verdict_overlap");
+                let (spawner, _spawner_guard) = install_passing_cargo_spawner(2);
                 harn_vm::stdlib::process::set_thread_execution_context(Some(RunExecutionRecord {
                     cwd: Some(fixture.path().to_string_lossy().into_owned()),
                     project_root: Some(fixture.path().to_string_lossy().into_owned()),
@@ -436,6 +470,7 @@ pipeline default(harness: Harness, _task) {{
                 let (result_a, result_b) =
                     tokio::join!(vm_a.execute(&chunk_a), vm_b.execute(&chunk_b));
                 harn_vm::stdlib::process::set_thread_execution_context(None);
+                assert_cargo_plan(&spawner, 2, None);
                 assert_eq!(result_a.expect("vm A").display(), "pass");
                 assert_eq!(result_b.expect("vm B").display(), "pass");
             })

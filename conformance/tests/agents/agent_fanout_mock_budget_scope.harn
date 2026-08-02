@@ -14,7 +14,7 @@ pipeline main(harness: Harness) {
         2,
         { ->
           const transcript_dir = path_join(
-            harness.fs.temp_dir(),
+            harness.fs.workspace_temp_dir(),
             "harn-fanout-context-manifest-" + harness.random.uuid(),
           )
           const results = agent_fanout(
