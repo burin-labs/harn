@@ -17,6 +17,12 @@ use super::persistence::load_run_record_snapshot;
 use super::time::parse_timestamp_ms;
 use super::{build_run_view_with_event_log, RunRecord, RunView, RunViewUsage, ViewProducer};
 
+mod join_evidence;
+#[cfg(test)]
+mod join_evidence_tests;
+
+use join_evidence::{project_join_evidence, JoinEvidenceProjection};
+
 pub const RUN_REPORT_SCHEMA: &str = "harn.run_report.v1";
 pub const RUN_REPORT_SCHEMA_VERSION: u32 = 1;
 const MAX_RUN_TREE_DEPTH: usize = 64;
@@ -144,10 +150,15 @@ pub struct RunReportCoordination {
     pub terminal: usize,
     pub open: usize,
     pub orphaned: usize,
-    /// `None` until the canonical lifecycle records an explicit join receipt.
+    /// Terminal children without a canonical join receipt. `None` when the
+    /// selected event evidence is missing, malformed, or truncated.
     pub unjoined: Option<usize>,
     pub max_concurrent_children: Option<usize>,
+    /// Parent wait duration is unavailable until a canonical wait-start event
+    /// exists. A join receipt alone cannot prove it.
     pub observed_wait_ms: Option<u64>,
+    /// Maximum observed child-terminal-to-parent-collection lag. `None` when
+    /// join evidence is incomplete or no valid lag was observed.
     pub observed_join_ms: Option<u64>,
 }
 
@@ -296,7 +307,7 @@ pub async fn build_run_report(request: RunReportRequest) -> Result<RunReport, Ru
         let timeline = query_session_timeline(event_log.as_ref(), Some(record), query)
             .await
             .map_err(|error| RunReportError::EventLog(error.to_string()))?;
-        if !timeline.nodes.is_empty() {
+        if event_log.is_some() || !timeline.nodes.is_empty() {
             timelines.push(timeline);
         }
         views.push(view);
@@ -584,19 +595,9 @@ fn assemble_report(
         ));
     }
 
-    agents.sort_by(|left, right| left.agent_id.cmp(&right.agent_id));
-    agents.dedup_by(|left, right| left.agent_id == right.agent_id);
-    delegations.sort_by(|left, right| {
-        (&left.parent_agent_id, &left.child_agent_id, &left.worker_id).cmp(&(
-            &right.parent_agent_id,
-            &right.child_agent_id,
-            &right.worker_id,
-        ))
-    });
-    llm_calls.sort_by_key(|call| (call.start_ms, call.call_id.clone()));
-    sources.sort_by(|left, right| left.id.cmp(&right.id));
-    checks.sort_by(|left, right| (&left.code, &left.agent_id).cmp(&(&right.code, &right.agent_id)));
-    let coordination = coordination_summary(&delegations, &checks);
+    let join_evidence = project_join_evidence(&delegations, &timelines, events_db_path.is_some());
+    checks.extend(join_evidence.checks.iter().cloned());
+    let coordination = coordination_summary(&delegations, &checks, &join_evidence);
     if !delegations.is_empty() {
         if coordination.max_concurrent_children.is_none() {
             checks.push(RunReportCheck {
@@ -612,9 +613,26 @@ fn assemble_report(
             severity: "info".to_string(),
             status: "unavailable".to_string(),
             agent_id: Some(format!("run:{root_run_id}")),
-            message: "the run has no canonical join receipt, so wait and collapse overhead cannot be measured".to_string(),
+            message: if join_evidence.complete {
+                "join receipts measure terminal-to-collection lag, but no canonical wait-start event exists, so parent wait and result-processing time remain unknown".to_string()
+            } else {
+                "canonical join evidence is missing, malformed, or truncated, so unjoined children, parent wait, and terminal-to-collection lag remain unknown".to_string()
+            },
         });
     }
+
+    agents.sort_by(|left, right| left.agent_id.cmp(&right.agent_id));
+    agents.dedup_by(|left, right| left.agent_id == right.agent_id);
+    delegations.sort_by(|left, right| {
+        (&left.parent_agent_id, &left.child_agent_id, &left.worker_id).cmp(&(
+            &right.parent_agent_id,
+            &right.child_agent_id,
+            &right.worker_id,
+        ))
+    });
+    llm_calls.sort_by_key(|call| (call.start_ms, call.call_id.clone()));
+    sources.sort_by(|left, right| left.id.cmp(&right.id));
+    checks.sort_by(|left, right| (&left.code, &left.agent_id).cmp(&(&right.code, &right.agent_id)));
 
     Ok(RunReport {
         schema: RUN_REPORT_SCHEMA.to_string(),
@@ -832,6 +850,7 @@ fn llm_call_from_span(run_id: &str, span: &super::RunTraceSpanRecord) -> RunRepo
 fn coordination_summary(
     delegations: &[RunReportDelegation],
     checks: &[RunReportCheck],
+    join_evidence: &JoinEvidenceProjection,
 ) -> RunReportCoordination {
     let terminal = delegations
         .iter()
@@ -879,10 +898,22 @@ fn coordination_summary(
             .iter()
             .filter(|check| check.code == "parent_run_missing")
             .count(),
-        unjoined: None,
+        unjoined: join_evidence.complete.then(|| {
+            delegations
+                .iter()
+                .filter(|delegation| {
+                    crate::agent_events::WorkerEvent::status_is_terminal(&delegation.status)
+                        && !join_evidence.joined(delegation)
+                })
+                .count()
+        }),
         max_concurrent_children,
         observed_wait_ms: None,
-        observed_join_ms: None,
+        observed_join_ms: if join_evidence.complete {
+            join_evidence.max_terminal_to_collection_ms
+        } else {
+            None
+        },
     }
 }
 
@@ -1108,6 +1139,7 @@ mod tests {
                 ..RunReportDelegation::default()
             }],
             &[],
+            &JoinEvidenceProjection::default(),
         );
 
         assert_eq!(coordination.terminal, 0);

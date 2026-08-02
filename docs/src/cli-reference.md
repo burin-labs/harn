@@ -2525,8 +2525,12 @@ the versioned `harn.run_report.v1` JSON projection. The report has one row per
 agent, checked parent/child links, LLM timing and cache/cost data recorded on
 trace spans, source hashes, redacted visible output, and structural checks.
 `--events-db` adds the redacted semantic timeline from a SQLite event log.
-Missing timing is `null`, not zero; until Harn records a join receipt, the
-report marks wait and result-collapse timing unavailable.
+Canonical `subagent_join` receipts let the report count terminal children that
+the parent has not collected and report the worst observed
+terminal-to-collection lag. These values remain `null`, not zero, when the
+event evidence is absent, malformed, or truncated. A join receipt does not
+record when the parent started waiting or how long result processing took, so
+`observed_wait_ms` remains `null` until Harn records that separate boundary.
 
 Timeline snapshots use schema version 2 and carry a `coverage` object with
 `returned`, `available`, and `truncated`. `available` is exact when Harn read
