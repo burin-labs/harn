@@ -232,7 +232,7 @@ fn capability_apply_converges_transitive_repairs_in_one_invocation() {
 }
 
 #[test]
-fn capability_apply_widens_an_existing_handle_for_an_imported_bundle() {
+fn capability_apply_preserves_an_existing_handle_for_an_imported_bundle() {
     let temp = tempfile::TempDir::new().unwrap();
     let mode = temp.path().join("mode.harn");
     let entry = temp.path().join("main.harn");
@@ -262,24 +262,28 @@ fn capability_apply_widens_an_existing_handle_for_an_imported_bundle() {
         callable_params(&updated, "invoke"),
         vec![
             param("setting", "string"),
-            shape_param("harness", &[("env", "HarnessEnv"), ("obs", "HarnessObs")],),
+            param("harness", "HarnessObs"),
+            param("env", "HarnessEnv"),
         ]
     );
     assert_eq!(
-        call_dict_argument_paths(&updated, "invoke", 1)[0],
+        call_dict_argument_paths(&updated, "run_auto_mode", 0)[0],
         BTreeMap::from([
-            ("env".to_string(), Some("harness.env".to_string())),
-            ("obs".to_string(), Some("harness.obs".to_string())),
+            ("env".to_string(), Some("env".to_string())),
+            ("obs".to_string(), Some("harness".to_string())),
         ])
     );
     assert_eq!(
-        call_argument_paths(&updated, "run_auto_mode")[0],
-        [Some("harness".to_string()), Some("setting".to_string())]
+        call_argument_paths(&updated, "invoke")[0][1..],
+        [
+            Some("harness.obs".to_string()),
+            Some("harness.env".to_string()),
+        ]
     );
 }
 
 #[test]
-fn capability_apply_inserts_an_argument_for_a_widened_existing_carrier() {
+fn capability_apply_projects_arguments_for_added_narrow_carriers() {
     let (result, updated) = apply_single(
         "pub fn read_mode(prefix: string, harness: HarnessEnv) -> string {\n  llm_usage()\n  return prefix + harness.get_or(\"MODE\", \"\")\n}\n\nfn invoke() -> string {\n  return read_mode(\"mode=\")\n}\n\nfn main(harness: Harness) {\n  invoke()\n}\n",
     );
@@ -293,7 +297,11 @@ fn capability_apply_inserts_an_argument_for_a_widened_existing_carrier() {
     );
     assert_eq!(
         call_argument_paths(&updated, "read_mode")[0][1],
-        Some("harness".to_string())
+        Some("harness.env".to_string())
+    );
+    assert_eq!(
+        call_argument_paths(&updated, "read_mode")[0][2],
+        Some("harness.obs".to_string())
     );
 }
 
