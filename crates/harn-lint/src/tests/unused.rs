@@ -21,6 +21,68 @@ log("hello")
 }
 
 #[test]
+fn test_public_module_bindings_are_externally_reachable() {
+    let diags = lint_source(
+        r#"
+pub const EXPORTED_SETTING: string = "configured"
+pub let exported_counter = 0
+"#,
+    );
+    assert!(
+        !has_rule(&diags, "unused-variable"),
+        "public module bindings must not be treated as file-local dead code: {diags:?}"
+    );
+}
+
+#[test]
+fn test_private_module_and_local_bindings_remain_checked() {
+    let diags = lint_source(
+        r#"
+const PRIVATE_SETTING = "configured"
+
+fn read_setting() {
+  const local_setting = "local"
+  return PRIVATE_SETTING
+}
+"#,
+    );
+    assert!(
+        diags.iter().any(|diagnostic| {
+            diagnostic.rule == "unused-variable" && diagnostic.message.contains("`local_setting`")
+        }),
+        "unused local binding should still be reported: {diags:?}"
+    );
+    assert!(
+        !diags.iter().any(|diagnostic| {
+            diagnostic.rule == "unused-variable" && diagnostic.message.contains("`PRIVATE_SETTING`")
+        }),
+        "referenced private module binding should remain clean: {diags:?}"
+    );
+
+    let unused_private = lint_source("const PRIVATE_SETTING = \"configured\"");
+    assert!(
+        unused_private.iter().any(|diagnostic| {
+            diagnostic.rule == "unused-variable" && diagnostic.message.contains("`PRIVATE_SETTING`")
+        }),
+        "unused private module binding should still be reported: {unused_private:?}"
+    );
+
+    let invalid_public_local = lint_source(
+        r#"
+fn invalid_export() {
+  pub const local_setting = "local"
+}
+"#,
+    );
+    assert!(
+        invalid_public_local.iter().any(|diagnostic| {
+            diagnostic.rule == "unused-variable" && diagnostic.message.contains("`local_setting`")
+        }),
+        "a local pub modifier must not make the binding externally reachable: {invalid_public_local:?}"
+    );
+}
+
+#[test]
 fn test_unused_underscore_ignored() {
     let diags = lint_source(
         r#"
