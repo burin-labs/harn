@@ -260,11 +260,12 @@ harn package docs --check
 
 ## Pack and publish dry run
 
-`harn package pack` validates the package and writes an inspectable artifact
-directory at `.harn/dist/<name>-<version>`. It excludes local build state such
-as Git administrative entries, `.harn/`, any `.harn-*` runtime directory,
-`target/`, and `node_modules/` at any depth. Files such as `.harn-version` are
-package content and remain included.
+Every `harn package verify` source, documentation, and packing gate uses the
+same package-input policy. It excludes Harn-owned `.harn/` and `.harn-*/`
+runtime directories at any depth, root `docs/dist/` output, Git administrative
+entries, `target/`, and `node_modules/`. Files such as `.harn-version` are
+package content and remain included. `harn package pack` validates those same
+inputs and writes an inspectable artifact at `.harn/dist/<name>-<version>`.
 
 ```bash
 harn package pack --dry-run

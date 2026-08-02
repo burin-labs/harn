@@ -70,16 +70,17 @@ pipeline default(harness: Harness, task) {
     first.success && first_data.drained == 1 && first_data.acked == 0 && first_data.deferred == 1,
   )
   harness.stdio.println(
-    first_data.summary.ready + first_data.summary.in_flight == 1
+    first_data.summary.in_flight == 1
       && first_data.summary.responses == 1
       && first_data.responses[0].outcome?.status == "dlq"
       && first_data.responses[0].outcome?.error
       != nil,
   )
-  // Poll a later drain until the deferred claim expires. The first drain's
-  // invocation-scoped exclusion set prevents it from dispatching its own
-  // deferred job again even if the deliberately short lease expires. A no-op
-  // later drain is safe to retry because it cannot consume a still-claimed job.
+  // Poll a later drain until the deferred claim expires. The first drain must
+  // keep its failed claim alive until it exits; otherwise it can reclaim and
+  // dispatch its own deferred job when response persistence plus loop overhead
+  // exceeds the short TTL. A no-op later drain is safe to retry because it
+  // cannot consume a still-claimed job.
   let second = nil
   let second_data = nil
   const claim_reclaim_deadline = harness.clock.now_ms() + 5000

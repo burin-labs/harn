@@ -1,5 +1,10 @@
 import { filter_nil } from "std/collections"
-import { connector_http_header } from "std/connectors/http"
+pub import {
+  connector_http_header,
+  connector_http_json,
+  connector_http_rate_limit,
+  connector_http_request,
+} from "std/connectors/http"
 import { JsonParseFailure, merge } from "std/json"
 
 const GIT_FORGE_PULL_REQUEST_TOPIC = "connectors.git_forge.pull_request"

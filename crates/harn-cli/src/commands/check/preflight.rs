@@ -2214,7 +2214,7 @@ fn walk_for_basename(
         if name_str.starts_with('.')
             || matches!(
                 name_str.as_ref(),
-                "target" | "node_modules" | "dist" | "build" | "out" | ".harn-runs"
+                "target" | "node_modules" | "dist" | "build" | "out"
             )
         {
             continue;
