@@ -48,6 +48,7 @@ struct ProgramCallable {
     boundary: bool,
     flow_predicate: bool,
     carrier: Option<Carrier>,
+    has_split_capability_params: bool,
     root_attenuation: Option<BTreeSet<CapabilityId>>,
     direct_requirements: BTreeSet<CapabilityId>,
 }
@@ -136,7 +137,9 @@ pub(super) fn plan(
             else {
                 continue;
             };
-            let carrier = capability_carrier(params);
+            let carriers = capability_carriers(params);
+            let has_split_capability_params = carriers.len() > 1;
+            let carrier = carriers.into_iter().next();
             let root_attenuation = root_attenuations
                 .get(&(info.span.start, info.span.end))
                 .cloned();
@@ -150,6 +153,7 @@ pub(super) fn plan(
                 boundary,
                 flow_predicate,
                 carrier,
+                has_split_capability_params,
                 root_attenuation,
                 direct_requirements,
             });
@@ -241,23 +245,25 @@ pub(super) fn plan(
                 .or_default()
                 .extend(receiver_projection_edits(callable, desired));
         }
-        edits_by_file
-            .entry(callable.file_idx)
-            .or_default()
-            .extend(ambient_edits(
-                &program_files[callable.file_idx].source,
-                callable,
-                desired,
-                diagnostics_by_file.get(&program_files[callable.file_idx].path),
-            ));
-        edits_by_file.entry(callable.file_idx).or_default().extend(
-            explicit_capability_argument_edits(
-                &program_files[callable.file_idx].source,
-                callable,
-                desired,
-                diagnostics_by_file.get(&program_files[callable.file_idx].path),
-            ),
-        );
+        if !callable.has_split_capability_params {
+            edits_by_file
+                .entry(callable.file_idx)
+                .or_default()
+                .extend(ambient_edits(
+                    &program_files[callable.file_idx].source,
+                    callable,
+                    desired,
+                    diagnostics_by_file.get(&program_files[callable.file_idx].path),
+                ));
+            edits_by_file.entry(callable.file_idx).or_default().extend(
+                explicit_capability_argument_edits(
+                    &program_files[callable.file_idx].source,
+                    callable,
+                    desired,
+                    diagnostics_by_file.get(&program_files[callable.file_idx].path),
+                ),
+            );
+        }
     }
     for edge in &edges {
         if !changed[edge.callee] {
@@ -418,30 +424,34 @@ fn collect_receiver_accesses(body: &[SNode], carrier: Option<&Carrier>) -> Vec<R
     accesses
 }
 
-fn capability_carrier(params: &[TypedParam]) -> Option<Carrier> {
-    params.iter().enumerate().find_map(|(param_index, param)| {
-        let kind = match param.type_expr.as_ref()? {
-            TypeExpr::Named(name) if name == "Harness" => CarrierKind::Root,
-            TypeExpr::Named(name) => CarrierKind::Narrow(CapabilityId::from_type_name(name)?),
-            TypeExpr::Shape(fields) => {
-                let capabilities = fields
-                    .iter()
-                    .map(|field| match &field.type_expr {
-                        TypeExpr::Named(name) => CapabilityId::from_type_name(name),
-                        _ => None,
-                    })
-                    .collect::<Option<BTreeSet<_>>>()?;
-                (!capabilities.is_empty()).then_some(CarrierKind::Bundle(capabilities))?
-            }
-            _ => return None,
-        };
-        Some(Carrier {
-            name: param.name.clone(),
-            param_index,
-            param: param.clone(),
-            kind,
+fn capability_carriers(params: &[TypedParam]) -> Vec<Carrier> {
+    params
+        .iter()
+        .enumerate()
+        .filter_map(|(param_index, param)| {
+            let kind = match param.type_expr.as_ref()? {
+                TypeExpr::Named(name) if name == "Harness" => CarrierKind::Root,
+                TypeExpr::Named(name) => CarrierKind::Narrow(CapabilityId::from_type_name(name)?),
+                TypeExpr::Shape(fields) => {
+                    let capabilities = fields
+                        .iter()
+                        .map(|field| match &field.type_expr {
+                            TypeExpr::Named(name) => CapabilityId::from_type_name(name),
+                            _ => None,
+                        })
+                        .collect::<Option<BTreeSet<_>>>()?;
+                    (!capabilities.is_empty()).then_some(CarrierKind::Bundle(capabilities))?
+                }
+                _ => return None,
+            };
+            Some(Carrier {
+                name: param.name.clone(),
+                param_index,
+                param: param.clone(),
+                kind,
+            })
         })
-    })
+        .collect()
 }
 
 fn direct_requirements(
@@ -450,17 +460,19 @@ fn direct_requirements(
     carrier: Option<&Carrier>,
     root_attenuation: Option<&BTreeSet<CapabilityId>>,
 ) -> BTreeSet<CapabilityId> {
+    let mut required = declared_capability_requirements(params);
     let Some(carrier) = carrier else {
-        return BTreeSet::new();
+        return required;
     };
-    if matches!(&carrier.kind, CarrierKind::Root) && root_attenuation.is_none() {
-        return BTreeSet::new();
+    if matches!(&carrier.kind, CarrierKind::Root)
+        && root_attenuation.is_none()
+        && required.is_empty()
+    {
+        return required;
     }
-    let mut required = match &carrier.kind {
-        CarrierKind::Narrow(capability) => BTreeSet::from([*capability]),
-        CarrierKind::Bundle(capabilities) => capabilities.clone(),
-        CarrierKind::Root => root_attenuation.cloned().unwrap_or_default(),
-    };
+    if let Some(attenuation) = root_attenuation {
+        required.extend(attenuation);
+    }
     let mut observe = |node: &SNode| {
         let (Node::PropertyAccess { object, property }
         | Node::OptionalPropertyAccess { object, property }) = &node.node
@@ -480,6 +492,17 @@ fn direct_requirements(
     }
     visit::walk_program(body, &mut observe);
     required
+}
+
+fn declared_capability_requirements(params: &[TypedParam]) -> BTreeSet<CapabilityId> {
+    capability_carriers(params)
+        .into_iter()
+        .flat_map(|carrier| match carrier.kind {
+            CarrierKind::Narrow(capability) => BTreeSet::from([capability]),
+            CarrierKind::Bundle(capabilities) => capabilities,
+            CarrierKind::Root => BTreeSet::new(),
+        })
+        .collect()
 }
 
 fn seed_ambient_requirements(
@@ -646,6 +669,12 @@ fn desired_carrier(
     callable: &ProgramCallable,
     requirements: &BTreeSet<CapabilityId>,
 ) -> Option<CarrierKind> {
+    if callable.has_split_capability_params {
+        return callable
+            .carrier
+            .as_ref()
+            .map(|carrier| carrier.kind.clone());
+    }
     if callable.flow_predicate
         && requirements.len() == 1
         && requirements.contains(&CapabilityId::Ast)

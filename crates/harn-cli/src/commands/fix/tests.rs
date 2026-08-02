@@ -684,6 +684,32 @@ fn apply_thread_params_threads_harness_for_stdio_migration() {
 }
 
 #[test]
+fn apply_preserves_separate_narrow_capability_parameters() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("split_capabilities.harn");
+    let source = "fn read_key(secrets: HarnessSecrets) {\n  secrets.read(\"app-jwt\", nil)\n}\n\npub fn mint_app_jwt(clock: HarnessClock, secrets: HarnessSecrets, config) {\n  const issued_at = clock.now_ms()\n  return {issued_at: issued_at, key: read_key(secrets), config: config}\n}\n\nfn main(harness: Harness) {\n  mint_app_jwt(harness.clock, harness.secrets, {})\n}\n";
+    fs::write(&script, source).unwrap();
+
+    for pass in 1..=2 {
+        let result = apply_repairs_with_options(
+            &script,
+            RepairSafety::SurfaceChanging,
+            false,
+            FixOptions {
+                capability_migrations_only: true,
+            },
+        )
+        .unwrap();
+        assert!(result.applied.is_empty(), "pass {pass}: {result:#?}");
+        assert_eq!(
+            fs::read_to_string(&script).unwrap(),
+            source,
+            "pass {pass} must preserve an already-split capability boundary"
+        );
+    }
+}
+
+#[test]
 fn apply_thread_params_threads_harness_for_non_stdio_capabilities() {
     let cases = [
         (
