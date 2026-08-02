@@ -167,6 +167,11 @@ fn scratch_root_is_exempt_from_the_ignore_stack() {
     write(dir.path(), "scratch/.gitignore", "*\n");
     write(dir.path(), "scratch/data.json", "{}\n");
 
+    assert_eq!(
+        effective_policy(&dir.path().join(".harn-tmp"), IgnorePolicy::Project),
+        IgnorePolicy::Builtin,
+        "the outer repository must not make its managed scratch projection authoritative"
+    );
     let scratch = walk(&dir.path().join(".harn-tmp"), IgnorePolicy::Project);
     assert!(has(&scratch, "data.json"), "{scratch:?}");
 

@@ -290,10 +290,21 @@ pub fn effective_policy(base: &Path, requested: IgnorePolicy) -> IgnorePolicy {
         return IgnorePolicy::None;
     }
     let resolved = absolutize(base);
+    let scratch_root = managed_scratch_root(&resolved);
     match project_root_for(&resolved) {
-        Some((_, ProjectAnchor::Vcs)) => requested,
-        Some((_, ProjectAnchor::SandboxWorkspace)) if !is_scratch_path(&resolved) => requested,
-        Some((_, ProjectAnchor::SandboxWorkspace)) | None => IgnorePolicy::Builtin,
+        // A repository nested *inside* managed scratch is an explicit project
+        // boundary. A repository above scratch is merely the owner of Harn's
+        // self-ignored workspace projection and must not lend that projection
+        // its ignore stack.
+        Some((root, ProjectAnchor::Vcs))
+            if scratch_root.is_none_or(|scratch| root.starts_with(scratch)) =>
+        {
+            requested
+        }
+        Some((_, ProjectAnchor::SandboxWorkspace)) if scratch_root.is_none() => requested,
+        Some((_, ProjectAnchor::Vcs | ProjectAnchor::SandboxWorkspace)) | None => {
+            IgnorePolicy::Builtin
+        }
     }
 }
 
@@ -335,9 +346,18 @@ pub fn project_root_for(path: &Path) -> Option<(PathBuf, ProjectAnchor)> {
 /// for git and fatal for a walk that honors it.
 #[must_use]
 pub fn is_scratch_path(path: &Path) -> bool {
-    path.components().any(|component| {
+    managed_scratch_root(path).is_some()
+}
+
+/// Nearest ancestor (inclusive) whose name denotes Harn-managed scratch.
+///
+/// Returning the boundary, rather than only a boolean, lets policy selection
+/// distinguish a real repository nested below scratch from the outer project
+/// that created the scratch directory.
+fn managed_scratch_root(path: &Path) -> Option<&Path> {
+    path.ancestors().find(|ancestor| {
         matches!(
-            component.as_os_str().to_str(),
+            ancestor.file_name().and_then(|name| name.to_str()),
             Some(workspace_env::WORKSPACE_TMPDIR_NAME)
                 | Some(workspace_env::WORKSPACE_TOOLCHAIN_CACHE_NAME)
         )
