@@ -7,13 +7,14 @@ reusable workflow so a package needs only a small trigger wrapper plus its own
 declared refresh and validation commands.
 
 - Workflow: `.github/workflows/bump-harn.yml` (`workflow_call`).
-- Orchestration: `scripts/bump_harn_runtime.harn` → `std/bump/runtime` (pure
-  state machine) → `std/bump/live` (git and authenticated `gh` calls via
-  `std/command`).
+- Orchestration: `scripts/bump-driver/bump_harn_runtime.harn` →
+  `std/bump/runtime` (pure state machine) → `std/bump/live` (local filesystem,
+  git, command, and polling effects) → the locked `harn-github-connector`
+  package (all remote GitHub behavior).
 - Workspace boundary: the caller is checked out at `package/`; the target Harn
-  orchestration checkout is its sibling. Refresh, validation, git, and `gh`
-  effects run from `package/`, so package discovery cannot traverse the
-  workflow's private runtime checkout.
+  orchestration checkout is its sibling. Refresh, validation, and local git
+  effects run from `package/`. The source script's nested package manifest
+  activates its locked connector without changing that working directory.
 - Receipt schema: `harn-bump-runtime-v1` (printed to stdout; key fields also
   land as step outputs and a step-summary block).
 
@@ -87,9 +88,10 @@ from the same published version.
   validation or commit. When a compatible older target predates that receipt
   outcome, the workflow's per-run success sentinel makes validation fail
   closed instead; neither path can reach a signed commit.
-- Stale heads: an open bump PR with auto-merge armed is **disarmed before** the
-  bump branch is reset, so a stale head cannot merge mid-refresh and race a
-  duplicate onto the base branch. Concurrent/scheduled reruns are safe.
+- Stale heads: an open bump PR with auto-merge armed is disarmed only under its
+  exact PR-head and base-head leases. The connector then derives the local
+  worktree delta, creates or resets the branch, and publishes the GitHub-signed
+  commit as one typed operation. Stale actors fail closed.
 
 ## Version availability
 
@@ -112,15 +114,16 @@ release, so this holds in practice.)
 - **Immutable supply chain.** Third-party actions are pinned by full commit SHA.
   The workflow contract is pinned by full Harn commit SHA; first-party runtime
   pieces (orchestration script, embedded modules, `setup-harn`) come from the
-  resolved immutable release tag. `setup-harn` verifies the downloaded release
-  archive against its published SHA-256 before installing.
+  resolved immutable release tag. The nested driver installs with `--locked`,
+  so the connector source and content hash are fixed. `setup-harn` verifies the
+  downloaded runtime archive against its published SHA-256 before installing.
 - **No package-domain logic in the shared workflow.** The reusable workflow
   never encodes a package's code-generation or build/test knowledge. Repos
   expose their existing owner commands through `refresh-command` and
   `validate-command`; the shared workflow only sequences them. Consumers copy
   no orchestration, release-readiness, signing, branch, or PR machinery.
 - **Sandbox posture.** The orchestration runs under `harn run --no-sandbox`
-  because it must reach git, the GitHub API through `gh`, and the caller's
-  refresh and validation commands. It carries no secret beyond the scoped
-  installation token, which is passed via the environment and never written to
-  the repo.
+  because it must reach git, the GitHub API through the connector, and the
+  caller's refresh and validation commands. It carries no secret beyond the
+  scoped installation token, which is passed via the environment and never
+  written to the repo.

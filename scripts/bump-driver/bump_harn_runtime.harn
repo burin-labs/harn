@@ -1,29 +1,9 @@
 #!/usr/bin/env harn
 import { live_bump_adapter } from "std/bump/live"
 import { bump_options, run_bump } from "std/bump/runtime"
-//
-// Entry point for the reusable `bump-harn` workflow (harn#5299).
-//
-// The orchestration is std/bump/runtime's pure state machine; the live effects
-// are std/bump/live's adapter. This script is a thin shell: it reads its
-// configuration from the GitHub Actions environment, runs the bump, prints the
-// machine-readable receipt to stdout, and writes step outputs/summary.
-//
-// It intentionally holds NO decision logic — every branch lives in the tested
-// std/bump/runtime module. Run it with `harn run --no-sandbox` so it can reach
-// git, the network, and the caller's validation command.
-//
-// Configuration (all via env, GitHub Actions style):
-//   GITHUB_REPOSITORY        owner/name of the package repo being bumped
-//   HARN_BUMP_RELEASE_REPO   repo whose releases gate readiness (default burin-labs/harn)
-//   HARN_BUMP_TOKEN          GitHub App installation token (contents+PRs write)
-//   HARN_BUMP_TARGET_TAG     optional target tag vX.Y.Z; empty => latest release
-//   HARN_BUMP_VALIDATE       the caller's single declared validation command
-//   HARN_BUMP_BRANCH         bump branch (default automation/bump-harn-runtime)
-//   HARN_BUMP_BASE           base branch (default main)
-//   HARN_BUMP_ENABLE_AUTOMERGE  "false" to skip arming auto-merge
-//   HARN_BUMP_READINESS_*     optional poll bounds (attempts/interval_ms/timeout_ms)
 import { gha_append_summary, gha_write_output } from "std/gha"
+/** Thin GitHub Actions entry point for the package-backed Harn bump driver. */
+import { github_bump_remote } from "./github_remote"
 
 fn env_or(env: HarnessEnv, name: string, fallback: string) -> string {
   const value = trim(env.get_or(name, ""))
@@ -45,20 +25,20 @@ pipeline main(harness: Harness) {
     harness.stdio.eprintln("bump_harn_runtime: GITHUB_REPOSITORY and HARN_BUMP_TOKEN are required")
     return 2
   }
+  const release_repo = env_or(harness.env, "HARN_BUMP_RELEASE_REPO", "burin-labs/harn")
   const branch = env_or(harness.env, "HARN_BUMP_BRANCH", "automation/bump-harn-runtime")
   const base = env_or(harness.env, "HARN_BUMP_BASE", "main")
   const enable_auto_merge = env_or(harness.env, "HARN_BUMP_ENABLE_AUTOMERGE", "true") != "false"
+  const remote = github_bump_remote(
+    harness,
+    {repo: repo, release_repo: release_repo, token: token, branch: branch, base: base},
+  )
   const adapter = live_bump_adapter(
     harness.clock,
     harness.tools,
+    remote,
     {
-      repo: repo,
-      // Readiness + latest-release resolution gate on the HARN release repo,
-      // not the consumer repo being bumped (which may publish no releases).
-      release_repo: env_or(harness.env, "HARN_BUMP_RELEASE_REPO", "burin-labs/harn"),
-      token: token,
-      branch: branch,
-      base: base,
+      release_repo: release_repo,
       validation_command: env_or(harness.env, "HARN_BUMP_VALIDATE", ""),
       refresh_command: env_or(
         harness.env,
@@ -71,16 +51,18 @@ pipeline main(harness: Harness) {
     },
     harness.fs,
   )
-  const options = bump_options(
-    {
-      repo: repo,
-      branch: branch,
-      base: base,
-      tag: env_or(harness.env, "HARN_BUMP_TARGET_TAG", ""),
-      enable_auto_merge: enable_auto_merge,
-    },
+  const receipt = run_bump(
+    bump_options(
+      {
+        repo: repo,
+        branch: branch,
+        base: base,
+        tag: env_or(harness.env, "HARN_BUMP_TARGET_TAG", ""),
+        enable_auto_merge: enable_auto_merge,
+      },
+    ),
+    adapter,
   )
-  const receipt = run_bump(options, adapter)
   harness.stdio.println(json_stringify_pretty(receipt))
   gha_write_output(harness, "outcome", receipt.outcome)
   gha_write_output(harness, "ok", receipt.ok)
@@ -96,11 +78,8 @@ pipeline main(harness: Harness) {
     "### bump-harn: ${receipt.outcome}\n\n"
       + "- target: `${receipt.target_tag}` (was `${receipt.previous_version}`)\n"
       + "- ready: ${receipt.ready}\n"
-      + join(receipt.notes.map({ n -> "- ${n}" }), "\n"),
+      + join(receipt.notes.map({ note -> "- ${note}" }), "\n"),
   )
-  // A validation failure is the only non-idempotent-safe outcome; everything
-  // else (not_ready, already_current, no_changes, closed_noop, committed) is a
-  // clean exit so scheduled reruns never flap.
   return if receipt.ok {
     0
   } else {

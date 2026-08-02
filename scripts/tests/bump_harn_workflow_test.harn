@@ -24,6 +24,13 @@ fn bump_workflow_errors(workflow, text: string) -> list<string> {
   if node == nil || node?.if != "inputs.node-version != ''" {
     errors = errors + ["optional Node setup must be gated by node-version"]
   }
+  const driver_install = steps.find({ step -> step?.name == "Install bump driver dependencies" })
+  if driver_install?.get("working-directory") != ".harn-runtime/scripts/bump-driver" {
+    errors = errors + ["provider dependencies must install from the target runtime's driver lock"]
+  }
+  if trim(to_string(driver_install?.run ?? "")) != "harn install --locked" {
+    errors = errors + ["provider dependencies must use the immutable driver lock"]
+  }
   const run = steps.find({ step -> step?.name == "Run bump orchestration" })
   if run == nil {
     return errors + ["workflow must keep one attributable bump orchestration step"]
@@ -46,7 +53,7 @@ fn bump_workflow_errors(workflow, text: string) -> list<string> {
     "> \"$HARN_BUMP_REFRESH_SENTINEL\"",
     "test -f \"$HARN_BUMP_REFRESH_SENTINEL\"",
     "eval \"$HARN_BUMP_VALIDATE_COMMAND\"",
-    "../.harn-runtime/scripts/bump_harn_runtime.harn",
+    "../.harn-runtime/scripts/bump-driver/bump_harn_runtime.harn",
   ] {
     if !command.contains(required) {
       errors = errors + ["orchestration must fail closed across runtime version skew: " + required]
@@ -57,6 +64,11 @@ fn bump_workflow_errors(workflow, text: string) -> list<string> {
   }
   if text.contains("HARN_BUMP_REFRESH: $" + "{{ inputs.refresh-command }}") {
     errors = errors + ["refresh-command must not bypass the fail-closed sentinel wrapper"]
+  }
+  for forbidden in ["gh api /graphql", "createCommitOnBranch(input:", "/git/refs/heads/"] {
+    if text.contains(forbidden) {
+      errors = errors + ["workflow must not reimplement GitHub connector behavior: " + forbidden]
+    }
   }
   return errors
 }

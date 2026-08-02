@@ -1,0 +1,208 @@
+import { LiveBumpRemote } from "std/bump/live"
+/** GitHub package implementation of std/bump/live's remote capability. */
+import {
+  GithubBranchTreeCompareRequest,
+  GithubPullRequestUpsertRequest,
+  github_close_pr,
+  github_compare_branch_trees,
+  github_find_open_pr,
+  github_latest_release,
+  github_release,
+  github_upsert_pull_request,
+  pulls_disable_auto_merge,
+  pulls_enable_auto_merge,
+} from "harn-github-connector/default"
+import { GithubWorktreeCommitRequest, github_commit_worktree } from "harn-github-connector/worktree"
+
+/** Closed configuration for one repository-bound GitHub bump driver. */
+pub type GithubBumpRemoteConfig = {
+  repo: string,
+  release_repo: string,
+  token: string,
+  branch: string,
+  base: string,
+}
+
+type GithubRepo = {owner: string, name: string}
+
+fn __repo(value: string) -> GithubRepo {
+  const parts = split(trim(value), "/")
+  if len(parts) != 2 || trim(parts[0]) == "" || trim(parts[1]) == "" {
+    throw "bump-driver: expected owner/repo, got '" + value + "'"
+  }
+  return {owner: parts[0], name: parts[1]}
+}
+
+fn __must(result, operation: string) {
+  if is_err(result) {
+    throw "bump-driver: " + operation + " failed: " + json_stringify(unwrap_err(result))
+  }
+  return unwrap(result)
+}
+
+/** Bind the GitHub connector package to std/bump/live's provider boundary. */
+pub fn github_bump_remote(harness: Harness, config: GithubBumpRemoteConfig) -> LiveBumpRemote {
+  const repo = __repo(config.repo)
+  const release_repo = __repo(config.release_repo)
+  const auth = {installation_token: config.token}
+  return {
+    latest_release_tag: fn() {
+      const latest = __must(
+        github_latest_release(harness, release_repo.owner, release_repo.name, auth),
+        "latest release lookup",
+      )
+      if !(latest.ok ?? false) {
+        throw "bump-driver: latest release lookup returned an unsuccessful envelope"
+      }
+      return trim(to_string(latest.tag_name ?? ""))
+    },
+    release_view: fn(tag) {
+      const lookup = __must(
+        github_release(harness, release_repo.owner, release_repo.name, tag, auth),
+        "release lookup",
+      )
+      if !lookup.found {
+        return {found: false, draft: true, prerelease: true, asset_names: []}
+      }
+      const release = lookup.release
+      if release == nil {
+        throw "bump-driver: found release lookup omitted its typed release"
+      }
+      return {
+        found: true,
+        draft: release.draft,
+        prerelease: release.prerelease,
+        asset_names: release.assets.map({ asset -> asset.name }).to_list(),
+      }
+    },
+    find_bump_pr: fn() {
+      const found = github_find_open_pr(
+        harness,
+        repo.owner,
+        repo.name,
+        auth + {head_ref: config.branch, base_ref: config.base, head_owner: repo.owner},
+      )
+      if !found.ok {
+        throw "bump-driver: pull request lookup failed: " + json_stringify(found.error)
+      }
+      if found.total_matches > 1 {
+        throw "bump-driver: pull request lookup found "
+          + to_string(found.total_matches)
+          + " exact head/base matches"
+      }
+      if !found.found {
+        return nil
+      }
+      const pull = found.pull_request
+      if pull == nil {
+        throw "bump-driver: found pull request lookup omitted its typed pull request"
+      }
+      return {
+        number: pull.number,
+        head_oid: pull.head.sha,
+        base_ref: pull.base.ref,
+        base_oid: pull.base.sha,
+        auto_merge_enabled: pull.auto_merge_armed,
+        auto_merge_method: pull.auto_merge_method,
+        url: pull.url,
+        state: pull.github_state,
+      }
+    },
+    disable_auto_merge: fn(pull, base_oid) {
+      __must(
+        pulls_disable_auto_merge(
+          harness,
+          repo.owner,
+          repo.name,
+          pull.number,
+          auth
+            + {
+            expected_head_oid: pull.head_oid,
+            base_branch: pull.base_ref,
+            expected_base_oid: base_oid,
+            restore_merge_method: pull.auto_merge_method ?? "SQUASH",
+          },
+        ),
+        "leased auto-merge disable",
+      )
+      return true
+    },
+    publish_commit: fn(request) {
+      const publication: GithubWorktreeCommitRequest = {
+        owner: repo.owner,
+        repo: repo.name,
+        branch: request.branch,
+        headline: request.headline,
+        repo_dir: ".",
+        source: "worktree",
+        base_oid: request.base_sha,
+        create_branch: true,
+        reset_branch: true,
+      }
+      const receipt = __must(
+        github_commit_worktree(harness, publication, auth),
+        "leased signed worktree publication",
+      )
+      if !receipt.committed {
+        throw "bump-driver: non-empty runtime changes produced no signed commit"
+      }
+      return {
+        oid: receipt.commit_oid,
+        url: receipt.commit_url,
+        branch_action: receipt.branch_action,
+      }
+    },
+    branch_matches_base: fn() {
+      const request: GithubBranchTreeCompareRequest = {
+        owner: repo.owner,
+        repo: repo.name,
+        left_ref: config.branch,
+        right_ref: config.base,
+      }
+      return __must(github_compare_branch_trees(harness, request, auth), "branch tree comparison")
+        .equal
+    },
+    upsert_pr: fn(_existing, expected_head_oid) {
+      const request: GithubPullRequestUpsertRequest = {
+        owner: repo.owner,
+        repo: repo.name,
+        head: config.branch,
+        base: config.base,
+        title: "Bump Harn runtime",
+        body:
+          "Automated Harn runtime bump. Regenerated the lockfile and ran the declared validation entrypoint. Merges through the normal queue.\n\nProduced by the reusable `bump-harn` workflow.",
+        expected_head_oid: expected_head_oid,
+      }
+      const receipt = __must(
+        github_upsert_pull_request(harness, request, auth),
+        "leased pull request upsert",
+      )
+      return {
+        number: receipt.number,
+        head_oid: receipt.head.sha,
+        url: receipt.url,
+        created: receipt.action == "created",
+      }
+    },
+    close_pr: fn(number, comment) {
+      const receipt = github_close_pr(harness, repo.owner, repo.name, number, comment, auth)
+      if !receipt.ok {
+        throw "bump-driver: pull request close failed: " + json_stringify(receipt.error)
+      }
+      return true
+    },
+    enable_auto_merge: fn(number, expected_head_oid) {
+      const receipt = __must(
+        pulls_enable_auto_merge(
+          harness,
+          repo.owner,
+          repo.name,
+          number,
+          auth + {expected_head_oid: expected_head_oid, method: "SQUASH"},
+        ),
+        "leased auto-merge enable",
+      )
+      return {enabled: true, state: receipt.state, detail: ""}
+    },
+  }
+}

@@ -1,0 +1,20 @@
+[package]
+name = "harn-bump-driver"
+version = "0.1.0"
+description = "Package-backed GitHub driver for Harn's provider-neutral runtime bump state machine."
+harn = ">=0.10.51,<0.11"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/burin-labs/harn"
+docs_url = "https://github.com/burin-labs/harn/blob/main/scripts/bump-driver/README.md"
+
+[exports]
+default = "github_remote.harn"
+
+[lint]
+require_public_api_types = true
+
+[dependencies]
+# Immutable development pin for harn-github-connector#224. Replace with the
+# release tag once that exact commit is published; harn.lock supplies the
+# content-addressed installation proof in either case.
+harn-github-connector = { git = "https://github.com/burin-labs/harn-github-connector", rev = "f20d2c1d409b2b73678bcf5fb9e4529e1c0a7417" }
