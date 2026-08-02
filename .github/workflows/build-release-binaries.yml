@@ -15,19 +15,12 @@ name: Build release binaries
 #      from the same source state, and an overlapping main warm cannot save
 #      a default-branch cache early enough to help that active tag run.
 #
-#      The setup job below short-circuits this mode unless the push
-#      changed Cargo.lock, any **/Cargo.toml, rust-toolchain.toml, this
-#      workflow, or the binary-size gate script. The Cargo files are exactly
-#      the inputs Swatinem
-#      hashes into its exact cache key, and workflow edits can change
-#      runner labels, cache topology, or build flags without changing
-#      Cargo inputs. Re-warm in both cases so the next tag does not pay
-#      for a cold release build after release-CI topology changes. (The
-#      check lives in the setup job rather than as a `paths:` trigger
-#      filter because GitHub's docs are ambiguous about how `paths:`
-#      interacts with `tags:` in the same push block — checking in-job
-#      is unambiguous and lets a single `push:` trigger cover both
-#      events.)
+#      The setup job below short-circuits this mode unless the push changed a
+#      compile or build-topology input declared in
+#      .github/release-warm-cache-paths.yml. Post-build gates do not rotate a
+#      Rust cache and therefore do not trigger the matrix. The check lives in
+#      the setup job rather than as a `paths:` trigger filter because one
+#      `push:` trigger must continue to cover both branches and release tags.
 #
 #   3. schedule, daily — safety-net warm-up that refreshes the cache
 #      against GitHub's 7-day no-access eviction even during quiet
@@ -122,18 +115,17 @@ permissions:
   packages: read
 
 concurrency:
-  group: build-release-binaries-${{ (github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}', inputs.benchmark_source_sha)) || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only)) && 'warm-main' || inputs.tag || github.ref_name }}
+  group: build-release-binaries-${{ (github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}', inputs.benchmark_source_sha)) || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only)) && 'warm-main' || (github.event_name == 'push' && github.ref_type == 'branch' && format('branch-{0}', github.run_id)) || inputs.tag || github.ref_name }}
   # Tag-push runs must never be cancelled mid-build (the release waits on
   # their artifacts), and neither should manual workflow_dispatch recovery
   # runs. An immutable-source benchmark has a source-qualified lane so a new
-  # main push cannot cancel a queued or active release gate. Warm-cache-only
-  # events ARE safe to cancel inside their own lane:
-  # a newer warm fully supersedes the older one, and the cache it produces
-  # will be at least as fresh as the cancelled run's would have been.
-  # Scheduled/manual warms deliberately do not share the `main` branch-push
-  # group, because a no-op push that skips the matrix must not cancel a full
-  # scheduled warm before it saves the default-branch cache.
-  cancel-in-progress: ${{ (github.event_name == 'push' && github.ref_type == 'branch') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only) }}
+  # main push cannot cancel a queued or active release gate. Branch pushes get
+  # run-qualified workflow lanes because setup may resolve to a no-op; the build
+  # job below gives only real per-target warms a shared, preemptible lane. This
+  # preserves the latest-warm-wins optimization without letting a docs-only push
+  # destroy useful cache work. Scheduled and explicit manual full warms share
+  # `warm-main` and safely supersede an older full warm.
+  cancel-in-progress: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only) }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -163,11 +155,14 @@ jobs:
           # keeps current recovery logic available for old releases. Build jobs
           # independently check out the resolved source ref.
           ref: ${{ github.sha }}
-          # Need at least one parent commit so the push-main warm-mode
-          # path check (`git diff HEAD^ HEAD -- …`) below can resolve
-          # HEAD^. depth: 2 is enough; the default depth=1 would make
-          # HEAD^ point at nothing on a fresh clone.
-          fetch-depth: 2
+          fetch-depth: 1
+
+      - name: Detect release build inputs
+        id: release-build-inputs
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+        with:
+          filters: .github/release-warm-cache-paths.yml
 
       - name: Resolve release binary-size policy
         id: binary-size-policy
@@ -205,6 +200,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
+          RELEASE_BUILD_INPUTS_CHANGED: ${{ steps.release-build-inputs.outputs.release_build_inputs || 'false' }}
           GH_TOKEN: ${{ github.token }}
         run: |
           REF="${INPUT_TAG:-$REF_NAME}"
@@ -470,19 +466,17 @@ jobs:
             elif skip_warm_cache_if_release_active; then
               echo "::notice::Push-to-main warm-cache run suppressed while release binaries are already building."
             else
-              # Push-to-main warm-cache run, but only when this push actually
-              # changed something that rotates Swatinem's exact cache key.
-              # For non-keying pushes the previous warm cache is still good
-              # and a rebuild adds no signal.
-              CHANGED_KEYING_FILES="$(git diff --name-only HEAD^ HEAD -- Cargo.lock Cargo.toml '**/Cargo.toml' rust-toolchain.toml scripts/check_binary_size.harn scripts/release_runner_matrix.sh .github/release-runner-policy.json .github/workflows/build-release-binaries.yml 2>/dev/null || true)"
-              if [[ -n "$CHANGED_KEYING_FILES" ]]; then
+              # The parsed path policy owns which changes rotate a build cache
+              # or alter release-build topology. For all other pushes the
+              # previous warm cache still keys cleanly and a rebuild adds no
+              # signal.
+              if [[ "$RELEASE_BUILD_INPUTS_CHANGED" == "true" ]]; then
                 SHOULD_BUILD_BINARIES=true
                 BUILD_MATRIX="$FULL_BUILD_MATRIX"
-                echo "::notice::Warm-cache-only run (push main). Keying files changed:"
-                while IFS= read -r f; do printf '::notice::  %s\n' "$f"; done <<<"$CHANGED_KEYING_FILES"
+                echo "::notice::Warm-cache-only run (push main). A release build input changed according to .github/release-warm-cache-paths.yml."
                 echo "::notice::Building release binaries to populate the per-target Swatinem rust-cache on main. No sign/notarize/package/upload/release/container."
               else
-                echo "::notice::Push to main did not change Cargo.lock / Cargo.toml / **/Cargo.toml / rust-toolchain.toml / release build scripts, runner policy, or build-release-binaries.yml — existing warm cache still keys cleanly. Skipping build matrix."
+                echo "::notice::Push to main did not change a release build input declared in .github/release-warm-cache-paths.yml — existing warm cache still keys cleanly. Skipping build matrix."
               fi
             fi
           elif [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
@@ -742,6 +736,14 @@ jobs:
     # `needs` on a skipped job is satisfied, so warm-cache runs still build.
     needs: [setup, prepare_release, prepare_cli_aot]
     if: needs.setup.outputs.should_build_binaries == 'true'
+    # Setup-only branch pushes never instantiate this matrix and therefore
+    # cannot enter or cancel these lanes. A newer real main-branch warm replaces
+    # only the same target from an older real warm. Releases, recoveries,
+    # benchmarks, schedules, and manual warms use run-qualified lanes; their
+    # workflow-level concurrency owns any allowed cancellation.
+    concurrency:
+      group: build-release-binaries-build-${{ (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.setup.outputs.build_mode == 'warm' && format('warm-{0}', matrix.target)) || format('{0}-{1}', github.run_id, matrix.target) }}
+      cancel-in-progress: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.setup.outputs.build_mode == 'warm' }}
     # contents: write so each leg can upload its own archive to the release
     # as soon as it finishes (incremental per-arch publish).
     permissions:
@@ -1390,7 +1392,11 @@ jobs:
   cache_budget:
     name: Report cache budget
     needs: [setup, build]
-    if: always() && needs.setup.outputs.build_mode == 'warm' && needs.setup.outputs.should_build_binaries == 'true'
+    # A superseded warm has cancelled build legs and must not prune the last
+    # complete generation while its successor is still populating targets.
+    # Ordinary partial failures still report/enforce the budget: successful
+    # legs saved useful generations and each failed family retains its prior one.
+    if: always() && needs.setup.outputs.build_mode == 'warm' && needs.setup.outputs.should_build_binaries == 'true' && needs.build.result != 'cancelled'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
