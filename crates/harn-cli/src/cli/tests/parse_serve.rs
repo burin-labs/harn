@@ -12,10 +12,6 @@ fn test_parses_serve_mcp_flags() {
         "127.0.0.1:9001",
         "--path",
         "/rpc",
-        "--sse-path",
-        "/events",
-        "--messages-path",
-        "/legacy/messages",
         "--api-key",
         "alpha,beta",
         "--hmac-secret",
@@ -38,8 +34,6 @@ fn test_parses_serve_mcp_flags() {
     assert_eq!(serve.transport, crate::cli::McpServeTransport::Http);
     assert_eq!(serve.bind.to_string(), "127.0.0.1:9001");
     assert_eq!(serve.path, "/rpc");
-    assert_eq!(serve.sse_path, "/events");
-    assert_eq!(serve.messages_path, "/legacy/messages");
     assert_eq!(serve.api_key, vec!["alpha".to_string(), "beta".to_string()]);
     assert_eq!(serve.hmac_secret.as_deref(), Some("shared"));
     assert_eq!(serve.tls, crate::cli::ServeTlsMode::Pem);

@@ -1253,8 +1253,8 @@ async fn execute_run_entry_asset_alias_resolves_against_project_not_dependency()
         "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
          [asset_roots]\npromptdir = \"prompts\"\n",
         "dep_connector",
-        "depwebhook",
-        "pub fn provider_id() { return \"depwebhook\" }\n\
+        "depassetwebhook",
+        "pub fn provider_id() { return \"depassetwebhook\" }\n\
          pub fn kinds() { return [\"webhook\"] }\n\
          pub fn payload_schema() { return \"GenericWebhookPayload\" }\n",
     );
@@ -1283,7 +1283,7 @@ async fn execute_run_entry_asset_alias_resolves_against_project_not_dependency()
             .iter()
             .map(|connector| connector.id.as_str())
             .collect::<Vec<_>>(),
-        ["depwebhook"]
+        ["depassetwebhook"]
     );
 
     // Run it exactly like `cd project && harn run main.harn`: a bare filename
@@ -1332,9 +1332,9 @@ async fn execute_run_installs_dependency_package_connector_client() {
         project,
         "[package]\nname = \"connector-consumer\"\nversion = \"0.1.0\"\n",
         "dep_connector",
-        "depwebhook",
+        "depcallwebhook",
         r#"
-pub fn provider_id() { return "depwebhook" }
+pub fn provider_id() { return "depcallwebhook" }
 pub fn kinds() { return ["webhook"] }
 pub fn payload_schema() { return "DependencyEventPayload" }
 pub fn call(_harness: Harness, method, args) {
@@ -1346,7 +1346,7 @@ pub fn call(_harness: Harness, method, args) {
         project.join("main.harn"),
         r#"
 pipeline main(harness: Harness) {
-  const response = harness.net.connector_call("depwebhook", "ping", {value: "active"})
+  const response = harness.net.connector_call("depcallwebhook", "ping", {value: "active"})
   harness.stdio.log(response.method + ":" + response.value)
 }
 "#,
@@ -1362,7 +1362,7 @@ pipeline main(harness: Harness) {
             .iter()
             .map(|connector| connector.id.as_str())
             .collect::<Vec<_>>(),
-        ["depwebhook"]
+        ["depcallwebhook"]
     );
 
     let original_cwd = std::env::current_dir().expect("cwd");

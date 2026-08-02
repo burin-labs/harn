@@ -4,6 +4,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot};
 
+mod conversion;
 mod support;
 use support::execute_test_harn;
 
@@ -42,10 +43,8 @@ impl Drop for CurrentHostBridgeGuard {
     }
 }
 
-// The loopback HTTP tests start background GET streams against in-process
-// mock servers. Keep those stream lifetimes isolated under the parallel
-// Rust test harness so one test cannot consume another test's scarce local
-// networking resources while it is still shutting down.
+// Keep loopback HTTP server lifetimes isolated under the parallel Rust test
+// harness so one test cannot consume another test's local networking resources.
 async fn http_mcp_test_guard() -> tokio::sync::MutexGuard<'static, ()> {
     static LOCK: std::sync::OnceLock<Mutex<()>> = std::sync::OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(())).lock().await
@@ -62,29 +61,29 @@ fn http_spec(url: &str, auth_token: Option<&str>) -> McpServerSpec {
         auth_token: auth_token.map(str::to_string),
         token_exchange: None,
         protocol_version: None,
-        protocol_mode: None,
         proxy_server_name: None,
     }
 }
 
 #[test]
-fn connect_protocol_options_reject_unsupported_versions() {
-    let error = match resolve_connect_protocol_options(None, Some("2099-01-01")) {
-        Ok(_) => panic!("unsupported protocol version must fail locally"),
-        Err(error) => error,
-    };
-    assert!(
-        error.to_string().contains("unsupported protocol_version"),
-        "{error}"
-    );
+fn connect_protocol_options_reject_non_stable_versions() {
+    for version in ["2025-11-25", "2099-01-01"] {
+        let error = match resolve_connect_protocol_options(Some(version)) {
+            Ok(_) => panic!("non-stable protocol version must fail locally: {version}"),
+            Err(error) => error,
+        };
+        assert!(
+            error.to_string().contains("unsupported protocol_version"),
+            "{error}"
+        );
+    }
 }
 
 #[test]
-fn connect_protocol_options_trim_before_mode_inference() {
-    let options = resolve_connect_protocol_options(None, Some(" DRAFT-2026-v1 "))
-        .expect("trimmed draft protocol version");
-    assert_eq!(options.protocol_mode, McpProtocolMode::Modern);
-    assert_eq!(options.protocol_version, DRAFT_PROTOCOL_VERSION);
+fn connect_protocol_options_trim_version() {
+    let options =
+        resolve_connect_protocol_options(Some(" 2026-07-28 ")).expect("trimmed stable version");
+    assert_eq!(options.protocol_version, PROTOCOL_VERSION);
 }
 
 #[tokio::test]
@@ -122,38 +121,13 @@ async fn http_auth_resolution_leaves_unauthenticated_servers_probeable() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn http_get_stream_dispatches_inbound_elicitation_response() {
-    let _guard = http_mcp_test_guard().await;
-    tokio::task::LocalSet::new()
-        .run_until(async {
-            let (base_url, mut responses) = spawn_eliciting_http_mcp_server().await;
-            let spec = http_spec(&format!("{base_url}/mcp"), None);
-
-            let handle = connect_mcp_server_from_spec(&spec).await.unwrap();
-            let response = tokio::time::timeout(MCP_TIMEOUT, responses.recv())
-                .await
-                .expect("timed out waiting for elicitation response POST")
-                .expect("mock server closed before receiving elicitation response");
-
-            assert_eq!(response["id"], serde_json::json!(99));
-            assert_eq!(
-                response["result"]["action"],
-                serde_json::json!("decline"),
-                "without a host bridge, inbound elicitation should decline cleanly"
-            );
-            handle.disconnect().await.unwrap();
-        })
-        .await;
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn stdio_rc_connect_uses_server_discover_with_metadata() {
+async fn stdio_stable_connect_uses_server_discover_with_metadata() {
     let script = r#"
 import json, sys
 request = json.loads(sys.stdin.readline())
 assert request["method"] == "server/discover"
 meta = request["params"]["_meta"]
-assert meta["io.modelcontextprotocol/protocolVersion"] == "DRAFT-2026-v1"
+assert meta["io.modelcontextprotocol/protocolVersion"] == "2026-07-28"
 assert meta["io.modelcontextprotocol/clientInfo"]["name"] == "harn"
 assert "io.modelcontextprotocol/clientCapabilities" in meta
 print(json.dumps({
@@ -161,129 +135,29 @@ print(json.dumps({
 "id": request["id"],
 "result": {
     "resultType": "complete",
-    "supportedVersions": ["DRAFT-2026-v1"],
+    "supportedVersions": ["2026-07-28"],
     "capabilities": {"tools": {}},
-    "serverInfo": {"name": "modern", "version": "1.0.0"}
+    "ttlMs": 0,
+    "cacheScope": "private",
+    "_meta": {"io.modelcontextprotocol/serverInfo": {"name": "stable", "version": "1.0.0"}}
 }
 }), flush=True)
 "#;
-    let handle = connect_stdio_test_script(
-        script,
-        McpProtocolMode::Modern,
-        DRAFT_PROTOCOL_VERSION.to_string(),
-    )
-    .await;
-    let initialize = handle.initialize_result.lock().await.clone().unwrap();
+    let handle = connect_stdio_test_script(script, PROTOCOL_VERSION.to_string()).await;
+    let discovery = handle.discovery_result.lock().await.clone().unwrap();
     assert_eq!(
-        initialize["supportedVersions"],
-        serde_json::json!([DRAFT_PROTOCOL_VERSION])
-    );
-    assert_eq!(
-        handle.protocol_mode().await.unwrap(),
-        McpProtocolMode::Modern
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn stdio_rc_connect_falls_back_to_initialize_only_on_method_not_found() {
-    let script = r#"
-import json, sys
-discover = json.loads(sys.stdin.readline())
-assert discover["method"] == "server/discover"
-print(json.dumps({
-"jsonrpc": "2.0",
-"id": discover["id"],
-"error": {"code": -32601, "message": "Method not found"}
-}), flush=True)
-initialize = json.loads(sys.stdin.readline())
-assert initialize["method"] == "initialize"
-assert initialize["params"]["protocolVersion"] == "2025-11-25"
-print(json.dumps({
-"jsonrpc": "2.0",
-"id": initialize["id"],
-"result": {
-    "protocolVersion": "2025-11-25",
-    "capabilities": {"tools": {}},
-    "serverInfo": {"name": "legacy", "version": "1.0.0"}
-}
-}), flush=True)
-initialized = json.loads(sys.stdin.readline())
-assert initialized["method"] == "notifications/initialized"
-"#;
-    let handle = connect_stdio_test_script(
-        script,
-        McpProtocolMode::Modern,
-        DRAFT_PROTOCOL_VERSION.to_string(),
-    )
-    .await;
-    let initialize = handle.initialize_result.lock().await.clone().unwrap();
-    assert_eq!(
-        initialize["protocolVersion"],
+        discovery["protocolVersion"],
         serde_json::json!(PROTOCOL_VERSION)
     );
-    assert_eq!(
-        handle.protocol_mode().await.unwrap(),
-        McpProtocolMode::Legacy
-    );
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn stdio_rc_connect_retries_unsupported_protocol_version() {
-    let script = r#"
-import json, sys
-first = json.loads(sys.stdin.readline())
-assert first["method"] == "server/discover"
-assert first["params"]["_meta"]["io.modelcontextprotocol/protocolVersion"] == "DRAFT-2026-v1"
-print(json.dumps({
-"jsonrpc": "2.0",
-"id": first["id"],
-"error": {
-    "code": -32004,
-    "message": "Unsupported protocol version",
-    "data": {"supported": ["2025-11-25"], "requested": "DRAFT-2026-v1"}
-}
-}), flush=True)
-second = json.loads(sys.stdin.readline())
-assert second["method"] == "server/discover"
-assert second["id"] != first["id"]
-assert second["params"]["_meta"]["io.modelcontextprotocol/protocolVersion"] == "2025-11-25"
-print(json.dumps({
-"jsonrpc": "2.0",
-"id": second["id"],
-"result": {
-    "resultType": "complete",
-    "supportedVersions": ["2025-11-25"],
-    "capabilities": {"tools": {}},
-    "serverInfo": {"name": "modern-compat", "version": "1.0.0"}
-}
-}), flush=True)
-"#;
-    let handle = connect_stdio_test_script(
-        script,
-        McpProtocolMode::Modern,
-        DRAFT_PROTOCOL_VERSION.to_string(),
-    )
-    .await;
-    assert_eq!(
-        handle.protocol_mode().await.unwrap(),
-        McpProtocolMode::Modern
-    );
-    assert_eq!(handle.protocol_version().await.unwrap(), PROTOCOL_VERSION);
-}
-
-#[test]
-fn rc_protocol_fallback_can_select_2025_06_18() {
-    let selected = select_supported_protocol_version(&[LEGACY_2025_06_18_PROTOCOL_VERSION]);
-    assert_eq!(selected, Some(LEGACY_2025_06_18_PROTOCOL_VERSION));
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn modern_http_sends_stateless_metadata_headers_and_schema_headers() {
+async fn stable_http_sends_stateless_metadata_headers_and_schema_headers() {
     let _guard = http_mcp_test_guard().await;
     tokio::task::LocalSet::new()
         .run_until(async {
-            let (base_url, mut requests) = spawn_modern_http_mcp_server().await;
-            let handle = modern_http_handle(&base_url).await;
+            let (base_url, mut requests) = spawn_stable_http_mcp_server().await;
+            let handle = stable_http_handle(&base_url).await;
 
             let tools_result = handle
                 .call("tools/list", serde_json::json!({}))
@@ -315,11 +189,11 @@ async fn modern_http_sends_stateless_metadata_headers_and_schema_headers() {
             assert_eq!(call_result, serde_json::json!("ok"));
 
             let discover = recv_recorded_request(&mut requests).await;
-            assert_modern_http_request(&discover, "server/discover", None);
+            assert_stable_http_request(&discover, "server/discover", None);
             let list = recv_recorded_request(&mut requests).await;
-            assert_modern_http_request(&list, "tools/list", None);
+            assert_stable_http_request(&list, "tools/list", None);
             let tool_call = recv_recorded_request(&mut requests).await;
-            assert_modern_http_request(&tool_call, "tools/call", Some("execute_sql"));
+            assert_stable_http_request(&tool_call, "tools/call", Some("execute_sql"));
             assert_eq!(
                 tool_call
                     .headers
@@ -333,47 +207,12 @@ async fn modern_http_sends_stateless_metadata_headers_and_schema_headers() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn modern_http_discovery_falls_back_to_legacy_initialize_when_endpoint_is_not_modern() {
+async fn stable_input_required_result_dispatches_and_retries() {
     let _guard = http_mcp_test_guard().await;
     tokio::task::LocalSet::new()
         .run_until(async {
-            let (base_url, mut requests) = spawn_legacy_http_fallback_server().await;
-            let handle = modern_http_handle(&base_url).await;
-
-            let discover = recv_recorded_request(&mut requests).await;
-            assert_modern_http_request(&discover, "server/discover", None);
-            let initialize = recv_recorded_request(&mut requests).await;
-            assert_eq!(initialize.body["method"], serde_json::json!("initialize"));
-            assert!(initialize.body["params"].get("_meta").is_none());
-            assert_eq!(
-                initialize
-                    .headers
-                    .get("mcp-protocol-version")
-                    .map(String::as_str),
-                Some(PROTOCOL_VERSION)
-            );
-            assert!(!initialize.headers.contains_key("mcp-method"));
-
-            assert_eq!(
-                handle.protocol_mode().await.unwrap(),
-                McpProtocolMode::Legacy
-            );
-            let initialize_result = handle.initialize_result.lock().await.clone().unwrap();
-            assert_eq!(
-                initialize_result["protocolVersion"],
-                serde_json::json!(PROTOCOL_VERSION)
-            );
-        })
-        .await;
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn modern_input_required_result_dispatches_and_retries() {
-    let _guard = http_mcp_test_guard().await;
-    tokio::task::LocalSet::new()
-        .run_until(async {
-            let (base_url, mut requests) = spawn_modern_http_mcp_server().await;
-            let handle = modern_http_handle(&base_url).await;
+            let (base_url, mut requests) = spawn_stable_http_mcp_server().await;
+            let handle = stable_http_handle(&base_url).await;
             install_sampling_mock().await;
             let result = call_mcp_tool(
                 &handle,
@@ -386,11 +225,11 @@ async fn modern_input_required_result_dispatches_and_retries() {
 
             let _discover = recv_recorded_request(&mut requests).await;
             let first_call = recv_recorded_request(&mut requests).await;
-            assert_modern_http_request(&first_call, "tools/call", Some("needs_input"));
+            assert_stable_http_request(&first_call, "tools/call", Some("needs_input"));
             assert!(first_call.body["params"].get("inputResponses").is_none());
 
             let retry_call = recv_recorded_request(&mut requests).await;
-            assert_modern_http_request(&retry_call, "tools/call", Some("needs_input"));
+            assert_stable_http_request(&retry_call, "tools/call", Some("needs_input"));
             let responses = &retry_call.body["params"]["inputResponses"];
             assert!(responses["roots"]["roots"].as_array().is_some());
             assert_eq!(
@@ -411,13 +250,79 @@ async fn modern_input_required_result_dispatches_and_retries() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn modern_http_401_auth_required_waits_for_oauth_and_retries_tool_call() {
+async fn stable_http_retries_prompt_and_resource_input_rounds() {
+    let _guard = http_mcp_test_guard().await;
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (base_url, mut requests) = spawn_stable_http_mcp_server().await;
+            let handle = stable_http_handle(&base_url).await;
+            let _discover = recv_recorded_request(&mut requests).await;
+
+            for (method, params, marker, expected_name) in [
+                (
+                    "prompts/get",
+                    serde_json::json!({"name": "review", "arguments": {}}),
+                    "prompt-complete",
+                    Some("review"),
+                ),
+                (
+                    "resources/read",
+                    serde_json::json!({"uri": "file:///fixture"}),
+                    "resource-complete",
+                    Some("file:///fixture"),
+                ),
+            ] {
+                let result = handle.call(method, params).await.unwrap();
+                assert_eq!(result["description"], serde_json::json!(marker));
+
+                let first = recv_recorded_request(&mut requests).await;
+                assert_stable_http_request(&first, method, expected_name);
+                assert!(first.body["params"].get("inputResponses").is_none());
+
+                let retry = recv_recorded_request(&mut requests).await;
+                assert_stable_http_request(&retry, method, expected_name);
+                assert!(retry.body["params"]["inputResponses"]["roots"]["roots"]
+                    .as_array()
+                    .is_some());
+                assert_eq!(
+                    retry.body["params"]["requestState"],
+                    serde_json::json!("state-non-tool")
+                );
+            }
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn stable_task_result_is_polled_to_completion() {
+    let _guard = http_mcp_test_guard().await;
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (base_url, mut requests) = spawn_stable_http_mcp_server().await;
+            let handle = stable_http_handle(&base_url).await;
+            let result = call_mcp_tool(&handle, "deferred", serde_json::json!({}))
+                .await
+                .unwrap();
+            assert_eq!(result, serde_json::json!("completed asynchronously"));
+
+            let _discover = recv_recorded_request(&mut requests).await;
+            let create = recv_recorded_request(&mut requests).await;
+            assert_stable_http_request(&create, "tools/call", Some("deferred"));
+            let poll = recv_recorded_request(&mut requests).await;
+            assert_stable_http_request(&poll, "tasks/get", None);
+            assert_eq!(poll.body["params"]["taskId"], serde_json::json!("task-1"));
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn stable_http_401_auth_required_waits_for_oauth_and_retries_tool_call() {
     let _guard = http_mcp_test_guard().await;
     tokio::task::LocalSet::new()
         .run_until(async {
             let (base_url, mut requests, auth_challenged) =
-                spawn_auth_required_modern_http_mcp_server().await;
-            let handle = modern_http_handle(&base_url).await;
+                spawn_auth_required_stable_http_mcp_server().await;
+            let handle = stable_http_handle(&base_url).await;
             let server_url = format!("{base_url}/mcp");
             let resource = crate::mcp_auth::canonical_resource_indicator(&server_url).unwrap();
             let session_id =
@@ -448,12 +353,12 @@ async fn modern_http_401_auth_required_waits_for_oauth_and_retries_tool_call() {
             assert_eq!(result, serde_json::json!("ok"));
 
             let discover = recv_recorded_request(&mut requests).await;
-            assert_modern_http_request(&discover, "server/discover", None);
+            assert_stable_http_request(&discover, "server/discover", None);
             let first_call = recv_recorded_request(&mut requests).await;
-            assert_modern_http_request(&first_call, "tools/call", Some("execute_sql"));
+            assert_stable_http_request(&first_call, "tools/call", Some("execute_sql"));
             assert!(!first_call.headers.contains_key("authorization"));
             let retry_call = recv_recorded_request(&mut requests).await;
-            assert_modern_http_request(&retry_call, "tools/call", Some("execute_sql"));
+            assert_stable_http_request(&retry_call, "tools/call", Some("execute_sql"));
             assert_eq!(
                 retry_call.headers.get("authorization").map(String::as_str),
                 Some("Bearer fresh-token")
@@ -469,7 +374,7 @@ async fn modern_http_401_auth_required_waits_for_oauth_and_retries_tool_call() {
                         resource: event_resource,
                         scope: Some(scope),
                     } if event_session_id == &session_id
-                        && server == "modern-http"
+                        && server == "stable-http"
                         && event_resource == &resource
                         && scope == "repo"
                 )),
@@ -482,13 +387,13 @@ async fn modern_http_401_auth_required_waits_for_oauth_and_retries_tool_call() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn modern_http_403_insufficient_scope_waits_for_step_up_and_retries_tool_call() {
+async fn stable_http_403_insufficient_scope_waits_for_step_up_and_retries_tool_call() {
     let _guard = http_mcp_test_guard().await;
     tokio::task::LocalSet::new()
         .run_until(async {
             let (base_url, mut requests, auth_challenged) =
-                spawn_insufficient_scope_modern_http_mcp_server().await;
-            let handle = modern_http_handle(&base_url).await;
+                spawn_insufficient_scope_stable_http_mcp_server().await;
+            let handle = stable_http_handle(&base_url).await;
             let server_url = format!("{base_url}/mcp");
             let resource = crate::mcp_auth::canonical_resource_indicator(&server_url).unwrap();
             let session_id =
@@ -519,11 +424,11 @@ async fn modern_http_403_insufficient_scope_waits_for_step_up_and_retries_tool_c
             assert_eq!(result, serde_json::json!("ok"));
 
             let discover = recv_recorded_request(&mut requests).await;
-            assert_modern_http_request(&discover, "server/discover", None);
+            assert_stable_http_request(&discover, "server/discover", None);
             let first_call = recv_recorded_request(&mut requests).await;
-            assert_modern_http_request(&first_call, "tools/call", Some("execute_sql"));
+            assert_stable_http_request(&first_call, "tools/call", Some("execute_sql"));
             let retry_call = recv_recorded_request(&mut requests).await;
-            assert_modern_http_request(&retry_call, "tools/call", Some("execute_sql"));
+            assert_stable_http_request(&retry_call, "tools/call", Some("execute_sql"));
             assert_eq!(
                 retry_call.headers.get("authorization").map(String::as_str),
                 Some("Bearer fresh-token")
@@ -539,7 +444,7 @@ async fn modern_http_403_insufficient_scope_waits_for_step_up_and_retries_tool_c
                         resource: event_resource,
                         scope: Some(scope),
                     } if event_session_id == &session_id
-                        && server == "modern-http"
+                        && server == "stable-http"
                         && event_resource == &resource
                         // The step-up event carries the elevated scope from the
                         // insufficient_scope challenge, not just the base scope.
@@ -554,14 +459,14 @@ async fn modern_http_403_insufficient_scope_waits_for_step_up_and_retries_tool_c
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn modern_http_401_without_interactive_host_returns_auth_error() {
+async fn stable_http_401_without_interactive_host_returns_auth_error() {
     let _guard = http_mcp_test_guard().await;
     tokio::task::LocalSet::new()
         .run_until(async {
             crate::llm::clear_current_host_bridge();
             let (base_url, mut requests, _auth_challenged) =
-                spawn_auth_required_modern_http_mcp_server().await;
-            let handle = modern_http_handle(&base_url).await;
+                spawn_auth_required_stable_http_mcp_server().await;
+            let handle = stable_http_handle(&base_url).await;
             let session_id =
                 crate::agent_sessions::open_or_create(Some("mcp-auth-headless".to_string()));
             let _session_guard = crate::agent_sessions::enter_current_session(session_id);
@@ -576,16 +481,16 @@ async fn modern_http_401_without_interactive_host_returns_auth_error() {
             match error {
                 VmError::CategorizedError { category, message } => {
                     assert_eq!(category, crate::value::ErrorCategory::Auth);
-                    assert!(message.contains("modern-http"), "{message}");
+                    assert!(message.contains("stable-http"), "{message}");
                     assert!(message.contains("no interactive host"), "{message}");
                 }
                 other => panic!("expected categorized auth error, got {other:?}"),
             }
 
             let discover = recv_recorded_request(&mut requests).await;
-            assert_modern_http_request(&discover, "server/discover", None);
+            assert_stable_http_request(&discover, "server/discover", None);
             let first_call = recv_recorded_request(&mut requests).await;
-            assert_modern_http_request(&first_call, "tools/call", Some("execute_sql"));
+            assert_stable_http_request(&first_call, "tools/call", Some("execute_sql"));
             assert!(
                 matches!(requests.try_recv(), Err(mpsc::error::TryRecvError::Empty)),
                 "headless path should not retry"
@@ -596,7 +501,7 @@ async fn modern_http_401_without_interactive_host_returns_auth_error() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn modern_http_token_exchange_sends_delegated_bearer_for_actor_chain() {
+async fn stable_http_token_exchange_sends_delegated_bearer_for_actor_chain() {
     let _guard = http_mcp_test_guard().await;
     tokio::task::LocalSet::new()
         .run_until(async {
@@ -605,7 +510,7 @@ async fn modern_http_token_exchange_sends_delegated_bearer_for_actor_chain() {
             let spec = token_exchange_http_spec(&base_url);
             let handle = connect_mcp_server_from_spec(&spec)
                 .await
-                .expect("modern HTTP MCP server should connect");
+                .expect("stable HTTP MCP server should connect");
             let actor_chain =
                 crate::actor_chain::ActorChain::new_with_scopes("user:kenneth", ["repo"])
                     .pushed_with_scopes("agent:merge-captain", ["repo"]);
@@ -625,13 +530,13 @@ async fn modern_http_token_exchange_sends_delegated_bearer_for_actor_chain() {
             assert_eq!(result, serde_json::json!("ok"));
 
             let discover = recv_recorded_request(&mut requests).await;
-            assert_modern_http_request(&discover, "server/discover", None);
+            assert_stable_http_request(&discover, "server/discover", None);
             assert_eq!(
                 discover.headers.get("authorization").map(String::as_str),
                 Some("Bearer base-token")
             );
             let tool_call = recv_recorded_request(&mut requests).await;
-            assert_modern_http_request(&tool_call, "tools/call", Some("execute_sql"));
+            assert_stable_http_request(&tool_call, "tools/call", Some("execute_sql"));
             assert_eq!(
                 tool_call.headers.get("authorization").map(String::as_str),
                 Some("Bearer delegated-token")
@@ -670,7 +575,7 @@ async fn modern_http_token_exchange_sends_delegated_bearer_for_actor_chain() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn modern_http_token_exchange_unsupported_grant_falls_back_to_plain_bearer() {
+async fn stable_http_token_exchange_unsupported_grant_falls_back_to_plain_bearer() {
     let _guard = http_mcp_test_guard().await;
     tokio::task::LocalSet::new()
         .run_until(async {
@@ -679,7 +584,7 @@ async fn modern_http_token_exchange_unsupported_grant_falls_back_to_plain_bearer
             let spec = token_exchange_http_spec(&base_url);
             let handle = connect_mcp_server_from_spec(&spec)
                 .await
-                .expect("modern HTTP MCP server should connect");
+                .expect("stable HTTP MCP server should connect");
             let actor_chain =
                 crate::actor_chain::ActorChain::new("user:kenneth").pushed("agent:merge-captain");
             let session_id = crate::agent_sessions::open_or_create_with_actor_chain(
@@ -746,19 +651,12 @@ fn x_mcp_header_validation_filters_invalid_tools_and_encodes_values() {
 
 pub(super) async fn connect_stdio_test_script(
     script: &str,
-    protocol_mode: McpProtocolMode,
     protocol_version: String,
 ) -> VmMcpClientHandle {
     let args = vec!["-u".to_string(), "-c".to_string(), script.to_string()];
-    mcp_connect_stdio_impl(
-        "python3",
-        &args,
-        &BTreeMap::new(),
-        protocol_mode,
-        protocol_version,
-    )
-    .await
-    .expect("stdio test MCP server should connect")
+    mcp_connect_stdio_impl("python3", &args, &BTreeMap::new(), protocol_version)
+        .await
+        .expect("stdio test MCP server should connect")
 }
 
 async fn install_sampling_mock() {
@@ -785,9 +683,9 @@ async fn clear_sampling_mock() {
     execute_test_harn("host_mock_clear()").await;
 }
 
-async fn modern_http_handle(base_url: &str) -> VmMcpClientHandle {
+async fn stable_http_handle(base_url: &str) -> VmMcpClientHandle {
     let spec = McpServerSpec {
-        name: "modern-http".to_string(),
+        name: "stable-http".to_string(),
         transport: McpTransport::Http,
         command: String::new(),
         args: Vec::new(),
@@ -795,13 +693,12 @@ async fn modern_http_handle(base_url: &str) -> VmMcpClientHandle {
         url: format!("{base_url}/mcp"),
         auth_token: None,
         token_exchange: None,
-        protocol_version: Some(DRAFT_PROTOCOL_VERSION.to_string()),
-        protocol_mode: Some("rc".to_string()),
+        protocol_version: Some(PROTOCOL_VERSION.to_string()),
         proxy_server_name: None,
     };
     connect_mcp_server_from_spec(&spec)
         .await
-        .expect("modern HTTP MCP server should connect")
+        .expect("stable HTTP MCP server should connect")
 }
 
 fn token_exchange_http_spec(base_url: &str) -> McpServerSpec {
@@ -818,20 +715,19 @@ fn token_exchange_http_spec(base_url: &str) -> McpServerSpec {
             actor_token: Some("agent.jwt".to_string()),
             ..Default::default()
         }),
-        protocol_version: Some(DRAFT_PROTOCOL_VERSION.to_string()),
-        protocol_mode: Some("rc".to_string()),
+        protocol_version: Some(PROTOCOL_VERSION.to_string()),
         proxy_server_name: None,
     }
 }
 
-fn assert_modern_http_request(request: &RecordedHttpRequest, method: &str, name: Option<&str>) {
+fn assert_stable_http_request(request: &RecordedHttpRequest, method: &str, name: Option<&str>) {
     assert_eq!(request.body["method"], serde_json::json!(method));
     assert_eq!(
         request
             .headers
             .get("mcp-protocol-version")
             .map(String::as_str),
-        Some(DRAFT_PROTOCOL_VERSION)
+        Some(PROTOCOL_VERSION)
     );
     assert_eq!(
         request.headers.get("mcp-method").map(String::as_str),
@@ -841,20 +737,20 @@ fn assert_modern_http_request(request: &RecordedHttpRequest, method: &str, name:
     assert!(!request.headers.contains_key("mcp-session-id"));
     let meta = &request.body["params"]["_meta"];
     assert_eq!(
-        meta[RC_META_KEY_PROTOCOL_VERSION],
-        serde_json::json!(DRAFT_PROTOCOL_VERSION)
+        meta[MCP_META_KEY_PROTOCOL_VERSION],
+        serde_json::json!(PROTOCOL_VERSION)
     );
     assert_eq!(
-        meta[RC_META_KEY_CLIENT_INFO]["name"],
+        meta[MCP_META_KEY_CLIENT_INFO]["name"],
         serde_json::json!("harn")
     );
     assert_eq!(
-        meta[RC_META_KEY_CLIENT_CAPABILITIES]["roots"],
+        meta[MCP_META_KEY_CLIENT_CAPABILITIES]["roots"],
         serde_json::json!({})
     );
 }
 
-async fn spawn_modern_http_mcp_server() -> (String, mpsc::UnboundedReceiver<RecordedHttpRequest>) {
+async fn spawn_stable_http_mcp_server() -> (String, mpsc::UnboundedReceiver<RecordedHttpRequest>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let (request_tx, request_rx) = mpsc::unbounded_channel();
@@ -875,7 +771,7 @@ async fn spawn_modern_http_mcp_server() -> (String, mpsc::UnboundedReceiver<Reco
                 body: request.clone(),
             });
             let method = request.get("method").and_then(|value| value.as_str());
-            let response = modern_http_response(&request, method);
+            let response = stable_http_response(&request, method);
             let _ = write_http_json(&mut stream, "200 OK", &[], response).await;
         }
     });
@@ -883,17 +779,17 @@ async fn spawn_modern_http_mcp_server() -> (String, mpsc::UnboundedReceiver<Reco
     (format!("http://{addr}"), request_rx)
 }
 
-async fn spawn_auth_required_modern_http_mcp_server() -> (
+async fn spawn_auth_required_stable_http_mcp_server() -> (
     String,
     mpsc::UnboundedReceiver<RecordedHttpRequest>,
     oneshot::Receiver<()>,
 ) {
     // A `401 Unauthorized` with a Bearer challenge: no/invalid token.
-    spawn_challenge_then_ok_modern_http_mcp_server("401 Unauthorized", r#"Bearer scope="repo""#)
+    spawn_challenge_then_ok_stable_http_mcp_server("401 Unauthorized", r#"Bearer scope="repo""#)
         .await
 }
 
-async fn spawn_insufficient_scope_modern_http_mcp_server() -> (
+async fn spawn_insufficient_scope_stable_http_mcp_server() -> (
     String,
     mpsc::UnboundedReceiver<RecordedHttpRequest>,
     oneshot::Receiver<()>,
@@ -901,19 +797,19 @@ async fn spawn_insufficient_scope_modern_http_mcp_server() -> (
     // A `403 Forbidden` with `error="insufficient_scope"`: a valid token that
     // lacks a required scope. Resolvable by a step-up authorization requesting
     // the elevated `scope` from the challenge.
-    spawn_challenge_then_ok_modern_http_mcp_server(
+    spawn_challenge_then_ok_stable_http_mcp_server(
         "403 Forbidden",
         r#"Bearer error="insufficient_scope", scope="repo admin""#,
     )
     .await
 }
 
-/// Modern-HTTP MCP mock that answers the first `tools/call` (and any call
+/// Stable-HTTP MCP mock that answers the first `tools/call` (and any call
 /// without a `Bearer fresh-token`) with `status_line` + the given
 /// `WWW-Authenticate` `challenge`, then serves `200 OK` once the fresh token
 /// is presented. Used to exercise both the `401` and `403 insufficient_scope`
 /// step-up authorization paths through one code path.
-async fn spawn_challenge_then_ok_modern_http_mcp_server(
+async fn spawn_challenge_then_ok_stable_http_mcp_server(
     status_line: &'static str,
     challenge: &'static str,
 ) -> (
@@ -970,7 +866,7 @@ async fn spawn_challenge_then_ok_modern_http_mcp_server(
                 .await;
                 continue;
             }
-            let response = modern_http_response(&request, method);
+            let response = stable_http_response(&request, method);
             let _ = write_http_json(&mut stream, "200 OK", &[], response).await;
         }
     });
@@ -1041,7 +937,7 @@ async fn spawn_token_exchange_http_mcp_server(
                 .await;
                 continue;
             }
-            let response = modern_http_response(&request, method);
+            let response = stable_http_response(&request, method);
             let _ = write_http_json(&mut stream, "200 OK", &[], response).await;
         }
     });
@@ -1129,77 +1025,25 @@ fn test_stored_mcp_token(resource: &str, access_token: &str) -> crate::mcp_oauth
     }
 }
 
-async fn spawn_legacy_http_fallback_server(
-) -> (String, mpsc::UnboundedReceiver<RecordedHttpRequest>) {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let (request_tx, request_rx) = mpsc::unbounded_channel();
-
-    tokio::spawn(async move {
-        loop {
-            let Ok((mut stream, _)) = listener.accept().await else {
-                break;
-            };
-            let Ok((request_line, headers, body)) = read_http_request(&mut stream).await else {
-                continue;
-            };
-            if request_line.starts_with("GET ") {
-                let _ = write_http_empty(&mut stream, "404 Not Found").await;
-                continue;
-            }
-            let Ok(request) = serde_json::from_slice::<serde_json::Value>(&body) else {
-                continue;
-            };
-            let method = request.get("method").and_then(|value| value.as_str());
-            let _ = request_tx.send(RecordedHttpRequest {
-                headers: headers.clone(),
-                body: request.clone(),
-            });
-            match method {
-                Some("server/discover") => {
-                    let _ = write_http_empty(&mut stream, "400 Bad Request").await;
-                }
-                Some("initialize") => {
-                    let response = serde_json::json!({
-                        "jsonrpc": "2.0",
-                        "id": request["id"].clone(),
-                        "result": {
-                            "protocolVersion": PROTOCOL_VERSION,
-                            "capabilities": {"tools": {}},
-                            "serverInfo": {"name": "legacy-http", "version": "1.0.0"}
-                        }
-                    });
-                    let _ = write_http_json(
-                        &mut stream,
-                        "200 OK",
-                        &[("MCP-Session-Id", "legacy-session")],
-                        response,
-                    )
-                    .await;
-                }
-                Some("notifications/initialized") => {
-                    let _ = write_http_empty(&mut stream, "202 Accepted").await;
-                }
-                _ => {
-                    let _ = write_http_empty(&mut stream, "404 Not Found").await;
-                }
-            }
-        }
-    });
-
-    (format!("http://{addr}"), request_rx)
-}
-
 async fn recv_recorded_request(
     requests: &mut mpsc::UnboundedReceiver<RecordedHttpRequest>,
 ) -> RecordedHttpRequest {
-    tokio::time::timeout(MCP_TIMEOUT, requests.recv())
-        .await
-        .expect("timed out waiting for recorded MCP HTTP request")
-        .expect("mock server closed before recording request")
+    tokio::time::timeout(MCP_TIMEOUT, async {
+        loop {
+            let request = requests
+                .recv()
+                .await
+                .expect("mock server closed before recording request");
+            if request.body.get("id").is_some() {
+                return request;
+            }
+        }
+    })
+    .await
+    .expect("timed out waiting for recorded MCP HTTP request")
 }
 
-fn modern_http_response(request: &serde_json::Value, method: Option<&str>) -> serde_json::Value {
+fn stable_http_response(request: &serde_json::Value, method: Option<&str>) -> serde_json::Value {
     let id = request
         .get("id")
         .cloned()
@@ -1210,9 +1054,11 @@ fn modern_http_response(request: &serde_json::Value, method: Option<&str>) -> se
             "id": id,
             "result": {
                 "resultType": "complete",
-                "supportedVersions": [DRAFT_PROTOCOL_VERSION],
+                "supportedVersions": [PROTOCOL_VERSION],
                 "capabilities": {"tools": {}, "resources": {}},
-                "serverInfo": {"name": "modern-http", "version": "1.0.0"}
+                "ttlMs": 0,
+                "cacheScope": "private",
+                "_meta": {"io.modelcontextprotocol/serverInfo": {"name": "stable-http", "version": "1.0.0"}}
             }
         }),
         Some("tools/list") => serde_json::json!({
@@ -1235,7 +1081,24 @@ fn modern_http_response(request: &serde_json::Value, method: Option<&str>) -> se
                 "cacheScope": "public"
             }
         }),
-        Some("tools/call") => modern_http_tool_call_response(request, id),
+        Some("tools/call") => stable_http_tool_call_response(request, id),
+        Some(method @ ("prompts/get" | "resources/read")) => {
+            stable_http_non_tool_input_response(request, id, method)
+        }
+        Some("tasks/get") => serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": {
+                "resultType": "complete",
+                "taskId": "task-1",
+                "status": "completed",
+                "result": {
+                    "resultType": "complete",
+                    "content": [{"type": "text", "text": "completed asynchronously"}],
+                    "isError": false
+                }
+            }
+        }),
         _ => serde_json::json!({
             "jsonrpc": "2.0",
             "id": id,
@@ -1244,12 +1107,56 @@ fn modern_http_response(request: &serde_json::Value, method: Option<&str>) -> se
     }
 }
 
-fn modern_http_tool_call_response(
+fn stable_http_non_tool_input_response(
+    request: &serde_json::Value,
+    id: serde_json::Value,
+    method: &str,
+) -> serde_json::Value {
+    if request["params"].get("inputResponses").is_none() {
+        return serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": {
+                "resultType": "input_required",
+                "requestState": "state-non-tool",
+                "inputRequests": {
+                    "roots": {"method": "roots/list", "params": {}}
+                }
+            }
+        });
+    }
+    let marker = match method {
+        "prompts/get" => "prompt-complete",
+        "resources/read" => "resource-complete",
+        _ => unreachable!("caller restricts stable non-tool input methods"),
+    };
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "result": {
+            "resultType": "complete",
+            "description": marker
+        }
+    })
+}
+
+fn stable_http_tool_call_response(
     request: &serde_json::Value,
     id: serde_json::Value,
 ) -> serde_json::Value {
     let params = &request["params"];
     let name = params.get("name").and_then(|value| value.as_str());
+    if name == Some("deferred") {
+        return serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": {
+                "resultType": "task",
+                "taskId": "task-1",
+                "pollIntervalMs": 10
+            }
+        });
+    }
     if name == Some("needs_input") && params.get("inputResponses").is_none() {
         return serde_json::json!({
             "jsonrpc": "2.0",
@@ -1303,23 +1210,6 @@ fn modern_http_tool_call_response(
     })
 }
 
-async fn spawn_eliciting_http_mcp_server() -> (String, mpsc::UnboundedReceiver<serde_json::Value>) {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let (response_tx, response_rx) = mpsc::unbounded_channel();
-
-    tokio::spawn(async move {
-        loop {
-            let Ok((stream, _)) = listener.accept().await else {
-                break;
-            };
-            let _ = handle_mock_http_mcp_connection(stream, response_tx.clone()).await;
-        }
-    });
-
-    (format!("http://{addr}"), response_rx)
-}
-
 async fn spawn_recording_http_mcp_server() -> (String, mpsc::UnboundedReceiver<serde_json::Value>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -1341,85 +1231,6 @@ async fn spawn_recording_http_mcp_server() -> (String, mpsc::UnboundedReceiver<s
     });
 
     (format!("http://{addr}"), request_rx)
-}
-
-async fn handle_mock_http_mcp_connection(
-    mut stream: TcpStream,
-    response_tx: mpsc::UnboundedSender<serde_json::Value>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let (request_line, headers, body) = read_http_request(&mut stream).await?;
-    if request_line.starts_with("GET ") {
-        let response = concat!(
-            "HTTP/1.1 200 OK\r\n",
-            "content-type: text/event-stream\r\n",
-            "cache-control: no-cache\r\n",
-            "connection: close\r\n",
-            "\r\n",
-            "id: prime\r\n",
-            "data: \r\n",
-            "\r\n",
-            "id: elicit-1\r\n",
-            "event: message\r\n",
-            "data: {\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"elicitation/create\",\"params\":{\"message\":\"Need input\",\"requestedSchema\":{\"type\":\"object\",\"properties\":{}}}}\r\n",
-            "\r\n"
-        );
-        stream.write_all(response.as_bytes()).await?;
-        stream.flush().await?;
-        return Ok(());
-    }
-
-    let request: serde_json::Value = serde_json::from_slice(&body)?;
-    let method = request.get("method").and_then(|value| value.as_str());
-    match method {
-        Some("initialize") => {
-            write_http_json(
-                &mut stream,
-                "200 OK",
-                &[("MCP-Session-Id", "test-session")],
-                serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": request["id"].clone(),
-                    "result": {
-                        "protocolVersion": PROTOCOL_VERSION,
-                        "capabilities": {
-                            "elicitation": {},
-                            "tools": {}
-                        },
-                        "serverInfo": {
-                            "name": "mock",
-                            "version": "0.0.0"
-                        }
-                    }
-                }),
-            )
-            .await?;
-        }
-        Some("notifications/initialized") => {
-            write_http_empty(&mut stream, "202 Accepted").await?;
-        }
-        _ if request.get("result").is_some() || request.get("error").is_some() => {
-            assert_eq!(
-                headers.get("mcp-session-id").map(String::as_str),
-                Some("test-session")
-            );
-            let _ = response_tx.send(request);
-            write_http_empty(&mut stream, "202 Accepted").await?;
-        }
-        _ => {
-            write_http_json(
-                &mut stream,
-                "200 OK",
-                &[],
-                serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": request["id"].clone(),
-                    "result": {}
-                }),
-            )
-            .await?;
-        }
-    }
-    Ok(())
 }
 
 async fn read_http_request(
@@ -1519,97 +1330,6 @@ async fn write_http_empty(stream: &mut TcpStream, status: &str) -> Result<(), st
 }
 
 #[test]
-fn test_vm_value_to_serde_string() {
-    let val = VmValue::String(arcstr::ArcStr::from("hello"));
-    let json = vm_value_to_serde(&val);
-    assert_eq!(json, serde_json::json!("hello"));
-}
-
-#[test]
-fn test_vm_value_to_serde_dict() {
-    let mut map = BTreeMap::new();
-    map.insert("key".to_string(), VmValue::Int(42));
-    let val = VmValue::dict(map);
-    let json = vm_value_to_serde(&val);
-    assert_eq!(json, serde_json::json!({"key": 42}));
-}
-
-#[test]
-fn test_vm_value_to_serde_list() {
-    let val = VmValue::List(std::sync::Arc::new(vec![VmValue::Int(1), VmValue::Int(2)]));
-    let json = vm_value_to_serde(&val);
-    assert_eq!(json, serde_json::json!([1, 2]));
-}
-
-#[test]
-fn test_extract_content_text_single() {
-    let result = serde_json::json!({
-        "content": [{"type": "text", "text": "hello world"}],
-        "isError": false
-    });
-    assert_eq!(extract_content_text(&result), "hello world");
-}
-
-#[test]
-fn test_extract_content_text_multiple() {
-    let result = serde_json::json!({
-        "content": [
-            {"type": "text", "text": "first"},
-            {"type": "text", "text": "second"}
-        ],
-        "isError": false
-    });
-    assert_eq!(extract_content_text(&result), "first\nsecond");
-}
-
-#[test]
-fn test_extract_content_text_fallback_json() {
-    let result = serde_json::json!({
-        "content": [{"type": "image", "data": "abc"}],
-        "isError": false
-    });
-    let output = extract_content_text(&result);
-    assert!(output.contains("image"));
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn test_parse_sse_jsonrpc_body_uses_matching_jsonrpc_response() {
-    let inner = HttpMcpClientInner {
-        client: reqwest::Client::new(),
-        url: "http://127.0.0.1/mcp".to_string(),
-        auth_token: None,
-        auth_token_source: HttpAuthTokenSource::None,
-        token_exchange: None,
-        protocol_mode: McpProtocolMode::Legacy,
-        protocol_version: PROTOCOL_VERSION.to_string(),
-        session_id: None,
-        next_id: 1,
-        proxy_server_name: None,
-        get_stream_task: None,
-        tool_headers: BTreeMap::new(),
-        fixtures: None,
-    };
-    let body = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/message\"}\n\nevent: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"tools\":[]}}\n\n";
-    let parsed = parse_sse_jsonrpc_body(&inner, "mock", body, Some(1))
-        .await
-        .unwrap();
-    assert_eq!(parsed["result"]["tools"], serde_json::json!([]));
-}
-
-#[test]
-fn client_rejects_unadvertised_server_to_client_requests() {
-    let unknown = client_request_rejection(&serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": "custom-1",
-        "method": "custom/method",
-        "params": {}
-    }))
-    .expect("rejection");
-    assert_eq!(unknown["error"]["code"], serde_json::json!(-32601));
-    assert!(unknown["error"].get("data").is_none());
-}
-
-#[test]
 fn current_mcp_roots_prefers_project_root_over_child_cwd() {
     let root = std::env::temp_dir().join(format!("harn-mcp-roots-{}", uuid::Uuid::now_v7()));
     let child = root.join("nested");
@@ -1663,7 +1383,7 @@ fn current_mcp_roots_prefers_explicit_project_root_without_harn_toml() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn handle_inbound_routes_roots_list() {
+async fn embedded_input_routes_roots_list() {
     let root = std::env::temp_dir().join(format!("harn-mcp-roots-{}", uuid::Uuid::now_v7()));
     std::fs::create_dir_all(&root).unwrap();
     crate::stdlib::process::set_thread_execution_context(Some(
@@ -1678,7 +1398,7 @@ async fn handle_inbound_routes_roots_list() {
         "id": "roots-1",
         "method": crate::mcp_protocol::METHOD_ROOTS_LIST,
     });
-    let response = handle_inbound_client_request("mock", &request)
+    let response = resolve_embedded_input_request("mock", &request, None)
         .await
         .expect("roots/list should produce a response");
     let expected_root = std::fs::canonicalize(&root).unwrap();
@@ -1709,17 +1429,14 @@ async fn roots_list_changed_notification_is_sent_once_per_snapshot() {
                     auth_token: None,
                     auth_token_source: HttpAuthTokenSource::None,
                     token_exchange: None,
-                    protocol_mode: McpProtocolMode::Legacy,
                     protocol_version: PROTOCOL_VERSION.to_string(),
-                    session_id: None,
                     next_id: 1,
                     proxy_server_name: None,
-                    get_stream_task: None,
                     tool_headers: BTreeMap::new(),
                     fixtures: None,
                 })))),
                 last_roots: Arc::new(Mutex::new(Vec::new())),
-                initialize_result: Arc::new(Mutex::new(None)),
+                discovery_result: Arc::new(Mutex::new(None)),
                 cache_hints: Arc::new(Mutex::new(BTreeMap::new())),
             };
 
@@ -1740,7 +1457,7 @@ async fn roots_list_changed_notification_is_sent_once_per_snapshot() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn handle_inbound_routes_sampling_to_dispatcher() {
+async fn embedded_input_routes_sampling_to_dispatcher() {
     // Confirms `sampling/createMessage` is routed to
     // `mcp_sampling::dispatch_inbound_sampling` rather than the
     // generic rejection path. With no host bridge installed, the
@@ -1758,110 +1475,12 @@ async fn handle_inbound_routes_sampling_to_dispatcher() {
             "maxTokens": 4,
         },
     });
-    let response = handle_inbound_client_request("mock", &request)
+    let response = resolve_embedded_input_request("mock", &request, None)
         .await
         .expect("sampling should produce a response");
     assert_eq!(response["id"], serde_json::json!(42));
     assert_eq!(
         response["error"]["data"]["type"],
         serde_json::json!("mcp.samplingDeclined")
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn stdio_read_line_capped_reads_lines_and_reports_eof() {
-    let data: &[u8] = b"{\"a\":1}\npartial";
-    let mut reader = BufReader::new(data);
-    let mut buf = Vec::new();
-
-    let bytes_read = read_line_capped(&mut reader, &mut buf, 1024).await.unwrap();
-    assert_eq!(bytes_read, 8);
-    assert_eq!(buf, b"{\"a\":1}\n");
-
-    // A final unterminated line is returned at EOF, like `read_line`.
-    buf.clear();
-    let bytes_read = read_line_capped(&mut reader, &mut buf, 1024).await.unwrap();
-    assert_eq!(bytes_read, 7);
-    assert_eq!(buf, b"partial");
-
-    buf.clear();
-    let bytes_read = read_line_capped(&mut reader, &mut buf, 1024).await.unwrap();
-    assert_eq!(bytes_read, 0, "EOF must read zero bytes");
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn stdio_read_line_capped_rejects_oversized_line() {
-    // An endless line (no newline) must produce a protocol error at the cap
-    // instead of growing the buffer without bound.
-    let data = vec![b'x'; 2 * 1024 * 1024];
-    let mut reader = BufReader::new(&data[..]);
-    let mut buf = Vec::new();
-    let error = read_line_capped(&mut reader, &mut buf, 1024 * 1024)
-        .await
-        .unwrap_err();
-    let message = format!("{error:?}");
-    assert!(message.contains("exceeding the 1 MiB limit"), "{message}");
-    assert!(buf.len() <= 1024 * 1024, "buffer must stay within the cap");
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn stdio_write_drains_server_flood_instead_of_deadlocking() {
-    // Both directions get a small 8 KiB buffer, standing in for OS pipe
-    // buffers. The server floods far more than that down its stdout *before*
-    // reading the client's oversized request: writing the request and only
-    // then reading (the old sequential behavior) deadlocks, because each side
-    // is blocked on a full pipe the other side is not draining.
-    let (client_io, server_io) = tokio::io::duplex(8 * 1024);
-    let (client_read, mut client_write) = tokio::io::split(client_io);
-    let (server_read, mut server_write) = tokio::io::split(server_io);
-
-    let request_line = format!(
-        r#"{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"blob":"{}"}}}}"#,
-        "x".repeat(512 * 1024)
-    );
-    let expected_request_len = request_line.len() + 1;
-
-    let server = tokio::spawn(async move {
-        let note = format!(
-            "{}\n",
-            serde_json::json!({
-                "jsonrpc": "2.0",
-                "method": "notifications/progress",
-                "params": {"progressToken": "t", "progress": 1},
-            })
-        );
-        for _ in 0..2_000 {
-            server_write.write_all(note.as_bytes()).await.unwrap();
-        }
-        let mut reader = BufReader::new(server_read);
-        let mut request = Vec::new();
-        reader.read_until(b'\n', &mut request).await.unwrap();
-        request.len()
-    });
-
-    let mut reader = BufReader::new(client_read);
-    let (drained, partial) = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        write_line_draining(&mut client_write, &mut reader, request_line.as_bytes()),
-    )
-    .await
-    .expect("request write must not deadlock against a flooding server")
-    .unwrap();
-
-    assert!(
-        !drained.is_empty(),
-        "the flood must have been drained while writing"
-    );
-    assert!(drained
-        .iter()
-        .all(|msg| msg["method"] == serde_json::json!("notifications/progress")));
-    assert!(
-        partial.is_empty() || !partial.contains(&b'\n'),
-        "any leftover must be a single partial line"
-    );
-    let request_len = server.await.unwrap();
-    assert_eq!(
-        request_len, expected_request_len,
-        "server must receive the complete request line"
     );
 }

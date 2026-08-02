@@ -147,10 +147,6 @@ pub(super) fn generate_manifest_for_version(
         },
         "mcp": {
             "protocolVersion": MCP_PROTOCOL_VERSION,
-            "stableProtocolVersion": MCP_PROTOCOL_VERSION,
-            "draftProtocolVersion": MCP_DRAFT_PROTOCOL_VERSION,
-            "legacy20250618ProtocolVersion": MCP_LEGACY_2025_06_18_PROTOCOL_VERSION,
-            "final2026ProtocolVersion": MCP_FINAL_2026_PROTOCOL_VERSION,
             "protocolVersions": MCP_PROTOCOL_VERSIONS,
             "jsonSchemaDialect": MCP_JSON_SCHEMA_2020_12_DIALECT,
             "methods": MCP_METHODS,
@@ -222,10 +218,8 @@ pub(super) fn generate_readme() -> String {
          - `schemas/acp-session-update.schema.json`: Harn's ACP session-update schema\n\
            profile (`{ACP_SCHEMA_COMPATIBILITY}`).\n\
          - `schemas/a2a-0.3.0.schema.json`: Harn's A2A schema profile (`{A2A_PROTOCOL_VERSION}`).\n\
-         - `schemas/mcp-2025-11-25.schema.json`: Harn's MCP schema profile (`{MCP_PROTOCOL_VERSION}`).\n\
-         - `schemas/mcp-draft-2026-v1.schema.json`: Harn's opt-in MCP RC schema\n\
-           profile (`{MCP_DRAFT_PROTOCOL_VERSION}`), pinned beside the stable profile until the\n\
-           final `2026-07-28` specification lands.\n\
+         - `schemas/mcp-2026-07-28.schema.json`: Harn's stable MCP schema profile\n\
+           (`{MCP_PROTOCOL_VERSION}`).\n\
          - `schemas/tool-call-receipt.schema.json`: Harn's typed, privacy-preserving\n\
            `ToolCallReceipt` schema for audited tool calls.\n\
          - `schemas/plan-document-v1.schema.json`: Harn's canonical collaborative\n\
@@ -244,11 +238,11 @@ pub(super) fn generate_readme() -> String {
            aliases, and constants mirroring the Python and Swift bindings.\n\
          - `fixtures/round_trip.json`: representative JSON envelopes used by\n\
            `make check-bindings` to exercise Python and Go round-trips.\n\
-         - `fixtures/mcp-rc/`: hand-authored MCP DRAFT-2026-v1 wire fixtures\n\
-           (modern success, unsupported-version retry, cache hints,\n\
+         - `fixtures/mcp/`: hand-authored MCP 2026-07-28 wire fixtures\n\
+           (stable success, unsupported-version retry, cache hints,\n\
            input-required, header mismatch, no-session HTTP, recursive\n\
-           `$defs` tool schema, legacy 2025-11-25 compat) replayed by\n\
-           `make mcp-rc-conformance` and republished here for downstream host\n\
+           `$defs` tool schema) replayed by\n\
+           `make mcp-conformance` and republished here for downstream host\n\
            and cloud test suites.\n\n\
          Compatibility rule: additive enum values and optional fields are minor-version\n\
          compatible; removing or renaming a wire value requires a Harn minor-version\n\
@@ -419,8 +413,15 @@ pub(super) fn generate_round_trip_fixture_for_version(
         "resultType": "complete",
         "supportedVersions": MCP_PROTOCOL_VERSIONS,
         "capabilities": {"tools": {}},
-        "serverInfo": {"name": "harn", "version": artifact_version},
-        "instructions": "Use the stable MCP version unless the RC is explicitly enabled.",
+        "ttlMs": 0,
+        "cacheScope": "private",
+        "_meta": {
+            "io.modelcontextprotocol/serverInfo": {
+                "name": "harn",
+                "version": artifact_version,
+            },
+        },
+        "instructions": "Use MCP 2026-07-28. Harn server endpoints do not emulate older lifecycles.",
     });
     let mcp_input_required_result = json!({
         "resultType": MCP_INPUT_REQUIRED_RESULT_TYPE,
@@ -448,7 +449,7 @@ pub(super) fn generate_round_trip_fixture_for_version(
             "code": MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE,
             "message": MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_MESSAGE,
             "data": {
-                "requested": "DRAFT-2026-v0",
+                "requested": "2026-01-01",
                 "supported": MCP_PROTOCOL_VERSIONS,
             }
         }

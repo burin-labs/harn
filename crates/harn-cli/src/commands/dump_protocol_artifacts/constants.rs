@@ -1,5 +1,6 @@
 use harn_serve::adapters::acp::HARN_PROVIDER_CATALOG_METHOD;
-use harn_serve::MCP_PROTOCOL_VERSION;
+pub(super) use harn_serve::MCP_PROTOCOL_VERSION;
+pub(super) use harn_vm::mcp_protocol::UNSUPPORTED_PROTOCOL_VERSION_CODE;
 use harn_vm::orchestration::SESSION_VIEW_QUERY_METHOD;
 use harn_vm::session_timeline::{
     SESSION_TIMELINE_QUERY_METHOD, SESSION_TIMELINE_SUBSCRIBE_METHOD,
@@ -165,24 +166,13 @@ pub(super) const A2A_TASK_STATES: &[&str] = &[
 
 pub(super) const A2A_TASK_EVENT_TYPES: &[&str] = &["status", "message", "worker_update"];
 
-pub(super) const MCP_DRAFT_PROTOCOL_VERSION: &str = "DRAFT-2026-v1";
-
-pub(super) const MCP_LEGACY_2025_06_18_PROTOCOL_VERSION: &str = "2025-06-18";
-
-pub(super) const MCP_FINAL_2026_PROTOCOL_VERSION: &str = "2026-07-28";
-
 pub(super) const MCP_JSON_SCHEMA_2020_12_DIALECT: &str =
     "https://json-schema.org/draft/2020-12/schema";
 
-pub(super) const MCP_PROTOCOL_VERSIONS: &[&str] = &[
-    MCP_DRAFT_PROTOCOL_VERSION,
-    MCP_PROTOCOL_VERSION,
-    MCP_LEGACY_2025_06_18_PROTOCOL_VERSION,
-];
+pub(super) const MCP_PROTOCOL_VERSIONS: &[&str] = &[MCP_PROTOCOL_VERSION];
 
 pub(super) const MCP_METHODS: &[&str] = &[
     "server/discover",
-    "initialize",
     "tools/list",
     "tools/call",
     "resources/list",
@@ -191,11 +181,12 @@ pub(super) const MCP_METHODS: &[&str] = &[
     "prompts/list",
     "prompts/get",
     "completion/complete",
-    "logging/setLevel",
     "sampling/createMessage",
     "elicitation/create",
-    "notifications/initialized",
     "notifications/message",
+    "tasks/get",
+    "tasks/update",
+    "tasks/cancel",
 ];
 
 pub(super) const MCP_REQUIRED_METADATA_KEYS: &[&str] = &[
@@ -222,11 +213,12 @@ pub(super) const MCP_CACHE_RESULT_FIELDS: &[&str] = &["ttlMs", "cacheScope"];
 
 pub(super) const MCP_CACHE_SCOPES: &[&str] = &["private", "public"];
 
-pub(super) const MCP_RESULT_TYPES: &[&str] = &["complete", "input_required"];
+pub(super) const MCP_RESULT_TYPES: &[&str] = &["complete", "input_required", "task"];
 
 pub(super) const MCP_INPUT_REQUIRED_RESULT_TYPE: &str = "input_required";
 
-pub(super) const MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE: i32 = -32004;
+pub(super) const MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE: i64 =
+    UNSUPPORTED_PROTOCOL_VERSION_CODE;
 
 pub(super) const MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_MESSAGE: &str =
     "Unsupported protocol version";
@@ -266,13 +258,8 @@ pub(super) const SCHEMA_COPIES: &[SchemaCopy] = &[
     },
     SchemaCopy {
         protocol: "mcp",
-        source: "conformance/protocols/schemas/mcp-2025-11-25.schema.json",
-        artifact: "schemas/mcp-2025-11-25.schema.json",
-    },
-    SchemaCopy {
-        protocol: "mcp",
-        source: "conformance/protocols/schemas/mcp-draft-2026-v1.schema.json",
-        artifact: "schemas/mcp-draft-2026-v1.schema.json",
+        source: "conformance/protocols/schemas/mcp-2026-07-28.schema.json",
+        artifact: "schemas/mcp-2026-07-28.schema.json",
     },
 ];
 

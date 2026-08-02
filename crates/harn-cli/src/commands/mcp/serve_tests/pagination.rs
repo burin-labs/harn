@@ -31,7 +31,7 @@ async fn list_endpoints_page_with_cursor_async() {
         "---\nid = \"second\"\n---\nSecond",
     );
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
-    let mut session = init_session(&service).await;
+    let mut session = ConnectionState::default();
     call_tool(
         &service,
         &mut session,
@@ -44,17 +44,14 @@ async fn list_endpoints_page_with_cursor_async() {
     .await;
 
     let first_tools = service
-        .handle_request(
-            &mut session,
-            harn_vm::jsonrpc::request(40, "tools/list", json!({})),
-        )
+        .handle_request(&mut session, stable_request(40, "tools/list", json!({})))
         .await;
     assert_eq!(first_tools["result"]["tools"].as_array().unwrap().len(), 1);
     let tools_cursor = first_tools["result"]["nextCursor"].as_str().unwrap();
     let next_tools = service
         .handle_request(
             &mut session,
-            harn_vm::jsonrpc::request(41, "tools/list", json!({"cursor": tools_cursor})),
+            stable_request(41, "tools/list", json!({"cursor": tools_cursor})),
         )
         .await;
     assert_eq!(next_tools["result"]["tools"].as_array().unwrap().len(), 1);
@@ -64,10 +61,7 @@ async fn list_endpoints_page_with_cursor_async() {
     );
 
     let first_prompts = service
-        .handle_request(
-            &mut session,
-            harn_vm::jsonrpc::request(42, "prompts/list", json!({})),
-        )
+        .handle_request(&mut session, stable_request(42, "prompts/list", json!({})))
         .await;
     assert_eq!(
         first_prompts["result"]["prompts"].as_array().unwrap().len(),
@@ -77,7 +71,7 @@ async fn list_endpoints_page_with_cursor_async() {
     let next_prompts = service
         .handle_request(
             &mut session,
-            harn_vm::jsonrpc::request(43, "prompts/list", json!({"cursor": prompts_cursor})),
+            stable_request(43, "prompts/list", json!({"cursor": prompts_cursor})),
         )
         .await;
     assert_eq!(
@@ -92,7 +86,7 @@ async fn list_endpoints_page_with_cursor_async() {
     let first_resources = service
         .handle_request(
             &mut session,
-            harn_vm::jsonrpc::request(44, "resources/list", json!({})),
+            stable_request(44, "resources/list", json!({})),
         )
         .await;
     assert_eq!(
@@ -106,7 +100,7 @@ async fn list_endpoints_page_with_cursor_async() {
     let next_resources = service
         .handle_request(
             &mut session,
-            harn_vm::jsonrpc::request(45, "resources/list", json!({"cursor": resources_cursor})),
+            stable_request(45, "resources/list", json!({"cursor": resources_cursor})),
         )
         .await;
     assert_eq!(
@@ -124,7 +118,7 @@ async fn list_endpoints_page_with_cursor_async() {
     let templates = service
         .handle_request(
             &mut session,
-            harn_vm::jsonrpc::request(46, "resources/templates/list", json!({})),
+            stable_request(46, "resources/templates/list", json!({})),
         )
         .await;
     assert_eq!(
@@ -139,7 +133,7 @@ async fn list_endpoints_page_with_cursor_async() {
     let invalid = service
         .handle_request(
             &mut session,
-            harn_vm::jsonrpc::request(47, "resources/list", json!({"cursor": "nope"})),
+            stable_request(47, "resources/list", json!({"cursor": "nope"})),
         )
         .await;
     assert_eq!(invalid["error"]["code"], json!(-32602));

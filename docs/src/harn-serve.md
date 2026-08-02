@@ -150,8 +150,7 @@ harn serve mcp --transport http --cert certs/prod.pem --key certs/prod-key.pem s
 Behavior today:
 
 - stdio transport for local subprocess-style MCP clients
-- Streamable HTTP `POST` / `GET` endpoint at `--path`
-- legacy SSE compatibility endpoints at `--sse-path` and `--messages-path`
+- stable Streamable HTTP `POST` endpoint at `--path`
 - TLS listener modes:
   `plain` for intentional HTTP,
   `edge` when public TLS is terminated by a proxy/load balancer,

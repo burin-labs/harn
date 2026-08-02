@@ -162,16 +162,6 @@ pub(crate) struct McpServeArgs {
     /// Streamable HTTP endpoint path.
     #[arg(long, default_value = "/mcp", value_name = "PATH")]
     pub path: String,
-    /// Legacy SSE endpoint path for older MCP clients.
-    #[arg(long = "sse-path", default_value = "/sse", value_name = "PATH")]
-    pub sse_path: String,
-    /// Legacy SSE POST endpoint path for older MCP clients.
-    #[arg(
-        long = "messages-path",
-        default_value = "/messages",
-        value_name = "PATH"
-    )]
-    pub messages_path: String,
 }
 
 #[derive(Debug, Args)]

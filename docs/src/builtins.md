@@ -2354,11 +2354,8 @@ MCP servers.
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `harness.tools.mcp_roots()` / `harn.mcp.roots()` | none | list | Return the MCP roots Harn exposes to connected servers (`uri`, `name`, `path`) |
-| `harness.tools.mcp_client_roots()` / `harn.mcp.client_roots()` | none | list | From a Harn-served MCP handler, ask the connected client for its `roots/list` result |
-| `harness.tools.mcp_configure(config)` / `harn.mcp.configure(config)` | config: dict | dict | Opt into experimental MCP behavior for the current VM, including draft SEP-2356 file inputs |
-| `harness.tools.mcp_file_input(options?)` / `harn.mcp.file_input(options?)` | options: dict | dict | Return a JSON Schema property using the draft `x-mcp-file` annotation |
-| `harness.tools.mcp_upload_file(server, file_path, options?)` / `harn.mcp.upload_file(server, file_path, options?)` | server: mcp\_client, file\_path: string, options: dict | string | Encode a local file as an RFC 2397 `data:` URI for an experimental MCP file input |
-| `harness.tools.mcp_connect(command, args?, options?)` | command: string, args: list, options: dict | mcp\_client | Spawn an MCP server and connect with the legacy or opt-in RC client profile |
+| `harness.tools.mcp_client_roots()` / `harn.mcp.client_roots()` | none | list | From a Harn-served MCP handler, resolve client roots through a stable `input_required` round |
+| `harness.tools.mcp_connect(command, args?, options?)` | command: string, args: list, options: dict | mcp\_client | Spawn an MCP server; the official SDK negotiates the protocol and owns older stdio compatibility |
 | `harness.tools.mcp_list_tools(client)` | client: mcp\_client | list | List available tools from the server |
 | `harness.tools.mcp_call(client, name, arguments?)` | client: mcp\_client, name: string, arguments: dict | string or list | Call a tool and return the result |
 | `harness.tools.mcp_list_resources(client)` | client: mcp\_client | list | List available resources from the server |
@@ -2366,7 +2363,7 @@ MCP servers.
 | `harness.tools.mcp_read_resource(client, uri)` | client: mcp\_client, uri: string | string or list | Read a resource by URI |
 | `harness.tools.mcp_list_prompts(client)` | client: mcp\_client | list | List available prompts from the server |
 | `harness.tools.mcp_get_prompt(client, name, arguments?)` | client: mcp\_client, name: string, arguments: dict | dict | Get a prompt with optional arguments |
-| `harness.tools.mcp_server_info(client)` | client: mcp\_client | dict | Get connection info (`name`, `connected`) plus the server initialize response and extracted advisory `instructions` when supplied |
+| `harness.tools.mcp_server_info(client)` | client: mcp\_client | dict | Get connection info (`name`, `connected`) plus the negotiated server `discovery` record and advisory `instructions` when supplied |
 | `harness.tools.mcp_disconnect(client)` | client: mcp\_client | nil | Kill the server process and release resources |
 
 Example:
@@ -2384,31 +2381,25 @@ harness.tools.mcp_disconnect(client)
 
 Notes:
 
-- MCP file inputs are experimental and default off. Harn implements the current
-  draft [SEP-2356](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2356)
-  shape: `x-mcp-file` on `uri` string schema properties and inline RFC 2397
-  `data:` URI values. Enable it explicitly with
-  `harn.mcp.configure({experimental: {file_upload: {spec_revision:
-  "modelcontextprotocol/modelcontextprotocol#2356"}}})`.
 - `mcp_call` returns a string when the tool produces a single text block,
   a list of content dicts for multi-block results, or nil when empty.
-- HTTP MCP clients keep the server's Streamable HTTP GET event stream open
-  after legacy initialization. RC clients use stateless request/response HTTP
-  with per-request metadata instead.
-- Set `options.protocol_mode` to `"rc"` for direct stdio connects, or
-  `protocol_mode = "rc"` in `harn.toml`, to opt into the draft MCP client
-  profile. Harn probes RC stdio servers with `server/discover`, attaches MCP
-  version/client/capability metadata to every request, retries a mutually
-  supported version on unsupported-version errors, and falls back to the legacy
-  initialize handshake only when `server/discover` is not implemented.
-- In RC HTTP mode Harn sends `MCP-Protocol-Version`, `Mcp-Method`, and
+- Harn requests stable MCP `2026-07-28`. The official SDK owns stdio discovery,
+  framing, negotiation, and older initialize-era compatibility. Harn does not
+  maintain a second negotiation or legacy-mode implementation.
+- HTTP clients use stable stateless request/response transport with per-request
+  metadata. Harn does not emulate the older session lifecycle for HTTP peers.
+- In stable HTTP mode Harn sends `MCP-Protocol-Version`, `Mcp-Method`, and
   `Mcp-Name` where required, does not require `MCP-Session-Id`, mirrors
   `x-mcp-header` tool-schema annotations into `Mcp-Param-*` headers for
   `tools/call`, and handles `input_required` tool results by resolving roots,
   elicitation, and sampling requests before retrying the call.
+- Harn advertises the stable tasks extension. `mcp_call` polls `tasks/get`,
+  submits outstanding MRTR input through `tasks/update`, and returns the
+  completed tool result. The synchronous call has the same 60-second bound as
+  a non-task MCP request.
 - If the tool reports `isError: true`, `mcp_call` throws the error text.
-- `mcp_connect` throws if the command cannot be spawned or the initialize
-  handshake or RC discovery probe fails.
+- `mcp_connect` throws if the command cannot be spawned or SDK negotiation or
+  stable discovery fails.
 
 ### Auto-connecting MCP servers via harn.toml
 
@@ -2445,7 +2436,6 @@ Each entry requires:
 | `client_secret` | string | Optional pre-registered OAuth client secret |
 | `scopes` | string | Optional OAuth scope string for login/consent |
 | `protocol_version` | string | Optional MCP protocol version override |
-| `protocol_mode` | string | Optional MCP client profile: `legacy` (default) or `rc` |
 
 `token_exchange` is off when omitted. When present, Harn exchanges the base
 bearer for a transient delegated bearer while a session actor chain is active,
@@ -2771,7 +2761,7 @@ Notes:
 - `harness.tools.mcp_tools(registry)` (or the alias `mcp_serve`) must be called to register tools.
 - Resources, resource templates, and prompts are registered individually.
 - All `print`/`println` output goes to stderr (stdout is the MCP transport in stdio mode).
-- The server supports the `2025-11-25` MCP protocol version over stdio and Streamable HTTP.
+- The server defaults to stable MCP `2026-07-28` over stdio and Streamable HTTP and negotiates all earlier released versions.
 - Tool handlers receive arguments as a dict and should return a string result.
 - Prompt handlers receive arguments as a dict and return a string (single
   user message) or a list of `{role, content}` dicts.

@@ -251,8 +251,8 @@ func TestRoundTripFixture(t *testing.T) {
 		if err := json.Unmarshal(raw, &result); err != nil {
 			t.Fatalf("decode mcp discover result: %v", err)
 		}
-		if len(result.SupportedVersions) == 0 || result.SupportedVersions[0] != MCPDraftProtocolVersion {
-			t.Fatalf("expected first supported version %q, got %#v", MCPDraftProtocolVersion, result.SupportedVersions)
+		if len(result.SupportedVersions) == 0 || result.SupportedVersions[0] != MCPProtocolVersion {
+			t.Fatalf("expected first supported version %q, got %#v", MCPProtocolVersion, result.SupportedVersions)
 		}
 		out, err := json.Marshal(result)
 		if err != nil {

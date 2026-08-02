@@ -16,7 +16,7 @@ use super::super::origin_guard::OriginAllowList;
 use super::super::role::OrchestratorRole;
 use super::super::supervisor_state::apply_supervisor_state;
 use super::audit::{
-    append_lifecycle_event, now_rfc3339, validate_mcp_paths, write_state_snapshot,
+    append_lifecycle_event, now_rfc3339, validate_mcp_path, write_state_snapshot,
     ConnectorActivationSnapshot, ServeStateSnapshot,
 };
 use super::config::{DrainConfig, OrchestratorConfig, PumpConfig};
@@ -241,11 +241,7 @@ async fn orchestrator_lifecycle(
         format_activation_summary(&connector_runtime.activations)
     );
     let (mcp_router, mcp_service) = if config.mcp {
-        validate_mcp_paths(
-            &config.mcp_path,
-            &config.mcp_sse_path,
-            &config.mcp_messages_path,
-        )?;
+        validate_mcp_path(&config.mcp_path)?;
         if !has_orchestrator_api_keys_configured() && !has_mcp_oauth_configured() {
             return Err(OrchestratorError::Serve(
                 "--mcp requires HARN_ORCHESTRATOR_API_KEYS or HARN_MCP_OAUTH_AUTHORIZATION_SERVERS so the embedded MCP management surface is authenticated"
@@ -263,13 +259,8 @@ async fn orchestrator_lifecycle(
         let router = crate::commands::mcp::serve::http_router_for_service(
             service.clone(),
             config.mcp_path.clone(),
-            config.mcp_sse_path.clone(),
-            config.mcp_messages_path.clone(),
         );
-        eprintln!(
-            "[harn] embedded MCP server mounted at {} (legacy SSE {}, messages {})",
-            config.mcp_path, config.mcp_sse_path, config.mcp_messages_path
-        );
+        eprintln!("[harn] embedded MCP server mounted at {}", config.mcp_path);
         (Some(router), Some(service))
     } else {
         (None, None)

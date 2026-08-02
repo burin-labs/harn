@@ -29,8 +29,6 @@ pub(crate) async fn run(args: OrchestratorServeArgs) -> Result<(), OrchestratorE
         watch_manifest: args.watch,
         mcp: args.mcp,
         mcp_path: args.mcp_path,
-        mcp_sse_path: args.mcp_sse_path,
-        mcp_messages_path: args.mcp_messages_path,
         tls,
         shutdown_timeout: Duration::from_secs(args.shutdown_timeout.max(1)),
         drain: DrainConfig {

@@ -23,16 +23,6 @@ pub(super) fn generate_typescript_for_version(artifact_version: &str) -> String 
     out.push_str("\n\n");
     for (name, value) in [
         ("MCP_PROTOCOL_VERSION", MCP_PROTOCOL_VERSION),
-        ("MCP_STABLE_PROTOCOL_VERSION", MCP_PROTOCOL_VERSION),
-        ("MCP_DRAFT_PROTOCOL_VERSION", MCP_DRAFT_PROTOCOL_VERSION),
-        (
-            "MCP_LEGACY_2025_06_18_PROTOCOL_VERSION",
-            MCP_LEGACY_2025_06_18_PROTOCOL_VERSION,
-        ),
-        (
-            "MCP_FINAL_2026_PROTOCOL_VERSION",
-            MCP_FINAL_2026_PROTOCOL_VERSION,
-        ),
         (
             "MCP_JSON_SCHEMA_2020_12_DIALECT",
             MCP_JSON_SCHEMA_2020_12_DIALECT,
@@ -725,7 +715,8 @@ export interface MCPDiscoverResult {
   resultType: "complete"
   supportedVersions: (MCPProtocolVersion | string)[]
   capabilities: ACPObject
-  serverInfo: MCPImplementation
+  ttlMs: number
+  cacheScope: MCPCacheScope
   instructions?: string
   _meta?: ACPObject
 }

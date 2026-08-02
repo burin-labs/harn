@@ -23,10 +23,6 @@ __all__ = [
     "ACP_PROMPT_ERROR_DATA_SCHEMA",
     "A2A_PROTOCOL_VERSION",
     "MCP_PROTOCOL_VERSION",
-    "MCP_STABLE_PROTOCOL_VERSION",
-    "MCP_DRAFT_PROTOCOL_VERSION",
-    "MCP_LEGACY_2025_06_18_PROTOCOL_VERSION",
-    "MCP_FINAL_2026_PROTOCOL_VERSION",
     "MCP_JSON_SCHEMA_2020_12_DIALECT",
     "MCP_INPUT_REQUIRED_RESULT_TYPE",
     "MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE",
@@ -141,15 +137,11 @@ HARN_PROVIDER_CATALOG_METHOD: str = "_harn/providerCatalog"
 ACP_SCHEMA_COMPATIBILITY: str = "agentclientprotocol/agent-client-protocol schema v0.12.2"
 ACP_PROMPT_ERROR_DATA_SCHEMA: str = "harn.acp.prompt_error.v1"
 A2A_PROTOCOL_VERSION: str = "0.3.0"
-MCP_PROTOCOL_VERSION: str = "2025-11-25"
-MCP_STABLE_PROTOCOL_VERSION: str = "2025-11-25"
-MCP_DRAFT_PROTOCOL_VERSION: str = "DRAFT-2026-v1"
-MCP_LEGACY_2025_06_18_PROTOCOL_VERSION: str = "2025-06-18"
-MCP_FINAL_2026_PROTOCOL_VERSION: str = "2026-07-28"
+MCP_PROTOCOL_VERSION: str = "2026-07-28"
 MCP_JSON_SCHEMA_2020_12_DIALECT: str = "https://json-schema.org/draft/2020-12/schema"
 MCP_INPUT_REQUIRED_RESULT_TYPE: str = "input_required"
 MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_MESSAGE: str = "Unsupported protocol version"
-MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE: int = -32004
+MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE: int = -32022
 
 ACP_AGENT_METHODS: tuple = (
     "initialize",
@@ -421,13 +413,10 @@ A2A_TASK_EVENT_TYPES: tuple = (
     "worker_update",
 )
 MCP_PROTOCOL_VERSIONS: tuple = (
-    "DRAFT-2026-v1",
-    "2025-11-25",
-    "2025-06-18",
+    "2026-07-28",
 )
 MCP_METHODS: tuple = (
     "server/discover",
-    "initialize",
     "tools/list",
     "tools/call",
     "resources/list",
@@ -436,11 +425,12 @@ MCP_METHODS: tuple = (
     "prompts/list",
     "prompts/get",
     "completion/complete",
-    "logging/setLevel",
     "sampling/createMessage",
     "elicitation/create",
-    "notifications/initialized",
     "notifications/message",
+    "tasks/get",
+    "tasks/update",
+    "tasks/cancel",
 )
 MCP_REQUIRED_METADATA_KEYS: tuple = (
     "io.modelcontextprotocol/protocolVersion",
@@ -473,6 +463,7 @@ MCP_CACHE_SCOPES: tuple = (
 MCP_RESULT_TYPES: tuple = (
     "complete",
     "input_required",
+    "task",
 )
 MCP_LOGGING_LEVELS: tuple = (
     "debug",
@@ -699,6 +690,7 @@ class MCPCacheScope(str, Enum):
 class MCPResultType(str, Enum):
     COMPLETE = "complete"
     INPUT_REQUIRED = "input_required"
+    TASK = "task"
 
 
 class MCPLoggingLevel(str, Enum):
@@ -1243,7 +1235,8 @@ class MCPDiscoverResult(_HarnDataclass):
     resultType: str
     supportedVersions: List[str]
     capabilities: JsonObject
-    serverInfo: MCPImplementation
+    ttlMs: int
+    cacheScope: str
     instructions: Optional[str] = None
     _meta: Optional[JsonObject] = None
 

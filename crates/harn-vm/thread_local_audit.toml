@@ -276,18 +276,6 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
-path = "src/mcp_client_request.rs"
-statics = ["CURRENT_BUS"]
-category = "runtime_registry"
-plan = "arc_registry_scope"
-
-[[thread_local]]
-path = "src/mcp_file_upload.rs"
-statics = ["FILE_UPLOAD_CONFIG"]
-category = "runtime_registry"
-plan = "arc_registry_scope"
-
-[[thread_local]]
 path = "src/mcp_progress.rs"
 statics = ["ACTIVE_BUS"]
 category = "runtime_registry"

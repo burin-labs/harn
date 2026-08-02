@@ -20,6 +20,29 @@ use test_util::stdio_jsonrpc::StdioJsonRpcClient;
 // budget — cold-starting the debug `harn` binary takes 30–40s under full
 // nextest load.
 const PROCESS_READY_TIMEOUT: Duration = Duration::from_mins(1);
+const PROTOCOL_VERSION: &str = "2026-07-28";
+
+fn stable_request(id: u64, method: &str, mut params: JsonValue) -> JsonValue {
+    let meta = params
+        .as_object_mut()
+        .expect("MCP params are an object")
+        .entry("_meta")
+        .or_insert_with(|| json!({}));
+    let meta = meta.as_object_mut().expect("MCP _meta is an object");
+    meta.insert(
+        "io.modelcontextprotocol/protocolVersion".into(),
+        json!(PROTOCOL_VERSION),
+    );
+    meta.insert(
+        "io.modelcontextprotocol/clientInfo".into(),
+        json!({"name": "harn-e2e-client", "version": "1.0.0"}),
+    );
+    meta.insert(
+        "io.modelcontextprotocol/clientCapabilities".into(),
+        json!({}),
+    );
+    json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params})
+}
 
 fn write_file(dir: &Path, relative: &str, contents: &str) {
     let path = dir.join(relative);
@@ -121,24 +144,14 @@ fn mcp_server_stdio_roundtrips_tools_and_resources() {
 
     let mut client = StdioJsonRpcClient::spawn("harn mcp serve", stdio_serve_command(&temp));
 
-    let init = client.request(json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": {
-            "protocolVersion": "2025-11-25",
-            "capabilities": {},
-            "clientInfo": { "name": "integration", "version": "1.0.0" }
-        }
-    }));
-    assert_eq!(init["result"]["serverInfo"]["name"], "harn-orchestrator");
+    let discovery = client.request(stable_request(1, "server/discover", json!({})));
+    assert_eq!(discovery["result"]["resultType"], "complete");
+    assert_eq!(
+        discovery["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]["name"],
+        "harn-orchestrator"
+    );
 
-    let tools = client.request(json!({
-        "jsonrpc": "2.0",
-        "id": 2,
-        "method": "tools/list",
-        "params": {}
-    }));
+    let tools = client.request(stable_request(2, "tools/list", json!({})));
     let tool_names: Vec<&str> = tools["result"]["tools"]
         .as_array()
         .unwrap()
@@ -150,26 +163,24 @@ fn mcp_server_stdio_roundtrips_tools_and_resources() {
         "tools/list must advertise the orchestrator tools over the wire, got {tool_names:?}"
     );
 
-    let fire = client.request(json!({
-        "jsonrpc": "2.0",
-        "id": 3,
-        "method": "tools/call",
-        "params": {
+    let fire = client.request(stable_request(
+        3,
+        "tools/call",
+        json!({
             "name": "harn.trigger.fire",
             "arguments": { "trigger_id": "cron-ok", "payload": {} }
-        }
-    }));
+        }),
+    ));
     assert_eq!(
         fire["result"]["structuredContent"]["status"],
         json!("dispatched")
     );
 
-    let manifest = client.request(json!({
-        "jsonrpc": "2.0",
-        "id": 4,
-        "method": "resources/read",
-        "params": { "uri": "harn://manifest" }
-    }));
+    let manifest = client.request(stable_request(
+        4,
+        "resources/read",
+        json!({"uri": "harn://manifest"}),
+    ));
     assert!(manifest["result"]["contents"][0]["text"]
         .as_str()
         .unwrap()
@@ -190,29 +201,19 @@ fn mcp_server_stdio_emits_progress_for_trigger_fire() {
 
     let mut client = StdioJsonRpcClient::spawn("harn mcp serve", stdio_serve_command(&temp));
 
-    let _init = client.request(json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": {
-            "protocolVersion": "2025-11-25",
-            "capabilities": {},
-            "clientInfo": { "name": "progress-test", "version": "1.0.0" }
-        }
-    }));
+    let _discovery = client.request(stable_request(1, "server/discover", json!({})));
 
     // Read everything until the id=2 response, collecting any progress
     // notifications for our token that arrive first.
-    client.send(&json!({
-        "jsonrpc": "2.0",
-        "id": 2,
-        "method": "tools/call",
-        "params": {
+    client.send(&stable_request(
+        2,
+        "tools/call",
+        json!({
             "name": "harn.trigger.fire",
             "arguments": { "trigger_id": "cron-ok", "payload": {} },
             "_meta": { "progressToken": "fire-1" }
-        }
-    }));
+        }),
+    ));
 
     let mut progress_messages = Vec::new();
     let response = client.recv_until(
@@ -247,7 +248,7 @@ fn mcp_server_stdio_emits_progress_for_trigger_fire() {
 
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[tokio::test(flavor = "multi_thread")]
-async fn mcp_server_http_roundtrips_initialize_and_fire() {
+async fn mcp_server_http_discovers_and_fires_without_sessions() {
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
 
@@ -273,49 +274,39 @@ async fn mcp_server_http_roundtrips_initialize_and_fire() {
     let url = wait_for_http_listener(&mut child, &rx);
     let client = reqwest::Client::new();
 
-    let init = client
+    let discovery_request = stable_request(1, "server/discover", json!({}));
+    let discovery = client
         .post(&url)
-        .header("Accept", "application/json, text/event-stream")
-        .json(&json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2025-11-25",
-                "capabilities": {},
-                "clientInfo": { "name": "http-test", "version": "1.0.0" }
-            }
-        }))
+        .header("Accept", "application/json")
+        .header("MCP-Protocol-Version", PROTOCOL_VERSION)
+        .header("Mcp-Method", "server/discover")
+        .json(&discovery_request)
         .send()
         .await
         .unwrap();
-    assert!(init.status().is_success());
-    let session_id = init
-        .headers()
-        .get("mcp-session-id")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .to_string();
-    let init_json: JsonValue = init.json().await.unwrap();
+    assert!(discovery.status().is_success());
+    assert!(discovery.headers().get("mcp-session-id").is_none());
+    let discovery_json: JsonValue = discovery.json().await.unwrap();
     assert_eq!(
-        init_json["result"]["serverInfo"]["name"],
+        discovery_json["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]["name"],
         "harn-orchestrator"
     );
 
+    let fire_request = stable_request(
+        2,
+        "tools/call",
+        json!({
+            "name": "harn.trigger.fire",
+            "arguments": { "trigger_id": "cron-ok", "payload": {} }
+        }),
+    );
     let fire = client
         .post(&url)
-        .header("Accept", "application/json, text/event-stream")
-        .header("mcp-session-id", &session_id)
-        .json(&json!({
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "tools/call",
-            "params": {
-                "name": "harn.trigger.fire",
-                "arguments": { "trigger_id": "cron-ok", "payload": {} }
-            }
-        }))
+        .header("Accept", "application/json")
+        .header("MCP-Protocol-Version", PROTOCOL_VERSION)
+        .header("Mcp-Method", "tools/call")
+        .header("Mcp-Name", "harn.trigger.fire")
+        .json(&fire_request)
         .send()
         .await
         .unwrap();
@@ -347,5 +338,5 @@ fn stdio_client_diagnoses_a_hung_server_instead_of_blocking() {
         StdioJsonRpcClient::spawn("hung server", command).with_timeout(Duration::from_secs(1));
     // `sleep` ignores stdin and never writes stdout, so the response read
     // must trip the deadline and panic with the diagnostic.
-    let _ = client.request(json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize" }));
+    let _ = client.request(json!({ "jsonrpc": "2.0", "id": 1, "method": "ping" }));
 }

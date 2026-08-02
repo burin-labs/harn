@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use futures::StreamExt;
 use serde_json::{json, Value as JsonValue};
 
 use harn_vm::event_log::{EventLog, LogEvent, Topic};
@@ -10,9 +9,7 @@ use crate::commands::orchestrator::common::{
     TRIGGER_INBOX_OBSERVABILITY_TOPIC, TRIGGER_OUTBOX_TOPIC,
 };
 
-use super::types::{
-    McpOrchestratorService, McpResourceNotification, RecordedTriggerEvent, ResourceSubscription,
-};
+use super::types::{McpOrchestratorService, RecordedTriggerEvent};
 use super::util::{filter_related_events, preview_events};
 use super::{ACTION_GRAPH_TOPIC, TRIGGER_EVENTS_TOPIC};
 
@@ -55,50 +52,6 @@ impl McpOrchestratorService {
                 }),
             ),
             Err(error) => harn_vm::jsonrpc::error_response(id, -32002, &error),
-        }
-    }
-
-    pub(super) async fn handle_resources_subscribe(
-        &self,
-        id: JsonValue,
-        session: &mut super::types::ConnectionState,
-        params: &JsonValue,
-    ) -> JsonValue {
-        let uri = params
-            .get("uri")
-            .and_then(JsonValue::as_str)
-            .unwrap_or_default();
-        let subscription = match self.resource_subscription(uri).await {
-            Ok(subscription) => subscription,
-            Err(error) => return harn_vm::jsonrpc::error_response(id, -32002, &error),
-        };
-        session
-            .subscribed_resources
-            .insert(subscription.uri.clone());
-        match self.ensure_resource_update_watcher(subscription).await {
-            Ok(()) => harn_vm::jsonrpc::response(id, json!({})),
-            Err(error) => harn_vm::jsonrpc::error_response(id, -32603, &error),
-        }
-    }
-
-    pub(super) fn handle_resources_unsubscribe(
-        &self,
-        id: JsonValue,
-        session: &mut super::types::ConnectionState,
-        params: &JsonValue,
-    ) -> JsonValue {
-        if let Some(uri) = params.get("uri").and_then(JsonValue::as_str) {
-            session.subscribed_resources.remove(uri);
-        }
-        harn_vm::jsonrpc::response(id, json!({}))
-    }
-
-    pub(super) fn notify_topic_resource_changed(&self, topic_name: &str) {
-        for uri in resource_uris_for_topic(topic_name) {
-            let _ = self.resource_notify_tx.send(McpResourceNotification {
-                uri: uri.clone(),
-                message: resource_updated_notification(&uri),
-            });
         }
     }
 
@@ -234,32 +187,26 @@ impl McpOrchestratorService {
     }
 
     pub(super) async fn topic_resource(&self, uri: &str) -> Result<JsonValue, String> {
-        let subscription = self.resource_subscription(uri).await?;
+        let topic = self.resource_topic(uri).await?;
         let ctx = load_local_runtime(&self.local_args()).await?;
         let events = ctx
             .event_log
-            .read_range(&subscription.topic, None, usize::MAX)
+            .read_range(&topic, None, usize::MAX)
             .await
             .map_err(|error| error.to_string())?;
         Ok(json!({
-            "uri": subscription.uri,
-            "topic": subscription.topic.as_str(),
+            "uri": uri,
+            "topic": topic.as_str(),
             "events": preview_events(events),
         }))
     }
 
-    pub(super) async fn resource_subscription(
-        &self,
-        uri: &str,
-    ) -> Result<ResourceSubscription, String> {
-        let topic_name = topic_name_for_resource_uri(uri)
-            .ok_or_else(|| format!("resource is not subscribable: {uri}"))?;
+    async fn resource_topic(&self, uri: &str) -> Result<Topic, String> {
+        let topic_name =
+            topic_name_for_resource_uri(uri).ok_or_else(|| format!("resource not found: {uri}"))?;
         let topic = Topic::new(topic_name).map_err(|error| error.to_string())?;
         if is_static_subscribable_topic(topic.as_str()) {
-            return Ok(ResourceSubscription {
-                uri: uri.to_string(),
-                topic,
-            });
+            return Ok(topic);
         }
 
         if is_agent_transcript_topic(topic.as_str()) {
@@ -272,91 +219,11 @@ impl McpOrchestratorService {
                 .iter()
                 .any(|existing| existing.as_str() == topic.as_str());
             if exists {
-                return Ok(ResourceSubscription {
-                    uri: uri.to_string(),
-                    topic,
-                });
+                return Ok(topic);
             }
         }
 
         Err(format!("resource not found: {uri}"))
-    }
-
-    pub(super) async fn ensure_resource_update_watcher(
-        &self,
-        subscription: ResourceSubscription,
-    ) -> Result<(), String> {
-        if self
-            .resource_watchers
-            .lock()
-            .expect("resource watchers poisoned")
-            .contains_key(&subscription.uri)
-        {
-            return Ok(());
-        }
-
-        let ctx = load_local_runtime(&self.local_args()).await?;
-        let start_from = ctx
-            .event_log
-            .latest(&subscription.topic)
-            .await
-            .map_err(|error| error.to_string())?;
-        let mut stream = ctx
-            .event_log
-            .clone()
-            .subscribe(&subscription.topic, start_from)
-            .await
-            .map_err(|error| error.to_string())?;
-        let event_log = ctx.event_log.clone();
-        let topic = subscription.topic.clone();
-        let tx = self.resource_notify_tx.clone();
-        let uri = subscription.uri.clone();
-        let handle = tokio::spawn(async move {
-            let mut last_seen = start_from.unwrap_or(0);
-            let mut poll = tokio::time::interval(std::time::Duration::from_millis(50));
-            loop {
-                tokio::select! {
-                    received = stream.next() => {
-                        match received {
-                            Some(Ok((event_id, _))) if event_id > last_seen => {
-                                last_seen = event_id;
-                                let _ = tx.send(McpResourceNotification {
-                                    uri: uri.clone(),
-                                    message: resource_updated_notification(&uri),
-                                });
-                            }
-                            Some(Ok(_)) => {}
-                            Some(Err(_)) | None => break,
-                        }
-                    }
-                    _ = poll.tick() => {
-                        match event_log.latest(&topic).await {
-                            Ok(Some(event_id)) if event_id > last_seen => {
-                                last_seen = event_id;
-                                let _ = tx.send(McpResourceNotification {
-                                    uri: uri.clone(),
-                                    message: resource_updated_notification(&uri),
-                                });
-                            }
-                            Ok(_) => {}
-                            Err(_) => break,
-                        }
-                    }
-                }
-            }
-        });
-
-        let mut watchers = self
-            .resource_watchers
-            .lock()
-            .expect("resource watchers poisoned");
-        if let std::collections::btree_map::Entry::Vacant(entry) = watchers.entry(subscription.uri)
-        {
-            entry.insert(handle);
-        } else {
-            handle.abort();
-        }
-        Ok(())
     }
 
     pub(super) async fn event_resource(&self, event_id: &str) -> Result<JsonValue, String> {
@@ -517,15 +384,6 @@ pub(super) fn topic_name_for_resource_uri(uri: &str) -> Option<&str> {
     }
 }
 
-pub(super) fn resource_uris_for_topic(topic_name: &str) -> Vec<String> {
-    match topic_name {
-        TRIGGER_INBOX_OBSERVABILITY_TOPIC => vec![topic_resource_uri("trigger.inbox")],
-        TRIGGER_OUTBOX_TOPIC => vec![topic_resource_uri(TRIGGER_OUTBOX_TOPIC)],
-        value if is_agent_transcript_topic(value) => vec![topic_resource_uri(value)],
-        _ => Vec::new(),
-    }
-}
-
 pub(super) fn is_static_subscribable_topic(topic_name: &str) -> bool {
     matches!(
         topic_name,
@@ -535,14 +393,6 @@ pub(super) fn is_static_subscribable_topic(topic_name: &str) -> bool {
 
 pub(super) fn is_agent_transcript_topic(topic_name: &str) -> bool {
     topic_name.starts_with("agent.transcript.")
-}
-
-pub(super) fn resource_updated_notification(uri: &str) -> JsonValue {
-    json!({
-        "jsonrpc": "2.0",
-        "method": "notifications/resources/updated",
-        "params": { "uri": uri },
-    })
 }
 
 #[cfg(test)]
@@ -555,11 +405,6 @@ mod tests {
             topic_name_for_resource_uri("harn://topic/trigger.inbox"),
             Some(TRIGGER_INBOX_OBSERVABILITY_TOPIC)
         );
-        assert_eq!(
-            resource_uris_for_topic(TRIGGER_INBOX_OBSERVABILITY_TOPIC),
-            vec!["harn://topic/trigger.inbox".to_string()]
-        );
-        assert!(resource_uris_for_topic(harn_vm::TRIGGER_INBOX_ENVELOPES_TOPIC).is_empty());
         assert!(is_static_subscribable_topic(
             TRIGGER_INBOX_OBSERVABILITY_TOPIC
         ));

@@ -16,7 +16,7 @@
 //! approval surface.
 //!
 //! See the spec at
-//! <https://modelcontextprotocol.io/specification/2025-11-25/client/sampling>.
+//! <https://modelcontextprotocol.io/specification/2026-07-28/client/sampling>.
 
 use crate::value::VmDictExt;
 
@@ -46,7 +46,7 @@ struct SamplingRequest {
     stop_sequences: Option<Vec<String>>,
     /// Model preferences hint chain — see [`pick_model_hint`].
     model_preferences: Option<JsonValue>,
-    /// Tool definitions (2025-11-25 sampling additions). Forwarded to
+    /// Tool definitions forwarded to
     /// `llm_call`'s `tools` option when present.
     tools: Option<JsonValue>,
     /// `tool_choice` directive — forwarded as-is to `llm_call`.
@@ -222,8 +222,7 @@ fn parse_sampling_request(params: &JsonValue) -> Result<SamplingRequest, String>
         .and_then(|value| value.as_str())
         .map(str::to_string);
 
-    // MCP spec uses camelCase for the 2025-11-25 sampling additions
-    // (`toolChoice`); accept the snake_case form as a tolerance for
+    // MCP uses camelCase for `toolChoice`; accept the snake_case form as a tolerance for
     // servers that follow Harn's own option naming.
     let tool_choice = object
         .get("toolChoice")

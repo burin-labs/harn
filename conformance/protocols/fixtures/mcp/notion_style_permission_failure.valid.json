@@ -1,7 +1,7 @@
 {
   "name": "mcp.notion_style.permission_failure",
   "protocol": "mcp",
-  "schema": "schemas/mcp-2025-11-25.schema.json",
+  "schema": "schemas/mcp-2026-07-28.schema.json",
   "expect": "valid",
   "documents": [
     {
@@ -9,7 +9,15 @@
       "id": 20,
       "method": "resources/read",
       "params": {
-        "uri": "harn://connector/notion/page/private_page"
+        "uri": "harn://connector/notion/page/private_page",
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientInfo": {
+            "name": "harn-conformance",
+            "version": "0.10.52"
+          },
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
       }
     },
     {
@@ -20,7 +28,7 @@
         "message": "unauthorized",
         "data": {
           "type": "mcp.permissionDenied",
-          "protocolVersion": "2025-11-25",
+          "protocolVersion": "2026-07-28",
           "uri": "harn://connector/notion/page/private_page",
           "provider": "notion",
           "status": "denied",
@@ -30,7 +38,7 @@
     }
   ],
   "matrix": {
-    "version": "2025-11-25",
+    "version": "2026-07-28",
     "family": "notion_style_resources_prompts",
     "case": "permission_failure",
     "source": {

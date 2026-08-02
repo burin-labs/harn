@@ -425,7 +425,7 @@ enum AmbientScoping {
 /// because the capture set was a hand-maintained allow-list with no forcing
 /// function: two same-shape thread-locals existed, were read across a worker's
 /// awaits, and nobody noticed they weren't captured. This catalog plus
-/// `drift_every_ambient_shape_thread_local_is_cataloged` is that forcing
+/// `every_ambient_shape_thread_local_is_cataloged` is that forcing
 /// function — a new `*_STACK` / `*_DEPTH` / `*_CONTEXT` / `*_SESSION` / `*_CTX`
 /// thread-local FAILS the test until it is classified here, so the author must
 /// consciously decide `Captured` vs `Uncaptured`.
@@ -566,7 +566,19 @@ const AMBIENT_THREAD_LOCAL_CATALOG: &[(&str, AmbientScoping)] = &[
              one LocalSet task, so every stage observes the same context (see its doc-comment).",
         ),
     ),
+    (
+        "INPUT_CONTEXT",
+        AmbientScoping::Uncaptured(
+            "mcp_input.rs Tokio task-local scoped directly around one stable MCP handler \
+             invocation; Tokio isolates it across sibling tasks and scope_input_context removes \
+             it at the request boundary.",
+        ),
+    ),
 ];
+
+#[cfg(test)]
+#[path = "ambient_scope/drift_tests.rs"]
+mod drift_tests;
 
 /// The same-shape capability/identity thread-locals the F1/F2 audit named as
 /// latent: NOT captured today, but the next dev to make one cross-task-relevant
@@ -1315,186 +1327,5 @@ mod tests {
             .await;
         // The outer thread is left clean — neither task's profile leaked out.
         assert!(crate::stdlib::process::current_session_environment().is_none());
-    }
-
-    /// F3 drift guard. Walk the crate source, discover every ambient-shape
-    /// thread-local (the `*_STACK` / `*_DEPTH` / `*_CONTEXT` / `*_SESSION` /
-    /// `*_CTX` / `VM_SOURCE_DIR` family), and assert each is classified in
-    /// `AMBIENT_THREAD_LOCAL_CATALOG`. A NEW ambient thread-local fails this test
-    /// until the author classifies it `Captured` or `Uncaptured` — the forcing
-    /// function F1/F2 lacked. Also fails on stale catalog entries.
-    #[test]
-    fn drift_every_ambient_shape_thread_local_is_cataloged() {
-        use std::collections::BTreeSet;
-
-        fn is_ambient_shape(name: &str) -> bool {
-            name == "VM_SOURCE_DIR"
-                || name == "CURRENT_HOST_BRIDGE"
-                || name.ends_with("_STACK")
-                || name.ends_with("_DEPTH")
-                || name.ends_with("_CONTEXT")
-                || name.ends_with("_SESSION")
-                || name.ends_with("_CTX")
-        }
-
-        fn collect(dir: &std::path::Path, out: &mut BTreeSet<String>) {
-            for entry in std::fs::read_dir(dir).expect("read_dir src") {
-                let path = entry.expect("dir entry").path();
-                // Skip test-support trees so test-only thread-locals (mock
-                // clocks, fixtures) never have to enter the production catalog.
-                // Match on the component name, not the full absolute path:
-                // worktree names such as `release-test-isolation` must not
-                // make the drift guard skip the entire `src` tree.
-                if path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| {
-                        name == "tests" || name == "test_util" || name.ends_with("_tests")
-                    })
-                {
-                    continue;
-                }
-                if path.is_dir() {
-                    collect(&path, out);
-                } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
-                    let content = std::fs::read_to_string(&path).expect("read src file");
-                    let mut pending_static: Option<String> = None;
-                    for line in content.lines() {
-                        // Thread-locals are the only `static _: RefCell<_>` decls
-                        // (a bare static RefCell is not Sync, so will not compile).
-                        let Some(idx) = line.find("static ") else {
-                            if line.contains("RefCell") {
-                                if let Some(name) = pending_static.take() {
-                                    if is_ambient_shape(&name) {
-                                        out.insert(name);
-                                    }
-                                }
-                            }
-                            continue;
-                        };
-                        let after = &line[idx + "static ".len()..];
-                        let name: String = after
-                            .chars()
-                            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
-                            .collect();
-                        if name.is_empty() {
-                            continue;
-                        }
-                        if line.contains("RefCell") {
-                            if is_ambient_shape(&name) {
-                                out.insert(name);
-                            }
-                        } else {
-                            pending_static = Some(name);
-                        }
-                    }
-                }
-            }
-        }
-
-        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut discovered = BTreeSet::new();
-        collect(&src, &mut discovered);
-
-        let cataloged: BTreeSet<String> = AMBIENT_THREAD_LOCAL_CATALOG
-            .iter()
-            .map(|(name, _)| (*name).to_string())
-            .collect();
-
-        let missing: Vec<_> = discovered.difference(&cataloged).cloned().collect();
-        assert!(
-            missing.is_empty(),
-            "new ambient-shape thread-local(s) not classified in \
-             AMBIENT_THREAD_LOCAL_CATALOG (orchestration/ambient_scope.rs): {missing:?}. Decide \
-             whether each must be Captured into AmbientExecutionScope (it is held across a \
-             fan-out worker's awaits and would otherwise cross-wire siblings) or is safely \
-             Uncaptured, then add it to the catalog. This is the F1/F2 drift guard."
-        );
-
-        let stale: Vec<_> = cataloged.difference(&discovered).cloned().collect();
-        assert!(
-            stale.is_empty(),
-            "AMBIENT_THREAD_LOCAL_CATALOG names thread-local(s) no longer in src \
-             (renamed/removed?): {stale:?}. Update the catalog."
-        );
-    }
-
-    /// The catalog's `Captured` set must exactly mirror what the scope actually
-    /// swaps. Adding/removing a field+swap in `AmbientExecutionScope` must update
-    /// this list and the catalog together; the cross-wire tests above prove the
-    /// captured ones isolate.
-    #[test]
-    fn captured_catalog_matches_scope_fields() {
-        use std::collections::BTreeSet;
-        let captured: BTreeSet<&str> = AMBIENT_THREAD_LOCAL_CATALOG
-            .iter()
-            .filter(|(_, scoping)| matches!(scoping, AmbientScoping::Captured))
-            .map(|(name, _)| *name)
-            .collect();
-        let expected: BTreeSet<&str> = [
-            "EXECUTION_POLICY_STACK",
-            "EXECUTION_APPROVAL_POLICY_STACK",
-            "OPERATOR_APPROVAL_GRANT_STACK",
-            "COMMAND_POLICY_STACK",
-            "DYNAMIC_PERMISSION_STACK",
-            "RUNTIME_CONTEXT_OVERLAY_STACK",
-            "AUTONOMY_POLICY_STACK",
-            "PERSONA_STACK",
-            "STEP_STACK",
-            "ACTIVE_CONTEXT_SUSPENSION_STACK",
-            "LLM_RENDER_STACK",
-            "ACTIVE_HARN_CONNECTOR_CTX",
-            "TRUSTED_BRIDGE_CALL_DEPTH",
-            "COMMAND_POLICY_HOOK_DEPTH",
-            "TOOL_PRECHECK_STACK",
-            "TOOL_PRECHECK_DEPTH",
-            "VM_EXECUTION_CONTEXT",
-            "VM_SOURCE_DIR",
-            "CURRENT_MUTATION_SESSION",
-            "SESSION_ENVIRONMENT_CONTEXT",
-            "CURRENT_HOST_BRIDGE",
-            "CURRENT_SESSION_STACK",
-            "LLM_CONFIG_OVERRIDES_CONTEXT",
-            "LLM_RUNTIME_PROVIDER_ENDPOINTS_CONTEXT",
-            "LLM_CAPABILITY_OVERRIDES_CONTEXT",
-            "LLM_MOCK_CONTEXT",
-            "EGRESS_POLICY_CONTEXT",
-            "ACTIVE_EXECUTION_SCOPE_STACK",
-            "RUN_EVENT_SINK_CONTEXT",
-            "TRANSCRIPT_DIR_STACK",
-        ]
-        .into_iter()
-        .collect();
-        assert_eq!(
-            captured, expected,
-            "the catalog's Captured set diverged from AmbientExecutionScope's swapped fields; \
-             keep the struct fields, swap_in, and the catalog in lockstep."
-        );
-    }
-
-    /// The audited latent capability/identity thread-locals (the F1/F2 audit
-    /// named these as same-shape but not-yet-cross-task-read) must stay cataloged
-    /// and `Uncaptured` with their tag — a forcing function so a future dev who
-    /// makes one read-across-await in fan-out has to revisit the capture decision.
-    #[test]
-    fn audited_latent_capabilities_are_cataloged() {
-        for latent in AUDITED_LATENT_CAPABILITIES {
-            let found = AMBIENT_THREAD_LOCAL_CATALOG
-                .iter()
-                .find(|(name, _)| name == latent);
-            let Some((_, scoping)) = found else {
-                panic!("{latent} missing from AMBIENT_THREAD_LOCAL_CATALOG");
-            };
-            match scoping {
-                AmbientScoping::Uncaptured(reason) => assert!(
-                    reason.contains("[latent-capability]"),
-                    "{latent} must keep its [latent-capability] reason tag so the call-out stays visible"
-                ),
-                AmbientScoping::Captured => panic!(
-                    "{latent} is now Captured — wire it fully and drop it from \
-                     AUDITED_LATENT_CAPABILITIES"
-                ),
-            }
-        }
     }
 }

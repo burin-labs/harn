@@ -120,6 +120,10 @@ pub enum VmError {
     /// this VM; see [`crate::Vm::execute_with_timeout`] for ambient-state
     /// cleanup requirements.
     AbandonedExecution,
+    /// A stable MCP handler needs client input before it can complete. The MCP
+    /// server boundary converts this uncatchable control signal into an
+    /// `input_required` result and re-enters the handler on retry.
+    McpInputRequired(Box<crate::mcp_input::McpInputRequired>),
     Thrown(VmValue),
     /// Thrown with error category for structured error handling.
     CategorizedError {
@@ -160,7 +164,10 @@ impl VmError {
     /// Whether this error is VM control flow that user `catch` blocks and
     /// error-as-data combinators must propagate unchanged.
     pub fn is_uncatchable_control_flow(&self) -> bool {
-        matches!(self, Self::ExecutionDeadlineExceeded | Self::ProcessExit(_))
+        matches!(
+            self,
+            Self::ExecutionDeadlineExceeded | Self::ProcessExit(_) | Self::McpInputRequired(_)
+        )
     }
 
     /// The requested host-process exit status, when this is an explicit Harn
@@ -670,6 +677,7 @@ impl std::fmt::Display for VmError {
                 f,
                 "Execution future was abandoned; discard this VM and reset its exclusively owned execution context"
             ),
+            VmError::McpInputRequired(_) => write!(f, "MCP client input required"),
             VmError::Thrown(v) => write!(f, "Thrown: {}", v.display()),
             VmError::CategorizedError { message, category } => {
                 write!(f, "Error [{}]: {}", category.as_str(), message)

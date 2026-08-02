@@ -3196,8 +3196,7 @@ flags to protect non-discovery routes.
 `harn serve mcp` uses the shared `harn-serve` dispatch core and maps each
 exported `pub fn` in the target module to one MCP tool. Tool schemas are
 derived from Harn type annotations. With `--transport http`, the server also
-supports Streamable HTTP on `--path` plus the legacy SSE compatibility
-endpoints `--sse-path` and `--messages-path`.
+supports stable Streamable HTTP POST requests on `--path`.
 
 ACP and MCP stdio transports reserve stdout for JSON-RPC frames, so they reject
 `--obs stdout`. Use `--obs stderr`, `--obs otel`, or `--obs off` instead.

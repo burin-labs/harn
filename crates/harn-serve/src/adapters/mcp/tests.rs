@@ -1,4 +1,4 @@
-use super::auth::{attach_legacy_deprecation_headers, should_stream_post_response};
+use super::auth::should_stream_post_response;
 use super::*;
 use crate::{ApiKeyAuthConfig, AuthMethodConfig, DispatchCoreConfig};
 use std::collections::BTreeMap;
@@ -45,7 +45,7 @@ pub fn greet(name: string) -> string {
 }
 
 #[tokio::test]
-async fn initialize_and_resources_expose_server_card() {
+async fn discover_and_resources_expose_server_card() {
     let dir = tempfile::tempdir().expect("tempdir");
     let script = dir.path().join("server.harn");
     std::fs::write(
@@ -63,17 +63,9 @@ pub fn greet(name: string) -> string {
             .with_server_card(json!({"name": "fixture-card", "version": "1"})),
     );
 
-    let session = SharedSession::new();
-    let init = server.handle_initialize(
-        json!(1),
-        &session,
-        &json!({
-            "protocolVersion": MCP_PROTOCOL_VERSION,
-            "clientInfo": {"name": "test", "version": "1"}
-        }),
-    );
+    let init = server.handle_server_discover(json!(1));
     assert_eq!(
-        init["result"]["serverInfo"]["card"]["name"],
+        init["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]["card"]["name"],
         json!("fixture-card")
     );
     assert!(init["result"]["capabilities"]["resources"].is_object());
@@ -88,70 +80,6 @@ pub fn greet(name: string) -> string {
         .as_str()
         .unwrap()
         .contains("fixture-card"));
-}
-
-#[tokio::test]
-async fn initialize_accepts_2025_06_18_protocol_version() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let script = dir.path().join("server.harn");
-    std::fs::write(
-        &script,
-        r"
-pub fn greet(name: string) -> string {
-  return name
-}
-",
-    )
-    .expect("write script");
-    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
-    let server = McpServer::new(McpServerConfig::new(core));
-    let session = SharedSession::new();
-    let init = server.handle_initialize(
-        json!(1),
-        &session,
-        &json!({
-            "protocolVersion": harn_vm::mcp_protocol::LEGACY_2025_06_18_PROTOCOL_VERSION,
-            "clientInfo": {"name": "codex", "version": "1"}
-        }),
-    );
-
-    assert_eq!(
-        init["result"]["protocolVersion"],
-        json!(harn_vm::mcp_protocol::LEGACY_2025_06_18_PROTOCOL_VERSION)
-    );
-    assert!(init["result"].get("resultType").is_none());
-}
-
-#[tokio::test]
-async fn initialize_accepts_2024_11_05_protocol_version() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let script = dir.path().join("server.harn");
-    std::fs::write(
-        &script,
-        r"
-pub fn greet(name: string) -> string {
-  return name
-}
-",
-    )
-    .expect("write script");
-    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
-    let server = McpServer::new(McpServerConfig::new(core));
-    let session = SharedSession::new();
-    let init = server.handle_initialize(
-        json!(1),
-        &session,
-        &json!({
-            "protocolVersion": harn_vm::mcp_protocol::LEGACY_2024_11_05_PROTOCOL_VERSION,
-            "clientInfo": {"name": "codex", "version": "1"}
-        }),
-    );
-
-    assert_eq!(
-        init["result"]["protocolVersion"],
-        json!(harn_vm::mcp_protocol::LEGACY_2024_11_05_PROTOCOL_VERSION)
-    );
-    assert!(init["result"].get("resultType").is_none());
 }
 
 #[tokio::test]
@@ -194,14 +122,7 @@ pub fn greet(name: string) -> string {
     let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
     let server = McpServer::new(McpServerConfig::new(core));
     let session = SharedSession::new();
-    let init = server.handle_initialize(
-        json!(1),
-        &session,
-        &json!({
-            "protocolVersion": MCP_PROTOCOL_VERSION,
-            "clientInfo": {"name": "test", "version": "1"}
-        }),
-    );
+    let init = server.handle_server_discover(json!(1));
     assert!(init["result"]["capabilities"]["resources"].is_object());
     assert!(init["result"]["capabilities"]["prompts"].is_object());
     assert!(init["result"]["capabilities"]["completions"].is_object());
@@ -330,15 +251,6 @@ pub fn greet(name: string) -> string {
     let core = DispatchCore::new(config).expect("core");
     let server = McpServer::new(McpServerConfig::new(core));
     let session = SharedSession::new();
-    let _ = server.handle_initialize(
-        json!(1),
-        &session,
-        &json!({
-            "protocolVersion": MCP_PROTOCOL_VERSION,
-            "clientInfo": {"name": "test", "version": "1"}
-        }),
-    );
-
     let unauthorized = mcp_response(
         &server,
         harn_vm::jsonrpc::request(2, "resources/list", json!({})),
@@ -349,7 +261,7 @@ pub fn greet(name: string) -> string {
 
     let authorized = match server
         .process_message(
-            harn_vm::jsonrpc::request(3, "resources/list", json!({})),
+            stable_request(harn_vm::jsonrpc::request(3, "resources/list", json!({}))),
             session,
             AuthRequest {
                 headers: BTreeMap::from([(
@@ -385,15 +297,6 @@ pub fn greet(name: string) -> string {
     let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
     let server = McpServer::new(McpServerConfig::new(core));
     let session = SharedSession::new();
-    let _ = server.handle_initialize(
-        json!(1),
-        &session,
-        &json!({
-            "protocolVersion": MCP_PROTOCOL_VERSION,
-            "clientInfo": {"name": "test", "version": "1"}
-        }),
-    );
-
     for (method, feature) in [
         (mcp_protocol::METHOD_SAMPLING_CREATE_MESSAGE, "sampling"),
         (mcp_protocol::METHOD_ELICITATION_CREATE, "elicitation"),
@@ -410,63 +313,9 @@ pub fn greet(name: string) -> string {
     }
 }
 
-#[tokio::test]
-async fn adapter_protocol_fixture_matches_checked_in_matrix() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let script = dir.path().join("server.harn");
-    std::fs::write(
-        &script,
-        r"
-pub fn greet(name: string) -> string {
-  return name
-}
-",
-    )
-    .expect("write script");
-    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
-    let server = McpServer::new(
-        McpServerConfig::new(core)
-            .with_server_card(json!({"name": "fixture-card", "version": "1"})),
-    );
-    let session = SharedSession::new();
-
-    let initialize = harn_vm::jsonrpc::request(
-        1,
-        "initialize",
-        json!({
-            "protocolVersion": MCP_PROTOCOL_VERSION,
-            "capabilities": {},
-            "clientInfo": {"name": "fixture-client", "version": "1"}
-        }),
-    );
-    let tools_list = harn_vm::jsonrpc::request(2, "tools/list", json!({}));
-    let resources_list = harn_vm::jsonrpc::request(3, "resources/list", json!({}));
-    let resources_read =
-        harn_vm::jsonrpc::request(4, "resources/read", json!({"uri": "well-known://mcp-card"}));
-    let templates_list = harn_vm::jsonrpc::request(5, "resources/templates/list", json!({}));
-
-    let actual = vec![
-        initialize.clone(),
-        mcp_response(&server, initialize, session.clone()).await,
-        harn_vm::jsonrpc::notification("notifications/initialized", json!({})),
-        tools_list.clone(),
-        mcp_response(&server, tools_list, session.clone()).await,
-        resources_list.clone(),
-        mcp_response(&server, resources_list, session.clone()).await,
-        resources_read.clone(),
-        mcp_response(&server, resources_read, session.clone()).await,
-        templates_list.clone(),
-        mcp_response(&server, templates_list, session).await,
-    ];
-    crate::protocol_fixture_tests::assert_fixture_documents_match(
-        "conformance/protocols/fixtures/mcp/adapter_initialize_tools_resources.valid.json",
-        actual,
-    );
-}
-
 async fn mcp_response(server: &McpServer, request: JsonValue, session: SharedSession) -> JsonValue {
     match server
-        .process_message(request, session, AuthRequest::default())
+        .process_message(stable_request(request), session, AuthRequest::default())
         .await
     {
         ImmediateResult::Response(response) => response,
@@ -482,7 +331,7 @@ async fn mcp_tool_response(
     session: SharedSession,
 ) -> JsonValue {
     let job = match server
-        .process_message(request, session, AuthRequest::default())
+        .process_message(stable_request(request), session, AuthRequest::default())
         .await
     {
         ImmediateResult::Stream(job) => job,
@@ -508,6 +357,25 @@ async fn mcp_tool_response(
     response
 }
 
+fn stable_request(mut request: JsonValue) -> JsonValue {
+    let params = request
+        .get_mut("params")
+        .and_then(JsonValue::as_object_mut)
+        .expect("test request params object");
+    let meta = params
+        .entry("_meta")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+        .expect("test request metadata object");
+    meta.entry(mcp_protocol::MCP_META_KEY_PROTOCOL_VERSION)
+        .or_insert_with(|| json!(MCP_PROTOCOL_VERSION));
+    meta.entry(mcp_protocol::MCP_META_KEY_CLIENT_INFO)
+        .or_insert_with(|| json!({"name": "test", "version": "1"}));
+    meta.entry(mcp_protocol::MCP_META_KEY_CLIENT_CAPABILITIES)
+        .or_insert_with(|| json!({}));
+    request
+}
+
 #[tokio::test]
 async fn repeated_tool_calls_with_same_arguments_observe_mutated_backing_state() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -530,15 +398,6 @@ pub fn observe_execution() -> int {
     let core = DispatchCore::new(config).expect("core");
     let server = McpServer::new(McpServerConfig::new(core));
     let session = SharedSession::new();
-    let _ = server.handle_initialize(
-        json!(1),
-        &session,
-        &json!({
-            "protocolVersion": MCP_PROTOCOL_VERSION,
-            "clientInfo": {"name": "test", "version": "1"}
-        }),
-    );
-
     let first = mcp_tool_response(
         &server,
         harn_vm::jsonrpc::request(
@@ -571,7 +430,7 @@ pub fn observe_execution() -> int {
 }
 
 #[tokio::test]
-async fn tool_call_rejects_task_augmentation() {
+async fn client_task_capability_does_not_enable_unadvertised_server_tasks() {
     let dir = tempfile::tempdir().expect("tempdir");
     let script = dir.path().join("server.harn");
     std::fs::write(
@@ -586,39 +445,26 @@ pub fn greet(name: string) -> string {
     let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
     let server = McpServer::new(McpServerConfig::new(core));
     let session = SharedSession::new();
-    let _ = server.handle_initialize(
-        json!(1),
-        &session,
-        &json!({
-            "protocolVersion": MCP_PROTOCOL_VERSION,
-            "clientInfo": {"name": "test", "version": "1"}
-        }),
-    );
+    let response = mcp_tool_response(
+        &server,
+        harn_vm::jsonrpc::request(
+            2,
+            "tools/call",
+            json!({
+                "name": "greet",
+                "arguments": {"name": "alice"},
+                "_meta": {
+                    harn_vm::mcp_protocol::MCP_META_KEY_CLIENT_CAPABILITIES: {
+                        "extensions": {mcp_protocol::TASKS_EXTENSION_ID: {}}
+                    }
+                }
+            }),
+        ),
+        session,
+    )
+    .await;
 
-    let response = match server
-        .process_message(
-            harn_vm::jsonrpc::request(
-                2,
-                "tools/call",
-                json!({
-                    "name": "greet",
-                    "arguments": {"name": "alice"},
-                    "task": {"title": "async please"}
-                }),
-            ),
-            session,
-            AuthRequest::default(),
-        )
-        .await
-    {
-        ImmediateResult::Response(response) => response,
-        ImmediateResult::Accepted | ImmediateResult::Stream(_) => {
-            panic!("expected task-augmentation error response")
-        }
-    };
-
-    assert_eq!(response["error"]["code"], json!(-32602));
-    assert_eq!(response["error"]["data"]["feature"], json!("tasks"));
+    assert_eq!(response["result"]["content"][0]["text"], json!("alice"));
 }
 
 #[test]
@@ -670,17 +516,4 @@ fn streamable_http_accept_negotiation_uses_sse_only_when_json_is_absent() {
         HeaderValue::from_static("application/json, text/event-stream"),
     );
     assert!(!should_stream_post_response(&headers));
-}
-
-#[test]
-fn legacy_deprecation_header_is_attached() {
-    let mut response = StatusCode::ACCEPTED.into_response();
-    attach_legacy_deprecation_headers(&mut response);
-    assert_eq!(
-        response
-            .headers()
-            .get(DEPRECATION_HEADER)
-            .and_then(|value| value.to_str().ok()),
-        Some("true")
-    );
 }

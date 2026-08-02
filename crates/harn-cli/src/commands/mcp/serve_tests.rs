@@ -65,8 +65,6 @@ fn fixture_args(temp: &TempDir) -> McpServeArgs {
         transport: McpServeTransport::Stdio,
         bind: "127.0.0.1:0".parse().unwrap(),
         path: "/mcp".to_string(),
-        sse_path: "/sse".to_string(),
-        messages_path: "/messages".to_string(),
     }
 }
 
@@ -117,47 +115,6 @@ pub fn on_fail(harness: Harness, event: TriggerEvent) -> any {
     );
 }
 
-async fn init_session(service: &McpOrchestratorService) -> ConnectionState {
-    let mut session = ConnectionState::default();
-    let response = service
-        .handle_request(
-            &mut session,
-            json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": MCP_PROTOCOL_VERSION,
-                    "capabilities": {},
-                    "clientInfo": { "name": "test-client", "version": "1.0.0" }
-                }
-            }),
-        )
-        .await;
-    assert_eq!(response["result"]["protocolVersion"], MCP_PROTOCOL_VERSION);
-    assert_eq!(
-        response["result"]["capabilities"]["tools"]["listChanged"],
-        json!(true)
-    );
-    assert_eq!(
-        response["result"]["capabilities"]["resources"]["listChanged"],
-        json!(true)
-    );
-    assert_eq!(
-        response["result"]["capabilities"]["resources"]["subscribe"],
-        json!(true)
-    );
-    assert_eq!(
-        response["result"]["capabilities"]["prompts"]["listChanged"],
-        json!(true)
-    );
-    assert_eq!(
-        response["result"]["capabilities"]["tasks"]["requests"]["tools"]["call"],
-        json!({})
-    );
-    session
-}
-
 async fn call_tool(
     service: &McpOrchestratorService,
     session: &mut ConnectionState,
@@ -174,6 +131,7 @@ async fn call_tool(
                 "params": {
                     "name": name,
                     "arguments": arguments,
+                    "_meta": stable_meta(),
                 }
             }),
         )
@@ -194,7 +152,7 @@ async fn read_resource(
                 "jsonrpc": "2.0",
                 "id": 3,
                 "method": "resources/read",
-                "params": { "uri": uri }
+                "params": { "uri": uri, "_meta": stable_meta() }
             }),
         )
         .await;
@@ -204,240 +162,18 @@ async fn read_resource(
     serde_json::from_str(text).unwrap_or_else(|_| json!(text))
 }
 
-// Wait for the next non-lagged notification, treating broadcast
-// `Lagged` errors as benign (production listeners at lines 1154 /
-// 1786 do the same). Without this, fixture-write storms during test
-// setup can fill the 64-slot broadcast buffer faster than the
-// subscriber drains it on a loaded CI runner, producing a spurious
-// `Lagged(N)` panic.
-async fn recv_next_notification(notifications: &mut broadcast::Receiver<JsonValue>) -> JsonValue {
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-    loop {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        assert!(!remaining.is_zero(), "timed out waiting for notification");
-        match tokio::time::timeout(remaining, notifications.recv())
-            .await
-            .expect("timed out waiting for notification")
-        {
-            Ok(msg) => return msg,
-            Err(broadcast::error::RecvError::Lagged(_)) => continue,
-            Err(broadcast::error::RecvError::Closed) => {
-                panic!("notification channel closed")
-            }
-        }
-    }
-}
-
-async fn recv_next_resource_notification(
-    notifications: &mut broadcast::Receiver<McpResourceNotification>,
-) -> McpResourceNotification {
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-    loop {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        assert!(
-            !remaining.is_zero(),
-            "timed out waiting for resource notification"
-        );
-        match tokio::time::timeout(remaining, notifications.recv())
-            .await
-            .expect("timed out waiting for resource notification")
-        {
-            Ok(msg) => return msg,
-            Err(broadcast::error::RecvError::Lagged(_)) => continue,
-            Err(broadcast::error::RecvError::Closed) => {
-                panic!("resource notification channel closed")
-            }
-        }
-    }
-}
-
-async fn collect_notification_methods(
-    notifications: &mut broadcast::Receiver<JsonValue>,
-    expected: &[&str],
-) -> std::collections::BTreeSet<String> {
-    let expected = expected
-        .iter()
-        .copied()
-        .collect::<std::collections::BTreeSet<_>>();
-    let mut seen = std::collections::BTreeSet::new();
-    while !expected.iter().all(|method| seen.contains(*method)) {
-        let notification = recv_next_notification(notifications).await;
-        if let Some(method) = notification.get("method").and_then(JsonValue::as_str) {
-            seen.insert(method.to_string());
-        }
-    }
-    seen
-}
-
-async fn recv_next_task_notification(
-    notifications: &mut broadcast::Receiver<McpTaskNotification>,
-) -> McpTaskNotification {
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-    loop {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        assert!(
-            !remaining.is_zero(),
-            "timed out waiting for task notification"
-        );
-        match tokio::time::timeout(remaining, notifications.recv())
-            .await
-            .expect("timed out waiting for task notification")
-        {
-            Ok(msg) => return msg,
-            Err(broadcast::error::RecvError::Lagged(_)) => continue,
-            Err(broadcast::error::RecvError::Closed) => {
-                panic!("task notification channel closed")
-            }
-        }
-    }
-}
-
-async fn recv_next_log_notification(
-    notifications: &mut broadcast::Receiver<McpLogNotification>,
-) -> McpLogNotification {
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-    loop {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        assert!(
-            !remaining.is_zero(),
-            "timed out waiting for log notification"
-        );
-        match tokio::time::timeout(remaining, notifications.recv())
-            .await
-            .expect("timed out waiting for log notification")
-        {
-            Ok(msg) => return msg,
-            Err(broadcast::error::RecvError::Lagged(_)) => continue,
-            Err(broadcast::error::RecvError::Closed) => {
-                panic!("log notification channel closed")
-            }
-        }
-    }
-}
-
-#[test]
-fn severity_for_event_honors_explicit_header_then_kind_then_default() {
-    let binding = &LOG_STREAM_BINDINGS[0];
-    let mut event = LogEvent::new("scan_completed", json!({}));
-    assert_eq!(severity_for_event(binding, &event), binding.default_level);
-
-    event.kind = "scan_failed".to_string();
-    assert_eq!(
-        severity_for_event(binding, &event),
-        mcp_protocol::McpLogLevel::Warning
-    );
-
-    event.kind = "scan_error".to_string();
-    assert_eq!(
-        severity_for_event(binding, &event),
-        mcp_protocol::McpLogLevel::Error
-    );
-
-    event.kind = "scan_completed".to_string();
-    event
-        .headers
-        .insert("severity".to_string(), "alert".to_string());
-    assert_eq!(
-        severity_for_event(binding, &event),
-        mcp_protocol::McpLogLevel::Alert
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn logging_set_level_updates_session_and_validates_input() {
-    let _guard = lock_harn_state_async().await;
-    let temp = TempDir::new().unwrap();
-    write_fixture(&temp);
-    let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
-    let mut session = init_session(&service).await;
-    assert_eq!(session.log_level, mcp_protocol::McpLogLevel::Info);
-
-    let response = service
-        .handle_request(
-            &mut session,
-            harn_vm::jsonrpc::request(
-                50,
-                mcp_protocol::METHOD_LOGGING_SET_LEVEL,
-                json!({"level": "warning"}),
-            ),
-        )
-        .await;
-    assert_eq!(response["result"], json!({}));
-    assert_eq!(session.log_level, mcp_protocol::McpLogLevel::Warning);
-
-    let bad_level = service
-        .handle_request(
-            &mut session,
-            harn_vm::jsonrpc::request(
-                51,
-                mcp_protocol::METHOD_LOGGING_SET_LEVEL,
-                json!({"level": "loud"}),
-            ),
-        )
-        .await;
-    assert_eq!(bad_level["error"]["code"], json!(-32602));
-    assert_eq!(session.log_level, mcp_protocol::McpLogLevel::Warning);
-
-    let missing = service
-        .handle_request(
-            &mut session,
-            harn_vm::jsonrpc::request(52, mcp_protocol::METHOD_LOGGING_SET_LEVEL, json!({})),
-        )
-        .await;
-    assert_eq!(missing["error"]["code"], json!(-32602));
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn audit_events_emit_log_notifications_with_logger_and_level() {
-    let _guard = lock_harn_state_async().await;
-    let temp = TempDir::new().unwrap();
-    write_fixture(&temp);
-    let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
-    let _session = init_session(&service).await;
-    let mut notifications = service.subscribe_log_notifications();
-    service.wait_for_log_watchers_ready().await;
-
-    let event_log = service
-        .log_event_log
-        .as_ref()
-        .expect("log event log present in tests")
-        .clone();
-    let topic = Topic::new(harn_vm::SIGNATURE_VERIFY_AUDIT_TOPIC).unwrap();
-    let mut headers = std::collections::BTreeMap::new();
-    headers.insert("severity".to_string(), "warning".to_string());
-    event_log
-        .append(
-            &topic,
-            LogEvent::new(
-                "verify_failed",
-                json!({"provider": "github", "reason": "bad signature"}),
-            )
-            .with_headers(headers),
-        )
-        .await
-        .unwrap();
-
-    let notification = recv_next_log_notification(&mut notifications).await;
-    assert_eq!(notification.level, mcp_protocol::McpLogLevel::Warning);
-    let params = &notification.message["params"];
-    assert_eq!(params["level"], json!("warning"));
-    assert_eq!(params["logger"], json!("harn.audit.signature_verify"));
-    assert_eq!(params["data"]["kind"], json!("verify_failed"));
-    assert_eq!(params["data"]["payload"]["provider"], json!("github"));
-}
-
 #[tokio::test(flavor = "current_thread")]
 async fn resource_template_and_empty_prompt_lists_roundtrip() {
     let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
-    let mut session = init_session(&service).await;
+    let mut session = ConnectionState::default();
 
     let templates = service
         .handle_request(
             &mut session,
-            harn_vm::jsonrpc::request(10, "resources/templates/list", json!({})),
+            stable_request(10, "resources/templates/list", json!({})),
         )
         .await;
     assert_eq!(
@@ -456,7 +192,7 @@ async fn resource_template_and_empty_prompt_lists_roundtrip() {
     let topic_completion = service
         .handle_request(
             &mut session,
-            harn_vm::jsonrpc::request(
+            stable_request(
                 9,
                 mcp_protocol::METHOD_COMPLETION_COMPLETE,
                 json!({
@@ -472,24 +208,21 @@ async fn resource_template_and_empty_prompt_lists_roundtrip() {
     );
 
     let prompts = service
-        .handle_request(
-            &mut session,
-            harn_vm::jsonrpc::request(11, "prompts/list", json!({})),
-        )
+        .handle_request(&mut session, stable_request(11, "prompts/list", json!({})))
         .await;
     assert_eq!(prompts["result"]["prompts"], json!([]));
 
     let prompt = service
         .handle_request(
             &mut session,
-            harn_vm::jsonrpc::request(12, "prompts/get", json!({"name": "missing"})),
+            stable_request(12, "prompts/get", json!({"name": "missing"})),
         )
         .await;
     assert_eq!(prompt["error"]["code"], json!(-32602));
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn file_backed_prompts_list_render_and_notify_changes() {
+async fn file_backed_prompts_list_render_and_refresh_changes() {
     let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
@@ -514,14 +247,10 @@ Review this {{ language }}: {{ code }}
 "#,
     );
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
-    let mut session = init_session(&service).await;
-    let mut notifications = service.subscribe_list_notifications();
+    let mut session = ConnectionState::default();
 
     let prompts = service
-        .handle_request(
-            &mut session,
-            harn_vm::jsonrpc::request(20, "prompts/list", json!({})),
-        )
+        .handle_request(&mut session, stable_request(20, "prompts/list", json!({})))
         .await;
     assert_eq!(prompts["result"]["prompts"][0]["name"], json!("review"));
     assert_eq!(
@@ -532,7 +261,7 @@ Review this {{ language }}: {{ code }}
     let completion = service
         .handle_request(
             &mut session,
-            harn_vm::jsonrpc::request(
+            stable_request(
                 19,
                 mcp_protocol::METHOD_COMPLETION_COMPLETE,
                 json!({
@@ -552,7 +281,7 @@ Review this {{ language }}: {{ code }}
     let missing = service
         .handle_request(
             &mut session,
-            harn_vm::jsonrpc::request(21, "prompts/get", json!({"name": "review"})),
+            stable_request(21, "prompts/get", json!({"name": "review"})),
         )
         .await;
     assert_eq!(missing["error"]["code"], json!(-32602));
@@ -560,7 +289,7 @@ Review this {{ language }}: {{ code }}
     let prompt = service
         .handle_request(
             &mut session,
-            harn_vm::jsonrpc::request(
+            stable_request(
                 22,
                 "prompts/get",
                 json!({"name": "review", "arguments": {"code": "fn main() {}"}}),
@@ -593,47 +322,20 @@ Updated: {{ code }}
 "#,
     );
     service.notify_manifest_reloaded();
-    // Exercise the shared reload/broadcast path in-process. The production
-    // file watcher uses the same cache-refresh and list-change helpers, but
-    // tests should not depend on OS notification timing under release-audit
-    // load.
-    let seen =
-        collect_notification_methods(&mut notifications, &["notifications/prompts/list_changed"])
-            .await;
-    assert!(seen.contains("notifications/prompts/list_changed"));
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn package_metadata_changes_notify_tools_resources_and_prompts() {
-    let _guard = lock_harn_state_async().await;
-    let temp = TempDir::new().unwrap();
-    write_fixture(&temp);
-    let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
-    let mut notifications = service.subscribe_list_notifications();
-
-    write_file(
-        temp.path(),
-        "harn.lock",
-        r#"
-[[package]]
-name = "prompt-pack"
-version = "0.1.0"
-"#,
+    let updated = service
+        .handle_request(
+            &mut session,
+            stable_request(
+                23,
+                "prompts/get",
+                json!({"name": "review", "arguments": {"code": "changed"}}),
+            ),
+        )
+        .await;
+    assert_eq!(
+        updated["result"]["messages"][0]["content"]["text"],
+        json!("Updated: changed\n")
     );
-    service.notify_manifest_reloaded();
-
-    let seen = collect_notification_methods(
-        &mut notifications,
-        &[
-            "notifications/tools/list_changed",
-            "notifications/resources/list_changed",
-            "notifications/prompts/list_changed",
-        ],
-    )
-    .await;
-    assert!(seen.contains("notifications/tools/list_changed"));
-    assert!(seen.contains("notifications/resources/list_changed"));
-    assert!(seen.contains("notifications/prompts/list_changed"));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -642,13 +344,10 @@ async fn tools_list_advertises_tool_metadata_per_tool() {
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
-    let mut session = init_session(&service).await;
+    let mut session = ConnectionState::default();
 
     let response = service
-        .handle_request(
-            &mut session,
-            harn_vm::jsonrpc::request(30, "tools/list", json!({})),
-        )
+        .handle_request(&mut session, stable_request(30, "tools/list", json!({})))
         .await;
     let tools = response["result"]["tools"].as_array().unwrap();
     let trigger_fire = tools
@@ -659,40 +358,43 @@ async fn tools_list_advertises_tool_metadata_per_tool() {
         .iter()
         .find(|tool| tool["name"] == "harn.trigger.list")
         .unwrap();
-    assert_eq!(trigger_fire["execution"]["taskSupport"], json!("optional"));
+    assert!(trigger_fire.get("execution").is_none());
     assert_eq!(trigger_fire["annotations"]["readOnlyHint"], json!(false));
     assert_eq!(trigger_fire["annotations"]["destructiveHint"], json!(true));
     assert_eq!(trigger_fire["annotations"]["openWorldHint"], json!(true));
-    assert_eq!(trigger_list["execution"]["taskSupport"], json!("forbidden"));
+    assert!(trigger_list.get("execution").is_none());
     assert_eq!(trigger_list["annotations"]["readOnlyHint"], json!(true));
     assert_eq!(trigger_list["annotations"]["idempotentHint"], json!(true));
     assert_eq!(trigger_list["annotations"]["openWorldHint"], json!(false));
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn tool_call_rejects_task_augmentation() {
+async fn inline_tool_completes_when_client_supports_tasks() {
     let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
-    let mut session = init_session(&service).await;
+    let mut session = ConnectionState::default();
 
     let response = service
         .handle_request(
             &mut session,
-            harn_vm::jsonrpc::request(
+            stable_request(
                 100,
                 "tools/call",
                 json!({
                     "name": "harn.trigger.list",
                     "arguments": {},
-                    "task": {"title": "async please"}
+                    "_meta": {
+                        mcp_protocol::MCP_META_KEY_CLIENT_CAPABILITIES: {
+                            "extensions": {mcp_protocol::TASKS_EXTENSION_ID: {}}
+                        }
+                    }
                 }),
             ),
         )
         .await;
-    assert_eq!(response["error"]["code"], json!(-32602));
-    assert_eq!(response["error"]["data"]["feature"], json!("tasks"));
+    assert_eq!(response["result"]["isError"], json!(false));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -701,13 +403,12 @@ async fn trigger_fire_task_roundtrip_polls_and_retrieves_result() {
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
-    let mut session = init_session(&service).await;
-    let mut task_notifications = service.subscribe_task_notifications();
+    let mut session = ConnectionState::default();
 
     let created = service
         .handle_request(
             &mut session,
-            harn_vm::jsonrpc::request(
+            stable_request(
                 101,
                 "tools/call",
                 json!({
@@ -716,57 +417,49 @@ async fn trigger_fire_task_roundtrip_polls_and_retrieves_result() {
                         "trigger_id": "cron-ok",
                         "payload": {}
                     },
-                    "task": {"ttl": 60_000}
+                    "_meta": {
+                        mcp_protocol::MCP_META_KEY_CLIENT_CAPABILITIES: {
+                            "extensions": {mcp_protocol::TASKS_EXTENSION_ID: {}}
+                        }
+                    }
                 }),
             ),
         )
         .await;
-    assert_eq!(created["result"]["task"]["status"], json!("working"));
-    assert_eq!(created["result"]["task"]["ttl"], json!(60_000));
-    let task_id = created["result"]["task"]["taskId"].as_str().unwrap();
+    assert_eq!(created["result"]["resultType"], json!("task"));
+    assert_eq!(created["result"]["status"], json!("working"));
+    assert_eq!(created["result"]["ttlMs"], json!(DEFAULT_TASK_TTL_MS));
+    let task_id = created["result"]["taskId"].as_str().unwrap();
 
-    let listed = service
-        .handle_request(
-            &mut session,
-            harn_vm::jsonrpc::request(102, "tasks/list", json!({})),
-        )
-        .await;
-    assert_eq!(listed["result"]["tasks"][0]["taskId"], json!(task_id));
-
-    let result = service
-        .handle_request(
-            &mut session,
-            harn_vm::jsonrpc::request(103, "tasks/result", json!({ "taskId": task_id })),
-        )
-        .await;
-    assert_eq!(result["result"]["isError"], json!(false), "result={result}");
+    let notify = service
+        .tasks
+        .lock()
+        .expect("MCP tasks poisoned")
+        .get(task_id)
+        .expect("created task")
+        .notify
+        .clone();
+    let task = loop {
+        let notified = notify.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        let task = service
+            .handle_request(
+                &mut session,
+                stable_request(102, "tasks/get", json!({ "taskId": task_id })),
+            )
+            .await;
+        if task["result"]["status"] == json!("completed") {
+            break task;
+        }
+        notified.await;
+    };
+    assert_eq!(task["result"]["status"], json!("completed"));
+    assert_eq!(task["result"]["result"]["isError"], json!(false));
     assert_eq!(
-        result["result"]["_meta"][mcp_protocol::RELATED_TASK_META_KEY]["taskId"],
-        json!(task_id)
-    );
-    assert_eq!(
-        result["result"]["structuredContent"]["status"],
+        task["result"]["result"]["structuredContent"]["status"],
         json!("dispatched")
     );
-
-    let task = service
-        .handle_request(
-            &mut session,
-            harn_vm::jsonrpc::request(104, "tasks/get", json!({ "taskId": task_id })),
-        )
-        .await;
-    assert_eq!(task["result"]["status"], json!("completed"));
-
-    let mut statuses = std::collections::BTreeSet::new();
-    while !statuses.contains("completed") {
-        let notification = recv_next_task_notification(&mut task_notifications).await;
-        if notification.owner == session.client_identity {
-            let status = notification.message["params"]["status"].as_str().unwrap();
-            statuses.insert(status.to_string());
-        }
-    }
-    assert!(statuses.contains("working"));
-    assert!(statuses.contains("completed"));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -775,7 +468,7 @@ async fn trigger_list_tool_returns_manifest_bindings() {
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
-    let mut session = init_session(&service).await;
+    let mut session = ConnectionState::default();
 
     let result = call_tool(&service, &mut session, "harn.trigger.list", json!({})).await;
     let triggers = result["triggers"].as_array().unwrap();
@@ -794,7 +487,7 @@ async fn secret_scan_tool_returns_findings_and_audits_them() {
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
-    let mut session = init_session(&service).await;
+    let mut session = ConnectionState::default();
 
     let result = call_tool(
         &service,
@@ -824,7 +517,7 @@ async fn trigger_fire_roundtrip_records_event_resource_and_action_graph() {
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
-    let mut session = init_session(&service).await;
+    let mut session = ConnectionState::default();
 
     let fire = call_tool(
         &service,
@@ -843,7 +536,7 @@ async fn trigger_fire_roundtrip_records_event_resource_and_action_graph() {
     let event = read_resource(&service, &mut session, &format!("harn://event/{event_id}")).await;
     assert_eq!(
         event["event"]["headers"]["x-harn-mcp-client"],
-        "test-client/1.0.0"
+        "stable-client/1.0"
     );
 
     let ctx = load_local_runtime(&service.local_args()).await.unwrap();
@@ -859,28 +552,12 @@ async fn trigger_fire_roundtrip_records_event_resource_and_action_graph() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn resource_subscription_notifies_when_event_log_topic_changes() {
+async fn topic_resource_reflects_event_log_changes() {
     let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
-    let mut session = init_session(&service).await;
-    let mut notifications = service.subscribe_resource_notifications();
-
-    let subscribed = service
-        .handle_request(
-            &mut session,
-            harn_vm::jsonrpc::request(
-                10,
-                "resources/subscribe",
-                json!({ "uri": "harn://topic/trigger.outbox" }),
-            ),
-        )
-        .await;
-    assert_eq!(subscribed["result"], json!({}));
-    assert!(session
-        .subscribed_resources
-        .contains("harn://topic/trigger.outbox"));
+    let mut session = ConnectionState::default();
 
     let fire = call_tool(
         &service,
@@ -891,37 +568,11 @@ async fn resource_subscription_notifies_when_event_log_topic_changes() {
     .await;
     assert_eq!(fire["status"], "dispatched");
 
-    let notification = recv_next_resource_notification(&mut notifications).await;
-    assert_eq!(notification.uri, "harn://topic/trigger.outbox");
-    assert_eq!(
-        notification.message["method"],
-        json!("notifications/resources/updated")
-    );
-    assert_eq!(
-        notification.message["params"]["uri"],
-        json!("harn://topic/trigger.outbox")
-    );
-
     let topic = read_resource(&service, &mut session, "harn://topic/trigger.outbox").await;
     assert_eq!(topic["topic"], json!("trigger.outbox"));
     assert!(topic["events"]
         .as_array()
         .is_some_and(|events| !events.is_empty()));
-
-    let unsubscribed = service
-        .handle_request(
-            &mut session,
-            harn_vm::jsonrpc::request(
-                11,
-                "resources/unsubscribe",
-                json!({ "uri": "harn://topic/trigger.outbox" }),
-            ),
-        )
-        .await;
-    assert_eq!(unsubscribed["result"], json!({}));
-    assert!(!session
-        .subscribed_resources
-        .contains("harn://topic/trigger.outbox"));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -930,7 +581,7 @@ async fn trigger_replay_tool_replays_event() {
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
-    let mut session = init_session(&service).await;
+    let mut session = ConnectionState::default();
     let fire = call_tool(
         &service,
         &mut session,
@@ -955,7 +606,7 @@ async fn dlq_tools_roundtrip_and_resource_read() {
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
-    let mut session = init_session(&service).await;
+    let mut session = ConnectionState::default();
 
     let fire = call_tool(
         &service,
@@ -993,7 +644,7 @@ async fn queue_and_inspect_tools_return_snapshots() {
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
-    let mut session = init_session(&service).await;
+    let mut session = ConnectionState::default();
 
     let _ = call_tool(
         &service,
@@ -1021,7 +672,7 @@ async fn trust_query_returns_filtered_trace_groups() {
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
-    let mut session = init_session(&service).await;
+    let mut session = ConnectionState::default();
 
     let ctx = load_local_runtime(&service.local_args()).await.unwrap();
     harn_vm::append_trust_record(
@@ -1087,169 +738,12 @@ async fn manifest_resource_reads_raw_manifest() {
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
-    let mut session = init_session(&service).await;
+    let mut session = ConnectionState::default();
 
     let manifest = read_resource(&service, &mut session, "harn://manifest").await;
     let manifest = manifest.as_str().unwrap();
     assert!(manifest.contains("[[triggers]]"));
     assert!(manifest.contains("cron-ok"));
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn streamable_http_endpoint_supports_sse_get_delete_and_session_headers() {
-    let _guard = lock_harn_state_async().await;
-    let temp = TempDir::new().unwrap();
-    write_fixture(&temp);
-    let args = fixture_args(&temp);
-    let service = Arc::new(McpOrchestratorService::new_local(args.local.clone()).unwrap());
-    let router = http_router_for_service(
-        service.clone(),
-        "/mcp".to_string(),
-        "/sse".to_string(),
-        "/messages".to_string(),
-    );
-
-    let init = router
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/mcp")
-                .header("accept", "application/json, text/event-stream")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    json!({
-                        "jsonrpc": "2.0",
-                        "id": 1,
-                        "method": "initialize",
-                        "params": {
-                            "protocolVersion": MCP_PROTOCOL_VERSION,
-                            "capabilities": {},
-                            "clientInfo": { "name": "streamable-test", "version": "1.0.0" }
-                        }
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(init.status(), StatusCode::OK);
-    assert_eq!(
-        init.headers()
-            .get(MCP_PROTOCOL_HEADER)
-            .and_then(|value| value.to_str().ok()),
-        Some(MCP_PROTOCOL_VERSION)
-    );
-    let session_id = init
-        .headers()
-        .get(MCP_SESSION_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .expect("session id")
-        .to_string();
-
-    let tools = router
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/mcp")
-                .header("accept", "text/event-stream")
-                .header(MCP_SESSION_HEADER, &session_id)
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    harn_vm::jsonrpc::request(2, "tools/list", json!({})).to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(tools.status(), StatusCode::OK);
-    assert!(tools
-        .headers()
-        .get("content-type")
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value.starts_with("text/event-stream")));
-    let body = to_bytes(tools.into_body(), usize::MAX).await.unwrap();
-    let body = String::from_utf8(body.to_vec()).unwrap();
-    assert!(body.contains("event: message"), "{body}");
-    assert!(body.contains("harn.trigger.list"), "{body}");
-
-    let get = router
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/mcp")
-                .header("accept", "text/event-stream")
-                .header(MCP_SESSION_HEADER, &session_id)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(get.status(), StatusCode::OK);
-    assert!(get
-        .headers()
-        .get("content-type")
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value.starts_with("text/event-stream")));
-    let mut stream = get.into_body().into_data_stream();
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), stream.next())
-        .await
-        .expect("timed out waiting for SSE prime event")
-        .expect("SSE stream ended")
-        .expect("SSE body error");
-    service.notify_manifest_reloaded();
-    let mut streamed = String::new();
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-    while !streamed.contains("notifications/tools/list_changed")
-        || !streamed.contains("notifications/resources/list_changed")
-    {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        assert!(
-            !remaining.is_zero(),
-            "timed out waiting for list_changed SSE notifications; body={streamed}"
-        );
-        let chunk = tokio::time::timeout(remaining, stream.next())
-            .await
-            .expect("timed out waiting for SSE notification")
-            .expect("SSE stream ended")
-            .expect("SSE body error");
-        streamed.push_str(std::str::from_utf8(&chunk).unwrap());
-    }
-
-    let delete = router
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("DELETE")
-                .uri("/mcp")
-                .header(MCP_SESSION_HEADER, &session_id)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(delete.status(), StatusCode::NO_CONTENT);
-
-    let after_delete = router
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/mcp")
-                .header("accept", "application/json")
-                .header(MCP_SESSION_HEADER, &session_id)
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    harn_vm::jsonrpc::request(3, "tools/list", json!({})).to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(after_delete.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1273,13 +767,7 @@ async fn oauth_metadata_and_challenge_are_served_when_configured() {
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let args = fixture_args(&temp);
-    let router = http_router_for_local(
-        args.local.clone(),
-        "/mcp".to_string(),
-        "/sse".to_string(),
-        "/messages".to_string(),
-    )
-    .unwrap();
+    let router = http_router_for_local(args.local.clone(), "/mcp".to_string()).unwrap();
 
     let metadata = router
         .clone()
@@ -1313,7 +801,7 @@ async fn oauth_metadata_and_challenge_are_served_when_configured() {
                 .header("accept", "application/json")
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    harn_vm::jsonrpc::request(1, "initialize", json!({})).to_string(),
+                    stable_request(1, mcp_protocol::METHOD_SERVER_DISCOVER, json!({})).to_string(),
                 ))
                 .unwrap(),
         )
@@ -1341,13 +829,7 @@ async fn mcp_json_descriptor_advertises_streamable_http_endpoint() {
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let args = fixture_args(&temp);
-    let router = http_router_for_local(
-        args.local.clone(),
-        "/mcp".to_string(),
-        "/sse".to_string(),
-        "/messages".to_string(),
-    )
-    .unwrap();
+    let router = http_router_for_local(args.local.clone(), "/mcp".to_string()).unwrap();
 
     let response = router
         .oneshot(
@@ -1431,26 +913,10 @@ async fn oauth_introspection_accepts_valid_token_and_rejects_wrong_audience() {
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let args = fixture_args(&temp);
-    let router = http_router_for_local(
-        args.local.clone(),
-        "/mcp".to_string(),
-        "/sse".to_string(),
-        "/messages".to_string(),
-    )
-    .unwrap();
+    let router = http_router_for_local(args.local.clone(), "/mcp".to_string()).unwrap();
 
-    let initialize_body = Body::from(
-        harn_vm::jsonrpc::request(
-            1,
-            "initialize",
-            json!({
-                "protocolVersion": MCP_PROTOCOL_VERSION,
-                "capabilities": {},
-                "clientInfo": { "name": "oauth-test", "version": "1.0.0" }
-            }),
-        )
-        .to_string(),
-    );
+    let discover_body =
+        Body::from(stable_request(1, mcp_protocol::METHOD_SERVER_DISCOVER, json!({})).to_string());
     let valid = router
         .clone()
         .oneshot(
@@ -1460,7 +926,7 @@ async fn oauth_introspection_accepts_valid_token_and_rejects_wrong_audience() {
                 .header("accept", "application/json")
                 .header("content-type", "application/json")
                 .header(AUTHORIZATION, "Bearer valid-token")
-                .body(initialize_body)
+                .body(discover_body)
                 .unwrap(),
         )
         .await
@@ -1478,7 +944,8 @@ async fn oauth_introspection_accepts_valid_token_and_rejects_wrong_audience() {
                     .header("content-type", "application/json")
                     .header(AUTHORIZATION, format!("Bearer {token}"))
                     .body(Body::from(
-                        harn_vm::jsonrpc::request(1, "initialize", json!({})).to_string(),
+                        stable_request(1, mcp_protocol::METHOD_SERVER_DISCOVER, json!({}))
+                            .to_string(),
                     ))
                     .unwrap(),
             )
@@ -1502,7 +969,7 @@ async fn oauth_introspection_accepts_valid_token_and_rejects_wrong_audience() {
                 .header("content-type", "application/json")
                 .header(AUTHORIZATION, "Bearer missing-scope")
                 .body(Body::from(
-                    harn_vm::jsonrpc::request(1, "initialize", json!({})).to_string(),
+                    stable_request(1, mcp_protocol::METHOD_SERVER_DISCOVER, json!({})).to_string(),
                 ))
                 .unwrap(),
         )
@@ -1521,72 +988,33 @@ async fn oauth_introspection_accepts_valid_token_and_rejects_wrong_audience() {
     auth_server.abort();
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn legacy_sse_routes_are_marked_deprecated() {
-    let _guard = lock_harn_state_async().await;
-    let temp = TempDir::new().unwrap();
-    write_fixture(&temp);
-    let args = fixture_args(&temp);
-    let router = http_router_for_local(
-        args.local.clone(),
-        "/mcp".to_string(),
-        "/sse".to_string(),
-        "/messages".to_string(),
-    )
-    .unwrap();
-
-    let sse = router
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/sse")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(sse.status(), StatusCode::OK);
-    assert_eq!(
-        sse.headers()
-            .get(DEPRECATION_HEADER)
-            .and_then(|value| value.to_str().ok()),
-        Some("true")
-    );
-    drop(sse);
-
-    let messages = router
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/messages")
-                .header("content-type", "application/json")
-                .body(Body::from("{}"))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(messages.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(
-        messages
-            .headers()
-            .get(DEPRECATION_HEADER)
-            .and_then(|value| value.to_str().ok()),
-        Some("true")
-    );
+fn stable_meta() -> JsonValue {
+    json!({
+        mcp_protocol::MCP_META_KEY_PROTOCOL_VERSION: mcp_protocol::PROTOCOL_VERSION,
+        mcp_protocol::MCP_META_KEY_CLIENT_INFO: {"name": "stable-client", "version": "1.0"},
+        mcp_protocol::MCP_META_KEY_CLIENT_CAPABILITIES: {},
+    })
 }
 
-fn rc_meta() -> JsonValue {
+fn stable_request(id: i64, method: &str, params: JsonValue) -> JsonValue {
+    let mut params = params.as_object().cloned().unwrap_or_default();
+    let meta = params
+        .entry("_meta".to_string())
+        .or_insert_with(|| json!({}));
+    let meta = meta.as_object_mut().expect("_meta must be an object");
+    for (key, value) in stable_meta().as_object().expect("stable meta") {
+        meta.entry(key.clone()).or_insert_with(|| value.clone());
+    }
     json!({
-        mcp_protocol::RC_META_KEY_PROTOCOL_VERSION: mcp_protocol::DRAFT_PROTOCOL_VERSION,
-        mcp_protocol::RC_META_KEY_CLIENT_INFO: {"name": "rc-client", "version": "1.0"},
-        mcp_protocol::RC_META_KEY_CLIENT_CAPABILITIES: {},
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": method,
+        "params": params,
     })
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn server_discover_returns_capabilities_and_skips_initialize() {
+async fn server_discover_returns_stable_capabilities() {
     let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
@@ -1600,7 +1028,7 @@ async fn server_discover_returns_capabilities_and_skips_initialize() {
                 "jsonrpc": "2.0",
                 "id": 1,
                 "method": mcp_protocol::METHOD_SERVER_DISCOVER,
-                "params": {}
+                "params": { "_meta": stable_meta() }
             }),
         )
         .await;
@@ -1608,34 +1036,30 @@ async fn server_discover_returns_capabilities_and_skips_initialize() {
         response["result"]["resultType"],
         json!(mcp_protocol::RESULT_TYPE_COMPLETE)
     );
-    assert_eq!(
-        response["result"]["protocolVersion"],
-        json!(mcp_protocol::DRAFT_PROTOCOL_VERSION)
-    );
+    assert_eq!(response["result"]["ttlMs"], json!(0));
+    assert_eq!(response["result"]["cacheScope"], json!("private"));
     let supported = response["result"]["supportedVersions"]
         .as_array()
         .expect("supportedVersions array");
-    assert!(supported
-        .iter()
-        .any(|v| v == &json!(mcp_protocol::DRAFT_PROTOCOL_VERSION)));
-    assert!(supported.iter().any(|v| v == &json!(MCP_PROTOCOL_VERSION)));
+    assert_eq!(supported.as_slice(), [json!(MCP_PROTOCOL_VERSION)]);
+    assert_eq!(response["result"]["capabilities"]["tools"], json!({}));
+    assert_eq!(response["result"]["capabilities"]["resources"], json!({}));
+    assert_eq!(response["result"]["capabilities"]["prompts"], json!({}));
     assert_eq!(
-        response["result"]["capabilities"]["tools"]["listChanged"],
-        json!(true)
+        response["result"]["capabilities"]["extensions"][mcp_protocol::TASKS_EXTENSION_ID],
+        json!({})
     );
-    assert!(session.initialized);
     assert!(session.authenticated);
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn rc_tools_list_returns_result_type_and_cache_hint_without_initialize() {
+async fn stable_tools_list_requires_only_request_metadata() {
     let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let args = fixture_args(&temp);
     let service = McpOrchestratorService::new_local(args.local.clone()).unwrap();
-    // No prior initialize: a Modern client should still be able to call
-    // tools/list with `_meta` metadata.
+    // Stable requests are self-describing and need no connection-scoped handshake.
     let mut session = ConnectionState::default();
     let response = service
         .handle_request(
@@ -1644,7 +1068,7 @@ async fn rc_tools_list_returns_result_type_and_cache_hint_without_initialize() {
                 "jsonrpc": "2.0",
                 "id": 1,
                 "method": "tools/list",
-                "params": { "_meta": rc_meta() }
+                "params": { "_meta": stable_meta() }
             }),
         )
         .await;
@@ -1665,12 +1089,11 @@ async fn rc_tools_list_returns_result_type_and_cache_hint_without_initialize() {
         .expect("tools array")
         .iter()
         .any(|tool| tool["name"] == json!("harn.trigger.list")));
-    assert!(session.initialized);
-    assert_eq!(session.protocol_mode, mcp_protocol::McpProtocolMode::Modern);
+    assert!(session.authenticated);
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn rc_request_with_unsupported_protocol_version_returns_minus_32004() {
+async fn stable_request_with_unsupported_protocol_version_returns_minus_32022() {
     let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
@@ -1686,7 +1109,7 @@ async fn rc_request_with_unsupported_protocol_version_returns_minus_32004() {
                 "method": "tools/list",
                 "params": {
                     "_meta": {
-                        mcp_protocol::RC_META_KEY_PROTOCOL_VERSION: "2099-01-01"
+                        mcp_protocol::MCP_META_KEY_PROTOCOL_VERSION: "2099-01-01"
                     }
                 }
             }),
@@ -1701,53 +1124,17 @@ async fn rc_request_with_unsupported_protocol_version_returns_minus_32004() {
         .expect("supported array");
     assert!(supported
         .iter()
-        .any(|v| v == &json!(mcp_protocol::DRAFT_PROTOCOL_VERSION)));
+        .any(|v| v == &json!(mcp_protocol::PROTOCOL_VERSION)));
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn legacy_initialize_still_negotiates_stable_protocol_version() {
-    let _guard = lock_harn_state_async().await;
-    let temp = TempDir::new().unwrap();
-    write_fixture(&temp);
-    let args = fixture_args(&temp);
-    let service = McpOrchestratorService::new_local(args.local.clone()).unwrap();
-    let mut session = ConnectionState::default();
-    let response = service
-        .handle_request(
-            &mut session,
-            json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": MCP_PROTOCOL_VERSION,
-                    "capabilities": {},
-                    "clientInfo": { "name": "legacy", "version": "1.0" }
-                }
-            }),
-        )
-        .await;
-    assert_eq!(response["result"]["protocolVersion"], MCP_PROTOCOL_VERSION);
-    // Legacy responses must remain free of RC envelope fields so the
-    // existing 2025-11-25 wire shape stays byte-stable.
-    assert!(response["result"].get("resultType").is_none());
-    assert!(response["result"].get("ttlMs").is_none());
-    assert_eq!(session.protocol_mode, mcp_protocol::McpProtocolMode::Legacy);
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn http_rc_request_returns_no_session_id_and_negotiates_draft_version() {
+async fn http_stable_request_uses_stateless_stable_version() {
     let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let args = fixture_args(&temp);
     let service = Arc::new(McpOrchestratorService::new_local(args.local.clone()).unwrap());
-    let router = http_router_for_service(
-        service.clone(),
-        "/mcp".to_string(),
-        "/sse".to_string(),
-        "/messages".to_string(),
-    );
+    let router = http_router_for_service(service.clone(), "/mcp".to_string());
 
     let response = router
         .clone()
@@ -1757,14 +1144,14 @@ async fn http_rc_request_returns_no_session_id_and_negotiates_draft_version() {
                 .uri("/mcp")
                 .header("accept", "application/json")
                 .header("content-type", "application/json")
-                .header(MCP_PROTOCOL_HEADER, mcp_protocol::DRAFT_PROTOCOL_VERSION)
-                .header(mcp_protocol::RC_HEADER_METHOD, "tools/list")
+                .header(MCP_PROTOCOL_HEADER, mcp_protocol::PROTOCOL_VERSION)
+                .header(mcp_protocol::MCP_HEADER_METHOD, "tools/list")
                 .body(Body::from(
                     json!({
                         "jsonrpc": "2.0",
                         "id": 1,
                         "method": "tools/list",
-                        "params": { "_meta": rc_meta() }
+                        "params": { "_meta": stable_meta() }
                     })
                     .to_string(),
                 ))
@@ -1778,12 +1165,8 @@ async fn http_rc_request_returns_no_session_id_and_negotiates_draft_version() {
             .headers()
             .get(MCP_PROTOCOL_HEADER)
             .and_then(|value| value.to_str().ok()),
-        Some(mcp_protocol::DRAFT_PROTOCOL_VERSION),
-        "RC responses must echo the negotiated draft version"
-    );
-    assert!(
-        response.headers().get(MCP_SESSION_HEADER).is_none(),
-        "RC responses must not emit MCP-Session-Id"
+        Some(mcp_protocol::PROTOCOL_VERSION),
+        "stable responses must echo the protocol version"
     );
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let body: JsonValue = serde_json::from_slice(&body).unwrap();
@@ -1794,18 +1177,13 @@ async fn http_rc_request_returns_no_session_id_and_negotiates_draft_version() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn http_rc_request_rejects_method_header_mismatch() {
+async fn http_stable_request_rejects_method_header_mismatch() {
     let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();
     write_fixture(&temp);
     let args = fixture_args(&temp);
     let service = Arc::new(McpOrchestratorService::new_local(args.local.clone()).unwrap());
-    let router = http_router_for_service(
-        service.clone(),
-        "/mcp".to_string(),
-        "/sse".to_string(),
-        "/messages".to_string(),
-    );
+    let router = http_router_for_service(service.clone(), "/mcp".to_string());
 
     let response = router
         .clone()
@@ -1815,14 +1193,14 @@ async fn http_rc_request_rejects_method_header_mismatch() {
                 .uri("/mcp")
                 .header("accept", "application/json")
                 .header("content-type", "application/json")
-                .header(MCP_PROTOCOL_HEADER, mcp_protocol::DRAFT_PROTOCOL_VERSION)
-                .header(mcp_protocol::RC_HEADER_METHOD, "tools/list")
+                .header(MCP_PROTOCOL_HEADER, mcp_protocol::PROTOCOL_VERSION)
+                .header(mcp_protocol::MCP_HEADER_METHOD, "tools/list")
                 .body(Body::from(
                     json!({
                         "jsonrpc": "2.0",
                         "id": 2,
                         "method": "tools/call",
-                        "params": { "name": "harn.trigger.list", "_meta": rc_meta() }
+                        "params": { "name": "harn.trigger.list", "_meta": stable_meta() }
                     })
                     .to_string(),
                 ))
@@ -1834,124 +1212,7 @@ async fn http_rc_request_rejects_method_header_mismatch() {
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let body: JsonValue = serde_json::from_slice(&body).unwrap();
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["error"]["code"], json!(-32600));
+    assert_eq!(body["error"]["code"], json!(-32020));
     assert_eq!(body["error"]["data"]["headerValue"], "tools/list");
     assert_eq!(body["error"]["data"]["bodyMethod"], "tools/call");
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn rc_http_get_stream_works_without_session_id() {
-    let _guard = lock_harn_state_async().await;
-    let temp = TempDir::new().unwrap();
-    write_fixture(&temp);
-    let args = fixture_args(&temp);
-    let service = Arc::new(McpOrchestratorService::new_local(args.local.clone()).unwrap());
-    let router = http_router_for_service(
-        service.clone(),
-        "/mcp".to_string(),
-        "/sse".to_string(),
-        "/messages".to_string(),
-    );
-
-    let response = router
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/mcp")
-                .header("accept", "text/event-stream")
-                .header(MCP_PROTOCOL_HEADER, mcp_protocol::DRAFT_PROTOCOL_VERSION)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(
-        response
-            .headers()
-            .get(MCP_PROTOCOL_HEADER)
-            .and_then(|value| value.to_str().ok()),
-        Some(mcp_protocol::DRAFT_PROTOCOL_VERSION)
-    );
-    assert!(response
-        .headers()
-        .get("content-type")
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value.starts_with("text/event-stream")));
-
-    let mut stream = response.into_body().into_data_stream();
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), stream.next())
-        .await
-        .expect("timed out waiting for SSE prime event")
-        .expect("SSE stream ended")
-        .expect("SSE body error");
-    service.notify_manifest_reloaded();
-    let mut buffer = String::new();
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
-    while !buffer.contains("notifications/tools/list_changed") {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        assert!(
-            !remaining.is_zero(),
-            "RC GET stream did not receive list_changed notification; body={buffer}"
-        );
-        let chunk = tokio::time::timeout(remaining, stream.next())
-            .await
-            .expect("timed out waiting for SSE notification")
-            .expect("SSE stream ended")
-            .expect("SSE body error");
-        buffer.push_str(std::str::from_utf8(&chunk).unwrap());
-    }
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn legacy_initialize_http_path_still_returns_session_id() {
-    let _guard = lock_harn_state_async().await;
-    let temp = TempDir::new().unwrap();
-    write_fixture(&temp);
-    let args = fixture_args(&temp);
-    let service = Arc::new(McpOrchestratorService::new_local(args.local.clone()).unwrap());
-    let router = http_router_for_service(
-        service.clone(),
-        "/mcp".to_string(),
-        "/sse".to_string(),
-        "/messages".to_string(),
-    );
-    let response = router
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/mcp")
-                .header("accept", "application/json")
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    json!({
-                        "jsonrpc": "2.0",
-                        "id": 1,
-                        "method": "initialize",
-                        "params": {
-                            "protocolVersion": MCP_PROTOCOL_VERSION,
-                            "capabilities": {},
-                            "clientInfo": { "name": "legacy-http", "version": "1.0" }
-                        }
-                    })
-                    .to_string(),
-                ))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(
-        response
-            .headers()
-            .get(MCP_PROTOCOL_HEADER)
-            .and_then(|value| value.to_str().ok()),
-        Some(MCP_PROTOCOL_VERSION)
-    );
-    assert!(
-        response.headers().get(MCP_SESSION_HEADER).is_some(),
-        "legacy initialize must mint a session id"
-    );
 }

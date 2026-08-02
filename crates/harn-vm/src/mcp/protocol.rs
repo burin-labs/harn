@@ -21,7 +21,9 @@ pub(crate) fn jsonrpc_error_to_vm_error(error: &serde_json::Value) -> VmError {
     ))))
 }
 
-pub(crate) fn client_request_rejection(msg: &serde_json::Value) -> Option<serde_json::Value> {
+pub(crate) fn unsupported_embedded_input_response(
+    msg: &serde_json::Value,
+) -> Option<serde_json::Value> {
     let request_id = msg.get("id")?.clone();
     let method = msg.get("method").and_then(|value| value.as_str())?;
     Some(crate::jsonrpc::error_response(
@@ -31,29 +33,9 @@ pub(crate) fn client_request_rejection(msg: &serde_json::Value) -> Option<serde_
     ))
 }
 
-pub(crate) fn resolve_protocol_mode(
-    protocol_mode: Option<&str>,
-    protocol_version: Option<&str>,
-) -> Result<McpProtocolMode, VmError> {
-    let normalized = protocol_mode.map(|value| value.trim().to_ascii_lowercase());
-    match normalized.as_deref() {
-        Some("legacy") | Some("2025") | Some("2025-11-25") | Some("2025-06-18") => {
-            Ok(McpProtocolMode::Legacy)
-        }
-        Some("rc") | Some("modern") | Some("draft") | Some("draft-2026-v1") => {
-            Ok(McpProtocolMode::Modern)
-        }
-        Some(other) => Err(VmError::Runtime(format!(
-            "mcp_connect: unsupported protocol_mode {other:?}; expected \"legacy\" or \"rc\""
-        ))),
-        None if protocol_version == Some(DRAFT_PROTOCOL_VERSION) => Ok(McpProtocolMode::Modern),
-        None => Ok(McpProtocolMode::Legacy),
-    }
-}
-
 pub(crate) fn mcp_connect_options(value: Option<&VmValue>) -> Result<McpConnectOptions, VmError> {
     let Some(value) = value else {
-        return resolve_connect_protocol_options(None, None);
+        return resolve_connect_protocol_options(None);
     };
     let VmValue::Dict(options) = value else {
         return Err(VmError::Runtime(format!(
@@ -61,27 +43,18 @@ pub(crate) fn mcp_connect_options(value: Option<&VmValue>) -> Result<McpConnectO
             value.type_name()
         )));
     };
-    let protocol_mode_value = options.get("protocol_mode").map(|value| value.display());
     let protocol_version_value = options.get("protocol_version").map(|value| value.display());
-    resolve_connect_protocol_options(
-        protocol_mode_value.as_deref(),
-        protocol_version_value.as_deref(),
-    )
+    resolve_connect_protocol_options(protocol_version_value.as_deref())
 }
 
 pub(crate) fn resolve_connect_protocol_options(
-    protocol_mode_value: Option<&str>,
     protocol_version_value: Option<&str>,
 ) -> Result<McpConnectOptions, VmError> {
-    let protocol_mode_value = protocol_mode_value
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
     let protocol_version_value = protocol_version_value
         .map(str::trim)
         .filter(|value| !value.is_empty());
-    let protocol_mode = resolve_protocol_mode(protocol_mode_value, protocol_version_value)?;
     let protocol_version = protocol_version_value
-        .unwrap_or_else(|| default_protocol_version(protocol_mode))
+        .unwrap_or(PROTOCOL_VERSION)
         .to_string();
     if !crate::mcp_protocol::is_supported_protocol_version(&protocol_version) {
         return Err(VmError::Runtime(format!(
@@ -89,25 +62,7 @@ pub(crate) fn resolve_connect_protocol_options(
             crate::mcp_protocol::supported_protocol_versions().join(", ")
         )));
     }
-    Ok(McpConnectOptions {
-        protocol_mode,
-        protocol_version,
-    })
-}
-
-pub(crate) fn default_protocol_version(mode: McpProtocolMode) -> &'static str {
-    match mode {
-        McpProtocolMode::Legacy => PROTOCOL_VERSION,
-        McpProtocolMode::Modern => DRAFT_PROTOCOL_VERSION,
-    }
-}
-
-pub(crate) fn legacy_initialize_params(protocol_version: &str) -> serde_json::Value {
-    serde_json::json!({
-        "protocolVersion": protocol_version,
-        "capabilities": legacy_client_capabilities(),
-        "clientInfo": client_info(),
-    })
+    Ok(McpConnectOptions { protocol_version })
 }
 
 pub(crate) fn client_info() -> serde_json::Value {
@@ -117,33 +72,21 @@ pub(crate) fn client_info() -> serde_json::Value {
     })
 }
 
-pub(crate) fn legacy_client_capabilities() -> serde_json::Value {
+pub(crate) fn stable_client_capabilities() -> serde_json::Value {
     serde_json::json!({
-        "elicitation": {},
-        "roots": {
-            "listChanged": true,
-        },
-        "sampling": {},
-    })
-}
-
-pub(crate) fn modern_client_capabilities() -> serde_json::Value {
-    serde_json::json!({
-        "elicitation": {},
+        "elicitation": {"form": {}, "url": {}},
         "roots": {},
         "sampling": {},
+        "extensions": {
+            TASKS_EXTENSION_ID: {},
+        },
     })
 }
 
 pub(crate) fn request_params_for_protocol(
-    protocol_mode: McpProtocolMode,
     protocol_version: &str,
     params: serde_json::Value,
 ) -> serde_json::Value {
-    if protocol_mode == McpProtocolMode::Legacy {
-        return params;
-    }
-
     let mut object = match params {
         serde_json::Value::Object(object) => object,
         serde_json::Value::Null => serde_json::Map::new(),
@@ -154,85 +97,16 @@ pub(crate) fn request_params_for_protocol(
         .and_then(|value| value.as_object().cloned())
         .unwrap_or_default();
     meta.insert(
-        RC_META_KEY_PROTOCOL_VERSION.to_string(),
+        MCP_META_KEY_PROTOCOL_VERSION.to_string(),
         serde_json::Value::String(protocol_version.to_string()),
     );
-    meta.insert(RC_META_KEY_CLIENT_INFO.to_string(), client_info());
+    meta.insert(MCP_META_KEY_CLIENT_INFO.to_string(), client_info());
     meta.insert(
-        RC_META_KEY_CLIENT_CAPABILITIES.to_string(),
-        modern_client_capabilities(),
+        MCP_META_KEY_CLIENT_CAPABILITIES.to_string(),
+        stable_client_capabilities(),
     );
     object.insert("_meta".to_string(), serde_json::Value::Object(meta));
     serde_json::Value::Object(object)
-}
-
-pub(crate) fn maybe_retry_unsupported_protocol(
-    protocol_mode: McpProtocolMode,
-    protocol_version: &mut String,
-    msg: &serde_json::Value,
-) -> bool {
-    if protocol_mode != McpProtocolMode::Modern {
-        return false;
-    }
-    let Some(error) = msg.get("error") else {
-        return false;
-    };
-    if error.get("code").and_then(|value| value.as_i64()) != Some(UNSUPPORTED_PROTOCOL_VERSION_CODE)
-    {
-        return false;
-    }
-    let supported = error
-        .get("data")
-        .and_then(|data| data.get("supported"))
-        .and_then(|value| value.as_array())
-        .into_iter()
-        .flatten()
-        .filter_map(|value| value.as_str())
-        .collect::<Vec<_>>();
-    let Some(selected) = select_supported_protocol_version(&supported) else {
-        return false;
-    };
-    if selected == protocol_version {
-        return false;
-    }
-    *protocol_version = selected.to_string();
-    true
-}
-
-pub(crate) fn should_fallback_to_legacy_http_discovery(
-    protocol_mode: McpProtocolMode,
-    method: &str,
-    status: u16,
-) -> bool {
-    protocol_mode == McpProtocolMode::Modern
-        && method == "server/discover"
-        && matches!(status, 400 | 404 | 405)
-}
-
-pub(crate) fn http_discovery_fallback_response(id: Option<u64>) -> serde_json::Value {
-    crate::jsonrpc::error_response(
-        id.map(serde_json::Value::from)
-            .unwrap_or(serde_json::Value::Null),
-        -32601,
-        "Modern MCP discovery was not recognized",
-    )
-}
-
-pub(crate) fn select_supported_protocol_version(supported: &[&str]) -> Option<&'static str> {
-    [
-        DRAFT_PROTOCOL_VERSION,
-        PROTOCOL_VERSION,
-        LEGACY_2025_06_18_PROTOCOL_VERSION,
-    ]
-    .into_iter()
-    .find(|candidate| supported.iter().any(|value| value == candidate))
-}
-
-pub(crate) fn is_method_not_found_response(msg: &serde_json::Value) -> bool {
-    msg.get("error")
-        .and_then(|error| error.get("code"))
-        .and_then(|code| code.as_i64())
-        == Some(-32601)
 }
 
 pub(crate) fn extract_tool_headers(tool: &serde_json::Value) -> Result<Vec<McpToolHeader>, String> {

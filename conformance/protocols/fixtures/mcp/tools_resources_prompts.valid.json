@@ -1,14 +1,23 @@
 {
   "name": "mcp.tools_resources_prompts.lists",
   "protocol": "mcp",
-  "schema": "schemas/mcp-2025-11-25.schema.json",
+  "schema": "schemas/mcp-2026-07-28.schema.json",
   "expect": "valid",
   "documents": [
     {
       "jsonrpc": "2.0",
       "id": 2,
       "method": "tools/list",
-      "params": {}
+      "params": {
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientInfo": {
+            "name": "harn-conformance",
+            "version": "0.10.52"
+          },
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
     },
     {
       "jsonrpc": "2.0",
@@ -30,7 +39,8 @@
               "readOnlyHint": true
             }
           }
-        ]
+        ],
+        "resultType": "complete"
       }
     },
     {
@@ -43,7 +53,8 @@
             "name": "README",
             "mimeType": "text/markdown"
           }
-        ]
+        ],
+        "resultType": "complete"
       }
     },
     {
@@ -56,7 +67,8 @@
             "name": "named-resource",
             "mimeType": "text/plain"
           }
-        ]
+        ],
+        "resultType": "complete"
       }
     },
     {
@@ -74,12 +86,13 @@
               }
             ]
           }
-        ]
+        ],
+        "resultType": "complete"
       }
     }
   ],
   "matrix": {
-    "version": "2025-11-25",
+    "version": "2026-07-28",
     "family": "tools_resources_prompts",
     "case": "success",
     "source": {

@@ -27,10 +27,8 @@ extension fields, and generated binding vocabulary.
 - `schemas/acp-session-update.schema.json`: Harn's ACP session-update schema
 profile (`agentclientprotocol/agent-client-protocol schema v0.12.2`).
 - `schemas/a2a-0.3.0.schema.json`: Harn's A2A schema profile (`0.3.0`).
-- `schemas/mcp-2025-11-25.schema.json`: Harn's MCP schema profile (`2025-11-25`).
-- `schemas/mcp-draft-2026-v1.schema.json`: Harn's opt-in MCP RC schema
-profile (`DRAFT-2026-v1`), pinned beside the stable profile until the
-final `2026-07-28` specification lands.
+- `schemas/mcp-2026-07-28.schema.json`: Harn's stable MCP schema profile
+(`2026-07-28`).
 - `schemas/tool-call-receipt.schema.json`: Harn's typed, privacy-preserving
 `ToolCallReceipt` schema for audited tool calls.
 - `schemas/plan-document-v1.schema.json`: Harn's canonical collaborative
@@ -49,11 +47,11 @@ the same host-facing surface (Python 3.9+, stdlib-only).
 aliases, and constants mirroring the Python and Swift bindings.
 - `fixtures/round_trip.json`: representative JSON envelopes used by
 `make check-bindings` to exercise Python and Go round-trips.
-- `fixtures/mcp-rc/`: hand-authored MCP DRAFT-2026-v1 wire fixtures
-(modern success, unsupported-version retry, cache hints,
+- `fixtures/mcp/`: hand-authored MCP 2026-07-28 wire fixtures
+(stable success, unsupported-version retry, cache hints,
 input-required, header mismatch, no-session HTTP, recursive
-`$defs` tool schema, legacy 2025-11-25 compat) replayed by
-`make mcp-rc-conformance` and republished here for downstream host
+`$defs` tool schema) replayed by
+`make mcp-conformance` and republished here for downstream host
 and cloud test suites.
 
 Compatibility rule: additive enum values and optional fields are minor-version

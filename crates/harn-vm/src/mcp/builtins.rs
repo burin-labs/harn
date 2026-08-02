@@ -57,35 +57,11 @@ pub(crate) async fn call_mcp_tool_with_hint(
     let mut result = client
         .call(
             "tools/call",
-            tool_call_params(tool_name, arguments.clone(), progress_token.as_ref(), None),
+            tool_call_params(tool_name, arguments, progress_token.as_ref()),
         )
         .await?;
-    for _ in 0..MCP_INPUT_REQUIRED_MAX_ROUNDS {
-        if result.get("resultType").and_then(|value| value.as_str())
-            != Some(RESULT_TYPE_INPUT_REQUIRED)
-        {
-            break;
-        }
-        let Some(input_round) = resolve_input_required_result(&client.name, &result).await? else {
-            break;
-        };
-        result = client
-            .call(
-                "tools/call",
-                tool_call_params(
-                    tool_name,
-                    arguments.clone(),
-                    progress_token.as_ref(),
-                    Some(input_round),
-                ),
-            )
-            .await?;
-    }
-    if result.get("resultType").and_then(|value| value.as_str()) == Some(RESULT_TYPE_INPUT_REQUIRED)
-    {
-        return Err(VmError::Runtime(format!(
-            "MCP tool '{tool_name}' still required input after {MCP_INPUT_REQUIRED_MAX_ROUNDS} rounds"
-        )));
+    if result.get("resultType").and_then(|value| value.as_str()) == Some("task") {
+        result = resolve_task_result(client, result).await?;
     }
 
     if result.get("isError").and_then(|v| v.as_bool()) == Some(true) {
@@ -122,11 +98,94 @@ pub(crate) async fn call_mcp_tool_with_hint(
     Ok((unwrapped, cache_hint))
 }
 
+async fn resolve_task_result(
+    client: &VmMcpClientHandle,
+    created: serde_json::Value,
+) -> Result<serde_json::Value, VmError> {
+    let task_id = created
+        .get("taskId")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| VmError::Runtime("MCP task result is missing taskId".into()))?
+        .to_string();
+    let poll_interval_ms = created
+        .get("pollIntervalMs")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(crate::mcp_protocol::DEFAULT_TASK_POLL_INTERVAL_MS)
+        .clamp(10, 5_000);
+
+    tokio::time::timeout(MCP_TIMEOUT, async {
+        loop {
+            let task = client
+                .call(
+                    crate::mcp_protocol::METHOD_TASKS_GET,
+                    serde_json::json!({"taskId": task_id}),
+                )
+                .await?;
+            match task.get("status").and_then(serde_json::Value::as_str) {
+                Some("completed") => {
+                    return task.get("result").cloned().ok_or_else(|| {
+                        VmError::Runtime(format!("MCP task '{task_id}' completed without a result"))
+                    });
+                }
+                Some("failed") => {
+                    let error = task.get("error").cloned().unwrap_or_else(|| {
+                        serde_json::json!({
+                            "code": -32603,
+                            "message": format!("MCP task '{task_id}' failed"),
+                        })
+                    });
+                    return Err(jsonrpc_error_to_vm_error(&error));
+                }
+                Some("cancelled") => {
+                    return Err(VmError::Runtime(format!(
+                        "MCP task '{task_id}' was cancelled"
+                    )));
+                }
+                Some("input_required") => {
+                    let Some(input_round) = resolve_input_required_result(client, &task).await?
+                    else {
+                        return Err(VmError::Runtime(format!(
+                            "MCP task '{task_id}' requires input but supplied no inputRequests"
+                        )));
+                    };
+                    client
+                        .call(
+                            crate::mcp_protocol::METHOD_TASKS_UPDATE,
+                            serde_json::json!({
+                                "taskId": task_id,
+                                "inputResponses": input_round.input_responses,
+                            }),
+                        )
+                        .await?;
+                }
+                Some("working") => {}
+                Some(status) => {
+                    return Err(VmError::Runtime(format!(
+                        "MCP task '{task_id}' returned unknown status {status:?}"
+                    )));
+                }
+                None => {
+                    return Err(VmError::Runtime(format!(
+                        "MCP task '{task_id}' response is missing status"
+                    )));
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(poll_interval_ms)).await;
+        }
+    })
+    .await
+    .map_err(|_| {
+        VmError::Runtime(format!(
+            "MCP task '{task_id}' did not complete within {}s",
+            MCP_TIMEOUT.as_secs()
+        ))
+    })?
+}
+
 pub(crate) fn tool_call_params(
     tool_name: &str,
     arguments: serde_json::Value,
     progress_token: Option<&client_progress::ProgressTokenContext>,
-    input_round: Option<McpInputRound>,
 ) -> serde_json::Value {
     let mut params = serde_json::Map::from_iter([
         (
@@ -141,46 +200,54 @@ pub(crate) fn tool_call_params(
             serde_json::json!({ "progressToken": tok.token }),
         );
     }
-    if let Some(input_round) = input_round {
-        params.insert("inputResponses".to_string(), input_round.input_responses);
-        if let Some(request_state) = input_round.request_state {
-            params.insert("requestState".to_string(), request_state);
-        }
-    }
     serde_json::Value::Object(params)
 }
 
+pub(crate) fn with_input_round(
+    params: serde_json::Value,
+    input_round: McpInputRound,
+) -> Result<serde_json::Value, VmError> {
+    let mut params = params.as_object().cloned().ok_or_else(|| {
+        VmError::Runtime("MCP MRTR retry parameters must be an object".to_string())
+    })?;
+    params.insert("inputResponses".to_string(), input_round.input_responses);
+    if let Some(request_state) = input_round.request_state {
+        params.insert("requestState".to_string(), request_state);
+    }
+    Ok(serde_json::Value::Object(params))
+}
+
 pub(crate) async fn resolve_input_required_result(
-    server_name: &str,
+    client: &VmMcpClientHandle,
     result: &serde_json::Value,
 ) -> Result<Option<McpInputRound>, VmError> {
-    let Some(input_requests) = result
-        .get("inputRequests")
-        .and_then(|value| value.as_object())
-    else {
+    let Some(input_requests) = result.get("inputRequests") else {
+        if result.get("requestState").is_some() {
+            return Ok(Some(McpInputRound {
+                input_responses: serde_json::json!({}),
+                request_state: result.get("requestState").cloned(),
+            }));
+        }
         return Ok(None);
     };
-    let mut responses = serde_json::Map::new();
+    let input_requests: rmcp::model::InputRequests = serde_json::from_value(input_requests.clone())
+        .map_err(|error| VmError::Runtime(format!("invalid MCP inputRequests: {error}")))?;
+    let fixtures = client.capability_fixtures().await;
+    let mut responses = rmcp::model::InputResponses::new();
     for (key, input_request) in input_requests {
-        let Some(method) = input_request.get("method").and_then(|value| value.as_str()) else {
-            return Err(VmError::Runtime(format!(
-                "MCP input_required request {key:?} is missing method"
-            )));
-        };
-        let request = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": format!("input-{key}"),
-            "method": method,
-            "params": input_request
-                .get("params")
-                .cloned()
-                .unwrap_or_else(|| serde_json::json!({})),
-        });
-        let response = handle_inbound_client_request(server_name, &request)
+        let mut request = serde_json::to_value(input_request).map_err(|error| {
+            VmError::Runtime(format!("invalid MCP input request {key:?}: {error}"))
+        })?;
+        let object = request.as_object_mut().ok_or_else(|| {
+            VmError::Runtime(format!("MCP input request {key:?} is not an object"))
+        })?;
+        object.insert("jsonrpc".to_string(), serde_json::json!("2.0"));
+        object.insert("id".to_string(), serde_json::json!(format!("input-{key}")));
+        let response = resolve_embedded_input_request(&client.name, &request, fixtures.as_deref())
             .await
             .ok_or_else(|| {
                 VmError::Runtime(format!(
-                    "MCP input_required request {key:?} used unsupported method {method:?}"
+                    "MCP input_required request {key:?} used an unsupported method"
                 ))
             })?;
         if let Some(result) = response.get("result") {
@@ -192,7 +259,8 @@ pub(crate) async fn resolve_input_required_result(
         }
     }
     Ok(Some(McpInputRound {
-        input_responses: serde_json::Value::Object(responses),
+        input_responses: serde_json::to_value(responses)
+            .expect("MCP input responses are JSON serializable"),
         request_state: result.get("requestState").cloned(),
     }))
 }
@@ -203,7 +271,6 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         "mcp_roots",
         mcp_roots_builtin,
     );
-    crate::mcp_file_upload::register_mcp_file_upload_builtins(vm);
     register_supervised_mcp_host_builtins(vm);
 
     vm.register_async_capability_method(
@@ -227,7 +294,6 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
                 &command,
                 &cmd_args,
                 &BTreeMap::new(),
-                options.protocol_mode,
                 options.protocol_version,
             )
             .await?;
@@ -408,10 +474,8 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
                 .and_then(|t| t.as_array())
                 .cloned()
                 .unwrap_or_default();
-            if client.protocol_mode().await? == McpProtocolMode::Modern {
-                tools = filter_tools_for_client(&tools);
-                client.store_http_tool_headers(&tools).await;
-            }
+            tools = filter_tools_for_client(&tools);
+            client.store_http_tool_headers(&tools).await;
 
             // Tag every tool with its originating server name so
             // downstream indexers (tool_search BM25) can surface them
@@ -489,17 +553,17 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
             let mut info = BTreeMap::new();
             info.put_str("name", client.name.as_str());
             info.insert("connected".to_string(), VmValue::Bool(true));
-            let initialize = client
-                .initialize_result
+            let discovery = client
+                .discovery_result
                 .lock()
                 .await
                 .clone()
                 .unwrap_or(serde_json::Value::Null);
-            if !initialize.is_null() {
-                if let Some(instructions) = initialize
+            if !discovery.is_null() {
+                if let Some(instructions) = discovery
                     .get("instructions")
                     .or_else(|| {
-                        initialize
+                        discovery
                             .get("serverInfo")
                             .and_then(|value| value.get("instructions"))
                     })
@@ -508,7 +572,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
                 {
                     info.put_str("instructions", instructions);
                 }
-                info.insert("initialize".to_string(), json_to_vm_value(&initialize));
+                info.insert("discovery".to_string(), json_to_vm_value(&discovery));
             }
             let cache_hints = client.cache_hints.lock().await;
             if !cache_hints.is_empty() {

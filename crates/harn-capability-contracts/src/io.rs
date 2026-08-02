@@ -687,27 +687,6 @@ capability_method!(
     "Render an MCP prompt."
 );
 capability_method!(
-    tools_mcp_configure,
-    "harness.tools.mcp_configure",
-    ["mcp.mutate@const=config"],
-    "__cap_tools_mcp_configure(config: dict) -> dict",
-    "Configure experimental MCP features."
-);
-capability_method!(
-    tools_mcp_file_input,
-    "harness.tools.mcp_file_input",
-    ["mcp.read@const=config"],
-    "__cap_tools_mcp_file_input(options?: dict) -> dict",
-    "Build an MCP file-input schema."
-);
-capability_method!(
-    tools_mcp_upload_file,
-    "harness.tools.mcp_upload_file",
-    ["mcp.write@arg0", "fs.read@arg1"],
-    "__cap_tools_mcp_upload_file(client: any, path: string, options?: dict) -> string",
-    "Upload a file to an MCP server."
-);
-capability_method!(
     tools_mcp_tools,
     "harness.tools.mcp_tools",
     ["mcp.write@const=server"],

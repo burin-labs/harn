@@ -9,18 +9,12 @@ public enum HarnProtocolConstants {
     public static let harnAgentEventMethod = "_harn/agentEvent"
     public static let harnProviderCatalogMethod = "_harn/providerCatalog"
     public static let acpPromptErrorDataSchema = "harn.acp.prompt_error.v1"
-    public static let mcpProtocolVersion = "2025-11-25"
-    public static let mcpStableProtocolVersion = "2025-11-25"
-    public static let mcpDraftProtocolVersion = "DRAFT-2026-v1"
-    public static let mcpLegacy20250618ProtocolVersion = "2025-06-18"
-    public static let mcpFinal2026ProtocolVersion = "2026-07-28"
+    public static let mcpProtocolVersion = "2026-07-28"
     public static let mcpJsonSchema202012Dialect = "https://json-schema.org/draft/2020-12/schema"
-    public static let mcpUnsupportedProtocolVersionErrorCode = -32004
+    public static let mcpUnsupportedProtocolVersionErrorCode = -32022
     public static let mcpUnsupportedProtocolVersionErrorMessage = "Unsupported protocol version"
     public static let mcpProtocolVersions: [String] = [
-        "DRAFT-2026-v1",
-        "2025-11-25",
-        "2025-06-18",
+        "2026-07-28",
     ]
     public static let mcpRequiredMetadataKeys: [String] = [
         "io.modelcontextprotocol/protocolVersion",
@@ -624,7 +618,6 @@ public enum HarnA2ATaskEventType: String, Codable, Sendable, CaseIterable {
 
 public enum HarnMCPMethod: String, Codable, Sendable, CaseIterable {
     case serverDiscover = "server/discover"
-    case initialize = "initialize"
     case toolsList = "tools/list"
     case toolsCall = "tools/call"
     case resourcesList = "resources/list"
@@ -633,15 +626,15 @@ public enum HarnMCPMethod: String, Codable, Sendable, CaseIterable {
     case promptsList = "prompts/list"
     case promptsGet = "prompts/get"
     case completionComplete = "completion/complete"
-    case loggingSetLevel = "logging/setLevel"
     case samplingCreateMessage = "sampling/createMessage"
     case elicitationCreate = "elicitation/create"
-    case notificationsInitialized = "notifications/initialized"
     case notificationsMessage = "notifications/message"
+    case tasksGet = "tasks/get"
+    case tasksUpdate = "tasks/update"
+    case tasksCancel = "tasks/cancel"
 
     public static let allCases: [Self] = [
         "server/discover",
-        "initialize",
         "tools/list",
         "tools/call",
         "resources/list",
@@ -650,11 +643,12 @@ public enum HarnMCPMethod: String, Codable, Sendable, CaseIterable {
         "prompts/list",
         "prompts/get",
         "completion/complete",
-        "logging/setLevel",
         "sampling/createMessage",
         "elicitation/create",
-        "notifications/initialized",
         "notifications/message",
+        "tasks/get",
+        "tasks/update",
+        "tasks/cancel",
     ].map { Self(rawValue: $0)! }
 }
 
@@ -671,10 +665,12 @@ public enum HarnMCPCacheScope: String, Codable, Sendable, CaseIterable {
 public enum HarnMCPResultType: String, Codable, Sendable, CaseIterable {
     case complete = "complete"
     case inputRequired = "input_required"
+    case task = "task"
 
     public static let allCases: [Self] = [
         "complete",
         "input_required",
+        "task",
     ].map { Self(rawValue: $0)! }
 }
 
@@ -1655,7 +1651,8 @@ public struct HarnMCPDiscoverResult: Codable, Sendable, Equatable {
     public var resultType: HarnMCPResultType
     public var supportedVersions: [String]
     public var capabilities: HarnACPObject
-    public var serverInfo: HarnMCPImplementation
+    public var ttlMs: Int
+    public var cacheScope: HarnMCPCacheScope
     public var instructions: String?
     public var meta: HarnACPObject?
 
@@ -1663,7 +1660,8 @@ public struct HarnMCPDiscoverResult: Codable, Sendable, Equatable {
         case resultType
         case supportedVersions
         case capabilities
-        case serverInfo
+        case ttlMs
+        case cacheScope
         case instructions
         case meta = "_meta"
     }

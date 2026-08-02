@@ -253,7 +253,7 @@ done
 make_targets="$tmp_root/make-cargo-targets.txt"
 make -C "$repo_root" -n \
   build build-release fmt fmt-check lint test-cargo test-e2e release-smoke \
-  mcp-rc-conformance lint-harn gen-run-view-fixtures check-run-view-fixtures > "$make_targets"
+  mcp-conformance lint-harn gen-run-view-fixtures check-run-view-fixtures > "$make_targets"
 
 for expected in \
   './scripts/cargo_with_worktree_build_dir.sh build' \
@@ -264,8 +264,8 @@ for expected in \
   './scripts/cargo_with_worktree_build_dir.sh test --workspace' \
   './scripts/cargo_with_worktree_build_dir.sh nextest run --workspace --profile e2e --run-ignored all' \
   './scripts/cargo_with_worktree_build_dir.sh build --release -p harn-cli --bin harn' \
-  './scripts/cargo_with_worktree_build_dir.sh test -p harn-mcp-rc-compat --tests' \
-  './scripts/cargo_with_worktree_build_dir.sh test -p harn-cli --lib mcp_rc_compat_tests' \
+  './scripts/cargo_with_worktree_build_dir.sh test -p harn-mcp-compat --tests' \
+  './scripts/cargo_with_worktree_build_dir.sh test -p harn-cli --lib mcp_compat_tests' \
   './scripts/cargo_with_worktree_build_dir.sh test -p harn-vm --test harn_vm -- run_view_fixtures::run_view_fixture_snapshots_match --exact'
 do
   if ! grep -Fq "$expected" "$make_targets"; then

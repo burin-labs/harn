@@ -14,8 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map as JsonMap, Value as JsonValue};
 
 use crate::mcp_protocol::{
-    completions_capability, server_discover_result, tasks_capability, DRAFT_PROTOCOL_VERSION,
-    PROTOCOL_VERSION,
+    completions_capability, server_discover_result, tasks_capability, PROTOCOL_VERSION,
 };
 
 pub const MCP_CASSETTE_SCHEMA_VERSION: u32 = 1;
@@ -589,7 +588,6 @@ impl McpWorldRuntime {
         let id = id?;
 
         Some(match method {
-            "initialize" => self.handle_initialize(id),
             crate::mcp_protocol::METHOD_SERVER_DISCOVER => self.handle_server_discover(id),
             "ping" => crate::jsonrpc::response(id, json!({})),
             "tools/list" => self.handle_tools_list(id),
@@ -600,18 +598,6 @@ impl McpWorldRuntime {
                 crate::jsonrpc::error_response(id, -32601, &format!("Method not found: {other}"))
             }
         })
-    }
-
-    fn handle_initialize(&self, id: JsonValue) -> JsonValue {
-        crate::jsonrpc::response(
-            id,
-            json!({
-                "protocolVersion": PROTOCOL_VERSION,
-                "capabilities": self.capabilities(),
-                "serverInfo": self.server_info(),
-                "instructions": "Deterministic Harn MCP simulated world.",
-            }),
-        )
     }
 
     fn handle_server_discover(&self, id: JsonValue) -> JsonValue {
@@ -638,7 +624,7 @@ impl McpWorldRuntime {
         json!({
             "name": self.spec.name,
             "version": self.spec.version,
-            "protocolVersion": DRAFT_PROTOCOL_VERSION,
+            "protocolVersion": PROTOCOL_VERSION,
         })
     }
 

@@ -286,39 +286,38 @@ async fn embedded_mcp_endpoint_serves_orchestrator_tools_on_listener() {
     let client = reqwest::Client::new();
     let mut auth_headers = json_headers();
     auth_headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer mcp-key"));
-    let initialize = client
+    auth_headers.insert(
+        "mcp-protocol-version",
+        HeaderValue::from_static("2026-07-28"),
+    );
+    auth_headers.insert("mcp-method", HeaderValue::from_static("server/discover"));
+    let discovery = client
         .post(format!("{base_url}/mcp"))
         .headers(auth_headers.clone())
         .json(&serde_json::json!({
             "jsonrpc": "2.0",
             "id": 1,
-            "method": "initialize",
+            "method": "server/discover",
             "params": {
-                "protocolVersion": "2025-11-25",
-                "clientInfo": { "name": "orchestrator-test", "version": "0" },
-                "capabilities": { "harn": { "apiKey": "mcp-key" } }
+                "_meta": {
+                    "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                    "io.modelcontextprotocol/clientInfo": { "name": "orchestrator-test", "version": "1" },
+                    "io.modelcontextprotocol/clientCapabilities": {}
+                }
             }
         }))
         .send()
         .await
         .unwrap();
-    assert_eq!(initialize.status(), StatusCode::OK);
-    let session_id = initialize
-        .headers()
-        .get("mcp-session-id")
-        .and_then(|value| value.to_str().ok())
-        .expect("MCP session header")
-        .to_string();
-    let initialize_body: JsonValue = initialize.json().await.unwrap();
+    assert_eq!(discovery.status(), StatusCode::OK);
+    assert!(discovery.headers().get("mcp-session-id").is_none());
+    let discovery_body: JsonValue = discovery.json().await.unwrap();
     assert_eq!(
-        initialize_body["result"]["serverInfo"]["name"],
+        discovery_body["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]["name"],
         serde_json::json!("harn-orchestrator")
     );
 
-    auth_headers.insert(
-        "mcp-session-id",
-        HeaderValue::from_str(&session_id).unwrap(),
-    );
+    auth_headers.insert("mcp-method", HeaderValue::from_static("tools/list"));
     let tools = client
         .post(format!("{base_url}/mcp"))
         .headers(auth_headers)
@@ -326,7 +325,13 @@ async fn embedded_mcp_endpoint_serves_orchestrator_tools_on_listener() {
             "jsonrpc": "2.0",
             "id": 2,
             "method": "tools/list",
-            "params": {}
+            "params": {
+                "_meta": {
+                    "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                    "io.modelcontextprotocol/clientInfo": { "name": "orchestrator-test", "version": "1" },
+                    "io.modelcontextprotocol/clientCapabilities": {}
+                }
+            }
         }))
         .send()
         .await

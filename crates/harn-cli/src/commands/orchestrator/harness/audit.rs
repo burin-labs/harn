@@ -1,6 +1,5 @@
 //! State-snapshot serialization and event-log lifecycle helpers.
 
-use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,11 +13,7 @@ use harn_vm::event_log::{AnyEventLog, EventLog};
 use super::super::errors::OrchestratorError;
 use super::{LIFECYCLE_TOPIC, MANIFEST_TOPIC};
 
-pub(super) fn validate_mcp_paths(
-    path: &str,
-    sse_path: &str,
-    messages_path: &str,
-) -> Result<(), OrchestratorError> {
+pub(super) fn validate_mcp_path(path: &str) -> Result<(), OrchestratorError> {
     let reserved = [
         "/health",
         "/healthz",
@@ -27,24 +22,14 @@ pub(super) fn validate_mcp_paths(
         "/admin/reload",
         "/acp",
     ];
-    let mut seen = BTreeSet::new();
-    for (label, value) in [
-        ("--mcp-path", path),
-        ("--mcp-sse-path", sse_path),
-        ("--mcp-messages-path", messages_path),
-    ] {
-        if !value.starts_with('/') {
-            return Err(format!("{label} must start with '/'").into());
-        }
-        if value == "/" {
-            return Err(format!("{label} cannot be '/'").into());
-        }
-        if reserved.contains(&value) {
-            return Err(format!("{label} cannot use reserved listener path '{value}'").into());
-        }
-        if !seen.insert(value) {
-            return Err(format!("embedded MCP paths must be unique; duplicate '{value}'").into());
-        }
+    if !path.starts_with('/') {
+        return Err("--mcp-path must start with '/'".into());
+    }
+    if path == "/" {
+        return Err("--mcp-path cannot be '/'".into());
+    }
+    if reserved.contains(&path) {
+        return Err(format!("--mcp-path cannot use reserved listener path '{path}'").into());
     }
     Ok(())
 }

@@ -1,17 +1,13 @@
-use std::cell::RefCell;
-
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
 
-use crate::mcp_elicit::{install_bus, ElicitationBus};
 use crate::mcp_progress::{
     active_bus as active_progress_bus, install_active_bus as install_active_progress_bus,
     is_valid_progress_token, scope_context, ProgressBus, ProgressContext,
 };
 use crate::mcp_protocol::{
-    self, apply_rc_result_envelope, enforce_request_protocol_version,
-    is_supported_protocol_version, parse_request_metadata, server_discover_result, McpCacheHint,
-    McpProtocolMode, McpRequestMetadata,
+    self, apply_result_envelope, enforce_request_protocol_version, parse_request_metadata,
+    server_discover_result, McpCacheHint,
 };
 use crate::stdlib::json_to_vm_value;
 use crate::value::VmError;
@@ -23,7 +19,6 @@ use super::defs::{
     McpToolDef,
 };
 use super::uri::{match_uri_template, uri_template_variables};
-use super::PROTOCOL_VERSION;
 
 /// MCP server that exposes Harn tools, resources, and prompts over MCP JSON-RPC.
 pub struct McpServer {
@@ -33,9 +28,8 @@ pub struct McpServer {
     resources: Vec<McpResourceDef>,
     resource_templates: Vec<McpResourceTemplateDef>,
     prompts: Vec<McpPromptDef>,
-    log_level: RefCell<String>,
-    /// Optional Server Card payload — advertised in the `initialize`
-    /// response's `serverInfo.card` field and exposed as a static
+    /// Optional Server Card payload — advertised by `server/discover` in
+    /// `serverInfo.card` and exposed as a static
     /// resource at the well-known URI `well-known://mcp-card`.
     /// Populated by `harn serve mcp --card path/to/card.json`.
     server_card: Option<serde_json::Value>,
@@ -57,7 +51,6 @@ impl McpServer {
             resources,
             resource_templates,
             prompts,
-            log_level: RefCell::new("warning".to_string()),
             server_card: None,
             instructions: None,
         }
@@ -75,7 +68,7 @@ impl McpServer {
         self
     }
 
-    /// Attach a Server Card to be advertised over `initialize` and via
+    /// Attach a Server Card to be advertised by `server/discover` and via
     /// the `well-known://mcp-card` resource. Call on a freshly-built
     /// `McpServer` before `run`.
     pub fn with_server_card(mut self, card: serde_json::Value) -> Self {
@@ -83,52 +76,12 @@ impl McpServer {
         self
     }
 
-    /// Run the MCP server loop, reading JSON-RPC from stdin and writing
-    /// to stdout. The transport is split across three concurrent halves:
-    /// a stdin reader that demuxes responses to in-flight elicitation
-    /// requests away from new client requests, a stdout writer task
-    /// that drains the outbound queue, and the main dispatch loop that
-    /// owns the VM and processes new requests one at a time. This shape
-    /// is what allows a tool handler to call `mcp_elicit(...)` mid-flight
-    /// — the handler awaits an inbound response while the writer keeps
-    /// emitting the elicitation request.
+    /// Run the stable MCP server loop over newline-delimited stdio.
+    /// Client input is handled by `input_required` response/retry rounds,
+    /// so the transport never has to demultiplex server-initiated requests.
     pub async fn run(&self, vm: &mut Vm) -> Result<(), VmError> {
         let (out_tx, mut out_rx) = mpsc::unbounded_channel::<serde_json::Value>();
-        let (in_tx, mut in_rx) = mpsc::unbounded_channel::<serde_json::Value>();
-        let bus = ElicitationBus::new(out_tx.clone());
         let progress_bus = ProgressBus::from_mpsc(out_tx.clone());
-
-        let bus_for_reader = bus.clone();
-        let in_tx_reader = in_tx.clone();
-        let reader = tokio::spawn(async move {
-            let stdin = BufReader::new(tokio::io::stdin());
-            let mut lines = stdin.lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                let trimmed = line.trim();
-                if trimmed.is_empty() {
-                    continue;
-                }
-                let msg: serde_json::Value = match serde_json::from_str(trimmed) {
-                    Ok(v) => v,
-                    Err(_) => continue,
-                };
-                // Per JSON-RPC, responses (no `method`, has `id` + result/error)
-                // must not themselves be replied to. Route to the
-                // elicitation bus when we recognize the id; otherwise
-                // silently drop instead of letting the dispatcher
-                // bounce a "Method not found" back to the client.
-                if msg.get("method").is_none() {
-                    let _ = bus_for_reader.route_response(&msg);
-                    continue;
-                }
-                if in_tx_reader.send(msg).is_err() {
-                    break;
-                }
-            }
-        });
-        // Drop the inbound sender held by the spawn closure's parent
-        // scope so closing of stdin actually terminates the dispatcher.
-        drop(in_tx);
 
         let writer = tokio::spawn(async move {
             let mut stdout = tokio::io::stdout();
@@ -147,11 +100,22 @@ impl McpServer {
             }
         });
 
-        // Make the bus visible to tool handlers running on this thread.
-        let previous_bus = install_bus(Some(bus));
         let previous_progress = install_active_progress_bus(Some(progress_bus));
-
-        while let Some(msg) = in_rx.recv().await {
+        let stdin = BufReader::new(tokio::io::stdin());
+        let mut lines = stdin.lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let Ok(msg) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+                continue;
+            };
+            // Stable MCP stdio is request/response. Stray responses have no
+            // server-initiated request to match and are ignored.
+            if msg.get("method").is_none() {
+                continue;
+            }
             if let Some(response) = self.handle_json_rpc(msg, vm).await {
                 if out_tx.send(response).is_err() {
                     break;
@@ -160,17 +124,12 @@ impl McpServer {
         }
 
         // Closing out_tx tells the writer task to drain and exit.
-        // Restoring the previous bus (rather than always wiping)
-        // keeps nested usages well-defined if they ever appear.
         drop(out_tx);
-        install_bus(previous_bus);
         install_active_progress_bus(previous_progress);
 
         // Best-effort wait so the writer flushes any tail responses
-        // before the function returns. Reader task exits naturally
-        // when stdin closes.
+        // before the function returns.
         let _ = writer.await;
-        reader.abort();
         Ok(())
     }
 
@@ -185,34 +144,27 @@ impl McpServer {
         let params = msg.get("params").cloned().unwrap_or(serde_json::json!({}));
 
         let metadata = parse_request_metadata(&params);
-        let mode = match enforce_request_protocol_version(&id, &metadata) {
-            Ok(Some(mode)) => mode,
-            Ok(None) => McpProtocolMode::Legacy,
-            Err(response) => return Some(response),
-        };
+        if let Err(response) = enforce_request_protocol_version(&id, &metadata) {
+            return Some(response);
+        }
 
         if let Some(response) =
-            mcp_protocol::unsupported_client_bound_method_response(id.clone(), method)
+            mcp_protocol::explicit_unsupported_method_response(id.clone(), method)
         {
             return Some(response);
         }
 
         let response = match method {
             mcp_protocol::METHOD_SERVER_DISCOVER => self.handle_server_discover(&id),
-            "initialize" => self.handle_initialize(&id, &params, &metadata),
             "ping" => crate::jsonrpc::response(id.clone(), serde_json::json!({})),
-            "logging/setLevel" => self.handle_logging_set_level(&id, &params),
             "harn.hitl.respond" => self.handle_hitl_respond(&id, &params).await,
             "tools/list" => self.handle_tools_list(&id, &params),
             "tools/call" => self.handle_tools_call(&id, &params, vm).await,
             mcp_protocol::METHOD_TASKS_GET => self.handle_task_lookup(&id, &params),
-            mcp_protocol::METHOD_TASKS_RESULT => self.handle_task_lookup(&id, &params),
-            mcp_protocol::METHOD_TASKS_LIST => self.handle_tasks_list(&id, &params),
+            mcp_protocol::METHOD_TASKS_UPDATE => self.handle_task_lookup(&id, &params),
             mcp_protocol::METHOD_TASKS_CANCEL => self.handle_task_lookup(&id, &params),
             "resources/list" => self.handle_resources_list(&id, &params),
             "resources/read" => self.handle_resources_read(&id, &params, vm).await,
-            "resources/subscribe" => self.handle_resources_subscribe(&id, &params),
-            "resources/unsubscribe" => self.handle_resources_unsubscribe(&id, &params),
             "resources/templates/list" => self.handle_resource_templates_list(&id, &params),
             "prompts/list" => self.handle_prompts_list(&id, &params),
             "prompts/get" => self.handle_prompts_get(&id, &params, vm).await,
@@ -228,50 +180,34 @@ impl McpServer {
                 }
             }),
         };
-        Some(apply_envelope(
-            response,
-            mode,
-            cache_hint_for_method(method),
-        ))
+        Some(apply_envelope(response, cache_hint_for_method(method)))
     }
 
     fn server_capabilities(&self) -> serde_json::Map<String, serde_json::Value> {
         let mut capabilities = serde_json::Map::new();
         if !self.tools.is_empty() {
-            capabilities.insert("tools".into(), serde_json::json!({ "listChanged": true }));
+            capabilities.insert("tools".into(), serde_json::json!({}));
         }
         if !self.resources.is_empty()
             || !self.resource_templates.is_empty()
             || self.server_card.is_some()
         {
-            capabilities.insert(
-                "resources".into(),
-                serde_json::json!({ "listChanged": true, "subscribe": true }),
-            );
+            capabilities.insert("resources".into(), serde_json::json!({}));
         }
         if !self.prompts.is_empty() {
-            capabilities.insert("prompts".into(), serde_json::json!({ "listChanged": true }));
+            capabilities.insert("prompts".into(), serde_json::json!({}));
         }
-        capabilities.insert("logging".into(), serde_json::json!({}));
-        capabilities.insert("tasks".into(), mcp_protocol::tasks_capability());
+        let mut extensions = mcp_protocol::tasks_capability();
         capabilities.insert("completions".into(), mcp_protocol::completions_capability());
         if self.resources.iter().any(|resource| {
             resource.uri.starts_with("ui://")
                 && resource.mime_type.as_deref() == Some("text/html;profile=mcp-app")
         }) {
-            capabilities.insert(
-                "extensions".into(),
-                serde_json::json!({
-                    "io.modelcontextprotocol/ui": {
-                        "mimeTypes": ["text/html;profile=mcp-app"]
-                    }
-                }),
-            );
+            extensions["io.modelcontextprotocol/ui"] = serde_json::json!({
+                "mimeTypes": ["text/html;profile=mcp-app"]
+            });
         }
-        // Always advertise elicitation: any registered tool may decide
-        // at runtime whether to call `mcp_elicit(...)`, so capability
-        // negotiation can't be tied to a static check.
-        capabilities.insert("elicitation".into(), serde_json::json!({}));
+        capabilities.insert("extensions".into(), extensions);
         capabilities
     }
 
@@ -294,41 +230,6 @@ impl McpServer {
             self.instructions.as_deref(),
         );
         crate::jsonrpc::response(id.clone(), result)
-    }
-
-    fn handle_initialize(
-        &self,
-        id: &serde_json::Value,
-        params: &serde_json::Value,
-        metadata: &McpRequestMetadata,
-    ) -> serde_json::Value {
-        // Echo the version the client asked for when we support it,
-        // falling back to the stable default otherwise. Modern clients
-        // can also pin their target through RC `_meta.protocolVersion`,
-        // which `enforce_request_protocol_version` validated upstream.
-        let requested = metadata
-            .protocol_version
-            .as_deref()
-            .or_else(|| {
-                params
-                    .get("protocolVersion")
-                    .and_then(serde_json::Value::as_str)
-            })
-            .filter(|version| is_supported_protocol_version(version))
-            .unwrap_or(PROTOCOL_VERSION);
-        let mut result = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "result": {
-                "protocolVersion": requested,
-                "capabilities": self.server_capabilities(),
-                "serverInfo": self.server_info_value(),
-            }
-        });
-        if let Some(instructions) = self.instructions.as_ref() {
-            result["result"]["instructions"] = serde_json::json!(instructions);
-        }
-        result
     }
 
     fn handle_tools_list(
@@ -363,8 +264,6 @@ impl McpServer {
                 if let Some(ref meta) = t.meta {
                     entry["_meta"] = meta.clone();
                 }
-                entry["execution"] =
-                    mcp_protocol::tool_execution(mcp_protocol::McpToolTaskSupport::Forbidden);
                 entry
             })
             .collect();
@@ -388,16 +287,6 @@ impl McpServer {
         vm: &mut Vm,
     ) -> serde_json::Value {
         let tool_name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
-        if mcp_protocol::requests_task_augmentation(params) {
-            return mcp_protocol::task_augmentation_error_response(
-                id.clone(),
-                "tools/call",
-                -32602,
-                "Tool does not support MCP task-augmented execution",
-                "This Harn MCP server executes registered Harn closures inline, so every tool advertises execution.taskSupport=\"forbidden\".",
-            );
-        }
-
         let tool = match self.tools.iter().find(|t| t.name == tool_name) {
             Some(t) => t,
             None => {
@@ -413,20 +302,6 @@ impl McpServer {
             .get("arguments")
             .cloned()
             .unwrap_or(serde_json::json!({}));
-        // SPECULATIVE: validates draft MCP SEP-2356 file inputs.
-        // Revisit this when the MCP proposal is ratified.
-        if let Err(message) =
-            crate::mcp_file_upload::validate_file_inputs_for_call(&arguments, &tool.input_schema)
-        {
-            return serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": {
-                    "content": [{ "type": "text", "text": message }],
-                    "isError": true,
-                },
-            });
-        }
         let args_vm = json_to_vm_value(&arguments);
 
         // Bind a per-call progress context so the handler (and any
@@ -444,8 +319,16 @@ impl McpServer {
         let progress_ctx = progress_token
             .and_then(|token| active_progress_bus().map(|bus| ProgressContext::new(bus, token)));
 
-        let result =
-            scope_context(progress_ctx, vm.call_closure_pub(&tool.handler, &[args_vm])).await;
+        let result = match crate::mcp_input::scope_input_context(
+            params,
+            client_capabilities(params),
+            scope_context(progress_ctx, vm.call_closure_pub(&tool.handler, &[args_vm])),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(error) => return crate::jsonrpc::error_response(id.clone(), -32602, &error),
+        };
 
         match result {
             Ok(value) => {
@@ -462,6 +345,9 @@ impl McpServer {
                     "id": id,
                     "result": call_result
                 })
+            }
+            Err(VmError::McpInputRequired(required)) => {
+                crate::jsonrpc::response(id.clone(), crate::mcp_input::input_result(*required))
             }
             Err(e) => serde_json::json!({
                 "jsonrpc": "2.0",
@@ -490,18 +376,6 @@ impl McpServer {
                 "code": -32602,
                 "message": format!("Failed to retrieve task: task not found '{task_id}'")
             }
-        })
-    }
-
-    fn handle_tasks_list(
-        &self,
-        id: &serde_json::Value,
-        _params: &serde_json::Value,
-    ) -> serde_json::Value {
-        serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "result": { "tasks": [] }
         })
     }
 
@@ -637,7 +511,18 @@ impl McpServer {
         for tmpl in &self.resource_templates {
             if let Some(args) = match_uri_template(&tmpl.uri_template, uri) {
                 let args_vm = json_to_vm_value(&serde_json::json!(args));
-                let result = vm.call_closure_pub(&tmpl.handler, &[args_vm]).await;
+                let result = match crate::mcp_input::scope_input_context(
+                    params,
+                    client_capabilities(params),
+                    vm.call_closure_pub(&tmpl.handler, &[args_vm]),
+                )
+                .await
+                {
+                    Ok(result) => result,
+                    Err(error) => {
+                        return crate::jsonrpc::error_response(id.clone(), -32602, &error)
+                    }
+                };
                 return match result {
                     Ok(value) => {
                         let mut content = serde_json::json!({
@@ -653,6 +538,10 @@ impl McpServer {
                             "result": { "contents": [content] }
                         })
                     }
+                    Err(VmError::McpInputRequired(required)) => crate::jsonrpc::response(
+                        id.clone(),
+                        crate::mcp_input::input_result(*required),
+                    ),
                     Err(e) => serde_json::json!({
                         "jsonrpc": "2.0",
                         "id": id,
@@ -667,41 +556,6 @@ impl McpServer {
             "id": id,
             "error": { "code": -32002, "message": format!("Resource not found: {uri}") }
         })
-    }
-
-    fn handle_resources_subscribe(
-        &self,
-        id: &serde_json::Value,
-        params: &serde_json::Value,
-    ) -> serde_json::Value {
-        let uri = params.get("uri").and_then(|u| u.as_str()).unwrap_or("");
-        if !self.resource_uri_exists(uri) {
-            return serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "error": { "code": -32002, "message": format!("Resource not found: {uri}") }
-            });
-        }
-        crate::jsonrpc::response(id.clone(), serde_json::json!({}))
-    }
-
-    fn handle_resources_unsubscribe(
-        &self,
-        id: &serde_json::Value,
-        _params: &serde_json::Value,
-    ) -> serde_json::Value {
-        crate::jsonrpc::response(id.clone(), serde_json::json!({}))
-    }
-
-    fn resource_uri_exists(&self, uri: &str) -> bool {
-        if uri == "well-known://mcp-card" {
-            return self.server_card.is_some();
-        }
-        self.resources.iter().any(|resource| resource.uri == uri)
-            || self
-                .resource_templates
-                .iter()
-                .any(|template| match_uri_template(&template.uri_template, uri).is_some())
     }
 
     fn handle_resource_templates_list(
@@ -796,19 +650,6 @@ impl McpServer {
         })
     }
 
-    fn handle_logging_set_level(
-        &self,
-        id: &serde_json::Value,
-        params: &serde_json::Value,
-    ) -> serde_json::Value {
-        let level = params
-            .get("level")
-            .and_then(|l| l.as_str())
-            .unwrap_or("warning");
-        *self.log_level.borrow_mut() = level.to_string();
-        crate::jsonrpc::response(id.clone(), serde_json::json!({}))
-    }
-
     async fn handle_prompts_get(
         &self,
         id: &serde_json::Value,
@@ -834,7 +675,16 @@ impl McpServer {
             .unwrap_or(serde_json::json!({}));
         let args_vm = json_to_vm_value(&arguments);
 
-        let result = vm.call_closure_pub(&prompt.handler, &[args_vm]).await;
+        let result = match crate::mcp_input::scope_input_context(
+            params,
+            client_capabilities(params),
+            vm.call_closure_pub(&prompt.handler, &[args_vm]),
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(error) => return crate::jsonrpc::error_response(id.clone(), -32602, &error),
+        };
 
         match result {
             Ok(value) => {
@@ -844,6 +694,9 @@ impl McpServer {
                     "id": id,
                     "result": { "messages": messages }
                 })
+            }
+            Err(VmError::McpInputRequired(required)) => {
+                crate::jsonrpc::response(id.clone(), crate::mcp_input::input_result(*required))
             }
             Err(e) => serde_json::json!({
                 "jsonrpc": "2.0",
@@ -978,22 +831,20 @@ impl McpServer {
 
 /// Map a JSON-RPC method to its conservative cache hint. Read/list
 /// methods get a TTL; everything else is `None`, which still routes
-/// through [`apply_envelope`] so Modern clients see `resultType`.
+/// through [`apply_envelope`] so Stable clients see `resultType`.
 fn cache_hint_for_method(method: &str) -> Option<&'static McpCacheHint> {
     const LIST: McpCacheHint = McpCacheHint::list_default();
     const READ: McpCacheHint = McpCacheHint::read_default();
     match method {
-        "tools/list"
-        | "resources/list"
-        | "resources/templates/list"
-        | "prompts/list"
-        | mcp_protocol::METHOD_TASKS_LIST => Some(&LIST),
+        "tools/list" | "resources/list" | "resources/templates/list" | "prompts/list" => {
+            Some(&LIST)
+        }
         "resources/read" => Some(&READ),
         _ => None,
     }
 }
 
-/// Stamp the RC `resultType`/cache-hint envelope onto a handler's
+/// Stamp the stable `resultType`/cache-hint envelope onto a handler's
 /// response in one place. Error responses pass through untouched.
 fn tool_error_text(error: &VmError) -> String {
     match error {
@@ -1004,13 +855,17 @@ fn tool_error_text(error: &VmError) -> String {
 
 fn apply_envelope(
     mut response: serde_json::Value,
-    mode: McpProtocolMode,
     hint: Option<&'static McpCacheHint>,
 ) -> serde_json::Value {
     if let Some(result) = response.get_mut("result") {
-        apply_rc_result_envelope(result, mode, hint);
+        apply_result_envelope(result, hint);
     }
     response
+}
+
+fn client_capabilities(params: &serde_json::Value) -> serde_json::Value {
+    serde_json::to_value(parse_request_metadata(params).client_capabilities())
+        .unwrap_or_else(|_| serde_json::json!({}))
 }
 
 fn completion_argument_name(params: &serde_json::Value) -> Result<&str, String> {

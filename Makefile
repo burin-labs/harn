@@ -1,4 +1,4 @@
-.PHONY: setup setup-rust setup-bootstrap clean-stale-targets install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-app-host fmt-harn fmt-harn-fix lint lint-md lint-actions lint-actions-source lint-actions-harn lint-harn check-app-host spec-lint gen-openapi-snapshot check-openapi-snapshot test test-one test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance mechanism-contracts protocol-conformance mcp-rc-conformance replay-oracle replay-bench eval-tool-calls bench bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak check-test-case-performance bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-cli-aot check-cli-aot gen-highlight check-highlight gen-prompt-grammar check-prompt-grammar gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs lint-no-rust-prompt-prose lint-agent-path-normalization lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc check-source-file-lengths update-source-file-length-baseline check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-dependabot-groups gen-tree-sitter-keywords check-tree-sitter-keywords gen-tree-sitter-parser check-tree-sitter-parser check-grammar-keywords gen-grammar-fitness check-grammar-fitness check-loud-boundaries check-generated-registry check-release-audit-contract check-ci-cache-policy check-binary-size-policy check-all-features
+.PHONY: setup setup-rust setup-bootstrap clean-stale-targets install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-app-host fmt-harn fmt-harn-fix lint lint-md lint-actions lint-actions-source lint-actions-harn lint-harn check-app-host spec-lint gen-openapi-snapshot check-openapi-snapshot test test-one test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance mechanism-contracts protocol-conformance mcp-conformance replay-oracle replay-bench eval-tool-calls bench bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak check-test-case-performance bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-cli-aot check-cli-aot gen-highlight check-highlight gen-prompt-grammar check-prompt-grammar gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs lint-no-rust-prompt-prose lint-agent-path-normalization lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc check-source-file-lengths update-source-file-length-baseline check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-dependabot-groups gen-tree-sitter-keywords check-tree-sitter-keywords gen-tree-sitter-parser check-tree-sitter-parser check-grammar-keywords gen-grammar-fitness check-grammar-fitness check-loud-boundaries check-generated-registry check-release-audit-contract check-ci-cache-policy check-binary-size-policy check-all-features
 .PHONY: test-pr-gate-post-warm-integrations test-rust-lint-lane-cache
 .PHONY: setup-wasm setup-wasm-tools gen-wasm-wit check-wasm-wit wasm-build wasm-audit-imports wasm-test-browser wasm-check wasm-demo kernel-check kernel-test kernel-vm-parity vm-check cli-check cli-test gen-portable-benchmark-schema check-portable-benchmark-schema
 
@@ -37,7 +37,7 @@ all: fmt
 	stable_root="$$(mktemp -d "$${TMPDIR:-/tmp}/harn-all-bin.XXXXXX")" || exit 1; \
 	trap 'rm -rf "$$stable_root"' EXIT; \
 	harn_bin="$$(./scripts/snapshot_harn_bin.sh "$$harn_bin" "$$stable_root/harn-bin")" || exit 1; \
-	$(MAKE) HARN_BIN="$$harn_bin" lint lint-md lint-actions lint-harn check-app-host spec-lint check-openapi-snapshot fmt-harn test test-harn-scripts test-agent-scripts test-pr-gate-scripts test-rust-lint-lane-cache conformance protocol-conformance mcp-rc-conformance replay-oracle replay-bench check-highlight check-portable-benchmark-schema check-prompt-grammar check-protocol-artifacts check-connector-schemas check-bindings check-session-bundle-schema check-run-view-fixtures check-language-spec check-trigger-quickref check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs check-provider-catalog-drift check-source-file-lengths check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-dependabot-groups check-tree-sitter-keywords check-tree-sitter-parser check-grammar-keywords check-grammar-fitness check-loud-boundaries check-generated-registry check-release-audit-contract check-ci-cache-policy portal-check
+	$(MAKE) HARN_BIN="$$harn_bin" lint lint-md lint-actions lint-harn check-app-host spec-lint check-openapi-snapshot fmt-harn test test-harn-scripts test-agent-scripts test-pr-gate-scripts test-rust-lint-lane-cache conformance protocol-conformance mcp-conformance replay-oracle replay-bench check-highlight check-portable-benchmark-schema check-prompt-grammar check-protocol-artifacts check-connector-schemas check-bindings check-session-bundle-schema check-run-view-fixtures check-language-spec check-trigger-quickref check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs check-provider-catalog-drift check-source-file-lengths check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-dependabot-groups check-tree-sitter-keywords check-tree-sitter-parser check-grammar-keywords check-grammar-fitness check-loud-boundaries check-generated-registry check-release-audit-contract check-ci-cache-policy portal-check
 
 check: all
 
@@ -283,18 +283,17 @@ mechanism-contracts:
 protocol-conformance:
 	$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD_VERBOSE) test protocols
 
-# MCP RC compatibility harness: exercises Harn's MCP client against fake
-# RC servers, fake RC clients against the generic and orchestrator
+# MCP stable compatibility harness: exercises Harn's MCP client against fake
+# stable servers, fake stable clients against the generic and orchestrator
 # servers, and validates the published wire fixtures + JSON Schema
 # 2020-12 recursive `$defs` handling.
 #
 # Failures are scoped per surface so CI breakage attribution is
 # unambiguous:
-#   - tests/harn_mcp_rc_compat/client.rs         — fake-server self-consistency
-#   - tests/harn_mcp_rc_compat/generic_server.rs — generic harn-serve MCP server
-#   - tests/harn_mcp_rc_compat/legacy_compat.rs  — 2025-11-25 wire compat regression
-#   - tests/harn_mcp_rc_compat/artifacts.rs      — published fixtures + recursive $defs
-#   - harn-cli mcp_rc_compat_tests — orchestrator MCP server
+#   - tests/harn_mcp_compat/client.rs         — fake-server self-consistency
+#   - tests/harn_mcp_compat/generic_server.rs — generic harn-serve MCP server
+#   - tests/harn_mcp_compat/artifacts.rs      — published fixtures + recursive $defs
+#   - harn-cli mcp_compat_tests — orchestrator MCP server
 #
 # This target is a developer-convenience entry point for local iteration
 # on the MCP surface — it lets you re-run the focused suite without
@@ -303,11 +302,11 @@ protocol-conformance:
 # in the `rust-test` workflow job, so running it again in `harn-audit`
 # would pay ~4 min of wall-clock to redo work the workspace test run
 # already covers.
-mcp-rc-conformance:
-	@echo "=== MCP RC harness: harn-mcp-rc-compat suite (client / generic_server / legacy_compat / artifacts) ==="
-	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) test -p harn-mcp-rc-compat --tests
-	@echo "=== MCP RC harness: orchestrator server (harn-cli mcp_rc_compat_tests) ==="
-	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) test -p harn-cli --lib mcp_rc_compat_tests
+mcp-conformance:
+	@echo "=== MCP stable harness: harn-mcp-compat suite (client / generic_server / artifacts) ==="
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) test -p harn-mcp-compat --tests
+	@echo "=== MCP stable harness: orchestrator server (harn-cli mcp_compat_tests) ==="
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) test -p harn-cli --lib mcp_compat_tests
 
 replay-oracle:
 	$(HARN_SCRIPT_TEST_ENV) $(HARN_CMD_VERBOSE) orchestrator replay-oracle

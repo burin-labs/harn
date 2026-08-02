@@ -15,18 +15,18 @@ Every fixture is a matrix row:
 
 ```json
 {
-  "name": "mcp.initialize.2025_11_25",
+  "name": "mcp.server_discover.2026_07_28",
   "protocol": "mcp",
-  "schema": "schemas/mcp-2025-11-25.schema.json",
+  "schema": "schemas/mcp-2026-07-28.schema.json",
   "expect": "valid",
   "documents": [],
   "matrix": {
-    "version": "2025-11-25",
-    "family": "initialize",
+    "version": "2026-07-28",
+    "family": "server_discover",
     "case": "success",
     "source": {
       "kind": "official_example",
-      "url": "https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle",
+      "url": "https://modelcontextprotocol.io/specification/2026-07-28/basic/lifecycle",
       "description": "Why this row exists."
     }
   }
@@ -86,9 +86,8 @@ Adapter-generated fixture tests print the expected and actual JSON arrays when
 they drift, so CI failures should point directly at the checked-in fixture that
 needs to be refreshed or the adapter behavior that changed unexpectedly.
 
-The MCP `DRAFT-2026-v1` profile is intentionally checked in beside the stable
-`2025-11-25` profile. It covers RC artifact shapes only: per-request metadata,
-Streamable HTTP routing headers, `server/discover`, cache hints,
-input-required results, unsupported-version errors, and JSON Schema 2020-12
-tool schemas. Runtime support remains opt-in until the final `2026-07-28`
-specification lands.
+The MCP conformance matrix targets stable `2026-07-28`. It covers per-request
+metadata, stateless Streamable HTTP routing headers, `server/discover`, cache
+hints, input-required results, unsupported-version errors, and JSON Schema
+2020-12 tool schemas. Harn-owned server and HTTP client paths use this profile;
+the official SDK owns older stdio peer negotiation.

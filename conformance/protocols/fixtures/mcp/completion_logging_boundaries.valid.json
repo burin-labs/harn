@@ -1,7 +1,7 @@
 {
-  "name": "mcp.completion_logging.boundaries",
+  "name": "mcp.completion_log_notification.boundaries",
   "protocol": "mcp",
-  "schema": "schemas/mcp-2025-11-25.schema.json",
+  "schema": "schemas/mcp-2026-07-28.schema.json",
   "expect": "valid",
   "documents": [
     {
@@ -16,6 +16,14 @@
         "argument": {
           "name": "diff",
           "value": "src/"
+        },
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientInfo": {
+            "name": "harn-conformance",
+            "version": "0.10.52"
+          },
+          "io.modelcontextprotocol/clientCapabilities": {}
         }
       }
     },
@@ -24,24 +32,15 @@
       "id": "complete-1",
       "result": {
         "completion": {
-          "values": ["src/lib.rs", "src/main.rs"],
+          "values": [
+            "src/lib.rs",
+            "src/main.rs"
+          ],
           "total": 2,
           "hasMore": false
-        }
+        },
+        "resultType": "complete"
       }
-    },
-    {
-      "jsonrpc": "2.0",
-      "id": "log-1",
-      "method": "logging/setLevel",
-      "params": {
-        "level": "info"
-      }
-    },
-    {
-      "jsonrpc": "2.0",
-      "id": "log-1",
-      "result": {}
     },
     {
       "jsonrpc": "2.0",
@@ -51,17 +50,25 @@
         "logger": "harn",
         "data": {
           "message": "tool finished"
+        },
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientInfo": {
+            "name": "harn-conformance",
+            "version": "0.10.52"
+          },
+          "io.modelcontextprotocol/clientCapabilities": {}
         }
       }
     }
   ],
   "matrix": {
-    "version": "2025-11-25",
-    "family": "completion_logging",
+    "version": "2026-07-28",
+    "family": "completion_log_notification",
     "case": "success",
     "source": {
       "kind": "hand_authored",
-      "description": "MCP completion and logging utility shapes from the 2025-11-25 schema semantics."
+      "description": "Stable completion plus an inbound logging notification accepted by Harn's MCP client."
     }
   }
 }

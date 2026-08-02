@@ -178,10 +178,6 @@ fn test_parses_mcp_serve_flags() {
         "127.0.0.1:9000",
         "--path",
         "/rpc",
-        "--sse-path",
-        "/events",
-        "--messages-path",
-        "/legacy/messages",
     ]);
 
     let Command::Mcp(args) = cli.command.unwrap() else {
@@ -195,8 +191,6 @@ fn test_parses_mcp_serve_flags() {
     assert_eq!(serve.transport, crate::cli::McpServeTransport::Http);
     assert_eq!(serve.bind.to_string(), "127.0.0.1:9000");
     assert_eq!(serve.path, "/rpc");
-    assert_eq!(serve.sse_path, "/events");
-    assert_eq!(serve.messages_path, "/legacy/messages");
 }
 
 #[test]

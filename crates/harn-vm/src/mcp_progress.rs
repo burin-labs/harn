@@ -1,16 +1,15 @@
 //! MCP `notifications/progress` plumbing — server-to-client progress
 //! updates emitted from a long-running tool handler.
 //!
-//! The MCP spec (2025-11-25) lets a client opt into progress updates by
+//! The MCP spec lets a client opt into progress updates by
 //! attaching `_meta.progressToken` to a request. While the matching tool
 //! is in flight, the server may emit any number of
 //! `notifications/progress` notifications carrying the same token. The
 //! server must not emit progress for requests without a token, and
 //! progress values must strictly increase per token.
 //!
-//! Mechanics mirror the elicitation bus
-//! (`crate::mcp_elicit::ElicitationBus`): a per-connection [`ProgressBus`]
-//! wraps the transport's outbound JSON sink (installed thread-locally
+//! A per-connection [`ProgressBus`] wraps the transport's outbound JSON
+//! sink (installed thread-locally
 //! via [`install_active_bus`]), and a per-call [`ProgressContext`] is
 //! bound for the duration of a tool handler future via [`scope_context`]
 //! (a tokio task-local) so that helpers — notably the
@@ -20,7 +19,7 @@
 //! concurrent tool calls onto a shared `LocalSet`, so a thread-local
 //! context would race across awaits.
 //!
-//! Spec: <https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/progress>
+//! Spec: <https://modelcontextprotocol.io/specification/2026-07-28/basic/utilities/progress>
 
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};

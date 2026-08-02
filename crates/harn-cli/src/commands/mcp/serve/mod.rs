@@ -28,25 +28,19 @@ pub(crate) use http::http_router_for_local;
 #[cfg(test)]
 #[allow(unused_imports)]
 pub(in crate::commands::mcp::serve) use {
-    self::http::initialize_api_key,
-    self::types::{
-        ConnectionState, McpListChangeKind, McpLogNotification, McpResourceNotification,
-        McpTaskNotification, TriggerReplayRequest,
-    },
+    self::types::{ConnectionState, TriggerReplayRequest},
     self::util::trigger_replay_steering_from_request,
-    self::watchers::severity_for_event,
     crate::cli::OrchestratorLocalArgs,
     crate::commands::orchestrator::common::{load_local_runtime, read_topic},
     axum::http::header::{AUTHORIZATION, WWW_AUTHENTICATE},
     axum::http::StatusCode,
     axum::Json,
     futures::StreamExt,
-    harn_vm::event_log::{EventLog, LogEvent, Topic},
+    harn_vm::event_log::{EventLog, Topic},
     harn_vm::mcp_protocol,
     serde_json::{json, Value as JsonValue},
     std::collections::BTreeMap,
     time::OffsetDateTime,
-    tokio::sync::broadcast,
 };
 
 #[cfg(test)]
@@ -54,52 +48,15 @@ pub(in crate::commands::mcp::serve) use {
 mod serve_tests;
 
 #[cfg(test)]
-#[path = "../mcp_rc_compat_tests.rs"]
-mod mcp_rc_compat_tests;
+#[path = "../mcp_compat_tests.rs"]
+mod mcp_compat_tests;
 
 pub(super) use harn_vm::mcp_protocol::{
-    MCP_SESSION_HEADER_LEGACY as MCP_SESSION_HEADER, PROTOCOL_VERSION as MCP_PROTOCOL_VERSION,
-    RC_HEADER_PROTOCOL_VERSION as MCP_PROTOCOL_HEADER,
+    MCP_HEADER_PROTOCOL_VERSION as MCP_PROTOCOL_HEADER, PROTOCOL_VERSION as MCP_PROTOCOL_VERSION,
 };
-pub(super) const DEPRECATION_HEADER: &str = "deprecation";
 pub(super) const ACTION_GRAPH_TOPIC: &str = "observability.action_graph";
 pub(super) const TRIGGER_EVENTS_TOPIC: &str = "triggers.events";
 pub(super) const DEFAULT_TASK_TTL_MS: u64 = 10 * 60 * 1000;
-pub(super) const MAX_TASK_TTL_MS: u64 = 60 * 60 * 1000;
-pub(super) const LOG_NOTIFICATION_CAPACITY: usize = 256;
-
-pub(in crate::commands::mcp::serve) const LOG_STREAM_BINDINGS: &[types::McpLogStreamBinding] = &[
-    types::McpLogStreamBinding {
-        topic: harn_vm::SECRET_SCAN_AUDIT_TOPIC,
-        logger: "harn.audit.secret_scan",
-        default_level: harn_vm::mcp_protocol::McpLogLevel::Notice,
-    },
-    types::McpLogStreamBinding {
-        topic: harn_vm::SIGNATURE_VERIFY_AUDIT_TOPIC,
-        logger: "harn.audit.signature_verify",
-        default_level: harn_vm::mcp_protocol::McpLogLevel::Notice,
-    },
-    types::McpLogStreamBinding {
-        topic: harn_vm::egress::EGRESS_AUDIT_TOPIC,
-        logger: "harn.connectors.egress.audit",
-        default_level: harn_vm::mcp_protocol::McpLogLevel::Notice,
-    },
-    types::McpLogStreamBinding {
-        topic: harn_vm::TRIGGER_OPERATION_AUDIT_TOPIC,
-        logger: "harn.trigger.operations.audit",
-        default_level: harn_vm::mcp_protocol::McpLogLevel::Notice,
-    },
-    types::McpLogStreamBinding {
-        topic: crate::commands::orchestrator::common::TRIGGER_DLQ_TOPIC,
-        logger: "harn.trigger.dlq",
-        default_level: harn_vm::mcp_protocol::McpLogLevel::Warning,
-    },
-    types::McpLogStreamBinding {
-        topic: ACTION_GRAPH_TOPIC,
-        logger: "harn.observability.action_graph",
-        default_level: harn_vm::mcp_protocol::McpLogLevel::Debug,
-    },
-];
 
 pub(crate) async fn run(args: &McpServeArgs) -> Result<(), String> {
     let service = Arc::new(McpOrchestratorService::new(args)?);

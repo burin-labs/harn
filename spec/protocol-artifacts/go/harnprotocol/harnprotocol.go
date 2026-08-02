@@ -28,21 +28,9 @@ const ACPPromptErrorDataSchema = "harn.acp.prompt_error.v1"
 const A2AProtocolVersion = "0.3.0"
 
 // MCPProtocolVersion is the MCP protocol version Harn implements.
-const MCPProtocolVersion = "2025-11-25"
+const MCPProtocolVersion = "2026-07-28"
 
-// MCPStableProtocolVersion is the stable MCP protocol version Harn implements at runtime.
-const MCPStableProtocolVersion = "2025-11-25"
-
-// MCPDraftProtocolVersion is the opt-in MCP release-candidate profile identity.
-const MCPDraftProtocolVersion = "DRAFT-2026-v1"
-
-// MCPLegacy20250618ProtocolVersion is the prior stable MCP protocol Harn still accepts.
-const MCPLegacy20250618ProtocolVersion = "2025-06-18"
-
-// MCPFinal2026ProtocolVersion is the scheduled final identity for the RC profile.
-const MCPFinal2026ProtocolVersion = "2026-07-28"
-
-// MCPJSONSchema202012Dialect is the JSON Schema dialect used by the MCP RC artifact profile.
+// MCPJSONSchema202012Dialect is the JSON Schema dialect used by the MCP stable artifact profile.
 const MCPJSONSchema202012Dialect = "https://json-schema.org/draft/2020-12/schema"
 
 // MCPInputRequiredResultType is the resultType discriminator for multi round-trip requests.
@@ -52,7 +40,7 @@ const MCPInputRequiredResultType = "input_required"
 const MCPUnsupportedProtocolVersionErrorMessage = "Unsupported protocol version"
 
 // MCPUnsupportedProtocolVersionErrorCode is the JSON-RPC server error for unsupported versions.
-const MCPUnsupportedProtocolVersionErrorCode = -32004
+const MCPUnsupportedProtocolVersionErrorCode = -32022
 
 // ACPAgentMethod is the typed alias for the ACPAgentMethods wire vocabulary.
 type ACPAgentMethod = string
@@ -423,9 +411,7 @@ type MCPProtocolVersionValue = string
 
 // MCPProtocolVersions enumerates every wire value Harn currently emits for MCPProtocolVersionValue.
 var MCPProtocolVersions = []MCPProtocolVersionValue{
-	"DRAFT-2026-v1",
-	"2025-11-25",
-	"2025-06-18",
+	"2026-07-28",
 }
 
 // MCPMethod is the typed alias for the MCPMethods wire vocabulary.
@@ -434,7 +420,6 @@ type MCPMethod = string
 // MCPMethods enumerates every wire value Harn currently emits for MCPMethod.
 var MCPMethods = []MCPMethod{
 	"server/discover",
-	"initialize",
 	"tools/list",
 	"tools/call",
 	"resources/list",
@@ -443,11 +428,12 @@ var MCPMethods = []MCPMethod{
 	"prompts/list",
 	"prompts/get",
 	"completion/complete",
-	"logging/setLevel",
 	"sampling/createMessage",
 	"elicitation/create",
-	"notifications/initialized",
 	"notifications/message",
+	"tasks/get",
+	"tasks/update",
+	"tasks/cancel",
 }
 
 // MCPCacheScope is the typed alias for the MCPCacheScopes wire vocabulary.
@@ -466,6 +452,7 @@ type MCPResultType = string
 var MCPResultTypes = []MCPResultType{
 	"complete",
 	"input_required",
+	"task",
 }
 
 // MCPLoggingLevel is the typed alias for the MCPLoggingLevels wire vocabulary.
@@ -1069,7 +1056,7 @@ type A2ATask struct {
 	Metadata  JSONObject        `json:"metadata,omitempty"`
 }
 
-// MCPJSONSchema202012 is the JSON Schema dialect surface used by the MCP RC
+// MCPJSONSchema202012 is the JSON Schema dialect surface used by the MCP stable
 // tool input/output schema profile.
 type MCPJSONSchema202012 = JSONObject
 
@@ -1082,7 +1069,7 @@ type MCPImplementation struct {
 	WebsiteURL  *string `json:"websiteUrl,omitempty"`
 }
 
-// MCPRequestMeta is the per-request metadata required by the MCP RC profile.
+// MCPRequestMeta is the per-request metadata required by the MCP stable profile.
 type MCPRequestMeta struct {
 	ProtocolVersion    string            `json:"io.modelcontextprotocol/protocolVersion"`
 	ClientInfo         MCPImplementation `json:"io.modelcontextprotocol/clientInfo"`
@@ -1094,14 +1081,14 @@ type MCPRequestMeta struct {
 	Baggage            *string           `json:"baggage,omitempty"`
 }
 
-// MCPHTTPHeaders names the HTTP headers used by the MCP RC Streamable HTTP profile.
+// MCPHTTPHeaders names the HTTP headers used by the MCP stable Streamable HTTP profile.
 type MCPHTTPHeaders struct {
 	ProtocolVersion string  `json:"MCP-Protocol-Version"`
 	Method          string  `json:"Mcp-Method"`
 	Name            *string `json:"Mcp-Name,omitempty"`
 }
 
-// MCPCacheHints captures the RC ttlMs/cacheScope cache fields.
+// MCPCacheHints captures the stable ttlMs/cacheScope cache fields.
 type MCPCacheHints struct {
 	TTLMS      uint64        `json:"ttlMs"`
 	CacheScope MCPCacheScope `json:"cacheScope"`
@@ -1109,12 +1096,13 @@ type MCPCacheHints struct {
 
 // MCPDiscoverResult is the result returned by server/discover.
 type MCPDiscoverResult struct {
-	ResultType        MCPResultType     `json:"resultType"`
-	SupportedVersions []string          `json:"supportedVersions"`
-	Capabilities      JSONObject        `json:"capabilities"`
-	ServerInfo        MCPImplementation `json:"serverInfo"`
-	Instructions      *string           `json:"instructions,omitempty"`
-	Meta              JSONObject        `json:"_meta,omitempty"`
+	ResultType        MCPResultType `json:"resultType"`
+	SupportedVersions []string      `json:"supportedVersions"`
+	Capabilities      JSONObject    `json:"capabilities"`
+	TTLMS             uint64        `json:"ttlMs"`
+	CacheScope        MCPCacheScope `json:"cacheScope"`
+	Instructions      *string       `json:"instructions,omitempty"`
+	Meta              JSONObject    `json:"_meta,omitempty"`
 }
 
 // MCPInputRequiredResult carries server-to-client requests for multi round-trip calls.
@@ -1125,7 +1113,7 @@ type MCPInputRequiredResult struct {
 	Meta          JSONObject    `json:"_meta,omitempty"`
 }
 
-// MCPUnsupportedProtocolVersionErrorData is the typed data payload for -32004.
+// MCPUnsupportedProtocolVersionErrorData is the typed data payload for -32022.
 type MCPUnsupportedProtocolVersionErrorData struct {
 	Requested string   `json:"requested"`
 	Supported []string `json:"supported"`
