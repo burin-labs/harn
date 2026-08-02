@@ -1,4 +1,7 @@
 import {
+  connector_http_json,
+  connector_http_rate_limit,
+  connector_http_request,
   git_forge_pull_request_event,
   git_forge_pull_request_topic,
   git_forge_writeback_request,
