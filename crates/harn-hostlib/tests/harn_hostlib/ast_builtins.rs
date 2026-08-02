@@ -225,6 +225,88 @@ fn symbol_delete_removes_function_and_keeps_syntax_valid() {
 }
 
 #[test]
+fn harn_symbol_mutations_address_top_level_identifier_bindings() {
+    let registry = ast_registry();
+    let source = concat!(
+        "const API_URL: string = \"https://api.example.com\"\n",
+        "let RETRY_LIMIT = 3\n",
+        "var request_count = 0\n",
+        "fn request() {\n",
+        "  const API_URL = \"local\"\n",
+        "  return API_URL\n",
+        "}\n",
+    );
+
+    for (name, expected) in [
+        (
+            "API_URL",
+            "const API_URL: string = \"https://api.example.com\"",
+        ),
+        ("RETRY_LIMIT", "let RETRY_LIMIT = 3"),
+        ("request_count", "var request_count = 0"),
+    ] {
+        let result = invoke(
+            &registry,
+            "hostlib_ast_symbol_extract",
+            dict(&[
+                ("source", vm_string(source)),
+                ("language", vm_string("harn")),
+                ("symbol_name", vm_string(name)),
+            ]),
+        );
+        assert_eq!(string_value(&dict_field(&result, "result")), "extracted");
+        assert_eq!(string_value(&dict_field(&result, "text")), expected);
+    }
+
+    let deleted = invoke(
+        &registry,
+        "hostlib_ast_symbol_delete",
+        dict(&[
+            ("source", vm_string(source)),
+            ("language", vm_string("harn")),
+            ("symbol_name", vm_string("API_URL")),
+        ]),
+    );
+    assert_eq!(string_value(&dict_field(&deleted, "result")), "removed");
+    let deleted_source = dict_field(&deleted, "source");
+    let after = string_value(&deleted_source);
+    assert!(!after.contains("https://api.example.com"));
+    assert!(after.contains("const API_URL = \"local\""));
+
+    let replaced = invoke(
+        &registry,
+        "hostlib_ast_symbol_replace",
+        dict(&[
+            ("source", vm_string(source)),
+            ("language", vm_string("harn")),
+            ("symbol_name", vm_string("RETRY_LIMIT")),
+            ("new_text", vm_string("const RETRY_LIMIT = 5")),
+        ]),
+    );
+    assert_eq!(string_value(&dict_field(&replaced, "result")), "replaced");
+    let replaced_source = dict_field(&replaced, "source");
+    let after = string_value(&replaced_source);
+    assert!(after.contains("const RETRY_LIMIT = 5"));
+    assert!(!after.contains("let RETRY_LIMIT = 3"));
+}
+
+#[test]
+fn harn_symbol_mutations_ignore_destructuring_bindings() {
+    let registry = ast_registry();
+    let source = "const {left, right} = pair\n";
+    let result = invoke(
+        &registry,
+        "hostlib_ast_symbol_extract",
+        dict(&[
+            ("source", vm_string(source)),
+            ("language", vm_string("harn")),
+            ("symbol_name", vm_string("left")),
+        ]),
+    );
+    assert_eq!(string_value(&dict_field(&result, "result")), "not_found");
+}
+
+#[test]
 fn symbol_replace_swaps_in_caller_text() {
     let registry = ast_registry();
     let source = "fn alpha() {}\nfn beta() -> i32 { 0 }\n";
