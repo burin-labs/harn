@@ -407,6 +407,10 @@ fn worker_event_status_strings_cover_all_variants() {
             "{non_terminal:?} should not be terminal"
         );
     }
+    assert!(WorkerEvent::status_is_terminal("completed"));
+    assert!(WorkerEvent::status_is_terminal("canceled"));
+    assert!(!WorkerEvent::status_is_terminal("suspended"));
+    assert!(!WorkerEvent::status_is_terminal("unknown"));
 
     // `ALL` is the iteration order downstream protocol-artifact
     // dumpers walk; keep it in lockstep with the variant list so a
