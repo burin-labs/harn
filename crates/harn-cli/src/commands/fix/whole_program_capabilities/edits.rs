@@ -306,6 +306,34 @@ pub(super) fn receiver_projection_edits(
     edits
 }
 
+pub(super) fn undefined_harness_edits(
+    callable: &ProgramCallable,
+    desired: &CarrierKind,
+    additions: &BTreeMap<CapabilityId, String>,
+    diagnostics: Option<&FileDiagnostics<'_>>,
+) -> Vec<FixEdit> {
+    let Some(diagnostics) = diagnostics else {
+        return Vec::new();
+    };
+    callable
+        .undefined_harness_accesses
+        .iter()
+        .filter(|access| {
+            diagnostics
+                .undefined_harness_spans
+                .contains(&(access.object_span.start, access.object_span.end))
+        })
+        .filter_map(|access| {
+            let capability = CapabilityId::from_field_name(&access.property)?;
+            let replacement = capability_value(callable, desired, additions, capability)?;
+            Some(FixEdit {
+                span: access.access_span,
+                replacement,
+            })
+        })
+        .collect()
+}
+
 pub(super) fn ambient_edits(
     source: &str,
     callable: &ProgramCallable,

@@ -24,7 +24,7 @@ use edits::{
     add_call_argument_at_index_edit, add_call_arguments_at_index_edit, ambient_edits,
     argument_for_kind, carrier_supplies, explicit_capability_argument_edits,
     receiver_projection_edits, signature_edit, split_call_extension,
-    split_capability_signature_edit,
+    split_capability_signature_edit, undefined_harness_edits,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,6 +53,7 @@ struct ProgramCallable {
     file_idx: usize,
     info: CallableInfo,
     receiver_accesses: Vec<ReceiverAccess>,
+    undefined_harness_accesses: Vec<ReceiverAccess>,
     boundary: bool,
     flow_predicate: bool,
     carrier: Option<Carrier>,
@@ -147,7 +148,11 @@ pub(super) fn plan(
                 continue;
             };
             let carriers = capability_carriers(params);
-            let has_split_capability_params = carriers.len() > 1;
+            let has_split_capability_params = carriers.len() > 1
+                || matches!(
+                    carriers.first().map(|carrier| &carrier.kind),
+                    Some(CarrierKind::Narrow(_))
+                );
             let carrier = carriers.first().cloned();
             let root_attenuation = root_attenuations
                 .get(&(info.span.start, info.span.end))
@@ -159,11 +164,20 @@ pub(super) fn plan(
                 carrier.as_ref(),
                 root_attenuation.as_ref(),
             );
-            let receiver_accesses = collect_receiver_accesses(body, carrier.as_ref());
+            let receiver = carrier
+                .as_ref()
+                .map_or("harness", |carrier| carrier.name.as_str());
+            let receiver_accesses = collect_receiver_accesses(body, receiver);
+            let undefined_harness_accesses = if receiver != "harness" {
+                collect_receiver_accesses(body, "harness")
+            } else {
+                Vec::new()
+            };
             callables.push(ProgramCallable {
                 file_idx,
                 info,
                 receiver_accesses,
+                undefined_harness_accesses,
                 boundary,
                 flow_predicate,
                 carrier,
@@ -281,6 +295,15 @@ pub(super) fn plan(
             .or_default()
             .extend(ambient_edits(
                 &program_files[callable.file_idx].source,
+                callable,
+                desired,
+                &added_capabilities[idx],
+                diagnostics_by_file.get(&program_files[callable.file_idx].path),
+            ));
+        edits_by_file
+            .entry(callable.file_idx)
+            .or_default()
+            .extend(undefined_harness_edits(
                 callable,
                 desired,
                 &added_capabilities[idx],
@@ -462,8 +485,7 @@ fn declaration_parts(
     None
 }
 
-fn collect_receiver_accesses(body: &[SNode], carrier: Option<&Carrier>) -> Vec<ReceiverAccess> {
-    let receiver = carrier.map_or("harness", |carrier| carrier.name.as_str());
+fn collect_receiver_accesses(body: &[SNode], receiver: &str) -> Vec<ReceiverAccess> {
     let mut accesses = Vec::new();
     visit::walk_program(body, &mut |node| {
         let (Node::PropertyAccess { object, property }
@@ -573,21 +595,22 @@ fn seed_ambient_requirements(
     callables: &mut [ProgramCallable],
     diagnostics_by_file: &BTreeMap<PathBuf, FileDiagnostics<'_>>,
 ) {
-    for callable in callables
-        .iter_mut()
-        .filter(|callable| callable.carrier.is_none())
-    {
+    for callable in callables.iter_mut() {
         let undefined = diagnostics_by_file
             .get(&files[callable.file_idx].path)
             .map(|diagnostics| &diagnostics.undefined_harness_spans);
-        callable.receiver_accesses.retain(|access| {
+        let accesses = if callable.carrier.is_none() {
+            &mut callable.receiver_accesses
+        } else {
+            &mut callable.undefined_harness_accesses
+        };
+        accesses.retain(|access| {
             undefined.is_some_and(|spans| {
                 spans.contains(&(access.object_span.start, access.object_span.end))
             })
         });
         callable.direct_requirements.extend(
-            callable
-                .receiver_accesses
+            accesses
                 .iter()
                 .filter_map(|access| CapabilityId::from_field_name(&access.property)),
         );

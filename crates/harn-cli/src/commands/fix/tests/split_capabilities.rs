@@ -112,6 +112,73 @@ fn apply_extends_narrow_first_split_boundary_with_missing_handle() {
 }
 
 #[test]
+fn apply_preserves_lone_narrow_handle_when_adding_another_capability() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("lone_narrow_handle.harn");
+    fs::write(
+        &script,
+        "fn helper(clock: HarnessClock, value) {\n  const day = clock.date_iso()\n  const token = harness.secrets.get(\"token\")\n  return [day, token, value]\n}\n\nfn main(harness: Harness) {\n  helper(harness.clock, \"input\")\n}\n",
+    )
+    .unwrap();
+
+    let first = apply_repairs_with_options(
+        &script,
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions {
+            capability_migrations_only: true,
+        },
+    )
+    .unwrap();
+    assert!(!first.applied.is_empty(), "{first:#?}");
+
+    let updated = fs::read_to_string(&script).unwrap();
+    assert_eq!(
+        updated,
+        "fn helper(clock: HarnessClock, secrets: HarnessSecrets, value) {\n  const day = clock.date_iso()\n  const token = secrets.get(\"token\")\n  return [day, token, value]\n}\n\nfn main(harness: Harness) {\n  helper(harness.clock, harness.secrets, \"input\")\n}\n",
+    );
+
+    let second = apply_repairs_with_options(
+        &script,
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions {
+            capability_migrations_only: true,
+        },
+    )
+    .unwrap();
+    assert!(second.applied.is_empty(), "{second:#?}");
+}
+
+#[test]
+fn apply_does_not_guess_domain_argument_after_lone_narrow_handle() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("lone_narrow_domain_gap.harn");
+    fs::write(
+        &script,
+        "fn helper(clock: HarnessClock, value) {\n  const token = harness.secrets.get(\"token\")\n  return [clock.date_iso(), token, value]\n}\n\nfn main(harness: Harness) {\n  helper(harness.clock)\n}\n",
+    )
+    .unwrap();
+
+    let result = apply_repairs_with_options(
+        &script,
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions {
+            capability_migrations_only: true,
+        },
+    )
+    .unwrap();
+    assert!(!result.applied.is_empty(), "{result:#?}");
+
+    assert_eq!(
+        fs::read_to_string(&script).unwrap(),
+        "fn helper(clock: HarnessClock, secrets: HarnessSecrets, value) {\n  const token = secrets.get(\"token\")\n  return [clock.date_iso(), token, value]\n}\n\nfn main(harness: Harness) {\n  helper(harness.clock, harness.secrets)\n}\n",
+        "the fixer must migrate authority without inventing the missing domain value",
+    );
+}
+
+#[test]
 fn apply_completes_split_capability_prefix_before_extension() {
     let temp = tempfile::TempDir::new().unwrap();
     let script = temp.path().join("partial_split_call.harn");
