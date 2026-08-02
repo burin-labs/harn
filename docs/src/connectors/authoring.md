@@ -138,6 +138,15 @@ pub fn call(harness: Harness, method, args)
 pub fn poll_tick(harness: Harness, ctx)
 ```
 
+After `harn install` materializes a dependency, both `harn run` and
+`harn run --serve mcp` activate its declared connector implementations for the
+lifetime of that process. Calls through
+`harness.net.connector_call(provider, method, args)` therefore reach the
+package's `call` export without host-specific registration. A root manifest
+entry for the same provider takes precedence over a dependency declaration,
+and a Harn implementation takes precedence over the corresponding Rust
+builtin.
+
 Inbound providers must also export:
 
 ```harn,ignore

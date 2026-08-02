@@ -11,6 +11,14 @@ pub(crate) struct ManifestRuntimeSetupError {
 }
 
 impl ManifestRuntimeSetupError {
+    fn connectors(error: impl fmt::Display) -> Self {
+        Self {
+            phase: "manifest_connectors",
+            label: "manifest connectors",
+            message: error.to_string(),
+        }
+    }
+
     fn triggers(error: impl fmt::Display) -> Self {
         Self {
             phase: "manifest_triggers",
@@ -49,11 +57,16 @@ impl fmt::Display for ManifestRuntimeSetupError {
 /// compatibility.
 pub(crate) async fn install_manifest_runtime(
     path: &Path,
+    store_base: &Path,
     vm: &mut harn_vm::Vm,
     defer_handlers: bool,
-) -> Result<(), ManifestRuntimeSetupError> {
+) -> Result<crate::ActiveConnectorClientsGuard, ManifestRuntimeSetupError> {
     let extensions = package::load_runtime_extensions(path);
     package::install_runtime_extensions(&extensions);
+    let connector_clients =
+        crate::install_connector_clients(store_base, &extensions.provider_connectors)
+            .await
+            .map_err(ManifestRuntimeSetupError::connectors)?;
     if let Some(manifest) = extensions.root_manifest.as_ref() {
         if !manifest.mcp.is_empty() {
             connect_mcp_servers(&manifest.mcp, vm).await;
@@ -65,7 +78,7 @@ pub(crate) async fn install_manifest_runtime(
     package::install_manifest_hooks_with_mode(vm, &extensions, defer_handlers)
         .await
         .map_err(ManifestRuntimeSetupError::hooks)?;
-    Ok(())
+    Ok(connector_clients)
 }
 
 /// Connect to MCP servers declared in `harn.toml` and register them as

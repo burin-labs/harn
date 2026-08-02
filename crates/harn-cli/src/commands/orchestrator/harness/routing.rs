@@ -311,26 +311,9 @@ async fn connector_override_for(
     else {
         return Ok(None);
     };
-    match &override_config.connector {
-        ResolvedProviderConnectorKind::RustBuiltin => Ok(None),
-        ResolvedProviderConnectorKind::Invalid(message) => {
-            Err(OrchestratorError::Serve(message.clone()))
-        }
-        ResolvedProviderConnectorKind::Harn { module } => {
-            let module_path =
-                harn_vm::resolve_module_import_path(&override_config.manifest_dir, module);
-            let connector = harn_vm::HarnConnector::load(&module_path)
-                .await
-                .map_err(|error| {
-                    format!(
-                        "failed to load Harn connector '{}' for provider '{}': {error}",
-                        module_path.display(),
-                        provider.as_str()
-                    )
-                })?;
-            Ok(Some(Box::new(connector)))
-        }
-    }
+    package::load_provider_connector(override_config)
+        .await
+        .map_err(|error| OrchestratorError::Serve(error.to_string()))
 }
 
 pub(super) fn build_route_configs(
