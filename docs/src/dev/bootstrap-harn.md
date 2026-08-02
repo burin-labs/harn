@@ -62,12 +62,14 @@ process that loses publication validates the winner before returning.
 The publication lock records its host, process, and a unique ownership token.
 Waiters give each unchanged owner 30 seconds before evicting it; an ownership
 change starts a fresh deadline rather than transferring stale wait time to the
-new owner. After acquiring the boundary, a waiter revalidates any installation
-the prior owner may have published. A dead same-host process or a lock older
-than five minutes is reclaimed immediately. Filesystem mutations retry
-transient Windows sharing and antivirus errors while the boundary remains
-owned. Token checks fence publication and cleanup so an evicted process cannot
-later mutate state or delete its replacement's lock.
+new owner. A separate two-minute total deadline fails closed under continuous
+owner rotation or unfair acquisition. After acquiring the boundary, a waiter
+revalidates any installation the prior owner may have published. A dead
+same-host process or a lock older than five minutes is reclaimed immediately.
+Filesystem mutations retry transient Windows sharing and antivirus errors
+while the boundary remains owned. Token checks fence publication and cleanup
+so an evicted process cannot later mutate state or delete its replacement's
+lock.
 
 The default cache is under the runner tool cache, `$XDG_CACHE_HOME`, Windows
 `%LOCALAPPDATA%`, or the user's `.cache` directory. The default installation

@@ -11,6 +11,7 @@ const INSTALL_MANIFEST_SCHEMA = "harn-bootstrap-install-v1";
 const INSTALL_LOCK_SCHEMA = "harn-bootstrap-install-lock-v1";
 const INSTALL_LOCK_POLL_MS = 10;
 const INSTALL_LOCK_TIMEOUT_MS = 30_000;
+const INSTALL_LOCK_TOTAL_TIMEOUT_MULTIPLIER = 4;
 const INSTALL_LOCK_STALE_MS = 5 * 60_000;
 const INSTALL_MUTATION_ATTEMPTS = 6;
 const INSTALL_MUTATION_RETRY_MS = 25;
@@ -419,7 +420,6 @@ async function discardInstallLock(lockPath, expectedIdentity) {
       );
     }
   }
-  return false;
 }
 
 async function reclaimAbandonedInstallLock(lockPath, expectedIdentity = null) {
@@ -450,6 +450,8 @@ async function withInstallLock(
     throw new Error("install lock timeout must be a positive number");
   }
   const lockPath = `${installRoot}.lock`;
+  const absoluteDeadline =
+    Date.now() + timeoutMs * INSTALL_LOCK_TOTAL_TIMEOUT_MULTIPLIER;
   let deadline = Date.now() + timeoutMs;
   let observedIdentity = null;
   const token = crypto.randomUUID();
@@ -473,20 +475,26 @@ async function withInstallLock(
       break;
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
+      if (Date.now() >= absoluteDeadline) {
+        throw new Error(
+          `timed out waiting for Harn installation at ${installRoot}`,
+        );
+      }
       const inspected = inspectInstallLock(lockPath);
-      if (!inspected) continue;
-      if (inspected.identity !== observedIdentity) {
-        observedIdentity = inspected.identity;
-        deadline = Date.now() + timeoutMs;
+      if (inspected) {
+        if (inspected.identity !== observedIdentity) {
+          observedIdentity = inspected.identity;
+          deadline = Date.now() + timeoutMs;
+        }
+        if (Date.now() >= deadline) {
+          // A critical section should finish in milliseconds. At the owner
+          // deadline, evict only the exact identity observed for that wait.
+          // Rotation gets a fresh owner deadline but not a fresh total bound.
+          await reclaimAbandonedInstallLock(lockPath, observedIdentity);
+          continue;
+        }
+        if (await reclaimAbandonedInstallLock(lockPath)) continue;
       }
-      if (Date.now() >= deadline) {
-        // A critical section should finish in milliseconds. At the deadline,
-        // evict only the exact owner observed for the whole wait. A rotating
-        // owner gets its own deadline rather than inheriting stale wait time.
-        await reclaimAbandonedInstallLock(lockPath, observedIdentity);
-        continue;
-      }
-      if (await reclaimAbandonedInstallLock(lockPath)) continue;
       await new Promise((resolve) => setTimeout(resolve, INSTALL_LOCK_POLL_MS));
     }
   }

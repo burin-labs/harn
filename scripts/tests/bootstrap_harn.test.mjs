@@ -91,6 +91,20 @@ function writeInstallLock(root, owner) {
   return lockRoot;
 }
 
+function replaceInstallLockOwner(lockRoot, owner) {
+  const ownerPath = path.join(lockRoot, "owner.json");
+  const temporary = path.join(lockRoot, `owner-${crypto.randomUUID()}.tmp`);
+  fs.writeFileSync(
+    temporary,
+    `${JSON.stringify({
+      schema_version: "harn-bootstrap-install-lock-v1",
+      token: crypto.randomUUID(),
+      ...owner,
+    })}\n`,
+  );
+  fs.renameSync(temporary, ownerPath);
+}
+
 function runChild(script, arguments_) {
   return new Promise((resolve, reject) => {
     const child = spawn(
@@ -505,12 +519,14 @@ test("a wait deadline does not evict a newly rotated owner", async (context) => 
     token: "foreign-owner",
   });
   let rotatedOwnerSurvived = false;
+  let rotationPrecededInstall = false;
   const startedAt = Date.now();
   const pending = bootstrap({
     ...bootstrapOptions(root, release.fetchImpl),
     installLockTimeoutMs: 50,
   });
   setTimeout(() => {
+    rotationPrecededInstall = !fs.existsSync(path.join(root, "install"));
     fs.rmSync(lockRoot, { recursive: true, force: true });
     writeInstallLock(root, {
       hostname: os.hostname(),
@@ -524,12 +540,39 @@ test("a wait deadline does not evict a newly rotated owner", async (context) => 
   }, 70);
 
   const result = await pending;
+  assert.equal(rotationPrecededInstall, true);
   assert.equal(rotatedOwnerSurvived, true);
   assert.ok(Date.now() - startedAt >= 60);
   assert.equal(
     fs.readFileSync(result.binary_path, "utf8"),
     "fake harn binary\n",
   );
+});
+
+test("rapid owner rotation still has an overall wait bound", async (context) => {
+  const root = temporaryRoot(context);
+  const archive = makeArchive(root);
+  const release = fakeRelease(archive);
+  const lockRoot = writeInstallLock(root, {
+    hostname: "foreign-bootstrap-host",
+    pid: 1,
+  });
+  const rotation = setInterval(() => {
+    replaceInstallLockOwner(lockRoot, {
+      hostname: "foreign-bootstrap-host",
+      pid: 1,
+    });
+  }, 8);
+  context.after(() => clearInterval(rotation));
+
+  await assert.rejects(
+    bootstrap({
+      ...bootstrapOptions(root, release.fetchImpl),
+      installLockTimeoutMs: 25,
+    }),
+    /timed out waiting for Harn installation/,
+  );
+  clearInterval(rotation);
 });
 
 test("independent processes safely converge on one atomic install", async (context) => {
