@@ -622,6 +622,79 @@ fn capability_apply_keeps_exported_definition_and_imported_call_arity_equal() {
 }
 
 #[test]
+fn capability_apply_widens_cross_module_carrier_without_duplicate_arguments() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let library = temp.path().join("library.harn");
+    let entrypoint = temp.path().join("main.harn");
+    fs::write(
+        &library,
+        "import { web_fetch } from \"std/web\"\n\npub fn run_surface(base_url: string, model: string) {\n  const _ = web_fetch(base_url, {})\n  harness.stdio.println(model)\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        &entrypoint,
+        "import { run_surface } from \"./library\"\n\nfn main(_harness: Harness) {\n  run_surface(\"http://localhost\", \"model\")\n  harness.stdio.println(\"\")\n}\n",
+    )
+    .unwrap();
+
+    let result = apply_repairs_with_options(
+        temp.path(),
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions {
+            capability_migrations_only: true,
+        },
+    )
+    .unwrap();
+    let migrated_library = fs::read_to_string(library).unwrap();
+    let migrated_entrypoint = fs::read_to_string(entrypoint).unwrap();
+    assert_eq!(
+        result.post_apply_diagnostics_count, 0,
+        "{result:#?}\n{migrated_library}\n{migrated_entrypoint}"
+    );
+    assert_eq!(
+        callable_params(&migrated_library, "run_surface"),
+        vec![
+            param("harness", "Harness"),
+            param("base_url", "string"),
+            param("model", "string"),
+        ]
+    );
+    assert_eq!(
+        call_argument_paths(&migrated_entrypoint, "run_surface")[0],
+        [Some("_harness".to_string()), None, None]
+    );
+    assert!(!migrated_entrypoint
+        .lines()
+        .any(|line| line.trim_start().starts_with("harness.stdio")));
+}
+
+#[test]
+fn capability_apply_repairs_imported_capability_helpers_inside_closures() {
+    let (result, updated) = apply_single(
+        "import { agent_reminder_providers_fire } from \"std/agent/state\"\nimport { llm_call_count } from \"std/testing\"\n\npipeline main(harness: Harness, task) {\n  const reports = [\"session\"].map({ session ->\n    return agent_reminder_providers_fire(session, \"session_idle\", {}, {})\n  })\n  return {reports: reports, llm_calls: llm_call_count()}\n}\n",
+    );
+    assert_eq!(
+        result.post_apply_diagnostics_count, 0,
+        "{result:#?}\n{updated}"
+    );
+    assert_eq!(
+        call_argument_paths(&updated, "agent_reminder_providers_fire")[0],
+        [
+            Some("harness.agent".to_string()),
+            Some("session".to_string()),
+            None,
+            None,
+            None,
+        ]
+    );
+    assert_eq!(
+        call_argument_paths(&updated, "llm_call_count")[0],
+        [Some("harness.llm".to_string())]
+    );
+}
+
+#[test]
 fn capability_apply_formats_every_edited_file() {
     let (result, updated) = apply_single(
         "fn helper(value: string) {\n  return read_file(value)\n}\nfn main(harness: Harness) { helper(\"x\") }\n",

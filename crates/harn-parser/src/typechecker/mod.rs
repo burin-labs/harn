@@ -97,6 +97,15 @@ pub enum DiagnosticDetails {
     /// this field instead of parsing the display message, whose wording and
     /// suggestions are free to evolve.
     UnresolvedName { name: String },
+    /// A call supplied the wrong number of positional arguments. Parameter
+    /// types let migration tooling repair omitted leading capability grants
+    /// without parsing the human-readable arity message.
+    CallArity {
+        callee: String,
+        parameter_types: Vec<Option<TypeExpr>>,
+        required: usize,
+        actual: usize,
+    },
     /// A Flow predicate requested authority outside the evaluator's injected
     /// contract. Tooling can report or migrate the exact parameter and
     /// capability set without parsing the human-readable diagnostic.
@@ -758,6 +767,34 @@ impl TypeChecker {
             related: Vec::new(),
             fix: None,
             details: None,
+            repair: default_repair(code),
+        });
+    }
+
+    pub(in crate::typechecker) fn call_arity_warning_at(
+        &mut self,
+        code: Code,
+        message: String,
+        span: Span,
+        callee: &str,
+        parameter_types: Vec<Option<TypeExpr>>,
+        required: usize,
+        actual: usize,
+    ) {
+        self.diagnostics.push(TypeDiagnostic {
+            code,
+            message,
+            severity: DiagnosticSeverity::Warning,
+            span: Some(span),
+            help: None,
+            related: Vec::new(),
+            fix: None,
+            details: Some(DiagnosticDetails::CallArity {
+                callee: callee.to_string(),
+                parameter_types,
+                required,
+                actual,
+            }),
             repair: default_repair(code),
         });
     }

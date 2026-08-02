@@ -329,19 +329,10 @@ pub(super) fn undefined_harness_edits(
     callable: &ProgramCallable,
     desired: &CarrierKind,
     additions: &BTreeMap<CapabilityId, String>,
-    diagnostics: Option<&FileDiagnostics<'_>>,
 ) -> Vec<FixEdit> {
-    let Some(diagnostics) = diagnostics else {
-        return Vec::new();
-    };
     callable
         .undefined_harness_accesses
         .iter()
-        .filter(|access| {
-            diagnostics
-                .undefined_harness_spans
-                .contains(&(access.object_span.start, access.object_span.end))
-        })
         .filter_map(|access| {
             let capability = CapabilityId::from_field_name(&access.property)?;
             let replacement = capability_value(callable, desired, additions, capability)?;
@@ -407,9 +398,16 @@ pub(super) fn explicit_capability_argument_edits(
     let Some(diagnostics) = diagnostics else {
         return Vec::new();
     };
+    let mut missing_arguments = diagnostics.missing_capability_arguments.clone();
+    missing_arguments.sort_by_key(|diagnostic| {
+        diagnostic
+            .span
+            .map(|span| (span.start, span.end))
+            .unwrap_or((usize::MAX, usize::MAX))
+    });
     let mut edited_calls = BTreeSet::new();
     let mut edits = Vec::new();
-    for diagnostic in &diagnostics.missing_capability_arguments {
+    for diagnostic in missing_arguments {
         let Some(span) = diagnostic.span else {
             continue;
         };

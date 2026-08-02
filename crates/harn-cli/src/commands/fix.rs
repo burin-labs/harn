@@ -546,6 +546,17 @@ fn collect_file_candidates(
     let ambient_context = AmbientRepairContext {
         cross_module_importer_count: module_graph.importers_of(file).len(),
     };
+    let deferred_capability_mismatches = options
+        .capability_migrations_only
+        .then(|| {
+            deferred_capability_mismatch_spans(
+                &output.diagnostics,
+                &program,
+                &source,
+                &exported_names,
+            )
+        })
+        .unwrap_or_default();
 
     for diag in &output.diagnostics {
         if harn_lint::type_diagnostic_lint_disabled(diag, &config.disable_rules) {
@@ -555,12 +566,28 @@ fn collect_file_candidates(
             Some(DiagnosticDetails::UnresolvedName { name }) => Some(name.clone()),
             _ => None,
         };
-        let (expected_type, actual_type) = match diag.details.as_ref() {
+        let (mut expected_type, actual_type) = match diag.details.as_ref() {
             Some(DiagnosticDetails::TypeMismatch { expected, actual }) => {
                 (Some(expected.clone()), Some(actual.clone()))
             }
             _ => (None, None),
         };
+        if let Some(DiagnosticDetails::CallArity {
+            parameter_types,
+            actual: 0,
+            ..
+        }) = diag.details.as_ref()
+        {
+            expected_type = parameter_types.first().cloned().flatten().filter(|expected| {
+                matches!(expected, TypeExpr::Named(name) if name == "Harness" || harn_builtin_meta::CapabilityId::from_type_name(name).is_some())
+            });
+        }
+        if diag
+            .span
+            .is_some_and(|span| deferred_capability_mismatches.contains(&(span.start, span.end)))
+        {
+            continue;
+        }
         let synthesized = (diag.code == Code::UndefinedVariable
             && unresolved_name.as_deref() == Some("harness"))
         .then(|| {
@@ -574,6 +601,14 @@ fn collect_file_candidates(
         })
         .flatten();
         let synthesized = synthesized.or_else(|| {
+            if diag.code == Code::OrchestrationArity {
+                return synthesize_missing_zero_arg_capability_repair(
+                    diag.span?,
+                    expected_type.as_ref()?,
+                    &source,
+                    &program,
+                );
+            }
             if diag.code != Code::ArgumentTypeMismatch {
                 return None;
             }
@@ -688,6 +723,63 @@ fn collect_file_candidates(
         out,
     );
     Ok(())
+}
+
+fn deferred_capability_mismatch_spans(
+    diagnostics: &[harn_parser::TypeDiagnostic],
+    program: &[SNode],
+    source: &str,
+    exported_names: &BTreeSet<String>,
+) -> BTreeSet<(usize, usize)> {
+    let calls = collect_callable_infos(program, source, exported_names)
+        .into_iter()
+        .flat_map(|callable| callable.calls)
+        .collect::<Vec<_>>();
+    let mut by_call = BTreeMap::<(usize, usize), Vec<(usize, Span)>>::new();
+    for diagnostic in diagnostics {
+        if diagnostic.code != Code::ArgumentTypeMismatch {
+            continue;
+        }
+        let Some(DiagnosticDetails::TypeMismatch {
+            expected: TypeExpr::Named(expected),
+            ..
+        }) = diagnostic.details.as_ref()
+        else {
+            continue;
+        };
+        if expected != "Harness"
+            && harn_builtin_meta::CapabilityId::from_type_name(expected.as_str()).is_none()
+        {
+            continue;
+        }
+        let Some(span) = diagnostic.span else {
+            continue;
+        };
+        let Some((call, argument_index)) = calls.iter().find_map(|call| {
+            call.args
+                .iter()
+                .position(|argument| argument.start == span.start && argument.end == span.end)
+                .map(|index| (call, index))
+        }) else {
+            continue;
+        };
+        by_call
+            .entry((call.span.start, call.span.end))
+            .or_default()
+            .push((argument_index, span));
+    }
+
+    let mut deferred = BTreeSet::new();
+    for mismatches in by_call.values_mut() {
+        mismatches.sort_by_key(|(argument_index, span)| (*argument_index, span.start, span.end));
+        deferred.extend(
+            mismatches
+                .iter()
+                .skip(1)
+                .map(|(_, span)| (span.start, span.end)),
+        );
+    }
+    deferred
 }
 
 fn skipped_file_from_analysis_error(
@@ -973,6 +1065,33 @@ fn synthesize_missing_capability_argument_repair(
     let expected_name = expected_name?;
     let argument = capability_argument_for_span(program, span, expected_name)?;
     let edit = insert_call_argument_before_span(source, program, span, &argument)?;
+    Some((
+        Repair {
+            id: harn_parser::RepairId::from_owned(
+                "bindings/prepend-capability-argument".to_string(),
+            ),
+            summary: format!(
+                "Pass the explicit `{expected_name}` capability required by the migrated callable"
+            ),
+            safety: RepairSafety::SurfaceChanging,
+        },
+        vec![edit],
+        RepairImpactWire::local_ambient("prepend-capability-argument"),
+    ))
+}
+
+fn synthesize_missing_zero_arg_capability_repair(
+    call_span: Span,
+    expected: &TypeExpr,
+    source: &str,
+    program: &[SNode],
+) -> Option<(Repair, Vec<FixEdit>, RepairImpactWire)> {
+    let TypeExpr::Named(expected_name) = expected else {
+        return None;
+    };
+    harn_builtin_meta::CapabilityId::from_type_name(expected_name)?;
+    let argument = capability_argument_for_span(program, call_span, expected_name)?;
+    let edit = add_call_argument_edit(source, &call_span, &argument)?;
     Some((
         Repair {
             id: harn_parser::RepairId::from_owned(
