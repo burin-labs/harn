@@ -672,7 +672,7 @@ fn capability_apply_widens_cross_module_carrier_without_duplicate_arguments() {
 #[test]
 fn capability_apply_repairs_imported_capability_helpers_inside_closures() {
     let (result, updated) = apply_single(
-        "import { agent_reminder_providers_fire } from \"std/agent/state\"\nimport { llm_call_count } from \"std/testing\"\n\npipeline main(harness: Harness, task) {\n  const reports = [\"session\"].map({ session ->\n    return agent_reminder_providers_fire(session, \"session_idle\", {}, {})\n  })\n  return {reports: reports, llm_calls: llm_call_count()}\n}\n",
+        "import { agent_reminder_providers_fire } from \"std/agent/state\"\nimport { llm_call_count, with_mocks } from \"std/testing\"\n\npipeline main(harness: Harness, task) {\n  const reports = [\"session\"].map({ session ->\n    return agent_reminder_providers_fire(session, \"session_idle\", {}, {})\n  })\n  return {reports: reports, llm_calls: llm_call_count()}\n}\n",
     );
     assert_eq!(
         result.post_apply_diagnostics_count, 0,
@@ -692,6 +692,21 @@ fn capability_apply_repairs_imported_capability_helpers_inside_closures() {
         call_argument_paths(&updated, "llm_call_count")[0],
         [Some("harness.llm".to_string())]
     );
+    assert!(!updated.contains("with_mocks"));
+}
+
+#[test]
+fn capability_apply_projects_retired_host_call_count_through_testing() {
+    let (result, updated) = apply_single(
+        "import { host_call_count, with_temp_dir } from \"std/testing\"\n\npipeline test_main(harness: Harness, task) {\n  assert(host_call_count() == 0)\n  return with_temp_dir(harness.fs, { dir -> dir })\n}\n",
+    );
+    assert_eq!(
+        result.post_apply_diagnostics_count, 0,
+        "{result:#?}\n{updated}"
+    );
+    assert!(updated.contains("import { with_temp_dir } from \"std/testing\""));
+    assert!(updated.contains("len(harness.testing.calls()) == 0"));
+    assert!(!updated.contains("host_call_count"));
 }
 
 #[test]

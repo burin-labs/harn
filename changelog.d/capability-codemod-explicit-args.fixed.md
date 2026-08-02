@@ -6,5 +6,7 @@
   of shifting ordinary arguments. A root requirement now widens a narrow
   carrier in place, stale ambient receiver names are rebound to the explicit
   carrier, and typed arity diagnostics let zero-argument imported helpers gain
-  their omitted capability. Multiline declarations and calls retain clean line
+  their omitted capability. Retired `std/testing` imports no longer prevent the
+  remaining module from loading, and `host_call_count()` projects through the
+  typed testing handle. Multiline declarations and calls retain clean line
   endings when the migration inserts a leading capability.
