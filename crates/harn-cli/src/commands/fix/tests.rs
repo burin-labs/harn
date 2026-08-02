@@ -774,6 +774,33 @@ fn apply_thread_params_threads_harness_for_non_stdio_capabilities() {
 }
 
 #[test]
+fn apply_preserves_separate_narrow_capability_parameters() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("split_capabilities.harn");
+    let source = "fn read_key(secrets: HarnessSecrets) {\n  secrets.read(\"app-key\")\n}\n\npub fn sign(clock: HarnessClock, secrets: HarnessSecrets) {\n  const now = clock.date_iso()\n  return {now: now, key: read_key(secrets)}\n}\n\nfn main(harness: Harness) {\n  sign(harness.clock, harness.secrets)\n}\n";
+    fs::write(&script, source).unwrap();
+
+    let result = apply_repairs_with_options(
+        &script,
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions {
+            capability_migrations_only: true,
+        },
+    )
+    .unwrap();
+
+    assert!(
+        result
+            .applied
+            .iter()
+            .all(|repair| repair.repair_id != "bindings/thread-harness-whole-program"),
+        "separate narrow handles are already an explicit capability contract: {result:#?}"
+    );
+    assert_eq!(fs::read_to_string(&script).unwrap(), source);
+}
+
+#[test]
 fn apply_scope_local_rewrites_ambient_calls_inside_pipeline() {
     let temp = tempfile::TempDir::new().unwrap();
     let script = temp.path().join("pipeline_direct.harn");
