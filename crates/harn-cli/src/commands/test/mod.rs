@@ -27,7 +27,8 @@ mod supervisor;
 mod watch;
 
 use conformance::{
-    run_conformance_determinism_tests, run_conformance_tests, ConformanceRunOptions,
+    run_conformance_determinism_tests, run_conformance_tests, run_parallel_conformance_tests,
+    ConformanceRunOptions,
 };
 
 pub(crate) use reporting::CONFORMANCE_TEST_SCHEMA_VERSION;
@@ -229,22 +230,46 @@ async fn run_standard_command(
 
     if let Some(t) = args.target.as_deref() {
         if t == "conformance" {
-            run_conformance_tests(
-                t,
-                args.selection.as_deref(),
-                args.filter.as_deref(),
-                args.junit.as_deref(),
-                args.timeout,
-                ConformanceRunOptions {
-                    verbose: args.verbose,
-                    timing: args.timing,
-                    differential_optimizations: args.differential_optimizations,
-                    json: args.json,
-                    shard: resolve_test_shard(args.shard_index, args.shard_total),
-                    cli_skill_dirs: &cli_skill_dirs,
-                },
-            )
-            .await;
+            let shard = resolve_test_shard(args.shard_index, args.shard_total);
+            if args.parallel && shard.is_some() {
+                command_error(
+                    "`harn test conformance --parallel` cannot combine with explicit test sharding",
+                );
+            }
+            let options = ConformanceRunOptions {
+                verbose: args.verbose,
+                timing: args.timing,
+                differential_optimizations: args.differential_optimizations,
+                json: args.json,
+                skip_xfail: matches!(
+                    args.internal_conformance_worker,
+                    Some(crate::cli::InternalConformanceWorkerMode::SkipXfail)
+                ),
+                shard,
+                cli_skill_dirs: &cli_skill_dirs,
+            };
+            if args.parallel {
+                run_parallel_conformance_tests(
+                    t,
+                    args.selection.as_deref(),
+                    args.filter.as_deref(),
+                    args.junit.as_deref(),
+                    args.timeout,
+                    options,
+                    args.jobs,
+                )
+                .await;
+            } else {
+                run_conformance_tests(
+                    t,
+                    args.selection.as_deref(),
+                    args.filter.as_deref(),
+                    args.junit.as_deref(),
+                    args.timeout,
+                    options,
+                )
+                .await;
+            }
         } else if args.selection.is_some() {
             command_error("only `harn test conformance` accepts a second positional target");
         } else {

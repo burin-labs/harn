@@ -2,7 +2,12 @@ use super::*;
 use crate::{execute_with_skill_dirs_and_options, SourceExecutionOptions};
 
 mod lint;
+mod parallel;
+mod sharding;
 mod write_root;
+
+pub(super) use parallel::run_parallel_conformance_tests;
+use sharding::select_conformance_shard;
 
 use lint::{format_conformance_lint_diagnostics, lint_expectation_error};
 
@@ -833,22 +838,9 @@ pub(crate) struct ConformanceRunOptions<'a> {
     pub(crate) timing: bool,
     pub(crate) differential_optimizations: bool,
     pub(crate) json: bool,
+    pub(crate) skip_xfail: bool,
     pub(crate) shard: Option<crate::test_runner::TestShard>,
     pub(crate) cli_skill_dirs: &'a [PathBuf],
-}
-
-fn select_conformance_shard<T>(
-    items: Vec<T>,
-    shard: Option<crate::test_runner::TestShard>,
-) -> Vec<T> {
-    let Some(shard) = shard else {
-        return items;
-    };
-    items
-        .into_iter()
-        .enumerate()
-        .filter_map(|(offset, item)| (offset % shard.total() == shard.index() - 1).then_some(item))
-        .collect()
 }
 
 async fn evaluate_conformance_case(
@@ -1196,8 +1188,20 @@ pub(crate) async fn run_conformance_tests(
         // JSON mode executes the test so stale markers become
         // `xfail_unexpected_pass` failures that force marker cleanup.
         let xfail_reason = read_xfail_marker(harn_file);
-        if !options.json {
+        let skip_xfail = !options.json || options.skip_xfail;
+        if skip_xfail {
             if let Some(reason) = xfail_reason.as_ref() {
+                if options.json {
+                    json_summary.record(ConformanceJsonOutcome::Skipped);
+                    json_results.push(ConformanceJsonResult {
+                        name: rel_path.clone(),
+                        outcome: ConformanceJsonOutcome::Skipped,
+                        duration_ms: 0,
+                        message: Some(reason.clone()),
+                        diagnostic_codes: Vec::new(),
+                    });
+                    continue;
+                }
                 println!("  \x1b[33mSKIP\x1b[0m  {rel_path}  ({reason})");
                 skipped_summary.push((rel_path.clone(), reason.clone()));
                 skipped += 1;

@@ -357,12 +357,14 @@ execution. Nested module values overlap setup/execute and are never additive.
 
 ### `harn test conformance --json`
 
-Conformance schema v2 retains the standard envelope and adds the same typed
-duration distribution under `data.timing`:
+Conformance schema v3 retains the standard envelope and adds the same typed
+duration distribution under `data.timing`. Sequential and parallel runs use
+the same snapshot and result contract; durations can differ because workers
+overlap:
 
 ```json
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "ok": true,
   "data": {
     "snapshotKey": "<blake3-hex>",

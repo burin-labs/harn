@@ -45,7 +45,10 @@ convention and are walked by the same runner.
 
 ```bash
 # Run the full conformance suite
-harn test conformance
+harn test conformance --parallel
+
+# Pin the process worker count on a shared build host
+harn test conformance --parallel --jobs 4
 
 # Filter by name (substring match)
 harn test conformance --filter workflow_runtime
@@ -59,6 +62,17 @@ harn test conformance --filter my_test -v
 # Timing summary without verbose failure details
 harn test conformance --timing --filter my_test
 ```
+
+Use a narrow `--filter` while developing. Run the full suite with `--parallel`
+before shipping. Each conformance worker is a separate process with its own
+runtime state, and the parent combines results in stable path order. The
+default worker count accounts for available CPU and memory; use `--jobs` only
+when a shared machine needs an explicit limit. `make conformance` uses this
+parallel path.
+
+The [CLI reference](cli-reference.md#harn-test) lists every test flag. The
+[JSON contract](cli-json-contract.md#harn-test-conformance---json) defines the
+machine-readable result shape.
 
 For user tests, `--timeout` bounds only the pipeline execution phase. VM,
 stdlib, skill, and manifest setup is measured separately and cannot consume the
@@ -83,7 +97,7 @@ compile/load attribution separately and labels it as overlapping the phases.
 Cold module compilation overlaps the suite compile phase; module instantiation
 and initialization remain attributed to the test that executes them. User JSON
 report schema v2 carries the same distribution, typed timeout metadata, and
-per-case phases. Conformance JSON schema v2 uses the same typed distribution
+per-case phases. Conformance JSON schema v3 uses the same typed distribution
 owner. Module compile/load values overlap compile, setup, and execution and
 must not be added to total wall time.
 

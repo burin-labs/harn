@@ -243,7 +243,7 @@ pub(crate) use supervisor::{
     SupervisorPauseArgs, SupervisorRecoverArgs, SupervisorReplayArgs, SupervisorResumeArgs,
     SupervisorStartArgs, SupervisorStopArgs,
 };
-pub(crate) use test::TestArgs;
+pub(crate) use test::{InternalConformanceWorkerMode, TestArgs};
 pub(crate) use test_bench::{
     TestBenchArgs, TestBenchCommand, TestBenchExportAnnotationsArgs, TestBenchFidelityArgs,
     TestBenchReplayArgs, TestBenchRunArgs, TestBenchValidateAnnotationsArgs,

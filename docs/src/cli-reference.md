@@ -516,6 +516,8 @@ Run tests.
 harn test conformance                  # run conformance test suite
 harn test conformance tests/language/arithmetic.harn # run one conformance file
 harn test conformance tests/stdlib/     # run a conformance subtree
+harn test conformance --parallel       # run isolated conformance workers
+harn test conformance --parallel -j 4  # pin the conformance worker count
 harn test tests/                       # run user tests in directory
 harn test tests/ --filter "auth*"      # filter by pattern
 harn test tests/ --parallel            # run tests concurrently with bounded workers
@@ -545,8 +547,8 @@ test still receives a fresh VM, module state, and persistence root.
 | `--json` | Emit conformance results as JSON to stdout, or the agents-conformance leaderboard report |
 | `--json-out <path>` | Write user-test results (or the agents-conformance report) to a JSON file; user-test schemaVersion 3 includes typed timeout, phase, aggregate, latency-distribution, and captured-output data |
 | `--workspace-id <id>` / `--session-id <id>` | Reuse existing Harness resources for agents conformance setup |
-| `--parallel` | Run tests concurrently with a bounded worker pool. Slow tests are front-loaded using historical timings from `.harn/test-timings.json` |
-| `--jobs <N>` / `-j <N>` | Maximum concurrent workers (also `HARN_TEST_JOBS`). Defaults to available parallelism, capped at 8 |
+| `--parallel` | Run a bounded worker pool. User tests run in-process and front-load slow files using `.harn/test-timings.json`. Conformance tests run in isolated processes because each worker owns process-wide runtime state. |
+| `--jobs <N>` / `-j <N>` | Maximum concurrent workers (also `HARN_TEST_JOBS`). The default follows available CPU and memory, capped at 8. |
 | `--watch` | Re-run tests on file changes (mutually exclusive with `--junit` / `--json-out`) |
 | `--verbose` / `-v` | Show per-test timing and detailed failures, including a passing test's captured `log`/`print`/`println` output (a failing test's captured output is always shown) |
 | `--timing` | Show detailed per-test timing, slowest tests/files, and phase totals. Every user-test run prints the concise p50/p90 latency line |
