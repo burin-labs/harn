@@ -70,16 +70,31 @@
       ]
     },
     {
-      "name": "Harn conformance + audit",
-      "job_id": "harn-audit",
-      "matrix_kind": "",
+    "name": "Harn conformance",
+    "job_id": "harn-audit",
+    "matrix_kind": "conformance",
       "proofs": ["harn-audit"],
       "steps": [
         {
           "id": "release-audit-harn",
           "condition": "",
-          "run": "./scripts/audit_gates.sh"
-        }
+        "run": "./scripts/audit_gates.sh --phase \"${{ matrix.kind }}\""
+      }
+    ]
+  },
+  {
+    "name": "Harn audit gates",
+    "job_id": "harn-audit",
+    "matrix_kind": "audit",
+    "proofs": [
+      "harn-audit"
+    ],
+    "steps": [
+      {
+        "id": "release-audit-harn",
+        "condition": "",
+        "run": "./scripts/audit_gates.sh --phase \"${{ matrix.kind }}\""
+      }
       ]
     }
   ]

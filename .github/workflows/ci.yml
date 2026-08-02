@@ -989,7 +989,7 @@ jobs:
           -E 'test(test_linux_process_sandbox_catches_ten_process_escapes)'
 
   harn-audit:
-    name: Harn conformance + audit
+    name: ${{ matrix.name }}
     # Consumes only the small portable CLI bundle, so it hangs off the fast
     # dedicated rust-check-inputs producer instead of the full workspace
     # compile+suite.
@@ -998,10 +998,20 @@ jobs:
       needs.changes.outputs.rust == 'true'
       && needs.rust-check-inputs.result == 'success'
     runs-on: ubuntu-latest
-    # Hang backstop, not a performance budget. On hosted four-core runners the
-    # complete conformance/audit fanout has reached the old 20m ceiling while
-    # healthy work was still progressing. Keep roughly 2x headroom; the
-    # per-test performance ratchet still owns performance regressions.
+    # The immutable CLI producer is shared, but conformance and the independent
+    # source/grammar/generated audits use separate free hosted workers. Putting
+    # both four-way pools on one four-core runner starved conformance and kept
+    # this post-build phase near ten minutes even after the CLI was ready.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kind: conformance
+            name: Harn conformance
+          - kind: audit
+            name: Harn audit gates
+    # Hang backstop, not a performance budget. The per-test performance ratchet
+    # still owns performance regressions.
     timeout-minutes: 40
     permissions:
       actions: read
@@ -1028,32 +1038,35 @@ jobs:
           "$GITHUB_SHA"
           "$GITHUB_ENV"
       - uses: ./.github/actions/node-cache
+        if: matrix.kind == 'audit'
         with:
           node-version: "22"
           cache-dependency-path: tree-sitter-harn/package-lock.json
       - name: Install Harn script test dependencies
+        if: matrix.kind == 'audit'
         uses: ./.github/actions/apt-install
         timeout-minutes: 5
         with:
           packages: ripgrep
           check-command: rg
       - name: Build tree-sitter grammar for the parse sweep
+        if: matrix.kind == 'audit'
         working-directory: tree-sitter-harn
         run: |
           npm ci
           touch src/parser.c
           ./scripts/tree-sitter-cli.sh build
-      - name: Run Harn conformance and audit
+      - name: Run Harn proof worker
         id: release-audit-harn
         env:
-          # The repo-scale scan and contract lookup regressions are fixed, so
-          # restore the proven four-shard/four-gate topology. The two-plus-two
-          # default more than doubled this lane's hosted wall time.
           AUDIT_GATES_CONCURRENCY: "4"
           HARN_CONFORMANCE_SHARDS: "4"
-        run: ./scripts/audit_gates.sh
+        run: ./scripts/audit_gates.sh --phase "${{ matrix.kind }}"
       - name: Summarize rolling merge-group wall time
-        if: github.event_name == 'merge_group' && steps.release-audit-harn.outcome == 'success'
+        if: >-
+          matrix.kind == 'conformance'
+          && github.event_name == 'merge_group'
+          && steps.release-audit-harn.outcome == 'success'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1921,12 +1934,12 @@ jobs:
           fi
 
           harn_audit_result="${{ needs['harn-audit'].result }}"
-          echo "Harn conformance + audit: $harn_audit_result"
+          echo "Harn proof workers: $harn_audit_result"
           if [ "$harn_audit_result" != "success" ]; then
             if [ "$harn_audit_result" = "skipped" ] && [ "${{ needs.changes.outputs.rust }}" != "true" ]; then
               :
             else
-              echo "::error::Harn conformance + audit failed or skipped while Rust proof was required."
+              echo "::error::Harn proof workers failed or skipped while Rust proof was required."
               exit 1
             fi
           fi
