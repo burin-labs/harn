@@ -715,7 +715,7 @@ fn apply_rewrites_ambient_call_through_root_first_split_boundary() {
     let script = temp.path().join("root_first_split.harn");
     fs::write(
         &script,
-        "fn helper(harness: Harness, clock: HarnessClock) {\n  println(\"hi\")\n  clock.now_ms()\n}\n\nfn main(harness: Harness) {\n  helper(harness, harness.clock)\n}\n",
+        "fn helper(harness: Harness, clock: HarnessClock) {\n  println(\"hi\")\n  now_ms()\n}\n\nfn main(harness: Harness) {\n  helper(harness, harness.clock)\n}\n",
     )
     .unwrap();
 
@@ -738,6 +738,10 @@ fn apply_rewrites_ambient_call_through_root_first_split_boundary() {
     assert!(
         updated.contains("harness.stdio.println(\"hi\")"),
         "the root carrier should own the ambient rewrite: {updated}"
+    );
+    assert!(
+        updated.contains("clock.now_ms()") && !updated.contains("harness.clock.now_ms()"),
+        "an existing narrow carrier should take precedence over root authority: {updated}"
     );
 }
 
@@ -776,6 +780,50 @@ fn apply_extends_narrow_first_split_boundary_with_missing_handle() {
     assert!(
         updated.contains("helper(harness.clock, harness.secrets, harness.stdio, {})"),
         "the caller should project the added handle at the matching position: {updated}"
+    );
+
+    let second = apply_repairs_with_options(
+        &script,
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions {
+            capability_migrations_only: true,
+        },
+    )
+    .unwrap();
+    assert!(second.applied.is_empty(), "{second:#?}");
+}
+
+#[test]
+fn apply_completes_split_capability_prefix_before_extension() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("partial_split_call.harn");
+    fs::write(
+        &script,
+        "fn mint(clock: HarnessClock, secrets: HarnessSecrets) {\n  println(\"hi\")\n  return {time: clock.now_ms(), key: secrets.read(\"key\", nil)}\n}\n\nfn main(harness: Harness) {\n  mint(harness.clock)\n}\n",
+    )
+    .unwrap();
+
+    let first = apply_repairs_with_options(
+        &script,
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions {
+            capability_migrations_only: true,
+        },
+    )
+    .unwrap();
+    assert!(!first.applied.is_empty(), "{first:#?}");
+
+    let updated = fs::read_to_string(&script).unwrap();
+    assert!(
+        updated
+            .contains("fn mint(clock: HarnessClock, secrets: HarnessSecrets, stdio: HarnessStdio)"),
+        "the split signature should gain the missing handle: {updated}"
+    );
+    assert!(
+        updated.contains("mint(harness.clock, harness.secrets, harness.stdio)"),
+        "the partial call should converge in parameter order: {updated}"
     );
 
     let second = apply_repairs_with_options(

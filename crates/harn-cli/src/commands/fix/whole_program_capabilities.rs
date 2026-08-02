@@ -341,39 +341,26 @@ pub(super) fn plan(
             edits_by_file.entry(caller.file_idx).or_default().push(edit);
         }
         if !added_capabilities[edge.callee].is_empty() {
-            let arguments = added_capabilities[edge.callee]
-                .keys()
-                .map(|capability| {
-                    capability_value(
-                        caller,
-                        caller_desired,
-                        &added_capabilities[edge.caller],
-                        *capability,
-                    )
-                    .ok_or_else(|| {
-                        format!(
-                            "{} cannot supply {} to {}",
-                            caller.info.name,
-                            capability.type_name(),
-                            callee.info.name
-                        )
-                    })
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            let index = callee
-                .carriers
-                .iter()
-                .map(|carrier| carrier.param_index)
-                .max()
-                .expect("split callable has capability carriers")
-                + 1;
+            let Some((index, arguments)) = split_call_extension(
+                caller,
+                caller_desired,
+                &added_capabilities[edge.caller],
+                callee,
+                &added_capabilities[edge.callee],
+                call.args.len(),
+            )?
+            else {
+                // The call omits a non-capability positional argument. The
+                // fixer cannot synthesize that value, so leave it untouched.
+                continue;
+            };
             let edit = add_call_arguments_at_index_edit(
                 &program_files[caller.file_idx].source,
                 call,
                 index,
                 &arguments,
             )
-            .ok_or_else(|| format!("failed to extend call to {}", callee.info.name))?;
+            .expect("split extension index is bounded by the observed call arity");
             edits_by_file.entry(caller.file_idx).or_default().push(edit);
         }
     }
@@ -802,10 +789,10 @@ fn added_split_capability_bindings(
             .into_iter()
             .find(|candidate| !unavailable.contains(candidate))
             .unwrap_or_else(|| {
-                (2..)
+                (2..=unavailable.len() + 2)
                     .map(|suffix| format!("{base}_{suffix}"))
                     .find(|candidate| !unavailable.contains(candidate))
-                    .expect("unbounded capability binding candidates")
+                    .expect("bounded capability binding candidates contain a free name")
             });
         unavailable.insert(name.clone());
         additions.insert(*capability, name);
@@ -857,10 +844,16 @@ fn capability_access<'a>(
     capability: CapabilityId,
 ) -> Option<CapabilityAccess<'a>> {
     if callable.has_split_capability_params {
-        for carrier in &callable.carriers {
-            if !carrier_supplies(&carrier.kind, capability) {
-                continue;
-            }
+        if let Some(carrier) = callable
+            .carriers
+            .iter()
+            .filter(|carrier| carrier_supplies(&carrier.kind, capability))
+            .min_by_key(|carrier| match carrier.kind {
+                CarrierKind::Narrow(_) => 0,
+                CarrierKind::Bundle(_) => 1,
+                CarrierKind::Root => 2,
+            })
+        {
             return Some(CapabilityAccess {
                 binding: &carrier.name,
                 direct: matches!(carrier.kind, CarrierKind::Narrow(_)),
@@ -940,6 +933,57 @@ fn argument_for_kind(
             Ok(format!("{{{}}}", fields.join(", ")))
         }
     }
+}
+
+/// Project every capability argument required to make a split call contiguous.
+/// A missing ordinary parameter is not synthesizable, so that call is deferred.
+fn split_call_extension(
+    caller: &ProgramCallable,
+    caller_desired: &CarrierKind,
+    caller_additions: &BTreeMap<CapabilityId, String>,
+    callee: &ProgramCallable,
+    callee_additions: &BTreeMap<CapabilityId, String>,
+    call_arity: usize,
+) -> Result<Option<(usize, Vec<String>)>, String> {
+    let extension_index = callee
+        .carriers
+        .iter()
+        .map(|carrier| carrier.param_index)
+        .max()
+        .expect("split callable has capability carriers")
+        + 1;
+    let insertion_index = call_arity.min(extension_index);
+    let mut arguments = Vec::new();
+    for param_index in call_arity..extension_index {
+        let Some(carrier) = callee
+            .carriers
+            .iter()
+            .find(|carrier| carrier.param_index == param_index)
+        else {
+            return Ok(None);
+        };
+        arguments.push(argument_for_kind(
+            caller,
+            caller_desired,
+            caller_additions,
+            &carrier.kind,
+        )?);
+    }
+    for capability in callee_additions.keys() {
+        arguments.push(
+            capability_value(caller, caller_desired, caller_additions, *capability).ok_or_else(
+                || {
+                    format!(
+                        "{} cannot supply {} to {}",
+                        caller.info.name,
+                        capability.type_name(),
+                        callee.info.name
+                    )
+                },
+            )?,
+        );
+    }
+    Ok(Some((insertion_index, arguments)))
 }
 
 fn signature_edit(
