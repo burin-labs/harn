@@ -1109,6 +1109,17 @@ mod tests {
             workflow_id: "workflow".to_string(),
             task: format!("do not expose {secret}"),
             status: "completed".to_string(),
+            transcript: Some(serde_json::json!({
+                "events": [{
+                    "kind": "message",
+                    "role": "assistant",
+                    "visibility": "public",
+                    "blocks": [
+                        {"type": "output_text", "text": format!("safe answer {secret}"), "visibility": "public"},
+                        {"type": "reasoning", "text": "private chain of thought", "visibility": "private"}
+                    ]
+                }]
+            })),
             ..RunRecord::default()
         };
         fs::write(&run_path, serde_json::to_vec(&run).unwrap()).unwrap();
@@ -1123,6 +1134,13 @@ mod tests {
         .unwrap();
         let rendered = serde_json::to_string(&report).unwrap();
         assert!(!rendered.contains(secret));
+        let visible = report.agents[0]
+            .visible_output
+            .as_deref()
+            .expect("public transcript output");
+        assert!(visible.starts_with("safe answer "));
+        assert!(visible.contains("<redacted:openai_key:"));
+        assert!(!rendered.contains("private chain of thought"));
 
         let expected_hash = report.projection.hash.clone();
         let mut value = serde_json::to_value(&report).unwrap();
