@@ -508,6 +508,84 @@ fn capability_apply_promotes_a_narrow_carrier_to_root_for_orchestration() {
 }
 
 #[test]
+fn capability_apply_propagates_root_selection_through_a_split_caller() {
+    let (result, updated) = apply_single(
+        "fn orchestrate() {\n  const dir = cwd()\n  const timestamp = now_ms()\n  const usage = llm_usage()\n  return {dir: dir, timestamp: timestamp, usage: usage}\n}\n\nfn bridge(fs: HarnessFs, clock: HarnessClock) {\n  clock.now_ms()\n  return orchestrate()\n}\n\nfn main(harness: Harness) {\n  bridge(harness.fs, harness.clock)\n}\n",
+    );
+    assert_eq!(
+        result.post_apply_diagnostics_count, 0,
+        "{result:#?}\n{updated}"
+    );
+    assert_eq!(
+        callable_params(&updated, "bridge"),
+        vec![param("fs", "Harness"), param("clock", "HarnessClock")],
+        "the root-selected callee must elevate the split caller without deleting its other parameters"
+    );
+    assert_eq!(
+        call_argument_paths(&updated, "bridge")[0],
+        [
+            Some("harness".to_string()),
+            Some("harness.clock".to_string())
+        ]
+    );
+    assert_eq!(
+        call_argument_paths(&updated, "orchestrate")[0],
+        [Some("fs".to_string())],
+        "the elevated carrier must supply root authority to the callee"
+    );
+}
+
+#[test]
+fn capability_apply_edge_errors_identify_the_exact_call() {
+    let error = whole_program_capabilities::call_edge_error(
+        std::path::Path::new("pipelines/lib/adapter.harn"),
+        "load_workspace",
+        "orchestrate",
+        harn_lexer::Span::with_offsets(120, 147, 8, 5),
+        "a narrow caller cannot supply root Harness",
+    );
+    assert_eq!(
+        error,
+        "cannot migrate call `load_workspace` -> `orchestrate` at pipelines/lib/adapter.harn:8:5 (bytes 120..147): a narrow caller cannot supply root Harness"
+    );
+}
+
+#[test]
+fn capability_only_plan_excludes_unrelated_preflight_repairs_at_fixed_point() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("main.harn");
+    fs::write(
+        &script,
+        "import { absent } from \"./missing\"\n\nfn main(harness: Harness) -> string {\n  return cwd()\n}\n",
+    )
+    .unwrap();
+
+    let result = apply_repairs_with_options(
+        &script,
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions {
+            capability_migrations_only: true,
+        },
+    )
+    .unwrap();
+    assert!(!result.applied.is_empty(), "{result:#?}");
+
+    let second_plan = build_plan_with_options(
+        &script,
+        Some(RepairSafety::SurfaceChanging),
+        FixOptions {
+            capability_migrations_only: true,
+        },
+    )
+    .unwrap();
+    assert!(
+        second_plan.repairs.is_empty(),
+        "an unrelated unresolved-import preflight must not make a completed capability migration look unfinished: {second_plan:#?}"
+    );
+}
+
+#[test]
 fn capability_apply_recognizes_a_local_named_capability_bundle() {
     let (result, updated) = apply_single(
         "type ScenarioCapabilities = {testing: HarnessTesting, llm: HarnessLlm}\n\nfn with_host_fixture(testing: HarnessTesting, body) {\n  testing.calls()\n  return body()\n}\n\nfn with_scenario(capabilities: ScenarioCapabilities, body) {\n  return with_host_fixture(capabilities.testing, body)\n}\n\nfn main(harness: Harness) {\n  with_scenario({testing: harness.testing, llm: harness.llm}, { -> nil })\n}\n",

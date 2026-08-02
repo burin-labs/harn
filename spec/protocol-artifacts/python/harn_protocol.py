@@ -127,6 +127,7 @@ __all__ = [
     "HarnSessionTimelineReference",
     "HarnSessionTimelineLink",
     "HarnSessionTimelineNode",
+    "HarnSessionTimelineCoverage",
     "HarnSessionTimelineSnapshot",
     "HarnSessionTimelineUpdate",
     "is_request",
@@ -286,6 +287,7 @@ HARN_AGENT_EVENT_KINDS: tuple = (
     "self_consistency_tie",
     "session_closed",
     "structural_validator_decision",
+    "subagent_join",
     "subagent_stop",
     "step_judge_decision",
     "tool_batch_disposition",
@@ -763,10 +765,17 @@ class HarnSessionTimelineNode:
     links: List[HarnSessionTimelineLink] = field(default_factory=list)
 
 @dataclass
+class HarnSessionTimelineCoverage:
+    returned: int
+    available: Optional[int]
+    truncated: bool
+
+@dataclass
 class HarnSessionTimelineSnapshot:
     schemaVersion: int
     query: HarnSessionTimelineQuery
     cursor: HarnSessionTimelineCursor
+    coverage: HarnSessionTimelineCoverage
     nodes: List[HarnSessionTimelineNode]
 
 @dataclass

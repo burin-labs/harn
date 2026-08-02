@@ -255,6 +255,7 @@ fn generated_rust_includes_harn_wire_vocabularies() {
     assert!(rust.contains("pub struct HarnAgentEventParams"));
     assert!(rust.contains("pub enum HarnAgentEventKind"));
     assert!(rust.contains("pub struct HarnSessionTimelineNode"));
+    assert!(rust.contains("pub struct HarnSessionTimelineCoverage"));
     assert!(rust.contains("pub struct HarnSessionTimelineSnapshot"));
     // Dotted / slashed wire names must collapse to valid const identifiers.
     assert!(rust.contains(
@@ -295,6 +296,7 @@ fn generated_bindings_expose_one_open_session_timeline_contract() {
         "HarnSessionTimelineReference",
         "HarnSessionTimelineLink",
         "HarnSessionTimelineNode",
+        "HarnSessionTimelineCoverage",
         "HarnSessionTimelineSnapshot",
         "HarnSessionTimelineUpdate",
     ] {

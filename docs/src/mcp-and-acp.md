@@ -865,6 +865,13 @@ agent-loop prompts, embedders should report completion only when
 `terminal.kind` is `natural`; `stopReason: end_turn` can also accompany policy
 or unknown stops.
 
+Delegated work uses the same two identities. `_harn/agentEvent` notifications
+with `kind: "subagent_stop"` carry parent and child session/run references for
+terminal completion. A background child's first `wait_agent` observation emits
+`kind: "subagent_join"` with the same references plus `workerId`,
+`completedAtMs`, `joinedAtMs`, and `waitMs`. The stop event says when the child
+finished; the join event says when its parent collected that result.
+
 ### Session timeline extension
 
 `harn.session_timeline.query` projects existing Harn observability records into

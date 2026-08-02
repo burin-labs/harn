@@ -213,6 +213,7 @@ export const HARN_AGENT_EVENT_KINDS = [
   "self_consistency_tie",
   "session_closed",
   "structural_validator_decision",
+  "subagent_join",
   "subagent_stop",
   "step_judge_decision",
   "tool_batch_disposition",
@@ -1102,10 +1103,17 @@ export interface HarnSessionTimelineNode {
   order: number
 }
 
+export interface HarnSessionTimelineCoverage {
+  returned: number
+  available: number | null
+  truncated: boolean
+}
+
 export interface HarnSessionTimelineSnapshot {
   schemaVersion: number
   query: HarnSessionTimelineQuery
   cursor: HarnSessionTimelineCursor
+  coverage: HarnSessionTimelineCoverage
   nodes: HarnSessionTimelineNode[]
 }
 

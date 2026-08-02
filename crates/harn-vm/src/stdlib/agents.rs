@@ -82,7 +82,11 @@ pub(super) struct SubAgentRunSpec {
     pub(super) options: crate::value::DictMap,
     pub(super) returns_schema: Option<VmValue>,
     pub(super) session_id: String,
+    /// Stable identity for this invocation. Allocated before the child starts
+    /// and reused by the canonical transcript journal.
+    pub(super) run_id: String,
     pub(super) parent_session_id: Option<String>,
+    pub(super) parent_run_id: Option<String>,
     pub(super) reminder_propagation: Vec<crate::llm::helpers::SystemReminder>,
     /// Workspace anchor applied to the child session at spawn time
     /// (#2223). `None` leaves the child anchor-less; when present, the
@@ -97,6 +101,7 @@ pub(super) struct SubAgentRunSpec {
 pub(super) struct SubAgentExecutionResult {
     pub(super) payload: serde_json::Value,
     pub(super) transcript: VmValue,
+    pub(super) identity: crate::agent_events::AgentRunRef,
 }
 
 pub(crate) fn register_agent_builtins(vm: &mut Vm) {
@@ -165,6 +170,12 @@ fn fresh_worker_state(
         if !spec.session_id.is_empty() {
             audit.session_id = spec.session_id.clone();
         }
+        if audit.parent_session_id.is_none() {
+            audit.parent_session_id = spec.parent_session_id.clone();
+        }
+        if audit.run_id.is_none() {
+            audit.run_id = spec.parent_run_id.clone();
+        }
     }
     let request = worker_request_for_config(&init.task, &init.config);
     Arc::new(parking_lot::Mutex::new(WorkerState {
@@ -175,6 +186,7 @@ fn fresh_worker_state(
         created_at: created_at.clone(),
         started_at: created_at,
         finished_at: None,
+        joined_at_ms: None,
         awaiting_started_at: None,
         awaiting_since: None,
         mode,
@@ -756,7 +768,9 @@ async fn top_level_agent_suspend_builtin(
             options,
             returns_schema: None,
             session_id: session_id.clone(),
+            run_id: format!("agent_run_{}", uuid::Uuid::now_v7()),
             parent_session_id: None,
+            parent_run_id: None,
             reminder_propagation: Vec::new(),
             workspace_anchor: None,
             stop_emitted: Arc::new(AtomicBool::new(false)),
@@ -780,6 +794,7 @@ async fn top_level_agent_suspend_builtin(
         created_at: now.clone(),
         started_at: now.clone(),
         finished_at: None,
+        joined_at_ms: None,
         awaiting_started_at: None,
         awaiting_since: None,
         mode: "top_level_agent".to_string(),

@@ -69,6 +69,7 @@ pipeline main(harness: Harness) {
       readiness_interval_ms: env_int(harness.env, "HARN_BUMP_READINESS_INTERVAL_MS", 20000),
       readiness_timeout_ms: env_int(harness.env, "HARN_BUMP_READINESS_TIMEOUT_MS", 20000),
     },
+    harness.fs,
   )
   const options = bump_options(
     {

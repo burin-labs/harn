@@ -105,12 +105,20 @@ pub(crate) async fn run_file_mcp_serve(
     emit_loader_warnings(&loaded.loader_warnings);
     install_skills_global(&mut vm, &loaded);
 
-    if let Err(error) =
-        super::manifest_runtime::install_manifest_runtime(Path::new(path), &mut vm, false).await
+    let _manifest_runtime = match super::manifest_runtime::install_manifest_runtime(
+        Path::new(path),
+        store_base,
+        &mut vm,
+        false,
+    )
+    .await
     {
-        eprintln!("error: failed to install {}: {error}", error.label());
-        process::exit(1);
-    }
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("error: failed to install {}: {error}", error.label());
+            process::exit(1);
+        }
+    };
 
     vm.set_source_dir(&entry_source_dir(path));
     let local = tokio::task::LocalSet::new();

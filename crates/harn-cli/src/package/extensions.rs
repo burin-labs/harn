@@ -152,6 +152,41 @@ fn dedupe_provider_connectors(
     out
 }
 
+/// Load one manifest-declared provider connector behind the runtime's common
+/// connector trait. Rust builtins are already present in the default registry.
+pub async fn load_provider_connector(
+    config: &ResolvedProviderConnectorConfig,
+) -> Result<Option<Box<dyn harn_vm::Connector>>, PackageError> {
+    match &config.connector {
+        ResolvedProviderConnectorKind::RustBuiltin => Ok(None),
+        ResolvedProviderConnectorKind::Invalid(message) => {
+            Err(PackageError::Validation(message.clone()))
+        }
+        ResolvedProviderConnectorKind::Harn { module } => {
+            let module_path = harn_vm::resolve_module_import_path(&config.manifest_dir, module);
+            let connector = harn_vm::HarnConnector::load(&module_path)
+                .await
+                .map_err(|error| {
+                    PackageError::Validation(format!(
+                        "failed to load Harn connector '{}' for provider '{}': {error}",
+                        module_path.display(),
+                        config.id.as_str()
+                    ))
+                })?;
+            let observed = harn_vm::Connector::provider_id(&connector);
+            if observed != &config.id {
+                return Err(PackageError::Validation(format!(
+                    "provider '{}' resolves to connector module '{}' which declares provider_id '{}'",
+                    config.id.as_str(),
+                    module_path.display(),
+                    observed.as_str()
+                )));
+            }
+            Ok(Some(Box::new(connector)))
+        }
+    }
+}
+
 pub fn load_runtime_extensions(anchor: &Path) -> RuntimeExtensions {
     match try_load_runtime_extensions(anchor) {
         Ok(extensions) => extensions,

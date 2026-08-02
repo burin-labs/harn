@@ -50,6 +50,22 @@ struct CapabilityAccess<'a> {
     direct: bool,
 }
 
+fn effective_carrier_kind<'a>(
+    callable: &ProgramCallable,
+    desired: &'a CarrierKind,
+    carrier: &'a super::Carrier,
+) -> &'a CarrierKind {
+    if callable
+        .carrier
+        .as_ref()
+        .is_some_and(|primary| primary.param_index == carrier.param_index)
+    {
+        desired
+    } else {
+        &carrier.kind
+    }
+}
+
 fn capability_access<'a>(
     callable: &'a ProgramCallable,
     desired: &CarrierKind,
@@ -60,16 +76,24 @@ fn capability_access<'a>(
         if let Some(carrier) = callable
             .carriers
             .iter()
-            .filter(|carrier| carrier_supplies(&carrier.kind, capability))
-            .min_by_key(|carrier| match carrier.kind {
-                CarrierKind::Narrow(_) => 0,
-                CarrierKind::Bundle(_) => 1,
-                CarrierKind::Root => 2,
+            .filter(|carrier| {
+                carrier_supplies(
+                    effective_carrier_kind(callable, desired, carrier),
+                    capability,
+                )
             })
+            .min_by_key(
+                |carrier| match effective_carrier_kind(callable, desired, carrier) {
+                    CarrierKind::Narrow(_) => 0,
+                    CarrierKind::Bundle(_) => 1,
+                    CarrierKind::Root => 2,
+                },
+            )
         {
+            let effective = effective_carrier_kind(callable, desired, carrier);
             return Some(CapabilityAccess {
                 binding: &carrier.name,
-                direct: matches!(carrier.kind, CarrierKind::Narrow(_)),
+                direct: matches!(effective, CarrierKind::Narrow(_)),
             });
         }
         return additions.get(&capability).map(|binding| CapabilityAccess {
@@ -109,7 +133,12 @@ pub(super) fn argument_for_kind(
                 callable
                     .carriers
                     .iter()
-                    .find(|carrier| matches!(carrier.kind, CarrierKind::Root))
+                    .find(|carrier| {
+                        matches!(
+                            effective_carrier_kind(callable, desired, carrier),
+                            CarrierKind::Root
+                        )
+                    })
                     .map(|carrier| carrier.name.clone())
                     .ok_or_else(|| "a narrow caller cannot supply root Harness".to_string())
             } else if matches!(desired, CarrierKind::Root) {
@@ -125,8 +154,11 @@ pub(super) fn argument_for_kind(
         CarrierKind::Bundle(required) => {
             let exact_bundle = if callable.has_split_capability_params {
                 callable.carriers.iter().find_map(|carrier| {
-                    matches!(&carrier.kind, CarrierKind::Bundle(available) if available == required)
-                        .then_some(carrier.name.as_str())
+                    matches!(
+                        effective_carrier_kind(callable, desired, carrier),
+                        CarrierKind::Bundle(available) if available == required
+                    )
+                    .then_some(carrier.name.as_str())
                 })
             } else {
                 matches!(desired, CarrierKind::Bundle(available) if available == required)

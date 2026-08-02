@@ -569,15 +569,14 @@ fn capability_only_plan_excludes_unrelated_repairs() {
     )
     .unwrap();
     assert!(!plan.repairs.is_empty());
-    assert!(plan.repairs.iter().all(|repair| repair
-        .repair
-        .id
-        .starts_with("bindings/thread-harness")
-        || repair.repair.id == "bindings/attenuate-harness"));
     assert!(plan
         .repairs
         .iter()
-        .any(|repair| repair.repair.id == "bindings/attenuate-harness"));
+        .all(|repair| is_capability_migration_repair_id(&repair.repair.id)));
+    assert!(
+        plan.repairs.iter().all(|repair| !repair.edits.is_empty()),
+        "capability-only plans must contain only executable repairs: {plan:#?}"
+    );
 }
 
 #[test]

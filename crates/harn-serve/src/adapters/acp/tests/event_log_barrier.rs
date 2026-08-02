@@ -1,6 +1,6 @@
 use super::*;
 
-struct ResetActiveEventLog;
+pub(super) struct ResetActiveEventLog;
 
 impl Drop for ResetActiveEventLog {
     fn drop(&mut self) {

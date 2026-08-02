@@ -354,6 +354,7 @@ pub(crate) use self::agent_runtime::{
 };
 #[cfg(test)]
 pub(crate) use self::agent_runtime::{fire_session_close_hooks, fire_session_end_hooks};
+pub(crate) use self::agent_session_host::active_run_id as active_agent_run_id;
 pub use self::api::fetch_provider_max_context;
 pub(crate) use self::api::vm_call_llm_full;
 pub(crate) use self::call::{

@@ -892,10 +892,17 @@ export interface HarnSessionTimelineNode {
   order: number
 }
 
+export interface HarnSessionTimelineCoverage {
+  returned: number
+  available: number | null
+  truncated: boolean
+}
+
 export interface HarnSessionTimelineSnapshot {
   schemaVersion: number
   query: HarnSessionTimelineQuery
   cursor: HarnSessionTimelineCursor
+  coverage: HarnSessionTimelineCoverage
   nodes: HarnSessionTimelineNode[]
 }
 

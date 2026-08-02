@@ -244,7 +244,9 @@ fn test_decision_and_promotion() {
   require decision.winner == "simple", "the better candidate is selected"
   require decision.promotion_required, "tune wins require explicit promotion"
   require len(decision.realized_assignments) > 0, "decision preserves realized assignment evidence"
-  require decision.candidates[1].status == "regressed_on_primary",
+  const replicate = decision.candidates[1]
+  require replicate != nil, "the decision preserves the replicate candidate"
+  require replicate.status == "regressed_on_primary",
     "typed outcomes let any scheduler stop a primary-eliminated arm"
   const guardrail = decision.guardrails[0]
   let expected_values: list<float> = []
@@ -307,7 +309,9 @@ fn test_guardrail_veto() {
   )
   require decision.verdict == "GUARDRAIL_VETO", "a proven harmful leader is vetoed distinctly"
   require decision.winner == nil, "a vetoed leader cannot be promoted"
-  require decision.candidates[0].status == "regressed_on_guardrail",
+  const candidate = decision.candidates[0]
+  require candidate != nil, "the decision preserves the vetoed candidate"
+  require candidate.status == "regressed_on_guardrail",
     "the candidate terminal status records its guardrail regression"
   require !decision.no_decision, "a guardrail veto is a terminal decision"
 }
@@ -332,7 +336,9 @@ fn test_baseline_beats_a_known_bad_candidate() {
   )
   require decision.verdict == "BASELINE", "a proven worse candidate selects the baseline early"
   require decision.winner == nil, "a baseline verdict has no candidate winner"
-  require decision.candidates[0].status == "regressed_on_primary",
+  const candidate = decision.candidates[0]
+  require candidate != nil, "the decision preserves the known-bad candidate"
+  require candidate.status == "regressed_on_primary",
     "the known-bad candidate records its primary regression"
   require !decision.no_decision, "a baseline verdict is terminal rather than unresolved"
 }

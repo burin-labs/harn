@@ -53,6 +53,7 @@ fn minimal_worker_state(config: WorkerConfig, snapshot_path: String) -> WorkerSt
         created_at: "created".to_string(),
         started_at: "started".to_string(),
         finished_at: None,
+        joined_at_ms: None,
         awaiting_started_at: None,
         awaiting_since: None,
         mode: "workflow".to_string(),
@@ -173,7 +174,9 @@ fn persist_worker_snapshot_strips_closures_from_sub_agent_options_with_warning()
                 options,
                 returns_schema: None,
                 session_id: "session_1".to_string(),
+                run_id: "agent_run_1".to_string(),
                 parent_session_id: None,
+                parent_run_id: None,
                 reminder_propagation: Vec::new(),
                 workspace_anchor: None,
                 stop_emitted: Arc::new(AtomicBool::new(false)),
@@ -304,6 +307,7 @@ fn worker_snapshot_round_trip_preserves_resume_fields() {
         created_at: "created".to_string(),
         started_at: "started".to_string(),
         finished_at: Some("finished".to_string()),
+        joined_at_ms: None,
         awaiting_started_at: None,
         awaiting_since: None,
         mode: "workflow".to_string(),
@@ -484,6 +488,7 @@ fn worker_summary_exposes_request_and_provenance() {
         created_at: created_at.clone(),
         started_at: started_at.clone(),
         finished_at: Some(finished_at.clone()),
+        joined_at_ms: None,
         awaiting_started_at: None,
         awaiting_since: None,
         mode: "sub_agent".to_string(),
@@ -496,7 +501,9 @@ fn worker_summary_exposes_request_and_provenance() {
                 options: crate::value::DictMap::new(),
                 returns_schema: None,
                 session_id: "session_worker".to_string(),
+                run_id: "run_1".to_string(),
                 parent_session_id: Some("session_parent".to_string()),
+                parent_run_id: Some("run_parent".to_string()),
                 reminder_propagation: Vec::new(),
                 workspace_anchor: None,
                 stop_emitted: Arc::new(AtomicBool::new(false)),
@@ -770,6 +777,82 @@ fn worker_policy_inherits_parent_ceiling_when_unspecified() {
     );
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn background_sub_agent_consumes_nested_depth_once_on_the_real_builtin_path() {
+    use std::rc::Rc;
+
+    use crate::events::{add_event_sink, reset_event_sinks, CollectorSink};
+    use crate::orchestration::{
+        clear_execution_policy_stacks, pop_execution_policy, push_execution_policy,
+    };
+
+    clear_execution_policy_stacks();
+    reset_event_sinks();
+    reset_worker_registry();
+    crate::agent_sessions::reset_session_store();
+    crate::llm::mock::reset_llm_mock_state();
+    push_execution_policy(CapabilityPolicy {
+        recursion_limit: Some(3),
+        ..Default::default()
+    });
+    let events = Rc::new(CollectorSink::new());
+    add_event_sink(events.clone());
+
+    let request = vm_dict(vec![
+        ("_type", vm_string("sub_agent_request")),
+        ("name", vm_string("background-child")),
+        ("task", vm_string("summarize")),
+        ("background", VmValue::Bool(true)),
+        (
+            "options",
+            vm_dict(vec![
+                ("provider", vm_string("mock")),
+                ("model", vm_string("mock")),
+                ("max_iterations", VmValue::Int(1)),
+            ]),
+        ),
+    ]);
+
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let mut vm = crate::Vm::new();
+            crate::register_vm_stdlib(&mut vm);
+            let ctx = crate::vm::AsyncBuiltinCtx::for_test(vm);
+            let wait_ctx = ctx.child_ctx();
+            let worker = super::super::sub_agent_run_builtin(ctx, vec![request])
+                .await
+                .expect("background sub-agent must spawn");
+            super::super::wait_agent_builtin(wait_ctx, vec![worker])
+                .await
+                .expect("background sub-agent must reach a terminal state");
+        })
+        .await;
+
+    let descents: Vec<_> = events
+        .logs
+        .borrow()
+        .iter()
+        .filter(|event| event.category == "policy.nested_execution_descent")
+        .cloned()
+        .collect();
+    assert_eq!(descents.len(), 1, "one child launch must emit one descent");
+    assert_eq!(
+        descents[0].metadata["parent_recursion_limit"],
+        serde_json::json!(3)
+    );
+    assert_eq!(
+        descents[0].metadata["child_recursion_limit"],
+        serde_json::json!(2)
+    );
+
+    pop_execution_policy();
+    clear_execution_policy_stacks();
+    reset_event_sinks();
+    reset_worker_registry();
+    crate::agent_sessions::reset_session_store();
+    crate::llm::mock::reset_llm_mock_state();
+}
+
 #[test]
 fn worker_policy_intersects_explicit_policy_and_tools_shorthand() {
     crate::orchestration::push_execution_policy(CapabilityPolicy {
@@ -924,7 +1007,9 @@ async fn cancelled_subagent_worker_emits_one_typed_stop() {
             name: "cancelled-child".to_string(),
             task: "wait".to_string(),
             session_id: "child-subagent-cancel".to_string(),
+            run_id: "agent_run_child_cancel".to_string(),
             parent_session_id: Some(parent.clone()),
+            parent_run_id: Some("agent_run_parent_cancel".to_string()),
             ..Default::default()
         }),
     };
@@ -955,6 +1040,80 @@ async fn cancelled_subagent_worker_emits_one_typed_stop() {
     assert!(stops[0].1.is_some());
     drop(events);
     clear_session_sinks(&parent);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn waiting_for_terminal_subagent_emits_one_typed_join_receipt() {
+    use std::sync::Mutex;
+
+    use crate::agent_events::{clear_session_sinks, register_sink, AgentEvent, AgentEventSink};
+
+    struct CapturingSink(Arc<Mutex<Vec<AgentEvent>>>);
+    impl AgentEventSink for CapturingSink {
+        fn handle_event(&self, event: &AgentEvent) {
+            self.0.lock().unwrap().push(event.clone());
+        }
+    }
+
+    let parent_session = "parent-subagent-join".to_string();
+    clear_session_sinks(&parent_session);
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    register_sink(
+        parent_session.clone(),
+        Arc::new(CapturingSink(captured.clone())),
+    );
+    let (dir, snapshot_path) = temp_snapshot_path();
+    let spec = SubAgentRunSpec {
+        name: "joined-child".to_string(),
+        task: "finish work".to_string(),
+        session_id: "child-subagent-join".to_string(),
+        run_id: "agent_run_child_join".to_string(),
+        parent_session_id: Some(parent_session.clone()),
+        parent_run_id: Some("agent_run_parent_join".to_string()),
+        ..Default::default()
+    };
+    let mut worker = minimal_worker_state(
+        WorkerConfig::SubAgent {
+            spec: Box::new(spec),
+        },
+        snapshot_path,
+    );
+    worker.id = "worker-join".to_string();
+    worker.mode = "sub_agent".to_string();
+    worker.finished_at = Some(uuid::Uuid::now_v7().to_string());
+    worker.child_run_id = Some("agent_run_child_join".to_string());
+    let state = Arc::new(parking_lot::Mutex::new(worker));
+
+    super::super::replay::wait_for_worker_terminal(state.clone(), "join test")
+        .await
+        .unwrap();
+    super::super::replay::wait_for_worker_terminal(state.clone(), "join test")
+        .await
+        .unwrap();
+
+    let events = captured.lock().unwrap();
+    let joins: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::SubagentJoin {
+                lineage,
+                worker_id,
+                completed_at_ms,
+                joined_at_ms,
+                ..
+            } => Some((lineage, worker_id, completed_at_ms, joined_at_ms)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(joins.len(), 1, "join receipt must be exactly once");
+    assert_eq!(joins[0].0.parent.run_id, "agent_run_parent_join");
+    assert_eq!(joins[0].0.child.run_id, "agent_run_child_join");
+    assert_eq!(joins[0].1, "worker-join");
+    assert!(joins[0].3 >= joins[0].2);
+    assert!(state.lock().joined_at_ms.is_some());
+    drop(events);
+    clear_session_sinks(&parent_session);
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 /// The `--approve auto` (headless) shape: a live auto-approve policy sits on

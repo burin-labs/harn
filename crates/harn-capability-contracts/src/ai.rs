@@ -571,7 +571,7 @@ capability_method!(
     // runtime-owned, not model-facing state effects. Inflated contracts
     // reject under agent-loop execution policy and abort turns mid-flight.
     [],
-    "__cap_agent_session_init(message: string, system?: string|nil, options?: dict|nil) -> {session_id: string, task: string, system: string|nil, max_iterations: int, max_verify_attempts: int, done: bool, result: any?}",
+    "__cap_agent_session_init(message: string, system?: string|nil, options?: dict|nil) -> {session_id: string, run_id: string, task: string, system: string|nil, max_iterations: int, max_verify_attempts: int, done: bool, result: any?}",
     "Initialize an agent execution session."
 );
 capability_method!(

@@ -576,6 +576,60 @@ fn pub_import_selective_re_exports_named_symbols() {
 }
 
 #[test]
+fn typed_facade_resolves_callable_and_transitive_record_aliases() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    write_file(
+        root,
+        "contracts.harn",
+        "type ClientOptions = {token?: string}\npub type Request = {owner: string, options?: ClientOptions}\npub type Unused = {ignored: bool}\n",
+    );
+    write_file(
+        root,
+        "api.harn",
+        "import { Request } from \"./contracts\"\ntype Response = {owner: string}\npub fn run(request: Request) -> Response { {owner: request.owner} }\n",
+    );
+    let facade = write_file(
+        root,
+        "facade.harn",
+        "pub import \"./contracts\"\npub import { run } from \"./api\"\n",
+    );
+    let entry = write_file(
+        root,
+        "entry.harn",
+        "import { run } from \"./facade\"\nrun({owner: \"octo\", options: {token: \"x\"}}).owner\n",
+    );
+
+    let graph = build(std::slice::from_ref(&entry));
+    let type_names: HashSet<String> = graph
+        .imported_type_declarations_for_file(&entry)
+        .expect("facade type declarations should resolve")
+        .iter()
+        .filter_map(type_decl_name)
+        .map(ToString::to_string)
+        .collect();
+    let callable_names: HashSet<String> = graph
+        .imported_callable_declarations_for_file(&entry)
+        .expect("facade callable declarations should resolve")
+        .iter()
+        .filter_map(callable_decl_name)
+        .map(ToString::to_string)
+        .collect();
+
+    assert_eq!(
+        type_names,
+        HashSet::from(["ClientOptions".into(), "Request".into(), "Response".into()])
+    );
+    assert_eq!(callable_names, HashSet::from(["run".into()]));
+    assert!(
+        graph
+            .export_definition_of(&facade, "ClientOptions")
+            .is_none(),
+        "signature-only alias leaked into the facade's public API"
+    );
+}
+
+#[test]
 fn pub_import_wildcard_re_exports_full_surface() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();

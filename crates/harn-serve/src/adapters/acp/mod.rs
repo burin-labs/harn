@@ -785,21 +785,19 @@ impl AcpServerConfig {
 }
 
 impl AcpSandboxConfig {
-    /// Whether the embedder actually opted into *process*-level OS sandbox
-    /// confinement.
+    /// Whether the embedder contributed any filesystem policy.
     ///
-    /// `read_only_roots` alone does NOT count: Burin always registers bundled
-    /// pipeline roots (and other dependency roots) as `read_only_roots` on
-    /// every session, regardless of whether the user asked for sandboxing.
-    /// Treating that as an opt-in signal accidentally armed `Worktree`-level
-    /// OS confinement for every TUI session, which sandboxes child processes
-    /// and breaks their network access (e.g. `git fetch` failing DNS
-    /// resolution for `github.com`). Only real process-sandbox config
-    /// (`presets`, `read_roots`, or `write_roots`) is the opt-in signal; a
-    /// default (empty) config, or a config with only `read_only_roots`, means
-    /// "embedder said nothing about process confinement" and must behave
-    /// exactly as before.
+    /// Read-only roots are Harn file-read authority even when the embedder did
+    /// not request OS process confinement. Keep that distinction explicit via
+    /// [`Self::has_process_confinement`]: callers deciding whether to retain a
+    /// per-turn policy use this method, while callers arming an OS or network
+    /// sandbox use the narrower predicate.
     pub fn is_configured(&self) -> bool {
+        !self.read_only_roots.is_empty() || self.has_process_confinement()
+    }
+
+    /// Whether the embedder opted into process-level OS confinement.
+    pub fn has_process_confinement(&self) -> bool {
         self.process.presets.is_some()
             || !self.process.read_roots.is_empty()
             || !self.process.write_roots.is_empty()

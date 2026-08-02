@@ -10,6 +10,23 @@ pub enum SubagentTerminalStatus {
     Timeout,
 }
 
+/// One agent run and the session whose transcript owns it.
+///
+/// Session and run identifiers are deliberately separate: a session may host
+/// multiple runs, while lifecycle correlation must name the exact run.
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct AgentRunRef {
+    pub session_id: String,
+    pub run_id: String,
+}
+
+/// Authoritative parent/child identity for one delegated run.
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct DelegatedRunLineage {
+    pub parent: AgentRunRef,
+    pub child: AgentRunRef,
+}
+
 /// One coalesced filesystem notification from a hostlib `fs_watch`
 /// subscription.
 #[derive(Clone, Debug, Serialize, Deserialize)]

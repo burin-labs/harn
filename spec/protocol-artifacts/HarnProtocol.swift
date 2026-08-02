@@ -119,6 +119,7 @@ public enum HarnProtocolConstants {
         "self_consistency_tie",
         "session_closed",
         "structural_validator_decision",
+        "subagent_join",
         "subagent_stop",
         "step_judge_decision",
         "tool_batch_disposition",
@@ -1846,10 +1847,17 @@ public struct HarnSessionTimelineNode: Codable, Sendable, Equatable, Identifiabl
     public var order: UInt64
 }
 
+public struct HarnSessionTimelineCoverage: Codable, Sendable, Equatable {
+    public var returned: Int
+    public var available: Int?
+    public var truncated: Bool
+}
+
 public struct HarnSessionTimelineSnapshot: Codable, Sendable, Equatable {
     public var schemaVersion: UInt32
     public var query: HarnSessionTimelineQuery
     public var cursor: HarnSessionTimelineCursor
+    public var coverage: HarnSessionTimelineCoverage
     public var nodes: [HarnSessionTimelineNode]
 }
 

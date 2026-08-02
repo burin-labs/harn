@@ -3,6 +3,10 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::Path;
 
+use crate::cli::FixArgs;
+use crate::commands;
+use crate::commands::check::collect_preflight_diagnostics_with_module_graph as preflight_diagnostics;
+use crate::package::{self, CheckConfig, PreflightSeverity};
 use harn_lexer::{FixEdit, Span};
 use harn_lint::LintSeverity;
 use harn_parser::analysis::{AnalysisDatabase, AnalysisError};
@@ -10,12 +14,6 @@ use harn_parser::{
     visit, DiagnosticCode as Code, DiagnosticDetails, DiagnosticSeverity, Node, Repair,
     RepairSafety, SNode, TypeExpr,
 };
-use serde::Serialize;
-
-use crate::cli::FixArgs;
-use crate::commands;
-use crate::commands::check::collect_preflight_diagnostics_with_module_graph as preflight_diagnostics;
-use crate::package::{self, CheckConfig, PreflightSeverity};
 
 #[path = "fix/capability_migrations.rs"]
 mod capability_migrations;
@@ -29,6 +27,8 @@ mod retired_testing;
 mod signature_threading;
 #[path = "fix/whole_program_capabilities.rs"]
 mod whole_program_capabilities;
+#[path = "fix/wire.rs"]
+mod wire;
 use capability_migrations::{ambient_call_rewrite, ambient_capability_handle, ambient_replacement};
 use lint_context::FixLintContext;
 #[path = "fix/apply.rs"]
@@ -42,170 +42,11 @@ use signature_threading::{
     harness_param_name_for_insert, propagate_harness_requirements,
     repair_for_ambient_capability_plan,
 };
+use wire::*;
 
 pub(crate) const FIX_PLAN_SCHEMA_VERSION: u32 = 2;
 pub(crate) const FIX_APPLY_SCHEMA_VERSION: u32 = 2;
 const CAPABILITY_MIGRATION_MAX_PASSES: usize = 64;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum FixRunError {
-    Command(String),
-    PartialFailure(String),
-}
-
-impl FixRunError {
-    pub(crate) fn message(&self) -> &str {
-        match self {
-            Self::Command(message) | Self::PartialFailure(message) => message,
-        }
-    }
-
-    pub(crate) fn is_partial_failure(&self) -> bool {
-        matches!(self, Self::PartialFailure(_))
-    }
-}
-
-impl From<String> for FixRunError {
-    fn from(message: String) -> Self {
-        Self::Command(message)
-    }
-}
-
-impl std::fmt::Display for FixRunError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.message())
-    }
-}
-
-impl std::error::Error for FixRunError {}
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct RepairPlan {
-    #[serde(rename = "schemaVersion")]
-    pub schema_version: u32,
-    pub path: String,
-    pub diagnostics: Vec<DiagnosticWire>,
-    pub repairs: Vec<RepairWire>,
-    #[serde(rename = "skippedFiles")]
-    pub skipped_files: Vec<SkippedFileWire>,
-    #[serde(rename = "safetyLevels")]
-    pub safety_levels: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct ApplyResult {
-    #[serde(rename = "schemaVersion")]
-    pub schema_version: u32,
-    pub applied: Vec<AppliedRepairWire>,
-    pub skipped: Vec<SkippedRepairWire>,
-    #[serde(rename = "skippedFiles")]
-    pub skipped_files: Vec<SkippedFileWire>,
-    #[serde(rename = "post_apply_diagnostics_count")]
-    pub post_apply_diagnostics_count: usize,
-    #[serde(rename = "dryRun")]
-    pub dry_run: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct AppliedRepairWire {
-    pub diagnostic_code: String,
-    pub repair_id: String,
-    pub path: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct SkippedRepairWire {
-    pub diagnostic_index: usize,
-    pub diagnostic_code: String,
-    pub repair_id: String,
-    pub path: String,
-    pub reason: &'static str,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct SkippedFileWire {
-    pub path: String,
-    pub reason: &'static str,
-    pub diagnostics: Vec<SkippedFileDiagnosticWire>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct SkippedFileDiagnosticWire {
-    pub source: &'static str,
-    pub severity: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub code: Option<String>,
-    pub message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub span: Option<SpanWire>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub help: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct DiagnosticWire {
-    pub index: usize,
-    pub file: String,
-    pub source: &'static str,
-    pub severity: &'static str,
-    pub code: String,
-    pub message: String,
-    pub span: Option<SpanWire>,
-    pub repair: RepairMetadataWire,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct RepairWire {
-    pub diagnostic_index: usize,
-    pub diagnostic_code: String,
-    pub repair: RepairMetadataWire,
-    pub impact: RepairImpactWire,
-    pub edits: Vec<FixEditWire>,
-    pub applies_cleanly: bool,
-    pub conflicts_with: Vec<usize>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct RepairImpactWire {
-    pub classification: String,
-    pub strategy: Option<String>,
-    #[serde(rename = "signatureChanges")]
-    pub signature_changes: Vec<SignatureChangeWire>,
-    #[serde(rename = "requiresCrossModuleCallerUpdates")]
-    pub requires_cross_module_caller_updates: bool,
-    pub notes: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub(crate) struct SignatureChangeWire {
-    pub callable: String,
-    #[serde(rename = "isExported")]
-    pub is_exported: bool,
-    #[serde(rename = "isEntrypoint")]
-    pub is_entrypoint: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct RepairMetadataWire {
-    pub id: String,
-    pub summary: String,
-    pub safety: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct FixEditWire {
-    pub span: SpanWire,
-    pub replacement: String,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
-pub(crate) struct SpanWire {
-    pub start: usize,
-    pub end: usize,
-    pub line: usize,
-    pub column: usize,
-    pub end_line: usize,
-}
 
 #[derive(Debug, Clone)]
 struct RepairCandidate {
@@ -474,6 +315,13 @@ fn build_plan_with_options(
         candidates.extend(whole_program_repairs);
     }
 
+    if options.capability_migrations_only {
+        // This mode is consumed as an executable migration plan. A lint that
+        // names a conceptual repair but has no source edit is context for the
+        // whole-program planner, not a repair that apply can perform.
+        candidates.retain(|candidate| !candidate.edits.is_empty());
+    }
+
     let conflicts = detect_conflicts(&candidates);
     let diagnostics = candidates
         .iter()
@@ -714,15 +562,20 @@ fn collect_file_candidates(
         });
     }
 
-    collect_preflight(
-        file,
-        &source,
-        &program,
-        &config,
-        module_graph,
-        safety_ceiling,
-        out,
-    );
+    // Capability-only plans are a migration contract, not a general repair
+    // census. Preflight repairs have no capability migration semantics and
+    // must not appear as non-applicable work on every convergence pass.
+    if !options.capability_migrations_only {
+        collect_preflight(
+            file,
+            &source,
+            &program,
+            &config,
+            module_graph,
+            safety_ceiling,
+            out,
+        );
+    }
     Ok(())
 }
 
@@ -850,7 +703,10 @@ fn skipped_file_from_analysis_error(
 }
 
 fn is_capability_migration_repair(repair: &Repair) -> bool {
-    let id = repair.id.as_str();
+    is_capability_migration_repair_id(repair.id.as_str())
+}
+
+fn is_capability_migration_repair_id(id: &str) -> bool {
     id.starts_with("bindings/thread-harness")
         || matches!(
             id,

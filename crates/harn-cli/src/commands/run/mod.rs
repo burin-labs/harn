@@ -947,34 +947,38 @@ async fn execute_run_inner_scoped(
 
     // An explicit allow/deny policy belongs to the requested target. Defer
     // unrelated manifest handler graphs until they actually fire under this VM.
-    if let Err(error) = manifest_runtime::install_manifest_runtime(
+    let _manifest_runtime = match manifest_runtime::install_manifest_runtime(
         Path::new(path),
+        store_base,
         &mut vm,
         defer_manifest_handlers,
     )
     .await
     {
-        stderr.push_str(&format!(
-            "error: failed to install {}: {error}\n",
-            error.label()
-        ));
-        time::record_run_setup_elapsed(timing.as_deref_mut(), setup_start);
-        return finalize_run_error(
-            stdout,
-            stderr,
-            json_session,
-            summary.as_ref(),
-            phase.as_ref(),
-            rusage.as_ref(),
-            run_started,
-            None,
-            timing.as_deref(),
-            0,
-            cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
-            error.phase(),
-            error.to_string(),
-        );
-    }
+        Ok(runtime) => runtime,
+        Err(error) => {
+            stderr.push_str(&format!(
+                "error: failed to install {}: {error}\n",
+                error.label()
+            ));
+            time::record_run_setup_elapsed(timing.as_deref_mut(), setup_start);
+            return finalize_run_error(
+                stdout,
+                stderr,
+                json_session,
+                summary.as_ref(),
+                phase.as_ref(),
+                rusage.as_ref(),
+                run_started,
+                None,
+                timing.as_deref(),
+                0,
+                cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
+                error.phase(),
+                error.to_string(),
+            );
+        }
+    };
 
     let local = tokio::task::LocalSet::new();
     time::record_run_setup_elapsed(timing.as_deref_mut(), setup_start);

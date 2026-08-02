@@ -17,7 +17,9 @@ mod policy;
 mod worktree;
 
 pub(super) use audit::inherited_worker_audit;
-pub(super) use bridge::{emit_worker_event, worker_event_snapshot, worker_snapshot_path};
+pub(super) use bridge::{
+    emit_subagent_join, emit_worker_event, worker_event_snapshot, worker_snapshot_path,
+};
 pub(super) use config::{
     load_worker_state_snapshot, parse_worker_config, parse_worker_execution_profile,
     persist_worker_state_snapshot,
@@ -53,6 +55,8 @@ pub(super) struct WorkerExecutionResult {
     pub(super) transcript: Option<VmValue>,
     pub(super) artifacts: Vec<ArtifactRecord>,
     pub(super) execution: WorkerExecutionProfile,
+    pub(super) child_run_id: Option<String>,
+    pub(super) child_run_path: Option<String>,
 }
 
 #[derive(Clone, Default)]
@@ -181,6 +185,7 @@ pub(super) struct WorkerState {
     pub(super) created_at: String,
     pub(super) started_at: String,
     pub(super) finished_at: Option<String>,
+    pub(super) joined_at_ms: Option<i64>,
     pub(super) awaiting_started_at: Option<String>,
     pub(super) awaiting_since: Option<Instant>,
     pub(super) mode: String,
@@ -479,6 +484,7 @@ pub(super) fn clone_worker_state(state: &WorkerState) -> serde_json::Value {
         "created_at": state.created_at,
         "started_at": state.started_at,
         "finished_at": state.finished_at,
+        "joined_at_ms": state.joined_at_ms,
         "created_at_ms": worker_timestamp_unix_ms(&state.created_at),
         "started_at_ms": worker_timestamp_unix_ms(&state.started_at),
         "finished_at_ms": state.finished_at.as_deref().and_then(worker_timestamp_unix_ms),

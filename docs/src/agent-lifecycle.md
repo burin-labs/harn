@@ -192,7 +192,9 @@ Every terminal `sub_agent_run` emits exactly one typed `SubagentStop` through
 the standard session event sink, for foreground and background children.
 Cooperative suspension is nonterminal and does not emit it. The event carries:
 
-- `parent_run_id` and `child_run_id` for lineage;
+- `lineage.parent` and `lineage.child`, each with a `session_id` and `run_id`;
+- `parent_run_id` and `child_run_id` as compatibility projections of the
+  corresponding run IDs;
 - `terminal_status`: `success`, `failure`, `cancellation`, or `timeout`;
 - a stable terminal class and human-readable reason;
 - result and receipt references;
@@ -205,6 +207,24 @@ child share a single emission token, so a cancellation racing a normal return
 cannot duplicate the terminal record. Generic `WorkerUpdate` events remain
 available for worker presentation; `SubagentStop` is the manifest-declared
 semantic terminal contract.
+
+Session and run IDs answer different questions. A session identifies the
+transcript owner and can outlive one invocation. A run identifies one exact
+invocation and its persisted run record. Both IDs are written to LLM transcript
+events, including the JSONL entry and event-log headers, so a debugger can join
+the event to its run record directly instead of guessing from timestamps.
+
+For a background child, `wait_agent(handle)` also emits exactly one typed
+`SubagentJoin` when the caller first observes the terminal result. It carries
+the same lineage, the worker ID, `completed_at_ms`, and `joined_at_ms`. The
+difference between those timestamps is time the completed result spent waiting
+for its parent. Repeated waits return the same terminal result without emitting
+another join event. A foreground call returns its terminal result directly and
+therefore has no separate join event.
+
+The result returned by `sub_agent_run` includes both `session_id` and `run_id`.
+Persist those values when a host needs to navigate from the parent result to
+the child's transcript or run record.
 
 ## Conditioned resume
 

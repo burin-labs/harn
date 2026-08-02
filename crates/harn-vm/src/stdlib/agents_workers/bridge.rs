@@ -33,6 +33,7 @@ fn worker_bridge_metadata(state: &WorkerState) -> serde_json::Value {
         "created_at": state.created_at,
         "started_at": state.started_at,
         "finished_at": state.finished_at,
+        "joined_at_ms": state.joined_at_ms,
         // Real wall-clock ms decoded from the UUIDv7 ids above, so a worker_update
         // consumer (TUI pane, ACP, dispatch receipt) gets a usable timestamp/
         // duration instead of an opaque id. See `worker_timestamp_unix_ms`.
@@ -177,6 +178,26 @@ pub(in super::super) async fn emit_worker_event(
         );
     }
     Ok(())
+}
+
+pub(in super::super) fn emit_subagent_join(
+    snapshot: &WorkerEventSnapshot,
+    completed_at_ms: i64,
+    joined_at_ms: i64,
+) {
+    let Some(spec) = snapshot.subagent_spec.as_ref() else {
+        return;
+    };
+    let Some(lineage) = super::super::sub_agent_lifecycle::delegated_run_lineage(spec) else {
+        return;
+    };
+    crate::agent_events::emit_event(&AgentEvent::SubagentJoin {
+        session_id: lineage.parent.session_id.clone(),
+        lineage,
+        worker_id: snapshot.worker_id.clone(),
+        completed_at_ms,
+        joined_at_ms,
+    });
 }
 
 /// Resolve the parent agent-session id to attribute a worker event to.

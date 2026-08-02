@@ -206,6 +206,7 @@ var HarnAgentEventKinds = []HarnAgentEventKind{
 	"self_consistency_tie",
 	"session_closed",
 	"structural_validator_decision",
+	"subagent_join",
 	"subagent_stop",
 	"step_judge_decision",
 	"tool_batch_disposition",
@@ -563,7 +564,7 @@ type HarnSessionTimelineCursor struct {
 	Topics map[string]uint64 `json:"topics"`
 }
 
-// HarnSessionTimelineQuery filters and paginates the canonical semantic timeline.
+// HarnSessionTimelineQuery filters and bounds the canonical semantic timeline.
 type HarnSessionTimelineQuery struct {
 	SessionID  *string                   `json:"sessionId,omitempty"`
 	RunID      *string                   `json:"runId,omitempty"`
@@ -610,12 +611,20 @@ type HarnSessionTimelineNode struct {
 	Order        uint64                         `json:"order"`
 }
 
+// HarnSessionTimelineCoverage states whether a bounded snapshot is complete.
+type HarnSessionTimelineCoverage struct {
+	Returned  uint64  `json:"returned"`
+	Available *uint64 `json:"available"`
+	Truncated bool    `json:"truncated"`
+}
+
 // HarnSessionTimelineSnapshot is a point-in-time semantic timeline query result.
 type HarnSessionTimelineSnapshot struct {
-	SchemaVersion uint32                    `json:"schemaVersion"`
-	Query         HarnSessionTimelineQuery  `json:"query"`
-	Cursor        HarnSessionTimelineCursor `json:"cursor"`
-	Nodes         []HarnSessionTimelineNode `json:"nodes"`
+	SchemaVersion uint32                      `json:"schemaVersion"`
+	Query         HarnSessionTimelineQuery    `json:"query"`
+	Cursor        HarnSessionTimelineCursor   `json:"cursor"`
+	Coverage      HarnSessionTimelineCoverage `json:"coverage"`
+	Nodes         []HarnSessionTimelineNode   `json:"nodes"`
 }
 
 // HarnSessionTimelineUpdate revises one semantic node for subscribers.

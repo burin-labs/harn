@@ -61,9 +61,12 @@ mod tool_result_messages;
 use cancellation::CancelSafeNestedExecutionGuard;
 mod live_transcript_journal;
 mod plan_document;
+mod run_identity;
 mod visible_messages;
 
 use plan_document::{next_plan_document_event, plan_artifact_from_result};
+pub(crate) use run_identity::active_run_id;
+use run_identity::{agent_init_control, agent_init_control_done};
 
 #[cfg(test)]
 pub(crate) use tool_result_messages::record_tool_results_for_test;
@@ -79,6 +82,7 @@ use tool_result_messages::{
 /// in `crate::agent_sessions`.
 struct AgentHostSession {
     session_id: String,
+    run_id: String,
     task: String,
     tokens_used: i64,
     cost_used: f64,
@@ -163,6 +167,7 @@ pub(crate) fn reset_agent_session_host_state() {
 pub(crate) fn seed_host_session_provider_model(session_id: &str, provider: &str, model: &str) {
     let session = AgentHostSession {
         session_id: session_id.to_string(),
+        run_id: format!("agent_run_{}", uuid::Uuid::now_v7()),
         task: String::new(),
         tokens_used: 0,
         cost_used: 0.0,
@@ -388,7 +393,7 @@ fn now_id() -> String {
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
-    sig = "__host_agent_session_init(message: string, system?: string|nil, options?: dict|nil) -> {session_id: string, task: string, system: string|nil, max_iterations: int, max_verify_attempts: int, done: bool, result: any?}",
+    sig = "__host_agent_session_init(message: string, system?: string|nil, options?: dict|nil) -> {session_id: string, run_id: string, task: string, system: string|nil, max_iterations: int, max_verify_attempts: int, done: bool, result: any?}",
     kind = "async",
     category = "agent.host",
     runtime_only = true
@@ -411,6 +416,7 @@ async fn host_agent_session_init(
     let initialized =
         live_transcript_journal::initialize(&session_id, &opts_map, system.clone()).await?;
     let has_canonical_history = initialized.has_canonical_history;
+    let run_id = initialized.run_id;
     let prompt_session_id = initialized.session_id;
 
     let prompt_payload = serde_json::json!({
@@ -436,6 +442,7 @@ async fn host_agent_session_init(
         let blocked = build_user_prompt_block_result(&prompt_session_id, &message, &reason);
         return Ok(agent_init_control_done(
             &prompt_session_id,
+            &run_id,
             &message,
             system.as_deref(),
             blocked,
@@ -454,6 +461,7 @@ async fn host_agent_session_init(
             .await?;
             return Ok(agent_init_control_done(
                 &session_id,
+                &run_id,
                 &message,
                 system.as_deref(),
                 result,
@@ -481,6 +489,7 @@ async fn host_agent_session_init(
             .await?;
             return Ok(agent_init_control_done(
                 &resolved,
+                &run_id,
                 &message,
                 system.as_deref(),
                 denial,
@@ -544,6 +553,7 @@ async fn host_agent_session_init(
 
     let session = AgentHostSession {
         session_id: resolved.clone(),
+        run_id: run_id.clone(),
         task: message.clone(),
         tokens_used: 0,
         cost_used: 0.0,
@@ -610,6 +620,7 @@ async fn host_agent_session_init(
 
     Ok(agent_init_control(
         &resolved,
+        &run_id,
         &message,
         system.as_deref(),
         max_iterations,
@@ -617,39 +628,6 @@ async fn host_agent_session_init(
         false,
         None,
     ))
-}
-
-fn agent_init_control(
-    session_id: &str,
-    task: &str,
-    system: Option<&str>,
-    max_iterations: i64,
-    max_verify_attempts: i64,
-    done: bool,
-    result: Option<VmValue>,
-) -> VmValue {
-    let mut control = crate::value::DictMap::new();
-    control.put_str("session_id", session_id);
-    control.put_str("task", task);
-    control.insert(
-        crate::value::intern_key("system"),
-        system
-            .map(|value| VmValue::String(arcstr::ArcStr::from(value)))
-            .unwrap_or(VmValue::Nil),
-    );
-    control.insert(
-        crate::value::intern_key("max_iterations"),
-        VmValue::Int(max_iterations),
-    );
-    control.insert(
-        crate::value::intern_key("max_verify_attempts"),
-        VmValue::Int(max_verify_attempts),
-    );
-    control.insert(crate::value::intern_key("done"), VmValue::Bool(done));
-    if let Some(result) = result {
-        control.insert(crate::value::intern_key("result"), result);
-    }
-    VmValue::dict(control)
 }
 
 enum AutonomyCheck {
@@ -710,15 +688,6 @@ fn build_user_prompt_block_result(session_id: &str, prompt: &str, reason: &str) 
         "daemon_snapshot_path": serde_json::Value::Null,
     });
     crate::stdlib::json_to_vm_value(&result)
-}
-
-fn agent_init_control_done(
-    session_id: &str,
-    task: &str,
-    system: Option<&str>,
-    result: VmValue,
-) -> VmValue {
-    agent_init_control(session_id, task, system, 0, 0, true, Some(result))
 }
 
 /// Tear down a Harn-driven agent session and emit the final result dict.
@@ -932,6 +901,7 @@ async fn host_agent_session_finalize(
         "tokens_used": session.tokens_used,
         "cost_usd": session.cost_used,
         "session_id": session.session_id,
+        "run_id": session.run_id,
         "started_at": session.started_at,
         "task": session.task,
         "daemon_state": session.daemon_state,

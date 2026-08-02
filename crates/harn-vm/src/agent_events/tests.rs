@@ -887,3 +887,23 @@ fn wildcard_sink_unregister_unknown_handle_is_noop() {
     assert_eq!(counter.load(Ordering::SeqCst), 0);
     reset_wildcard_sinks();
 }
+
+#[test]
+fn legacy_subagent_stop_deserializes_without_typed_lineage() {
+    let event: AgentEvent = serde_json::from_value(serde_json::json!({
+        "type": "subagent_stop",
+        "session_id": "legacy-parent-session",
+        "parent_run_id": "legacy-parent-session",
+        "child_run_id": "legacy-child-session",
+        "terminal_status": "success",
+        "terminal_class": "natural",
+        "reason": "completed",
+        "completed_at_ms": 42
+    }))
+    .expect("legacy stop event remains readable");
+
+    let AgentEvent::SubagentStop { lineage, .. } = event else {
+        panic!("expected subagent stop");
+    };
+    assert_eq!(lineage, None);
+}

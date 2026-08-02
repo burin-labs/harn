@@ -14,6 +14,10 @@ use super::{
     RunStageRecord, RunTraceSpanRecord,
 };
 
+mod visible_transcript;
+
+use visible_transcript::public_assistant_transcript_text;
+
 pub const RUN_VIEW_SCHEMA: &str = "harn.run_view.v1";
 pub const SESSION_VIEW_SCHEMA: &str = "harn.session_view.v1";
 pub const RUN_VIEW_SCHEMA_VERSION: u32 = 1;
@@ -402,7 +406,8 @@ pub fn build_run_view_with_options(run: &RunRecord, options: RunViewOptions) -> 
             .filter_map(|stage| stage.visible_text.as_deref())
             .map(|text| redact_bounded(text, &policy, TEXT_LIMIT)),
         TEXT_LIMIT,
-    );
+    )
+    .or_else(|| public_assistant_transcript_text(run.transcript.as_ref(), &policy));
     let usage = run
         .usage
         .as_ref()
@@ -1336,6 +1341,64 @@ mod tests {
         assert_eq!(view.providers.len(), 1);
         assert!(view.projection.projection_id.starts_with("run_view:run_1:"));
         assert!(view.projection.projection_hash.is_some());
+    }
+
+    #[test]
+    fn build_run_view_falls_back_to_public_assistant_transcript_blocks() {
+        let secret = "sk-proj-test-abcdefghijklmnopqrstuvwxyz123456";
+        let run = RunRecord {
+            type_name: "run_record".to_string(),
+            id: "transcript_only".to_string(),
+            status: "completed".to_string(),
+            transcript: Some(json!({
+                "events": [
+                    {
+                        "kind": "message",
+                        "role": "user",
+                        "visibility": "public",
+                        "blocks": [{
+                            "type": "text",
+                            "text": "user prompt must not become output",
+                            "visibility": "public"
+                        }]
+                    },
+                    {
+                        "kind": "message",
+                        "role": "assistant",
+                        "visibility": "public",
+                        "text": "event-level text is not an authority",
+                        "blocks": [
+                            {"type": "output_text", "text": "visible answer ", "visibility": "public"},
+                            {"type": "text", "text": format!("with {secret}"), "visibility": "public"},
+                            {"type": "reasoning", "text": "public reasoning stays private", "visibility": "public"},
+                            {"type": "output_text", "text": "private output", "visibility": "private"}
+                        ]
+                    },
+                    {
+                        "kind": "message",
+                        "role": "assistant",
+                        "visibility": "private",
+                        "blocks": [{
+                            "type": "output_text",
+                            "text": "private event output",
+                            "visibility": "public"
+                        }]
+                    }
+                ]
+            })),
+            ..RunRecord::default()
+        };
+
+        let view = build_run_view(&run);
+        let visible = view.visible_text.expect("public assistant output");
+        assert!(visible.starts_with("visible answer with "));
+        assert!(visible.contains("<redacted:openai_key:"));
+        assert!(!visible.contains(secret));
+        assert!(!visible.contains("user prompt"));
+        assert!(!visible.contains("event-level text"));
+        assert!(!visible.contains("reasoning"));
+        assert!(!visible.contains("private output"));
+        assert!(!visible.contains("private event output"));
     }
 
     #[test]

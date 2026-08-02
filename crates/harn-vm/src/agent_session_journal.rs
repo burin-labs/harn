@@ -48,6 +48,10 @@ pub(crate) struct JournalState {
 }
 
 impl JournalState {
+    pub(crate) fn run_id(&self) -> &str {
+        &self.config.run_id
+    }
+
     pub(crate) fn next_event(&self) -> Result<Option<(SqliteSessionStore, AppendEvent)>, VmError> {
         self.pending
             .front()
@@ -84,6 +88,9 @@ pub(crate) async fn prepare(
     run_id: String,
     turn_id: String,
 ) -> Result<PreparedJournal, VmError> {
+    EventIdentity::new()
+        .with(EventIdentityField::RunId, run_id.clone())
+        .map_err(|error| VmError::Runtime(format!("agent transcript journal identity: {error}")))?;
     let state_dir = session_store::canonical_store_state_dir(Some(options))?;
     let parent_session_id = options
         .get("parent_session_id")

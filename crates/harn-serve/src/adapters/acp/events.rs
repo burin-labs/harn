@@ -1,11 +1,10 @@
 //! ACP AgentEventSink — translates canonical `AgentEvent` variants into ACP
 //! `session/update` notifications. Registered per-session at prompt start.
 
+use super::AcpOutput;
 use harn_vm::agent_events::{AgentEvent, AgentEventSink, ToolExecutor};
 use harn_vm::composition::{CompositionChildCall, CompositionChildResult, CompositionRunEnvelope};
 use harn_vm::visible_text::sanitize_visible_assistant_text;
-
-use super::AcpOutput;
 
 /// Writes canonical ACP `session/update` notifications for each `AgentEvent`.
 pub(super) struct AcpAgentEventSink {
@@ -1205,7 +1204,8 @@ impl AgentEventSink for AcpAgentEventSink {
                 session_id,
                 ext_payloads::missing_tool_call_verdict(event),
             ),
-            AgentEvent::SubagentStop { .. }
+            AgentEvent::SubagentJoin { .. }
+            | AgentEvent::SubagentStop { .. }
             | AgentEvent::RequireSuccessfulToolsViolation { .. }
             | AgentEvent::FinalWrapup { .. }
             | AgentEvent::PackThinkingStripped { .. }

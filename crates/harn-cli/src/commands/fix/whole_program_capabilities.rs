@@ -268,7 +268,12 @@ pub(super) fn plan(
         .iter()
         .map(|callable| callable.direct_root_requirement)
         .collect::<Vec<_>>();
-    propagate_requirements(&edges, &mut requirements, &mut root_requirements);
+    propagate_carrier_requirements(
+        &edges,
+        &callables,
+        &mut requirements,
+        &mut root_requirements,
+    );
 
     for ((callable, required), root_required) in
         callables.iter().zip(&requirements).zip(&root_requirements)
@@ -446,7 +451,16 @@ pub(super) fn plan(
                 caller_desired,
                 &added_capabilities[edge.caller],
                 callee_desired,
-            )?;
+            )
+            .map_err(|error| {
+                call_edge_error(
+                    &program_files[caller.file_idx].path,
+                    &caller.info.name,
+                    &callee.info.name,
+                    call.span,
+                    &error,
+                )
+            })?;
             let edit = if let Some(carrier) = &callee.carrier {
                 if let Some(argument_span) = call.args.get(carrier.param_index).copied() {
                     FixEdit {
@@ -495,7 +509,16 @@ pub(super) fn plan(
                             caller_desired,
                             &added_capabilities[edge.caller],
                             &carrier.kind,
-                        )?;
+                        )
+                        .map_err(|error| {
+                            call_edge_error(
+                                &program_files[caller.file_idx].path,
+                                &caller.info.name,
+                                &callee.info.name,
+                                call.span,
+                                &error,
+                            )
+                        })?;
                         edits_by_file
                             .entry(caller.file_idx)
                             .or_default()
@@ -515,7 +538,16 @@ pub(super) fn plan(
                 callee,
                 &added_capabilities[edge.callee],
                 call.args.len(),
-            )?
+            )
+            .map_err(|error| {
+                call_edge_error(
+                    &program_files[caller.file_idx].path,
+                    &caller.info.name,
+                    &callee.info.name,
+                    call.span,
+                    &error,
+                )
+            })?
             else {
                 // The call omits a non-capability positional argument. The
                 // fixer cannot synthesize that value, so leave it untouched.
@@ -985,12 +1017,42 @@ fn propagate_requirements(
     }
 }
 
+/// Capability sets alone are not a complete call contract: a root Harness
+/// selected for orchestration cannot be reconstructed from its child handles.
+/// Feed that selected carrier back through the reverse call graph until both
+/// capability requirements and root authority reach a fixed point.
+fn propagate_carrier_requirements(
+    edges: &[ProgramEdge],
+    callables: &[ProgramCallable],
+    requirements: &mut [BTreeSet<CapabilityId>],
+    root_requirements: &mut [bool],
+) {
+    loop {
+        propagate_requirements(edges, requirements, root_requirements);
+        let mut discovered_root = false;
+        for (idx, callable) in callables.iter().enumerate() {
+            if !root_requirements[idx]
+                && matches!(
+                    desired_carrier(callable, &requirements[idx], false),
+                    Some(CarrierKind::Root)
+                )
+            {
+                root_requirements[idx] = true;
+                discovered_root = true;
+            }
+        }
+        if !discovered_root {
+            return;
+        }
+    }
+}
+
 fn desired_carrier(
     callable: &ProgramCallable,
     requirements: &BTreeSet<CapabilityId>,
     root_required: bool,
 ) -> Option<CarrierKind> {
-    if root_required && callable.carriers.len() <= 1 {
+    if root_required {
         return Some(CarrierKind::Root);
     }
     if callable.has_split_capability_params {
@@ -1090,10 +1152,27 @@ fn split_carrier_becomes_root(
     requirements: &BTreeSet<CapabilityId>,
     root_required: bool,
 ) -> bool {
-    // A single nominal handle is a carrier that can be widened in place.
-    // Multiple hand-authored capability parameters are an existing interface;
-    // collapsing and deleting those parameters is outside this migration.
-    callable.carriers.len() == 1 && (root_required || requirements.len() > 2)
+    // Widen the first carrier in place when root authority is required. Keep
+    // every additional hand-authored capability parameter: collapsing or
+    // deleting those parameters is outside this migration.
+    root_required || (callable.carriers.len() == 1 && requirements.len() > 2)
+}
+
+pub(super) fn call_edge_error(
+    file: &Path,
+    caller: &str,
+    callee: &str,
+    span: Span,
+    error: &str,
+) -> String {
+    format!(
+        "cannot migrate call `{caller}` -> `{callee}` at {}:{}:{} (bytes {}..{}): {error}",
+        file.display(),
+        span.line,
+        span.column,
+        span.start,
+        span.end
+    )
 }
 
 fn is_missing_capability_argument(diagnostic: &RepairCandidate) -> bool {

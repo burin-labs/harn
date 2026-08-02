@@ -69,3 +69,15 @@ pub(crate) fn has_journal(id: &str) -> bool {
             .is_some_and(|state| state.transcript_journal.is_some())
     })
 }
+
+/// Run identity owned by the live transcript journal for this session.
+pub(crate) fn active_run_id(id: &str) -> Option<String> {
+    super::SESSIONS.with(|sessions| {
+        sessions
+            .try_borrow()
+            .ok()?
+            .get(id)
+            .and_then(|state| state.transcript_journal.as_ref())
+            .map(|journal| journal.run_id().to_string())
+    })
+}

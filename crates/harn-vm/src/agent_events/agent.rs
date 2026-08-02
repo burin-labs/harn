@@ -824,7 +824,14 @@ pub enum AgentEvent {
     /// and background delegation and preserves the parent/child lineage.
     SubagentStop {
         session_id: String,
+        /// Typed identity is authoritative for events emitted by current
+        /// runtimes. `None` accepts persisted events from older runtimes whose
+        /// run-id fields actually contained session ids.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lineage: Option<super::DelegatedRunLineage>,
+        /// Compatibility projection of `lineage.parent.run_id`.
         parent_run_id: String,
+        /// Compatibility projection of `lineage.child.run_id`.
         child_run_id: String,
         terminal_status: SubagentTerminalStatus,
         terminal_class: String,
@@ -838,6 +845,15 @@ pub enum AgentEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         timeout: Option<serde_json::Value>,
         completed_at_ms: i64,
+    },
+    /// Exactly-once receipt that an attached background child was observed in
+    /// a terminal state by its parent.
+    SubagentJoin {
+        session_id: String,
+        lineage: super::DelegatedRunLineage,
+        worker_id: String,
+        completed_at_ms: i64,
+        joined_at_ms: i64,
     },
     /// A human-in-the-loop primitive (`ask_user`, `request_approval`,
     /// `dual_control`, `escalate`) has just suspended the script and is
@@ -1177,6 +1193,7 @@ impl AgentEvent {
             | Self::ControlOutcome { session_id, .. }
             | Self::WorkerUpdate { session_id, .. }
             | Self::SubagentStop { session_id, .. }
+            | Self::SubagentJoin { session_id, .. }
             | Self::HitlRequested { session_id, .. }
             | Self::HitlResolved { session_id, .. }
             | Self::LoopControlDecision { session_id, .. }
