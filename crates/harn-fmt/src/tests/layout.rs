@@ -5,7 +5,7 @@
 //! the three ways it was previously violated — deciding from source newlines,
 //! wrapping args at the wrong depth, and measuring a prefix instead of a line.
 
-use super::assert_roundtrip;
+use super::{assert_roundtrip, corpus::repository_harn_files};
 use crate::{
     format_source, format_source_opts, line_width_violations, FmtOptions, LINE_WIDTH_DEFAULT,
 };
@@ -28,36 +28,7 @@ fn assert_within_line_width(source: &str) {
 
 #[test]
 fn formatted_repository_corpus_has_no_breakable_width_overflow() {
-    let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(std::path::Path::parent)
-        .expect("harn-fmt lives two levels below the repository root");
-    let roots = [
-        "crates/harn-stdlib/src/stdlib",
-        "conformance/tests",
-        "experiments",
-        "scripts",
-        "crates/harn-cli/assets/demo",
-        "personas",
-        "tests",
-        "examples",
-        "evals",
-    ];
-    let skipped = [
-        "semicolon_statements.harn",
-        "semicolon_if_else_invalid.harn",
-        "semicolon_try_catch_invalid.harn",
-        "semicolon_empty_statement_invalid.harn",
-        "import_broken_module_lib.harn",
-    ];
-
-    let mut files = Vec::new();
-    for root in roots {
-        collect_harn_files(&repo_root.join(root), &skipped, &mut files);
-    }
-    files.sort();
-
-    for path in files {
+    for path in repository_harn_files().expect("failed to enumerate formatter corpus") {
         let source = std::fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
         let formatted = format_source(&source)
@@ -78,31 +49,6 @@ fn formatted_repository_corpus_has_no_breakable_width_overflow() {
             path.display(),
             violations
         );
-    }
-}
-
-fn collect_harn_files(
-    root: &std::path::Path,
-    skipped: &[&str],
-    files: &mut Vec<std::path::PathBuf>,
-) {
-    let Ok(entries) = std::fs::read_dir(root) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            collect_harn_files(&path, skipped, files);
-        } else if path
-            .extension()
-            .is_some_and(|extension| extension == "harn")
-            && path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_none_or(|name| !skipped.contains(&name))
-        {
-            files.push(path);
-        }
     }
 }
 
