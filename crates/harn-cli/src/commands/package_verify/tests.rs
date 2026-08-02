@@ -86,6 +86,63 @@ fn package_gate_stderr_label_matches_gate_status() {
 }
 
 #[test]
+fn package_source_gate_commands_add_only_the_typed_strict_policy() {
+    let files = vec!["lib.harn".to_string(), "tests/contract.harn".to_string()];
+
+    assert_eq!(
+        PackageSourceGate::Check.command(&files, false),
+        ["check", "lib.harn", "tests/contract.harn"]
+    );
+    assert_eq!(
+        PackageSourceGate::Check.command(&files, true),
+        [
+            "check",
+            "--strict",
+            "--strict-types",
+            "lib.harn",
+            "tests/contract.harn"
+        ]
+    );
+    assert_eq!(
+        PackageSourceGate::Lint.command(&files, false),
+        ["lint", "lib.harn", "tests/contract.harn"]
+    );
+    assert_eq!(
+        PackageSourceGate::Lint.command(&files, true),
+        ["lint", "--strict", "lib.harn", "tests/contract.harn"]
+    );
+}
+
+#[test]
+fn package_gate_header_projects_the_requested_strict_policy() {
+    let mut report = PackageVerifyReport {
+        package: "contract-test".to_string(),
+        package_kinds: vec!["package".to_string()],
+        strict_requested: true,
+        status: "pass".to_string(),
+        summary: PackageVerifySummary {
+            passed: 2,
+            failed: 0,
+            skipped: 1,
+            warnings: 0,
+        },
+        checks: Vec::new(),
+        connector_contract: None,
+    };
+
+    assert_eq!(
+        gate_report_header(&report),
+        "Package verification pass for contract-test (package, strict_requested=true): 2 passed, 0 failed, 1 skipped."
+    );
+
+    report.strict_requested = false;
+    assert_eq!(
+        gate_report_header(&report),
+        "Package verification pass for contract-test (package, strict_requested=false): 2 passed, 0 failed, 1 skipped."
+    );
+}
+
+#[test]
 fn package_dependency_path_canonicalizes_relative_package_dir() {
     let cwd = std::env::current_dir().unwrap();
     let dir = tempfile::Builder::new()

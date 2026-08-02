@@ -18,7 +18,7 @@ use crate::package::{self, ConnectorContractFixture, ResolvedProviderConnectorKi
 mod connector_contract;
 use connector_contract::check_one_connector;
 
-pub(crate) const PACKAGE_VERIFY_SCHEMA_VERSION: u32 = 1;
+pub(crate) const PACKAGE_VERIFY_SCHEMA_VERSION: u32 = 2;
 
 pub(crate) async fn handle_package_verify(args: PackageVerifyArgs) -> Result<(), String> {
     let report = verify_package(&args).await;
@@ -106,6 +106,10 @@ pub(crate) struct CheckedFixture {
 pub(crate) struct PackageVerifyReport {
     pub package: String,
     pub package_kinds: Vec<String>,
+    /// Whether this invocation requested the package-level strict policy.
+    /// Per-file manifest strictness remains visible in each recorded command's
+    /// outcome rather than being collapsed into one misleading package bit.
+    pub strict_requested: bool,
     pub status: String,
     pub summary: PackageVerifySummary,
     pub checks: Vec<PackageVerifyCheck>,
@@ -266,16 +270,16 @@ pub(crate) async fn verify_package(args: &PackageVerifyArgs) -> PackageVerifyRep
 
     let package_harn_files = package_harn_file_args(&package_dir);
     checks.push(run_package_harn_file_check(
-        "harn check",
+        PackageSourceGate::Check,
         &package_dir,
-        "check",
         &package_harn_files,
+        args.strict,
     ));
     checks.push(run_package_harn_file_check(
-        "harn lint",
+        PackageSourceGate::Lint,
         &package_dir,
-        "lint",
         &package_harn_files,
+        args.strict,
     ));
     let mut fmt_args = vec!["fmt".to_string(), "--check".to_string()];
     fmt_args.extend(package_harn_files.clone());
@@ -372,6 +376,7 @@ pub(crate) async fn verify_package(args: &PackageVerifyArgs) -> PackageVerifyRep
     PackageVerifyReport {
         package: package_label,
         package_kinds,
+        strict_requested: args.strict,
         status,
         summary,
         checks,
@@ -742,15 +747,43 @@ fn run_harn_subcommand_owned(name: &str, cwd: &Path, args: Vec<String>) -> Packa
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PackageSourceGate {
+    Check,
+    Lint,
+}
+
+impl PackageSourceGate {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Check => "harn check",
+            Self::Lint => "harn lint",
+        }
+    }
+
+    fn command(self, package_harn_files: &[String], strict: bool) -> Vec<String> {
+        let (subcommand, strict_flags): (&str, &[&str]) = match self {
+            Self::Check => ("check", &["--strict", "--strict-types"]),
+            Self::Lint => ("lint", &["--strict"]),
+        };
+        let mut args = vec![subcommand.to_string()];
+        if strict {
+            args.extend(strict_flags.iter().map(|flag| (*flag).to_string()));
+        }
+        args.extend(package_harn_files.iter().cloned());
+        args
+    }
+}
+
 fn run_package_harn_file_check(
-    name: &str,
+    gate: PackageSourceGate,
     package_dir: &Path,
-    subcommand: &str,
     package_harn_files: &[String],
+    strict: bool,
 ) -> PackageVerifyCheck {
     if package_harn_files.is_empty() {
         return PackageVerifyCheck {
-            name: name.to_string(),
+            name: gate.name().to_string(),
             applicable: true,
             reached: false,
             status: "fail".to_string(),
@@ -762,9 +795,11 @@ fn run_package_harn_file_check(
             details: Vec::new(),
         };
     }
-    let mut args = vec![subcommand.to_string()];
-    args.extend(package_harn_files.iter().cloned());
-    run_harn_subcommand_owned(name, package_dir, args)
+    run_harn_subcommand_owned(
+        gate.name(),
+        package_dir,
+        gate.command(package_harn_files, strict),
+    )
 }
 
 fn package_harn_file_args(package_dir: &Path) -> Vec<String> {
@@ -1213,15 +1248,7 @@ pub(crate) fn print_connector_report(report: &ConnectorCheckReport) {
 }
 
 fn print_gate_report(report: &PackageVerifyReport) {
-    println!(
-        "Package verification {} for {} ({}): {} passed, {} failed, {} skipped.",
-        report.status,
-        report.package,
-        report.package_kinds.join(", "),
-        report.summary.passed,
-        report.summary.failed,
-        report.summary.skipped
-    );
+    println!("{}", gate_report_header(report));
     for check in &report.checks {
         println!(
             "- {}: {} (applicable={}, reached={})",
@@ -1239,6 +1266,19 @@ fn print_gate_report(report: &PackageVerifyReport) {
             );
         }
     }
+}
+
+fn gate_report_header(report: &PackageVerifyReport) -> String {
+    format!(
+        "Package verification {} for {} ({}, strict_requested={}): {} passed, {} failed, {} skipped.",
+        report.status,
+        report.package,
+        report.package_kinds.join(", "),
+        report.strict_requested,
+        report.summary.passed,
+        report.summary.failed,
+        report.summary.skipped
+    )
 }
 
 fn gate_stderr_label(check: &PackageVerifyCheck) -> &'static str {

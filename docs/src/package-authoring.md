@@ -137,6 +137,7 @@ package-root-relative skill directories containing `SKILL.md`.
 harn new connector echo-connector
 cd echo-connector
 harn package verify .
+harn package verify . --strict
 harn package docs
 harn publish --dry-run
 harn publish
@@ -147,6 +148,10 @@ metadata validation, `harn check`, `harn lint`, `harn fmt --check`, connector
 contract fixtures, package-local fixture tests, install/import smoke tests, and
 standalone Harn doc examples. Use `harn connector check .` when you only need
 the lower-level pure-Harn connector contract check.
+
+Use `harn package verify . --strict` for warning-free release admission. It
+makes check and lint warnings fatal, enables strict boundary typing, and records
+the exact source-gate commands in the schema-v2 receipt.
 
 Connector packages should also declare package-facing capability coverage on
 their `[[providers]]` entry so `harn check --connector-matrix` can compare
@@ -221,7 +226,8 @@ gates, package tests, consumer install/import smoke coverage, documentation
 drift, package packing, and any applicable connector contract. Use
 `--receipt-out PATH` to persist the versioned JSON receipt; `--json` emits the
 same envelope on standard output. Individual commands remain useful for
-focused local iteration.
+focused local iteration. Add `--strict` in CI when warnings and unvalidated
+boundary types must fail the package contract.
 
 ## API docs
 

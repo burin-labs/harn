@@ -370,6 +370,7 @@ fn test_parses_package_cache_subcommands() {
         "--provider",
         "notion",
         "--run-poll-tick",
+        "--strict",
         "--json",
         "--receipt-out",
         "receipt.json",
@@ -383,6 +384,7 @@ fn test_parses_package_cache_subcommands() {
     assert_eq!(verify.package, "pkg");
     assert_eq!(verify.providers, vec!["notion"]);
     assert!(verify.run_poll_tick);
+    assert!(verify.strict);
     assert!(verify.json);
     assert_eq!(verify.receipt_out, Some(PathBuf::from("receipt.json")));
 
