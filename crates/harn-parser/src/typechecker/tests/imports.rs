@@ -138,9 +138,43 @@ pipeline t(task) {
     assert!(
         errors
             .iter()
-            .any(|error| error.contains("argument 1 `options`: unknown option `dropnil`")),
+            .any(|error| error.contains("argument 1 `options`: unknown field `dropnil`")),
         "expected imported argument error, got: {errors:?}"
     );
+}
+
+#[test]
+fn imported_named_record_parameter_accepts_structurally_exact_arguments() {
+    let imported = parse_program(
+        r#"
+pub type BranchRequest = {owner: string, repo: string, branch: string}
+
+pub fn view(request: BranchRequest) -> string {
+  return request.owner + "/" + request.repo + ":" + request.branch
+}
+"#,
+    );
+    let program = parse_program(
+        r#"
+pipeline t(task) {
+  view({owner: "octo", repo: "demo", branch: "main"})
+  const request = {owner: "octo", repo: "demo", branch: "next"}
+  view(request)
+}
+"#,
+    );
+
+    let diagnostics = TypeChecker::new()
+        .with_imported_type_decls(imported.clone())
+        .with_imported_callable_decls(imported)
+        .check(&program);
+    let errors = diagnostics
+        .into_iter()
+        .filter(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+        .map(|diagnostic| diagnostic.message)
+        .collect::<Vec<_>>();
+
+    assert!(errors.is_empty(), "got imported-record errors: {errors:?}");
 }
 
 #[test]

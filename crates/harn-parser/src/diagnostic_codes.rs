@@ -209,7 +209,6 @@ diagnostic_codes! {
     UnknownField, "HARN-NAM-004", Nam, "field name does not exist on the target type";
     UnknownMethod, "HARN-NAM-005", Nam, "method name does not exist on the receiver type";
     DuplicateArgument, "HARN-NAM-006", Nam, "argument name is duplicated";
-    UnknownOption, "HARN-NAM-007", Nam, "option key is not recognized";
     UnknownBuiltin, "HARN-NAM-008", Nam, "builtin name cannot be resolved";
     DeprecatedFunction, "HARN-NAM-009", Nam, "function call targets a deprecated declaration";
     UnknownDeclaration, "HARN-NAM-010", Nam, "declaration reference cannot be resolved";
@@ -224,7 +223,6 @@ diagnostic_codes! {
     CapabilityCallStaticNameRequired, "HARN-CAP-006", Cap, "host capability call must use a static operation name";
     CapabilityBindingInvalid, "HARN-CAP-007", Cap, "tool host capability binding is invalid";
     EffectInheritanceViolation, "HARN-CAP-301", Cap, "child agent effect set exceeds the parent's declared effects";
-    UnknownLlmOption, "HARN-LLM-001", Llm, "LLM option key is not recognized";
     DeprecatedLlmOption, "HARN-LLM-002", Llm, "LLM option key is deprecated";
     LlmSchemaMissing, "HARN-LLM-003", Llm, "LLM call is missing schema validation";
     LlmSchemaInvalid, "HARN-LLM-004", Llm, "LLM schema option is invalid";
@@ -434,10 +432,9 @@ impl Code {
                 &[Code::UnknownAttribute, Code::InvalidAttributeArgument]
             }
             // LLM call family — schema, options, provider branching.
-            Code::LlmSchemaMissing => &[Code::LlmSchemaInvalid, Code::UnknownLlmOption],
-            Code::LlmSchemaInvalid => &[Code::LlmSchemaMissing, Code::UnknownLlmOption],
-            Code::UnknownLlmOption => &[Code::DeprecatedLlmOption, Code::LlmSchemaInvalid],
-            Code::DeprecatedLlmOption => &[Code::UnknownLlmOption],
+            Code::LlmSchemaMissing => &[Code::LlmSchemaInvalid],
+            Code::LlmSchemaInvalid => &[Code::LlmSchemaMissing],
+            Code::DeprecatedLlmOption => &[Code::LintDeprecatedLlmOptions],
             Code::LlmProviderIdentityBranch => &[Code::PromptProviderIdentityBranch],
             // Prompt-template family.
             Code::PromptTemplateParse => &[Code::PromptTargetMissing],
@@ -521,7 +518,7 @@ impl Code {
             Code::ImmutableAssignment => &[Code::MutableNeverReassigned],
             Code::MutableNeverReassigned => &[Code::LintMutableNeverReassigned],
             // Lint pairs (drift between lint and runtime/typecheck codes).
-            Code::LintDeprecatedLlmOptions => &[Code::DeprecatedLlmOption, Code::UnknownLlmOption],
+            Code::LintDeprecatedLlmOptions => &[Code::DeprecatedLlmOption],
             Code::LintUnnormalizedOptions => {
                 &[Code::LintDeprecatedLlmOptions, Code::LintUntypedDictAccess]
             }

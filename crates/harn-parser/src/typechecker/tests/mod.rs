@@ -29,6 +29,7 @@ mod nil_safety;
 mod ownership;
 mod pipeline_typing;
 mod reachability;
+mod record_arguments;
 mod repair;
 mod row_merge;
 mod soundness;

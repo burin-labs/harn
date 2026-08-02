@@ -14,7 +14,7 @@
     {
       "id": "NAM",
       "title": "Naming and resolution",
-      "count": 13
+      "count": 12
     },
     {
       "id": "CAP",
@@ -24,7 +24,7 @@
     {
       "id": "LLM",
       "title": "LLM calls",
-      "count": 6
+      "count": 5
     },
     {
       "id": "ORC",
@@ -610,15 +610,6 @@
       "apiStability": "stable"
     },
     {
-      "code": "HARN-NAM-007",
-      "category": "NAM",
-      "summary": "option key is not recognized",
-      "repairs": [],
-      "related": [],
-      "explanationPresent": true,
-      "apiStability": "stable"
-    },
-    {
       "code": "HARN-NAM-008",
       "category": "NAM",
       "summary": "builtin name cannot be resolved",
@@ -812,18 +803,6 @@
       "apiStability": "stable"
     },
     {
-      "code": "HARN-LLM-001",
-      "category": "LLM",
-      "summary": "LLM option key is not recognized",
-      "repairs": [],
-      "related": [
-        "HARN-LLM-002",
-        "HARN-LLM-004"
-      ],
-      "explanationPresent": true,
-      "apiStability": "stable"
-    },
-    {
       "code": "HARN-LLM-002",
       "category": "LLM",
       "summary": "LLM option key is deprecated",
@@ -835,7 +814,7 @@
         }
       ],
       "related": [
-        "HARN-LLM-001"
+        "HARN-LNT-050"
       ],
       "explanationPresent": true,
       "apiStability": "stable"
@@ -852,8 +831,7 @@
         }
       ],
       "related": [
-        "HARN-LLM-004",
-        "HARN-LLM-001"
+        "HARN-LLM-004"
       ],
       "explanationPresent": true,
       "apiStability": "stable"
@@ -864,8 +842,7 @@
       "summary": "LLM schema option is invalid",
       "repairs": [],
       "related": [
-        "HARN-LLM-003",
-        "HARN-LLM-001"
+        "HARN-LLM-003"
       ],
       "explanationPresent": true,
       "apiStability": "stable"
@@ -2175,8 +2152,7 @@
         }
       ],
       "related": [
-        "HARN-LLM-002",
-        "HARN-LLM-001"
+        "HARN-LLM-002"
       ],
       "explanationPresent": true,
       "apiStability": "stable"

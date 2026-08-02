@@ -37,9 +37,9 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 |---|---|---:|
 | [`TYP`](#typ--type-checker) | Type checker | 27 |
 | [`PAR`](#par--parser--lexer) | Parser / lexer | 6 |
-| [`NAM`](#nam--naming-and-resolution) | Naming and resolution | 13 |
+| [`NAM`](#nam--naming-and-resolution) | Naming and resolution | 12 |
 | [`CAP`](#cap--capabilities) | Capabilities | 9 |
-| [`LLM`](#llm--llm-calls) | LLM calls | 6 |
+| [`LLM`](#llm--llm-calls) | LLM calls | 5 |
 | [`ORC`](#orc--orchestration-constructs) | Orchestration constructs | 12 |
 | [`STD`](#std--stdlib-usage) | Stdlib usage | 5 |
 | [`PRM`](#prm--prompt-templates) | Prompt templates | 7 |
@@ -116,7 +116,6 @@ Name resolution failed: the identifier, field, or attribute referenced does not 
 | [`HARN-NAM-004`](#harn-nam-004) | field name does not exist on the target type | `bindings/rename-to-closest` | `scope-local` |
 | [`HARN-NAM-005`](#harn-nam-005) | method name does not exist on the receiver type | `bindings/rename-to-closest` | `scope-local` |
 | [`HARN-NAM-006`](#harn-nam-006) | argument name is duplicated | — | — |
-| [`HARN-NAM-007`](#harn-nam-007) | option key is not recognized | — | — |
 | [`HARN-NAM-008`](#harn-nam-008) | builtin name cannot be resolved | `bindings/rename-to-closest` | `scope-local` |
 | [`HARN-NAM-009`](#harn-nam-009) | function call targets a deprecated declaration | `stdlib/migrate-renamed` | `scope-local` |
 | [`HARN-NAM-010`](#harn-nam-010) | declaration reference cannot be resolved | `bindings/rename-to-closest` | `scope-local` |
@@ -146,7 +145,6 @@ A `harness.llm.call(...)` invocation violates the schema Harn enforces. Schema-v
 
 | Code | Summary | Repair | Safety |
 |---|---|---|---|
-| [`HARN-LLM-001`](#harn-llm-001) | LLM option key is not recognized | — | — |
 | [`HARN-LLM-002`](#harn-llm-002) | LLM option key is deprecated | `llm/migrate-deprecated-option` | `scope-local` |
 | [`HARN-LLM-003`](#harn-llm-003) | LLM call is missing schema validation | `llm/add-schema` | `surface-changing` |
 | [`HARN-LLM-004`](#harn-llm-004) | LLM schema option is invalid | — | — |
@@ -893,17 +891,6 @@ argument name is duplicated
 - Define the missing name, import it, or fix the typo.
 - Confirm the symbol is exported by the module you're importing from.
 
-### `HARN-NAM-007`
-
-**Category:** `NAM` (Naming and resolution) &nbsp;·&nbsp; **API stability:** `stable`
-
-option key is not recognized
-
-#### How to fix
-
-- Define the missing name, import it, or fix the typo.
-- Confirm the symbol is exported by the module you're importing from.
-
 ### `HARN-NAM-008`
 
 **Category:** `NAM` (Naming and resolution) &nbsp;·&nbsp; **API stability:** `stable`
@@ -1227,20 +1214,6 @@ The matched `EffectInheritanceViolation` runtime payload's `_type`
 discriminator (`effect_inheritance_violation`) is part of the stable
 contract.
 
-### `HARN-LLM-001`
-
-**Category:** `LLM` (LLM calls) &nbsp;·&nbsp; **API stability:** `stable`
-
-LLM option key is not recognized
-
-- **See also:** [`HARN-LLM-002`](#harn-llm-002), [`HARN-LLM-004`](#harn-llm-004)
-
-#### How to fix
-
-- Pass a `schema:` option that validates the model output, with `schema_retries:` as appropriate.
-- Drop or rename deprecated options to the names listed in the LLM call quickref.
-- Pick capability flags (`tool_calling: true`, etc.) instead of branching on `provider:` identity.
-
 ### `HARN-LLM-002`
 
 **Category:** `LLM` (LLM calls) &nbsp;·&nbsp; **API stability:** `stable`
@@ -1249,7 +1222,7 @@ LLM option key is deprecated
 
 - **Repair:** `llm/migrate-deprecated-option` &nbsp;·&nbsp; **Safety:** `scope-local`
 - Replace the deprecated option with its supported equivalent
-- **See also:** [`HARN-LLM-001`](#harn-llm-001)
+- **See also:** [`HARN-LNT-050`](#harn-lnt-050)
 
 #### How to fix
 
@@ -1265,7 +1238,7 @@ LLM call is missing schema validation
 
 - **Repair:** `llm/add-schema` &nbsp;·&nbsp; **Safety:** `surface-changing`
 - Add a typed output schema to the LLM call
-- **See also:** [`HARN-LLM-004`](#harn-llm-004), [`HARN-LLM-001`](#harn-llm-001)
+- **See also:** [`HARN-LLM-004`](#harn-llm-004)
 
 #### How to fix
 
@@ -1279,7 +1252,7 @@ LLM call is missing schema validation
 
 LLM schema option is invalid
 
-- **See also:** [`HARN-LLM-003`](#harn-llm-003), [`HARN-LLM-001`](#harn-llm-001)
+- **See also:** [`HARN-LLM-003`](#harn-llm-003)
 
 #### How to fix
 
@@ -3085,7 +3058,7 @@ deprecated LLM options lint
 
 - **Repair:** `llm/migrate-deprecated-option` &nbsp;·&nbsp; **Safety:** `scope-local`
 - Replace the deprecated option with its supported equivalent
-- **See also:** [`HARN-LLM-002`](#harn-llm-002), [`HARN-LLM-001`](#harn-llm-001)
+- **See also:** [`HARN-LLM-002`](#harn-llm-002)
 
 #### How to fix
 

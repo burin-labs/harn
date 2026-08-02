@@ -1,9 +1,9 @@
 /**
  * Shape validation across the static/dynamic boundary.
  *
- * A shape *literal* still checks structurally at the call boundary (cases 1–5):
- * width subtyping, optional fields, and nested shapes all resolve at compile
- * time. A dynamically-obtained bare `dict` no longer flows into a shape
+ * A fresh shape literal checks exactly at a closed call boundary (cases 1–5).
+ * Existing values keep width subtyping, while optional fields and nested shapes
+ * resolve at compile time. A dynamically-obtained bare `dict` no longer flows into a shape
  * parameter implicitly — under the dict-as-top rule it must be narrowed with
  * `schema_is`, which validates the fields at run time and rejects bad data
  * (cases 6–9). This keeps the "validate, then use" path sound end to end.
@@ -21,8 +21,9 @@ pipeline default(harness: Harness) {
   }
   // 1. Valid shape literal passes.
   harness.stdio.println(show_user({name: "Alice", age: 30}))
-  // 2. Width subtyping: extra fields are allowed.
-  harness.stdio.println(show_user({name: "Bob", age: 25, role: "admin"}))
+  // 2. Width subtyping: an existing value may carry extra fields.
+  const bob = {name: "Bob", age: 25, role: "admin"}
+  harness.stdio.println(show_user(bob))
   // 3. Optional field missing is fine.
   fn show_config(c: {host: string, port?: int}) -> string {
     return c["host"]

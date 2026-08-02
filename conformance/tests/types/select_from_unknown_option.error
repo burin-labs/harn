@@ -1,1 +1,1 @@
-argument 3 `opts`: unknown option `prompts`
+argument 3 `opts`: unknown field `prompts` in closed record

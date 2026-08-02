@@ -6,11 +6,12 @@ pipeline default(harness: Harness) {
   // Optional fields — missing optional is fine
   const config: {host: string, port?: int} = {host: "localhost"}
   harness.stdio.println(config["host"])
-  // Width subtyping — extra fields allowed
+  // Width subtyping — an existing value may carry extra fields.
   fn greet(u: {name: string}) -> string {
     return "hi " + u["name"]
   }
-  harness.stdio.println(greet({name: "Bob", age: 25, role: "admin"}))
+  const bob = {name: "Bob", age: 25, role: "admin"}
+  harness.stdio.println(greet(bob))
   // Nested shapes
   const data: {user: {name: string}, tags: list} = {user: {name: "X"}, tags: [1, 2]}
   harness.stdio.println(data["user"]["name"])

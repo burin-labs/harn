@@ -24,6 +24,7 @@ mod hitl;
 mod literal_union;
 mod match_patterns;
 mod pipe;
+mod record_arguments;
 mod statements;
 mod subtyping;
 mod variance;
