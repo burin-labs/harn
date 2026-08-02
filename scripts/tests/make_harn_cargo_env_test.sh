@@ -334,6 +334,11 @@ if ! grep -Fq 'make HARN_BIN="$harn_bin" lint lint-md lint-actions' "$make_all";
   cat "$make_all" >&2
   exit 1
 fi
+if ! grep -Fq 'harn_snapshot_binary "$harn_bin" "$stable_root/harn-bin"' "$make_all"; then
+  echo "all did not snapshot the resolved Cargo output before parallel execution" >&2
+  cat "$make_all" >&2
+  exit 1
+fi
 
 make_provider_targets="$tmp_root/make-provider-targets.txt"
 make -C "$repo_root" -n \

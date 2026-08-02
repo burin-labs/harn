@@ -2,6 +2,8 @@
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+# shellcheck source=scripts/lib/harn_bin.sh
+source "$repo_root/scripts/lib/harn_bin.sh"
 
 tmp_root=$(mktemp -d)
 trap 'rm -rf "$tmp_root"' EXIT
@@ -17,6 +19,25 @@ HARN_BIN="$fake_bin" "$repo_root/scripts/harn_bin.sh" --print >"$tmp_root/explic
 if ! grep -Fxq "$fake_bin" "$tmp_root/explicit.out"; then
   echo "harn_bin resolver did not return the explicit executable HARN_BIN" >&2
   cat "$tmp_root/explicit.out" >&2
+  exit 1
+fi
+
+snapshot="$(harn_snapshot_binary "$fake_bin" "$tmp_root/stable/harn-bin")"
+if [[ "$snapshot" != "$tmp_root/stable/harn-bin/harn" ]] || [[ ! -x "$snapshot" ]]; then
+  echo "harn binary snapshot did not produce the canonical executable path" >&2
+  exit 1
+fi
+rm "$fake_bin"
+if [[ "$("$snapshot")" != "fake harn" ]]; then
+  echo "harn binary snapshot still depended on the mutable source path" >&2
+  exit 1
+fi
+
+fake_exe="$tmp_root/harn.exe"
+cp "$snapshot" "$fake_exe"
+exe_snapshot="$(harn_snapshot_binary "$fake_exe" "$tmp_root/stable/windows")"
+if [[ "$exe_snapshot" != "$tmp_root/stable/windows/harn.exe" ]]; then
+  echo "harn binary snapshot did not preserve the Windows executable suffix" >&2
   exit 1
 fi
 
