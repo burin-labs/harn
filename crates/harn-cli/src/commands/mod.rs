@@ -157,6 +157,8 @@ pub(crate) fn should_skip_recursive_source_file(file: &Path) -> bool {
     let Some(name) = file.file_name().and_then(|name| name.to_str()) else {
         return false;
     };
+    // Harn can emit generated source snapshots such as `.harn-eval-*.harn`.
+    // This source-file rule is separate from directory-owned runtime state.
     name.starts_with(".harn-")
 }
 

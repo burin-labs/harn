@@ -1104,7 +1104,7 @@ fn collect_repo_files(root: &Path, dir: &Path, limit: usize, out: &mut Vec<PathB
             .and_then(|name| name.to_str())
             .unwrap_or_default();
         if path.is_dir() {
-            if should_skip_scan_dir(name) {
+            if should_skip_scan_dir(root, &path) {
                 continue;
             }
             collect_repo_files(root, &path, limit, out);
@@ -1119,7 +1119,13 @@ fn collect_repo_files(root: &Path, dir: &Path, limit: usize, out: &mut Vec<PathB
     }
 }
 
-fn should_skip_scan_dir(name: &str) -> bool {
+fn should_skip_scan_dir(root: &Path, path: &Path) -> bool {
+    if path.strip_prefix(root).ok() == Some(Path::new("docs").join("dist").as_path()) {
+        return true;
+    }
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
     matches!(
         name,
         ".git" | "target" | "node_modules" | ".claude" | ".burin"
@@ -1308,6 +1314,34 @@ mod tests {
     use super::*;
     use ed25519_dalek::SigningKey;
     use harn_vm::flow::{Atom, Provenance};
+
+    #[test]
+    fn repo_context_walk_uses_exact_generated_and_harn_state_boundaries() {
+        let temp = tempfile::tempdir().unwrap();
+        for relative in [
+            "src/main.rs",
+            "docs/dist/generated.md",
+            "nested/docs/dist/source.md",
+            ".harn-runs/session/context.md",
+        ] {
+            let path = temp.path().join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, relative).unwrap();
+        }
+
+        let relative = walk_repo_files(temp.path(), 100)
+            .into_iter()
+            .map(|path| path.strip_prefix(temp.path()).unwrap().to_path_buf())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            relative,
+            [
+                PathBuf::from("nested/docs/dist/source.md"),
+                PathBuf::from("src/main.rs"),
+            ]
+        );
+    }
 
     #[test]
     fn parse_since_accepts_rfc3339_unix_and_date() {

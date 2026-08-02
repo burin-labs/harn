@@ -9,6 +9,8 @@ pub(crate) fn should_exclude_package_entry(relative: &Path, kind: PathEntryKind)
     let Some(name) = relative.file_name().and_then(|name| name.to_str()) else {
         return false;
     };
+    // Preserve the pack contract for a literal `.harn` file. Harn runtime
+    // state is directory-only; this file case is a package archive rule.
     matches!(name, ".git" | ".harn")
         || is_harn_internal_entry(name, kind)
         || (kind == PathEntryKind::Directory && matches!(name, "target" | "node_modules"))
