@@ -683,6 +683,8 @@ fn apply_thread_params_threads_harness_for_stdio_migration() {
     );
 }
 
+mod split_capabilities;
+
 #[test]
 fn apply_thread_params_threads_harness_for_non_stdio_capabilities() {
     let cases = [
