@@ -184,7 +184,7 @@ expect_type = "immediate_response"
 expect_event_count = 0
 ```
 
-Run `harn package verify .` locally. Use `--provider <id>` for a multi-provider package, `--run-poll-tick` to execute the first poll tick, and `--json` for CI output.
+Run `harn package verify .` locally. Add `--strict` for warning-fatal check/lint gates and strict boundary typing, use `--provider <id>` for a multi-provider package, `--run-poll-tick` to execute the first poll tick, and `--json` for a schema-v2 CI receipt.
 
 ## Example library
 

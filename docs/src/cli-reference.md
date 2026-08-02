@@ -3379,6 +3379,7 @@ Run the complete package CI contract and emit a versioned receipt.
 ```bash
 harn package verify
 harn package verify --json
+harn package verify --strict
 harn package verify --receipt-out .harn/receipts/package-verify.json
 harn package verify . --provider github --run-poll-tick
 ```
@@ -3390,6 +3391,11 @@ documentation and generated API docs; and dry-runs package packing. Connector
 packages also run their connector metadata and deterministic fixture contract.
 Each receipt check records whether the gate was applicable and reached, plus
 its command, result, timing, and diagnostics.
+
+`--strict` makes both check and lint warnings fatal and enables strict boundary
+type checking. Schema-v2 receipts expose `strict_requested` and record the
+exact strict command for each source gate; manifest-level `[check]` policy is
+still applied monotonically by those commands.
 
 ## harn package scaffold openapi
 

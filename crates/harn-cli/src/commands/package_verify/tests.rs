@@ -95,7 +95,13 @@ fn package_source_gate_commands_add_only_the_typed_strict_flag() {
     );
     assert_eq!(
         PackageSourceGate::Check.command(&files, true),
-        ["check", "--strict-types", "lib.harn", "tests/contract.harn"]
+        [
+            "check",
+            "--strict",
+            "--strict-types",
+            "lib.harn",
+            "tests/contract.harn"
+        ]
     );
     assert_eq!(
         PackageSourceGate::Lint.command(&files, false),

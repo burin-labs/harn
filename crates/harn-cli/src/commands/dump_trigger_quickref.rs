@@ -243,7 +243,7 @@ fn generate_file() -> String {
     out.push_str("## Package fixtures\n\n");
     out.push_str("Connector packages should declare deterministic fixtures in `harn.toml` and run them in CI:\n\n");
     out.push_str("```toml\n[connector_contract]\nversion = 1\n\n[[connector_contract.fixtures]]\nprovider = \"slack\"\nname = \"url verification\"\nkind = \"webhook\"\nheaders = { \"content-type\" = \"application/json\" }\nbody_json = { type = \"url_verification\", challenge = \"challenge-token\" }\nexpect_type = \"immediate_response\"\nexpect_event_count = 0\n```\n\n");
-    out.push_str("Run `harn package verify .` locally. Use `--provider <id>` for a multi-provider package, `--run-poll-tick` to execute the first poll tick, and `--json` for CI output.\n\n");
+    out.push_str("Run `harn package verify .` locally. Add `--strict` for warning-fatal check/lint gates and strict boundary typing, use `--provider <id>` for a multi-provider package, `--run-poll-tick` to execute the first poll tick, and `--json` for a schema-v2 CI receipt.\n\n");
 
     out.push_str("## Example library\n\n");
     out.push_str("Ready-to-customize pipelines live under `examples/triggers/`. Each example includes `harn.toml`, `lib.harn`, `README.md`, and `SKILL.md` so it can be copied into a project or installed as a local skill bundle. Validate examples with `make check-trigger-examples`.\n\n");

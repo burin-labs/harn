@@ -18,7 +18,7 @@ use crate::package::{self, ConnectorContractFixture, ResolvedProviderConnectorKi
 mod connector_contract;
 use connector_contract::check_one_connector;
 
-pub(crate) const PACKAGE_VERIFY_SCHEMA_VERSION: u32 = 1;
+pub(crate) const PACKAGE_VERIFY_SCHEMA_VERSION: u32 = 2;
 
 pub(crate) async fn handle_package_verify(args: PackageVerifyArgs) -> Result<(), String> {
     let report = verify_package(&args).await;
@@ -106,7 +106,10 @@ pub(crate) struct CheckedFixture {
 pub(crate) struct PackageVerifyReport {
     pub package: String,
     pub package_kinds: Vec<String>,
-    pub strict: bool,
+    /// Whether this invocation requested the package-level strict policy.
+    /// Per-file manifest strictness remains visible in each recorded command's
+    /// outcome rather than being collapsed into one misleading package bit.
+    pub strict_requested: bool,
     pub status: String,
     pub summary: PackageVerifySummary,
     pub checks: Vec<PackageVerifyCheck>,
@@ -373,7 +376,7 @@ pub(crate) async fn verify_package(args: &PackageVerifyArgs) -> PackageVerifyRep
     PackageVerifyReport {
         package: package_label,
         package_kinds,
-        strict: args.strict,
+        strict_requested: args.strict,
         status,
         summary,
         checks,
@@ -759,13 +762,13 @@ impl PackageSourceGate {
     }
 
     fn command(self, package_harn_files: &[String], strict: bool) -> Vec<String> {
-        let (subcommand, strict_flag) = match self {
-            Self::Check => ("check", "--strict-types"),
-            Self::Lint => ("lint", "--strict"),
+        let (subcommand, strict_flags): (&str, &[&str]) = match self {
+            Self::Check => ("check", &["--strict", "--strict-types"]),
+            Self::Lint => ("lint", &["--strict"]),
         };
         let mut args = vec![subcommand.to_string()];
         if strict {
-            args.push(strict_flag.to_string());
+            args.extend(strict_flags.iter().map(|flag| (*flag).to_string()));
         }
         args.extend(package_harn_files.iter().cloned());
         args
@@ -1246,10 +1249,11 @@ pub(crate) fn print_connector_report(report: &ConnectorCheckReport) {
 
 fn print_gate_report(report: &PackageVerifyReport) {
     println!(
-        "Package verification {} for {} ({}): {} passed, {} failed, {} skipped.",
+        "Package verification {} for {} ({}, strict_requested={}): {} passed, {} failed, {} skipped.",
         report.status,
         report.package,
         report.package_kinds.join(", "),
+        report.strict_requested,
         report.summary.passed,
         report.summary.failed,
         report.summary.skipped

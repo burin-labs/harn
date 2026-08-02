@@ -36,15 +36,24 @@ fn scaffold_and_install(kind: &str) -> (tempfile::TempDir, std::path::PathBuf) {
 }
 
 fn verify(package: &std::path::Path) -> serde_json::Value {
-    let receipt = package.join(".harn/receipts/package-verify.json");
-    let output = run(Command::new(harn_e2e_binary()).current_dir(package).args([
-        "package",
-        "verify",
-        ".",
-        "--json",
-        "--receipt-out",
-        receipt.to_str().unwrap(),
-    ]));
+    verify_with_policy(package, false)
+}
+
+fn verify_with_policy(package: &std::path::Path, strict: bool) -> serde_json::Value {
+    let receipt_name = if strict {
+        "package-verify-strict.json"
+    } else {
+        "package-verify.json"
+    };
+    let receipt = package.join(".harn/receipts").join(receipt_name);
+    let mut command = Command::new(harn_e2e_binary());
+    command
+        .current_dir(package)
+        .args(["package", "verify", "."]);
+    if strict {
+        command.arg("--strict");
+    }
+    let output = run(command.arg("--json").arg("--receipt-out").arg(&receipt));
     assert!(
         output.status.success(),
         "verify failed:\nstdout:\n{}\nstderr:\n{}",
@@ -65,8 +74,9 @@ fn ordinary_package_receipt_marks_connector_gate_not_applicable() {
     let (_temp, package) = scaffold_and_install("package");
     let receipt = verify(&package);
 
-    assert_eq!(receipt["schemaVersion"], 1);
+    assert_eq!(receipt["schemaVersion"], 2);
     assert_eq!(receipt["ok"], true);
+    assert_eq!(receipt["data"]["strict_requested"], false);
     assert_eq!(
         receipt["data"]["package_kinds"],
         serde_json::json!(["package"])
@@ -80,6 +90,33 @@ fn ordinary_package_receipt_marks_connector_gate_not_applicable() {
     assert_eq!(connector["applicable"], false);
     assert_eq!(connector["reached"], false);
     assert_eq!(connector["status"], "skipped");
+}
+
+#[test]
+fn strict_package_receipt_proves_both_source_gate_policies_fired() {
+    let (_temp, package) = scaffold_and_install("package");
+    let receipt = verify_with_policy(&package, true);
+
+    assert_eq!(receipt["schemaVersion"], 2);
+    assert_eq!(receipt["data"]["strict_requested"], true);
+    let checks = receipt["data"]["checks"].as_array().unwrap();
+    let command_for = |name: &str| {
+        checks
+            .iter()
+            .find(|check| check["name"] == name)
+            .and_then(|check| check["command"].as_array())
+            .map(|command| {
+                command
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_else(|| panic!("missing recorded command for {name}"))
+    };
+    let check = command_for("harn check");
+    assert_eq!(&check[1..4], ["check", "--strict", "--strict-types"]);
+    let lint = command_for("harn lint");
+    assert_eq!(&lint[1..3], ["lint", "--strict"]);
 }
 
 #[test]

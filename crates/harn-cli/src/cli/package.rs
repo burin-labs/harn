@@ -225,7 +225,7 @@ pub(crate) struct PackageVerifyArgs {
     /// Run connector poll bindings long enough to execute the first poll_tick.
     #[arg(long = "run-poll-tick")]
     pub run_poll_tick: bool,
-    /// Fail on lint warnings and require strict type checking for package-owned Harn sources.
+    /// Fail on check/lint warnings and require strict type checking for package-owned Harn sources.
     #[arg(long)]
     pub strict: bool,
     /// Emit the versioned verification receipt as JSON.
