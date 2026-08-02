@@ -84,7 +84,7 @@ fn main(harness: Harness) {
 HARN
 
 printf '%s' '{}' \
-  | HARN_BIN="$HARN_BIN" HARN_SHELL_GUARD_DEBUG=1 \
+  | HARN_BIN="$HARN_BIN" AGENT_SHELL_GUARD_DEBUG=1 \
     "$fixture_root/model-probe/agent-shell-guard.sh" \
     >"$fixture_root/model-probe.out" 2>"$fixture_root/model-probe.err"
 if ! grep -Fq "llm_call' is not permitted" "$fixture_root/model-probe.err"; then
