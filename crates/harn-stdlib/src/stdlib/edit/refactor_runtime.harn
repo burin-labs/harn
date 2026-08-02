@@ -2,7 +2,12 @@ import { diff_artifact } from "std/diff"
 import { edit_refactor_content_hash } from "std/edit/internal"
 import { edit_apply_node, edit_insert_at_anchor } from "std/edit/patch"
 
-/** Test whether an item is present in a refactor planning list. */
+/**
+ * Test whether an item is present in a refactor planning list.
+ *
+ * @effects: []
+ * @errors: []
+ */
 pub fn __refactor_member(list, item) -> bool {
   for x in list ?? [] {
     if x == item {
@@ -59,7 +64,12 @@ fn __refactor_new_session(random: HarnessRandom, operation) {
   return "harn-refactor-" + operation + "-" + random.uuid_v7()
 }
 
-/** Build the stable result envelope shared by structured refactorings. */
+/**
+ * Build the stable result envelope shared by structured refactorings.
+ *
+ * @effects: []
+ * @errors: []
+ */
 pub fn __refactor_result(operation, language, fields) -> dict {
   const base = {
     ok: false,
@@ -85,6 +95,12 @@ pub fn __refactor_result(operation, language, fields) -> dict {
   return base.merging(fields ?? {})
 }
 
+/**
+ * Build an unsupported-operation refactor result.
+ *
+ * @effects: []
+ * @errors: []
+ */
 pub fn __refactor_unsupported(operation, language, reason) -> dict {
   return __refactor_result(
     operation,
@@ -93,6 +109,12 @@ pub fn __refactor_unsupported(operation, language, reason) -> dict {
   )
 }
 
+/**
+ * Build an invalid-parameters refactor result.
+ *
+ * @effects: []
+ * @errors: []
+ */
 pub fn __refactor_invalid(operation, language, reason) -> dict {
   return __refactor_result(
     operation,
@@ -105,6 +127,12 @@ pub fn __refactor_invalid(operation, language, reason) -> dict {
   )
 }
 
+/**
+ * Build a conflict refactor result from structured conflicts.
+ *
+ * @effects: []
+ * @errors: []
+ */
 pub fn __refactor_conflict(operation, language, conflicts) -> dict {
   return __refactor_result(
     operation,
@@ -180,6 +208,9 @@ fn __refactor_exec_op(fs: HarnessFs, ast: HarnessAst, op, session_id, before_map
  * A dry run previews and discards one overlay. An apply either commits every
  * operation atomically or discards the overlay after the first conflict.
  * Callers that provide `session_id` retain ownership of the final commit.
+ *
+ * @effects: [host, fs]
+ * @errors: [backend]
  */
 pub fn __refactor_run(
   fs: HarnessFs,
