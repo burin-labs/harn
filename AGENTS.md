@@ -125,6 +125,10 @@ autonomy, cross-surface convergence, and operationally complete launches.
 ## Verification
 
 - Start with the narrowest check through the owning interface.
+- Run one exact Rust library test without unrelated nextest discovery with
+  `HARN_TEST_ONE_NAME='module::tests::case' make test-one`. Set
+  `HARN_TEST_ONE_PACKAGE` only when the test is outside `harn-cli`; zero matches
+  fail loudly.
 - Workspace tests: `make test` (nextest when available).
 - Full gate: `make all`.
 - Before declaring a change clean, run `make check-drift` and inspect
