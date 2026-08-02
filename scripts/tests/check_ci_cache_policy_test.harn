@@ -103,6 +103,7 @@ fn release_binary_workflow() {
         ],
       },
       build: {
+        if: "needs.setup.outputs.should_build_binaries == 'true'",
         concurrency: {
           group: "build-release-binaries-build-"
             + gha_expression(
@@ -112,6 +113,10 @@ fn release_binary_workflow() {
             "github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.setup.outputs.build_mode == 'warm'",
           ),
         },
+      },
+      cache_budget: {
+        if:
+          "always() && needs.setup.outputs.build_mode == 'warm' && needs.setup.outputs.should_build_binaries == 'true' && needs.build.result == 'success'",
       },
     },
   }
@@ -460,10 +465,15 @@ pipeline test_release_warm_cache_concurrency_rejects_setup_only_preemption(harne
     jobs: {
       ...workflow.jobs,
       build: {
+        if: "always()",
         concurrency: {
           group: "build-release-binaries-build-main",
           "cancel-in-progress": gha_expression("true"),
         },
+      },
+      cache_budget: {
+        if:
+          "always() && needs.setup.outputs.build_mode == 'warm' && needs.setup.outputs.should_build_binaries == 'true'",
       },
     },
   }
@@ -472,8 +482,10 @@ pipeline test_release_warm_cache_concurrency_rejects_setup_only_preemption(harne
     [
       "build-release-binaries.yml must give branch pushes run-qualified workflow lanes",
       "build-release-binaries.yml must reserve workflow cancellation for full scheduled/manual warms",
+      "build-release-binaries.yml:build must instantiate only after setup selects a real build",
       "build-release-binaries.yml:build must share one warm lane per target and qualify every other run",
       "build-release-binaries.yml:build must let only real main-branch warms supersede a target warm",
+      "build-release-binaries.yml:cache_budget must prune only after a complete successful warm matrix",
     ],
   )
 }

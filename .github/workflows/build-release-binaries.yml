@@ -1392,7 +1392,9 @@ jobs:
   cache_budget:
     name: Report cache budget
     needs: [setup, build]
-    if: always() && needs.setup.outputs.build_mode == 'warm' && needs.setup.outputs.should_build_binaries == 'true'
+    # A superseded warm has cancelled build legs and must not prune the last
+    # complete generation while its successor is still populating targets.
+    if: always() && needs.setup.outputs.build_mode == 'warm' && needs.setup.outputs.should_build_binaries == 'true' && needs.build.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

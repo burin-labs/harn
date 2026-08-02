@@ -51,6 +51,11 @@ const RELEASE_BUILD_CONCURRENCY_GROUP = "build-release-binaries-build-$"
 const RELEASE_BUILD_CANCEL_POLICY = "$"
   + "{{ github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.setup.outputs.build_mode == 'warm' }}"
 
+const RELEASE_BUILD_IF = "needs.setup.outputs.should_build_binaries == 'true'"
+
+const RELEASE_CACHE_BUDGET_IF =
+  "always() && needs.setup.outputs.build_mode == 'warm' && needs.setup.outputs.should_build_binaries == 'true' && needs.build.result == 'success'"
+
 const REQUIRED_RELEASE_BUILD_INPUTS = [
   ".github/actions/rust-cache/**",
   ".github/actions/rust-toolchain/**",
@@ -369,6 +374,12 @@ pub fn release_warm_cache_concurrency_errors(workflow) -> list<string> {
     ]
   }
   const build_concurrency = workflow?.jobs?.build?.concurrency
+  if trim(workflow?.jobs?.build?.if ?? "") != RELEASE_BUILD_IF {
+    errors = errors
+      + [
+      "${RELEASE_BINARY_WORKFLOW}:build must instantiate only after setup selects a real build",
+    ]
+  }
   if trim(build_concurrency?.group ?? "") != RELEASE_BUILD_CONCURRENCY_GROUP {
     errors = errors
       + [
@@ -379,6 +390,12 @@ pub fn release_warm_cache_concurrency_errors(workflow) -> list<string> {
     errors = errors
       + [
       "${RELEASE_BINARY_WORKFLOW}:build must let only real main-branch warms supersede a target warm",
+    ]
+  }
+  if trim(workflow?.jobs?.cache_budget?.if ?? "") != RELEASE_CACHE_BUDGET_IF {
+    errors = errors
+      + [
+      "${RELEASE_BINARY_WORKFLOW}:cache_budget must prune only after a complete successful warm matrix",
     ]
   }
   return errors
