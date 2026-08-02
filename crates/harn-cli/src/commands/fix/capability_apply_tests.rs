@@ -740,6 +740,104 @@ fn capability_plan_repairs_imported_helpers_without_type_diagnostics() {
 }
 
 #[test]
+fn capability_plan_preserves_explicit_imported_capability_expressions() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("main.harn");
+    fs::write(
+        &script,
+        "import { terminal_width } from \"std/tui\"\n\nfn custom_term(term: HarnessTerm) -> HarnessTerm {\n  return term\n}\n\npipeline main(harness: Harness, task) {\n  const term = harness.term\n  return [terminal_width(custom_term(harness.term)), terminal_width(term)]\n}\n",
+    )
+    .unwrap();
+    let files = vec![script];
+    let graph = commands::check::build_module_graph(&files);
+
+    let repairs = whole_program_capabilities::plan(&files, &graph, &[]).unwrap();
+
+    assert!(
+        repairs.is_empty(),
+        "explicit capability expressions must not be shifted into optional ordinary parameters: {repairs:#?}"
+    );
+}
+
+#[test]
+fn capability_plan_preserves_an_unknown_capability_identifier_when_ordinary_args_are_missing() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("main.harn");
+    fs::write(
+        &script,
+        "import { agent_session_messages } from \"std/agent/state\"\n\nfn custom_agent(harness: Harness) -> HarnessAgent {\n  return harness.agent\n}\n\npipeline main(harness: Harness, task) {\n  const agent = custom_agent(harness)\n  return agent_session_messages(agent)\n}\n",
+    )
+    .unwrap();
+    let files = vec![script];
+    let graph = commands::check::build_module_graph(&files);
+
+    let repairs = whole_program_capabilities::plan(&files, &graph, &[]).unwrap();
+
+    assert!(
+        !repairs
+            .iter()
+            .flat_map(|repair| &repair.edits)
+            .any(|edit| edit.replacement == "harness.agent, "),
+        "an unknown identifier may already be the carrier; adding one would shift it into the missing session slot: {repairs:#?}"
+    );
+}
+
+#[test]
+fn capability_plan_completes_a_partial_imported_capability_prefix() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("main.harn");
+    fs::write(
+        &script,
+        "import { which } from \"std/os\"\n\npipeline main(harness: Harness, task) {\n  return which(harness.tools, \"git\")\n}\n",
+    )
+    .unwrap();
+    let files = vec![script.clone()];
+    let graph = commands::check::build_module_graph(&files);
+
+    let repairs = whole_program_capabilities::plan(&files, &graph, &[]).unwrap();
+    let edits = repairs
+        .iter()
+        .flat_map(|repair| &repair.edits)
+        .filter(|edit| edit.replacement == ", harness.system")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        edits.len(),
+        1,
+        "only the missing capability suffix should be inserted: {repairs:#?}"
+    );
+    assert_eq!(
+        &fs::read_to_string(&script).unwrap()[edits[0].span.start..edits[0].span.end],
+        ""
+    );
+
+    let mut updated = fs::read_to_string(&script).unwrap();
+    let mut all_edits = repairs
+        .iter()
+        .flat_map(|repair| repair.edits.iter().cloned())
+        .collect::<Vec<_>>();
+    all_edits.sort_by_key(|edit| std::cmp::Reverse((edit.span.start, edit.span.end)));
+    for edit in all_edits {
+        updated.replace_range(edit.span.start..edit.span.end, &edit.replacement);
+    }
+    assert_eq!(
+        call_argument_paths(&updated, "which")[0],
+        [
+            Some("harness.tools".to_string()),
+            Some("harness.system".to_string()),
+            None,
+        ]
+    );
+    fs::write(&script, updated).unwrap();
+    let repaired_graph = commands::check::build_module_graph(&files);
+    assert!(
+        whole_program_capabilities::plan(&files, &repaired_graph, &[])
+            .unwrap()
+            .is_empty(),
+        "a completed imported prefix must be a planner fixed point"
+    );
+}
+
+#[test]
 fn capability_plan_resolves_private_imported_capability_aliases() {
     let temp = tempfile::TempDir::new().unwrap();
     let library = temp.path().join("library.harn");

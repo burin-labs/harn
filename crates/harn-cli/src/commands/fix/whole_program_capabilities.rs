@@ -19,12 +19,17 @@ use super::{CallableInfo, RepairCandidate, RepairImpactWire, SignatureChangeWire
 
 #[path = "whole_program_capabilities/edits.rs"]
 mod edits;
+#[path = "whole_program_capabilities/imported_calls.rs"]
+mod imported_calls;
 
 use edits::{
     add_call_argument_at_index_edit, add_call_arguments_at_index_edit, ambient_edits,
     argument_for_kind, carrier_supplies, explicit_capability_argument_edits,
     receiver_projection_edits, signature_edit, split_call_extension,
     split_capability_receiver_edits, split_capability_signature_edit, undefined_harness_edits,
+};
+use imported_calls::{
+    argument_edits as imported_argument_edits, signatures as imported_signatures,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,15 +51,7 @@ struct Carrier {
 struct ProgramFile {
     path: PathBuf,
     source: String,
-    imported_capability_signatures: BTreeMap<String, ImportedCapabilitySignature>,
-}
-
-#[derive(Debug, Clone)]
-struct ImportedCapabilitySignature {
-    prefix: Vec<CarrierKind>,
-    required_params: usize,
-    total_params: usize,
-    has_rest: bool,
+    imported_capability_signatures: BTreeMap<String, imported_calls::Signature>,
 }
 
 #[derive(Debug)]
@@ -68,6 +65,7 @@ struct ProgramCallable {
     flow_predicate: bool,
     carrier: Option<Carrier>,
     carriers: Vec<Carrier>,
+    ordinary_bindings: BTreeSet<String>,
     has_split_capability_params: bool,
     root_attenuation: Option<BTreeSet<CapabilityId>>,
     direct_requirements: BTreeSet<CapabilityId>,
@@ -153,8 +151,7 @@ pub(super) fn plan(
             .collect::<BTreeMap<_, _>>();
         let type_aliases = capability_type_aliases(&program, file, module_graph);
         let infos = collect_callable_infos(&program, &source, &exported);
-        let imported_capability_signatures =
-            imported_capability_signatures(file, module_graph, &type_aliases);
+        let imported_capability_signatures = imported_signatures(file, module_graph, &type_aliases);
         for info in infos {
             let Some((params, body, boundary, flow_predicate)) =
                 declaration_parts(&program, info.span)
@@ -162,6 +159,7 @@ pub(super) fn plan(
                 continue;
             };
             let carriers = capability_carriers(params, &type_aliases);
+            let ordinary_bindings = imported_calls::ordinary_bindings(params, body, &type_aliases);
             let has_split_capability_params = carriers.len() > 1
                 || matches!(
                     carriers.first().map(|carrier| &carrier.kind),
@@ -183,10 +181,16 @@ pub(super) fn plan(
                 let Some(signature) = imported_capability_signatures.get(&call.callee) else {
                     continue;
                 };
-                if !imported_capability_prefix_is_missing(&source, &carriers, call, signature) {
+                let Some(first_missing) = imported_calls::missing_prefix(
+                    &source,
+                    &carriers,
+                    &ordinary_bindings,
+                    call,
+                    signature,
+                ) else {
                     continue;
-                }
-                for kind in &signature.prefix {
+                };
+                for kind in &signature.prefix[first_missing..] {
                     match kind {
                         CarrierKind::Root => direct_root_requirement = true,
                         CarrierKind::Narrow(capability) => {
@@ -219,6 +223,7 @@ pub(super) fn plan(
                 flow_predicate,
                 carrier,
                 carriers,
+                ordinary_bindings,
                 has_split_capability_params,
                 root_attenuation,
                 direct_requirements,
@@ -305,12 +310,14 @@ pub(super) fn plan(
             file.imported_capability_signatures
                 .get(&call.callee)
                 .is_some_and(|signature| {
-                    imported_capability_prefix_is_missing(
+                    imported_calls::missing_prefix(
                         &file.source,
                         &callable.carriers,
+                        &callable.ordinary_bindings,
                         call,
                         signature,
                     )
+                    .is_some()
                 })
         })
     });
@@ -392,14 +399,15 @@ pub(super) fn plan(
                 diagnostics_by_file.get(&program_files[callable.file_idx].path),
             ),
         );
-        edits_by_file.entry(callable.file_idx).or_default().extend(
-            imported_capability_argument_edits(
+        edits_by_file
+            .entry(callable.file_idx)
+            .or_default()
+            .extend(imported_argument_edits(
                 &program_files[callable.file_idx],
                 callable,
                 desired,
                 &added_capabilities[idx],
-            ),
-        );
+            ));
     }
     for edge in &edges {
         if !signature_changed[edge.callee] && !signature_changed[edge.caller] {
@@ -917,127 +925,6 @@ fn resolve_edges(
         }
     }
     edges
-}
-
-fn imported_capability_argument_edits(
-    file: &ProgramFile,
-    callable: &ProgramCallable,
-    desired: &CarrierKind,
-    additions: &BTreeMap<CapabilityId, String>,
-) -> Vec<FixEdit> {
-    callable
-        .info
-        .calls
-        .iter()
-        .filter_map(|call| {
-            let signature = file.imported_capability_signatures.get(&call.callee)?;
-            if !imported_capability_prefix_is_missing(
-                &file.source,
-                &callable.carriers,
-                call,
-                signature,
-            ) {
-                return None;
-            }
-            let arguments = signature
-                .prefix
-                .iter()
-                .map(|kind| argument_for_kind(callable, desired, additions, kind))
-                .collect::<Result<Vec<_>, _>>()
-                .ok()?;
-            add_call_arguments_at_index_edit(&file.source, call, 0, &arguments)
-        })
-        .collect()
-}
-
-fn imported_capability_signatures(
-    file: &Path,
-    module_graph: &harn_modules::ModuleGraph,
-    type_aliases: &BTreeMap<String, TypeExpr>,
-) -> BTreeMap<String, ImportedCapabilitySignature> {
-    module_graph
-        .imported_callable_declarations_for_file(file)
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|declaration| {
-            let declaration = match &declaration.node {
-                Node::AttributedDecl { inner, .. } => inner.as_ref(),
-                _ => &declaration,
-            };
-            let (name, params) = match &declaration.node {
-                Node::FnDecl { name, params, .. }
-                | Node::Pipeline { name, params, .. }
-                | Node::ToolDecl { name, params, .. } => (name, params),
-                _ => return None,
-            };
-            let prefix = params
-                .iter()
-                .map_while(|param| {
-                    capability_carrier_kind(
-                        param.type_expr.as_ref()?,
-                        type_aliases,
-                        &mut BTreeSet::new(),
-                    )
-                })
-                .collect::<Vec<_>>();
-            if prefix.is_empty() {
-                return None;
-            }
-            let required_params = params
-                .iter()
-                .position(|param| param.default_value.is_some())
-                .unwrap_or_else(|| params.iter().filter(|param| !param.rest).count());
-            Some((
-                name.clone(),
-                ImportedCapabilitySignature {
-                    prefix,
-                    required_params,
-                    total_params: params.len(),
-                    has_rest: params.last().is_some_and(|param| param.rest),
-                },
-            ))
-        })
-        .collect()
-}
-
-fn imported_capability_prefix_is_missing(
-    source: &str,
-    carriers: &[Carrier],
-    call: &super::CallSite,
-    signature: &ImportedCapabilitySignature,
-) -> bool {
-    let prefix_len = signature.prefix.len();
-    if !signature.has_rest && call.args.len() >= signature.total_params {
-        return false;
-    }
-    let required_without_prefix = signature.required_params.saturating_sub(prefix_len);
-    let total_without_prefix = signature.total_params.saturating_sub(prefix_len);
-    let minimum_without_prefix = if signature.has_rest {
-        required_without_prefix.min(total_without_prefix.saturating_sub(1))
-    } else {
-        required_without_prefix
-    };
-    if call.args.len() < minimum_without_prefix {
-        return false;
-    }
-
-    let Some(first_arg) = call.args.first() else {
-        return true;
-    };
-    let Some(actual) = source.get(first_arg.start..first_arg.end).map(str::trim) else {
-        return false;
-    };
-    let uses_typed_carrier = carriers
-        .iter()
-        .any(|carrier| actual == carrier.name || actual.starts_with(&format!("{}.", carrier.name)));
-    if uses_typed_carrier {
-        return false;
-    }
-
-    // An untyped ambient `harness` can already occupy the capability slot;
-    // the existing carrier migration will type/project it in place. Treat it
-    // as omitted only when the call is too short for the declared signature.
-    !(actual == "harness" && call.args.len() >= signature.required_params)
 }
 
 fn propagate_requirements(
