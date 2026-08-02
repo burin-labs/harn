@@ -10,6 +10,12 @@
 // exits non-zero with an `error: ...` message on any failed check.
 import { parse } from "std/semver"
 import {
+  ReleaseWithdrawal,
+  load_release_withdrawals,
+  release_distribution_version,
+  release_withdrawal_for_tag,
+} from "./release_withdrawals.harn"
+import {
   extract_section,
   normalize_version,
   previous_version,
@@ -23,6 +29,8 @@ const CHANGELOG_PATH = "CHANGELOG.md"
 const MANIFEST_PATH = "spec/protocol-artifacts/manifest.json"
 
 const ACP_AGENT_MANIFEST_PATH = "spec/acp-registry/harn/agent.json"
+
+const RELEASE_WITHDRAWALS_PATH = ".github/release-withdrawals.json"
 
 type AcpArchiveVersion = {archive: string, version: string}
 
@@ -92,12 +100,12 @@ pub fn acp_agent_manifest_archive_versions(manifest_text: string) -> list<AcpArc
   return versions
 }
 
-/** Ensure the ACP Agent Registry manifest points at the current release. */
+/** Ensure the ACP Agent Registry manifest points at the install-facing release. */
 pub fn check_acp_agent_manifest(manifest_text: string, version: string) {
   const manifest_version = acp_agent_manifest_version(manifest_text)
   if manifest_version != version {
     throw "error: " + ACP_AGENT_MANIFEST_PATH + " version " + manifest_version
-      + " does not match Cargo.toml version "
+      + " does not match expected release projection version "
       + version
   }
   for item in acp_agent_manifest_archive_versions(manifest_text) {
@@ -105,7 +113,7 @@ pub fn check_acp_agent_manifest(manifest_text: string, version: string) {
       throw "error: " + ACP_AGENT_MANIFEST_PATH + " archive " + item.archive
         + " points at v"
         + item.version
-        + " instead of Cargo.toml version v"
+        + " instead of expected release projection v"
         + version
     }
   }
@@ -318,9 +326,32 @@ fn verify_release_notes(fs: HarnessFs, stdio: HarnessStdio, version: string) {
 /**
  * Reject git tag states that would silently re-release or rewrite history.
  * Passes when the tag is absent, HEAD is at/descends from the tagged
- * commit, or HEAD carries an equivalent `Release vX.Y.Z` commit.
+ * commit, HEAD carries an equivalent `Release vX.Y.Z` commit, or the closed
+ * withdrawal registry binds the immutable tag to this version exactly.
  */
-fn verify_tag_state(process: HarnessProcess, version: string) {
+fn head_contains_release_commit(process: HarnessProcess, version: string) -> bool {
+  const release = process.run(
+    {
+      program: "git",
+      args: [
+        "log",
+        "--format=%H",
+        "--grep=^Release v" + version + "( |$|\\()",
+        "--extended-regexp",
+        "-n",
+        "1",
+        "HEAD",
+      ],
+    },
+  )
+  return release.success && release.stdout.trim() != ""
+}
+
+fn verify_tag_state(
+  process: HarnessProcess,
+  withdrawals: list<ReleaseWithdrawal>,
+  version: string,
+) -> nil {
   const tag = "v" + version
   const tag_lookup = process.run(
     {program: "git", args: ["rev-parse", "-q", "--verify", "refs/tags/" + tag]},
@@ -339,22 +370,20 @@ fn verify_tag_state(process: HarnessProcess, version: string) {
   if is_descendant.success {
     return
   }
-  const rebrand = process.run(
-    {
-      program: "git",
-      args: [
-        "log",
-        "--format=%H",
-        "--grep=^Release " + tag + "( |$|\\()",
-        "--extended-regexp",
-        "-n",
-        "1",
-        "HEAD",
-      ],
-    },
-  )
-  if rebrand.success && rebrand.stdout.trim() != "" {
+  if head_contains_release_commit(process, version) {
     return
+  }
+  const withdrawal = release_withdrawal_for_tag(withdrawals, version, tag_commit)
+  if withdrawal != nil {
+    if head_contains_release_commit(process, withdrawal.distribution_version) {
+      return
+    }
+    throw "error: withdrawal for v" + version
+      + " matches immutable tag commit "
+      + tag_commit
+      + ", but HEAD has no `Release v"
+      + withdrawal.distribution_version
+      + "` lineage commit"
   }
   throw "error: current version " + version + " is already tagged at " + tag_commit
     + ", but HEAD ("
@@ -384,17 +413,20 @@ pipeline main(harness: Harness, task) {
         + "; run `make gen-protocol-artifacts` (and "
         + "scripts/sync_protocol_fixture_runtime_versions.harn) after bumping the version"
     }
+    const withdrawals = load_release_withdrawals(harness.fs, RELEASE_WITHDRAWALS_PATH)
+    const distribution_version = release_distribution_version(withdrawals, version)
     const acp_manifest_text = harness.fs.read_text(ACP_AGENT_MANIFEST_PATH)
-    check_acp_agent_manifest(acp_manifest_text, version)
+    check_acp_agent_manifest(acp_manifest_text, distribution_version)
     verify_release_notes(harness.fs, harness.stdio, effective_version)
-    verify_tag_state(harness.process, effective_version)
+    verify_tag_state(harness.process, withdrawals, effective_version)
     harness.stdio.println(success_message(version, effective_version))
     return 0
   } catch (e) {
     if e == "release-notes-failed" {
       return 1
     }
-    harness.stdio.eprintln("${e}")
+    const message = to_string(e)
+    harness.stdio.eprintln(message.starts_with("error: ") ? message : "error: " + message)
     return 1
   }
 }
