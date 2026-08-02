@@ -436,6 +436,122 @@ fn capability_apply_coalesces_multiple_requirements_into_one_carrier() {
 }
 
 #[test]
+fn capability_apply_keeps_three_capability_orchestration_on_root_harness() {
+    let (result, updated) = apply_single(
+        "fn orchestrate() {\n  const dir = cwd()\n  const timestamp = now_ms()\n  const usage = llm_usage()\n  return {dir: dir, timestamp: timestamp, usage: usage}\n}\n\nfn main(harness: Harness) {\n  orchestrate()\n}\n",
+    );
+    assert_eq!(
+        result.post_apply_diagnostics_count, 0,
+        "{result:#?}\n{updated}"
+    );
+    assert_eq!(
+        callable_params(&updated, "orchestrate"),
+        vec![param("harness", "Harness")]
+    );
+    assert_eq!(
+        call_argument_paths(&updated, "orchestrate")[0],
+        [Some("harness".to_string())],
+        "three capabilities are orchestration and must pass one root carrier"
+    );
+    assert_eq!(method_receiver_paths(&updated, "cwd"), vec!["harness.fs"]);
+    assert_eq!(
+        method_receiver_paths(&updated, "now_ms"),
+        vec!["harness.clock"]
+    );
+    assert_eq!(
+        method_receiver_paths(&updated, "llm_usage"),
+        vec!["harness.obs"]
+    );
+}
+
+#[test]
+fn capability_apply_promotes_a_narrow_carrier_to_root_for_orchestration() {
+    let (result, updated) = apply_single(
+        "fn orchestrate(harness: HarnessFs) {\n  const dir = harness.cwd()\n  const timestamp = now_ms()\n  const usage = llm_usage()\n  return {dir: dir, timestamp: timestamp, usage: usage}\n}\n\nfn main(harness: Harness) {\n  orchestrate(harness.fs)\n}\n",
+    );
+    assert_eq!(
+        result.post_apply_diagnostics_count, 0,
+        "{result:#?}\n{updated}"
+    );
+    assert_eq!(
+        callable_params(&updated, "orchestrate"),
+        vec![param("harness", "Harness")]
+    );
+    assert_eq!(method_receiver_paths(&updated, "cwd"), vec!["harness.fs"]);
+    assert_eq!(
+        call_argument_paths(&updated, "orchestrate")[0],
+        [Some("harness".to_string())]
+    );
+}
+
+#[test]
+fn capability_apply_recognizes_a_local_named_capability_bundle() {
+    let (result, updated) = apply_single(
+        "type ScenarioCapabilities = {testing: HarnessTesting, llm: HarnessLlm}\n\nfn with_host_fixture(testing: HarnessTesting, body) {\n  testing.calls()\n  return body()\n}\n\nfn with_scenario(capabilities: ScenarioCapabilities, body) {\n  return with_host_fixture(capabilities.testing, body)\n}\n\nfn main(harness: Harness) {\n  with_scenario({testing: harness.testing, llm: harness.llm}, { -> nil })\n}\n",
+    );
+    assert_eq!(
+        result.post_apply_diagnostics_count, 0,
+        "{result:#?}\n{updated}"
+    );
+    assert_eq!(
+        callable_params(&updated, "with_scenario"),
+        vec![
+            param("capabilities", "ScenarioCapabilities"),
+            ParamContract {
+                name: "body".to_string(),
+                type_expr: None,
+            },
+        ],
+        "the alias already supplies both capabilities and needs no duplicate parameter"
+    );
+    assert_eq!(call_arities(&updated, "with_scenario"), vec![2]);
+}
+
+#[test]
+fn capability_apply_recognizes_an_imported_named_capability_bundle() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let types = temp.path().join("types.harn");
+    let adapter = temp.path().join("adapter.harn");
+    let entrypoint = temp.path().join("main.harn");
+    fs::write(
+        &types,
+        "pub type ScenarioCapabilities = {testing: HarnessTesting, llm: HarnessLlm}\n",
+    )
+    .unwrap();
+    fs::write(
+        &adapter,
+        "import { ScenarioCapabilities } from \"./types\"\n\nfn with_host_fixture(testing: HarnessTesting, body) {\n  testing.calls()\n  return body()\n}\n\npub fn with_scenario(capabilities: ScenarioCapabilities, body) {\n  return with_host_fixture(capabilities.testing, body)\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        &entrypoint,
+        "import { with_scenario } from \"./adapter\"\n\nfn main(harness: Harness) {\n  with_scenario({testing: harness.testing, llm: harness.llm}, { -> nil })\n}\n",
+    )
+    .unwrap();
+
+    let result = apply_repairs_with_options(
+        temp.path(),
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions {
+            capability_migrations_only: true,
+        },
+    )
+    .unwrap();
+    let migrated_adapter = fs::read_to_string(adapter).unwrap();
+    let migrated_entrypoint = fs::read_to_string(entrypoint).unwrap();
+    assert!(
+        result.applied.is_empty(),
+        "the imported alias already supplies the propagated capability:\n{result:#?}\n{migrated_adapter}\n{migrated_entrypoint}"
+    );
+    assert_eq!(
+        callable_params(&migrated_adapter, "with_scenario")[0],
+        param("capabilities", "ScenarioCapabilities")
+    );
+    assert_eq!(call_arities(&migrated_entrypoint, "with_scenario"), vec![2]);
+}
+
+#[test]
 fn capability_apply_keeps_exported_definition_and_imported_call_arity_equal() {
     let temp = tempfile::TempDir::new().unwrap();
     let library = temp.path().join("library.harn");

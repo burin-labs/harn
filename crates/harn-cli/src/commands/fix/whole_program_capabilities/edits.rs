@@ -277,9 +277,9 @@ pub(super) fn receiver_projection_edits(
                 }
             }
         }
-        (Some(CarrierKind::Narrow(capability)), CarrierKind::Bundle(_)) => {
-            edits.extend(callable.receiver_accesses.iter().map(|access| FixEdit {
-                span: access.object_span,
+        (Some(CarrierKind::Narrow(capability)), CarrierKind::Root | CarrierKind::Bundle(_)) => {
+            edits.extend(callable.direct_receiver_spans.iter().map(|span| FixEdit {
+                span: *span,
                 replacement: format!("{binding}.{}", capability.field_name()),
             }));
         }

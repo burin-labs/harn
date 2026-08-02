@@ -53,6 +53,7 @@ struct ProgramCallable {
     file_idx: usize,
     info: CallableInfo,
     receiver_accesses: Vec<ReceiverAccess>,
+    direct_receiver_spans: Vec<Span>,
     undefined_harness_accesses: Vec<ReceiverAccess>,
     boundary: bool,
     flow_predicate: bool,
@@ -140,6 +141,7 @@ pub(super) fn plan(
                 )
             })
             .collect::<BTreeMap<_, _>>();
+        let type_aliases = capability_type_aliases(&program, file, module_graph);
         let infos = collect_callable_infos(&program, &source, &exported);
         for info in infos {
             let Some((params, body, boundary, flow_predicate)) =
@@ -147,7 +149,7 @@ pub(super) fn plan(
             else {
                 continue;
             };
-            let carriers = capability_carriers(params);
+            let carriers = capability_carriers(params, &type_aliases);
             let has_split_capability_params = carriers.len() > 1
                 || matches!(
                     carriers.first().map(|carrier| &carrier.kind),
@@ -168,6 +170,7 @@ pub(super) fn plan(
                 .as_ref()
                 .map_or("harness", |carrier| carrier.name.as_str());
             let receiver_accesses = collect_receiver_accesses(body, receiver);
+            let direct_receiver_spans = collect_direct_receiver_spans(body, receiver);
             let undefined_harness_accesses = if receiver != "harness" {
                 collect_receiver_accesses(body, "harness")
             } else {
@@ -177,6 +180,7 @@ pub(super) fn plan(
                 file_idx,
                 info,
                 receiver_accesses,
+                direct_receiver_spans,
                 undefined_harness_accesses,
                 boundary,
                 flow_predicate,
@@ -535,26 +539,68 @@ fn collect_receiver_accesses(body: &[SNode], receiver: &str) -> Vec<ReceiverAcce
     accesses
 }
 
-fn capability_carriers(params: &[TypedParam]) -> Vec<Carrier> {
+fn collect_direct_receiver_spans(body: &[SNode], receiver: &str) -> Vec<Span> {
+    let mut spans = Vec::new();
+    visit::walk_program(body, &mut |node| {
+        let Node::MethodCall { object, .. } = &node.node else {
+            return;
+        };
+        if matches!(&object.node, Node::Identifier(name) if name == receiver) {
+            spans.push(object.span);
+        }
+    });
+    spans
+}
+
+fn capability_type_aliases(
+    program: &[SNode],
+    file: &Path,
+    module_graph: &harn_modules::ModuleGraph,
+) -> BTreeMap<String, TypeExpr> {
+    let mut aliases = BTreeMap::new();
+    if let Some(imported) = module_graph.imported_type_declarations_for_file(file) {
+        collect_type_aliases(&imported, &mut aliases);
+    }
+    // The typechecker registers local declarations after imports, so a valid
+    // local alias has the same precedence here as it does during checking.
+    collect_type_aliases(program, &mut aliases);
+    aliases
+}
+
+fn collect_type_aliases(nodes: &[SNode], aliases: &mut BTreeMap<String, TypeExpr>) {
+    for node in nodes {
+        let node = match &node.node {
+            Node::AttributedDecl { inner, .. } => inner.as_ref(),
+            _ => node,
+        };
+        let Node::TypeDecl {
+            name,
+            type_params,
+            type_expr,
+            ..
+        } = &node.node
+        else {
+            continue;
+        };
+        if type_params.is_empty() {
+            aliases.insert(name.clone(), type_expr.clone());
+        }
+    }
+}
+
+fn capability_carriers(
+    params: &[TypedParam],
+    type_aliases: &BTreeMap<String, TypeExpr>,
+) -> Vec<Carrier> {
     params
         .iter()
         .enumerate()
         .filter_map(|(param_index, param)| {
-            let kind = match param.type_expr.as_ref()? {
-                TypeExpr::Named(name) if name == "Harness" => CarrierKind::Root,
-                TypeExpr::Named(name) => CarrierKind::Narrow(CapabilityId::from_type_name(name)?),
-                TypeExpr::Shape(fields) => {
-                    let capabilities = fields
-                        .iter()
-                        .map(|field| match &field.type_expr {
-                            TypeExpr::Named(name) => CapabilityId::from_type_name(name),
-                            _ => None,
-                        })
-                        .collect::<Option<BTreeSet<_>>>()?;
-                    (!capabilities.is_empty()).then_some(CarrierKind::Bundle(capabilities))?
-                }
-                _ => return None,
-            };
+            let kind = capability_carrier_kind(
+                param.type_expr.as_ref()?,
+                type_aliases,
+                &mut BTreeSet::new(),
+            )?;
             Some(Carrier {
                 name: param.name.clone(),
                 param_index,
@@ -563,6 +609,41 @@ fn capability_carriers(params: &[TypedParam]) -> Vec<Carrier> {
             })
         })
         .collect()
+}
+
+fn capability_carrier_kind(
+    type_expr: &TypeExpr,
+    type_aliases: &BTreeMap<String, TypeExpr>,
+    resolving: &mut BTreeSet<String>,
+) -> Option<CarrierKind> {
+    match type_expr {
+        TypeExpr::Named(name) if name == "Harness" => Some(CarrierKind::Root),
+        TypeExpr::Named(name) => {
+            if let Some(capability) = CapabilityId::from_type_name(name) {
+                return Some(CarrierKind::Narrow(capability));
+            }
+            let alias = type_aliases.get(name)?;
+            if !resolving.insert(name.clone()) {
+                return None;
+            }
+            let kind = capability_carrier_kind(alias, type_aliases, resolving);
+            resolving.remove(name);
+            kind
+        }
+        TypeExpr::Shape(fields) => {
+            let capabilities = fields
+                .iter()
+                .map(|field| {
+                    match capability_carrier_kind(&field.type_expr, type_aliases, resolving)? {
+                        CarrierKind::Narrow(capability) => Some(capability),
+                        CarrierKind::Root | CarrierKind::Bundle(_) => None,
+                    }
+                })
+                .collect::<Option<BTreeSet<_>>>()?;
+            (!capabilities.is_empty()).then_some(CarrierKind::Bundle(capabilities))
+        }
+        _ => None,
+    }
 }
 
 fn direct_requirements(
@@ -781,6 +862,9 @@ fn desired_carrier(
     requirements: &BTreeSet<CapabilityId>,
 ) -> Option<CarrierKind> {
     if callable.has_split_capability_params {
+        if split_carrier_becomes_root(callable, requirements) {
+            return Some(CarrierKind::Root);
+        }
         return callable
             .carrier
             .as_ref()
@@ -808,12 +892,16 @@ fn desired_carrier(
     if callable.boundary {
         return Some(CarrierKind::Root);
     }
-    if requirements.len() == 1 {
-        return Some(CarrierKind::Narrow(
+    match requirements.len() {
+        1 => Some(CarrierKind::Narrow(
             *requirements.first().expect("one requirement"),
-        ));
+        )),
+        2 => Some(CarrierKind::Bundle(requirements.clone())),
+        // HARN-LNT-069 defines one handle and a two-field record as the
+        // attenuated helper shapes. Three or more capabilities are genuine
+        // orchestration: retain or introduce the compact root Harness.
+        _ => Some(CarrierKind::Root),
     }
-    Some(CarrierKind::Bundle(requirements.clone()))
 }
 
 fn carrier_changed(current: Option<&Carrier>, desired: Option<&CarrierKind>) -> bool {
@@ -828,7 +916,7 @@ fn added_split_capability_bindings(
     callable: &ProgramCallable,
     requirements: &BTreeSet<CapabilityId>,
 ) -> BTreeMap<CapabilityId, String> {
-    if !callable.has_split_capability_params {
+    if !callable.has_split_capability_params || split_carrier_becomes_root(callable, requirements) {
         return BTreeMap::new();
     }
     let mut unavailable = callable.info.bound_names.clone();
@@ -860,6 +948,16 @@ fn added_split_capability_bindings(
         additions.insert(*capability, name);
     }
     additions
+}
+
+fn split_carrier_becomes_root(
+    callable: &ProgramCallable,
+    requirements: &BTreeSet<CapabilityId>,
+) -> bool {
+    // A single nominal handle is a carrier that can be widened in place.
+    // Multiple hand-authored capability parameters are an existing interface;
+    // collapsing and deleting those parameters is outside this migration.
+    callable.carriers.len() == 1 && requirements.len() > 2
 }
 
 fn is_missing_capability_argument(diagnostic: &RepairCandidate) -> bool {
@@ -1019,5 +1117,22 @@ mod tests {
         assert_eq!(indexed.missing_capability_arguments.len(), 1);
         assert_eq!(index[Path::new("b.harn")].ambient_spans.len(), 1);
         assert!(!index.contains_key(Path::new("c.harn")));
+    }
+
+    #[test]
+    fn capability_carrier_alias_resolution_stops_at_cycles() {
+        let aliases = BTreeMap::from([
+            ("First".to_string(), TypeExpr::Named("Second".to_string())),
+            ("Second".to_string(), TypeExpr::Named("First".to_string())),
+        ]);
+
+        assert_eq!(
+            capability_carrier_kind(
+                &TypeExpr::Named("First".to_string()),
+                &aliases,
+                &mut BTreeSet::new(),
+            ),
+            None
+        );
     }
 }
