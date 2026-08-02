@@ -2512,7 +2512,21 @@ Inspect persisted workflow runs through stable view schemas.
 ```bash
 harn runs view --json .harn-runs/<run>.json
 harn runs view --json --session .harn-runs/
+harn runs report .harn-runs/<run>.json
+harn runs report .harn-runs/<run>.json --events-db .harn/events.sqlite
 ```
+
+`harn runs report` follows the root record's typed child-run pointers and emits
+the versioned `harn.run_report.v1` JSON projection. The report has one row per
+agent, checked parent/child links, LLM timing and cache/cost data recorded on
+trace spans, source hashes, redacted visible output, and structural checks.
+`--events-db` adds the redacted semantic timeline from a SQLite event log.
+Missing timing is `null`, not zero; until Harn records a join receipt, the
+report marks wait and result-collapse timing unavailable.
+
+Agents can request the same projection through the read-only
+`harn.run.report` MCP tool. MCP paths are confined to the server's project and
+state roots; the local CLI accepts an explicit local path.
 
 Project one authoritative run into a `harn.agent_training_example.v1`
 training example.

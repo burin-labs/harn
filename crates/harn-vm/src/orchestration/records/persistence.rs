@@ -547,9 +547,21 @@ pub fn save_run_record(run: &RunRecord, path: Option<&str>) -> Result<String, Vm
 }
 
 pub fn load_run_record(path: &Path) -> Result<RunRecord, VmError> {
-    let content = std::fs::read_to_string(path)
+    let (mut run, _) = load_run_record_snapshot(path)?;
+    refresh_run_observability(&mut run, Some(path));
+    Ok(run)
+}
+
+/// Load one immutable persisted snapshot without consulting derived sidecars.
+///
+/// Auditors use this path so parsing and source hashing refer to the same bytes
+/// and a sidecar symlink cannot widen the caller's read authority. Interactive
+/// consumers should keep using [`load_run_record`], which enriches the snapshot
+/// with current transcript-derived observability.
+pub(super) fn load_run_record_snapshot(path: &Path) -> Result<(RunRecord, Vec<u8>), VmError> {
+    let content = std::fs::read(path)
         .map_err(|e| VmError::Runtime(format!("failed to read run record: {e}")))?;
-    let mut run: RunRecord = serde_json::from_str(&content)
+    let mut run: RunRecord = serde_json::from_slice(&content)
         .map_err(|e| VmError::Runtime(format!("failed to parse run record: {e}")))?;
     materialize_child_runs_from_stage_metadata(&mut run);
     if run.replay_fixture.is_none() {
@@ -558,8 +570,7 @@ pub fn load_run_record(path: &Path) -> Result<RunRecord, VmError> {
     run.persisted_path
         .get_or_insert_with(|| path.to_string_lossy().into_owned());
     sync_run_handoffs(&mut run);
-    refresh_run_observability(&mut run, Some(path));
-    Ok(run)
+    Ok((run, content))
 }
 
 #[cfg(test)]

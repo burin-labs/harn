@@ -1,5 +1,5 @@
 use clap::{Args, Subcommand};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process;
 
 #[derive(Debug, Args)]
@@ -14,6 +14,8 @@ pub(crate) enum RunsCommand {
     Inspect(RunsInspectArgs),
     /// Print the stable harn.run_view.v1 / harn.session_view.v1 JSON projection.
     View(RunsViewArgs),
+    /// Build one versioned, evidence-backed report for a run or run bundle.
+    Report(RunsReportArgs),
     /// Project one authoritative run into a harn.agent_training_example.v1 example.
     ExportTraining(RunsExportTrainingArgs),
 }
@@ -59,6 +61,15 @@ pub(crate) struct RunsViewArgs {
     pub json: bool,
 }
 
+#[derive(Debug, Args)]
+pub(crate) struct RunsReportArgs {
+    /// Root run record JSON file.
+    pub path: String,
+    /// Optional SQLite event log to add to each agent timeline.
+    #[arg(long, value_name = "PATH")]
+    pub events_db: Option<PathBuf>,
+}
+
 /// Dispatch a `harn runs` subcommand.
 ///
 /// Lives beside the argument definitions rather than in the top-level command
@@ -69,6 +80,12 @@ pub(crate) async fn run_runs_command(args: RunsArgs) {
             crate::inspect_run_record(&inspect.path, inspect.compare.as_deref());
         }
         RunsCommand::View(view) => print_view(&view.path, view.session, view.json),
+        RunsCommand::Report(report) => {
+            let code = crate::commands::run_report::run(report).await;
+            if code != 0 {
+                process::exit(code);
+            }
+        }
         RunsCommand::ExportTraining(export) => {
             let code = crate::commands::runs_export_training::run(&export).await;
             if code != 0 {

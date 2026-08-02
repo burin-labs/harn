@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use serde_json::Value as JsonValue;
@@ -103,6 +103,21 @@ impl McpOrchestratorService {
         OrchestratorLocalArgs {
             config: self.config_path.clone(),
             state_dir: self.state_dir.clone(),
+        }
+    }
+
+    pub(super) fn project_root(&self) -> PathBuf {
+        self.config_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf()
+    }
+
+    pub(super) fn effective_state_dir(&self) -> PathBuf {
+        if self.state_dir.is_absolute() {
+            self.state_dir.clone()
+        } else {
+            self.project_root().join(&self.state_dir)
         }
     }
 
