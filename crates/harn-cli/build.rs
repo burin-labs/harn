@@ -16,10 +16,11 @@ mod build_revision;
 #[path = "build_support/cli_aot_manifest.rs"]
 #[allow(dead_code)]
 mod cli_aot_manifest;
+#[path = "build_support/embedded_assets.rs"]
+mod embedded_assets;
 
 const CLI_AOT_MANIFEST: &str = "generated/cli-bytecode-manifest.json";
 const CLI_BYTECODE_MAGIC: &[u8; 8] = b"HARNBC\0\0";
-const EMBEDDED_ASSET_DIRS: &[&str] = &["assets/persona-templates", "portal-dist"];
 const CLI_AOT_REQUIRED_ENV: &str = "HARN_REQUIRE_CLI_AOT";
 
 fn main() {
@@ -63,7 +64,7 @@ fn main() {
         }
     }
 
-    emit_embedded_asset_watches(&manifest_dir);
+    embedded_assets::emit_watches(&manifest_dir);
 }
 
 /// Fingerprint the check pipeline's own sources — `harn-lint`, this crate's
@@ -447,18 +448,6 @@ fn emit_demo_sibling_assets() {
 
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
     write_demo_assets_table(&out_dir.join("demo_assets_table.rs"), &entries);
-}
-
-/// Keep every directory embedded by `include_dir!` under one Cargo-owned watch
-/// contract. This runs after the portal fallback exists so Cargo can observe
-/// nested portal assets on fresh checkouts as well as real frontend builds.
-fn emit_embedded_asset_watches(manifest_dir: &Path) {
-    for relative_dir in EMBEDDED_ASSET_DIRS {
-        println!(
-            "cargo:rerun-if-changed={}",
-            manifest_dir.join(relative_dir).display()
-        );
-    }
 }
 
 /// Recurse `dir`, recording each embeddable sibling file as
