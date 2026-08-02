@@ -27,6 +27,14 @@ const SUPPORTED_TARGETS = new Set([
   "x86_64-unknown-linux-gnu",
 ]);
 
+class InstallLockTimeoutError extends Error {
+  constructor(installRoot) {
+    super(`timed out waiting for Harn installation at ${installRoot}`);
+    this.name = "InstallLockTimeoutError";
+    this.code = "HARN_INSTALL_LOCK_TIMEOUT";
+  }
+}
+
 export function normalizeVersion(value) {
   const text = String(value ?? "").trim();
   const match = SEMVER.exec(text);
@@ -476,9 +484,7 @@ async function withInstallLock(
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
       if (Date.now() >= absoluteDeadline) {
-        throw new Error(
-          `timed out waiting for Harn installation at ${installRoot}`,
-        );
+        throw new InstallLockTimeoutError(installRoot);
       }
       const inspected = inspectInstallLock(lockPath);
       if (inspected) {
@@ -520,38 +526,48 @@ async function withInstallLock(
 }
 
 async function commitInstall(temporary, installRoot, expected, lockTimeoutMs) {
-  return withInstallLock(
-    installRoot,
-    async (assertOwned) => {
-      const current = readValidInstall(installRoot, expected);
-      if (current) return current;
-      for (
-        let attempt = 1;
-        attempt <= INSTALL_MUTATION_ATTEMPTS;
-        attempt += 1
-      ) {
-        try {
-          assertOwned();
-          discardInvalid(installRoot);
-          assertOwned();
-          fs.renameSync(temporary, installRoot);
-          return readValidInstall(installRoot, expected);
-        } catch (error) {
-          if (
-            !retryableInstallMutation(error) ||
-            attempt === INSTALL_MUTATION_ATTEMPTS
-          ) {
-            throw error;
+  try {
+    return await withInstallLock(
+      installRoot,
+      async (assertOwned) => {
+        const current = readValidInstall(installRoot, expected);
+        if (current) return current;
+        for (
+          let attempt = 1;
+          attempt <= INSTALL_MUTATION_ATTEMPTS;
+          attempt += 1
+        ) {
+          try {
+            assertOwned();
+            discardInvalid(installRoot);
+            assertOwned();
+            fs.renameSync(temporary, installRoot);
+            return readValidInstall(installRoot, expected);
+          } catch (error) {
+            if (
+              !retryableInstallMutation(error) ||
+              attempt === INSTALL_MUTATION_ATTEMPTS
+            ) {
+              throw error;
+            }
+            await new Promise((resolve) =>
+              setTimeout(
+                resolve,
+                INSTALL_MUTATION_RETRY_MS * 2 ** (attempt - 1),
+              ),
+            );
           }
-          await new Promise((resolve) =>
-            setTimeout(resolve, INSTALL_MUTATION_RETRY_MS * 2 ** (attempt - 1)),
-          );
         }
-      }
-      return null;
-    },
-    lockTimeoutMs,
-  );
+        return null;
+      },
+      lockTimeoutMs,
+    );
+  } catch (error) {
+    if (error?.code !== "HARN_INSTALL_LOCK_TIMEOUT") throw error;
+    const winner = readValidInstall(installRoot, expected);
+    if (winner) return winner;
+    throw error;
+  }
 }
 
 async function installVerifiedArchive(options) {

@@ -105,6 +105,26 @@ function replaceInstallLockOwner(lockRoot, owner) {
   fs.renameSync(temporary, ownerPath);
 }
 
+function publishValidInstall(root, archive) {
+  const installRoot = path.join(root, "install");
+  const binaryPath = path.join(installRoot, "harn");
+  const binary = Buffer.from("fake harn binary\n");
+  fs.mkdirSync(installRoot);
+  fs.writeFileSync(binaryPath, binary);
+  fs.writeFileSync(
+    path.join(installRoot, "install-manifest.json"),
+    `${JSON.stringify({
+      schema_version: "harn-bootstrap-install-v1",
+      version: TEST_VERSION,
+      target: TEST_TARGET,
+      binary_path: binaryPath,
+      source: `https://github.com/burin-labs/harn/releases/download/v${TEST_VERSION}/${TEST_ASSET}`,
+      checksum: sha256(archive),
+      binary_sha256: sha256(binary),
+    })}\n`,
+  );
+}
+
 function runChild(script, arguments_) {
   return new Promise((resolve, reject) => {
     const child = spawn(
@@ -573,6 +593,27 @@ test("rapid owner rotation still has an overall wait bound", async (context) => 
     /timed out waiting for Harn installation/,
   );
   clearInterval(rotation);
+});
+
+test("a peer install published at the total deadline wins", async (context) => {
+  const root = temporaryRoot(context);
+  const archive = makeArchive(root);
+  const release = fakeRelease(archive);
+  writeInstallLock(root, {
+    hostname: os.hostname(),
+    pid: process.pid,
+  });
+  setTimeout(() => publishValidInstall(root, archive), 50);
+
+  const result = await bootstrap({
+    ...bootstrapOptions(root, release.fetchImpl),
+    installLockTimeoutMs: 50,
+  });
+
+  assert.equal(
+    fs.readFileSync(result.binary_path, "utf8"),
+    "fake harn binary\n",
+  );
 });
 
 test("independent processes safely converge on one atomic install", async (context) => {
