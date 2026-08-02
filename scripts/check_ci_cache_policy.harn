@@ -54,7 +54,7 @@ const RELEASE_BUILD_CANCEL_POLICY = "$"
 const RELEASE_BUILD_IF = "needs.setup.outputs.should_build_binaries == 'true'"
 
 const RELEASE_CACHE_BUDGET_IF =
-  "always() && needs.setup.outputs.build_mode == 'warm' && needs.setup.outputs.should_build_binaries == 'true' && needs.build.result == 'success'"
+  "always() && needs.setup.outputs.build_mode == 'warm' && needs.setup.outputs.should_build_binaries == 'true' && needs.build.result != 'cancelled'"
 
 const REQUIRED_RELEASE_BUILD_INPUTS = [
   ".github/actions/rust-cache/**",
@@ -392,13 +392,17 @@ pub fn release_warm_cache_concurrency_errors(workflow) -> list<string> {
       "${RELEASE_BINARY_WORKFLOW}:build must let only real main-branch warms supersede a target warm",
     ]
   }
+  return errors
+}
+
+/** Keep budget enforcement live after partial failures, but never prune from a superseded warm. */
+pub fn release_warm_cache_prune_errors(workflow) -> list<string> {
   if trim(workflow?.jobs?.cache_budget?.if ?? "") != RELEASE_CACHE_BUDGET_IF {
-    errors = errors
-      + [
-      "${RELEASE_BINARY_WORKFLOW}:cache_budget must prune only after a complete successful warm matrix",
+    return [
+      "${RELEASE_BINARY_WORKFLOW}:cache_budget must skip cancelled warms and enforce every other completed warm",
     ]
   }
-  return errors
+  return []
 }
 
 fn policy_from_validated(value) -> CiCachePolicy {
@@ -1508,19 +1512,19 @@ fn main(harness: Harness) {
     workflows[RELEASE_BINARY_WORKFLOW],
   )
     + release_warm_cache_concurrency_errors(workflows[RELEASE_BINARY_WORKFLOW])
-    + setup_harn_cache_action_errors(
-    setup_harn_action,
+    + release_warm_cache_prune_errors(
+    workflows[RELEASE_BINARY_WORKFLOW],
   )
-    + sccache_install_action_errors(sccache_install_action)
-    + ci_sccache_policy_errors(
-    sccache_action,
+    + setup_harn_cache_action_errors(setup_harn_action)
+    + sccache_install_action_errors(
+    sccache_install_action,
+  )
+    + ci_sccache_policy_errors(sccache_action, workflows["ci.yml"])
+    + windows_shared_cache_errors(
     workflows["ci.yml"],
+    workflows["windows-nightly.yml"],
   )
-    + windows_shared_cache_errors(workflows["ci.yml"], workflows["windows-nightly.yml"])
-    + macos_shared_cache_errors(
-    workflows["ci.yml"],
-    workflows["macos-nightly.yml"],
-  )
+    + macos_shared_cache_errors(workflows["ci.yml"], workflows["macos-nightly.yml"])
   if len(errors) > 0 {
     harness.stdio.eprintln("CI cache policy violations:")
     for error in errors {

@@ -6,6 +6,7 @@ import {
   release_warm_cache_path_matches,
   release_warm_cache_path_policy_errors,
   release_warm_cache_path_policy_parse,
+  release_warm_cache_prune_errors,
   setup_harn_cache_action_errors,
   windows_shared_cache_errors,
 } from "../check_ci_cache_policy"
@@ -116,7 +117,7 @@ fn release_binary_workflow() {
       },
       cache_budget: {
         if:
-          "always() && needs.setup.outputs.build_mode == 'warm' && needs.setup.outputs.should_build_binaries == 'true' && needs.build.result == 'success'",
+          "always() && needs.setup.outputs.build_mode == 'warm' && needs.setup.outputs.should_build_binaries == 'true' && needs.build.result != 'cancelled'",
       },
     },
   }
@@ -336,6 +337,7 @@ pipeline test_release_warm_cache_policy_accepts_build_inputs_and_typed_workflow_
   const workflow = release_binary_workflow()
   assert_eq(release_warm_cache_path_policy_errors(policy, workflow), [])
   assert_eq(release_warm_cache_concurrency_errors(workflow), [])
+  assert_eq(release_warm_cache_prune_errors(workflow), [])
 }
 
 pipeline test_release_warm_cache_policy_classifies_representative_paths(harness: Harness, task) {
@@ -471,10 +473,6 @@ pipeline test_release_warm_cache_concurrency_rejects_setup_only_preemption(harne
           "cancel-in-progress": gha_expression("true"),
         },
       },
-      cache_budget: {
-        if:
-          "always() && needs.setup.outputs.build_mode == 'warm' && needs.setup.outputs.should_build_binaries == 'true'",
-      },
     },
   }
   assert_eq(
@@ -485,7 +483,26 @@ pipeline test_release_warm_cache_concurrency_rejects_setup_only_preemption(harne
       "build-release-binaries.yml:build must instantiate only after setup selects a real build",
       "build-release-binaries.yml:build must share one warm lane per target and qualify every other run",
       "build-release-binaries.yml:build must let only real main-branch warms supersede a target warm",
-      "build-release-binaries.yml:cache_budget must prune only after a complete successful warm matrix",
+    ],
+  )
+}
+
+pipeline test_release_warm_cache_prune_skips_only_superseded_warms(harness: Harness, task) {
+  const workflow = release_binary_workflow()
+  const invalid = {
+    ...workflow,
+    jobs: {
+      ...workflow.jobs,
+      cache_budget: {
+        if:
+          "always() && needs.setup.outputs.build_mode == 'warm' && needs.setup.outputs.should_build_binaries == 'true'",
+      },
+    },
+  }
+  assert_eq(
+    release_warm_cache_prune_errors(invalid),
+    [
+      "build-release-binaries.yml:cache_budget must skip cancelled warms and enforce every other completed warm",
     ],
   )
 }

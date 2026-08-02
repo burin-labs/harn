@@ -1394,7 +1394,9 @@ jobs:
     needs: [setup, build]
     # A superseded warm has cancelled build legs and must not prune the last
     # complete generation while its successor is still populating targets.
-    if: always() && needs.setup.outputs.build_mode == 'warm' && needs.setup.outputs.should_build_binaries == 'true' && needs.build.result == 'success'
+    # Ordinary partial failures still report/enforce the budget: successful
+    # legs saved useful generations and each failed family retains its prior one.
+    if: always() && needs.setup.outputs.build_mode == 'warm' && needs.setup.outputs.should_build_binaries == 'true' && needs.build.result != 'cancelled'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
