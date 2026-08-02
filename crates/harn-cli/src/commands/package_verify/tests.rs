@@ -74,6 +74,40 @@ fn package_dir_from_anchor_finds_manifest_for_nested_file() {
 }
 
 #[test]
+fn package_gates_exclude_harn_internal_directories() {
+    let dir = tempfile::tempdir().unwrap();
+    for relative in [".harn/workflow-policy", ".harn-runs/session"] {
+        let internal = dir.path().join(relative);
+        fs::create_dir_all(&internal).unwrap();
+        fs::write(internal.join("invalid.harn"), "this is not Harn").unwrap();
+        fs::write(
+            internal.join("guide.md"),
+            "```harn\nthis is not Harn\n```\n",
+        )
+        .unwrap();
+        fs::write(internal.join("payload.txt"), "internal").unwrap();
+    }
+    fs::write(dir.path().join("lib.harn"), "pub fn value() { return 1 }\n").unwrap();
+    fs::write(dir.path().join("README.md"), "# Package\n").unwrap();
+    fs::write(dir.path().join("payload.txt"), "public").unwrap();
+
+    assert_eq!(package_harn_file_args(dir.path()), ["lib.harn"]);
+
+    let mut markdown = Vec::new();
+    collect_markdown_files(dir.path(), &mut markdown);
+    let markdown = markdown
+        .into_iter()
+        .map(|path| path.strip_prefix(dir.path()).unwrap().to_path_buf())
+        .collect::<Vec<_>>();
+    assert_eq!(markdown, [PathBuf::from("README.md")]);
+
+    assert_eq!(
+        package::collect_package_files(dir.path()).unwrap(),
+        ["README.md", "lib.harn", "payload.txt"]
+    );
+}
+
+#[test]
 fn package_gate_stderr_label_matches_gate_status() {
     let mut check = PackageVerifyCheck {
         status: "pass".to_string(),

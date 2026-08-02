@@ -789,11 +789,7 @@ fn collect_package_harn_files(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in entries {
         let path = entry.path();
         if path.is_dir() {
-            if path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| matches!(name, ".git" | ".harn" | "target" | "node_modules"))
-            {
+            if should_skip_package_input_directory(&path) {
                 continue;
             }
             collect_package_harn_files(&path, out);
@@ -801,6 +797,15 @@ fn collect_package_harn_files(dir: &Path, out: &mut Vec<PathBuf>) {
             out.push(path);
         }
     }
+}
+
+fn should_skip_package_input_directory(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            package::is_harn_internal_directory_name(name)
+                || matches!(name, ".git" | "target" | "node_modules")
+        })
 }
 
 fn run_package_tests(package_dir: &Path) -> PackageVerifyCheck {
@@ -1086,11 +1091,7 @@ fn collect_markdown_files(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in entries {
         let path = entry.path();
         if path.is_dir() {
-            if path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| matches!(name, ".git" | ".harn" | "target" | "node_modules"))
-            {
+            if should_skip_package_input_directory(&path) {
                 continue;
             }
             collect_markdown_files(&path, out);

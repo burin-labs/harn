@@ -124,8 +124,9 @@ pub(crate) fn should_skip_package_entry(rel: &Path, is_dir: bool) -> bool {
         return false;
     };
     name == ".git"
-        || name == ".harn"
-        || (is_dir && (name.starts_with(".harn-") || matches!(name, "target" | "node_modules")))
+        || (is_dir
+            && (super::super::is_harn_internal_directory_name(name)
+                || matches!(name, "target" | "node_modules")))
 }
 
 pub(crate) fn default_artifact_dir(ctx: &ManifestContext, report: &PackageCheckReport) -> PathBuf {

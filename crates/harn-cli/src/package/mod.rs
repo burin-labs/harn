@@ -38,6 +38,7 @@ mod manifest_search;
 mod maturity;
 mod mutation;
 mod package_ops;
+mod path_policy;
 mod persona_activation;
 mod persona_runtime;
 mod registry;
@@ -66,6 +67,7 @@ pub use maturity::{
 };
 pub(crate) use mutation::*;
 pub use package_ops::*;
+pub(crate) use path_policy::is_harn_internal_directory_name;
 pub use persona_activation::*;
 pub(crate) use persona_runtime::*;
 pub(crate) use registry::*;

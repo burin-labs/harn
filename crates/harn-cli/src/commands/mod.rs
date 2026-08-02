@@ -131,8 +131,6 @@ const GENERATED_SOURCE_WALK_DIRS: &[&str] = &[
     ".claude",
     ".codex",
     ".git",
-    ".harn",
-    ".harn-runs",
     ".next",
     ".svelte-kit",
     ".turbo",
@@ -148,7 +146,8 @@ pub(crate) fn should_skip_recursive_source_dir(dir: &Path) -> bool {
     let Some(name) = dir.file_name().and_then(|name| name.to_str()) else {
         return false;
     };
-    GENERATED_SOURCE_WALK_DIRS.contains(&name) || name.starts_with(".harn-")
+    GENERATED_SOURCE_WALK_DIRS.contains(&name)
+        || crate::package::is_harn_internal_directory_name(name)
 }
 
 pub(crate) fn should_skip_recursive_source_file(file: &Path) -> bool {
