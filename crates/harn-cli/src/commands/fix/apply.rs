@@ -343,12 +343,14 @@ fn validate_edit_composition(path: &Path, edits: &[FixEditWire]) -> Result<(), S
                 && edit.span.start.max(other.span.start) < edit.span.end.min(other.span.end);
             if distinct_insertions_same_offset || insertion_strictly_inside || replacement_overlap {
                 return Err(format!(
-                    "repair edits overlap in {} at {}..{} and {}..{}; refusing to write an ambiguous candidate",
+                    "repair edits overlap in {} at {}..{} ({:?}) and {}..{} ({:?}); refusing to write an ambiguous candidate",
                     path.display(),
                     edit.span.start,
                     edit.span.end,
+                    edit.replacement,
                     other.span.start,
                     other.span.end,
+                    other.replacement,
                 ));
             }
         }

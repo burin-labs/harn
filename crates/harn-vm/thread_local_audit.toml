@@ -487,12 +487,13 @@ plan = "task_local_or_explicit"
 
 [[thread_local]]
 path = "src/stdlib/host.rs"
-statics = [
-  "HOST_MOCKS",
-  "HOST_MOCK_CALLS",
-  "HOST_MOCK_SCOPES",
-  "FIXTURED_HOST_OPERATIONS",
-]
+statics = ["HOST_MOCKS", "HOST_MOCK_CALLS", "HOST_MOCK_SCOPES"]
+category = "thread_private"
+plan = "thread_private_test"
+
+[[thread_local]]
+path = "src/stdlib/host/fixtured_operations.rs"
+statics = ["FIXTURED_HOST_OPERATIONS"]
 category = "thread_private"
 plan = "thread_private_test"
 

@@ -92,7 +92,7 @@ impl CapabilityFixtureState {
             ..CapabilityFixtureInner::default()
         };
         drop(scopes);
-        crate::stdlib::host::clear_fixtured_host_operations();
+        crate::stdlib::host::fixtured_operations::clear_fixtured_host_operations();
         self.http_mocks.clear();
     }
 
@@ -110,7 +110,7 @@ impl CapabilityFixtureState {
             },
         );
         scopes.stack.push(previous);
-        crate::stdlib::host::push_fixtured_host_operation_scope();
+        crate::stdlib::host::fixtured_operations::push_fixtured_host_operation_scope();
     }
 
     pub(crate) fn pop_scope(&self) -> Result<(), crate::VmError> {
@@ -121,7 +121,7 @@ impl CapabilityFixtureState {
             ));
         };
         scopes.current = previous;
-        crate::stdlib::host::pop_fixtured_host_operation_scope();
+        crate::stdlib::host::fixtured_operations::pop_fixtured_host_operation_scope();
         Ok(())
     }
 
@@ -138,7 +138,7 @@ impl CapabilityFixtureState {
         // A fixtured operation must also be visible to `host_has`, or scripts
         // that gate their host call on the capability manifest skip the call
         // and never reach the fixture.
-        crate::stdlib::host::record_fixtured_host_operation(capability, member);
+        crate::stdlib::host::fixtured_operations::record_fixtured_host_operation(capability, member);
         scopes
             .current
             .responses
