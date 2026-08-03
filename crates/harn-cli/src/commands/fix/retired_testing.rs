@@ -31,6 +31,7 @@ const RETIRED_UNUSED_HELPERS: &[&str] = &["with_mocks", "with_host_mocks"];
 /// which the attenuation pass would immediately try to narrow away again.
 pub(super) fn retired_wrapper_capabilities(
     program: &[SNode],
+    source: &str,
     call: &super::CallSite,
 ) -> Vec<CapabilityId> {
     match call.callee.as_str() {
@@ -41,7 +42,7 @@ pub(super) fn retired_wrapper_capabilities(
         "with_mocks" => call
             .args
             .first()
-            .and_then(|config| mock_config_scopes(program, *config))
+            .and_then(|config| mock_config_scopes(program, source, *config))
             .map(|scopes| scopes.capabilities())
             .unwrap_or_default(),
         _ => Vec::new(),
@@ -84,18 +85,27 @@ fn dict_key_name(entry: &DictEntry) -> Option<&str> {
 /// Read the scopes a `with_mocks` config literal declares.
 ///
 /// `with_mocks` hid two scopes behind one untyped dict, so the recipe reads the
-/// keys the site actually wrote rather than assuming a shape. Three configs are
-/// deliberately unreadable and keep their call site inert:
+/// keys the site actually wrote rather than assuming a shape. The split is
+/// performed by splicing around the value spans, which keeps each site's own
+/// formatting but can only preserve what lies inside those spans. Configs it
+/// cannot read that way keep their call site inert:
 ///
 /// * anything that is not a dict literal — a helper call or a forwarded
 ///   parameter has no keys to read, and reading it twice to split it would
 ///   evaluate the caller's expression twice;
-/// * a key outside the two-scope contract, which means the site is doing
-///   something this recipe has not been taught;
+/// * a key outside the two-scope contract, or the same key twice, which means
+///   the site is doing something this recipe has not been taught;
 /// * `llm_mocks` written before `host_mocks`, because the fixture scope must
 ///   stay outside the LLM scope to preserve teardown order, and splicing
-///   cannot reorder the two values.
-fn mock_config_scopes(program: &[SNode], config: Span) -> Option<MockScopes> {
+///   cannot reorder the two values;
+/// * a config carrying a comment, because the spliced-away text between the
+///   braces and the values is discarded, and silently dropping a comment
+///   during a bulk migration is not a trade this recipe makes.
+fn mock_config_scopes(program: &[SNode], source: &str, config: Span) -> Option<MockScopes> {
+    let config_source = source.get(config.start..config.end)?;
+    if config_source.contains("//") || config_source.contains("/*") {
+        return None;
+    }
     let mut scopes = None;
     visit::walk_program(program, &mut |node| {
         if node.span.start != config.start || node.span.end != config.end {
@@ -108,8 +118,8 @@ fn mock_config_scopes(program: &[SNode], config: Span) -> Option<MockScopes> {
         let mut llm = None;
         for entry in entries {
             match dict_key_name(entry) {
-                Some("host_mocks") => host = Some(entry.value.span),
-                Some("llm_mocks") => {
+                Some("host_mocks") if host.is_none() => host = Some(entry.value.span),
+                Some("llm_mocks") if llm.is_none() => {
                     if host.is_none() && entries.len() > 1 {
                         return;
                     }
@@ -140,6 +150,7 @@ fn span_between(start: usize, end: usize, anchor: Span) -> Span {
 /// both typed helpers pass the same context value the retired wrapper passed.
 fn mock_wrapper_call_edits(
     program: &[SNode],
+    source: &str,
     call: &TestingCall,
 ) -> Option<(Vec<FixEdit>, Vec<&'static str>)> {
     if call.args.len() != 2 {
@@ -147,7 +158,7 @@ fn mock_wrapper_call_edits(
     }
     let config = *call.args.first()?;
     let body = *call.args.get(1)?;
-    let scopes = mock_config_scopes(program, config)?;
+    let scopes = mock_config_scopes(program, source, config)?;
     let name_end = call.span.start.checked_add("with_mocks".len())?;
     let name_span = span_between(call.span.start, name_end, call.span);
     let handle = |expected| capability_argument_for_span(program, call.span, expected);
@@ -327,7 +338,7 @@ pub(super) fn repair(file: &Path) -> Option<RepairCandidate> {
             .and_then(|calls| {
                 calls
                     .iter()
-                    .map(|call| mock_wrapper_call_edits(&program, call))
+                    .map(|call| mock_wrapper_call_edits(&program, &source, call))
                     .collect::<Option<Vec<_>>>()
             })
     } else {
@@ -346,7 +357,7 @@ pub(super) fn repair(file: &Path) -> Option<RepairCandidate> {
                 .into_iter()
                 .flatten()
                 .filter_map(|call| call.args.first().copied())
-                .filter_map(|config| mock_config_scopes(&program, config)?.host),
+                .filter_map(|config| mock_config_scopes(&program, &source, config)?.host),
         );
     }
 

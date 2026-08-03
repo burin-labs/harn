@@ -698,6 +698,8 @@ fn capability_apply_leaves_an_unreadable_retired_mock_config_for_a_human() {
     for source in [
         "import { with_mocks } from \"std/testing\"\n\npub fn forward(config, body) {\n  return with_mocks(config, body)\n}\n",
         "import { with_mocks } from \"std/testing\"\n\npipeline test_extra(task) {\n  return with_mocks({host_mocks: [], unsupported: 1}, { _ -> \"ok\" })\n}\n",
+        "import { with_mocks } from \"std/testing\"\n\npipeline test_reordered(task) {\n  return with_mocks({llm_mocks: [], host_mocks: []}, { _ -> \"ok\" })\n}\n",
+        "import { with_mocks } from \"std/testing\"\n\npipeline test_commented(task) {\n  return with_mocks(\n    {\n      // seed the project before the turn runs\n      host_mocks: [],\n    },\n    { _ -> \"ok\" },\n  )\n}\n",
     ] {
         let (_, updated) = apply_single(source);
         assert!(

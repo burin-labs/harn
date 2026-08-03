@@ -197,7 +197,7 @@ pub(super) fn plan(
             // reads the parsed program because the demand depends on what each
             // call site declared, not just on the callee's name.
             direct_requirements.extend(info.calls.iter().flat_map(|call| {
-                super::retired_testing::retired_wrapper_capabilities(&program, call)
+                super::retired_testing::retired_wrapper_capabilities(&program, &source, call)
             }));
             let mut direct_root_requirement = false;
             for call in &info.calls {
