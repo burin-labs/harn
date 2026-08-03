@@ -776,6 +776,7 @@ impl<'a> Machine<'a> {
             | Op::Import
             | Op::SelectiveImport
             | Op::NamespaceImport
+            | Op::NamespaceImportMembers
             | Op::DeadlineSetup
             | Op::DeadlineEnd
             | Op::BuildEnum

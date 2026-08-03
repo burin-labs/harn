@@ -64,6 +64,7 @@ impl Compiler {
         self.collect_type_aliases(program);
         self.collect_imported_enum_candidates(program);
         self.collect_source_callable_names(program);
+        self.namespace_import_demands = harn_parser::namespace_import_demands(program);
         // Box module-level mutable `let`s that a top-level or pipeline-body
         // closure captures (harn#4479). Nested function-like bodies reseed
         // their own capture set when compiled.
@@ -127,6 +128,7 @@ impl Compiler {
             local_scopes: vec![std::collections::HashMap::new()],
             module_level: true,
             captured_bindings: std::collections::HashSet::new(),
+            namespace_import_demands: std::collections::BTreeMap::new(),
         }
     }
 

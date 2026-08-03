@@ -113,6 +113,25 @@ pub(crate) fn disasm_selective_import(chunk: &Chunk, ip: &mut usize, label: &str
     )
 }
 
+pub(crate) fn disasm_namespace_import_members(
+    chunk: &Chunk,
+    ip: &mut usize,
+    label: &str,
+) -> String {
+    let path_idx = chunk.read_u16(*ip);
+    *ip += 2;
+    let alias_idx = chunk.read_u16(*ip);
+    *ip += 2;
+    let names_idx = chunk.read_u16(*ip);
+    *ip += 2;
+    format!(
+        "{label} {path_idx:>4} ({}) alias: {alias_idx:>4} ({}) members: {names_idx:>4} ({})",
+        chunk.constants[path_idx as usize],
+        chunk.constants[alias_idx as usize],
+        chunk.constants[names_idx as usize],
+    )
+}
+
 pub(crate) fn disasm_check_type(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
     let var_idx = chunk.read_u16(*ip);
     *ip += 2;

@@ -77,7 +77,8 @@ pub const MAGIC: &[u8; 8] = b"HARNBC\0\0";
 /// version (#5610); and manifest entries carry a content digest, and the
 /// manifest a capture time, so a rewrite inside the filesystem's timestamp
 /// granularity cannot present itself as unchanged (#5582).
-pub const SCHEMA_VERSION: u32 = 9;
+/// v10: module namespace imports carry conservative static member demand.
+pub const SCHEMA_VERSION: u32 = 10;
 
 /// Compile-time Harn release. Cache files written by a different release
 /// are rejected on load.
