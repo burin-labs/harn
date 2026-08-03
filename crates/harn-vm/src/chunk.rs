@@ -556,11 +556,36 @@ fn op_stack_delta(op: Op, count: u16) -> Option<i32> {
         Call | MethodCall | MethodCallOpt => -count,
         // Non-linear (see doc comment): branches, terminators, async/handler
         // ops, and variadic ops whose arity isn't the emit argument.
-        Jump | JumpIfFalse | JumpIfTrue | IterNext | Return | TailCall | Throw | TryCatchSetup
-        | Spawn | Pipe | Parallel | ParallelMap | ParallelMapStream | ParallelSettle
-        | SyncMutexEnter | SyncMutexEnterKeyed | TaskScopeEnter | TaskScopeExit | Import
-        | SelectiveImport | NamespaceImport | DeadlineSetup | DeadlineEnd | BuildEnum
-        | MatchEnum | Yield | CallSpread | CallBuiltinSpread | MethodCallSpread => return None,
+        Jump
+        | JumpIfFalse
+        | JumpIfTrue
+        | IterNext
+        | Return
+        | TailCall
+        | Throw
+        | TryCatchSetup
+        | Spawn
+        | Pipe
+        | Parallel
+        | ParallelMap
+        | ParallelMapStream
+        | ParallelSettle
+        | SyncMutexEnter
+        | SyncMutexEnterKeyed
+        | TaskScopeEnter
+        | TaskScopeExit
+        | Import
+        | SelectiveImport
+        | NamespaceImport
+        | NamespaceImportMembers
+        | DeadlineSetup
+        | DeadlineEnd
+        | BuildEnum
+        | MatchEnum
+        | Yield
+        | CallSpread
+        | CallBuiltinSpread
+        | MethodCallSpread => return None,
     })
 }
 

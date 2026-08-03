@@ -164,6 +164,7 @@ harn_opcode_macros::define_opcodes! {
     Import { async_op(self.execute_import_op().await), disasm: const_pool_u16("IMPORT") };
     SelectiveImport { async_op(self.execute_selective_import().await), disasm: selective_import("SELECTIVE_IMPORT") };
     NamespaceImport { async_op(self.execute_namespace_import().await), disasm: selective_import("NAMESPACE_IMPORT") };
+    NamespaceImportMembers { async_op(self.execute_namespace_import_members().await), disasm: namespace_import_members("NAMESPACE_IMPORT_MEMBERS") };
 
     // === Deadline ===
     DeadlineSetup { sync(self.execute_deadline_setup()), disasm: bare("DEADLINE_SETUP") };

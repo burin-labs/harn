@@ -10,7 +10,7 @@ use harn_modules::DefKind;
 use crate::bytecode_cache;
 use crate::module_artifact::{
     compile_module_artifact_from_source, compile_trusted_host_dispatch_module_artifact_from_source,
-    ModuleProvenance,
+    ModuleImportBinding, ModuleProvenance,
 };
 use crate::module_source::{self, ModuleSource};
 use crate::prepared_module::PreparedModuleArtifact;
@@ -116,20 +116,22 @@ pub(crate) struct DeferredCyclicImport {
     pub(crate) selected_names: Option<Vec<String>>,
     /// When set, bind a namespace dict under this alias instead of flattening.
     pub(crate) namespace_alias: Option<String>,
+    /// Statically demanded namespace members, or `None` for the whole namespace.
+    pub(crate) namespace_members: Option<Vec<String>>,
 }
 
 #[derive(Clone, Copy)]
 enum ImportProjection<'a> {
     BindCaller(Option<&'a [String]>),
     /// Bind `import * as alias` as a single namespace dict.
-    BindNamespace(&'a str),
+    BindNamespace(&'a str, Option<&'a [String]>),
     MaterializeOnly,
 }
 
 impl ImportProjection<'_> {
     fn package_rejection_kind(self) -> &'static str {
         match self {
-            Self::BindCaller(_) | Self::BindNamespace(_) => "import",
+            Self::BindCaller(_) | Self::BindNamespace(..) => "import",
             Self::MaterializeOnly => "execution",
         }
     }
@@ -167,33 +169,42 @@ fn module_import_names(
 /// Includes `"_namespace" → module path` so `call_dict_method` dispatches
 /// callable fields, plus every public export that has a runtime value.
 /// Type/interface-only exports are omitted (no runtime binding).
-fn build_namespace_dict(module_path: &str, loaded: &LoadedModule) -> VmValue {
+fn build_namespace_dict(
+    module_path: &str,
+    loaded: &LoadedModule,
+    members: Option<&[String]>,
+) -> Result<VmValue, VmError> {
     let mut map = BTreeMap::new();
     map.insert(
         "_namespace".to_string(),
         VmValue::String(arcstr::ArcStr::from(module_path)),
     );
-    for (name, kind) in &loaded.public_exports {
+    let names = module_import_names(module_path, loaded, members)?;
+    for name in names {
+        let kind = loaded
+            .public_exports
+            .get(&name)
+            .expect("module_import_names validates the public export contract");
         if !kind.has_runtime_value() {
             // Still project schema-capable type aliases when present.
-            if let Some(schema) = loaded.public_type_schemas.get(name) {
-                map.insert(name.clone(), schema.clone());
+            if let Some(schema) = loaded.public_type_schemas.get(&name) {
+                map.insert(name, schema.clone());
             }
             continue;
         }
-        if let Some(value) = loaded.public_values.get(name) {
-            map.insert(name.clone(), value.clone());
+        if let Some(value) = loaded.public_values.get(&name) {
+            map.insert(name, value.clone());
             continue;
         }
-        if let Some(schema) = loaded.public_type_schemas.get(name) {
-            map.insert(name.clone(), schema.clone());
+        if let Some(schema) = loaded.public_type_schemas.get(&name) {
+            map.insert(name, schema.clone());
             continue;
         }
-        if let Some(closure) = loaded.functions.get(name) {
-            map.insert(name.clone(), VmValue::Closure(Arc::clone(closure)));
+        if let Some(closure) = loaded.functions.get(&name) {
+            map.insert(name, VmValue::Closure(Arc::clone(closure)));
         }
     }
-    VmValue::dict(map)
+    Ok(VmValue::dict(map))
 }
 
 pub fn resolve_module_import_path(base: &Path, path: &str) -> PathBuf {
@@ -568,21 +579,27 @@ impl Vm {
         self.source_dir = module_source_dir.clone();
 
         for import in &artifact.imports {
-            if let Some(alias) = &import.namespace_alias {
-                self.execute_import_with_projection(
-                    &import.path,
-                    ImportProjection::BindNamespace(alias),
-                    artifact.provenance,
-                )
+            let projection = match &import.binding {
+                ModuleImportBinding::Wildcard => ImportProjection::BindCaller(None),
+                ModuleImportBinding::Selected(names) => ImportProjection::BindCaller(Some(names)),
+                ModuleImportBinding::Namespace { alias, demand } => {
+                    let members = match demand {
+                        harn_parser::NamespaceDemand::Whole => None,
+                        harn_parser::NamespaceDemand::Members(members) => {
+                            Some(members.iter().cloned().collect::<Vec<_>>())
+                        }
+                    };
+                    self.execute_import_with_projection(
+                        &import.path,
+                        ImportProjection::BindNamespace(alias, members.as_deref()),
+                        artifact.provenance,
+                    )
+                    .await?;
+                    continue;
+                }
+            };
+            self.execute_import_with_projection(&import.path, projection, artifact.provenance)
                 .await?;
-            } else {
-                self.execute_import_with_projection(
-                    &import.path,
-                    ImportProjection::BindCaller(import.selected_names.as_deref()),
-                    artifact.provenance,
-                )
-                .await?;
-            }
         }
 
         // Nested modules own their own load spans. Start this module's span
@@ -708,7 +725,7 @@ impl Vm {
             };
             // `pub import * as alias` publishes the alias namespace object —
             // never flatten target members into this module's public surface.
-            if let Some(alias) = &import.namespace_alias {
+            if let ModuleImportBinding::Namespace { alias, .. } = &import.binding {
                 if public_exports.contains_key(alias) || functions.contains_key(alias) {
                     return Err(VmError::Runtime(format!(
                         "Re-export collision: '{alias}' is defined here and also \
@@ -716,13 +733,19 @@ impl Vm {
                         import.path
                     )));
                 }
-                let dict = build_namespace_dict(&import.path, &loaded);
+                // A public namespace is observable as a first-class value and
+                // is therefore always complete.
+                let dict = build_namespace_dict(&import.path, &loaded, None)?;
                 public_values.insert(alias.clone(), dict);
                 public_exports.insert(alias.clone(), DefKind::Variable);
                 continue;
             }
-            let names_to_reexport =
-                module_import_names(&import.path, &loaded, import.selected_names.as_deref())?;
+            let selected_names = match &import.binding {
+                ModuleImportBinding::Selected(names) => Some(names.as_slice()),
+                ModuleImportBinding::Wildcard => None,
+                ModuleImportBinding::Namespace { .. } => unreachable!("handled above"),
+            };
+            let names_to_reexport = module_import_names(&import.path, &loaded, selected_names)?;
             for name in names_to_reexport {
                 let Some(kind) = loaded.public_exports.get(&name).copied() else {
                     return Err(VmError::Runtime(format!(
@@ -782,6 +805,7 @@ impl Vm {
         module_path: &Path,
         loaded: &LoadedModule,
         alias: &str,
+        members: Option<&[String]>,
     ) -> Result<(), VmError> {
         let module_name = module_path.display().to_string();
         if self.env.get(alias).is_some() {
@@ -790,7 +814,7 @@ impl Vm {
                  Use a different namespace alias: import * as <name> from \"...\""
             )));
         }
-        let dict = build_namespace_dict(&module_name, loaded);
+        let dict = build_namespace_dict(&module_name, loaded, members)?;
         self.env.define(alias, dict, false)?;
         Ok(())
     }
@@ -866,10 +890,11 @@ impl Vm {
         &'a mut self,
         path: &'a str,
         alias: &'a str,
+        members: Option<&'a [String]>,
     ) -> Pin<Box<dyn Future<Output = Result<(), VmError>> + Send + 'a>> {
         self.execute_import_with_projection(
             path,
-            ImportProjection::BindNamespace(alias),
+            ImportProjection::BindNamespace(alias, members),
             self.module_provenance,
         )
     }
@@ -895,8 +920,8 @@ impl Vm {
             ImportProjection::BindCaller(selected_names) => {
                 self.export_loaded_module(module_path, loaded, selected_names)
             }
-            ImportProjection::BindNamespace(alias) => {
-                self.export_namespace_module(module_path, loaded, alias)
+            ImportProjection::BindNamespace(alias, members) => {
+                self.export_namespace_module(module_path, loaded, alias, members)
             }
             ImportProjection::MaterializeOnly => Ok(()),
         }
@@ -974,11 +999,12 @@ impl Vm {
                                     target: canonical.clone(),
                                     selected_names: selected_names.map(<[String]>::to_vec),
                                     namespace_alias: None,
+                                    namespace_members: None,
                                 });
                             }
                         }
                     }
-                    ImportProjection::BindNamespace(alias) => {
+                    ImportProjection::BindNamespace(alias, members) => {
                         if let Some(importer) = self.imported_paths.last().cloned() {
                             if importer != canonical {
                                 self.deferred_cyclic_imports.push(DeferredCyclicImport {
@@ -986,6 +1012,7 @@ impl Vm {
                                     target: canonical.clone(),
                                     selected_names: None,
                                     namespace_alias: Some(alias.to_string()),
+                                    namespace_members: members.map(<[String]>::to_vec),
                                 });
                             }
                         }
@@ -1178,7 +1205,11 @@ impl Vm {
             let mut module_state = importer._module_state.lock();
             if let Some(alias) = &import.namespace_alias {
                 if module_state.get(alias).is_none() {
-                    let dict = build_namespace_dict(&import.target.display().to_string(), &target);
+                    let dict = build_namespace_dict(
+                        &import.target.display().to_string(),
+                        &target,
+                        import.namespace_members.as_deref(),
+                    )?;
                     module_state.define(alias, dict, false)?;
                 }
                 continue;
