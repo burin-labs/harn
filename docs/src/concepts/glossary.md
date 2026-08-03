@@ -114,6 +114,11 @@ audit trail; `assets` are large or non-text payloads.
 with delegated child runs, timelines, trace spans, and verified transcript
 pointers, then reports structural checks without changing the source data.
 
+**Run review.** The versioned model assessment produced by `harn runs review`
+from one validated run report. It binds its verdict and evidence-addressed
+findings to the report, rubric, and resolved model route. It does not replace
+the run report's deterministic checks or read source artifacts itself.
+
 **Snapshot.** A frozen, serializable copy of a session or worker state, used for
 resume-after-suspend and for replay.
 

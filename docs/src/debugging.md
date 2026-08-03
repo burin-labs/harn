@@ -106,9 +106,13 @@ jq '.delegations, [.checks[] | select(.status != "passed")]' run-report.json
 
 The report follows each typed `child_runs[].run_path`, checks the child's
 back-pointer, and keeps the source hash beside the projected evidence. Add
-`--events-db <path>` when the run used a SQLite event log. A `null` wait or
-join duration means that the source artifacts did not record it; the report
-does not turn missing timing into zero.
+`--events-db <path>` when the run used a SQLite event log. Canonical join
+receipts make `coordination.unjoined` exact for terminal children and let
+`observed_join_ms` report the worst terminal-to-collection lag. Both remain
+`null` when event evidence is absent, malformed, or truncated. Parent wait and
+result-processing time remain unknown because a join receipt does not record a
+wait-start or processing boundary; the report never turns missing timing into
+zero.
 
 Each timeline includes `coverage.returned`, `coverage.available`, and
 `coverage.truncated`. Treat a missing event as evidence only when `truncated`
@@ -116,6 +120,25 @@ is `false`. A truncated run report also contains a `timeline_truncated` warning.
 Query `harn.session_timeline.query` with a higher `limit` when you need more
 nodes. `available: null` means Harn stopped after proving truncation, before it
 could count every matching node.
+
+Ask for a quick qualitative assessment after inspecting the deterministic
+checks:
+
+```bash
+harn runs review run-report.json > run-review.json
+jq '{verdict, confidence, findings, limitations, actions}' run-review.json
+```
+
+Use `--rubric rubric.md` to supply a project-specific rubric and `--model <model>`
+to pin a model route. The review records both hashes and the resolved
+route. It cites evidence by JSON Pointer and fails if a pointer does not resolve
+inside the report. Coverage limits from the report remain explicit in the
+review; the model cannot fill those gaps by reading other files. Harn projects
+large arrays and strings into bounded first/last samples or previews before the
+call. The review records every omission's original JSON Pointer, count, and
+hash plus the source and projected byte counts, and repeats omissions as
+deterministic limitations. If this auditable projection still exceeds the
+48,000-token estimate, review fails before the model call.
 
 ## Comparing runs
 

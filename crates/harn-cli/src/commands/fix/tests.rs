@@ -81,6 +81,95 @@ fn file_edits_compose_projection_before_same_offset_insertion() {
 }
 
 #[test]
+fn file_edits_refuse_ambiguous_overlap_without_writing() {
+    let temp = tempfile::NamedTempFile::new().unwrap();
+    let source = "resolve_trial_path(harness, params)\n";
+    fs::write(temp.path(), source).unwrap();
+    let call_start = source.find("harness").unwrap();
+    let error = apply_file_edits(
+        temp.path(),
+        &[
+            FixEditWire {
+                span: SpanWire::from(Span::with_offsets(
+                    call_start,
+                    call_start + "harness".len(),
+                    1,
+                    call_start + 1,
+                )),
+                replacement: "{fs: harness.fs, env: harness.env}".to_string(),
+            },
+            FixEditWire {
+                span: SpanWire::from(Span::with_offsets(
+                    call_start + 2,
+                    call_start + 2,
+                    1,
+                    call_start + 3,
+                )),
+                replacement: "harness, ".to_string(),
+            },
+        ],
+    )
+    .expect_err("an insertion inside a replacement is ambiguous");
+    assert!(
+        error.contains("refusing to write an ambiguous candidate"),
+        "{error}"
+    );
+    assert_eq!(fs::read_to_string(temp.path()).unwrap(), source);
+}
+
+#[test]
+fn capability_edits_validate_the_complete_candidate_before_writing() {
+    let temp = tempfile::NamedTempFile::new().unwrap();
+    let source = "fn main(harness: Harness) {\n  harness.fs.read(\"ok\")\n}\n";
+    fs::write(temp.path(), source).unwrap();
+    let start = source.find("harness.fs.read").unwrap();
+    let error = apply_capability_file_edits(
+        temp.path(),
+        &[FixEditWire {
+            span: SpanWire::from(Span::with_offsets(
+                start,
+                start + "harness.fs.read".len(),
+                2,
+                3,
+            )),
+            replacement: "harness.fs.{read".to_string(),
+        }],
+    )
+    .expect_err("malformed migration output must be rejected");
+    assert!(
+        error.contains("failed to format capability migration output")
+            || error.contains("capability migration produced invalid syntax"),
+        "{error}"
+    );
+    assert_eq!(fs::read_to_string(temp.path()).unwrap(), source);
+}
+
+#[test]
+fn rollback_restores_every_snapshotted_file() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let first = temp.path().join("first.harn");
+    let second = temp.path().join("second.harn");
+    fs::write(&first, "first\n").unwrap();
+    fs::write(&second, "second\n").unwrap();
+    let originals = BTreeMap::from([
+        (first.to_string_lossy().into_owned(), "first\n".to_string()),
+        (
+            second.to_string_lossy().into_owned(),
+            "second\n".to_string(),
+        ),
+    ]);
+    fs::write(&first, "changed first\n").unwrap();
+    fs::write(&second, "changed second\n").unwrap();
+
+    let error = finish_with_rollback::<()>(Err("later pass failed".to_string()), false, &originals)
+        .expect_err("the original failure remains visible after rollback");
+
+    assert_eq!(error, "later pass failed");
+    assert_eq!(fs::read_to_string(first).unwrap(), "first\n");
+    assert_eq!(fs::read_to_string(second).unwrap(), "second\n");
+}
+
+#[test]
 fn plan_reports_repairable_diagnostics_without_writing() {
     let temp = tempfile::TempDir::new().unwrap();
     let script = temp.path().join("repair_demo.harn");

@@ -1200,6 +1200,24 @@ impl Vm {
         self.child_vm()
     }
 
+    /// Return the cooperative cancellation/deadline sources that a blocking
+    /// host adapter must install on its worker thread. The values are cloned
+    /// once at the async-boundary; the token remains shared with the owning VM
+    /// so `parallel` aborts and host cancellation reach an in-flight wait.
+    pub(crate) fn interrupt_sources(
+        &self,
+    ) -> (
+        Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+        Option<std::time::Instant>,
+    ) {
+        let scope_deadline = self.deadlines.last().map(|(deadline, _)| *deadline);
+        let deadline = match (scope_deadline, self.interrupt_handler_deadline) {
+            (Some(scope), Some(interrupt)) => Some(scope.min(interrupt)),
+            (scope, interrupt) => scope.or(interrupt),
+        };
+        (self.cancel_token.clone(), deadline)
+    }
+
     pub(crate) fn request_process_exit(&self, code: i32) {
         self.process_exit_request.request(code);
     }

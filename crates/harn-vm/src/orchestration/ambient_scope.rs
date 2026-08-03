@@ -4,9 +4,7 @@
 //! policy, dynamic permissions, the current host bridge, the bridge-trust +
 //! command-hook depths, and the runtime-context overlay — is held in
 //! thread-local LIFO stacks or single slots. The same hazard applies to
-//! single-slot contexts a worker installs for the whole agent loop: the VM
-//! execution context (cwd/env/source-dir + capability root) and mutation
-//! session (audit/run_id/approval/secret-scope). That model is sound for a
+//! single-slot contexts installed for the whole agent loop. That model is sound for a
 //! synchronous call stack, but a guard held across an `.await` is **not**:
 //! workers use [`tokio::task::spawn_local`] and can interleave or migrate. A
 //! child that installs context across an await would otherwise read a
@@ -60,6 +58,8 @@ use crate::stdlib::process::{
     swap_session_environment, swap_source_dir, swap_thread_execution_context,
 };
 use crate::stdlib::template::llm_context::{swap_llm_render_stack, LlmRenderContextFrame};
+
+pub(crate) mod blocking;
 
 /// An isolated snapshot of every ambient capability/identity stack a worker
 /// task owns while it runs. `Default` is the empty scope (no policies, depth 0).

@@ -15,9 +15,26 @@ pub(super) fn apply_repairs_with_options(
     dry_run: bool,
     options: FixOptions,
 ) -> Result<ApplyResult, String> {
+    let mut original_files = BTreeMap::new();
+    let result = apply_repairs_with_options_inner(
+        target,
+        safety_ceiling,
+        dry_run,
+        options,
+        &mut original_files,
+    );
+    finish_with_rollback(result, dry_run, &original_files)
+}
+
+fn apply_repairs_with_options_inner(
+    target: &Path,
+    safety_ceiling: RepairSafety,
+    dry_run: bool,
+    options: FixOptions,
+    original_files: &mut BTreeMap<String, String>,
+) -> Result<ApplyResult, String> {
     let mut applied = Vec::new();
     let mut skipped = Vec::new();
-    let mut edited_files = BTreeSet::new();
     let max_passes = if options.capability_migrations_only && !dry_run {
         CAPABILITY_MIGRATION_MAX_PASSES
     } else {
@@ -88,11 +105,24 @@ pub(super) fn apply_repairs_with_options(
             converged = true;
             break;
         }
-        let rendered_files = render_capability_migration_pass(&edits_by_file)?;
-        for (path, rendered) in rendered_files {
-            std::fs::write(&path, rendered)
-                .map_err(|error| format!("failed to write {path}: {error}"))?;
-            edited_files.insert(path.clone());
+        for path in edits_by_file.keys() {
+            if !original_files.contains_key(path) {
+                let source = std::fs::read_to_string(path)
+                    .map_err(|error| format!("failed to snapshot {path} before repair: {error}"))?;
+                original_files.insert(path.clone(), source);
+            }
+        }
+        if options.capability_migrations_only {
+            let rendered_files = render_capability_migration_pass(&edits_by_file)?;
+            for (path, rendered) in rendered_files {
+                std::fs::write(&path, rendered)
+                    .map_err(|error| format!("failed to write {path}: {error}"))?;
+            }
+        } else {
+            for (path, edits) in &edits_by_file {
+                let edits = dedupe_wire_edits(edits);
+                apply_file_edits(Path::new(path), &edits)?;
+            }
         }
         if !options.capability_migrations_only {
             converged = true;
@@ -104,10 +134,6 @@ pub(super) fn apply_repairs_with_options(
         return Err(format!(
             "capability migration did not converge after {CAPABILITY_MIGRATION_MAX_PASSES} passes"
         ));
-    }
-
-    if options.capability_migrations_only && !dry_run {
-        format_edited_files(&edited_files)?;
     }
 
     let remaining = count_remaining_diagnostics(target)?;
@@ -127,40 +153,58 @@ pub(super) fn render_capability_migration_pass(
     let mut rendered_files = BTreeMap::new();
     for (path, edits) in edits_by_file {
         let edits = dedupe_wire_edits(edits);
-        let rendered = render_file_edits(Path::new(path), &edits)?;
-        harn_parser::parse_source(&rendered).map_err(|errors| {
+        let path_ref = Path::new(path);
+        let edited = edited_source(path_ref, &edits)?;
+        let candidate = format_capability_candidate(path_ref, &edited)?;
+        harn_parser::parse_source(&candidate).map_err(|errors| {
             format!(
                 "capability migration produced invalid Harn for {path}; no files from this pass were written: {errors:?}"
             )
         })?;
-        rendered_files.insert(path.clone(), rendered);
+        rendered_files.insert(path.clone(), candidate);
     }
     Ok(rendered_files)
 }
 
+pub(super) fn restore_original_files(
+    original_files: &BTreeMap<String, String>,
+) -> Result<(), String> {
+    let mut failures = Vec::new();
+    for (path, source) in original_files {
+        if let Err(error) = std::fs::write(path, source) {
+            failures.push(format!("{path}: {error}"));
+        }
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("; "))
+    }
+}
+
+pub(super) fn finish_with_rollback<T>(
+    result: Result<T, String>,
+    dry_run: bool,
+    original_files: &BTreeMap<String, String>,
+) -> Result<T, String> {
+    match result {
+        Ok(value) => Ok(value),
+        Err(error) if dry_run => Err(error),
+        Err(error) => match restore_original_files(original_files) {
+            Ok(()) => Err(error),
+            Err(restore_error) => Err(format!(
+                "{error}; additionally failed to roll back the `harn fix` transaction: {restore_error}"
+            )),
+        },
+    }
+}
+
+#[cfg(test)]
 pub(super) fn format_edited_files(paths: &BTreeSet<String>) -> Result<(), String> {
     for path in paths {
-        let config = match harn_modules::project_config::load_for_path(Path::new(path)) {
-            Ok(config) => config,
-            Err(error) => {
-                eprintln!(
-                    "warning: failed to load formatter config for {path}: {error}; using defaults"
-                );
-                harn_modules::project_config::HarnConfig::default()
-            }
-        };
-        let mut options = harn_fmt::FmtOptions::default();
-        if let Some(line_width) = config.fmt.line_width {
-            options.line_width = line_width;
-        }
-        if let Some(separator_width) = config.fmt.separator_width {
-            options.separator_width = separator_width;
-        }
         let source = std::fs::read_to_string(path)
             .map_err(|error| format!("failed to read {path} before formatting: {error}"))?;
-        let formatted = harn_fmt::format_source_opts(&source, &options).map_err(|error| {
-            format!("failed to format capability migration output {path}: {error}")
-        })?;
+        let formatted = format_capability_candidate(Path::new(path), &source)?;
         if source != formatted {
             std::fs::write(path, formatted).map_err(|error| {
                 format!("failed to write formatted migration output {path}: {error}")
@@ -182,18 +226,62 @@ pub(super) fn repair_path(plan: &RepairPlan, repair: &RepairWire) -> Result<Stri
         })
 }
 
-#[cfg(test)]
 pub(super) fn apply_file_edits(path: &Path, edits: &[FixEditWire]) -> Result<(), String> {
-    let result = render_file_edits(path, edits)?;
+    if edits.is_empty() {
+        return Ok(());
+    }
+    let result = edited_source(path, edits)?;
     std::fs::write(path, result)
         .map_err(|error| format!("failed to write {}: {error}", path.display()))
 }
 
-fn render_file_edits(path: &Path, edits: &[FixEditWire]) -> Result<String, String> {
+#[cfg(test)]
+pub(super) fn apply_capability_file_edits(
+    path: &Path,
+    edits: &[FixEditWire],
+) -> Result<(), String> {
     if edits.is_empty() {
-        return std::fs::read_to_string(path)
-            .map_err(|error| format!("failed to read {}: {error}", path.display()));
+        return Ok(());
     }
+    let edited = edited_source(path, edits)?;
+    let candidate = format_capability_candidate(path, &edited)?;
+    harn_parser::parse_source(&candidate).map_err(|error| {
+        format!(
+            "capability migration produced invalid syntax for {}: {error}",
+            path.display()
+        )
+    })?;
+    std::fs::write(path, candidate)
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))
+}
+
+fn format_capability_candidate(path: &Path, source: &str) -> Result<String, String> {
+    let config = match harn_modules::project_config::load_for_path(path) {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!(
+                "warning: failed to load formatter config for {}: {error}; using defaults",
+                path.display()
+            );
+            harn_modules::project_config::HarnConfig::default()
+        }
+    };
+    let mut options = harn_fmt::FmtOptions::default();
+    if let Some(line_width) = config.fmt.line_width {
+        options.line_width = line_width;
+    }
+    if let Some(separator_width) = config.fmt.separator_width {
+        options.separator_width = separator_width;
+    }
+    harn_fmt::format_source_opts(source, &options).map_err(|error| {
+        format!(
+            "failed to format capability migration output {}: {error}",
+            path.display()
+        )
+    })
+}
+
+fn edited_source(path: &Path, edits: &[FixEditWire]) -> Result<String, String> {
     let mut result = std::fs::read_to_string(path)
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
     let mut sorted = edits.to_vec();
@@ -206,6 +294,7 @@ fn render_file_edits(path: &Path, edits: &[FixEditWire]) -> Result<String, Strin
             std::cmp::Reverse(edit.span.end),
         )
     });
+    validate_edit_composition(path, &sorted)?;
     for edit in sorted {
         if edit.span.start > edit.span.end || edit.span.end > result.len() {
             return Err(format!(
@@ -227,6 +316,39 @@ fn render_file_edits(path: &Path, edits: &[FixEditWire]) -> Result<String, Strin
         result.replace_range(edit.span.start..edit.span.end, &edit.replacement);
     }
     Ok(result)
+}
+
+fn validate_edit_composition(path: &Path, edits: &[FixEditWire]) -> Result<(), String> {
+    for (index, edit) in edits.iter().enumerate() {
+        for other in &edits[index + 1..] {
+            let edit_inserts = edit.span.start == edit.span.end;
+            let other_inserts = other.span.start == other.span.end;
+            let distinct_insertions_same_offset = edit_inserts
+                && other_inserts
+                && edit.span.start == other.span.start
+                && edit.replacement != other.replacement;
+            let insertion_strictly_inside = (edit_inserts
+                && other.span.start < edit.span.start
+                && edit.span.start < other.span.end)
+                || (other_inserts
+                    && edit.span.start < other.span.start
+                    && other.span.start < edit.span.end);
+            let replacement_overlap = !edit_inserts
+                && !other_inserts
+                && edit.span.start.max(other.span.start) < edit.span.end.min(other.span.end);
+            if distinct_insertions_same_offset || insertion_strictly_inside || replacement_overlap {
+                return Err(format!(
+                    "repair edits overlap in {} at {}..{} and {}..{}; refusing to write an ambiguous candidate",
+                    path.display(),
+                    edit.span.start,
+                    edit.span.end,
+                    other.span.start,
+                    other.span.end,
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]

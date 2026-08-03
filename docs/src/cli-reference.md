@@ -2516,6 +2516,8 @@ harn runs view --json .harn-runs/<run>.json
 harn runs view --json --session .harn-runs/
 harn runs report .harn-runs/<run>.json
 harn runs report .harn-runs/<run>.json --events-db .harn/events.sqlite
+harn runs review run-report.json
+harn runs review run-report.json --rubric review-rubric.md --model <model>
 ```
 
 `harn runs report` follows the root record's typed child-run pointers and emits
@@ -2523,8 +2525,12 @@ the versioned `harn.run_report.v1` JSON projection. The report has one row per
 agent, checked parent/child links, LLM timing and cache/cost data recorded on
 trace spans, source hashes, redacted visible output, and structural checks.
 `--events-db` adds the redacted semantic timeline from a SQLite event log.
-Missing timing is `null`, not zero; until Harn records a join receipt, the
-report marks wait and result-collapse timing unavailable.
+Canonical `subagent_join` receipts let the report count terminal children that
+the parent has not collected and report the worst observed
+terminal-to-collection lag. These values remain `null`, not zero, when the
+event evidence is absent, malformed, or truncated. A join receipt does not
+record when the parent started waiting or how long result processing took, so
+`observed_wait_ms` remains `null` until Harn records that separate boundary.
 
 Timeline snapshots use schema version 2 and carry a `coverage` object with
 `returned`, `available`, and `truncated`. `available` is exact when Harn read
@@ -2534,6 +2540,42 @@ warning; consumers must not infer that an event is absent from a truncated
 snapshot. Increase the timeline query's `limit` to recover more nodes. The
 topic cursor remains a subscription watermark, not a continuation token for a
 snapshot that combines sorted run spans and event topics.
+
+`harn runs review` reads one `harn.run_report.v1` file and makes one structured
+model call. It emits `harn.run_review.v1` JSON with the verdict, confidence,
+findings, actions, usage, and lifecycle receipts. Each finding must cite an
+existing JSON Pointer in the report. The command rejects a changed report hash,
+an unsupported report schema, and a response with an invalid evidence pointer.
+
+The default model route selects the available `small` tier. `--model` accepts a
+model alias or provider/model selector. `--rubric` reads the exact rubric text
+from a UTF-8 file; otherwise Harn uses its built-in run-review rubric. The
+output records the resolved provider and model, report and rubric hashes, and
+an idempotency key derived from those values. Report checks that mark evidence
+coverage unavailable or incomplete are copied into `limitations`.
+The `lifecycle.receipts` array is embedded in the emitted review artifact; v1
+does not append those receipts to an event-log database.
+
+Before the call, Harn builds a deterministic `harn.run_review_evidence.v1`
+projection. Wide arrays keep bounded first/last samples with their original
+report pointers; large strings keep bounded previews. Every omission records
+its original and included size, omitted size, and omitted-content hash. The
+review provenance records the source and projected byte counts plus the exact
+projection hash, so this reduction is visible and reproducible. Core report
+fields such as agents, delegations, LLM calls, coordination, checks, and
+coverage remain in the projection unless their own collections exceed the
+same generic bound. Each omission also appears in the review's deterministic
+`limitations` array.
+
+If that bounded projection is still estimated above 48,000 tokens, the command
+fails before entering the `reviewing` state. It never silently trims evidence
+or makes a second model call.
+
+A run review uses the redacted run report as its only evidence. It does not
+read raw transcripts, provider-visible prompts, private reasoning, or host UI
+events. Inspect the report's `sources` entries and authorized source artifacts
+when the review names missing evidence. A review is an assessment, not a
+replacement for the report's deterministic checks.
 
 Agents can request the same projection through the read-only
 `harn.run.report` MCP tool. MCP paths are confined to the server's project and

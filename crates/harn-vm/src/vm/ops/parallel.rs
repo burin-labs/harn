@@ -41,6 +41,18 @@ fn parallel_cap_from_value(cap_val: &VmValue, task_count: usize) -> Result<Optio
     }
 }
 
+/// Cancels every inline child when the fan-out future is dropped (host
+/// cancellation) and when fail-fast observes a terminal branch error. The
+/// process wait loop and other blocking builtins observe this token from their
+/// own worker threads, so dropping a LocalSet future cannot strand a child.
+struct ParallelCancelGuard(Arc<std::sync::atomic::AtomicBool>);
+
+impl Drop for ParallelCancelGuard {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 /// Run `futures` concurrently, capped to at most `cap` in-flight tasks
 /// at any moment (or unlimited when `cap` is `None`). Results come back
 /// in source order so callers can index by original position. A single
@@ -54,12 +66,14 @@ fn parallel_cap_from_value(cap_val: &VmValue, task_count: usize) -> Result<Optio
 async fn run_capped_ordered<F, T>(
     futures: Vec<F>,
     cap: Option<usize>,
+    cancel_token: Arc<std::sync::atomic::AtomicBool>,
     error_label: &'static str,
 ) -> Result<Vec<T>, VmError>
 where
     F: std::future::Future<Output = T> + 'static,
     T: 'static,
 {
+    let _cancel_guard = ParallelCancelGuard(cancel_token);
     let total = futures.len();
     if total == 0 {
         return Ok(Vec::new());
@@ -115,12 +129,14 @@ where
 async fn run_capped_ordered_fail_fast<F, T>(
     futures: Vec<F>,
     cap: Option<usize>,
+    cancel_token: Arc<std::sync::atomic::AtomicBool>,
     error_label: &'static str,
 ) -> Result<Vec<T>, VmError>
 where
     F: std::future::Future<Output = Result<T, VmError>> + 'static,
     T: 'static,
 {
+    let _cancel_guard = ParallelCancelGuard(Arc::clone(&cancel_token));
     let total = futures.len();
     if total == 0 {
         return Ok(Vec::new());
@@ -175,6 +191,7 @@ where
         // Fail fast: kill in-flight siblings and stop scheduling queued
         // branches, then keep draining `join_next` so every aborted task is
         // joined before this returns.
+        cancel_token.store(true, std::sync::atomic::Ordering::SeqCst);
         join_set.abort_all();
         pending.clear();
     }
@@ -218,11 +235,13 @@ async fn stream_capped_unordered<F, T>(
     cap: Option<usize>,
     sender: tokio::sync::mpsc::Sender<Result<T, VmError>>,
     mut cancel_rx: tokio::sync::watch::Receiver<bool>,
+    cancel_token: Arc<std::sync::atomic::AtomicBool>,
     error_label: &'static str,
 ) where
     F: std::future::Future<Output = Result<T, VmError>> + 'static,
     T: 'static,
 {
+    let _cancel_guard = ParallelCancelGuard(Arc::clone(&cancel_token));
     let total = futures.len();
     if total == 0 {
         return;
@@ -240,6 +259,7 @@ async fn stream_capped_unordered<F, T>(
 
     loop {
         if *cancel_rx.borrow() {
+            cancel_token.store(true, std::sync::atomic::Ordering::SeqCst);
             join_set.abort_all();
             return;
         }
@@ -248,6 +268,7 @@ async fn stream_capped_unordered<F, T>(
         }
         let joined = tokio::select! {
             _ = cancel_rx.changed() => {
+                cancel_token.store(true, std::sync::atomic::Ordering::SeqCst);
                 join_set.abort_all();
                 return;
             }
@@ -264,12 +285,14 @@ async fn stream_capped_unordered<F, T>(
         let should_stop = value.is_err();
         let send_result = tokio::select! {
             _ = cancel_rx.changed() => {
+                cancel_token.store(true, std::sync::atomic::Ordering::SeqCst);
                 join_set.abort_all();
                 return;
             }
             result = sender.send(value) => result,
         };
         if send_result.is_err() || should_stop {
+            cancel_token.store(true, std::sync::atomic::Ordering::SeqCst);
             join_set.abort_all();
             return;
         }
@@ -299,9 +322,11 @@ impl super::super::Vm {
             );
             let mut futures: Vec<_> = Vec::with_capacity(count);
             let mut task_ids = Vec::with_capacity(count);
+            let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
             for i in 0..count {
                 let task_id = format!("{task_group_id}:{i}");
                 let mut child = self.child_vm();
+                child.cancel_token = Some(Arc::clone(&cancel_token));
                 child.runtime_context = self.runtime_context.child_task(
                     task_id.clone(),
                     "parallel",
@@ -323,7 +348,9 @@ impl super::super::Vm {
                 .wait_for_tasks(&self.runtime_context.task_id, task_ids)?;
             // Fail fast: the first branch error aborts in-flight siblings and
             // skips queued branches; only the settle form drains everything.
-            let joined = run_capped_ordered_fail_fast(futures, cap, "Parallel task error").await?;
+            let joined =
+                run_capped_ordered_fail_fast(futures, cap, cancel_token, "Parallel task error")
+                    .await?;
             let mut results = Vec::with_capacity(count);
             for (val, task_output) in joined {
                 self.output.push_str(&task_output);
@@ -344,6 +371,7 @@ impl super::super::Vm {
             (VmValue::List(items), VmValue::Closure(closure)) => {
                 let len = items.len();
                 let cap = parallel_cap_from_value(&cap_val, len)?;
+                let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
                 self.runtime_context_counter += 1;
                 let task_group_id = format!(
                     "{}:parallel_each:{}",
@@ -354,6 +382,7 @@ impl super::super::Vm {
                 for (i, item) in items.iter().enumerate() {
                     let task_id = format!("{task_group_id}:{i}");
                     let mut child = self.child_vm();
+                    child.cancel_token = Some(Arc::clone(&cancel_token));
                     child.runtime_context = self.runtime_context.child_task(
                         task_id.clone(),
                         "parallel each",
@@ -379,7 +408,8 @@ impl super::super::Vm {
                 // Fail fast, matching `parallel`: use `parallel settle` when
                 // every branch must run regardless of failures.
                 let joined =
-                    run_capped_ordered_fail_fast(futures, cap, "Parallel map error").await?;
+                    run_capped_ordered_fail_fast(futures, cap, cancel_token, "Parallel map error")
+                        .await?;
                 let mut results = Vec::with_capacity(len);
                 for (val, task_output) in joined {
                     self.output.push_str(&task_output);
@@ -400,6 +430,7 @@ impl super::super::Vm {
             (VmValue::List(items), VmValue::Closure(closure)) => {
                 let len = items.len();
                 let cap = parallel_cap_from_value(&cap_val, len)?;
+                let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
                 self.runtime_context_counter += 1;
                 let task_group_id = format!(
                     "{}:parallel_each_stream:{}",
@@ -408,6 +439,7 @@ impl super::super::Vm {
                 let mut futures = Vec::with_capacity(len);
                 for (i, item) in items.iter().enumerate() {
                     let mut child = self.child_vm();
+                    child.cancel_token = Some(Arc::clone(&cancel_token));
                     child.runtime_context = self.runtime_context.child_task(
                         format!("{task_group_id}:{i}"),
                         "parallel each as stream",
@@ -430,6 +462,7 @@ impl super::super::Vm {
                     cap,
                     tx,
                     cancel.subscribe(),
+                    cancel_token,
                     "Parallel map stream error",
                 ));
                 self.stack.push(VmValue::stream(VmStream {
@@ -451,6 +484,7 @@ impl super::super::Vm {
             (VmValue::List(items), VmValue::Closure(closure)) => {
                 let len = items.len();
                 let cap = parallel_cap_from_value(&cap_val, len)?;
+                let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
                 self.runtime_context_counter += 1;
                 let task_group_id = format!(
                     "{}:parallel_settle:{}",
@@ -461,6 +495,7 @@ impl super::super::Vm {
                 for (i, item) in items.iter().enumerate() {
                     let task_id = format!("{task_group_id}:{i}");
                     let mut child = self.child_vm();
+                    child.cancel_token = Some(Arc::clone(&cancel_token));
                     child.runtime_context = self.runtime_context.child_task(
                         task_id.clone(),
                         "parallel settle",
@@ -481,7 +516,8 @@ impl super::super::Vm {
                 let _wait = self
                     .wait_for_graph
                     .wait_for_tasks(&self.runtime_context.task_id, task_ids)?;
-                let joined = run_capped_ordered(futures, cap, "Parallel settle error").await?;
+                let joined =
+                    run_capped_ordered(futures, cap, cancel_token, "Parallel settle error").await?;
                 let mut results = Vec::with_capacity(len);
                 let mut succeeded = 0i64;
                 let mut failed = 0i64;

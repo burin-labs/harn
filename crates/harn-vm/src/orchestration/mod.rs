@@ -98,6 +98,7 @@ pub(crate) use policy::swap_execution_policy_stack;
 pub use policy::*;
 
 mod ambient_scope;
+pub use ambient_scope::blocking::run_blocking_with_ambient;
 pub(crate) use ambient_scope::{
     scope_ambient, scope_ambient_transaction, scope_approval_policy, scope_autonomy_policy,
     scope_command_policy, scope_dynamic_permissions, scope_inline_subtask, scope_run_event_sink,
@@ -131,6 +132,9 @@ mod workflow_test_fixtures;
 
 mod records;
 pub use records::*;
+
+mod run_review;
+pub use run_review::*;
 
 mod training_example;
 pub use training_example::*;
