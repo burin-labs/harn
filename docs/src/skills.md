@@ -356,20 +356,22 @@ CI can pipe through `jq`.
 
 ```text
 $ harn skill list
-Embedded canonical skills (13):
-  harn-agent          Agent runtime, supervisor wiring, and tool callers.
-  harn-de-slop        Remove duplicated policy and weak contracts.
-  harn-diagnostics    Diagnostic codes, severity rules, suppression hints.
-  harn-docs           Task-shaped developer documentation in plain language.
-  harn-language       Harn syntax, modules, types, diagnostics, script structure.
-  harn-orchestration  Triggers, orchestrator handoffs, parallelism primitives.
-  harn-probe          Evidence-first codebase and runtime investigation.
-  harn-product-quality Launch-quality behavior across Harn-powered surfaces.
-  harn-providers      Provider catalog, model packs, fallback policy.
-  harn-rules          Rules engine authoring and validation.
-  harn-testing        Conformance suite, deterministic test patterns.
-  harn-tracing        Transcripts, eval replay, observability surfaces.
-  release-harn        Harn release preparation and shipping.
+Embedded canonical skills (15):
+  harn-agent            Agent runtime, lifecycle, capabilities, and supervision.
+  harn-apps             Build Harn apps with typed views, event handlers, and model jobs.
+  harn-de-slop          Remove duplicated policy, shallow seams, and weak contracts.
+  harn-diagnostics      Diagnostics, the HARN-* error-code index, explain output, repair plans,…
+  harn-docs             Write task-shaped developer documentation in plain language.
+  harn-language         Harn syntax, modules, types, diagnostics, and script structure.
+  harn-mcp              Connect Harn to MCP servers and expose Harn pipelines as MCP servers.
+  harn-orchestration    Workflows, triggers, workers, handoffs, and lifecycle ownership.
+  harn-probe            Evidence-driven investigation for material or unstable claims.
+  harn-product-quality  Launch-quality product behavior across Harn-powered surfaces.
+  harn-providers        LLM provider configuration, model routing, and provider capability beha…
+  harn-rules            Structural search, lint rules, and codemods with the Harn rule engine.
+  harn-testing          Deterministic, claim-driven Harn verification.
+  harn-tracing          Transcripts, receipts, traces, replay, and observability surfaces.
+  release-harn          Merge-queue-safe Harn patch/minor/major release workflow.
 
 Run `harn skill get <name>` for one entry's frontmatter.
 Run `harn skill get <name> --full` to include the body.

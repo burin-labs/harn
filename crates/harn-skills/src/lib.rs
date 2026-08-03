@@ -134,6 +134,7 @@ const SOURCES: &[&str] = &[
     include_str!("corpus/harn-diagnostics/SKILL.md"),
     include_str!("corpus/harn-docs/SKILL.md"),
     include_str!("corpus/harn-language/SKILL.md"),
+    include_str!("corpus/harn-mcp/SKILL.md"),
     include_str!("corpus/harn-orchestration/SKILL.md"),
     include_str!("corpus/harn-probe/SKILL.md"),
     include_str!("corpus/harn-product-quality/SKILL.md"),
@@ -395,6 +396,7 @@ mod tests {
                 "harn-diagnostics",
                 "harn-docs",
                 "harn-language",
+                "harn-mcp",
                 "harn-orchestration",
                 "harn-probe",
                 "harn-product-quality",
@@ -498,6 +500,7 @@ mod tests {
             ("harn-diagnostics", ["diagnostic", "repair", "conformance"]),
             ("harn-docs", ["diátaxis", "glossary", "slopwash"]),
             ("harn-language", ["quickref", "type", "conformance"]),
+            ("harn-mcp", ["mcp_call", "elicitation", "harn serve mcp"]),
             ("harn-orchestration", ["agent_loop", "workflow", "host"]),
             ("harn-probe", ["probe", "fact", "evidence"]),
             (
