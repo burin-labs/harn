@@ -72,8 +72,10 @@ Ed25519 PKCS#8 PEM key, embeds the signature in `harnpack.json`, and appends an
 OpenTrustGraph `release` record. `harn pack --unsigned` skips the manifest
 signature but still appends the release record at autonomy tier `suggest`.
 `harn pack --json` emits a `JsonEnvelope` summary with the bundle hash, output
-path, archive size, signature presence, SBOM counts, bytecode/debug-symbol
-metadata, and the full manifest.
+path, archive size, signature presence, SBOM counts, and the full manifest.
+Its `debug_symbol_metadata` reports separate `harnbc_count`, `harnbc_bytes`,
+`harnmod_count`, and `harnmod_bytes` values; `total_bytes` is the sum of both
+artifact families.
 
 `harn pack --exclude-secrets` refuses to bundle entrypoints and skips imported
 non-Harn assets that match a conservative secret-bearing glob: `.env`,
@@ -119,9 +121,32 @@ When that gate fails, the verifier exits with `verify.untrusted_signer`.
 and per-bundle counts (`module_count`, `content_entry_count`). The schema is
 `harn --json-schemas --command "pack verify"`.
 
-`harn run <bundle.harnpack>` also runs the same verification before extracting
-into the content-addressed pack cache and executing the entrypoint — `harn pack
-verify` is the standalone equivalent for CI and supply-chain audits.
+`harn run <bundle.harnpack>` also runs the same signature and per-module source
+and `.harnbc` hash, and SBOM asset-path verification before replaying into the
+content-addressed pack cache. On every run it compares all replayed files and
+the cached manifest with the verified archive bytes, atomically repairing a
+partial or locally modified cache slot and rejecting symlinked cache parents.
+The archive keeps one authoritative copy of generated artifacts
+under `bytecode/`; replay projects those bytes beside their matching files
+under `sources/`, where Harn's canonical entry and module loaders already look.
+Those loaders still validate source content, compilation context, Harn version,
+and compiler build before execution. A mismatch fails closed and recompiles
+from the bundled source.
+
+Packs built by current Harn use a root-relative dependency identity for entry
+bytecode, so an unchanged source tree can move from the build checkout into the
+replay cache without a false miss. Older packs remain readable. Their module
+artifacts and entrypoints without user imports can still hit after replay; an
+older imported entrypoint carries its original absolute-path identity and
+therefore recompiles once rather than weakening validation. `harn pack verify`
+is the standalone verification equivalent for CI and supply-chain audits.
+
+Legacy v2 signatures bind payload hashes but not their archive paths. Runtime
+and standalone verification supply that path binding from module manifest
+entries and SBOM asset rows. A signed v2 bundle containing an extension-only
+payload without either identity is refused; rebuild it after adding the file as
+an imported asset. Unsigned local-development packs retain the explicit
+`--allow-unsigned` escape hatch.
 
 ## Preview
 

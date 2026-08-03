@@ -15,7 +15,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use harn_cli::cli::PackArgs;
+use harn_cli::cli::{PackArgs, PackVerifyArgs};
 use harn_cli::commands::pack;
 use harn_cli::commands::run::harnpack::HarnpackRunOptions;
 use harn_cli::commands::run::{
@@ -186,6 +186,127 @@ fn signed_harnpack_runs_end_to_end_and_reuses_cache() {
 }
 
 #[test]
+fn first_run_reaches_packaged_entry_and_nested_module_artifacts() {
+    let fixture = HarnpackFixture::new(
+        "import { greeting } from \"./message\"\n\
+         fn main(harness: Harness) { harness.stdio.println(greeting()) }\n",
+    );
+    fs::create_dir(fixture.workdir.path().join("nested")).unwrap();
+    fs::write(
+        fixture.workdir.path().join("message.harn"),
+        "import { suffix } from \"./nested/suffix\"\n\
+         pub fn greeting() -> string { return \"packaged-\" + suffix() }\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.workdir.path().join("nested/suffix.harn"),
+        "pub fn suffix() -> string { return \"artifact\" }\n",
+    )
+    .unwrap();
+    let packed = build_pack(&fixture.pack_args(true));
+    let archive = read_harnpack(&fs::read(&fixture.pack_path).unwrap()).unwrap();
+    assert_eq!(
+        archive
+            .contents
+            .iter()
+            .filter(|entry| entry.path.extension().and_then(|ext| ext.to_str()) == Some("harnbc"))
+            .count(),
+        3
+    );
+    let expected_suffix_module = archive
+        .contents
+        .iter()
+        .find(|entry| entry.path == Path::new("bytecode/nested/suffix.harnmod"))
+        .expect("suffix module artifact")
+        .bytes
+        .clone();
+    assert_eq!(
+        archive
+            .contents
+            .iter()
+            .filter(|entry| entry.path.extension().and_then(|ext| ext.to_str()) == Some("harnmod"))
+            .count(),
+        3
+    );
+
+    let first = execute(
+        &fixture.pack_path,
+        &fixture.cache_dir,
+        HarnpackRunOptions::default(),
+    );
+    assert_eq!(first.exit_code, 0, "first run failed: {}", first.stderr);
+    assert!(first.stdout.contains("packaged-artifact"));
+
+    let replay_dir = fixture
+        .cache_dir
+        .join("packs")
+        .join(packed.bundle_hash.replace(':', "_"));
+    for relative in [
+        "hello.harnbc",
+        "hello.harnmod",
+        "message.harnbc",
+        "message.harnmod",
+        "nested/suffix.harnbc",
+        "nested/suffix.harnmod",
+    ] {
+        assert!(
+            replay_dir.join("sources").join(relative).is_file(),
+            "canonical adjacent projection is missing {relative}"
+        );
+    }
+    assert!(
+        !replay_dir.join("bytecode").exists(),
+        "fresh replay must not duplicate archive bytecode"
+    );
+
+    let shared_artifacts = fs::read_dir(&fixture.cache_dir)
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            matches!(
+                entry.path().extension().and_then(|ext| ext.to_str()),
+                Some("harnbc" | "harnmod")
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        shared_artifacts.is_empty(),
+        "a first-run miss writes to the shared cache; found {shared_artifacts:?}"
+    );
+
+    // A cache hit is not an integrity decision. The verified archive repairs a
+    // damaged adjacent module before the canonical loader can observe it.
+    fs::write(
+        replay_dir.join("sources/nested/suffix.harnmod"),
+        b"not a harn module artifact",
+    )
+    .unwrap();
+    let fallback = execute(
+        &fixture.pack_path,
+        &fixture.cache_dir,
+        HarnpackRunOptions::default(),
+    );
+    assert_eq!(fallback.exit_code, 0, "repair failed: {}", fallback.stderr);
+    assert!(fallback.stdout.contains("packaged-artifact"));
+    assert_eq!(
+        fs::read(replay_dir.join("sources/nested/suffix.harnmod")).unwrap(),
+        expected_suffix_module,
+        "verified archive bytes must repair the tampered cache target"
+    );
+    assert!(
+        fs::read_dir(&fixture.cache_dir).unwrap().all(|entry| {
+            entry.ok().is_some_and(|entry| {
+                !matches!(
+                    entry.path().extension().and_then(|ext| ext.to_str()),
+                    Some("harnbc" | "harnmod")
+                )
+            })
+        }),
+        "authoritative repair should preserve entry and module cache hits"
+    );
+}
+
+#[test]
 fn unsigned_harnpack_is_rejected_by_default() {
     let fixture =
         HarnpackFixture::new("fn main(harness: Harness) { harness.stdio.println(\"unsigned\") }\n");
@@ -274,6 +395,66 @@ fn tampered_harnpack_fails_verification() {
         "tampered pack must not run the pipeline: {}",
         outcome.stdout
     );
+}
+
+#[test]
+fn signed_asset_path_swap_fails_legacy_path_binding() {
+    let fixture = HarnpackFixture::new(
+        "import \"./assets/a.txt\"\n\
+         import \"./assets/b.txt\"\n\
+         fn main(harness: Harness) { harness.stdio.println(\"assets-bound\") }\n",
+    );
+    fs::create_dir(fixture.workdir.path().join("assets")).unwrap();
+    fs::write(fixture.workdir.path().join("assets/a.txt"), b"asset A\n").unwrap();
+    fs::write(fixture.workdir.path().join("assets/b.txt"), b"asset B\n").unwrap();
+    build_pack(&fixture.pack_args(true));
+
+    // v2 signatures cover the multiset of payload hashes. Swapping two paths
+    // therefore preserves the signature but must fail the SBOM path binding
+    // that `harn run` applies before replay.
+    let mut archive = read_harnpack(&fs::read(&fixture.pack_path).unwrap()).unwrap();
+    let a = archive
+        .contents
+        .iter()
+        .position(|entry| entry.path == Path::new("sources/assets/a.txt"))
+        .unwrap();
+    let b = archive
+        .contents
+        .iter()
+        .position(|entry| entry.path == Path::new("sources/assets/b.txt"))
+        .unwrap();
+    let a_bytes = archive.contents[a].bytes.clone();
+    archive.contents[a].bytes = archive.contents[b].bytes.clone();
+    archive.contents[b].bytes = a_bytes;
+    fs::write(
+        &fixture.pack_path,
+        build_harnpack(&archive.manifest, &archive.contents).unwrap(),
+    )
+    .unwrap();
+
+    let verify_error = pack::verify(&PackVerifyArgs {
+        bundle: fixture.pack_path.clone(),
+        allow_unsigned: false,
+        trust_policy: None,
+        require_trusted_signer: false,
+        strict: false,
+        json: false,
+    })
+    .expect_err("standalone verification must enforce the same path binding");
+    assert!(verify_error.message.contains("SBOM package asset:assets/"));
+
+    let outcome = execute(
+        &fixture.pack_path,
+        &fixture.cache_dir,
+        HarnpackRunOptions::default(),
+    );
+    assert_eq!(outcome.exit_code, 1);
+    assert!(
+        outcome.stderr.contains("SBOM package asset:assets/"),
+        "path-bound asset verification should decide the failure: {}",
+        outcome.stderr
+    );
+    assert!(outcome.stdout.is_empty());
 }
 
 #[test]

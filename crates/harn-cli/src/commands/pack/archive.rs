@@ -675,11 +675,66 @@ pub fn verify(args: &PackVerifyArgs) -> Result<PackVerifyJsonData, PackError> {
         ));
     }
 
-    let mut source_map: BTreeMap<PathBuf, &HarnpackEntry> = BTreeMap::new();
-    let mut bytecode_map: BTreeMap<PathBuf, &HarnpackEntry> = BTreeMap::new();
+    verify_runtime_payloads(manifest, contents, signature_present)?;
+
     let mut archive_hashes: BTreeMap<PathBuf, String> = BTreeMap::new();
     for entry in contents {
         archive_hashes.insert(entry.path.clone(), blake3_hash(&entry.bytes));
+    }
+
+    if args.strict {
+        verify_sbom_package_hashes(manifest, &archive_hashes)?;
+    }
+
+    // Cross-check the recorded signature hash against the recomputed
+    // canonical hash. `verify_workflow_bundle_signature` already does
+    // this for signed bundles; for unsigned bundles we report the
+    // recomputed hash so callers can compare against external
+    // attestations.
+    let recorded_bundle_hash = manifest
+        .signature
+        .as_ref()
+        .map(|sig| sig.manifest_hash_blake3.clone());
+    if let Some(recorded) = &recorded_bundle_hash {
+        if recorded != &expected_hash {
+            return Err(PackError::new(
+                "verify.recorded_hash_mismatch",
+                format!(
+                    "recorded signature manifest hash {recorded} does not match recomputed {expected_hash}"
+                ),
+            ));
+        }
+    }
+
+    Ok(PackVerifyJsonData {
+        bundle: args.bundle.clone(),
+        bundle_hash: expected_hash,
+        recorded_bundle_hash,
+        signature_present,
+        signature_verified,
+        key_id,
+        schema_version: manifest.schema_version,
+        entrypoint: manifest.entrypoint.clone(),
+        module_count: manifest.transitive_modules.len(),
+        content_entry_count: contents.len(),
+        link_report: manifest
+            .execution_artifact
+            .as_ref()
+            .map(|artifact| artifact.link_report.clone()),
+    })
+}
+
+/// Validate the manifest's source and entry-bytecode hashes against their
+/// exact archive paths. Standalone verification and execution share this
+/// owner, so path-insensitive bundle hashing cannot authorize moving signed
+/// payload bytes between modules.
+pub(crate) fn verify_module_payloads(
+    manifest: &WorkflowBundle,
+    contents: &[HarnpackEntry],
+) -> Result<(), PackError> {
+    let mut source_map: BTreeMap<PathBuf, &HarnpackEntry> = BTreeMap::new();
+    let mut bytecode_map: BTreeMap<PathBuf, &HarnpackEntry> = BTreeMap::new();
+    for entry in contents {
         if let Ok(rel) = entry.path.strip_prefix("sources") {
             source_map.insert(rel.to_path_buf(), entry);
         } else if let Ok(rel) = entry.path.strip_prefix("bytecode") {
@@ -787,47 +842,92 @@ pub fn verify(args: &PackVerifyArgs) -> Result<PackVerifyJsonData, PackError> {
         )
         .map_err(|error| PackError::new("verify.linked_graph_mismatch", error.message))?;
     }
+    Ok(())
+}
 
-    if args.strict {
-        verify_sbom_package_hashes(manifest, &archive_hashes)?;
+/// Bind every payload that `harn run` can execute or read to its archive path
+/// before replay. Legacy v2 signatures cover a multiset of content hashes but
+/// not paths, so module-manifest and SBOM identities supply the missing path
+/// binding. Signed packs with extension-only payloads that have no such
+/// identity are rejected; unsigned local-development packs already require an
+/// explicit execution override and retain their legacy behavior.
+pub(crate) fn verify_runtime_payloads(
+    manifest: &WorkflowBundle,
+    contents: &[HarnpackEntry],
+    reject_unbound: bool,
+) -> Result<(), PackError> {
+    verify_module_payloads(manifest, contents)?;
+
+    let archive_hashes = contents
+        .iter()
+        .map(|entry| (entry.path.clone(), blake3_hash(&entry.bytes)))
+        .collect::<BTreeMap<_, _>>();
+    verify_sbom_package_hashes(manifest, &archive_hashes)?;
+
+    let expected_sbom = serde_json::to_vec_pretty(&manifest.sbom).map_err(|error| {
+        PackError::new(
+            "verify.sbom_mismatch",
+            format!("failed to encode manifest SBOM: {error}"),
+        )
+    })?;
+    let sbom_entry = contents
+        .iter()
+        .find(|entry| entry.path == Path::new(super::PACK_SBOM_ARCHIVE_PATH))
+        .ok_or_else(|| {
+            PackError::new(
+                "verify.sbom_mismatch",
+                format!("archive is missing {}", super::PACK_SBOM_ARCHIVE_PATH),
+            )
+        })?;
+    if sbom_entry.bytes != expected_sbom {
+        return Err(PackError::new(
+            "verify.sbom_mismatch",
+            format!(
+                "archive {} does not match the signed manifest SBOM",
+                super::PACK_SBOM_ARCHIVE_PATH
+            ),
+        ));
     }
 
-    // Cross-check the recorded signature hash against the recomputed
-    // canonical hash. `verify_workflow_bundle_signature` already does
-    // this for signed bundles; for unsigned bundles we report the
-    // recomputed hash so callers can compare against external
-    // attestations.
-    let recorded_bundle_hash = manifest
-        .signature
-        .as_ref()
-        .map(|sig| sig.manifest_hash_blake3.clone());
-    if let Some(recorded) = &recorded_bundle_hash {
-        if recorded != &expected_hash {
+    let mut bound_paths = std::collections::BTreeSet::new();
+    bound_paths.insert(PathBuf::from(super::PACK_SBOM_ARCHIVE_PATH));
+    if let Some(artifact) = &manifest.execution_artifact {
+        bound_paths.insert(artifact.path.clone());
+    }
+    for module in &manifest.transitive_modules {
+        bound_paths.insert(PathBuf::from("sources").join(&module.path));
+        for extension in [
+            bytecode_cache::CACHE_EXTENSION,
+            bytecode_cache::MODULE_CACHE_EXTENSION,
+        ] {
+            if let Some(relative) = adjacent_with_extension(&module.path, extension) {
+                bound_paths.insert(PathBuf::from("bytecode").join(relative));
+            }
+        }
+    }
+    for package in &manifest.sbom.packages {
+        if package.package_hash_blake3.is_some() {
+            if let Some(relative) = package.name.strip_prefix("asset:") {
+                bound_paths.insert(PathBuf::from("sources").join(relative));
+            }
+        }
+    }
+
+    if reject_unbound {
+        if let Some(entry) = contents
+            .iter()
+            .find(|entry| !bound_paths.contains(&entry.path))
+        {
             return Err(PackError::new(
-                "verify.recorded_hash_mismatch",
+                "verify.unbound_payload",
                 format!(
-                    "recorded signature manifest hash {recorded} does not match recomputed {expected_hash}"
+                    "signed legacy bundle payload {} has no path-bound manifest or SBOM identity",
+                    entry.path.display()
                 ),
             ));
         }
     }
-
-    Ok(PackVerifyJsonData {
-        bundle: args.bundle.clone(),
-        bundle_hash: expected_hash,
-        recorded_bundle_hash,
-        signature_present,
-        signature_verified,
-        key_id,
-        schema_version: manifest.schema_version,
-        entrypoint: manifest.entrypoint.clone(),
-        module_count: manifest.transitive_modules.len(),
-        content_entry_count: contents.len(),
-        link_report: manifest
-            .execution_artifact
-            .as_ref()
-            .map(|artifact| artifact.link_report.clone()),
-    })
+    Ok(())
 }
 
 fn verify_sbom_package_hashes(

@@ -293,6 +293,7 @@ impl PackError {
 
 mod archive;
 
+pub(crate) use archive::verify_runtime_payloads;
 pub use archive::{
     repack, run_repack, run_unpack, run_verify, unpack, verify, verify_json_schema,
     verify_to_envelope, PackRepackOutcome, PackUnpackOutcome, PackVerifyJsonData,
