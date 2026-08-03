@@ -22,17 +22,30 @@ const RETIRED_UNUSED_HELPERS: &[&str] = &["with_mocks", "with_host_mocks"];
 /// its typed replacement.
 ///
 /// The replacements take explicit handles — `with_host_mocks` becomes
-/// `with_capability_fixtures(testing, ..)`, and `with_mocks` splits into a
-/// `HarnessTesting` scope around a `HarnessLlm` script. The whole-program pass
-/// seeds these so the enclosing callable actually receives a carrier; without
-/// the seed the rewrite has no handle to name, declines the file, and the plan
-/// converges while retired calls remain.
+/// `with_capability_fixtures(testing, ..)`, and `with_mocks` becomes
+/// `with_scenario(harness, ..)`, which scopes both capabilities. The
+/// whole-program pass seeds these so the enclosing callable actually receives a
+/// carrier; without the seed the rewrite has no handle to name, declines the
+/// file, and the plan converges while retired calls remain.
+///
+/// `with_mocks` additionally needs the root — see
+/// [`retired_wrapper_requires_root`].
 pub(super) fn retired_wrapper_capabilities(callee: &str) -> &'static [CapabilityId] {
     match callee {
         "with_host_mocks" => &[CapabilityId::Testing],
         "with_mocks" => &[CapabilityId::Testing, CapabilityId::Llm],
         _ => &[],
     }
+}
+
+/// Whether a retired wrapper's successor takes the whole `Harness`.
+///
+/// `with_mocks` maps onto `with_scenario(harness, ..)`, so its enclosing
+/// callable must carry the root. Seeding only `Testing` + `Llm` lets the
+/// carrier collapse to a `{llm, testing}` bundle, which cannot be passed where
+/// a `Harness` is expected.
+pub(super) fn retired_wrapper_requires_root(callee: &str) -> bool {
+    callee == "with_mocks"
 }
 
 #[derive(Clone)]
