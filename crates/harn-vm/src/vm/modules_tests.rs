@@ -865,7 +865,7 @@ fn namespace_member_projection_keeps_target_complete_and_nested_dict_narrow() {
     let wrapper = temp.path().join("wrapper.harn");
     std::fs::write(
         &lib,
-        "pub fn greet() { return \"hello\" }\npub fn unused() { return 2 }\n",
+        "let greeting = \"hello\"\npub fn greet() { return greeting }\npub fn unused() { return 2 }\n",
     )
     .expect("write lib");
     std::fs::write(
@@ -876,6 +876,7 @@ fn namespace_member_projection_keeps_target_complete_and_nested_dict_narrow() {
 
     runtime.block_on(async {
         let mut vm = Vm::new();
+        let recorder = vm.enable_module_phase_timing();
         vm.set_source_dir(temp.path());
         let exports = vm
             .load_module_exports(&wrapper)
@@ -905,6 +906,11 @@ fn namespace_member_projection_keeps_target_complete_and_nested_dict_narrow() {
         assert!(
             loaded_lib.functions.contains_key("unused"),
             "target artifacts and caches remain complete"
+        );
+        assert_eq!(
+            recorder.snapshot().modules_loaded,
+            2,
+            "wrapper and dependency each initialize exactly once"
         );
     });
 }
