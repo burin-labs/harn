@@ -81,6 +81,10 @@ pub enum RunEvent {
         key_id: Option<String>,
         cache_hit: bool,
         dry_run_verify: bool,
+        execution_artifact_state: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        fallback_reason: Option<String>,
+        artifact_decode_ms: u64,
     },
 }
 

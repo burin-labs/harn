@@ -326,6 +326,7 @@ impl Vm {
         }
         self.module_provenance = ModuleProvenance::TrustedHostDispatch;
         self.graph_link_table = None;
+        self.linked_program_repository = None;
         Ok(())
     }
 
@@ -967,6 +968,26 @@ impl Vm {
                     if let Some(loaded) = self.module_cache.get(&synthetic).cloned() {
                         return self.apply_import_projection(&synthetic, &loaded, projection);
                     }
+                    if let Some(repository) = &self.linked_program_repository {
+                        let artifact = repository.get(&synthetic).ok_or_else(|| {
+                            VmError::Runtime(format!(
+                                "linked program is missing required module std/{module}"
+                            ))
+                        })?;
+                        self.imported_paths.push(synthetic.clone());
+                        let loaded = Arc::new(
+                            self.instantiate_module(
+                                synthetic.parent().map(Path::to_path_buf),
+                                &artifact,
+                            )
+                            .await?,
+                        );
+                        self.imported_paths.pop();
+                        Arc::make_mut(&mut self.module_cache)
+                            .insert(synthetic.clone(), Arc::clone(&loaded));
+                        self.record_module_loaded();
+                        return self.apply_import_projection(&synthetic, &loaded, projection);
+                    }
                     let loaded = self
                         .load_stdlib_module_from_source(module, synthetic.clone(), source)
                         .await?;
@@ -1071,18 +1092,38 @@ impl Vm {
             // file is never read. Guard-verified package bytes are excluded:
             // they are their own authority and deliberately bypass every memo,
             // and `verified_source` is `Some` exactly when a guard is active.
-            let linked = (provenance == ModuleProvenance::User && verified_source.is_none())
-                .then(|| {
-                    let content_hash = self
-                        .graph_link_table
-                        .as_ref()?
-                        .content_hash(canonical.as_path())?;
-                    let _load_span = self.module_load_span();
-                    self.linked_module_artifact(&file_path, &canonical, content_hash)
+            let closed = self
+                .linked_program_repository
+                .as_ref()
+                .map(|repository| {
+                    repository
+                        .get(&canonical)
+                        .or_else(|| repository.get(&file_path))
+                        .ok_or_else(|| {
+                            VmError::Runtime(format!(
+                                "linked program is missing required module {}",
+                                file_path.display()
+                            ))
+                        })
                 })
-                .flatten();
+                .transpose()?;
 
-            let artifact = if let Some(linked) = linked {
+            let linked = (closed.is_none()
+                && provenance == ModuleProvenance::User
+                && verified_source.is_none())
+            .then(|| {
+                let content_hash = self
+                    .graph_link_table
+                    .as_ref()?
+                    .content_hash(canonical.as_path())?;
+                let _load_span = self.module_load_span();
+                self.linked_module_artifact(&file_path, &canonical, content_hash)
+            })
+            .flatten();
+
+            let artifact = if let Some(closed) = closed {
+                closed
+            } else if let Some(linked) = linked {
                 linked
             } else {
                 let source = {

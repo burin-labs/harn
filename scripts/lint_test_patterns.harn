@@ -302,6 +302,10 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   // injected time. Same justification as `run/mod.rs`, which owned this code
   // before the chunk-loading phases moved to their own module.
   "crates/harn-cli/src/commands/run/chunk_loading.rs",
+  // The pack run receipt reports how long decoding the linked-program artifact
+  // took. The host monotonic clock is the measured subject, not a scheduling
+  // input; same shape as the allowlisted `bench/portable.rs` entry.
+  "crates/harn-cli/src/commands/run/harnpack.rs",
   "crates/harn-cli/src/commands/run/mod.rs",
   // The script MCP HTTP server bounds how long a queued server-to-client
   // request may wait for a real network client to open its event stream

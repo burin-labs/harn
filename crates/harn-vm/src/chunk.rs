@@ -251,7 +251,7 @@ impl Clone for Chunk {
 /// cache and for in-memory stdlib artifact caches. Inline-cache state is
 /// dropped at freeze time because it warms at runtime per VM isolate; the
 /// rest of the chunk round-trips byte-identically.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CachedChunk {
     pub(crate) code: Vec<u8>,
     pub(crate) constants: Vec<Constant>,
@@ -266,7 +266,7 @@ pub struct CachedChunk {
     pub(crate) references_outer_names: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CachedCompiledFunction {
     pub(crate) name: String,
     pub(crate) type_params: Vec<String>,
@@ -280,7 +280,7 @@ pub struct CachedCompiledFunction {
     pub(crate) has_runtime_type_checks: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct CachedParamSlot {
     pub(crate) name: String,
     pub(crate) type_expr: Option<TypeExpr>,

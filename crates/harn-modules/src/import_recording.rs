@@ -35,6 +35,7 @@ pub(crate) fn record_import_node(
                 path: import_path,
                 selective_names: None,
                 namespace_alias: None,
+                is_pub: *is_pub,
                 import_span: snode.span,
             });
             true
@@ -67,6 +68,7 @@ pub(crate) fn record_import_node(
                 path: import_path,
                 selective_names: Some(names),
                 namespace_alias: None,
+                is_pub: *is_pub,
                 import_span: snode.span,
             });
             true

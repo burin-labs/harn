@@ -59,6 +59,11 @@ versioned program artifact and returns completed, suspended, or failed.
 bytecode plus the metadata needed by the portable kernel. It is data, not a
 serialized Rust object or a grant of host authority.
 
+**Linked program.** The closed native execution artifact inside a schema-v3
+`.harnpack`. It contains the entry bytecode and only the reachable module
+symbols needed by that exact source graph. It is separate from the
+authority-free portable-kernel program artifact.
+
 **Capability request.** A typed request emitted when portable execution needs
 host-owned authority. The host may deny it or resume the authenticated
 snapshot with a matching typed result.

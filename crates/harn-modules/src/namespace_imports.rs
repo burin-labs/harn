@@ -129,6 +129,7 @@ pub(crate) fn record_namespace_import(
         path: import_path,
         selective_names: None,
         namespace_alias: Some(alias.to_string()),
+        is_pub,
         import_span: span,
     });
 }

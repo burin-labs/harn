@@ -13,7 +13,15 @@ use sha2::{Digest, Sha256};
 use super::{validate_workflow, WorkflowEdge, WorkflowGraph};
 use crate::tool_annotations::ToolAnnotations;
 
-pub const WORKFLOW_BUNDLE_SCHEMA_VERSION: u32 = 2;
+mod projection;
+
+use projection::{
+    catchup_editable_fields, connector_editable_fields, render_workflow_bundle_mermaid,
+    retry_editable_fields, trigger_editable_fields, workflow_node_editable_fields,
+};
+
+pub const WORKFLOW_BUNDLE_SCHEMA_VERSION: u32 = 3;
+pub const LEGACY_WORKFLOW_BUNDLE_SCHEMA_VERSION: u32 = 2;
 pub const WORKFLOW_BUNDLE_RECEIPT_TYPE: &str = "harn.workflow_bundle.run";
 pub const HARNPACK_MANIFEST_PATH: &str = "harnpack.json";
 
@@ -51,6 +59,9 @@ fn decompress_harnpack_zstd(bytes: &[u8]) -> Result<Vec<u8>, WorkflowBundleError
 pub struct WorkflowBundle {
     pub schema_version: u32,
     pub entrypoint: PathBuf,
+    /// Closed execution payload for schema-v3 bundles. Schema-v2 archives omit
+    /// this field and use the explicit legacy source/bytecode adapter.
+    pub execution_artifact: Option<ExecutionArtifact>,
     pub transitive_modules: Vec<ModuleEntry>,
     pub stdlib_version: String,
     pub harn_version: String,
@@ -77,6 +88,7 @@ impl Default for WorkflowBundle {
         Self {
             schema_version: WORKFLOW_BUNDLE_SCHEMA_VERSION,
             entrypoint: PathBuf::new(),
+            execution_artifact: None,
             transitive_modules: Vec::new(),
             stdlib_version: env!("CARGO_PKG_VERSION").to_string(),
             harn_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -106,6 +118,38 @@ pub struct ModuleEntry {
     pub path: PathBuf,
     pub source_hash_blake3: String,
     pub harnbc_hash_blake3: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ExecutionArtifact {
+    pub format: String,
+    pub path: PathBuf,
+    pub hash_blake3: String,
+    pub graph_digest_blake3: String,
+    pub fallback: ExecutionArtifactFallback,
+    pub link_report: crate::linked_program::LinkReport,
+}
+
+impl Default for ExecutionArtifact {
+    fn default() -> Self {
+        Self {
+            format: "harn.linked_program.v1".to_string(),
+            path: PathBuf::from(crate::linked_program::LINKED_PROGRAM_ARCHIVE_PATH),
+            hash_blake3: String::new(),
+            graph_digest_blake3: String::new(),
+            fallback: ExecutionArtifactFallback::Deny,
+            link_report: crate::linked_program::LinkReport::default(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionArtifactFallback {
+    #[default]
+    Deny,
+    ExactSources,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -581,7 +625,7 @@ pub fn parse_workflow_bundle_manifest(bytes: &[u8]) -> Result<WorkflowBundle, Wo
             ),
         )
     })?;
-    if actual != WORKFLOW_BUNDLE_SCHEMA_VERSION {
+    if actual != WORKFLOW_BUNDLE_SCHEMA_VERSION && actual != LEGACY_WORKFLOW_BUNDLE_SCHEMA_VERSION {
         return Err(WorkflowBundleError::unsupported_schema_version(actual));
     }
     serde_json::from_value(value).map_err(Into::into)
@@ -601,16 +645,45 @@ pub fn workflow_bundle_hash(
     let mut canonical = canonical_workflow_bundle_manifest(bundle);
     canonical.signature = None;
     let manifest_bytes = serde_json::to_vec(&canonical)?;
+    if bundle.schema_version >= WORKFLOW_BUNDLE_SCHEMA_VERSION {
+        hasher.update(b"harn.workflow-bundle.v3\0");
+    }
     hasher.update(&manifest_bytes);
 
-    let mut content_hashes = contents
-        .iter()
-        .map(|entry| blake3_hash_bytes(&entry.bytes))
-        .collect::<Vec<_>>();
-    content_hashes.sort();
-    for content_hash in content_hashes {
-        hasher.update(b"\n");
-        hasher.update(content_hash.as_bytes());
+    if bundle.schema_version >= WORKFLOW_BUNDLE_SCHEMA_VERSION {
+        let mut entries = contents
+            .iter()
+            .map(|entry| normalize_archive_path(&entry.path).map(|path| (path, entry)))
+            .collect::<Result<Vec<_>, _>>()?;
+        entries.sort_by(|left, right| left.0.cmp(&right.0));
+        for pair in entries.windows(2) {
+            if pair[0].0 == pair[1].0 {
+                return Err(WorkflowBundleError::new(
+                    WorkflowBundleErrorKind::DuplicateArchiveEntry,
+                    format!("duplicate archive entry {}", pair[0].0),
+                ));
+            }
+        }
+        for (path, entry) in entries {
+            let path_bytes = path;
+            hasher.update(b"\nentry\0");
+            hasher.update(&(path_bytes.len() as u64).to_le_bytes());
+            hasher.update(path_bytes.as_bytes());
+            hasher.update(&entry.mode.to_le_bytes());
+            hasher.update(blake3_hash_bytes(&entry.bytes).as_bytes());
+        }
+    } else {
+        // Schema-v2 compatibility: preserve the historical path-agnostic
+        // multiset hash so existing signatures remain verifiable.
+        let mut content_hashes = contents
+            .iter()
+            .map(|entry| blake3_hash_bytes(&entry.bytes))
+            .collect::<Vec<_>>();
+        content_hashes.sort();
+        for content_hash in content_hashes {
+            hasher.update(b"\n");
+            hasher.update(content_hash.as_bytes());
+        }
     }
 
     Ok(blake3_digest_string(hasher.finalize()))
@@ -1403,7 +1476,9 @@ fn validate_bundle_identity(
     graph: &WorkflowGraph,
     report: &mut WorkflowBundleValidationReport,
 ) {
-    if bundle.schema_version != WORKFLOW_BUNDLE_SCHEMA_VERSION {
+    if bundle.schema_version != WORKFLOW_BUNDLE_SCHEMA_VERSION
+        && bundle.schema_version != LEGACY_WORKFLOW_BUNDLE_SCHEMA_VERSION
+    {
         push_error(
             report,
             "schema_version",
@@ -1461,6 +1536,44 @@ fn validate_manifest_contract(
         &bundle.entrypoint,
         "entrypoint is required",
     );
+    if bundle.schema_version >= WORKFLOW_BUNDLE_SCHEMA_VERSION {
+        match &bundle.execution_artifact {
+            Some(artifact) => {
+                if artifact.format != "harn.linked_program.v1" {
+                    push_error(
+                        report,
+                        "execution_artifact.format",
+                        "execution artifact format must be harn.linked_program.v1",
+                        None,
+                    );
+                }
+                validate_relative_path(
+                    report,
+                    "execution_artifact.path",
+                    &artifact.path,
+                    "execution artifact path is required",
+                );
+                validate_blake3_hash(
+                    report,
+                    "execution_artifact.hash_blake3",
+                    &artifact.hash_blake3,
+                    true,
+                );
+                validate_blake3_hash(
+                    report,
+                    "execution_artifact.graph_digest_blake3",
+                    &artifact.graph_digest_blake3,
+                    true,
+                );
+            }
+            None => push_error(
+                report,
+                "execution_artifact",
+                "schema-v3 bundles require a linked execution artifact",
+                None,
+            ),
+        }
+    }
     if bundle.transitive_modules.is_empty() {
         push_error(
             report,
@@ -1496,12 +1609,14 @@ fn validate_manifest_contract(
             &module.source_hash_blake3,
             true,
         );
-        validate_blake3_hash(
-            report,
-            format!("{path}.harnbc_hash_blake3"),
-            &module.harnbc_hash_blake3,
-            true,
-        );
+        if bundle.schema_version == LEGACY_WORKFLOW_BUNDLE_SCHEMA_VERSION {
+            validate_blake3_hash(
+                report,
+                format!("{path}.harnbc_hash_blake3"),
+                &module.harnbc_hash_blake3,
+                true,
+            );
+        }
     }
     if bundle.stdlib_version.trim().is_empty() {
         push_error(report, "stdlib_version", "stdlib_version is required", None);
@@ -2056,324 +2171,6 @@ fn connector_label(connector: &ConnectorRequirement) -> String {
     } else {
         format!("{} ({})", connector.id, connector.provider_id)
     }
-}
-
-fn editable_field(
-    id: impl Into<String>,
-    label: impl Into<String>,
-    json_pointer: impl Into<String>,
-    value_type: impl Into<String>,
-    required: bool,
-    enum_values: &[&str],
-) -> WorkflowBundleEditableField {
-    WorkflowBundleEditableField {
-        id: id.into(),
-        label: label.into(),
-        json_pointer: json_pointer.into(),
-        value_type: value_type.into(),
-        required,
-        enum_values: enum_values
-            .iter()
-            .map(|value| (*value).to_string())
-            .collect(),
-    }
-}
-
-fn json_pointer_segment(value: &str) -> String {
-    value.replace('~', "~0").replace('/', "~1")
-}
-
-fn trigger_editable_fields(
-    index: usize,
-    trigger: &WorkflowBundleTrigger,
-) -> Vec<WorkflowBundleEditableField> {
-    let base = format!("/triggers/{index}");
-    let mut fields = vec![
-        editable_field(
-            format!("trigger.{}.kind", trigger.id),
-            "Trigger kind",
-            format!("{base}/kind"),
-            "enum",
-            true,
-            &["github", "cron", "delay", "manual", "webhook", "mcp"],
-        ),
-        editable_field(
-            format!("trigger.{}.node_id", trigger.id),
-            "Target node",
-            format!("{base}/node_id"),
-            "string",
-            false,
-            &[],
-        ),
-    ];
-    if trigger.provider.is_some() || trigger.kind == "github" {
-        fields.push(editable_field(
-            format!("trigger.{}.provider", trigger.id),
-            "Provider",
-            format!("{base}/provider"),
-            "string",
-            trigger.kind == "github",
-            &[],
-        ));
-    }
-    for (field, label, value_type) in [
-        ("events", "Events", "list"),
-        ("schedule", "Schedule", "string"),
-        ("delay", "Delay", "string"),
-        ("webhook_path", "Webhook path", "string"),
-        ("mcp_tool", "MCP tool", "string"),
-        ("resume_key", "Resume key", "string"),
-        ("metadata", "Metadata", "object"),
-    ] {
-        fields.push(editable_field(
-            format!("trigger.{}.{}", trigger.id, field),
-            label,
-            format!("{base}/{field}"),
-            value_type,
-            false,
-            &[],
-        ));
-    }
-    fields
-}
-
-fn workflow_node_editable_fields(
-    node_id: &str,
-    capsule_id: Option<&String>,
-) -> Vec<WorkflowBundleEditableField> {
-    let escaped_node = json_pointer_segment(node_id);
-    let mut fields = vec![
-        editable_field(
-            format!("workflow.{node_id}.task_label"),
-            "Task label",
-            format!("/workflow/nodes/{escaped_node}/task_label"),
-            "string",
-            false,
-            &[],
-        ),
-        editable_field(
-            format!("workflow.{node_id}.prompt"),
-            "Prompt",
-            format!("/workflow/nodes/{escaped_node}/prompt"),
-            "string",
-            false,
-            &[],
-        ),
-        editable_field(
-            format!("workflow.{node_id}.system"),
-            "System prompt",
-            format!("/workflow/nodes/{escaped_node}/system"),
-            "string",
-            false,
-            &[],
-        ),
-        editable_field(
-            format!("workflow.{node_id}.model_policy"),
-            "Model policy",
-            format!("/workflow/nodes/{escaped_node}/model_policy"),
-            "object",
-            false,
-            &[],
-        ),
-        editable_field(
-            format!("workflow.{node_id}.tools"),
-            "Tool policy",
-            format!("/workflow/nodes/{escaped_node}/tools"),
-            "any",
-            false,
-            &[],
-        ),
-        editable_field(
-            format!("workflow.{node_id}.capability_policy"),
-            "Capability policy",
-            format!("/workflow/nodes/{escaped_node}/capability_policy"),
-            "object",
-            false,
-            &[],
-        ),
-        editable_field(
-            format!("workflow.{node_id}.approval_policy"),
-            "Approval policy",
-            format!("/workflow/nodes/{escaped_node}/approval_policy"),
-            "object",
-            false,
-            &[],
-        ),
-        editable_field(
-            format!("workflow.{node_id}.retry_policy"),
-            "Retry policy",
-            format!("/workflow/nodes/{escaped_node}/retry_policy"),
-            "object",
-            false,
-            &[],
-        ),
-    ];
-    if let Some(capsule_id) = capsule_id {
-        let escaped_capsule = json_pointer_segment(capsule_id);
-        fields.extend([
-            editable_field(
-                format!("prompt_capsule.{capsule_id}.prompt"),
-                "Prompt capsule",
-                format!("/prompt_capsules/{escaped_capsule}/prompt"),
-                "string",
-                true,
-                &[],
-            ),
-            editable_field(
-                format!("prompt_capsule.{capsule_id}.system"),
-                "Prompt capsule system",
-                format!("/prompt_capsules/{escaped_capsule}/system"),
-                "string",
-                false,
-                &[],
-            ),
-            editable_field(
-                format!("prompt_capsule.{capsule_id}.context"),
-                "Prompt capsule context",
-                format!("/prompt_capsules/{escaped_capsule}/context"),
-                "object",
-                false,
-                &[],
-            ),
-            editable_field(
-                format!("prompt_capsule.{capsule_id}.trigger_id"),
-                "Prompt capsule trigger",
-                format!("/prompt_capsules/{escaped_capsule}/trigger_id"),
-                "string",
-                false,
-                &[],
-            ),
-        ]);
-    }
-    fields
-}
-
-fn connector_editable_fields(
-    index: usize,
-    connector: &ConnectorRequirement,
-) -> Vec<WorkflowBundleEditableField> {
-    let base = format!("/connectors/{index}");
-    [
-        ("id", "Connector id", "string", true),
-        ("provider_id", "Provider id", "string", true),
-        ("scopes", "Scopes", "list", false),
-        ("setup_required", "Setup required", "bool", false),
-        ("status_required", "Status required", "bool", false),
-    ]
-    .into_iter()
-    .map(|(field, label, value_type, required)| {
-        editable_field(
-            format!("connector.{}.{}", connector.id, field),
-            label,
-            format!("{base}/{field}"),
-            value_type,
-            required,
-            &[],
-        )
-    })
-    .collect()
-}
-
-fn retry_editable_fields() -> Vec<WorkflowBundleEditableField> {
-    vec![
-        editable_field(
-            "policy.retry.max_attempts",
-            "Retry attempts",
-            "/policy/retry/max_attempts",
-            "integer",
-            true,
-            &[],
-        ),
-        editable_field(
-            "policy.retry.backoff",
-            "Retry backoff",
-            "/policy/retry/backoff",
-            "string",
-            true,
-            &[],
-        ),
-    ]
-}
-
-fn catchup_editable_fields() -> Vec<WorkflowBundleEditableField> {
-    vec![
-        editable_field(
-            "policy.catchup.mode",
-            "Catchup mode",
-            "/policy/catchup/mode",
-            "enum",
-            true,
-            &["none", "latest", "all"],
-        ),
-        editable_field(
-            "policy.catchup.max_events",
-            "Catchup max events",
-            "/policy/catchup/max_events",
-            "integer",
-            false,
-            &[],
-        ),
-    ]
-}
-
-fn render_workflow_bundle_mermaid(
-    nodes: &[WorkflowBundleGraphNode],
-    edges: &[WorkflowBundleGraphEdge],
-) -> String {
-    let mut lines = vec!["flowchart TD".to_string()];
-    for node in nodes {
-        lines.push(format!(
-            "  {}[\"{}\"]",
-            mermaid_id(&node.id),
-            mermaid_label(&format!("{}: {}", node.node_type, node.label))
-        ));
-    }
-    for edge in edges {
-        let label = edge
-            .label
-            .as_deref()
-            .or(edge.branch.as_deref())
-            .map(mermaid_label);
-        match label {
-            Some(label) if !label.is_empty() => lines.push(format!(
-                "  {} -->|{}| {}",
-                mermaid_id(&edge.from),
-                label,
-                mermaid_id(&edge.to)
-            )),
-            _ => lines.push(format!(
-                "  {} --> {}",
-                mermaid_id(&edge.from),
-                mermaid_id(&edge.to)
-            )),
-        }
-    }
-    lines.join("\n")
-}
-
-fn mermaid_id(value: &str) -> String {
-    let digest = Sha256::digest(value.as_bytes());
-    let suffix = digest
-        .iter()
-        .take(4)
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    let mut out = format!("n_{suffix}_");
-    for ch in value.chars() {
-        if ch.is_ascii_alphanumeric() {
-            out.push(ch);
-        } else {
-            out.push('_');
-        }
-    }
-    out
-}
-
-fn mermaid_label(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', " ")
 }
 
 fn triggers_by_node(bundle: &WorkflowBundle) -> BTreeMap<String, Vec<String>> {

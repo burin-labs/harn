@@ -7,7 +7,8 @@ workflow's durable identity, graph, policy, or replay metadata.
 
 The canonical package format is `.harnpack`: a deterministic `tar.zst` archive
 with `harnpack.json` and `sbom.spdx.json` at the archive root. The manifest can
-also be read as plain JSON during authoring. The current schema version is `2`.
+also be read as plain JSON during authoring. The current schema version is `3`.
+Harn continues to read schema-v2 archives.
 
 For an end-to-end walkthrough that authors a bundle, validates it,
 previews the graph, and runs a deterministic local receipt — all
@@ -27,9 +28,10 @@ Top-level bundle fields:
 
 | Field | Purpose |
 |---|---|
-| `schema_version` | Bundle schema version. Must be `2`. |
+| `schema_version` | Bundle schema version. Current writers emit `3`; readers also accept legacy `2`. |
 | `entrypoint` | Relative path to the entry Harn module inside the package. |
-| `transitive_modules` | Sorted module manifest entries with source and bytecode BLAKE3 hashes. |
+| `execution_artifact` | Schema-v3 linked program, its graph and content hashes, compatibility policy, and link report. |
+| `transitive_modules` | Sorted module manifest entries with source hashes. Legacy v2 entries also carry per-module bytecode hashes. |
 | `stdlib_version` / `harn_version` | Runtime and standard library versions used to build the package. |
 | `provider_catalog_hash` | BLAKE3 hash of the provider catalog used at build time. |
 | `tool_manifest` | Tool names, providers, optional annotations, and schema hashes captured for review. |
@@ -63,19 +65,30 @@ connector identity, and environment worktree policy. The validation report
 includes a stable `graph_digest` over canonical graph JSON so receipts and
 replay runs can pin the exact workflow graph.
 
-Bundle identity for `.harnpack` archives is BLAKE3 over the canonical manifest
-bytes plus the sorted content hashes. Re-packing the same manifest and content
-produces the same bundle hash.
+Bundle identity for schema-v3 `.harnpack` archives is BLAKE3 over the canonical
+manifest plus each normalized archive path, file mode, and content hash. This
+binds bytes to their names and rejects duplicate normalized paths. Re-packing
+the same manifest and content produces the same bundle hash. Schema-v2
+verification preserves its historical path-independent hash so existing
+signatures remain valid, then applies path checks before execution.
 
 `harn pack --sign --key <private.pem>` signs the canonical bundle hash with an
 Ed25519 PKCS#8 PEM key, embeds the signature in `harnpack.json`, and appends an
 OpenTrustGraph `release` record. `harn pack --unsigned` skips the manifest
 signature but still appends the release record at autonomy tier `suggest`.
 `harn pack --json` emits a `JsonEnvelope` summary with the bundle hash, output
-path, archive size, signature presence, SBOM counts, and the full manifest.
-Its `debug_symbol_metadata` reports separate `harnbc_count`, `harnbc_bytes`,
-`harnmod_count`, and `harnmod_bytes` values; `total_bytes` is the sum of both
-artifact families.
+path, archive size, signature presence, SBOM counts, the full manifest, and a
+`link_report`. The report names the linker version and graph identity, input
+and output byte counts, retained and removed symbols with reasons, conservative
+widening, and user-versus-standard-library totals. Module initializers remain
+in the artifact because their effects are observable.
+
+Schema v3 stores one `artifacts/program.harnlink` execution payload instead of
+parallel `.harnbc` and `.harnmod` files. The linker keeps only modules reachable
+from the entrypoint. For a static namespace use such as `ui.render(...)`, it
+keeps `render`, the private callables and type schemas it needs, and module
+initialization. If the namespace escapes, is indexed dynamically, or is
+publicly re-exported, the report records why that module stayed whole.
 
 `harn pack --exclude-secrets` refuses to bundle entrypoints and skips imported
 non-Harn assets that match a conservative secret-bearing glob: `.env`,
@@ -88,12 +101,11 @@ about the default behavior in release pipelines.
 
 `harn pack verify <bundle.harnpack>` reads a bundle back, recomputes the
 canonical bundle hash, verifies the embedded Ed25519 signature (if any), and
-cross-checks every `transitive_modules[*].source_hash_blake3` and
-`harnbc_hash_blake3` against the in-archive payload. The command exits non-zero
-on any mismatch and emits structured error codes (`verify.signature_failed`,
-`verify.source_mismatch`, `verify.bytecode_mismatch`,
-`verify.recorded_hash_mismatch`, `verify.archive_failed`,
-`verify.unsigned`).
+cross-checks every source hash. For schema v3 it also checks the linked-artifact
+hash, exact runtime/compiler identity, embedded report, and graph digest rebuilt
+from the verified user sources and the current embedded standard library. For
+schema v2 it checks each recorded `.harnbc` hash. The command exits non-zero on
+any mismatch.
 
 Pass `--strict` to additionally cross-check SBOM package hashes against the
 archive payloads they describe when the bundle format carries a corresponding
@@ -118,20 +130,23 @@ When that gate fails, the verifier exits with `verify.untrusted_signer`.
 
 `harn pack verify --json` emits a `JsonEnvelope` with the recomputed
 `bundle_hash`, signature presence/verification flags, signing key fingerprint,
-and per-bundle counts (`module_count`, `content_entry_count`). The schema is
+per-bundle counts, and the schema-v3 `link_report`. The schema is
 `harn --json-schemas --command "pack verify"`.
 
-`harn run <bundle.harnpack>` also runs the same signature and per-module source
-and `.harnbc` hash, and SBOM asset-path verification before replaying into the
-content-addressed pack cache. On every run it compares all replayed files and
-the cached manifest with the verified archive bytes, atomically repairing a
-partial or locally modified cache slot and rejecting symlinked cache parents.
-The archive keeps one authoritative copy of generated artifacts
-under `bytecode/`; replay projects those bytes beside their matching files
-under `sources/`, where Harn's canonical entry and module loaders already look.
-Those loaders still validate source content, compilation context, Harn version,
-and compiler build before execution. A mismatch fails closed and recompiles
-from the bundled source.
+`harn run <bundle.harnpack>` applies the same verification before replaying into
+the content-addressed pack cache. Schema v3 decodes the linked entry chunk and
+program-scoped module repository directly. Missing, corrupt, incomplete, or
+incompatible artifacts fail closed unless the signed descriptor explicitly
+allows exact-source fallback; the `pack_run` event reports `linked`,
+`legacy_v2`, or `source_fallback`, the fallback reason, and decode time.
+
+Schema v2 keeps one authoritative copy of generated artifacts under
+`bytecode/`; replay projects those bytes beside their matching files under
+`sources/`, where Harn's canonical loaders look. On every run Harn compares all
+replayed files and the cached manifest with the verified archive bytes,
+atomically repairs a partial or locally modified cache slot, and rejects
+symlinked cache parents. A cache mismatch recompiles from bundled source rather
+than weakening validation.
 
 Packs built by current Harn use a root-relative dependency identity for entry
 bytecode, so an unchanged source tree can move from the build checkout into the
