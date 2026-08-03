@@ -9,6 +9,185 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.52
+
+### Breaking
+
+- `harness.process.run` no longer returns the duplicate `exit_status` and
+  `legacy_status` fields. Read `exit_code` instead.
+- Replace the separate browser-only Harn subset interpreter and experimental
+  native codegen stack with a versioned Portable Harn Kernel artifact, shared
+  native/browser execution semantics, typed capability suspension, and a checked
+  WIT/wasm-bindgen browser contract. Browser callers must migrate from the former
+  single-call interpreter exports to `compile`, `start`, and `resume`.
+
+### Added
+
+- Add `harn app run` as a standalone, loopback-only MCP Apps host. Harn scripts can
+  now serve stable MCP Apps tool and resource metadata, and `std/ui_resource`
+  projects validated HTML into the wire contract without hand-written adapters.
+- Flow invariant predicates can now opt into structural queries with an explicit
+  leading `HarnessAst` parameter. The executor injects only that narrow handle;
+  existing three-argument predicates and every other capability remain unchanged.
+- Add a typed `std/model_job` lifecycle for local and hosted image, audio, video,
+  embedding, and custom model work, with content-addressed media assets,
+  deterministic replay, a ComfyUI adapter, and a ready-to-run FLUX.2 Klein graph.
+  The same contract includes a hosted OpenAI Responses image adapter. A new
+  `harn-docs` corpus skill and Codex/Claude writing skill keep developer docs
+  task-shaped, linked, checked, and plain. `harn skill validate` checks a skill
+  bundle with the runtime's canonical parser and supports strict and JSON output.
+- **Interactive Harn apps can now keep all product behavior in Harn (#5901).**
+  `std/ui` supplies typed documents, browser events, effects, canvas strokes,
+  and one shared MCP Apps renderer. Model jobs can report progress and accept
+  cancellation without freezing the app. The Harn-only logo studio supports
+  drawing, annotations, local and hosted image editing, replay, restart
+  recovery, previews, and writing result files. The ComfyUI backend now uploads
+  verified inputs and includes a FLUX.2 Klein edit graph, while a smaller
+  decision-card example proves the renderer is reusable.
+- MCP tools with an output schema now preserve JSON string results as strings
+  in `structuredContent` instead of parsing their contents a second time.
+- Add strict type and warning enforcement to `harn package verify --strict`,
+  with the requested policy recorded in schema-v2 JSON receipts.
+- Structural codemods can now move top-level Harn `const`, `let`, and `var`
+  declarations by name. Local and destructured bindings remain outside the
+  declaration symbol index.
+
+### Changed
+
+- **Flow predicate capability signatures are now exact (#5907).** Bare
+  `@invariant` functions may request only a literal leading `HarnessAst`,
+  matching the evaluator's injected argument contract.
+  Capability aliases, nested bundles, and root authority are rejected during
+  typechecking instead of producing shifted runtime arguments.
+- Codex and Claude now share one Harn-authored shell guard that directs owned Rust
+  build, check, test, lint, format, and benchmark commands through worktree-safe
+  Make targets while preserving an explicit one-command escape.
+- Local development now has a receipt-checked exact Rust test command that avoids
+  enumerating unrelated package test binaries.
+- Release verification now recognizes an invalid immutable tag only through a
+  closed exact-commit withdrawal registry. Install-facing projections remain on
+  the last published version until the named patch replacement ships.
+- Split Harn conformance and audit gates onto independent hosted CI workers so
+  merge groups no longer oversubscribe one four-core runner after the shared CLI
+  build.
+- Use a target-specific release codegen policy to restore x86_64 Linux
+  binary-size headroom while preserving the OOM-safe aarch64 build shape.
+
+### Fixed
+
+- `harn fix --capability-migrations-only` now repairs capability signatures and
+  their reachable cross-module call sites as one whole-program edit, widening an
+  existing Harness handle instead of introducing competing authority parameters.
+- ACP mode-policy tests no longer inherit ambient `HARN_EGRESS_*` overrides from the developer shell.
+- The reusable Harn runtime bump now applies the target runtime's deterministic
+  capability migrations before repository refresh and validation. Runtime bumps
+  therefore carry typed `Harness` source migrations in the same signed PR instead
+  of failing every consumer that still uses a removed ambient capability.
+- Package commands now read projects with pre-v5 Git hashes in `harn.lock`. They
+  use a current lock projection for the runtime package snapshot and leave the
+  project lock unchanged. Run `harn install` when you want to update the file.
+- Sandboxed scripts can now install `harness.net.egress_policy(...)` before they
+  receive network authority. Policy installation is a state change, not network
+  traffic; it still cannot grant network access or widen a host policy.
+  Matching `harness.testing.http_mock` calls are in-process and need no
+  network grant; unmatched calls still use the active network and egress policy.
+- `harness.process.run` now exposes its stable subprocess result as a closed typed
+  record, so callers can retain named result annotations and field-name checking.
+  Successful and blocked calls expose the same typed core fields.
+- `harness.process.run` and other process methods can now create generated
+  fixture files with shell redirection. They can also update untracked generated
+  files inside a Git worktree. The command floor still blocks replacing or
+  erasing tracked files.
+- Capability-only `harn fix` runs now thread newly required typed arguments
+  through the whole invocation graph, coalesce concurrent requirements into one
+  least-authority carrier, and format every edited Harn file. Reusable runtime
+  bumps can therefore migrate package sources without duplicate grants, stale
+  call arities, or formatter-only validation failures. Fix planning now consumes
+  structured unresolved-name and expected/actual-type diagnostics instead of
+  parsing human-readable messages. Formatting follows the owning project's
+  `[fmt]` policy, and flow predicates reject capabilities the evaluator cannot
+  inject. The type checker enforces the same authority boundary for manually
+  authored Flow predicate signatures.
+
+  Attributed non-function declarations no longer emit every attribute diagnostic
+  twice during typechecking.
+
+  `harn package verify` now labels warning-only stderr from passing gates as
+  diagnostics instead of incorrectly calling it failed output.
+- **Harn Serve now injects declared typed Harness capabilities into handlers.**
+  Trusted routes and pipelines can accept a narrow handle such as
+  `HarnessObs` as their leading parameter instead of requiring root `Harness`;
+  pure callables and existing untyped `harness` handlers keep their prior
+  behavior.
+- Connector HTTP failures now redact secret-bearing response headers and cap
+  error bodies at 1,024 characters. Import connector HTTP policy from
+  `std/connectors/http`; `std/connectors/shared` keeps compatibility re-exports
+  for packages built against the earlier Harn 0.10 API.
+- Allow scoped typed fixtures to intercept host-backed methods whose names share a
+  built-in Harness capability, including embedding-specific methods explicitly
+  marked `unregistered_ok`.
+- The release binary-size gate now reads one closed, target-indexed policy shared
+  with the local checker, validates it before building, and records the exact
+  candidate behind each bounded-headroom ratchet update.
+- Whole-program capability fixes now index diagnostics by file once per pass,
+  avoiding repeated filesystem path normalization for every callable during
+  large repository migrations.
+- Pushes that change only a post-build release gate no longer launch Harn's full
+  five-target warm-cache matrix. A typed-validated path policy now owns Cargo,
+  toolchain, cache-action, and runner-topology inputs. Setup-only pushes cannot
+  cancel useful warm work, while newer real warms still supersede it per target.
+- Preserve functions that accept separate capability handles during whole-program
+  migrations, reuse their narrowest existing authority, and add only genuinely
+  missing handles across resolved callers.
+- Package API documentation now renders complete, formatted, parseable declarations
+  for multiline public functions and type aliases.
+- Count identifiers referenced from attribute arguments as used bindings during linting.
+- `std/diff` now uses Harn's native Histogram diff engine instead of building a
+  quadratic Harn map. Structural edit previews stay responsive on large files,
+  `diff_artifact` returns counts and rendered output from one comparison, and all
+  Harn diff surfaces handle final newlines consistently.
+- **Capability fixes preserve a lone narrow handle (#5945).** When a function
+  already accepts one `Harness*` capability and needs another, `harn fix`
+  keeps the existing parameter, adds only the missing handle, rewrites the
+  undefined `harness.<capability>` access, and updates resolved callers without
+  inventing omitted domain arguments.
+- Make queued pull-request source updates atomic: the pre-push guard now points
+  to one command that dequeues the exact queue entry, proves the pushed remote
+  OID and exact-head CI fanout, recovers one dropped `synchronize` event, and
+  only then restores auto-merge.
+- Unify package verification and packing exclusions so Harn runtime state and
+  generated documentation never become package inputs or verification targets.
+  Flow repository context now excludes the same root generated-documentation tree.
+- Keep embedded persona and portal invalidation coverage while moving its Cargo
+  causality proof onto the owning build-support module, avoiding a full CLI
+  rebuild in every audit lane.
+- Package verification now builds the exact-tree Harn CLI and AOT generator in
+  one Cargo feature-unification boundary, reuses those binaries directly, and
+  avoids compiling their shared dependency graph twice.
+- Parallel release bootstraps now serialize the final install publication, repair
+  abandoned locks, and preserve a valid install while other processes converge
+  on the same checksum.
+- Timed-out Harn source builds no longer amplify compiler-wrapper contention by
+  starting a duplicate cold build. Diagnostics now offer a deliberate
+  `HARN_BIN_RETRY_WITHOUT_WRAPPER=1` recovery path for genuinely wedged wrappers.
+- The unused-variable lint no longer reports public module bindings or offers to
+  rename exported APIs to the discard binding. Private and local bindings remain
+  checked.
+- Add `harn run --defer-project-handlers` and use it to keep the shared Codex and
+  Claude command guard active when unrelated project handler initialization fails.
+- Keep a deferred worker claim live through its queue-drain receipt without relying on heartbeat scheduling.
+- An orchestrator queue drain now attempts each job at most once per invocation,
+  even if a short claim lease expires, while later drains can still reclaim
+  deferred work and fairness selection continues across other eligible jobs.
+- Cancel obsolete merge-queue workflows when their exact speculative ref is superseded or dequeued.
+- `harn fix` now tells callers where the HTTP mock family and the egress-policy
+  declaration went. `http_mock`, `http_mock_clear`, `http_mock_calls`, and
+  `egress_policy` are hand-written methods rather than registered builtins, so no
+  recipe derived for them and upgrading packages saw a bare "not defined" error on
+  every test file instead of a repair.
+- Linux process sandboxes now preserve Swift and other runtimes that inspect
+  their own memory maps across compiler subprocesses on Yama-hardened hosts.
+
 ## v0.10.51
 
 ### Changed
