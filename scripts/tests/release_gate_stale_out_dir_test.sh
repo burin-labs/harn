@@ -177,6 +177,9 @@ chmod +x "$fake_bin/env"
 cat > "$release_root/scripts/verify_crate_packages.sh" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "${FAKE_PACKAGE_MODE:-}" == "sigkill" ]]; then
+  kill -9 $$
+fi
 count=0
 if [[ -f "$FAKE_CARGO_STATE/package-count" ]]; then
   count=$(<"$FAKE_CARGO_STATE/package-count")
@@ -495,6 +498,48 @@ fi
 if ! grep -Fxq 'clean -p libsqlite3-sys' "$package_state/cargo-record"; then
   echo "package-audit recovery should clean only the implicated package" >&2
   cat "$package_state/cargo-record" >&2
+  exit 1
+fi
+
+# A lane can die without writing anything an error-text scan would match. The
+# package-audit runner is not wrapped in `time_phase`, so there is no unmatched
+# sub-step marker either, and selecting failing lanes by log content dropped it
+# from the summary entirely (#6102). The summary must name the lane and say how
+# it died.
+killed_state="$tmp_root/state-killed"
+killed_target="$tmp_root/target killed"
+killed_build="$tmp_root/build killed"
+mkdir -p "$killed_state" "$killed_target" "$killed_build"
+: > "$killed_state/cargo-record"
+: > "$killed_state/make-record"
+set +e
+HARN_RELEASE_ROOT="$release_root" \
+  HARN_BIN="$fake_harn" \
+  CARGO_TARGET_DIR="$killed_target" \
+  CARGO_BUILD_BUILD_DIR="$killed_build" \
+  FAKE_AUDIT_LANE=package \
+  FAKE_CARGO_MODE=stale-then-success \
+  FAKE_CARGO_RECORD="$killed_state/cargo-record" \
+  FAKE_CARGO_STATE="$killed_state" \
+  FAKE_MAKE_RECORD="$killed_state/make-record" \
+  FAKE_PACKAGE_MODE=sigkill \
+  PATH="$fake_bin:$PATH" \
+  "$release_tools/release_gate.sh" audit --source-only > "$killed_state/output" 2>&1
+killed_status=$?
+set -e
+if [[ "$killed_status" -eq 0 ]]; then
+  echo "a signal-killed audit lane must fail the gate" >&2
+  cat "$killed_state/output" >&2
+  exit 1
+fi
+if ! grep -Fq '>>> package-audit  <<<' "$killed_state/output"; then
+  echo "signal-killed lane is missing from the failure summary" >&2
+  cat "$killed_state/output" >&2
+  exit 1
+fi
+if ! grep -Fq 'killed by SIGKILL (exit 137)' "$killed_state/output"; then
+  echo "failure summary did not report how the lane died" >&2
+  cat "$killed_state/output" >&2
   exit 1
 fi
 
