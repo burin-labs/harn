@@ -22,9 +22,7 @@ pub(crate) fn cache_root() -> Result<PathBuf, PackageError> {
     PackageWorkspace::from_current_dir()?.cache_root()
 }
 
-pub(crate) fn sha256_hex(bytes: impl AsRef<[u8]>) -> String {
-    hex::encode(Sha256::digest(bytes.as_ref()))
-}
+pub(crate) use harn_kernel::pure::sha256_hex;
 
 pub(crate) fn git_cache_dir_in(
     workspace: &PackageWorkspace,
@@ -34,7 +32,7 @@ pub(crate) fn git_cache_dir_in(
     Ok(workspace
         .cache_root()?
         .join("git")
-        .join(sha256_hex(source))
+        .join(sha256_hex(source.as_bytes()))
         .join(commit))
 }
 
@@ -46,7 +44,7 @@ pub(crate) fn git_cache_lock_path_in(
     Ok(workspace
         .cache_root()?
         .join("locks")
-        .join(format!("{}-{commit}.lock", sha256_hex(source))))
+        .join(format!("{}-{commit}.lock", sha256_hex(source.as_bytes()))))
 }
 
 pub(crate) fn archive_cache_key(content_hash: &str) -> Result<&str, PackageError> {
@@ -69,7 +67,7 @@ pub(crate) fn archive_cache_dir_in(
     Ok(workspace
         .cache_root()?
         .join("archive")
-        .join(sha256_hex(source))
+        .join(sha256_hex(source.as_bytes()))
         .join(archive_cache_key(content_hash)?))
 }
 
@@ -80,7 +78,7 @@ pub(crate) fn archive_cache_lock_path_in(
 ) -> Result<PathBuf, PackageError> {
     Ok(workspace.cache_root()?.join("locks").join(format!(
         "{}-{}.lock",
-        sha256_hex(source),
+        sha256_hex(source.as_bytes()),
         archive_cache_key(content_hash)?
     )))
 }

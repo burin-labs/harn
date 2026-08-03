@@ -1,10 +1,11 @@
+use harn_kernel::pure::sha256_hex;
 use std::collections::BTreeMap;
 
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
 use hmac::{Hmac, KeyInit, Mac};
 use serde_json::json;
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 use subtle::ConstantTimeEq;
 use time::{Duration, OffsetDateTime};
 
@@ -1067,15 +1068,6 @@ fn canonical_request_message(method: &str, path: &str, timestamp: &str, body: &[
         timestamp.trim(),
         sha256_hex(body)
     )
-}
-
-fn sha256_hex(data: &[u8]) -> String {
-    let digest = Sha256::digest(data);
-    let mut encoded = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        encoded.push_str(&format!("{byte:02x}"));
-    }
-    encoded
 }
 
 pub(crate) fn hmac_sha256(secret: &[u8], data: &[u8]) -> Vec<u8> {

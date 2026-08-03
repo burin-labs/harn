@@ -1,12 +1,12 @@
 use crate::canonical_json;
 use crate::value::VmDictExt;
+use harn_kernel::pure::sha256_hex;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value as YamlValue;
-use sha2::{Digest, Sha256};
 
 use crate::llm::{execute_llm_call, extract_llm_options, vm_value_to_json};
 use crate::runtime_limits::RuntimeLimits;
@@ -91,10 +91,10 @@ async fn project_enrich_impl(
     // `canonical_schema` is reused by the token estimate below.
     let canonical_schema = canonical_json::to_string(&vm_value_to_json(&options.schema));
     let canonical_evidence = canonical_json::to_string(&vm_value_to_json(&enriched_evidence));
-    let schema_hash = sha256_hex(&canonical_schema);
+    let schema_hash = sha256_hex(canonical_schema.as_bytes());
     let prompt_hash = sha256_hex(rendered_prompt.as_bytes());
     let content_hash = hash_relevant_files(&relevant_files);
-    let evidence_hash = sha256_hex(&canonical_evidence);
+    let evidence_hash = sha256_hex(canonical_evidence.as_bytes());
     let cache_path = cache_file_path(
         &root,
         options.cache_dir.as_deref(),
@@ -1730,18 +1730,6 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
         return text.to_string();
     }
     text.chars().take(max_chars).collect()
-}
-
-fn sha256_hex(data: impl AsRef<[u8]>) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(data.as_ref());
-    let digest = hasher.finalize();
-    let mut out = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        use std::fmt::Write;
-        let _ = write!(out, "{byte:02x}");
-    }
-    out
 }
 
 fn push_unique_str<'a>(items: &mut Vec<&'a str>, value: &'a str) {

@@ -1,3 +1,4 @@
+use harn_kernel::pure::sha256_hex;
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fs;
@@ -795,10 +796,6 @@ fn append_suffix(path: &Path, suffix: &str) -> PathBuf {
     let mut raw: OsString = path.as_os_str().to_os_string();
     raw.push(suffix);
     PathBuf::from(raw)
-}
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    hex::encode(Sha256::digest(bytes))
 }
 
 pub(crate) fn fingerprint_for_key(key: &VerifyingKey) -> String {

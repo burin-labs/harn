@@ -1,13 +1,13 @@
 //! Persistent cache primitives used by `std/cache` and LLM wrappers.
 
 use crate::value::VmDictExt;
+use harn_kernel::pure::sha256_hex;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::runtime_limits::RuntimeLimits;
 use crate::runtime_sqlite::{initialize_runtime_sqlite, RuntimeSqliteSchema, DEFAULT_BUSY_TIMEOUT};
@@ -355,10 +355,9 @@ fn llm_cache_key_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
             "__llm_cache_key: failed to encode identity: {error}"
         ))
     })?;
-    let digest = Sha256::digest(canonical.as_bytes());
     Ok(VmValue::String(arcstr::ArcStr::from(format!(
         "sha256:{}",
-        hex::encode(digest)
+        sha256_hex(canonical.as_bytes())
     ))))
 }
 
@@ -859,10 +858,6 @@ fn write_fs_record(path: &Path, record: &CacheRecord) -> Result<(), VmError> {
             path.display()
         ))
     })
-}
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    hex::encode(Sha256::digest(bytes))
 }
 
 fn json_float_or_null(value: Option<f64>) -> serde_json::Value {
