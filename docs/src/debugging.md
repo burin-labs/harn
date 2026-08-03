@@ -125,12 +125,15 @@ Ask for a quick qualitative assessment after inspecting the deterministic
 checks:
 
 ```bash
-harn runs review run-report.json > run-review.json
+harn runs review --run-record .harn-runs/<root-run-id>.json \
+  --events-db .harn/events.sqlite > run-review.json
 jq '{verdict, confidence, findings, limitations, actions}' run-review.json
 ```
 
-Use `--rubric rubric.md` to supply a project-specific rubric and `--model <model>`
-to pin a model route. The review records both hashes and the resolved
+Use `--report run-report.json` instead when a report already exists. The two
+inputs are explicit and mutually exclusive; Harn does not guess from a file's
+contents. Use `--rubric rubric.md` to supply a project-specific rubric and
+`--model <model>` to pin a model route. The review records both hashes and the resolved
 route. It cites evidence by JSON Pointer and fails if a pointer does not resolve
 inside the report. Coverage limits from the report remain explicit in the
 review; the model cannot fill those gaps by reading other files. Harn projects
