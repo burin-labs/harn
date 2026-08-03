@@ -365,6 +365,34 @@ AUDIT_RECEIPT_REUSED="false"
 PRESERVE_AUDIT_TMP=0
 AUDIT_TMP_DIR=""
 
+# Render a lane's terminal exit status. A lane killed by a signal writes
+# nothing recognizable into its log, so the status is the only record of how it
+# died; name it rather than leaving an unexplained failing lane.
+release_gate_lane_exit_description() {
+  local rc_file="$1"
+  local rc=""
+  local signal
+  local name
+  if [[ -f "$rc_file" ]]; then
+    rc="$(<"$rc_file")"
+  fi
+  if [[ ! "$rc" =~ ^[0-9]+$ ]]; then
+    printf 'exit status unknown\n'
+    return 0
+  fi
+  if [[ "$rc" -gt 128 ]]; then
+    signal=$(( rc - 128 ))
+    name="$(kill -l "$signal" 2>/dev/null || true)"
+    if [[ -n "$name" ]]; then
+      printf 'killed by SIG%s (exit %s)\n' "$name" "$rc"
+    else
+      printf 'killed by signal %s (exit %s)\n' "$signal" "$rc"
+    fi
+    return 0
+  fi
+  printf 'exit %s\n' "$rc"
+}
+
 cleanup_preserved_audit_tmp() {
   if [[ -n "$AUDIT_TMP_DIR" ]]; then
     rm -rf "$AUDIT_TMP_DIR"
@@ -570,13 +598,24 @@ cmd_audit() {
     shift
     local started
     started="$(date +%s)"
+    # Suspend errexit around the lane so a failure reaches the duration and
+    # status writes below instead of aborting this function. `|| rc=$?` and
+    # `if` both work by putting the lane in a conditional context, which
+    # suppresses errexit inside the subshell too and lets a lane keep running
+    # past its own first failing sub-step.
+    local rc=0
+    set +e
     (
       set -euo pipefail
       echo ">>> $name"
       "$@"
     ) >"$tmp/$name.log" 2>&1
-    local rc=$?
+    rc=$?
+    set -e
     printf '%s\n' "$(( $(date +%s) - started ))" >"$tmp/$name.dur"
+    # A lane killed by a signal writes nothing recognizable to its log, so the
+    # exit status is the only record of how it died. Keep it for the summary.
+    printf '%s\n' "$rc" >"$tmp/$name.rc"
     return "$rc"
   }
 
@@ -605,6 +644,10 @@ cmd_audit() {
   done
 
   local failed=0
+  # Names of lanes that are still failing once recovery settles. The failure
+  # summary is driven by this list rather than by scanning logs for error text,
+  # so a lane that dies without writing one is still reported.
+  local failed_steps=()
   local idx
   for idx in "${!steps[@]}"; do
     local step="${steps[$idx]}"
@@ -645,17 +688,20 @@ cmd_audit() {
     if [[ "$classification_status" -eq 1 ]]; then
       echo "recovery: $step failed without a recoverable stale build-script output"
       failed=1
+      failed_steps+=("$step")
       continue
     fi
     if [[ "$classification_status" -ne 0 ]]; then
       echo "error: $step stale-output classification failed closed" >&2
       failed=1
+      failed_steps+=("$step")
       continue
     fi
     cp "$tmp/$step.log" "$first_log"
     if ! release_gate_clean_stale_out_dir_packages \
       "$step" "$packages" "$recovery_target_dir" "$recovery_build_dir"; then
       failed=1
+      failed_steps+=("$step")
       continue
     fi
 
@@ -674,6 +720,7 @@ cmd_audit() {
       printf 'fail: %-13s (%ss retry)\n' "$step" "$retry_dur"
       echo "error: $step retry failed after package-scoped stale-output cleanup" >&2
       failed=1
+      failed_steps+=("$step")
     fi
   done
 
@@ -694,6 +741,7 @@ cmd_audit() {
       performance_dur="$([[ -f "$tmp/$performance_step.dur" ]] && cat "$tmp/$performance_step.dur" || echo '?')"
       printf 'fail: %-13s (%ss)\n' "$performance_step" "$performance_dur"
       failed=1
+      failed_steps+=("$performance_step")
     fi
   fi
 
@@ -702,32 +750,35 @@ cmd_audit() {
     # output / audit md, not buried thousands of lines into the full dump). ──
     echo ""
     echo "=== RELEASE AUDIT FAILED — failing step(s) ==="
-    for step in "${steps[@]}"; do
+    # Report exactly the lanes that are still failing. Selecting them by
+    # scanning logs for error text hid lanes killed by a signal, whose last
+    # line is the shell's own `Killed: 9` notice and matches no error pattern.
+    for step in ${failed_steps[@]+"${failed_steps[@]}"}; do
       local log="$tmp/$step.log"
-      [[ -f "$log" ]] || continue
-      # Heuristic: a lane failed if it has a `time_phase` sub-step that opened
-      # (`  -> label ...`) without a matching close (`  <- label (Ns)`). The
-      # last such unmatched label is the failing sub-step. This pinpoints e.g.
-      # "grammar-audit / verify_tree_sitter_parse" instead of just "grammar-audit".
-      local failing_sub
-      failing_sub="$(awk '
-        /^  -> / { sub(/^  -> /, ""); sub(/ \.\.\.$/, ""); open=$0 }
-        /^  <- / { open="" }
-        END { if (open != "") print open }
-      ' "$log")"
-      # Surface the lane only if it looks like it failed: either it has an
-      # unmatched sub-step, or its log contains an obvious error marker near
-      # the end. We always include lanes with an unmatched sub-step; for the
-      # rest we check the tail for error signatures.
-      if [[ -n "$failing_sub" ]] || tail -n 50 "$log" | grep -qiE "error|fail|panic|✗|status completed|sweep failed|assertion"; then
-        echo ""
-        if [[ -n "$failing_sub" ]]; then
-          echo ">>> ${step} / ${failing_sub}  <<< (failing sub-step)"
-        else
-          echo ">>> ${step}  <<<"
-        fi
+      echo ""
+      # A `time_phase` sub-step that opened (`  -> label ...`) without a
+      # matching close (`  <- label (Ns)`) is the one that failed. This
+      # pinpoints e.g. "grammar-audit / verify_tree_sitter_parse" instead of
+      # just "grammar-audit".
+      local failing_sub=""
+      if [[ -f "$log" ]]; then
+        failing_sub="$(awk '
+          /^  -> / { sub(/^  -> /, ""); sub(/ \.\.\.$/, ""); open=$0 }
+          /^  <- / { open="" }
+          END { if (open != "") print open }
+        ' "$log")"
+      fi
+      if [[ -n "$failing_sub" ]]; then
+        echo ">>> ${step} / ${failing_sub}  <<< (failing sub-step)"
+      else
+        echo ">>> ${step}  <<<"
+      fi
+      echo "    $(release_gate_lane_exit_description "$tmp/$step.rc")"
+      if [[ -f "$log" ]]; then
         echo "    last 40 lines of $step.log:"
         tail -n 40 "$log" | sed 's/^/      /'
+      else
+        echo "    no log was written"
       fi
     done
 

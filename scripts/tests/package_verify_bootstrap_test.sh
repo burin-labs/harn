@@ -47,6 +47,15 @@ chmod +x "$fixture/scripts/cargo_with_worktree_build_dir.sh"
 cat > "$fixture/target/debug/harn-cli-aot-gen" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
+# Every case must reach the generator through a snapshot the caller owns. A
+# concurrent Cargo build relinking the shared target copy killed this process
+# mid-run during release audits (#6102), so refuse to run from there at all.
+case "$0" in
+  "$FIXTURE_ROOT"/target/*)
+    printf 'aot generator ran from the shared target dir: %s\n' "$0" >&2
+    exit 1
+    ;;
+esac
 printf 'aot %s\n' "$*" >> "$CALLS_FILE"
 if [[ " ${*} " != *" --check "* ]]; then
   mkdir -p "$FIXTURE_ROOT/crates/harn-cli/generated/cli-bytecode"
@@ -64,11 +73,14 @@ export FIXTURE_ROOT="$fixture"
 export PATH="$tmp_root/bin:$PATH"
 export CARGO_TARGET_DIR="$fixture/target"
 
+# Stands in for the trapped scratch directory verify_crate_packages.sh owns.
+tool_dir="$tmp_root/aot-tools"
+
 # This case proves the cold bootstrap contract. Keep it independent from the
 # aggregate gate's deliberately warmed Harn execution boundary; explicit-bin
 # behavior has its own case below.
 unset HARN_BIN HARN_BIN_NO_BUILD
-package_verify_prepare_tools "$fixture"
+package_verify_prepare_tools "$fixture" "$tool_dir"
 [[ "$HARN_BIN" == "$fake_harn" ]]
 
 expected="cargo cwd=$fixture args=build -p harn-cli --bin harn -p harn-cli-aot-gen --bin harn-cli-aot-gen
@@ -88,7 +100,7 @@ fi
 stable_harn="$tmp_root/bin/stable-harn"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$stable_harn"
 chmod +x "$stable_harn"
-HARN_BIN="$stable_harn" package_verify_prepare_tools "$fixture"
+HARN_BIN="$stable_harn" package_verify_prepare_tools "$fixture" "$tool_dir"
 expected="cargo cwd=$fixture args=build -p harn-cli-aot-gen --bin harn-cli-aot-gen
 resolve cwd=$fixture no_build=1 explicit=$stable_harn args=--print
 aot --workspace-root $fixture --check"
@@ -103,7 +115,7 @@ fi
 # not only Harn itself.
 : > "$CALLS_FILE"
 HARN_BIN="$stable_harn" HARN_BIN_NO_BUILD=1 \
-  package_verify_prepare_tools "$fixture"
+  package_verify_prepare_tools "$fixture" "$tool_dir"
 expected="resolve cwd=$fixture no_build=1 explicit=$stable_harn args=--print
 aot --workspace-root $fixture --check"
 actual="$(<"$CALLS_FILE")"
@@ -117,7 +129,7 @@ mv "$fixture/target/debug/harn-cli-aot-gen" \
   "$fixture/target/debug/harn-cli-aot-gen.not-built"
 : > "$CALLS_FILE"
 if HARN_BIN="$stable_harn" HARN_BIN_NO_BUILD=1 \
-  package_verify_prepare_tools "$fixture" 2>"$tmp_root/no-build.err"; then
+  package_verify_prepare_tools "$fixture" "$tool_dir" 2>"$tmp_root/no-build.err"; then
   echo 'no-build package bootstrap accepted a missing AOT generator' >&2
   exit 1
 fi
@@ -139,7 +151,7 @@ export AOT_GENERATOR_TEMPLATE="$fixture/target/debug/harn-cli-aot-gen"
 mv "$fixture/target/debug/harn-cli-aot-gen" "$AOT_GENERATOR_TEMPLATE.template"
 export AOT_GENERATOR_TEMPLATE="$AOT_GENERATOR_TEMPLATE.template"
 unset HARN_BIN HARN_BIN_NO_BUILD
-OS=Windows_NT FAKE_CARGO_WINDOWS=1 package_verify_prepare_tools "$fixture"
+OS=Windows_NT FAKE_CARGO_WINDOWS=1 package_verify_prepare_tools "$fixture" "$tool_dir"
 expected="cargo cwd=$fixture args=build -p harn-cli --bin harn -p harn-cli-aot-gen --bin harn-cli-aot-gen
 resolve cwd=$fixture no_build=1 explicit= args=--print
 aot --workspace-root $fixture --check"

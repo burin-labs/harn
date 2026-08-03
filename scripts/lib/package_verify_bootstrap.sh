@@ -3,15 +3,27 @@
 # Shared bootstrap for package verification. One Cargo invocation owns both
 # current-tree executables so Cargo can unify features across harn-cli and the
 # narrower AOT generator instead of compiling their shared graph twice.
+#
+# The caller passes a directory it owns for the lifetime of verification. The
+# AOT generator executes from a snapshot taken into it rather than from the
+# shared Cargo target directory, so a concurrent build cannot relink the
+# executable this helper is in the middle of running. Harn itself reaches the
+# same boundary through the stable copy release orchestration supplies.
 
 package_verify_prepare_tools() {
   local root_dir="$1"
+  local tool_dir="${2:-}"
   local aot_generator
   local explicit_harn="${HARN_BIN:-}"
   local generated_dir="$root_dir/crates/harn-cli/generated"
   local no_build="${HARN_BIN_NO_BUILD:-0}"
   local resolved
   local target_dir
+
+  if [[ -z "$tool_dir" ]]; then
+    echo "error: package_verify_prepare_tools requires a caller-owned tool directory" >&2
+    return 1
+  fi
 
   case "$no_build" in
   0 | 1) ;;
@@ -61,6 +73,13 @@ package_verify_prepare_tools() {
   fi
   HARN_BIN="$resolved"
   export HARN_BIN
+  # Take the generator out of the shared target directory before running it.
+  # Package verification outlives the build that produced this executable, and
+  # a parallel Cargo invocation replacing it mid-run kills the process rather
+  # than failing a check.
+  aot_generator="$(
+    harn_snapshot_binary "$aot_generator" "$tool_dir" harn-cli-aot-gen
+  )" || return $?
   # release_gate.sh generates once before its parallel readers start. Repair a
   # genuinely absent/partial payload here, but never rewrite a complete one.
   if [[ ! -f "$generated_dir/cli-bytecode-manifest.json" || \

@@ -869,10 +869,12 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install cargo-bloat
-        # Warm runs own the recurring diagnostic. Release-admission
-        # benchmarks keep their hard byte/ELF gate but only pay cargo-bloat's
-        # tens-of-minutes relink/analysis tail when explicitly requested.
-        if: matrix.target == 'x86_64-unknown-linux-gnu' && (needs.setup.outputs.build_mode == 'warm' || (needs.setup.outputs.build_mode == 'benchmark' && inputs.benchmark_cargo_bloat))
+        # Installing is a prebuilt-binary download; what costs tens of minutes
+        # is cargo-bloat's relink/analysis tail, which the report step below
+        # gates. Install runs before the budget gate, so it cannot depend on
+        # that outcome — install unconditionally on the measured target so a
+        # budget failure can always produce its own attribution.
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
         uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # v2.85.2
         with:
           tool: cargo-bloat
@@ -1184,6 +1186,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Check binary size budget
+        id: binary_size_budget
         if: matrix.target == 'x86_64-unknown-linux-gnu'
         shell: bash
         env:
@@ -1224,15 +1227,28 @@ jobs:
             exit 1
           fi
 
+      # A failed byte gate is exactly when the attribution is needed, and the
+      # expensive build has already been paid for by the time it fires. Run the
+      # report for warm builds, for an opt-in benchmark, and unconditionally
+      # whenever the budget step failed.
       - name: Generate cargo-bloat report
-        if: always() && matrix.target == 'x86_64-unknown-linux-gnu' && (needs.setup.outputs.build_mode == 'warm' || (needs.setup.outputs.build_mode == 'benchmark' && inputs.benchmark_cargo_bloat))
+        if: always() && matrix.target == 'x86_64-unknown-linux-gnu' && (needs.setup.outputs.build_mode == 'warm' || (needs.setup.outputs.build_mode == 'benchmark' && inputs.benchmark_cargo_bloat) || steps.binary_size_budget.outcome == 'failure')
         shell: bash
         continue-on-error: true
         env:
           BINARY_SIZE_REPORT_DIR: dist/binary-size-${{ matrix.target }}
           HARN_RELEASE_TARGET: ${{ matrix.target }}
         run: |
-          ./target/"$HARN_RELEASE_TARGET"/release/harn run scripts/check_binary_size.harn -- --no-build --target "$HARN_RELEASE_TARGET"
+          # The build writes to ./target regardless of the ambient
+          # CARGO_TARGET_DIR this workflow exports, and the budget step above
+          # reads it from there. Name the same path explicitly: resolving it
+          # through CARGO_TARGET_DIR looked in the toolchain cache, failed with
+          # `harn binary not found`, and — under `set -e` plus
+          # `continue-on-error` — silently skipped `cargo bloat` entirely, so a
+          # blocked release shipped no attribution at all.
+          harn_bin="./target/${HARN_RELEASE_TARGET}/release/harn"
+          "$harn_bin" run scripts/check_binary_size.harn -- \
+            --no-build --target "$HARN_RELEASE_TARGET" --bin "$harn_bin"
           cargo bloat --release -p harn-cli --bin harn --target "$HARN_RELEASE_TARGET" --filter deserialize -n 100 \
             | tee "$BINARY_SIZE_REPORT_DIR/cargo-bloat-deserialize.txt"
 
