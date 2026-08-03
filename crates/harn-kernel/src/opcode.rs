@@ -22,8 +22,8 @@ pub enum OperandKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Portability {
-    PortableV1,
-    UnsupportedV1,
+    Executable,
+    Deferred,
 }
 
 impl OperandKind {
@@ -135,7 +135,7 @@ define_opcodes! {
     Slice = 38 => [],
     GetProperty = 39 => [StringConstantU16],
     GetPropertyOpt = 40 => [StringConstantU16],
-    SetProperty = 41 => [StringConstantU16],
+    SetProperty = 41 => [StringConstantU16, StringConstantU16],
     SetSubscript = 42 => [StringConstantU16],
     SetLocalSlotProperty = 43 => [StringConstantU16, LocalU16],
     SetLocalSlotSubscript = 44 => [LocalU16],
@@ -211,7 +211,7 @@ define_opcodes! {
 }
 
 impl Op {
-    /// Whether Portable Kernel v1 has an explicit execution arm for this
+    /// Whether the portable kernel has an explicit execution arm for this
     /// opcode. Artifact validation uses this closed classification so an opcode
     /// addition cannot become browser-executable by omission.
     pub const fn portability(self) -> Portability {
@@ -257,12 +257,19 @@ impl Op {
             | Self::Slice
             | Self::GetProperty
             | Self::GetPropertyOpt
+            | Self::SetProperty
+            | Self::SetSubscript
+            | Self::SetLocalSlotProperty
+            | Self::SetLocalSlotSubscript
             | Self::MethodCall
             | Self::MethodCallOpt
             | Self::Concat
             | Self::Throw
             | Self::TryCatchSetup
             | Self::PopHandler
+            | Self::IterInit
+            | Self::IterNext
+            | Self::PopIterator
             | Self::GetArgc
             | Self::CallBuiltin
             | Self::CallBuiltinSpread
@@ -298,15 +305,13 @@ impl Op {
             | Self::GetLocalSlot
             | Self::DefLocalSlot
             | Self::SetLocalSlot
-            | Self::ConcatAssignLocal => Portability::PortableV1,
+            | Self::ConcatAssignLocal
+            | Self::BuildEnum
+            | Self::MatchEnum
+            | Self::TryUnwrap
+            | Self::TryWrapOk => Portability::Executable,
 
-            Self::SetProperty
-            | Self::SetSubscript
-            | Self::SetLocalSlotProperty
-            | Self::SetLocalSlotSubscript
-            | Self::IterInit
-            | Self::IterNext
-            | Self::Pipe
+            Self::Pipe
             | Self::Parallel
             | Self::ParallelMap
             | Self::ParallelMapStream
@@ -322,39 +327,28 @@ impl Op {
             | Self::NamespaceImportMembers
             | Self::DeadlineSetup
             | Self::DeadlineEnd
-            | Self::BuildEnum
-            | Self::MatchEnum
-            | Self::PopIterator
             | Self::CheckType
-            | Self::TryUnwrap
-            | Self::TryWrapOk
             | Self::CallSpread
             | Self::MethodCallSpread
-            | Self::Yield => Portability::UnsupportedV1,
+            | Self::Yield => Portability::Deferred,
         }
     }
 
-    pub const fn is_portable_v1(self) -> bool {
-        matches!(self.portability(), Portability::PortableV1)
+    pub const fn is_executable(self) -> bool {
+        matches!(self.portability(), Portability::Executable)
     }
 }
 
 /// Artifact format version whose golden opcode fingerprint is pinned below.
 pub const OPCODE_ABI_ARTIFACT_VERSION: u16 = 2;
 
-/// Golden BLAKE3 digest of opcode bytes, names, and operand-role tags for v1.
+/// Golden BLAKE3 digest of opcode bytes, names, and operand-role tags for v2.
 ///
 /// Changing the schema requires an intentional artifact-version bump and a new
 /// named fingerprint rather than silently rewriting existing bytecode.
-pub const OPCODE_ABI_FINGERPRINT_V1: [u8; 32] = [
-    0x76, 0x1f, 0x93, 0x67, 0xa5, 0x69, 0xd4, 0x18, 0x8b, 0x00, 0xf7, 0xaf, 0x36, 0xe5, 0x51, 0x20,
-    0xcb, 0xb6, 0xed, 0x92, 0xf3, 0x47, 0x95, 0xa0, 0x59, 0x3d, 0x02, 0x9e, 0x57, 0xbe, 0x20, 0x0e,
-];
-
-/// Golden BLAKE3 digest of opcode bytes, names, and operand-role tags for v2.
 pub const OPCODE_ABI_FINGERPRINT_V2: [u8; 32] = [
-    0x20, 0x00, 0xe6, 0xcc, 0xaa, 0xdc, 0x12, 0x69, 0x66, 0x9c, 0xec, 0xfa, 0xc9, 0x1c, 0x0a, 0x45,
-    0x47, 0xbe, 0x0f, 0x5e, 0x15, 0x93, 0x35, 0x89, 0xd0, 0x95, 0xeb, 0x91, 0x22, 0x9d, 0x0d, 0x87,
+    0xa6, 0xb2, 0x94, 0x00, 0xa9, 0x05, 0x0d, 0xf4, 0xbb, 0x67, 0xb7, 0xc3, 0x40, 0x62, 0x3c, 0xb2,
+    0x47, 0xc3, 0x75, 0xe6, 0xb6, 0x81, 0x78, 0x68, 0xaa, 0x4a, 0x12, 0x09, 0x5b, 0xd7, 0x5e, 0x56,
 ];
 
 /// Compute the fingerprint of the compiled opcode schema.

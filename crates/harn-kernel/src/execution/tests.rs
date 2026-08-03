@@ -18,6 +18,62 @@ fn reducer_executes_and_round_trips_json() {
 }
 
 #[test]
+fn equality_is_structural_across_unlike_types() {
+    let program = compile_program(
+        "fn reduce(input) { return [input != nil, input != 7, 1 == 1.0, nil == nil] }",
+        "reduce",
+        EntryKind::Function,
+    )
+    .unwrap();
+
+    assert_eq!(
+        start(
+            &program,
+            DataValue::String("ui://portable".to_string()),
+            &GrantSet::pure(),
+        ),
+        Execution::Completed {
+            value: DataValue::List(vec![
+                DataValue::Bool(true),
+                DataValue::Bool(true),
+                DataValue::Bool(true),
+                DataValue::Bool(true),
+            ])
+        }
+    );
+}
+
+#[test]
+fn known_unimplemented_builtin_fails_only_when_execution_reaches_it() {
+    let source = r#"
+        fn reduce(input) {
+            if input == "parse" { return json_parse("{}") }
+            return "pure"
+        }
+    "#;
+    let program = compile_program(source, "reduce", EntryKind::Function).unwrap();
+    assert_eq!(
+        start(
+            &program,
+            DataValue::String("skip".into()),
+            &GrantSet::pure()
+        ),
+        Execution::Completed {
+            value: DataValue::String("pure".into())
+        }
+    );
+    let Execution::Failed { diagnostic } = start(
+        &program,
+        DataValue::String("parse".into()),
+        &GrantSet::pure(),
+    ) else {
+        panic!("unimplemented builtin did not fail at its actual trigger")
+    };
+    assert_eq!(diagnostic.code, "unsupported_builtin");
+    assert!(diagnostic.message.contains("json_parse"));
+}
+
+#[test]
 fn entry_parameter_types_are_enforced_at_the_host_boundary() {
     let source =
         "fn reduce(input: { count: int, tags: list<string> }) -> int { return input.count }";
@@ -102,6 +158,51 @@ fn named_calls_support_recursion_and_mutual_recursion() {
         start(&even, DataValue::Int(8), &GrantSet::pure()),
         Execution::Completed {
             value: DataValue::Bool(true)
+        }
+    );
+}
+
+#[test]
+fn enums_and_result_propagation_share_native_bytecode_semantics() {
+    let source = r#"
+        fn divide(value: int, divisor: int) -> Result<int, string> {
+            if divisor == 0 { return Result.Err("division by zero") }
+            return Result.Ok(value / divisor)
+        }
+        fn halve(value: int, divisor: int) -> Result<int, string> {
+            const divided: int = divide(value, divisor)?
+            return Result.Ok(divided / 2)
+        }
+        fn reduce(input: int) {
+            const result = halve(12, input)
+            match result {
+                Result.Ok(value) -> {
+                    return [result.variant, result.fields, value, result == Result.Ok(value)]
+                }
+                Result.Err(message) -> {
+                    return [result.variant, result.fields, message, result == Result.Err(message)]
+                }
+            }
+        }
+    "#;
+    let program = compile_program(source, "reduce", EntryKind::Function).unwrap();
+
+    assert_eq!(
+        start(&program, DataValue::Int(3), &GrantSet::pure()),
+        Execution::Completed {
+            value: DataValue::from_json(serde_json::json!(["Ok", [2], 2, true])).unwrap()
+        }
+    );
+    assert_eq!(
+        start(&program, DataValue::Int(0), &GrantSet::pure()),
+        Execution::Completed {
+            value: DataValue::from_json(serde_json::json!([
+                "Err",
+                ["division by zero"],
+                "division by zero",
+                true,
+            ]))
+            .unwrap()
         }
     );
 }
@@ -352,6 +453,29 @@ fn capability_grants_reject_nonportable_registry_types() {
 
     GrantSet::from_names(["interaction.ask".to_string(), "llm.call".to_string()])
         .expect("JSON-shaped nested capability contracts remain portable");
+}
+
+#[test]
+fn host_grants_use_one_strict_record_contract() {
+    let pure = GrantSet::from_host_json(r#"{"capabilities":[]}"#).unwrap();
+    assert!(!pure.allows("interaction", "ask"));
+
+    let suspendable = GrantSet::from_host_json(
+        r#"{"capabilities":["interaction.ask"],"snapshotKey":[7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7]}"#,
+    )
+    .unwrap();
+    assert!(suspendable.allows("interaction", "ask"));
+
+    assert_eq!(
+        GrantSet::from_host_json("[]").unwrap_err().code,
+        "invalid_capability_grants"
+    );
+    assert_eq!(
+        GrantSet::from_host_json(r#"{"capabilities":[],"extra":true}"#)
+            .unwrap_err()
+            .code,
+        "invalid_capability_grants"
+    );
 }
 
 #[test]

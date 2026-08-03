@@ -192,6 +192,111 @@ pub fn matches_manifest_type<V: TypeContractValue>(value: &V, expected: &Ty) -> 
     matches_type(value, &expected, &[], &[])
 }
 
+/// Match a runtime value against the closed schema subset emitted by the
+/// canonical compiler for typed default parameters.
+///
+/// This is intentionally narrower than Harn's user-facing schema language:
+/// it owns only the compiler-generated `type`, `properties`, `required`,
+/// `items`, `additional_properties`, `union`, `all_of`, `enum`, and `const`
+/// vocabulary. Both native and portable runtimes can project values through
+/// [`TypeContractValue`] without growing a second source-type dispatcher.
+pub fn matches_compiler_schema<V: TypeContractValue>(value: &V, schema: &DataValue) -> bool {
+    matches_compiler_schema_inner(value, schema, 0)
+}
+
+fn matches_compiler_schema_inner<V: TypeContractValue>(
+    value: &V,
+    schema: &DataValue,
+    depth: usize,
+) -> bool {
+    const MAX_SCHEMA_DEPTH: usize = 256;
+    if depth >= MAX_SCHEMA_DEPTH {
+        return false;
+    }
+    let DataValue::Record(fields) = schema else {
+        return false;
+    };
+
+    if let Some(DataValue::List(branches)) = fields.get("union") {
+        return branches
+            .iter()
+            .any(|branch| matches_compiler_schema_inner(value, branch, depth + 1));
+    }
+    if let Some(DataValue::List(branches)) = fields.get("all_of") {
+        return branches
+            .iter()
+            .all(|branch| matches_compiler_schema_inner(value, branch, depth + 1));
+    }
+    if let Some(DataValue::String(expected)) = fields.get("type") {
+        use RuntimeTypeKind as Kind;
+        let matches = match expected.as_str() {
+            "int" => value.runtime_type_kind() == Kind::Int,
+            "float" => matches!(value.runtime_type_kind(), Kind::Int | Kind::Float),
+            "string" => value.runtime_type_kind() == Kind::String,
+            "bool" => value.runtime_type_kind() == Kind::Bool,
+            "nil" => value.runtime_type_kind() == Kind::Nil,
+            "list" => value.runtime_type_kind() == Kind::List,
+            "dict" => value.runtime_type_kind() == Kind::Dict,
+            "bytes" => value.runtime_type_kind() == Kind::Bytes,
+            "closure" => value.runtime_type_kind() == Kind::Closure,
+            // Sets cannot cross the portable data boundary.
+            "set" => value.runtime_type_kind() == Kind::Set,
+            _ => false,
+        };
+        if !matches {
+            return false;
+        }
+    }
+    if let Some(DataValue::List(allowed)) = fields.get("enum") {
+        if !allowed
+            .iter()
+            .any(|candidate| literal_matches(value, candidate))
+        {
+            return false;
+        }
+    }
+    if let Some(expected) = fields.get("const") {
+        if !literal_matches(value, expected) {
+            return false;
+        }
+    }
+    if let Some(DataValue::List(required)) = fields.get("required") {
+        if !required.iter().all(|name| match name {
+            DataValue::String(name) => value.record_field(name).is_some(),
+            _ => false,
+        }) {
+            return false;
+        }
+    }
+    if let Some(DataValue::Record(properties)) = fields.get("properties") {
+        for (name, child_schema) in properties {
+            if let Some(child) = value.record_field(name) {
+                if !matches_compiler_schema_inner(child, child_schema, depth + 1) {
+                    return false;
+                }
+            }
+        }
+    }
+    if let Some(additional) = fields.get("additional_properties") {
+        if value.record_values_match(&mut |child| {
+            matches_compiler_schema_inner(child, additional, depth + 1)
+        }) != Some(true)
+        {
+            return false;
+        }
+    }
+    true
+}
+
+fn literal_matches<V: TypeContractValue>(value: &V, expected: &DataValue) -> bool {
+    match expected {
+        DataValue::String(expected) => value.string_literal() == Some(expected),
+        DataValue::Int(expected) => value.int_literal() == Some(*expected),
+        DataValue::Nil => value.runtime_type_kind() == RuntimeTypeKind::Nil,
+        _ => false,
+    }
+}
+
 /// Return whether a canonical manifest type can cross the portable
 /// [`DataValue`] boundary without losing information or type precision.
 ///

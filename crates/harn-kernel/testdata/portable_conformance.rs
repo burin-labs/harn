@@ -111,6 +111,22 @@ pub const PURE_CASES: &[PureCase] = &[
         expected_json: r#"{"constant_greater":true,"constant_less":true,"runtime_equal":true,"runtime_less":true}"#,
     },
     PureCase {
+        id: "mixed-type-equality-is-structural-not-ordering",
+        source: r"
+            fn compare(input) {
+              return {
+                string_is_not_nil: input.value != nil,
+                string_is_not_int: input.value != 7,
+                nil_is_nil: nil == nil,
+                numeric_cross_kind: 1 == 1.0,
+              }
+            }
+        ",
+        entry: "compare",
+        input_json: r#"{"value":"ui://portable"}"#,
+        expected_json: r#"{"nil_is_nil":true,"numeric_cross_kind":true,"string_is_not_int":true,"string_is_not_nil":true}"#,
+    },
+    PureCase {
         id: "structured-throw-catch",
         source: r#"
             fn validate(input) {
@@ -142,6 +158,107 @@ pub const PURE_CASES: &[PureCase] = &[
         entry: "choose",
         input_json: r#"{"values":[1,2,3,4,5],"text":"kernel"}"#,
         expected_json: r#"{"last":5,"middle":[2,3,4],"suffix":"nel"}"#,
+    },
+    PureCase {
+        id: "module-capture-property-mutation",
+        source: r"
+            let state = {count: 0}
+            fn reduce(input) {
+              state.count = input.count
+              return {count: state.count}
+            }
+        ",
+        entry: "reduce",
+        input_json: r#"{"count":9}"#,
+        expected_json: r#"{"count":9}"#,
+    },
+    PureCase {
+        id: "iteration-and-copy-on-write-mutation",
+        source: r#"
+            fn reduce(input) {
+              let state = input.state
+              for value in input.values {
+                state.count = state.count + value
+              }
+              state.tags[0] = "updated"
+              return state
+            }
+        "#,
+        entry: "reduce",
+        input_json: r#"{"state":{"count":1,"tags":["old"]},"values":[2,3,4]}"#,
+        expected_json: r#"{"count":10,"tags":["updated"]}"#,
+    },
+    PureCase {
+        id: "renderer-string-and-option-primitives",
+        source: r#"
+            fn reduce(input) {
+              const options = {allow_network: false}.merging(input.validation ?? {})
+              const name = trim(input.name)
+              return {
+                encoded: replace(json_stringify(name), "<", "\\u003c"),
+                portable: starts_with(name, "Portable"),
+                options: options,
+              }
+            }
+        "#,
+        entry: "reduce",
+        input_json: r#"{"name":"  Portable <Harn>  ","validation":{"allow_host_bridge":true}}"#,
+        expected_json: r#"{"encoded":"\"Portable \\u003cHarn>\"","options":{"allow_host_bridge":true,"allow_network":false},"portable":true}"#,
+    },
+    PureCase {
+        id: "artifact-regex-hash-and-secret-safety-primitives",
+        source: r#"
+            fn inspect(input: string) {
+              const captures = regex_captures("(?is)<body\\b([^>]*)>(.*?)</body>", input)
+              return {
+                body: captures[0].groups[1],
+                scripts: regex_match("(?is)<script\\b", input),
+                text: trim(regex_replace("(?is)<[^>]+>", " ", input)),
+                digest: sha256("abc"),
+                clean: len(secret_scan(input)) == 0,
+              }
+            }
+        "#,
+        entry: "inspect",
+        input_json: r#""<body class='app'>Portable <b>Harn</b></body>""#,
+        expected_json: r#"{"body":"Portable <b>Harn</b>","clean":true,"digest":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","scripts":null,"text":"Portable  Harn"}"#,
+    },
+    PureCase {
+        id: "target-independent-path-joining",
+        source: r#"
+            fn paths(input) {
+              return {
+                host: path_join(input.root, ".harn", "state.json"),
+                reset: path_join("ignored", "/absolute", "file"),
+              }
+            }
+        "#,
+        entry: "paths",
+        input_json: r#"{"root":"C:\\workspace"}"#,
+        expected_json: r#"{"host":"C:/workspace/.harn/state.json","reset":"/absolute/file"}"#,
+    },
+    PureCase {
+        id: "result-enum-match-and-propagation",
+        source: r#"
+            fn divide(value: int, divisor: int) -> Result<int, string> {
+              if divisor == 0 { return Result.Err("division by zero") }
+              return Result.Ok(value / divisor)
+            }
+            fn halve(value: int, divisor: int) -> Result<int, string> {
+              const divided: int = divide(value, divisor)?
+              return Result.Ok(divided / 2)
+            }
+            fn reduce(input: int) {
+              const result = halve(12, input)
+              match result {
+                Result.Ok(value) -> { return [result.variant, result.fields, value] }
+                Result.Err(message) -> { return [result.variant, result.fields, message] }
+              }
+            }
+        "#,
+        entry: "reduce",
+        input_json: "3",
+        expected_json: r#"["Ok",[2],2]"#,
     },
 ];
 

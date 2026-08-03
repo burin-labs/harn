@@ -23,7 +23,8 @@ fn type_of_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "to_string(...args: any) -> string", category = "types"
+    sig_expr = harn_builtin_meta::signatures::PORTABLE_TO_STRING,
+    category = "types"
 )]
 fn to_string_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);
@@ -277,7 +278,7 @@ fn tuple_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "len(value: string | bytes | list | dict | set | range | nil) -> int",
+    sig_expr = harn_builtin_meta::signatures::PORTABLE_LEN,
     category = "types"
 )]
 fn len_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

@@ -17,7 +17,7 @@ use harn_builtin_meta::{BuiltinContract, BuiltinSignature};
 
 /// One name-keyed projection of a macro-emitted builtin definition. Aliases
 /// receive their own entry so signature and contract can never drift.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BuiltinManifestEntry {
     pub name: &'static str,
     /// The builtin's primary name. Equal to [`Self::name`] except on an alias
@@ -110,17 +110,19 @@ fn installed() -> &'static RwLock<BTreeMap<&'static str, &'static BuiltinManifes
 ///
 /// # Panics
 /// Multiple owners may contribute disjoint manifest fragments (for example
-/// the core runtime and an optional host capability crate). Reinstalling the
-/// same entries is idempotent; redefining an existing name panics.
+/// the portable kernel and a native host). Installing structurally identical
+/// projections is idempotent; redefining an existing name panics.
 pub fn install_builtin_manifest(entries: &'static [&'static BuiltinManifestEntry]) {
     let mut manifest = installed().write().expect("builtin manifest lock poisoned");
     for entry in entries {
-        if let Some(previous) = manifest.insert(entry.name, entry) {
+        if let Some(previous) = manifest.get(entry.name) {
             assert!(
-                std::ptr::eq(previous, *entry),
+                *previous == *entry,
                 "builtin manifest name `{}` registered by multiple contracts",
                 entry.name
             );
+        } else {
+            manifest.insert(entry.name, entry);
         }
     }
 }
@@ -162,4 +164,41 @@ pub fn is_installed() -> bool {
         .read()
         .expect("builtin manifest lock poisoned")
         .is_empty()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use harn_builtin_meta::{Param, Ty};
+
+    const SIGNATURE_A: BuiltinSignature = BuiltinSignature::simple(
+        "__registry_structural_idempotence",
+        &[Param::new("value", Ty::Named("string"))],
+        Ty::Named("string"),
+    );
+    const SIGNATURE_B: BuiltinSignature = SIGNATURE_A;
+    static ENTRY_A: BuiltinManifestEntry = BuiltinManifestEntry {
+        name: "__registry_structural_idempotence",
+        canonical_name: "__registry_structural_idempotence",
+        signature: &SIGNATURE_A,
+        contract: BuiltinContract::PURE,
+    };
+    static ENTRY_B: BuiltinManifestEntry = BuiltinManifestEntry {
+        name: "__registry_structural_idempotence",
+        canonical_name: "__registry_structural_idempotence",
+        signature: &SIGNATURE_B,
+        contract: BuiltinContract::PURE,
+    };
+    static MANIFEST_A: &[&BuiltinManifestEntry] = &[&ENTRY_A];
+    static MANIFEST_B: &[&BuiltinManifestEntry] = &[&ENTRY_B];
+
+    #[test]
+    fn structurally_identical_projections_are_idempotent() {
+        install_builtin_manifest(MANIFEST_A);
+        install_builtin_manifest(MANIFEST_B);
+        assert!(std::ptr::eq(
+            builtin_entry(ENTRY_A.name).unwrap(),
+            &raw const ENTRY_A
+        ));
+    }
 }

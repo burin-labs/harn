@@ -52,6 +52,28 @@
           ],
           "result": 22
         },
+        "compile-package": {
+          "name": "compile-package",
+          "kind": "freestanding",
+          "params": [
+            {
+              "name": "manifest-json",
+              "type": "string"
+            },
+            {
+              "name": "entry",
+              "type": "string"
+            },
+            {
+              "name": "kind",
+              "type": 9
+            }
+          ],
+          "result": 22,
+          "docs": {
+            "contents": "Compile a host-linked JSON source package. The manifest contains stable\nmodule IDs, resolved import targets, and public export projections."
+          }
+        },
         "start": {
           "name": "start",
           "kind": "freestanding",

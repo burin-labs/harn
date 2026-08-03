@@ -3,6 +3,9 @@ use std::path::Path;
 use std::sync::{Condvar, Mutex};
 use std::time::Instant;
 
+use super::display_path;
+use crate::cli::{BenchPortableArgs, PortableEntryKindArg, ProfileArgs};
+use crate::commands::portable_source::PortableSourceInput;
 use harn_kernel::{
     benchmark_terminal_digest, ArtifactLimits, BenchmarkBuildProfile, BenchmarkEntryKind,
     BenchmarkProvenance, BenchmarkStatistics, BenchmarkTarget, CompileMeasurements, DataValue,
@@ -10,9 +13,6 @@ use harn_kernel::{
     ProgramArtifact, PORTABLE_BENCHMARK_SCHEMA_VERSION, PORTABLE_MAX_COMPILE_ITERATIONS,
     PORTABLE_MAX_DISPATCH_ITERATIONS, PORTABLE_MAX_WORKERS,
 };
-
-use super::display_path;
-use crate::cli::{BenchPortableArgs, PortableEntryKindArg, ProfileArgs};
 
 #[cfg(test)]
 const SCHEMA_PATH: &str = "spec/schemas/portable-kernel-benchmark.v1.schema.json";
@@ -94,7 +94,7 @@ fn collect(args: &BenchPortableArgs) -> Result<PortableBenchmarkReceipt, String>
         ));
     }
 
-    let source = read(&args.source, "source")?;
+    let source = PortableSourceInput::load(&args.source)?;
     let input_json = read(&args.input, "input")?;
     let input = DataValue::from_json(
         serde_json::from_str(&input_json)
@@ -107,15 +107,13 @@ fn collect(args: &BenchPortableArgs) -> Result<PortableBenchmarkReceipt, String>
     };
 
     let first_compile_started = Instant::now();
-    let program = harn_kernel::compile_program(&source, &args.entry, entry_kind.clone())
-        .map_err(render_diagnostics)?;
+    let program = source.compile(&args.entry, entry_kind.clone())?;
     let first_compile_ms = elapsed_ms(first_compile_started);
 
     let mut compile_samples = Vec::with_capacity(args.compile_iterations);
     for _ in 0..args.compile_iterations {
         let started = Instant::now();
-        let repeated = harn_kernel::compile_program(&source, &args.entry, entry_kind.clone())
-            .map_err(render_diagnostics)?;
+        let repeated = source.compile(&args.entry, entry_kind.clone())?;
         compile_samples.push(elapsed_ms(started));
         if repeated.bytes() != program.bytes() {
             return Err(
@@ -331,14 +329,6 @@ fn write(path: &Path, json: &str) -> Result<(), String> {
     }
     fs::write(path, format!("{json}\n"))
         .map_err(|error| format!("write {}: {error}", path.display()))
-}
-
-fn render_diagnostics(diagnostics: Vec<harn_kernel::Diagnostic>) -> String {
-    diagnostics
-        .into_iter()
-        .map(|diagnostic| format!("{}: {}", diagnostic.code, diagnostic.message))
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 #[cfg(test)]

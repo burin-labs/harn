@@ -189,7 +189,8 @@ pub(crate) fn register_json_builtins(vm: &mut Vm) {
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "json_stringify(value: any) -> string", category = "json"
+    sig_expr = harn_builtin_meta::signatures::PORTABLE_JSON_STRINGIFY,
+    category = "json"
 )]
 fn json_stringify_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = args.first().unwrap_or(&VmValue::Nil);

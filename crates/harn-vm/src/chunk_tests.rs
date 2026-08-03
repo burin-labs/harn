@@ -56,7 +56,30 @@ fn disassemble_covers_every_opcode_variant() {
             "disasm emitted UNKNOWN for {op:?}: {out}",
         );
         assert!(!out.is_empty(), "disasm produced no output for {op:?}");
+        assert_eq!(
+            ip,
+            op.instruction_len() - 1,
+            "disassembler operand width drifted for {op:?}",
+        );
     }
+}
+
+#[test]
+fn disassemble_consumes_both_named_property_store_operands() {
+    let program = harn_parser::check_source_strict(
+        "let state = {count: 0}\nfn update() { state.count = 1; return state.count }",
+    )
+    .unwrap();
+    let chunk = crate::compiler::Compiler::new().compile(&program).unwrap();
+    let update = chunk
+        .functions
+        .iter()
+        .find(|function| function.name == "update")
+        .expect("update function is compiled");
+    let disassembly = update.chunk.disassemble("update");
+    assert!(disassembly.contains("SET_PROPERTY"), "{disassembly}");
+    assert!(disassembly.contains("RETURN"), "{disassembly}");
+    assert!(!disassembly.contains("UNKNOWN"), "{disassembly}");
 }
 
 // --- references_outer_names tracking ---

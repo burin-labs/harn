@@ -1198,6 +1198,7 @@ impl Chunk {
         let mut out = format!("== {name} ==\n");
         let mut ip = 0;
         while ip < self.code.len() {
+            let op_start = ip;
             let op_byte = self.code[ip];
             let line = self.lines.get(ip).copied().unwrap_or(0);
             out.push_str(&format!("{ip:04} [{line:>4}] "));
@@ -1205,6 +1206,12 @@ impl Chunk {
 
             if let Some(op) = Op::from_byte(op_byte) {
                 self.disassemble_op(op, &mut ip, &mut out);
+                debug_assert_eq!(
+                    ip,
+                    op_start + op.instruction_len(),
+                    "disassembler operand width drifted for {}",
+                    op.name(),
+                );
             } else {
                 out.push_str(&format!("UNKNOWN(0x{op_byte:02x})\n"));
             }

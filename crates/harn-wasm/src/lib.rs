@@ -7,13 +7,13 @@
 use harn_kernel::{
     ArtifactLimits, BenchmarkBuildProfile, BenchmarkProvenance, BenchmarkStatistics,
     CapabilityResult, DataValue, Diagnostic, EntryKind, Execution, GrantSet,
-    PortableBenchmarkReceipt, ProgramArtifact, PORTABLE_BENCHMARK_SCHEMA_VERSION,
-    PORTABLE_MAX_DISPATCH_ITERATIONS,
+    PortableBenchmarkReceipt, PortableSourcePackage, ProgramArtifact,
+    PORTABLE_BENCHMARK_SCHEMA_VERSION, PORTABLE_MAX_DISPATCH_ITERATIONS,
+    PORTABLE_MAX_GRANTS_JSON_BYTES, PORTABLE_MAX_PACKAGE_BYTES, PORTABLE_MAX_PACKAGE_MODULES,
+    PORTABLE_MAX_SOURCE_BYTES, PORTABLE_MAX_VALUE_JSON_BYTES,
 };
 use wasm_bindgen::prelude::*;
 
-const MAX_VALUE_JSON_BYTES: usize = 1024 * 1024;
-const MAX_GRANTS_JSON_BYTES: usize = 64 * 1024;
 const MAX_BENCHMARK_SAMPLES_JSON_BYTES: usize = 8 * 1024 * 1024;
 const MAX_BENCHMARK_RECEIPT_JSON_BYTES: usize = 64 * 1024;
 
@@ -90,6 +90,12 @@ impl ExecutionOutcome {
 /// Compile a function or pipeline through the canonical Harn frontend.
 #[wasm_bindgen]
 pub fn compile(source: &str, entry: &str, entry_kind: &str) -> CompileOutcome {
+    if source.len() > PORTABLE_MAX_SOURCE_BYTES {
+        return compile_failure(vec![Diagnostic::new(
+            "source_too_large",
+            "source exceeds the browser compiler's 1 MiB limit",
+        )]);
+    }
     let entry_kind = match entry_kind.parse::<EntryKind>() {
         Ok(kind) => kind,
         Err(diagnostic) => return compile_failure(vec![diagnostic]),
@@ -103,6 +109,49 @@ pub fn compile(source: &str, entry: &str, entry_kind: &str) -> CompileOutcome {
         },
         Err(diagnostics) => compile_failure(diagnostics),
     }
+}
+
+/// Compile a host-linked source package through the same canonical lexer,
+/// parser, compiler, and artifact encoder as native Harn. The manifest is
+/// deliberately data-only: import targets and public export projections are
+/// resolved by the host build step, while this adapter has no filesystem or
+/// package-loader authority.
+#[wasm_bindgen(js_name = compilePackage)]
+pub fn compile_package(
+    manifest_json: &str,
+    entry: &str,
+    entry_kind: &str,
+) -> Result<CompileOutcome, JsError> {
+    if manifest_json.len() > PORTABLE_MAX_PACKAGE_BYTES {
+        return Err(JsError::new("package manifest exceeds the 8 MiB limit"));
+    }
+    let entry_kind = entry_kind
+        .parse::<EntryKind>()
+        .map_err(|error| JsError::new(&format!("{}: {}", error.code, error.message)))?;
+    let manifest: PortableSourcePackage = serde_json::from_str(manifest_json)
+        .map_err(|error| JsError::new(&format!("invalid package manifest: {error}")))?;
+    if manifest.modules.len() > PORTABLE_MAX_PACKAGE_MODULES {
+        return Err(JsError::new("package module count exceeds the 1,024 limit"));
+    }
+    let source_bytes = manifest.root_source.len()
+        + manifest
+            .modules
+            .iter()
+            .map(|module| module.source.len())
+            .sum::<usize>();
+    if source_bytes > PORTABLE_MAX_PACKAGE_BYTES {
+        return Err(JsError::new("package source exceeds the 8 MiB limit"));
+    }
+    Ok(
+        match harn_kernel::compile_source_package(manifest, entry, entry_kind) {
+            Ok(program) => CompileOutcome {
+                artifact: program.bytes().to_vec(),
+                digest: program.digest_hex(),
+                diagnostics_json: "[]".to_string(),
+            },
+            Err(diagnostics) => compile_failure(diagnostics),
+        },
+    )
 }
 
 /// Start a fresh portable execution.
@@ -128,7 +177,7 @@ pub fn resume(
     capability_result_json: &str,
     grants_json: &str,
 ) -> Result<ExecutionOutcome, JsError> {
-    if capability_result_json.len() > MAX_VALUE_JSON_BYTES {
+    if capability_result_json.len() > PORTABLE_MAX_VALUE_JSON_BYTES {
         return Err(JsError::new("capability result exceeds the 1 MiB limit"));
     }
     let program = decode_program(artifact)?;
@@ -211,7 +260,7 @@ pub fn normalize_benchmark_receipt_json(receipt_json: &str) -> Result<String, Js
 /// BLAKE3 contract used by the native benchmark receipt.
 #[wasm_bindgen(js_name = benchmarkTerminalDigest)]
 pub fn benchmark_terminal_digest(value_json: &str) -> Result<String, JsError> {
-    if value_json.len() > MAX_VALUE_JSON_BYTES {
+    if value_json.len() > PORTABLE_MAX_VALUE_JSON_BYTES {
         return Err(JsError::new(
             "benchmark terminal JSON exceeds the 1 MiB limit",
         ));
@@ -237,7 +286,7 @@ fn decode_program(bytes: &[u8]) -> Result<ProgramArtifact, JsError> {
 }
 
 fn decode_input(json: &str) -> Result<DataValue, JsError> {
-    if json.len() > MAX_VALUE_JSON_BYTES {
+    if json.len() > PORTABLE_MAX_VALUE_JSON_BYTES {
         return Err(JsError::new("input JSON exceeds the 1 MiB limit"));
     }
     let value = serde_json::from_str(json)
@@ -247,37 +296,11 @@ fn decode_input(json: &str) -> Result<DataValue, JsError> {
 }
 
 fn decode_grants(json: &str) -> Result<GrantSet, JsError> {
-    if json.len() > MAX_GRANTS_JSON_BYTES {
+    if json.len() > PORTABLE_MAX_GRANTS_JSON_BYTES {
         return Err(JsError::new("grants JSON exceeds the 64 KiB limit"));
     }
-    #[derive(serde::Deserialize)]
-    struct GrantsInput {
-        capabilities: Vec<String>,
-        #[serde(default, rename = "snapshotKey")]
-        snapshot_key: Option<String>,
-    }
-    let input: GrantsInput = serde_json::from_str(json)
-        .map_err(|error| JsError::new(&format!("invalid grants JSON: {error}")))?;
-    let grants = GrantSet::from_names(input.capabilities)
-        .map_err(|error| JsError::new(&format!("{}: {}", error.code, error.message)))?;
-    match input.snapshot_key {
-        Some(snapshot_key) => Ok(grants.with_snapshot_key(decode_snapshot_key(&snapshot_key)?)),
-        None => Ok(grants),
-    }
-}
-
-fn decode_snapshot_key(encoded: &str) -> Result<[u8; 32], JsError> {
-    if encoded.len() != 64 || !encoded.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(JsError::new(
-            "snapshotKey must be exactly 32 bytes encoded as 64 hexadecimal characters",
-        ));
-    }
-    let mut key = [0_u8; 32];
-    for (index, slot) in key.iter_mut().enumerate() {
-        *slot = u8::from_str_radix(&encoded[index * 2..index * 2 + 2], 16)
-            .map_err(|_| JsError::new("snapshotKey contains invalid hexadecimal"))?;
-    }
-    Ok(key)
+    GrantSet::from_host_json(json)
+        .map_err(|error| JsError::new(&format!("{}: {}", error.code, error.message)))
 }
 
 impl From<Execution> for ExecutionOutcome {
@@ -344,6 +367,89 @@ mod browser_tests {
         .expect("browser adapter starts");
         assert_eq!(execution.status(), "completed");
         assert_eq!(execution.value_json(), r#"{"count":42}"#);
+    }
+
+    #[wasm_bindgen_test]
+    fn browser_worker_package_manifest_executes_the_same_imported_reducer() {
+        let manifest = include_str!("../demo/package.json");
+        let compiled = compile_package(manifest, "reduce", "function")
+            .expect("browser package manifest parses");
+        assert!(compiled.ok(), "{}", compiled.diagnostics_json());
+        let repeated =
+            compile_package(manifest, "reduce", "function").expect("browser package recompiles");
+        assert!(repeated.ok(), "{}", repeated.diagnostics_json());
+        assert_eq!(compiled.digest(), repeated.digest());
+        assert_eq!(compiled.artifact_bytes(), repeated.artifact_bytes());
+        let execution = start(
+            &compiled.artifact_bytes(),
+            r#"{"state":{"count":40,"history":[],"label":"portable"},"event":{"kind":"increment","amount":2}}"#,
+            r#"{"capabilities":[]}"#,
+        )
+        .expect("browser package starts");
+        assert_eq!(execution.status(), "completed");
+        assert_eq!(
+            execution.value_json(),
+            r#"{"count":42,"history":[42],"label":"portable"}"#
+        );
+    }
+
+    #[wasm_bindgen_test]
+    fn browser_worker_matches_native_suspend_resume_and_denial() {
+        const SOURCE: &str = r#"
+            fn greet(harness: Harness, input) {
+                return harness.interaction.ask(input)
+            }
+        "#;
+        let compiled = compile(SOURCE, "greet", "function");
+        assert!(compiled.ok(), "{}", compiled.diagnostics_json());
+        let artifact = compiled.artifact_bytes();
+        let grants = serde_json::json!({
+            "capabilities": ["interaction.ask"],
+            "snapshotKey": vec![7; 32],
+        })
+        .to_string();
+
+        let suspended = start(&artifact, r#""name""#, &grants)
+            .expect("browser capability call reaches the kernel");
+        assert_eq!(suspended.status(), "suspended");
+        let request: serde_json::Value = serde_json::from_str(&suspended.request_json()).unwrap();
+        assert_eq!(request["capability"], "interaction");
+        assert_eq!(request["operation"], "ask");
+
+        let resumed = resume(
+            &artifact,
+            &suspended.snapshot_bytes(),
+            &serde_json::json!({
+                "status": "ok",
+                "request_id": request["id"],
+                "value": "Ada",
+            })
+            .to_string(),
+            &grants,
+        )
+        .expect("matching typed result resumes the browser execution");
+        assert_eq!(resumed.status(), "completed");
+        assert_eq!(resumed.value_json(), r#""Ada""#);
+
+        let denied = start(&artifact, r#""name""#, r#"{"capabilities":[]}"#)
+            .expect("denial is a structured kernel result");
+        assert_eq!(denied.status(), "failed");
+        let browser_diagnostic: harn_kernel::Diagnostic =
+            serde_json::from_str(&denied.diagnostic_json()).unwrap();
+        let native_program =
+            harn_kernel::ProgramArtifact::decode(&artifact, harn_kernel::ArtifactLimits::default())
+                .unwrap();
+        let harn_kernel::Execution::Failed {
+            diagnostic: native_diagnostic,
+        } = harn_kernel::start(
+            &native_program,
+            harn_kernel::DataValue::String("name".to_string()),
+            &harn_kernel::GrantSet::pure(),
+        )
+        else {
+            panic!("native denial did not fail")
+        };
+        assert_eq!(browser_diagnostic, native_diagnostic);
     }
 
     #[wasm_bindgen_test]

@@ -147,6 +147,21 @@ ci = true
 make_all = false
 
 [[artifact]]
+id = "portable-demo-package"
+description = "Browser package-manifest projection generated from the standalone Harn reducer sources, so native and browser adapters consume one sample program rather than parallel source copies."
+gen = "gen-portable-demo-package"
+check = "check-portable-demo-package"
+outputs = ["crates/harn-wasm/demo/package.json"]
+sources = [
+  "crates/harn-wasm/demo/package-root.harn",
+  "crates/harn-wasm/demo/package-reducer-math.harn",
+  "crates/harn-cli/src/commands/portable_source.rs",
+  "crates/harn-cli/src/commands/portable.rs",
+]
+ci = true
+make_all = true
+
+[[artifact]]
 id = "portable-benchmark-schema"
 description = "Public JSON Schema generated from the Portable Kernel benchmark receipt type, validation constants, and serialization contract."
 gen = "gen-portable-benchmark-schema"
@@ -525,6 +540,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 # --- binary: verdict depends on current executable semantics (check-drift-binary) ---
 "check-highlight" = "binary"
 "check-portable-benchmark-schema" = "binary"
+"check-portable-demo-package" = "binary"
 "check-prompt-grammar" = "binary"
 "check-protocol-artifacts" = "binary"
 "check-connector-schemas" = "binary"

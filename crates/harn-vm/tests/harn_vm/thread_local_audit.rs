@@ -28,10 +28,15 @@ struct ThreadLocalSite {
 #[test]
 fn thread_local_audit_tracks_every_vm_thread_local_site() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let source_dir = manifest_dir.join("src");
+    let crates_dir = manifest_dir.parent().expect("crate under crates/");
     let audit_path = manifest_dir.join("thread_local_audit.toml");
 
-    let actual = scan_thread_local_sites(&manifest_dir, &source_dir);
+    // The kernel runs on VM threads and owns state the VM used to hold itself
+    // (the regex cache moved there when native and portable execution stopped
+    // keeping parallel copies). Scan it here so relocating a thread-local into
+    // a sibling crate cannot launder it out of this audit.
+    let source_dirs = [manifest_dir.join("src"), crates_dir.join("harn-kernel/src")];
+    let actual = scan_thread_local_sites(&manifest_dir, &source_dirs);
     let audit = parse_audit(&audit_path);
 
     let mut audited = BTreeSet::new();
@@ -93,23 +98,42 @@ fn parse_audit(path: &Path) -> ThreadLocalAudit {
     toml::from_str(&contents).expect("parse thread_local_audit.toml")
 }
 
-fn scan_thread_local_sites(manifest_dir: &Path, source_dir: &Path) -> BTreeSet<ThreadLocalSite> {
+fn scan_thread_local_sites(
+    manifest_dir: &Path,
+    source_dirs: &[PathBuf],
+) -> BTreeSet<ThreadLocalSite> {
     let mut sites = BTreeSet::new();
-    for path in rust_files(source_dir) {
-        let source = fs::read_to_string(&path).expect("read Rust source");
-        let relative_path = path
-            .strip_prefix(manifest_dir)
-            .expect("source under crate")
-            .to_string_lossy()
-            .replace('\\', "/");
-        for block in thread_local_blocks(&source) {
-            sites.insert(ThreadLocalSite {
-                path: relative_path.clone(),
-                statics: static_names(block),
-            });
+    for source_dir in source_dirs {
+        for path in rust_files(source_dir) {
+            let source = fs::read_to_string(&path).expect("read Rust source");
+            let relative_path = audit_path_for(manifest_dir, &path);
+            for block in thread_local_blocks(&source) {
+                sites.insert(ThreadLocalSite {
+                    path: relative_path.clone(),
+                    statics: static_names(block),
+                });
+            }
         }
     }
     sites
+}
+
+/// Audit paths are written relative to this crate, so a sibling crate's source
+/// appears as `../<crate>/src/...`. Keeping one path vocabulary lets the
+/// manifest name every site the VM's threads can reach without a second file.
+fn audit_path_for(manifest_dir: &Path, path: &Path) -> String {
+    let relative = path.strip_prefix(manifest_dir).map(Path::to_path_buf);
+    let relative = match relative {
+        Ok(inside) => inside.to_string_lossy().into_owned(),
+        Err(_) => {
+            let crates_dir = manifest_dir.parent().expect("crate under crates/");
+            let sibling = path
+                .strip_prefix(crates_dir)
+                .expect("scanned source under crates/");
+            format!("../{}", sibling.to_string_lossy())
+        }
+    };
+    relative.replace('\\', "/")
 }
 
 fn rust_files(root: &Path) -> Vec<PathBuf> {

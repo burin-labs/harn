@@ -11,6 +11,7 @@ mod error;
 mod error_handling;
 mod expressions;
 mod hitl;
+mod module;
 mod optimizer;
 mod patterns;
 mod pipe;
@@ -24,6 +25,10 @@ mod type_facts;
 mod yield_scan;
 
 pub use error::CompileError;
+pub use module::{
+    CompiledPortableModule, PortableExportKind, PortableImport, PortableSourceModule,
+    PortableSourcePackage,
+};
 
 use crate::chunk::{Chunk, Constant, Op};
 
@@ -86,6 +91,7 @@ pub struct CompilerOptions {
     optimize: bool,
     privileged_wire_authority: bool,
     legacy_ambient_capabilities: bool,
+    defer_builtin_linking: bool,
 }
 
 impl CompilerOptions {
@@ -94,6 +100,7 @@ impl CompilerOptions {
             optimize: true,
             privileged_wire_authority: false,
             legacy_ambient_capabilities: false,
+            defer_builtin_linking: false,
         }
     }
 
@@ -102,6 +109,7 @@ impl CompilerOptions {
             optimize: false,
             privileged_wire_authority: false,
             legacy_ambient_capabilities: false,
+            defer_builtin_linking: false,
         }
     }
 
@@ -116,6 +124,7 @@ impl CompilerOptions {
             optimize: true,
             privileged_wire_authority: true,
             legacy_ambient_capabilities: false,
+            defer_builtin_linking: false,
         }
     }
 
@@ -131,6 +140,20 @@ impl CompilerOptions {
 
     pub fn optimizations_enabled(self) -> bool {
         self.optimize
+    }
+
+    /// Options for a portable artifact. The closed runtime linker returns a
+    /// structured unsupported diagnostic only if execution reaches a builtin
+    /// that this kernel cannot execute; the frontend still typechecks it.
+    pub(crate) fn portable_artifact() -> Self {
+        Self {
+            defer_builtin_linking: true,
+            ..Self::optimized()
+        }
+    }
+
+    pub(crate) fn defers_builtin_linking(self) -> bool {
+        self.defer_builtin_linking
     }
 
     #[doc(hidden)]

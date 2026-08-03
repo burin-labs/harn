@@ -734,6 +734,22 @@ pipeline test(harness: Harness) {
 }
 
 #[test]
+fn disassembly_consumes_both_named_property_store_operands() {
+    let chunk = compile_source(
+        "let state = {count: 0}\nfn update() { state.count = 1; return state.count }",
+    );
+    let update = chunk
+        .functions
+        .iter()
+        .find(|function| function.name == "update")
+        .expect("update function is compiled");
+    let disassembly = update.chunk.disassemble("update");
+    assert!(disassembly.contains("SET_PROPERTY"), "{disassembly}");
+    assert!(disassembly.contains("RETURN"), "{disassembly}");
+    assert!(!disassembly.contains("UNKNOWN"), "{disassembly}");
+}
+
+#[test]
 fn test_compile_discard_bindings_do_not_define_underscore() {
     let chunk = compile_source(
         r#"

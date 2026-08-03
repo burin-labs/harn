@@ -16,6 +16,7 @@ impl TypeContractValue for RuntimeValue {
             Self::Bytes(_) => RuntimeTypeKind::Bytes,
             Self::List(_) => RuntimeTypeKind::List,
             Self::Record(_) => RuntimeTypeKind::Dict,
+            Self::Enum(_) => RuntimeTypeKind::Enum,
             Self::Closure(_) | Self::Builtin(_) => RuntimeTypeKind::Closure,
             Self::Harness(_) => RuntimeTypeKind::Harness,
         }
@@ -52,6 +53,13 @@ impl TypeContractValue for RuntimeValue {
     fn int_literal(&self) -> Option<i64> {
         match self {
             Self::Int(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    fn nominal_type_name(&self) -> Option<&str> {
+        match self {
+            Self::Enum(value) => Some(&value.enum_name),
             _ => None,
         }
     }
@@ -129,6 +137,7 @@ fn runtime_type_name(value: &RuntimeValue) -> &'static str {
         RuntimeTypeKind::Dict => "dict",
         RuntimeTypeKind::Closure => "closure",
         RuntimeTypeKind::Harness => "Harness",
+        RuntimeTypeKind::Enum => "enum",
         _ => "unsupported portable value",
     }
 }

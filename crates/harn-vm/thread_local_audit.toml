@@ -570,10 +570,16 @@ category = "logical_task"
 plan = "task_local_or_explicit"
 
 [[thread_local]]
-path = "src/stdlib/regex.rs"
+path = "../harn-kernel/src/pure/regex.rs"
 statics = ["REGEX_CACHE", "LAST_REGEX"]
 category = "thread_private"
 plan = "thread_private_cache"
+
+[[thread_local]]
+path = "../harn-kernel/src/compiler/state.rs"
+statics = ["FORCE_DISCARDED_PRODUCES_VALUE"]
+category = "thread_private"
+plan = "thread_private_test"
 
 [[thread_local]]
 path = "src/stdlib/sandbox/mod.rs"

@@ -2,7 +2,9 @@ use harn_parser::{ShapeField, TypeExpr};
 
 use crate::Constant;
 
-use super::{WireChunk, WireFunction, WireLocalSlot, WireParam, WireProgram};
+use std::collections::BTreeMap;
+
+use super::{WireChunk, WireFunction, WireLocalSlot, WireModule, WireParam, WireProgram};
 use crate::artifact::validation::{semantic_abi_fingerprint, MetadataBudget};
 use crate::artifact::{ArtifactLimits, Diagnostic, EntryKind};
 
@@ -63,6 +65,12 @@ impl<'a> ArtifactReader<'a> {
         for function_id in 0..function_count {
             functions.push(self.function(function_id)?);
         }
+        let root_imports = self.import_vec()?;
+        let module_count = self.count("modules", self.limits.max_chunks)?;
+        let mut modules = Vec::with_capacity(module_count);
+        for module_id in 0..module_count {
+            modules.push(self.module(module_id, function_count, chunk_count)?);
+        }
         if self.offset != self.bytes.len() {
             return Err(Diagnostic::artifact(
                 "artifact_trailing_payload",
@@ -79,6 +87,80 @@ impl<'a> ArtifactReader<'a> {
             expects_harness,
             chunks,
             functions,
+            root_imports,
+            modules,
+        })
+    }
+
+    fn module(
+        &mut self,
+        module_id: usize,
+        function_count: usize,
+        chunk_count: usize,
+    ) -> Result<WireModule, Diagnostic> {
+        let id = self.string("module id")?;
+        let imports = self.import_vec()?;
+        let init = match self.u8("module init presence")? {
+            0 => None,
+            1 => {
+                let chunk = self.u32("module init chunk")?;
+                if chunk as usize >= chunk_count {
+                    return Err(Diagnostic::artifact(
+                        "artifact_invalid_index",
+                        format!("module {module_id} references missing init chunk {chunk}"),
+                    ));
+                }
+                Some(chunk)
+            }
+            value => {
+                return Err(Diagnostic::artifact(
+                    "artifact_malformed",
+                    format!("module {module_id} has invalid init presence tag {value}"),
+                ))
+            }
+        };
+        let function_count_for_module =
+            self.count("module functions", self.limits.max_functions)?;
+        let mut functions = BTreeMap::new();
+        for _ in 0..function_count_for_module {
+            let name = self.string("module function name")?;
+            let function = self.u32("module function")?;
+            if function as usize >= function_count {
+                return Err(Diagnostic::artifact(
+                    "artifact_invalid_index",
+                    format!("module {module_id} references missing function {function}"),
+                ));
+            }
+            if functions.insert(name, function).is_some() {
+                return Err(Diagnostic::artifact(
+                    "artifact_invalid_module",
+                    format!("module {module_id} repeats a function name"),
+                ));
+            }
+        }
+        let export_count = self.count("module exports", self.limits.max_metadata_entries)?;
+        let mut exports = BTreeMap::new();
+        for _ in 0..export_count {
+            let name = self.string("module export name")?;
+            let kind = export_kind(self.u8("module export kind")?).ok_or_else(|| {
+                Diagnostic::artifact(
+                    "artifact_malformed",
+                    format!("module {module_id} has an invalid export kind"),
+                )
+            })?;
+            if exports.insert(name, kind).is_some() {
+                return Err(Diagnostic::artifact(
+                    "artifact_invalid_module",
+                    format!("module {module_id} repeats an export name"),
+                ));
+            }
+        }
+        Ok(WireModule {
+            id,
+            imports,
+            init,
+            functions,
+            exports,
         })
     }
 
@@ -282,6 +364,45 @@ impl<'a> ArtifactReader<'a> {
         Ok(values)
     }
 
+    fn import_vec(&mut self) -> Result<Vec<crate::PortableImport>, Diagnostic> {
+        let count = self.count("imports", self.limits.max_metadata_entries)?;
+        self.budget.metadata(count)?;
+        let mut imports = Vec::with_capacity(count);
+        for _ in 0..count {
+            let path = self.string("import path")?;
+            let target = self.string("import target")?;
+            let selected_names = match self.u8("selected import presence")? {
+                0 => None,
+                1 => Some(self.string_vec("selected import names")?),
+                value => {
+                    return Err(Diagnostic::artifact(
+                        "artifact_malformed",
+                        format!("import has invalid selected-name tag {value}"),
+                    ))
+                }
+            };
+            let namespace_alias = match self.u8("namespace import presence")? {
+                0 => None,
+                1 => Some(self.string("namespace alias")?),
+                value => {
+                    return Err(Diagnostic::artifact(
+                        "artifact_malformed",
+                        format!("import has invalid namespace-alias tag {value}"),
+                    ))
+                }
+            };
+            let is_pub = self.boolean("public import flag")?;
+            imports.push(crate::PortableImport {
+                path,
+                target,
+                selected_names,
+                namespace_alias,
+                is_pub,
+            });
+        }
+        Ok(imports)
+    }
+
     fn u32_vec_exact(&mut self, expected: usize, kind: &str) -> Result<Vec<u32>, Diagnostic> {
         let count = self.count(kind, self.limits.max_instructions)?;
         if count != expected {
@@ -398,4 +519,20 @@ impl<'a> ArtifactReader<'a> {
         self.offset = end;
         Ok(value)
     }
+}
+
+fn export_kind(tag: u8) -> Option<crate::PortableExportKind> {
+    Some(match tag {
+        0 => crate::PortableExportKind::Function,
+        1 => crate::PortableExportKind::Pipeline,
+        2 => crate::PortableExportKind::Tool,
+        3 => crate::PortableExportKind::Skill,
+        4 => crate::PortableExportKind::EvalPack,
+        5 => crate::PortableExportKind::Struct,
+        6 => crate::PortableExportKind::Enum,
+        7 => crate::PortableExportKind::Interface,
+        8 => crate::PortableExportKind::Type,
+        9 => crate::PortableExportKind::Variable,
+        _ => return None,
+    })
 }

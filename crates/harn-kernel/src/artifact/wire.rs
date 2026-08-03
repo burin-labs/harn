@@ -1,9 +1,11 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use harn_parser::TypeExpr;
 
-use crate::{Chunk, CompiledFunction, Constant, LocalSlotInfo, ParamSlot};
+use crate::{
+    Chunk, CompiledFunction, Constant, LocalSlotInfo, ParamSlot, PortableExportKind, PortableImport,
+};
 
 use super::validation::{semantic_abi_fingerprint, validate_code, MetadataBudget};
 use super::{ArtifactLimits, Diagnostic, EntryKind};
@@ -21,6 +23,31 @@ pub(super) struct WireProgram {
     pub(super) expects_harness: bool,
     pub(super) chunks: Vec<WireChunk>,
     pub(super) functions: Vec<WireFunction>,
+    pub(super) root_imports: Vec<PortableImport>,
+    pub(super) modules: Vec<WireModule>,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct WireModule {
+    pub(super) id: String,
+    pub(super) imports: Vec<PortableImport>,
+    pub(super) init: Option<u32>,
+    pub(super) functions: BTreeMap<String, u32>,
+    pub(super) exports: BTreeMap<String, PortableExportKind>,
+}
+
+pub(super) struct BuiltProgram {
+    pub(super) root: Chunk,
+    pub(super) root_imports: Vec<PortableImport>,
+    pub(super) modules: Vec<BuiltModule>,
+}
+
+pub(super) struct BuiltModule {
+    pub(super) id: String,
+    pub(super) imports: Vec<PortableImport>,
+    pub(super) init: Option<Chunk>,
+    pub(super) functions: BTreeMap<String, Arc<CompiledFunction>>,
+    pub(super) exports: BTreeMap<String, PortableExportKind>,
 }
 
 #[derive(Debug, Clone)]
@@ -140,6 +167,117 @@ impl WireProgram {
             expects_harness,
             chunks,
             functions,
+            root_imports: Vec::new(),
+            modules: Vec::new(),
+        })
+    }
+
+    pub(super) fn from_package(
+        root: &Chunk,
+        modules: &[crate::CompiledPortableModule],
+        root_imports: Vec<PortableImport>,
+        entry: String,
+        entry_kind: EntryKind,
+        expects_harness: bool,
+    ) -> Result<Self, Diagnostic> {
+        let mut pending = vec![root.clone()];
+        let mut functions = Vec::new();
+        let mut module_wires = Vec::with_capacity(modules.len());
+        let append_function = |function: &CompiledFunction,
+                               pending: &mut Vec<Chunk>,
+                               functions: &mut Vec<WireFunction>| {
+            let child_chunk = u32::try_from(pending.len())
+                .map_err(|_| Diagnostic::artifact("artifact_too_large", "too many chunks"))?;
+            pending.push((*function.chunk).clone());
+            let function_id = u32::try_from(functions.len())
+                .map_err(|_| Diagnostic::artifact("artifact_too_large", "too many functions"))?;
+            functions.push(WireFunction::from_compiled(function, child_chunk));
+            Ok::<u32, Diagnostic>(function_id)
+        };
+
+        // Module order is part of the artifact's canonical bytes. The caller
+        // normally supplies graph order, but sorting here makes a package
+        // deterministic even when a parallel graph walk returns a hash map.
+        let mut modules = modules.to_vec();
+        modules.sort_by(|left, right| left.id.cmp(&right.id));
+        for module in &modules {
+            let init = module
+                .init
+                .as_ref()
+                .map(|chunk| {
+                    let id = u32::try_from(pending.len()).map_err(|_| {
+                        Diagnostic::artifact("artifact_too_large", "too many chunks")
+                    })?;
+                    pending.push(chunk.clone());
+                    Ok::<u32, Diagnostic>(id)
+                })
+                .transpose()?;
+            let mut module_functions = BTreeMap::new();
+            for (name, function) in &module.functions {
+                let id = append_function(function, &mut pending, &mut functions)?;
+                module_functions.insert(name.clone(), id);
+            }
+            module_wires.push(WireModule {
+                id: module.id.clone(),
+                imports: module.imports.clone(),
+                init,
+                functions: module_functions,
+                exports: module.exports.clone(),
+            });
+        }
+
+        // The root and every module init/function may contain nested closures.
+        // Walk the complete chunk queue once, appending their function records
+        // in source order just like `from_image`.
+        let mut chunks = Vec::new();
+        let mut cursor = 0usize;
+        while cursor < pending.len() {
+            let chunk = pending[cursor].clone();
+            let mut function_ids = Vec::with_capacity(chunk.functions.len());
+            for function in &chunk.functions {
+                let id = append_function(function, &mut pending, &mut functions)?;
+                function_ids.push(id);
+            }
+            chunks.push(Self::wire_chunk(&chunk, function_ids)?);
+            cursor += 1;
+        }
+        Ok(Self {
+            semantic_abi: semantic_abi_fingerprint(),
+            entry,
+            entry_kind,
+            expects_harness,
+            chunks,
+            functions,
+            root_imports,
+            modules: module_wires,
+        })
+    }
+
+    fn wire_chunk(chunk: &Chunk, functions: Vec<u32>) -> Result<WireChunk, Diagnostic> {
+        Ok(WireChunk {
+            code: chunk.code.clone(),
+            constants: chunk.constants.clone(),
+            lines: chunk.lines.clone(),
+            columns: chunk.columns.clone(),
+            source_file: chunk.source_file.clone(),
+            functions,
+            local_slots: chunk
+                .local_slots
+                .iter()
+                .map(|slot| {
+                    Ok(WireLocalSlot {
+                        name: slot.name.clone(),
+                        mutable: slot.mutable,
+                        scope_depth: u32::try_from(slot.scope_depth).map_err(|_| {
+                            Diagnostic::artifact(
+                                "artifact_metadata_too_large",
+                                "local scope depth exceeds the portable u32 range",
+                            )
+                        })?,
+                    })
+                })
+                .collect::<Result<_, Diagnostic>>()?,
+            references_outer_names: chunk.references_outer_names,
         })
     }
 
@@ -261,6 +399,58 @@ impl WireProgram {
                 ));
             }
         }
+        budget_imports(&mut budget, &self.root_imports)?;
+        if self.modules.len() > limits.max_chunks {
+            return Err(Diagnostic::artifact(
+                "artifact_too_many_modules",
+                "package module count exceeds limit",
+            ));
+        }
+        let mut module_ids = HashSet::with_capacity(self.modules.len());
+        for module in &self.modules {
+            if module.id.is_empty() || !module_ids.insert(module.id.as_str()) {
+                return Err(Diagnostic::artifact(
+                    "artifact_invalid_module",
+                    "package contains an empty or duplicate module id",
+                ));
+            }
+            budget.string(&module.id)?;
+            budget_imports(&mut budget, &module.imports)?;
+            if let Some(init) = module.init {
+                if init as usize >= self.chunks.len() {
+                    return Err(Diagnostic::artifact(
+                        "artifact_invalid_index",
+                        format!(
+                            "module `{}` references missing init chunk {init}",
+                            module.id
+                        ),
+                    ));
+                }
+            }
+            for (name, function) in &module.functions {
+                budget.string(name)?;
+                if *function as usize >= self.functions.len() {
+                    return Err(Diagnostic::artifact(
+                        "artifact_invalid_index",
+                        format!(
+                            "module `{}` references missing function {function}",
+                            module.id
+                        ),
+                    ));
+                }
+            }
+            for name in module.exports.keys() {
+                budget.string(name)?;
+            }
+        }
+        // Import targets are package-local identifiers, not arbitrary paths.
+        // Resolve this graph at the artifact boundary so a malformed or
+        // hand-crafted artifact cannot make the runtime consult host paths or
+        // silently turn a missing dependency into an empty module.
+        validate_import_targets(&self.root_imports, &module_ids, "root")?;
+        for module in &self.modules {
+            validate_import_targets(&module.imports, &module_ids, &module.id)?;
+        }
         let entry_matches = self.functions.iter().any(|function| {
             function.name == self.entry
                 && function.params.first().is_some_and(|parameter| {
@@ -279,7 +469,10 @@ impl WireProgram {
         Ok(())
     }
 
-    pub(super) fn validate_and_build(&self, limits: ArtifactLimits) -> Result<Chunk, Diagnostic> {
+    pub(super) fn validate_and_build(
+        &self,
+        limits: ArtifactLimits,
+    ) -> Result<BuiltProgram, Diagnostic> {
         if self.semantic_abi != semantic_abi_fingerprint() {
             return Err(Diagnostic::artifact(
                 "artifact_semantic_abi",
@@ -305,14 +498,6 @@ impl WireProgram {
                 "artifact function count exceeds limit",
             ));
         }
-        // Named-call bytecode is shared by user functions and builtins. The
-        // function metadata is the artifact's mechanically-derived user
-        // callable catalog; keeping it here avoids a second compiler registry.
-        let user_callables = self
-            .functions
-            .iter()
-            .map(|function| function.name.as_str())
-            .collect::<HashSet<_>>();
         for (chunk_id, chunk) in self.chunks.iter().enumerate() {
             if chunk.lines.len() != chunk.code.len() || chunk.columns.len() != chunk.code.len() {
                 return Err(Diagnostic::artifact(
@@ -323,7 +508,6 @@ impl WireProgram {
             validate_code(
                 &chunk.code,
                 &chunk.constants,
-                &user_callables,
                 chunk.functions.len(),
                 chunk.local_slots.len(),
                 chunk_id,
@@ -396,11 +580,194 @@ impl WireProgram {
                 wire.references_outer_names,
             )));
         }
-        Arc::try_unwrap(built[0].take().expect("root chunk constructed")).map_err(|_| {
-            Diagnostic::artifact(
-                "artifact_invalid_graph",
-                "root chunk has an unexpected internal reference",
-            )
+        let root =
+            Arc::try_unwrap(built[0].take().expect("root chunk constructed")).map_err(|_| {
+                Diagnostic::artifact(
+                    "artifact_invalid_graph",
+                    "root chunk has an unexpected internal reference",
+                )
+            })?;
+
+        let mut modules = Vec::with_capacity(self.modules.len());
+        let mut module_ids = HashSet::new();
+        for module in &self.modules {
+            if module.id.is_empty() || !module_ids.insert(module.id.as_str()) {
+                return Err(Diagnostic::artifact(
+                    "artifact_invalid_module",
+                    "package contains an empty or duplicate module id",
+                ));
+            }
+            let init = module
+                .init
+                .map(|chunk| {
+                    built
+                        .get(chunk as usize)
+                        .and_then(Option::clone)
+                        .ok_or_else(|| {
+                            Diagnostic::artifact(
+                                "artifact_invalid_module",
+                                "module initialization chunk was not constructed",
+                            )
+                        })
+                })
+                .transpose()?;
+            let mut functions = BTreeMap::new();
+            for (name, function_id) in &module.functions {
+                let function = self.functions.get(*function_id as usize).ok_or_else(|| {
+                    Diagnostic::artifact(
+                        "artifact_invalid_module",
+                        "module references a missing function",
+                    )
+                })?;
+                let chunk = built
+                    .get(function.chunk as usize)
+                    .and_then(Option::clone)
+                    .ok_or_else(|| {
+                        Diagnostic::artifact(
+                            "artifact_invalid_module",
+                            "module function chunk was not constructed",
+                        )
+                    })?;
+                functions.insert(
+                    name.clone(),
+                    Arc::new(CompiledFunction {
+                        name: function.name.clone(),
+                        type_params: function.type_params.clone(),
+                        nominal_type_names: function.nominal_type_names.clone(),
+                        params: function
+                            .params
+                            .iter()
+                            .map(|param| ParamSlot {
+                                name: param.name.clone(),
+                                type_expr: param.type_expr.clone(),
+                                has_default: param.has_default,
+                            })
+                            .collect(),
+                        default_start: function.default_start.map(|value| value as usize),
+                        chunk,
+                        is_generator: function.is_generator,
+                        is_stream: function.is_stream,
+                        has_rest_param: function.has_rest_param,
+                        has_runtime_type_checks: function.has_runtime_type_checks,
+                    }),
+                );
+            }
+            modules.push(BuiltModule {
+                id: module.id.clone(),
+                imports: module.imports.clone(),
+                init: init
+                    .map(|chunk| Arc::try_unwrap(chunk).unwrap_or_else(|chunk| (*chunk).clone())),
+                functions,
+                exports: module.exports.clone(),
+            });
+        }
+        Ok(BuiltProgram {
+            root,
+            root_imports: self.root_imports.clone(),
+            modules,
         })
     }
+}
+
+impl WireFunction {
+    fn from_compiled(function: &CompiledFunction, chunk: u32) -> Self {
+        Self {
+            name: function.name.clone(),
+            type_params: function.type_params.clone(),
+            nominal_type_names: function.nominal_type_names.clone(),
+            params: function
+                .params
+                .iter()
+                .map(|param| WireParam {
+                    name: param.name.clone(),
+                    type_expr: param.type_expr.clone(),
+                    has_default: param.has_default,
+                })
+                .collect(),
+            default_start: function.default_start.map(|value| value as u32),
+            chunk,
+            is_generator: function.is_generator,
+            is_stream: function.is_stream,
+            has_rest_param: function.has_rest_param,
+            has_runtime_type_checks: function.has_runtime_type_checks,
+        }
+    }
+}
+
+fn budget_imports(
+    budget: &mut MetadataBudget,
+    imports: &[PortableImport],
+) -> Result<(), Diagnostic> {
+    budget.metadata(imports.len())?;
+    for import in imports {
+        budget.string(&import.path)?;
+        budget.string(&import.target)?;
+        if let Some(names) = &import.selected_names {
+            budget.metadata(names.len())?;
+            for name in names {
+                budget.string(name)?;
+            }
+        }
+        if let Some(alias) = &import.namespace_alias {
+            budget.string(alias)?;
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn validate_import_targets(
+    imports: &[PortableImport],
+    module_ids: &HashSet<&str>,
+    owner: &str,
+) -> Result<(), Diagnostic> {
+    for import in imports {
+        if import.path.is_empty() || import.target.is_empty() {
+            return Err(Diagnostic::artifact(
+                "artifact_invalid_import",
+                format!("{owner} contains an import with an empty path or target"),
+            ));
+        }
+        if import.selected_names.is_some() && import.namespace_alias.is_some() {
+            return Err(Diagnostic::artifact(
+                "artifact_invalid_import",
+                format!(
+                    "{owner} import `{}` mixes selected and namespace bindings",
+                    import.path
+                ),
+            ));
+        }
+        if let Some(names) = &import.selected_names {
+            let mut seen = HashSet::with_capacity(names.len());
+            for name in names {
+                if name.is_empty() || !seen.insert(name.as_str()) {
+                    return Err(Diagnostic::artifact(
+                        "artifact_invalid_import",
+                        format!(
+                            "{owner} import `{}` has duplicate or empty selected names",
+                            import.path
+                        ),
+                    ));
+                }
+            }
+        }
+        if import.namespace_alias.as_deref().is_some_and(str::is_empty) {
+            return Err(Diagnostic::artifact(
+                "artifact_invalid_import",
+                format!(
+                    "{owner} import `{}` has an empty namespace alias",
+                    import.path
+                ),
+            ));
+        }
+        if !module_ids.contains(import.target.as_str()) {
+            return Err(Diagnostic::artifact(
+                "artifact_invalid_import",
+                format!(
+                    "{owner} import `{}` targets missing module `{}`",
+                    import.path, import.target
+                ),
+            ));
+        }
+    }
+    Ok(())
 }

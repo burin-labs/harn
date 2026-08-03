@@ -14,6 +14,19 @@ pub(super) struct Closure {
 }
 
 #[derive(Clone)]
+pub(super) struct EnumValue {
+    pub(super) enum_name: Arc<str>,
+    pub(super) variant: Arc<str>,
+    pub(super) fields: Rc<Vec<RuntimeValue>>,
+}
+
+impl EnumValue {
+    pub(super) fn is_variant(&self, enum_name: &str, variant: &str) -> bool {
+        self.enum_name.as_ref() == enum_name && self.variant.as_ref() == variant
+    }
+}
+
+#[derive(Clone)]
 pub(super) enum RuntimeValue {
     Nil,
     Bool(bool),
@@ -23,6 +36,7 @@ pub(super) enum RuntimeValue {
     Bytes(Arc<[u8]>),
     List(Rc<Vec<RuntimeValue>>),
     Record(Rc<BTreeMap<String, RuntimeValue>>),
+    Enum(Rc<EnumValue>),
     Closure(Closure),
     Builtin(String),
     Harness(String),
@@ -65,6 +79,20 @@ impl RuntimeValue {
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
+            Self::Enum(value) if value.fields.is_empty() => {
+                format!("{}.{}", value.enum_name, value.variant)
+            }
+            Self::Enum(value) => format!(
+                "{}.{}({})",
+                value.enum_name,
+                value.variant,
+                value
+                    .fields
+                    .iter()
+                    .map(Self::display)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             Self::Closure(_) => "<closure>".into(),
             Self::Builtin(name) => format!("<builtin {name}>"),
             Self::Harness(name) => format!("<harness {name}>"),
@@ -83,6 +111,11 @@ impl SemanticValue for RuntimeValue {
             Self::Bytes(value) => ValueView::Bytes(value),
             Self::List(values) => ValueView::List(values),
             Self::Record(values) => ValueView::Record(values),
+            Self::Enum(value) => ValueView::Enum {
+                enum_name: &value.enum_name,
+                variant: &value.variant,
+                fields: &value.fields,
+            },
             Self::Closure(_) | Self::Builtin(_) | Self::Harness(_) => ValueView::Opaque,
         }
     }
@@ -153,6 +186,12 @@ impl DataValue {
                     .map(|(key, value)| Ok((key, Self::try_from_validated(value)?)))
                     .collect::<Result<_, Diagnostic>>()?,
             ),
+            RuntimeValue::Enum(_) => {
+                return Err(diagnostic(
+                    "non_data_result",
+                    "execution returned an enum outside the portable data contract",
+                ));
+            }
             RuntimeValue::Closure(_) | RuntimeValue::Builtin(_) | RuntimeValue::Harness(_) => {
                 return Err(diagnostic(
                     "non_data_result",

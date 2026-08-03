@@ -288,7 +288,16 @@ pub fn structural_diff(ast: HarnessAst, path_a: string, path_b: string, options 
  * @example: changeset_summary(harness.ast, [{path: "src/lib.rs", before: old, after: next}])
  */
 pub fn changeset_summary(ast: HarnessAst, files: list<ChangesetFileImage>) -> ChangesetSummary {
-  return ast.changeset_summary({files: files})
+  const summary = ast.changeset_summary({files: files})
+  return {
+    schema: summary.schema,
+    status: summary.status,
+    files: summary.files,
+    changes: summary.changes,
+    candidate_callers: summary.candidate_callers,
+    counts: summary.counts,
+    warnings: summary.warnings,
+  }
 }
 
 /**

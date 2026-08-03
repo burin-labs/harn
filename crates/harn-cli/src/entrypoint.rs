@@ -615,6 +615,11 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
             }
             Err(error) => command_error(&error),
         },
+        Command::Portable(args) => {
+            if let Err(error) = commands::portable::run(args.command) {
+                command_error(&error);
+            }
+        }
         Command::Supervisor(args) => {
             if let Err(error) = commands::supervisor::handle(args).await {
                 eprintln!("error: {error}");

@@ -7,6 +7,7 @@ export const benchmarkProvenanceJson: () => [number, number];
 export const benchmarkSchemaVersion: () => [number, number];
 export const benchmarkTerminalDigest: (a: number, b: number) => [number, number, number, number];
 export const compile: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
+export const compilePackage: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
 export const compileoutcome_artifactBytes: (a: number) => [number, number];
 export const compileoutcome_diagnosticsJson: (a: number) => [number, number];
 export const compileoutcome_digest: (a: number) => [number, number];

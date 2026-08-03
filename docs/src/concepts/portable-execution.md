@@ -6,7 +6,7 @@ language.
 
 ```mermaid
 flowchart TD
-    source[Harn source] --> frontend[Canonical lexer, parser, type checker, compiler]
+    source[Harn source and imports] --> frontend[Canonical lexer, parser, type checker, compiler]
     frontend --> artifact[Versioned program artifact]
     artifact --> kernel[Portable execution kernel]
     kernel --> native[Native Harn host]
@@ -18,6 +18,29 @@ flowchart TD
 The artifact contains checked bytecode and metadata. It contains no filesystem,
 network, process, clock, randomness, or model authority. Native Rust and browser
 WebAssembly decode the same bytes and call the same execution kernel.
+
+For a program with imports, the compiler first resolves a closed package graph.
+The graph is compiled in a stable order and its module identities, imports, and
+export projections are stored in the artifact. A host never has to re-resolve a
+source import after compilation:
+
+```mermaid
+flowchart LR
+    root[Root Harn module] --> resolve[Canonical module graph resolver]
+    dep[Imported Harn module] --> resolve
+    resolve --> closure[Closed, sorted module closure]
+    closure --> bytes[One artifact byte stream]
+    bytes --> native[Native adapter]
+    bytes --> worker[Browser worker adapter]
+    bytes --> burin[Burin host adapter]
+```
+
+`compile(source, ...)` remains the smallest API for a self-contained module.
+`compilePackage(manifest, ...)` is the load-bearing API when imports are
+present. The browser demo's JSON manifest is generated from its checked-in
+`.harn` sources by `harn portable package` through
+`make gen-portable-demo-package`; it is a delivery projection, not a second
+source language.
 
 ## How the surfaces stay synchronized
 
@@ -33,8 +56,8 @@ mechanism. Each relationship uses the strongest available form:
 | WIT tooling input | WIT remains the standards-facing source; pinned `wasm-tools` generates its committed JSON projection. |
 | Independent target behavior | Differential corpus tests compare exact native and browser results and diagnostics. This is a proof boundary, not synchronization between duplicate implementations. |
 
-Version and generated-artifact checks therefore catch broken wiring or stale
-committed delivery files. They do not compensate for parallel semantic owners.
+Generated-artifact checks catch broken wiring or stale committed delivery
+files. They do not compensate for parallel semantic owners.
 
 ## A cooperative authority boundary
 
@@ -71,7 +94,7 @@ into Harn semantics.
 
 A browser host uses the same rule at a different boundary: run each execution
 lane in a dedicated Web Worker and send typed values and artifact bytes through
-worker messages. Portable Kernel v1 does not depend on Wasm threads,
+worker messages. The portable kernel does not depend on Wasm threads,
 `SharedArrayBuffer`, atomics, or JavaScript Promise Integration. That keeps the
 adapter usable on browser and edge deployments that do not expose the same
 threading features. It also means one CPU-heavy execution is cooperative only
@@ -95,19 +118,23 @@ not yet execute components directly. A future Component Model adapter can use
 deployment work.
 
 WASI 0.3 now standardizes native async functions, streams, and futures, so it
-is a credible future server adapter. It is not the v1 semantic owner: runtime
+is a credible future server adapter. It is not the semantic owner: runtime
 support remains deployment-specific, and some edge platforms still expose
 only partial or experimental WASI support.
 
 ## Tooling and dependency decision
 
 The kernel reuses dependencies already present in the Harn workspace. The
-browser cutover adds no new third-party production crate beyond the existing
-`wasm-bindgen` adapter; its new packages and pinned tools are:
+browser adapter adds no new third-party production dependency; it links the
+same regex and hashing implementations as the native VM instead of recreating
+them for Wasm. The relevant packages and pinned tools are:
 
 | Package | Scope and reason | License | Maintenance evidence checked 2026-08-01 | Browser size cost |
 |---|---|---|---|---:|
 | [`wasm-bindgen`](https://github.com/wasm-bindgen/wasm-bindgen) 0.2 | Existing generated core-Wasm/JavaScript boundary | MIT or Apache-2.0 | Workspace lockfile resolves 0.2.126; active upstream repository | Included in the measured module; not newly introduced |
+| [`regex`](https://github.com/rust-lang/regex) 1.13.0 | Shared native/Wasm regular-expression semantics, including Unicode behavior | MIT or Apache-2.0 | Existing workspace dependency; active Rust project | Included in the measured cutover delta |
+| [`sha2`](https://github.com/RustCrypto/hashes) 0.11.0 | Shared native/Wasm SHA-256 implementation | MIT or Apache-2.0 | Existing workspace dependency; active RustCrypto project | Included in the measured cutover delta |
+| `harn-secret-catalog` | Internal canonical secret-pattern catalog shared by both runtimes | Harn workspace license | Maintained in this repository | No third-party dependency |
 | `wasm-bindgen-test` 0.3 | Development-only real-browser worker tests | MIT or Apache-2.0 | Maintained in the same active upstream repository | 0 bytes in release artifacts |
 | [`wasm-pack`](https://github.com/wasm-bindgen/wasm-pack) 0.15.0 | Pinned development/CI build and browser-test driver | MIT or Apache-2.0 | 0.15.0 released in May 2026 | 0 bytes; installed tool only |
 | [`wasm-tools`](https://github.com/bytecodealliance/wasm-tools) 1.255.0 | Pinned development/CI WIT parser and JSON projection | MIT, Apache-2.0, or Apache-2.0 with LLVM exception | Active Bytecode Alliance repository with versioned releases | 0 bytes; installed tool only |
@@ -119,12 +146,23 @@ reduces deployment work rather than duplicating it.
 
 ## Current boundary
 
-Portable kernel v1 deliberately supports a proved pure subset plus typed host
-capability suspension. The full native VM still owns hostful orchestration,
-concurrency, modules, and other unavailable operations. Artifact validation
-rejects unsupported opcodes before execution; callers must not interpret
-“portable” as “all Harn programs.” See the
-[contract reference](../portable-kernel-reference.md) for the exact boundary.
+The portable kernel supports a proved pure subset plus typed host capability
+suspension. The full native VM still owns hostful orchestration, concurrency,
+and other unavailable operations. A closed artifact may contain those paths so
+one real application package does not need a portable-only source fork; the
+kernel returns an exact unsupported diagnostic if execution reaches one.
+Callers must not interpret “portable” as “all Harn programs.” See the [contract
+reference](../portable-kernel-reference.md) for the exact boundary.
+
+The unchanged logo-studio package is the reference boundary test. Its complete
+source closure compiles into one 927,272-byte artifact. With no grants, its
+first privileged operation fails at `fs.source_dir`. With typed grants, the
+same artifact suspends and resumes through `fs.source_dir`, `env.get_or`, and
+`fs.exists`, then reaches `tool_registry`. That final operation stores Harn
+closures as host callbacks, which cannot cross the portable data-value ABI.
+It remains an exact `unsupported_builtin` boundary until Harn has one canonical
+callback-registration contract; the portable kernel does not grow a second
+tool registry to hide that seam.
 
 ## Primary references
 

@@ -12,8 +12,10 @@ make wasm-check
 make wasm-demo
 ```
 
-The checked WIT contract is in `wit/harn-kernel.wit`. Browser v1 ships core
-Wasm because browsers do not execute Component Model artifacts directly. See
+![The reducer running in a dedicated browser worker with generated Harn syntax highlighting](demo/screenshots/portable-reducer.png)
+
+The checked WIT contract is in `wit/harn-kernel.wit`. Browsers load the core
+Wasm adapter because they do not execute Component Model artifacts directly. See
 the [portable execution explanation](../../docs/src/concepts/portable-execution.md),
 [contract reference](../../docs/src/portable-kernel-reference.md), and
 [browser guide](../../docs/src/portable-kernel-browser.md).

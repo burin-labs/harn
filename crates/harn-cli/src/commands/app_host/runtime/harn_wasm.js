@@ -243,6 +243,31 @@ export function compile(source, entry, entry_kind) {
 }
 
 /**
+ * Compile a host-linked source package through the same canonical lexer,
+ * parser, compiler, and artifact encoder as native Harn. The manifest is
+ * deliberately data-only: import targets and public export projections are
+ * resolved by the host build step, while this adapter has no filesystem or
+ * package-loader authority.
+ * @param {string} manifest_json
+ * @param {string} entry
+ * @param {string} entry_kind
+ * @returns {CompileOutcome}
+ */
+export function compilePackage(manifest_json, entry, entry_kind) {
+    const ptr0 = passStringToWasm0(manifest_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(entry, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passStringToWasm0(entry_kind, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.compilePackage(ptr0, len0, ptr1, len1, ptr2, len2);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return CompileOutcome.__wrap(ret[0]);
+}
+
+/**
  * Validate and canonically serialize a browser-captured benchmark receipt
  * through the same closed Rust type used by the native CLI.
  * @param {string} receipt_json

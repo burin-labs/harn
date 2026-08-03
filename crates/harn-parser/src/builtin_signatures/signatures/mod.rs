@@ -20,8 +20,9 @@ pub(crate) use super::types::{
     TY_STRING, TY_STRING_OR_NIL,
 };
 
-pub(crate) fn groups() -> [&'static [BuiltinSignature]; 6] {
+pub(crate) fn groups() -> [&'static [BuiltinSignature]; 7] {
     [
+        harn_builtin_meta::signatures::PORTABLE_SOURCE_BUILTINS,
         stdlib::SIGNATURES,
         agents::SIGNATURES,
         integrations::SIGNATURES,
