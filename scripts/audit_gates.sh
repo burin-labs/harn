@@ -115,6 +115,7 @@ GATES=(
   check-harn-syntax-sensitive-scans
   check-loud-boundaries
   check-ci-cache-policy
+  check-rust-test-lane-policy
   check-crate-sibling-versions
   check-dependabot-groups
   check-docs-workflow-quickstart

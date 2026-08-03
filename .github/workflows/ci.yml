@@ -983,6 +983,7 @@ jobs:
       - name: Run Landlock escape proof on GitHub Ubuntu
         id: release-audit-rust-security
         run: >-
+          scripts/ci/run_rust_test_lane.sh
           cargo nextest run --profile ci
           --archive-file "$RUNNER_TEMP/harn-security/harn-security-tests.tar.zst"
           --workspace-remap "$GITHUB_WORKSPACE"
@@ -1619,7 +1620,9 @@ jobs:
         # call them fresh without replaying their diagnostics.
         run: ./scripts/ci/run_rust_lint_lane.sh
       - name: Verify canonical package hash parity
-        run: cargo test -p harn-modules canonical_content_hash_projection_is_platform_independent
+        run: >-
+          scripts/ci/run_rust_test_lane.sh
+          cargo test -p harn-modules canonical_content_hash_projection_is_platform_independent
       - name: Typecheck generated Swift protocol bindings
         shell: bash
         run: xcrun swiftc -typecheck spec/protocol-artifacts/HarnProtocol.swift

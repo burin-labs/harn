@@ -51,7 +51,14 @@ jobs:
         with:
           tool: nextest@0.9.132
 
+      # Through the shared lane wrapper so this suite runs with the same
+      # 16 MiB RUST_MIN_STACK as every other Rust test lane. Running raw
+      # `cargo nextest` left the default 2 MiB spawned-thread stack, which
+      # aborts VM-driving tests with SIGABRT regardless of thread count and
+      # reports a stack-size difference as a thread-count parity failure.
       - name: Run full suite at ${{ matrix.threads }} threads
-        run: cargo nextest run --workspace --test-threads=${{ matrix.threads }}
+        run: >-
+          scripts/ci/run_rust_test_lane.sh
+          cargo nextest run --workspace --test-threads=${{ matrix.threads }}
         env:
           NEXTEST_PROFILE: ci

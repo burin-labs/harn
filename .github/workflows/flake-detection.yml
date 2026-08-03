@@ -125,6 +125,11 @@ jobs:
         if: steps.touched.outputs.has_tests == 'true'
         env:
           NEXTEST_FILTER: ${{ steps.touched.outputs.filter }}
+          # Same 16 MiB stack contract as scripts/ci/run_rust_test_lane.sh.
+          # Set here rather than wrapping the call because the rerun loop
+          # invokes nextest once per iteration, and the wrapper's resource
+          # report would repeat with it.
+          RUST_MIN_STACK: "16777216"
         run: |
           # `--workspace` is required: without it, `cargo nextest run`
           # only discovers tests in the cwd's package, so `-E
