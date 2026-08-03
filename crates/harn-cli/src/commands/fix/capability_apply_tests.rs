@@ -1304,6 +1304,34 @@ fn capability_apply_replaces_an_existing_imported_carrier_in_place() {
     );
 }
 
+/// `with_mocks` and `with_scenario` do not share a config vocabulary, so the
+/// callee rename is only complete when the keys travel with it. Over a config
+/// this pass cannot see into, the rename alone leaves `with_scenario` reading
+/// `capabilities`/`llm` off a dict that still says `host_mocks`/`llm_mocks`:
+/// both scopes install empty and the body runs against the real host, while the
+/// call site is gone and the plan converges.
+#[test]
+fn capability_apply_leaves_an_unreadable_retired_mock_config_for_a_human() {
+    for source in [
+        // A forwarded config has no keys to rewrite.
+        "import { with_mocks } from \"std/testing\"\n\npub fn with_checked(config, body) {\n  return with_mocks(config, body)\n}\n",
+        // A helper call that builds the config is equally opaque.
+        "import { with_mocks } from \"std/testing\"\n\nfn turn_mocks() -> dict {\n  return {host_mocks: []}\n}\n\npipeline test_live(task) {\n  return with_mocks(turn_mocks(), { _ -> \"ok\" })\n}\n",
+        // A key outside the two-scope contract is not part of the rename.
+        "import { with_mocks } from \"std/testing\"\n\npipeline test_extra(task) {\n  return with_mocks({host_mocks: [], unsupported: 1}, { _ -> \"ok\" })\n}\n",
+    ] {
+        let (_, updated) = apply_single(source);
+        assert!(
+            updated.contains("with_mocks("),
+            "an unreadable config must stay inert: {updated}"
+        );
+        assert!(
+            !updated.contains("with_scenario("),
+            "renaming the callee without the keys silently installs no fixtures: {updated}"
+        );
+    }
+}
+
 /// An imported callee with a multi-capability prefix has two would-be edit
 /// producers: the imported-signature pass, which reads the whole prefix, and
 /// the per-diagnostic pass, which sees only the capability the typechecker
