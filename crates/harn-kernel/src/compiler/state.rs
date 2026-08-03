@@ -358,17 +358,19 @@ impl Compiler {
         }
     }
 
-    /// Compile exported type schemas into a tiny module initializer. Running
-    /// this after imports makes referenced imported schemas ordinary lexical
-    /// inputs while keeping the cached artifact immutable and relocatable.
+    /// Compile each exported type schema into an independently addressable
+    /// module initializer. Running these after imports makes referenced
+    /// imported schemas ordinary lexical inputs while keeping the cached
+    /// artifact immutable and relocatable. A module may export more schema
+    /// bytecode than one u16-addressed chunk can hold; declaration-sized
+    /// chunks remove that package-wide limit without weakening any schema.
     pub fn compile_public_type_schema_initializers(
         program: &[SNode],
         source_file: Option<String>,
-    ) -> Result<Option<Chunk>, CompileError> {
+    ) -> Result<Vec<Chunk>, CompileError> {
         let mut compiler = Compiler::new();
         compiler.collect_type_aliases(program);
-        compiler.chunk.source_file = source_file;
-        let mut emitted = false;
+        let mut chunks = Vec::new();
         for sn in program {
             let Node::TypeDecl {
                 name, is_pub: true, ..
@@ -376,22 +378,22 @@ impl Compiler {
             else {
                 continue;
             };
+            compiler.chunk = Chunk::new();
+            compiler.string_constants.clear();
+            compiler.chunk.source_file.clone_from(&source_file);
             if compiler.emit_schema_for_alias(name) {
                 compiler.emit_define_binding(name, false);
-                emitted = true;
+                compiler.chunk.emit(Op::Nil, compiler.line);
+                compiler.chunk.emit(Op::Return, compiler.line);
+                super::ensure_chunk_addressable(
+                    &compiler.chunk,
+                    &format!("the public type-schema initializer for `{name}`"),
+                    compiler.line,
+                )?;
+                chunks.push(std::mem::take(&mut compiler.chunk));
             }
         }
-        if !emitted {
-            return Ok(None);
-        }
-        compiler.chunk.emit(Op::Nil, compiler.line);
-        compiler.chunk.emit(Op::Return, compiler.line);
-        super::ensure_chunk_addressable(
-            &compiler.chunk,
-            "the module type-schema initializer",
-            compiler.line,
-        )?;
-        Ok(Some(compiler.chunk))
+        Ok(chunks)
     }
 
     /// Schema-guard builtins that accept a schema as their second argument.

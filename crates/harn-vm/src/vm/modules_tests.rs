@@ -324,6 +324,48 @@ pub fn works() {
 }
 
 #[test]
+fn large_public_type_surface_loads_every_schema() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime builds");
+    let mut source = String::new();
+    for alias in 0..400 {
+        source.push_str(&format!("pub type Contract{alias} = {{"));
+        for field in 0..12 {
+            source.push_str(&format!("field_{field}: string,"));
+        }
+        source.push_str("}\n");
+    }
+
+    runtime.block_on(async {
+        let mut vm = Vm::new();
+        crate::stdlib::register_vm_stdlib(&mut vm);
+        let loaded = vm
+            .load_module_from_source(PathBuf::from("<test>/large_facade.harn"), &source)
+            .await
+            .expect("large typed facade loads");
+
+        assert_eq!(loaded.public_type_schemas.len(), 400);
+        let mut fields = crate::value::DictMap::default();
+        for field in 0..12 {
+            fields.insert(
+                format!("field_{field}").into(),
+                VmValue::String(arcstr::ArcStr::from("value")),
+            );
+        }
+        let value = VmValue::dict(fields);
+        for name in ["Contract0", "Contract399"] {
+            let schema = loaded
+                .public_type_schemas
+                .get(name)
+                .unwrap_or_else(|| panic!("missing schema {name}"));
+            assert!(crate::schema::schema_is_value(&value, schema).expect("schema validates"));
+        }
+    });
+}
+
+#[test]
 fn imported_public_struct_exports_its_runtime_constructor() {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
