@@ -594,10 +594,10 @@ fn test_unknown_harness_capability_root_is_rejected() {
 fn test_known_harness_capability_roots_are_accepted() {
     for root in ["fs", "stdio", "env", "clock", "process", "llm"] {
         let source = format!(
-            r#"pipeline t(harness: Harness, task) {{
+            r"pipeline t(harness: Harness, task) {{
   const cap = harness.{root}
   log(cap)
-}}"#
+}}"
         );
         let errs = strict_errors(&source);
         assert!(
@@ -614,9 +614,9 @@ fn test_known_harness_capability_roots_are_accepted() {
 #[test]
 fn test_optional_harness_capability_access_stays_gradual() {
     let errs = strict_errors(
-        r#"pipeline t(harness: Harness, task) {
+        r"pipeline t(harness: Harness, task) {
   log(harness?.crypto)
-}"#,
+}",
     );
     assert!(
         !errs
@@ -631,9 +631,9 @@ fn test_optional_harness_capability_access_stays_gradual() {
 #[test]
 fn test_unknown_harness_capability_root_suggests_closest() {
     let errs = strict_errors(
-        r#"pipeline t(harness: Harness, task) {
+        r"pipeline t(harness: Harness, task) {
   log(harness.clocks)
-}"#,
+}",
     );
     assert!(
         errs.iter()
