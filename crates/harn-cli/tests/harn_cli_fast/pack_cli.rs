@@ -321,10 +321,32 @@ fn pack_json_envelope_carries_pack_schema() {
     );
     assert_eq!(value["data"]["debug_symbol_metadata"]["harnbc_count"], 1);
     assert!(
+        value["data"]["debug_symbol_metadata"]["harnbc_bytes"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert_eq!(value["data"]["debug_symbol_metadata"]["harnmod_count"], 1);
+    assert!(
+        value["data"]["debug_symbol_metadata"]["harnmod_bytes"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert!(
         value["data"]["debug_symbol_metadata"]["total_bytes"]
             .as_u64()
             .unwrap()
             > 0
+    );
+    assert_eq!(
+        value["data"]["debug_symbol_metadata"]["total_bytes"],
+        value["data"]["debug_symbol_metadata"]["harnbc_bytes"]
+            .as_u64()
+            .unwrap()
+            + value["data"]["debug_symbol_metadata"]["harnmod_bytes"]
+                .as_u64()
+                .unwrap()
     );
     assert_eq!(
         value["data"]["manifest"]["schema_version"],

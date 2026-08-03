@@ -3411,10 +3411,23 @@ Output paths default to `<entrypoint>.harnpack` next to the entrypoint.
 `--json` emits a `JsonEnvelope` with `bundle_hash` (BLAKE3 over the
 canonical manifest bytes plus sorted content hashes), `output_path`,
 `size_bytes`, signature status, SBOM counts, bytecode/debug-symbol
-metadata, and the full manifest; see the catalog row at
+metadata, and the full manifest. Bytecode metadata reports counts and bytes
+separately for `.harnbc` entry chunks and `.harnmod` module artifacts, plus
+their summed `total_bytes`; see the catalog row at
 `harn --json-schemas --command pack` for the schema version and inline
 JSON Schema. Repacking the same source produces a byte-identical
 archive.
+
+`harn run <bundle.harnpack>` verifies the archive, then projects each generated
+artifact beside its source inside the content-addressed replay cache. This
+reuses the same validating loaders as ordinary adjacent precompiled artifacts;
+source, context, runtime-version, or compiler-build mismatches recompile instead
+of executing stale bytecode. The archive itself remains unchanged, with one
+copy under `bytecode/` for deterministic verify, unpack, and repack behavior.
+Every cache hit is rechecked against the verified archive and repaired
+atomically if its manifest, source, asset, or artifact bytes changed. Signed
+legacy bundles also require every runtime payload path to be bound by a module
+manifest entry or SBOM asset row.
 
 `--upgrade <old.harnpack>` reads a prior bundle (v1 JSON or v2 archive)
 and re-emits it under the v2 manifest, preserving the prior bundle's

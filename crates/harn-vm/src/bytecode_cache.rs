@@ -183,6 +183,25 @@ impl CacheKey {
         }
     }
 
+    /// Compute a relocatable entry-chunk key for a closed source tree.
+    ///
+    /// Unlike [`Self::from_source`], the dependency graph identifies files by
+    /// their path relative to the entrypoint directory. Moving the complete
+    /// tree therefore preserves the key, while changing a relative path,
+    /// source byte, compiler build, or embedded stdlib still invalidates it.
+    /// This is the key used by packaged adjacent artifacts; ordinary shared
+    /// cache entries remain anchored to canonical host paths.
+    pub fn from_relocatable_source(source_path: &Path, source: &str) -> Self {
+        let source_hash = sha256(source.as_bytes());
+        let context_hash = hash_relocatable_user_imports(source_path, source);
+        Self {
+            source_hash,
+            context_hash,
+            harn_version: HARN_VERSION,
+            compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
+        }
+    }
+
     /// Compute the cache key for one independently-compiled module artifact.
     ///
     /// A [`ModuleArtifact`] stores unresolved import specs and never compiles
@@ -313,11 +332,11 @@ pub fn load(source_path: &Path, source: &str) -> LookupOutcome {
         };
     }
 
-    let mut candidates: Vec<PathBuf> = Vec::with_capacity(2);
+    let mut candidates: Vec<(PathBuf, bool)> = Vec::with_capacity(2);
     if let Some(adjacent) = adjacent_cache_path(source_path) {
-        candidates.push(adjacent);
+        candidates.push((adjacent, true));
     }
-    candidates.push(cache_dir().join(key.filename()));
+    candidates.push((cache_dir().join(key.filename()), false));
 
     // Candidates are found by entry source hash alone, so a candidate may have
     // been written by a *different* entry with byte-identical source. Its
@@ -325,7 +344,7 @@ pub fn load(source_path: &Path, source: &str) -> LookupOutcome {
     // anything here.
     let entry = module_source::canonical_identity(source_path);
 
-    for path in candidates {
+    for (path, allow_relocatable) in candidates {
         let Ok(Some(candidate)) = read_entry_candidate(&path, &key) else {
             continue;
         };
@@ -362,7 +381,19 @@ pub fn load(source_path: &Path, source: &str) -> LookupOutcome {
             Some(ManifestCheck::Stale) | None => {}
         }
         if walk.context_hash() != candidate.context_hash {
-            continue;
+            if !allow_relocatable || walk.relocatable_context_hash() != candidate.context_hash {
+                continue;
+            }
+            // Packaged chunks carry no host-specific manifest. Their distinct
+            // root-relative context is accepted only from the adjacent path;
+            // shared-cache candidates must always match the canonical graph.
+            key.context_hash = candidate.context_hash;
+            return LookupOutcome {
+                key,
+                chunk: Some(candidate.chunk),
+                manifest: walk.manifest().cloned(),
+                link_table: None,
+            };
         }
         // The graph moved in a way that does not change the key — a touched
         // mtime, a restored checkout. Refresh the artifact so the next spawn
@@ -400,7 +431,7 @@ fn link_table_for(manifest: &ContextManifest) -> Arc<GraphLinkTable> {
 struct GraphWalk<'a> {
     source_path: &'a Path,
     source: &'a str,
-    result: Option<([u8; 32], Option<ContextManifest>)>,
+    result: Option<GraphHashes>,
 }
 
 impl<'a> GraphWalk<'a> {
@@ -412,23 +443,28 @@ impl<'a> GraphWalk<'a> {
         }
     }
 
-    fn run(&mut self) -> &([u8; 32], Option<ContextManifest>) {
+    fn run(&mut self) -> &GraphHashes {
         self.result.get_or_insert_with(|| {
-            hash_transitive_user_imports_with_manifest(self.source_path, self.source)
+            walk_import_graph_fingerprinted(self.source_path, self.source, CODEGEN_FINGERPRINT)
         })
     }
 
     fn context_hash(&mut self) -> [u8; 32] {
-        self.run().0
+        self.run().canonical
+    }
+
+    fn relocatable_context_hash(&mut self) -> [u8; 32] {
+        self.run().relocatable
     }
 
     fn manifest(&mut self) -> Option<&ContextManifest> {
-        self.run().1.as_ref()
+        self.run().manifest.as_ref()
     }
 
     fn finish(mut self) -> ([u8; 32], Option<ContextManifest>) {
         self.run();
-        self.result.expect("the walk was just run")
+        let result = self.result.expect("the walk was just run");
+        (result.canonical, result.manifest)
     }
 }
 
@@ -901,8 +937,15 @@ fn hash_transitive_user_imports(source_path: &Path, source: &str) -> [u8; 32] {
     hash_transitive_user_imports_fingerprinted(source_path, source, CODEGEN_FINGERPRINT).0
 }
 
+/// Root-relative companion to [`hash_transitive_user_imports`]. Only closed,
+/// packaged source trees use this identity; shared host caches stay canonical.
+fn hash_relocatable_user_imports(source_path: &Path, source: &str) -> [u8; 32] {
+    walk_import_graph_fingerprinted(source_path, source, CODEGEN_FINGERPRINT).relocatable
+}
+
 /// As [`hash_transitive_user_imports`], but also returns the manifest that
 /// proves the walk's observations, for callers that will persist it.
+#[cfg(test)]
 fn hash_transitive_user_imports_with_manifest(
     source_path: &Path,
     source: &str,
@@ -918,6 +961,21 @@ fn hash_transitive_user_imports_fingerprinted(
     source: &str,
     codegen_fingerprint: &str,
 ) -> ([u8; 32], Option<ContextManifest>) {
+    let result = walk_import_graph_fingerprinted(source_path, source, codegen_fingerprint);
+    (result.canonical, result.manifest)
+}
+
+struct GraphHashes {
+    canonical: [u8; 32],
+    relocatable: [u8; 32],
+    manifest: Option<ContextManifest>,
+}
+
+fn walk_import_graph_fingerprinted(
+    source_path: &Path,
+    source: &str,
+    codegen_fingerprint: &str,
+) -> GraphHashes {
     #[cfg(test)]
     WALKS_PERFORMED.with(|c| c.set(c.get() + 1));
 
@@ -1013,7 +1071,54 @@ fn hash_transitive_user_imports_fingerprinted(
         }
     }
 
-    let mut hasher = Sha256::new();
+    let mut canonical_hasher = Sha256::new();
+    seed_entry_context_hasher(&mut canonical_hasher, codegen_fingerprint);
+    let mut relocatable_hasher = Sha256::new();
+    relocatable_hasher.update(b"relocatable-entry-graph-v1\0");
+    seed_entry_context_hasher(&mut relocatable_hasher, codegen_fingerprint);
+
+    let entry_identity = module_source::canonical_identity(source_path);
+    let entry_dir = entry_identity.parent().unwrap_or(Path::new(""));
+    let mut relocatable_nodes = Vec::with_capacity(visited.len());
+    for (path, node) in &visited {
+        canonical_hasher.update(path.to_string_lossy().as_bytes());
+        canonical_hasher.update(b"\0");
+        hash_import_node(&mut canonical_hasher, node);
+        canonical_hasher.update(b"\0");
+
+        let Some(label) = relative_path_label(entry_dir, path) else {
+            // A dependency on another filesystem root cannot be moved as one
+            // closed tree. Preserve fail-closed behavior by retaining its
+            // canonical identity in the packaged key.
+            relocatable_nodes.push((path.to_string_lossy().replace('\\', "/"), node));
+            continue;
+        };
+        relocatable_nodes.push((label, node));
+    }
+    relocatable_nodes.sort_by(|left, right| left.0.cmp(&right.0));
+    for (path, node) in relocatable_nodes {
+        relocatable_hasher.update(path.as_bytes());
+        relocatable_hasher.update(b"\0");
+        hash_import_node(&mut relocatable_hasher, node);
+        relocatable_hasher.update(b"\0");
+    }
+
+    // Sorted so one graph always serializes to one byte sequence, whatever
+    // order the frontier happened to pop.
+    if let Some(m) = manifest.as_mut() {
+        m.files.sort_by(|a, b| a.path.cmp(&b.path));
+        m.unresolved
+            .sort_by(|a, b| (&a.anchor, &a.import).cmp(&(&b.anchor, &b.import)));
+        m.unreadable.sort_by(|a, b| a.path.cmp(&b.path));
+    }
+    GraphHashes {
+        canonical: canonical_hasher.finalize().into(),
+        relocatable: relocatable_hasher.finalize().into(),
+        manifest,
+    }
+}
+
+fn seed_entry_context_hasher(hasher: &mut Sha256, codegen_fingerprint: &str) {
     hasher.update(b"stdlib-digest\0");
     hasher.update(embedded_stdlib_digest());
     hasher.update(b"\0");
@@ -1024,34 +1129,59 @@ fn hash_transitive_user_imports_fingerprinted(
     hasher.update(b"codegen-fingerprint\0");
     hasher.update(codegen_fingerprint.as_bytes());
     hasher.update(b"\0");
-    for (path, node) in &visited {
-        hasher.update(path.to_string_lossy().as_bytes());
-        hasher.update(b"\0");
-        match node {
-            ImportNode::Resolved { content } => {
-                hasher.update(b"resolved\0");
-                hasher.update(content.as_bytes());
-            }
-            ImportNode::Unresolved { import } => {
-                hasher.update(b"unresolved\0");
-                hasher.update(import.as_bytes());
-            }
-            ImportNode::IoError { kind } => {
-                hasher.update(b"ioerror\0");
-                hasher.update(kind.as_bytes());
-            }
+}
+
+fn hash_import_node(hasher: &mut Sha256, node: &ImportNode) {
+    match node {
+        ImportNode::Resolved { content } => {
+            hasher.update(b"resolved\0");
+            hasher.update(content.as_bytes());
         }
-        hasher.update(b"\0");
+        ImportNode::Unresolved { import } => {
+            hasher.update(b"unresolved\0");
+            hasher.update(import.as_bytes());
+        }
+        ImportNode::IoError { kind } => {
+            hasher.update(b"ioerror\0");
+            hasher.update(kind.as_bytes());
+        }
     }
-    // Sorted so one graph always serializes to one byte sequence, whatever
-    // order the frontier happened to pop.
-    if let Some(m) = manifest.as_mut() {
-        m.files.sort_by(|a, b| a.path.cmp(&b.path));
-        m.unresolved
-            .sort_by(|a, b| (&a.anchor, &a.import).cmp(&(&b.anchor, &b.import)));
-        m.unreadable.sort_by(|a, b| a.path.cmp(&b.path));
+}
+
+/// Render `target` relative to `base` with `/` separators. Both inputs are
+/// canonical identities in production, so differing roots are the only case
+/// that cannot produce a relocatable label.
+fn relative_path_label(base: &Path, target: &Path) -> Option<String> {
+    let base_components = base.components().collect::<Vec<_>>();
+    let target_components = target.components().collect::<Vec<_>>();
+    let common = base_components
+        .iter()
+        .zip(&target_components)
+        .take_while(|(left, right)| left == right)
+        .count();
+    if common == 0 && (base.is_absolute() || target.is_absolute()) {
+        return None;
     }
-    (hasher.finalize().into(), manifest)
+
+    let mut parts = Vec::new();
+    for component in &base_components[common..] {
+        if matches!(component, std::path::Component::Normal(_)) {
+            parts.push("..".to_string());
+        }
+    }
+    for component in &target_components[common..] {
+        match component {
+            std::path::Component::Normal(part) => parts.push(part.to_string_lossy().into_owned()),
+            std::path::Component::ParentDir => parts.push("..".to_string()),
+            std::path::Component::CurDir => {}
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => return None,
+        }
+    }
+    Some(if parts.is_empty() {
+        ".".to_string()
+    } else {
+        parts.join("/")
+    })
 }
 
 enum ImportNode {

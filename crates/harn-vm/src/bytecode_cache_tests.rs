@@ -191,6 +191,103 @@ fn module_key_excludes_dependency_graph_while_entry_key_tracks_it() {
 }
 
 #[test]
+fn relocatable_entry_key_moves_with_an_unchanged_source_tree() {
+    let first = tempfile::tempdir().unwrap();
+    let second = tempfile::tempdir().unwrap();
+    let entry_source = "import { value } from \"./lib/value\"\nfn main() { return value() }\n";
+    let dependency_source = "pub fn value() { return 42 }\n";
+
+    for root in [first.path(), second.path()] {
+        std::fs::create_dir(root.join("lib")).unwrap();
+        std::fs::write(root.join("entry.harn"), entry_source).unwrap();
+        std::fs::write(root.join("lib/value.harn"), dependency_source).unwrap();
+    }
+
+    let first_entry = first.path().join("entry.harn");
+    let second_entry = second.path().join("entry.harn");
+    assert_ne!(
+        CacheKey::from_source(&first_entry, entry_source),
+        CacheKey::from_source(&second_entry, entry_source),
+        "ordinary entry keys remain anchored to canonical dependency paths"
+    );
+    assert_eq!(
+        CacheKey::from_relocatable_source(&first_entry, entry_source),
+        CacheKey::from_relocatable_source(&second_entry, entry_source),
+        "packaged keys must describe relative layout and content, not checkout location"
+    );
+}
+
+#[test]
+fn adjacent_relocatable_entry_loads_and_dependency_edits_fail_closed() {
+    let built = tempfile::tempdir().unwrap();
+    let replayed = tempfile::tempdir().unwrap();
+    let entry_source =
+        "import \"./dep\"\nfn main(harness: Harness) { harness.stdio.println(\"ok\") }\n";
+    let dependency_source = "pub fn value() { return 42 }\n";
+
+    for root in [built.path(), replayed.path()] {
+        std::fs::write(root.join("entry.harn"), entry_source).unwrap();
+        std::fs::write(root.join("dep.harn"), dependency_source).unwrap();
+    }
+
+    let built_entry = built.path().join("entry.harn");
+    let replayed_entry = replayed.path().join("entry.harn");
+    let key = CacheKey::from_relocatable_source(&built_entry, entry_source);
+    let chunk = compile_source(entry_source).expect("compile entry");
+    store_at(&adjacent_cache_path(&replayed_entry).unwrap(), &key, &chunk)
+        .expect("project packaged artifact beside replayed source");
+
+    assert!(
+        load(&replayed_entry, entry_source).chunk.is_some(),
+        "the canonical adjacent loader must accept an unchanged relocated graph"
+    );
+
+    std::fs::write(
+        replayed.path().join("dep.harn"),
+        "pub fn value() { return 99 }\n",
+    )
+    .unwrap();
+    let future = std::fs::metadata(replayed.path().join("dep.harn"))
+        .unwrap()
+        .modified()
+        .unwrap()
+        + std::time::Duration::from_secs(10);
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(replayed.path().join("dep.harn"))
+        .unwrap()
+        .set_times(std::fs::FileTimes::new().set_modified(future))
+        .unwrap();
+    assert!(
+        load(&replayed_entry, entry_source).chunk.is_none(),
+        "a changed dependency must reject packaged bytecode rather than blessing it at the new path"
+    );
+}
+
+#[test]
+fn packaged_module_artifact_with_another_sources_key_fails_closed() {
+    let tmp = tempfile::tempdir().unwrap();
+    let first_source = "pub fn value() -> int { return 1 }\n";
+    let second_source = "pub fn value() -> int { return 2 }\n";
+    let first_path = tmp.path().join("first.harn");
+    let second_path = tmp.path().join("second.harn");
+    let target = tmp.path().join("second.harnmod");
+    let artifact =
+        crate::module_artifact::compile_module_artifact_from_source(&first_path, first_source)
+            .expect("compile first module");
+    let first_key = CacheKey::from_module_source(&ModuleSource::from_text(first_source));
+    store_module_at(&target, &first_key, &artifact).expect("store swapped artifact");
+
+    let second_key = CacheKey::from_module_source(&ModuleSource::from_text(second_source));
+    assert!(
+        read_module_if_matches(&target, &second_key, &second_path)
+            .unwrap()
+            .is_none(),
+        "a valid module payload under the wrong source identity must fall back to compilation"
+    );
+}
+
+#[test]
 fn module_artifact_is_relocatable_and_rebinds_exact_source_path() {
     let source = "pub fn answer() { fn inner() { return 42 }; return inner() }\n";
     let first_path = Path::new("/workspace/first/module.harn");
