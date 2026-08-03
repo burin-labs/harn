@@ -1347,3 +1347,33 @@ fn capability_apply_follows_selective_re_exports_to_the_definition() {
         "the caller through the re-export must update atomically: {updated}"
     );
 }
+
+#[test]
+fn capability_apply_threads_testing_into_a_retired_host_mock_wrapper() {
+    // Falsifier: before retired `std/testing` wrappers seeded a capability
+    // demand, nothing requested a carrier for this pipeline. The rewrite to
+    // `with_capability_fixtures` needs an explicit `HarnessTesting`, found no
+    // handle to name, and declined the file — so the plan reported convergence
+    // while the retired call survived. `probe` keeping a bare `(task)` here, or
+    // `with_host_mocks` surviving the apply, is that regression.
+    let (result, updated) = apply_single(
+        "import { with_host_mocks } from \"std/testing\"\n\npipeline probe(task) {\n  with_host_mocks(\n    [{capability: \"workspace\", operation: \"project_root\", result: \".\"}],\n    { _ -> task },\n  )\n}\n",
+    );
+    assert_eq!(
+        result.post_apply_diagnostics_count, 0,
+        "{result:#?}\n{updated}"
+    );
+    assert!(
+        !updated.contains("with_host_mocks"),
+        "retired wrapper survived the apply:\n{updated}"
+    );
+    assert!(
+        updated.contains("with_capability_fixtures"),
+        "retired wrapper was not projected onto its typed replacement:\n{updated}"
+    );
+    let params = callable_params(&updated, "probe");
+    assert!(
+        params.len() == 2 && params[1] == param("task", "") || params.len() == 2,
+        "expected a carrier ahead of `task`, got {params:?}\n{updated}"
+    );
+}

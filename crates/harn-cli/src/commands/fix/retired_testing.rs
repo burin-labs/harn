@@ -8,12 +8,30 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+use harn_builtin_meta::CapabilityId;
 use harn_lexer::{FixEdit, Span};
 use harn_parser::{visit, DiagnosticCode as Code, Node, Repair, RepairSafety};
 
 use super::{capability_argument_for_span, RepairCandidate, RepairImpactWire};
 
 const RETIRED_UNUSED_HELPERS: &[&str] = &["with_mocks", "with_host_mocks"];
+
+/// Capabilities a retired `std/testing` wrapper needs once it is projected onto
+/// its typed replacement.
+///
+/// The replacements take explicit handles — `with_host_mocks` becomes
+/// `with_capability_fixtures(testing, ..)`, and `with_mocks` splits into a
+/// `HarnessTesting` scope around a `HarnessLlm` script. The whole-program pass
+/// seeds these so the enclosing callable actually receives a carrier; without
+/// the seed the rewrite has no handle to name, declines the file, and the plan
+/// converges while retired calls remain.
+pub(super) fn retired_wrapper_capabilities(callee: &str) -> &'static [CapabilityId] {
+    match callee {
+        "with_host_mocks" => &[CapabilityId::Testing],
+        "with_mocks" => &[CapabilityId::Testing, CapabilityId::Llm],
+        _ => &[],
+    }
+}
 
 #[derive(Clone)]
 struct TestingCall {
