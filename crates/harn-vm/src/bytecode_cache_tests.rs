@@ -57,7 +57,7 @@ fn header_mismatch_returns_none() {
     let other = CacheKey {
         source_hash: [0xAB; 32],
         context_hash: key.context_hash,
-        harn_version: HARN_VERSION,
+        harn_version: std::borrow::Cow::Borrowed(HARN_VERSION),
         compiler_tag: key.compiler_tag,
     };
     assert!(read_entry_candidate(&path, &other).unwrap().is_none());
@@ -578,7 +578,7 @@ fn seed_entry(tmp: &Path, dep_body: &str, settle: Settle) -> (PathBuf, String) {
     let key = CacheKey {
         source_hash: sha256(entry_source.as_bytes()),
         context_hash,
-        harn_version: HARN_VERSION,
+        harn_version: std::borrow::Cow::Borrowed(HARN_VERSION),
         compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
     };
     let chunk = compile_source(&entry_source).expect("compile");
@@ -715,7 +715,7 @@ fn stored_manifest(entry: &Path, entry_source: &str) -> ContextManifest {
         &CacheKey {
             source_hash: sha256(entry_source.as_bytes()),
             context_hash: [0u8; 32],
-            harn_version: HARN_VERSION,
+            harn_version: std::borrow::Cow::Borrowed(HARN_VERSION),
             compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
         },
     )
@@ -857,7 +857,7 @@ fn a_touched_dependency_refreshes_the_manifest_instead_of_re_walking_forever() {
         &CacheKey {
             source_hash: sha256(entry_source.as_bytes()),
             context_hash: [0u8; 32],
-            harn_version: HARN_VERSION,
+            harn_version: std::borrow::Cow::Borrowed(HARN_VERSION),
             compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
         },
     )
@@ -977,7 +977,7 @@ fn store_beside(entry: &Path, source: &str) -> PathBuf {
     let key = CacheKey {
         source_hash: sha256(source.as_bytes()),
         context_hash,
-        harn_version: HARN_VERSION,
+        harn_version: std::borrow::Cow::Borrowed(HARN_VERSION),
         compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
     };
     let artifact = adjacent_cache_path(entry).unwrap();
@@ -1060,7 +1060,7 @@ fn an_artifact_from_another_build_of_this_version_is_not_served() {
     let key = CacheKey {
         source_hash: sha256(source.as_bytes()),
         context_hash,
-        harn_version: HARN_VERSION,
+        harn_version: std::borrow::Cow::Borrowed(HARN_VERSION),
         compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
     };
     let payload = serialize_cache_payload(&EntryPayload {
@@ -1091,4 +1091,36 @@ fn an_artifact_from_another_build_of_this_version_is_not_served() {
         load(&entry, &source).chunk.is_some(),
         "an artifact from this build must still take the fast path"
     );
+}
+
+/// Release preparation snapshots the AOT generator *before* rewriting
+/// `Cargo.toml`, so the generator's own `HARN_VERSION` is one patch behind the
+/// version the shipped binary reports. The emitted artifact must carry the
+/// version it will be loaded under, not the version it was produced under:
+/// otherwise the released runtime rejects its own embedded payload and falls
+/// back to source compilation.
+#[test]
+fn artifact_header_stamps_the_key_version_not_the_build_version() {
+    let chunk = compile_source("1 + 1").expect("compile");
+    let source_path = Path::new("/tmp/stamp.harn");
+    let built_at = CacheKey::from_source(source_path, "1 + 1");
+    let shipped_as = CacheKey::from_source(source_path, "1 + 1").for_artifact_version("99.99.99");
+
+    assert_eq!(built_at.harn_version, HARN_VERSION);
+    assert_eq!(shipped_as.harn_version, "99.99.99");
+
+    let built_bytes = serialize_chunk_artifact(&built_at, &chunk).expect("serialize built");
+    let shipped_bytes = serialize_chunk_artifact(&shipped_as, &chunk).expect("serialize shipped");
+    assert_ne!(
+        built_bytes, shipped_bytes,
+        "the requested artifact version must reach the header bytes"
+    );
+
+    // A runtime at the stamped version accepts the artifact; the generator's own
+    // version does not. That asymmetry is the whole point of the override.
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("stamp.harnbc");
+    fs::write(&path, &shipped_bytes).expect("write");
+    assert!(read_entry_candidate(&path, &shipped_as).unwrap().is_some());
+    assert!(read_entry_candidate(&path, &built_at).unwrap().is_none());
 }
