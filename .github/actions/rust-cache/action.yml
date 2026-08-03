@@ -21,6 +21,16 @@ inputs:
     description: Optional absolute Cargo target directory to cache instead of the workspace-relative default.
     required: false
     default: ""
+  workspaces:
+    description: >-
+      Cargo workspace roots, one per line, relative to the checkout root.
+      Only needed when the Rust workspace is not at the repository root — a
+      consumer that checks harn out into a subdirectory must name it, or the
+      cache key is computed against a directory with no Cargo.lock and the
+      save is silently useless.
+    required: false
+    default: ""
+
   broad-restore-prefix:
     description: Optional same-version cache key prefix to restore before the precise Swatinem key.
     required: false
@@ -74,4 +84,7 @@ runs:
         cache-bin: ${{ inputs.cache-bin }}
         cache-targets: ${{ inputs.target-dir == '' }}
         cache-directories: ${{ inputs.target-dir }}
+        # Fall back to Swatinem's documented default rather than passing an
+        # empty string, so existing callers keep their exact current key.
+        workspaces: ${{ inputs.workspaces != '' && inputs.workspaces || '.' }}
         save-if: ${{ inputs.save == 'true' && github.ref == 'refs/heads/main' }}
