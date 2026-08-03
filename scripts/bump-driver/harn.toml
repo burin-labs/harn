@@ -14,7 +14,6 @@ default = "github_remote.harn"
 require_public_api_types = true
 
 [dependencies]
-# Immutable development pin for harn-github-connector#224. Replace with the
-# release tag once that exact commit is published; harn.lock supplies the
-# content-addressed installation proof in either case.
-harn-github-connector = { git = "https://github.com/burin-labs/harn-github-connector", rev = "f20d2c1d409b2b73678bcf5fb9e4529e1c0a7417" }
+# Immutable release tag plus the content-addressed lockfile keep CI and local
+# bump runs on the same reviewed connector implementation.
+harn-github-connector = { git = "https://github.com/burin-labs/harn-github-connector", tag = "v0.6.6" }

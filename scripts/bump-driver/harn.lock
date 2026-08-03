@@ -7,12 +7,13 @@ protocol_artifact_version = "0.10.51"
 [[package]]
 name = "harn-github-connector"
 source = "git+https://github.com/burin-labs/harn-github-connector"
-rev_request = "f20d2c1d409b2b73678bcf5fb9e4529e1c0a7417"
-commit = "f20d2c1d409b2b73678bcf5fb9e4529e1c0a7417"
-content_hash = "sha256-v2:3e1445d4b3edcebcae9237eab99f8951257f0518ed50dbc860da9562084b0499"
-package_version = "0.6.5"
+tag = "v0.6.6"
+rev_request = "v0.6.6"
+commit = "9f88e2669e43d39544277d4a9a5dff29016bf1b4"
+content_hash = "sha256-v2:abf064a9b874aa0f7a87428ef55c8dc198f22f5bbea601ca8664f94f3f721977"
+package_version = "0.6.6"
 harn_compat = ">=0.10.50,<0.11"
-manifest_digest = "sha256:cde4badce10347a8de90c72206e1f98525ed69c24bcb396a70d48ecda018e221"
+manifest_digest = "sha256:89f07847f81770aa77b6e6ff1055f1941c71baf845af6cdda45e73fc564fe20c"
 
 [[package.exports.modules]]
 name = "default"
