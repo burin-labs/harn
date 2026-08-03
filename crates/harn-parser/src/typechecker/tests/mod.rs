@@ -18,6 +18,7 @@ mod calls_and_generics;
 mod coalesce;
 mod enum_construct;
 mod exhaustiveness;
+mod harness_capabilities;
 mod imports;
 mod interfaces;
 mod lexical_capture;

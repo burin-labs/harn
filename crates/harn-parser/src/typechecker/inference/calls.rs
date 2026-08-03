@@ -699,6 +699,11 @@ impl TypeChecker {
         else {
             return false;
         };
+        // A miss here cannot be reported as an unknown method. `harn-parser`
+        // only sees capability methods that `harn-vm` has installed into the
+        // builtin manifest, so before the VM installs it a perfectly valid
+        // `harness.runtime.shared_cell` is indistinguishable from a typo. See
+        // #6101.
         let Some(sig) = builtin_signatures::lookup_capability_method(capability, method) else {
             return false;
         };
