@@ -154,11 +154,16 @@ pub(super) fn render_capability_migration_pass(
     for (path, edits) in edits_by_file {
         let edits = dedupe_wire_edits(edits);
         let path_ref = Path::new(path);
-        let edited = edited_source(path_ref, &edits)?;
-        let candidate = format_capability_candidate(path_ref, &edited)?;
-        harn_parser::parse_source(&candidate).map_err(|errors| {
+        let candidate = (|| {
+            let edited = edited_source(path_ref, &edits)?;
+            let candidate = format_capability_candidate(path_ref, &edited)?;
+            harn_parser::parse_source(&candidate)
+                .map_err(|errors| format!("invalid Harn syntax: {errors:?}"))?;
+            Ok::<_, String>(candidate)
+        })()
+        .map_err(|error| {
             format!(
-                "capability migration produced invalid Harn for {path}; no files from this pass were written: {errors:?}"
+                "capability migration rejected the candidate for {path}; no files from this pass were written: {error}"
             )
         })?;
         rendered_files.insert(path.clone(), candidate);
