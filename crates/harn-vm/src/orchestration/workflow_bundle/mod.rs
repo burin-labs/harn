@@ -653,12 +653,12 @@ pub fn workflow_bundle_hash(
             if pair[0].0 == pair[1].0 {
                 return Err(WorkflowBundleError::new(
                     WorkflowBundleErrorKind::DuplicateArchiveEntry,
-                    format!("duplicate archive entry {}", pair[0].0.display()),
+                    format!("duplicate archive entry {}", pair[0].0),
                 ));
             }
         }
         for (path, entry) in entries {
-            let path_bytes = path.to_string_lossy();
+            let path_bytes = path;
             hasher.update(b"\nentry\0");
             hasher.update(&(path_bytes.len() as u64).to_le_bytes());
             hasher.update(path_bytes.as_bytes());

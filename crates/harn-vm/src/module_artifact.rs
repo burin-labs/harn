@@ -55,7 +55,7 @@ pub struct ModuleImportSpec {
 }
 
 /// The mutually exclusive binding forms of an import declaration.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ModuleImportBinding {
     Wildcard,
     Selected(Vec<String>),

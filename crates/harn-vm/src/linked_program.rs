@@ -32,6 +32,7 @@ pub fn link_program(
     project_root: &Path,
 ) -> Result<LinkedProgramArtifact, LinkedProgramError> {
     let entrypoint = harn_modules::canonical_path(entrypoint);
+    let project_root = harn_modules::canonical_path(project_root);
     let build = harn_modules::build_closed_program(std::slice::from_ref(&entrypoint));
     let reachability = harn_modules::closed_program_reachability(&build, &entrypoint);
     let entry_source = build.parsed_sources.get(&entrypoint).ok_or_else(|| {
@@ -55,7 +56,7 @@ pub fn link_program(
         })?
         .freeze_for_cache();
 
-    let entrypoint_rel = entrypoint.strip_prefix(project_root).map_err(|_| {
+    let entrypoint_rel = entrypoint.strip_prefix(&project_root).map_err(|_| {
         LinkedProgramError::invalid(format!(
             "entrypoint {} is outside package root {}",
             entrypoint.display(),
@@ -99,7 +100,7 @@ pub fn link_program(
                 path.display()
             ))
         })?;
-        let archive_path = archive_module_path(project_root, &path)?;
+        let archive_path = archive_module_path(&project_root, &path)?;
         digest_inputs.push((archive_path.clone(), parsed.source.as_bytes().to_vec()));
         if path == entrypoint {
             continue;
@@ -548,6 +549,7 @@ impl std::error::Error for LinkedProgramError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     #[test]
     fn identity_rejects_codegen_drift() {
@@ -555,5 +557,55 @@ mod tests {
         identity.codegen_fingerprint.push_str("-different");
         let error = identity.validate_current().unwrap_err();
         assert_eq!(error.code, "linked_program.incompatible");
+    }
+
+    #[test]
+    fn closed_link_retains_private_callable_closure_and_initializer_roots() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path().join("library.harn");
+        let entry = dir.path().join("entry.harn");
+        fs::write(
+            &library,
+            r#"
+            fn helper_a() { helper_b() }
+            fn helper_b() { 7 }
+            fn init_helper() { "initialized" }
+            const init_hook = init_helper
+            pub fn kept() { helper_a() }
+            pub fn dead() { "dead" }
+            pub type KeptShape = { value: int }
+            pub type DeadShape = { value: string }
+            "#,
+        )
+        .unwrap();
+        fs::write(
+            &entry,
+            r#"
+            import * as lib from "./library.harn"
+            fn main() { println(lib.kept()) }
+            "#,
+        )
+        .unwrap();
+
+        let linked = link_program(&entry, dir.path()).expect("link succeeds");
+        let library = &linked.modules[Path::new("library.harn")];
+        assert!(library.functions.contains_key("kept"));
+        assert!(library.functions.contains_key("helper_a"));
+        assert!(library.functions.contains_key("helper_b"));
+        assert!(library.functions.contains_key("init_helper"));
+        assert!(!library.functions.contains_key("dead"));
+        assert_eq!(
+            library.public_exports.keys().cloned().collect::<Vec<_>>(),
+            ["kept"]
+        );
+        let report = linked
+            .report
+            .modules
+            .iter()
+            .find(|module| module.path == Path::new("library.harn"))
+            .unwrap();
+        assert!(report.removed_symbols.iter().any(|name| name == "dead"));
+        assert!(report.initializer_bytes > 0);
+        assert!(report.output_bytes < report.input_bytes);
     }
 }

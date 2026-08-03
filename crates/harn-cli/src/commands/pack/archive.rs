@@ -456,7 +456,7 @@ fn set_file_mode(_path: &Path, _mode: u32) -> Result<(), PackError> {
 /// Stable schema version for the `harn pack verify --json` envelope.
 /// Bump when [`PackVerifyJsonData`] changes shape in a way agents need
 /// to detect.
-pub const PACK_VERIFY_SCHEMA_VERSION: u32 = 2;
+pub const PACK_VERIFY_SCHEMA_VERSION: u32 = 3;
 
 /// JSON payload emitted under `JsonEnvelope.data` for `harn pack verify`.
 #[derive(Debug, Clone, Serialize)]
