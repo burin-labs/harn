@@ -9,6 +9,302 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.53
+
+### Breaking
+
+- Harn now defaults to stable MCP 2026-07-28. The official `rmcp` SDK owns
+  stdio client lifecycle, version negotiation, framing, request association,
+  inbound client requests, and shutdown; Harn retains host policy, OAuth, egress,
+  audit, and VM conversion. Release-candidate aliases and task shapes were
+  removed, the redundant `protocol_mode` client option is gone, stable task
+  polling and error codes are supported, and the generated protocol artifacts now
+  project the released schema. Harn-owned servers now implement stable MCP only:
+  the pre-stable `initialize` lifecycle, session headers, legacy SSE routes and
+  their CLI flags, and `resources/subscribe` compatibility RPCs were removed.
+  The unratified SEP-2356 file-input experiment and its `std/mcp` wrappers were
+  also removed instead of carrying a draft wire extension into the stable cutover.
+- **Portable Harn packages now compile into one canonical artifact (#6080).**
+  `harn portable`, `harn bench portable`, and browser workers now resolve and
+  execute the same closed module artifact through the canonical compiler and
+  kernel. Named calls, module closure, and opcode layouts no longer have
+  target-specific classifiers. **Version 1 program artifacts must be recompiled
+  from source**; the kernel fails closed with `artifact_version` ("artifact
+  version 1 is not supported; expected 2") rather than reading them. Recompile
+  with `harn portable compile`, or `harn portable package` first when the
+  program has imports.
+
+### Added
+
+- Harn programs can compile, start, suspend, resume, and drive versioned
+  Portable Kernel artifacts through `std/portable`. The same reducer can run in
+  native and browser hosts. Every host uses one capability record with an
+  optional snapshot key.
+- Add `harn runs report` and the `harn.run.report` MCP tool as one versioned,
+  redacted projection over a root run, delegated children, trace spans,
+  transcript pointers, and an optional event timeline.
+- **Run and session views now expose a versioned public contract (#6032,
+  #6034).** Compatibility fixtures cover output, bounded timeline evidence,
+  delegated-worker lineage, and reviews.
+- **Run reviews bind model assessments to deterministic run reports (#6035).**
+  `harn runs review` validates one `harn.run_report.v1` artifact, makes one
+  small/value-routed structured model call, and emits `harn.run_review.v1` JSON
+  with evidence pointers, propagated limitations, lifecycle receipts,
+  provenance hashes, usage, cost, and an idempotency key. Large reports use a
+  deterministic bounded evidence projection with explicit omission counts and
+  hashes.
+- Added a `harn-mcp` skill covering MCP client connections, server definitions,
+  inbound roots/sampling/elicitation, and deterministic capability fixtures, so
+  `harn skill get harn-mcp` answers how to write MCP integrations in Harn.
+
+### Changed
+
+- `harn test conformance --parallel` now uses bounded, process-isolated workers
+  and combines their text, JSON, timing, and JUnit results deterministically.
+  `make conformance` and the CI audit gate use this runner. Set
+  `HARN_CONFORMANCE_JOBS` to limit CI workers.
+- Move reusable runtime-bump GitHub behavior out of stdlib and into the locked
+  `harn-github-connector` package. `std/bump/live` now accepts one typed remote
+  capability, while the connector owns exact PR/base leases, worktree encoding,
+  branch publication, signed commits, tree comparison, and pull-request upserts.
+- `harn pack` now emits one closed linked-program artifact. Static namespace
+  imports retain only the used exports and their private dependencies, while
+  dynamic namespace uses and module initialization remain conservative. Pack,
+  verify, and run JSON expose a deterministic per-symbol link report and runtime
+  artifact state. Schema-v2 packs remain readable through the legacy cache
+  adapter.
+- **Static namespace imports now bind only proven member demand (#6061).**
+  `import * as ui` records direct uses such as `ui.render` in entry bytecode
+  and cached module metadata. Target modules and initialization remain
+  complete; alias escape, dynamic access, shadowing, and public re-export keep
+  the full namespace.
+- `harn runs review` now requires an explicit `--report` or `--run-record`
+  input, and the new `harn.run.review` MCP tool exposes the same distinction. A
+  run record can be reviewed without an intermediate report file while
+  preserving identical review provenance.
+- Raised the x86_64 Linux release binary-size ceiling to 224 MiB and rebaselined
+  it on the v0.10.53 candidate (233,410,816 bytes at `14aad89`). The previous
+  220 MiB ceiling was set against the v0.10.51 baseline and left 1.78 MiB of
+  headroom, which cumulative growth since then consumed.
+
+### Removed
+
+- Replace the eval-specific `harn.eval.inspect_run` MCP tool with
+  `harn.run.report`. Callers now pass the root run-record `path` (and optional
+  `events_db`) instead of an eval output directory; the CLI equivalent is
+  `harn runs report <path>`.
+
+### Fixed
+
+- Conformance executions now keep temporary files and capability policy within a
+  case-owned workspace root, including when the runner checkout itself is below
+  the host temporary directory. The full local gate also snapshots one Harn
+  executable and reuses those immutable bytes across parallel checks instead of
+  launching competing Cargo builds.
+- The shared agent shell guard now uses the product-neutral
+  `AGENT_SHELL_GUARD_DEBUG` switch, so byte-exact consumers do not need a newer
+  Harn environment registry merely to expose adapter diagnostics.
+- Accept exact record literals and structurally compatible inferred values at
+  named and intersected record parameters. Direct literals now reject unknown
+  fields in every closed record, including builtin option records. Open records
+  remain the explicit way to accept extra fields.
+- `harn package verify` now discovers tests recursively under `tests/`, so
+  packages can organize unit, contract, and integration tests without the package
+  gate skipping or under-counting them.
+- Plain `make setup` now preserves worktree-isolated Cargo build state created by
+  bootstrap setup instead of silently replacing it with a cold checkout-local
+  target directory.
+- **Standalone apps now receive the standard tool lifecycle (#6018).** The app
+  host sends MCP Apps tool-input and successful tool-result notifications for
+  every View-initiated tool call, including apps that use their own renderer.
+- Run synchronous command-policy host operations on the blocking pool and propagate structured parallel cancellation into
+  their process waits, so a terminal branch failure promptly interrupts sibling command trees.
+- **ACP code-mode read-only roots now remain effective without changing process
+  or network confinement (#6022).** Embedders can grant access to host-owned
+  read-only assets independently from OS process sandbox settings.
+- **Standalone apps now follow the MCP Apps startup order (#6025).** Views
+  finish connecting before using tools, the host reports only supported
+  capabilities, shared Harn views declare only the host method they use, and
+  reserved sandbox messages stay outside app HTML. The host now rejects
+  malformed browser policy, unknown server methods, and tool calls without a
+  request ID.
+- Windows release-candidate certification no longer restores the shared main-branch
+  target generation into its fixed-size Dev Drive. Version-bumped workspaces build
+  cold instead of retaining two complete artifact generations until LLVM runs out
+  of disk space.
+- Run reports now recover public assistant output from canonical embedded transcripts when stages omit it.
+- Delegated agents now keep session and run identities distinct across results,
+  worker snapshots, transcript events, and ACP lifecycle events. Background
+  waits emit one auditable join receipt with completion and collection timing.
+- `pub import` facades now preserve the full parameter and return types of
+  re-exported functions. Callers can use the package entry point without extra
+  type imports or casts.
+- Activate installed package connector implementations during ordinary
+  `harn run` and script-driven MCP serving, using the same validated loader as
+  the orchestrator.
+- Complete the bump adapter's typed version-file boundary: reads use `HarnessFs`,
+  exact fixtures inject the capability, and a failed write cannot run the refresh
+  command.
+- **Large typed package facades now load without a 64 KiB schema-initializer
+  failure (#6052).** Harn compiles each exported type schema into its own
+  addressable initializer while preserving declaration order and exact runtime
+  validation.
+- Release preparation now snapshots the exact-source CLI AOT generator before
+  rewriting Harn's workspace version. This avoids a second shared-graph
+  compilation while still generating the payload from the bumped tree.
+- `harn run <bundle.harnpack>` now reaches verified packaged entry and module
+  bytecode on the first replay by projecting each artifact beside its source in
+  the content-addressed cache. Packaged entry keys are relocatable across
+  unchanged source trees, while source, dependency, compiler, and runtime
+  mismatches still fail closed and recompile. Replay cache hits are checked
+  byte-for-byte against the verified archive and repaired atomically, and signed
+  legacy asset paths are bound through the module manifest and SBOM before
+  execution. `harn pack --json` also reports separate counts and byte sizes for
+  `.harnbc` and `.harnmod` artifacts.
+- Release preparation now lets the frozen exact-source CLI AOT generator target
+  the explicitly validated bumped artifact version without rebuilding it after
+  the metadata change.
+- Installing MCP capability fixtures no longer restarts a live HTTP client, so a
+  server-to-client elicitation can no longer be stranded on an abandoned
+  connection until the MCP deadline expires.
+- `harn runs review` no longer discards a completed model review when the model
+  cites the evidence document it was shown. The prompt now presents that evidence
+  as its own rooted document, and citations are normalized once to canonical
+  report-rooted JSON Pointers. Pointers that resolve under no rooting still fail
+  closed.
+- Release preparation now stamps the released Harn version into the CLI AOT bytecode payload instead of the
+  version the generator binary happened to be built at. The release gate snapshots that generator before
+  rewriting `Cargo.toml`, so every artifact was written one patch version behind the binary that would load it.
+  The shipped runtime validates that header on load, so the embedded payload would have been rejected and
+  silently fall back to source compilation, and `make check-cli-aot` reported the artifact stale. `CacheKey` now
+  carries the artifact version as typed state rather than reading a compile-time global at encode time.
+- `harn check` now rejects an unknown capability on a `Harness` receiver, such as
+  `harness.crypto`. It was accepted at check time and only failed when the
+  expression executed, so a mistake on a rarely-taken branch could survive every
+  gate and surface in production. The capability list comes from the same
+  registry the VM enumerates when it raises the same error.
+- Release certification no longer fails because a test asserted a wall-clock
+  latency budget. Two `make test` cases asserted that a 10k-event query finished
+  in under 500 ms; both measure whatever else the machine is doing, and one failed
+  a v0.10.53 release attempt at 8.49 s while the release audit built the CLI AOT
+  payload on the same host. Both keep their correctness assertions and still
+  report the measured duration. `make lint-test-patterns` now rejects
+  millisecond-scale duration budgets in tests, which the previous
+  `Instant::now() <` rule did not match.
+- Package verification runs the CLI AOT generator from a snapshot the caller
+  owns rather than from the shared Cargo target directory, so a concurrent build
+  can no longer replace the executable mid-run. The release audit summary now
+  reports every lane that is still failing, including one killed by a signal,
+  together with its exit status.
+- Accept and validate the `acquisition` block that the release certifier records on every hosted platform
+  proof. `platform_proof_schema` is a closed object and never learned about the field, so every hosted
+  receipt produced since the certifier began recording how it obtained each workflow run was rejected with
+  `invalid_receipt`, and the release gate hard-fails rather than replanning when an explicitly supplied
+  receipt is refused. A v0.10.53 attempt reached a fully successful certification and was still blocked by
+  its own receipt. The acquisition decision is now typed — `action` and `selection_reason` are enums, and
+  each cancellation entry is either the connector's accepted-cancel receipt or a refused-cancel record —
+  so it is validated as proof rather than tolerated as free-form data.
+- Make the release binary-size gate produce its own diagnosis. The cargo-bloat report resolved the built
+  binary through `CARGO_TARGET_DIR` while the build and the byte gate use `./target`, so it failed with
+  `harn binary not found`; under `set -e` plus `continue-on-error` that silently skipped `cargo bloat`
+  altogether. The report also only ran for warm builds or an opt-in benchmark, so a release blocked by the
+  byte gate shipped no attribution for what grew. It now names the binary explicitly and runs whenever the
+  budget step fails, which is when the attribution is actually needed and after the expensive build is
+  already paid for.
+- The pre-push hook no longer aborts when the current branch's upstream has been
+  deleted. `git rev-parse @{upstream}` prints the literal string `@{upstream}`
+  while exiting non-zero in that state, which defeated `hook_push_base`'s
+  `origin/main` fallback and failed the hook under `set -e`. Since a remote head
+  branch is auto-deleted once its PR merges, this blocked every subsequent push
+  from the local branch left behind — including ref deletions that touch no
+  commits.
+- **Capability migrations now preserve compact orchestration and call shapes.**
+  `harn fix --capability-migrations-only` keeps three-or-more-capability
+  orchestration on root `Harness`, recognizes local and imported named
+  capability bundles, rewrites newly split accesses to their explicit
+  bindings, and replaces existing imported carrier arguments in place instead
+  of shifting ordinary arguments. A root requirement now widens a narrow
+  carrier in place, stale ambient receiver names are rebound to the explicit
+  carrier, and typed arity diagnostics let zero-argument imported helpers gain
+  their omitted capability. Retired `std/testing` imports no longer prevent the
+  remaining module from loading, and `host_call_count()` projects through the
+  typed testing handle. Multiline declarations and calls retain clean line
+  endings when the migration inserts a leading capability.
+- Capability migrations now reject overlapping edit plans and validate each
+  formatted candidate before replacing its source file. If any later file or
+  fixed-point pass fails, `harn fix` restores every file touched by the command.
+- `host_has` now reports the host operations answered by the active
+  `harness.testing` fixture scope. A script that gates its host call on the
+  capability manifest previously skipped the call and never reached its fixture,
+  so the retired `with_host_mocks` wrapper — which merged its mocks into the
+  manifest — could not be replaced by `with_capability_fixtures` without silently
+  losing the behavior under test.
+- **A capability repair no longer shifts a call's ordinary arguments one slot.**
+  A diagnostic names one argument slot, not the callee's declared capability
+  prefix, so when a callee took several capabilities and the call omitted all of
+  them, the reported slot was the second or later one. Inserting there left the
+  preceding ordinary argument sitting in a capability position and moved every
+  later argument one slot along, turning an incomplete call into a wrong one
+  whose damage resurfaced as an unrelated type error a slot away. Capability
+  parameters are always a contiguous leading prefix, so a lone insertion is now
+  taken only when every preceding argument already carries a capability. Calls
+  that fail that test belong to the whole-program pass, which reads the callee's
+  declared prefix from the module graph and inserts it whole; when that pass
+  cannot resolve the call, the site is left intact for a human instead of being
+  silently shifted.
+- Claude sessions no longer block on the compiling parts of dev setup. The
+  SessionStart hook waits only for the `bootstrap` profile, which configures git
+  hooks, merge drivers, and the per-worktree Cargo target, and warms tool
+  installs, the portal build, the workspace check, and local signing in the
+  background. Sessions in a checkout that tracks `main` previously waited through
+  a full setup whenever `Cargo.lock` or a `package-lock.json` moved, which was
+  measured at up to 432s.
+- **`harn fix --capability-migrations-only` no longer aborts a whole pass on a
+  call to an imported callee that needs several capabilities.** The
+  imported-signature pass and the per-diagnostic pass both inserted at the same
+  argument index, leaving two conflicting zero-width edits at one offset, and
+  the overlap check refused the entire candidate — so an otherwise complete
+  migration wrote nothing. The callee's declared signature now owns that
+  insertion.
+- `harn fix --capability-migrations-only` now threads a capability handle into
+  callables that call retired `std/testing` wrappers. The whole-program pass
+  previously seeded demand only from ambient builtins, so `with_host_mocks` and
+  `with_mocks` never requested the `HarnessTesting`/`HarnessLlm` carrier their
+  typed replacements require. The rewrite found no handle to name, declined the
+  file, and the plan reported convergence while retired calls survived.
+- `harn runs report --events-db` now projects canonical delegated-child join
+  receipts, including uncollected terminal children and the worst observed
+  terminal-to-collection lag. Missing or truncated event evidence remains
+  explicitly unknown.
+- Run reports now mark bounded timelines as truncated so omitted later evidence cannot be mistaken for absence.
+- CI lanes that ran Rust tests by invoking cargo directly no longer inherit
+  Rust's 2 MiB spawned-thread stack instead of the 16 MiB the rest of the suite
+  uses. `thread-parity.yml` and the flake-detection rerun both bypassed
+  `scripts/ci/run_rust_test_lane.sh`, so `harn-serve`'s A2A handoff test aborted
+  with `fatal runtime error: stack overflow` at every thread count — reporting a
+  stack-size difference as a thread-count parity failure, and keeping both
+  scheduled lanes red since 2026-07-27. Two more lanes (the Landlock escape
+  proof and the macOS package-hash parity check) had the same gap without a
+  visible failure. `make check-rust-test-lane-policy` now fails any workflow
+  step that runs Rust tests without either the lane wrapper or an explicit
+  `RUST_MIN_STACK`.
+- `harn fix --capability-migrations-only` now projects the retired `with_mocks`
+  wrapper onto its successor `with_scenario`, threading the root `Harness` and
+  renaming the `host_mocks` / `llm_mocks` config keys to `capabilities` / `llm`.
+  Legacy host entries reached through the fixture-source walk also get the
+  `operation` -> `method` field migration. Previously the repair only dropped the
+  import when `with_mocks` was uncalled, so every live call site was left behind.
+  Also corrects a `std/testing` doc comment that still pointed at `with_mocks`.
+- **The retired `with_mocks` migration no longer silently disarms fixtures at a
+  call site whose config it cannot read.** `with_mocks` read `host_mocks` and
+  `llm_mocks`; `with_scenario` reads `capabilities` and `llm`. Keys can only be
+  rewritten on a dict literal, so renaming the callee over a forwarded
+  parameter, a helper call, or a config carrying an unrecognized key left
+  `with_scenario` reading two fields that were not there — both scopes
+  installed empty and the body ran against the real host, while the retired call
+  site was gone and the plan converged. Those call sites now stay inert for a
+  human.
+
 ## v0.10.52
 
 ### Breaking
