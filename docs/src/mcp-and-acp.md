@@ -240,6 +240,12 @@ project root and rejects files outside the canonical project and state roots,
 including `..` and symlink escapes. Report text and event timelines pass
 through Harn's redaction policy before they are returned.
 
+The `harn.run.review` tool accepts either `report_path` or `run_record_path`,
+never both. The latter composes the same report projection in memory and also
+accepts `events_db`. It then makes one provenance-bound model call, so the tool
+is non-destructive but not read-only; its structured result is
+`harn.run_review.v1`. The same project and state-root confinement applies.
+
 When an LLM uses `tool_search` (progressive tool disclosure), MCP tools
 are auto-tagged with both `mcp:<server>` and `<server>` in the BM25
 corpus. That means a query like `"github"` or `"mcp:github"` surfaces

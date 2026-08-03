@@ -115,7 +115,8 @@ with delegated child runs, timelines, trace spans, and verified transcript
 pointers, then reports structural checks without changing the source data.
 
 **Run review.** The versioned model assessment produced by `harn runs review`
-from one validated run report. It binds its verdict and evidence-addressed
+or `harn.run.review` from one validated run report. Harn can build that report
+in memory from a root run record. The review binds its verdict and evidence-addressed
 findings to the report, rubric, and resolved model route. It does not replace
 the run report's deterministic checks or read source artifacts itself.
 

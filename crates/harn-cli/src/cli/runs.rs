@@ -74,8 +74,30 @@ pub(crate) struct RunsReportArgs {
 
 #[derive(Debug, Args)]
 pub(crate) struct RunsReviewArgs {
-    /// Path to a harn.run_report.v1 JSON file.
-    pub path: PathBuf,
+    /// Review an existing harn.run_report.v1 JSON file.
+    #[arg(
+        long,
+        value_name = "PATH",
+        conflicts_with = "run_record",
+        required_unless_present = "run_record"
+    )]
+    pub report: Option<PathBuf>,
+    /// Build and review a report directly from this root run record.
+    #[arg(
+        long,
+        value_name = "PATH",
+        conflicts_with = "report",
+        required_unless_present = "report"
+    )]
+    pub run_record: Option<PathBuf>,
+    /// Optional SQLite event log used when building a report from --run-record.
+    #[arg(
+        long,
+        value_name = "PATH",
+        requires = "run_record",
+        conflicts_with = "report"
+    )]
+    pub events_db: Option<PathBuf>,
     /// Read the review rubric from this UTF-8 file.
     #[arg(long, value_name = "PATH")]
     pub rubric: Option<PathBuf>,

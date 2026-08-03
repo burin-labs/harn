@@ -9,7 +9,10 @@ use std::path::PathBuf;
 use crate::llm::{execute_llm_call, extract_llm_options, vm_value_to_json};
 use crate::value::{VmError, VmValue};
 
-use super::{validate_run_report, RunReport, ViewProducer};
+use super::{
+    build_run_report, read_checked_run_report_bytes, validate_run_report, RunReport,
+    RunReportRequest, ViewProducer,
+};
 
 pub const RUN_REVIEW_SCHEMA: &str = "harn.run_review.v1";
 pub const RUN_REVIEW_SCHEMA_VERSION: u32 = 1;
@@ -20,8 +23,19 @@ const MAX_PROJECTED_STRING_BYTES: usize = 2_048;
 pub const DEFAULT_RUN_REVIEW_RUBRIC: &str = "Assess the run using only the supplied run report. Judge whether the run completed its stated work, coordinated reliably, exposed material failures, and preserved enough evidence to support the verdict. Prefer a limitation over an unsupported claim.";
 
 #[derive(Clone, Debug)]
+pub enum RunReviewInput {
+    Report {
+        path: PathBuf,
+        /// Empty for a trusted local CLI call. Remote adapters must provide
+        /// every root from which the review may read.
+        allowed_roots: Vec<PathBuf>,
+    },
+    RunRecord(RunReportRequest),
+}
+
+#[derive(Clone, Debug)]
 pub struct RunReviewRequest {
-    pub report_path: PathBuf,
+    pub input: RunReviewInput,
     pub rubric: String,
     pub model: Option<String>,
 }
@@ -178,11 +192,25 @@ async fn review_run_report_with_clock(
     clock: &dyn Clock,
 ) -> Result<RunReview, RunReviewError> {
     let mut lifecycle = LifecycleRecorder::new(clock);
-    let bytes = std::fs::read(&request.report_path)
-        .map_err(|error| lifecycle.invalid(format!("read run report: {error}")))?;
-    lifecycle.advance(RunReviewState::Located);
-    let report: RunReport = serde_json::from_slice(&bytes)
-        .map_err(|error| lifecycle.invalid(format!("parse run report: {error}")))?;
+    let report = match request.input {
+        RunReviewInput::Report {
+            path,
+            allowed_roots,
+        } => {
+            let bytes = read_checked_run_report_bytes(&path, &allowed_roots)
+                .map_err(|error| lifecycle.invalid(error.to_string()))?;
+            lifecycle.advance(RunReviewState::Located);
+            serde_json::from_slice::<RunReport>(&bytes)
+                .map_err(|error| lifecycle.invalid(format!("parse run report: {error}")))?
+        }
+        RunReviewInput::RunRecord(report_request) => {
+            let report = build_run_report(report_request)
+                .await
+                .map_err(|error| lifecycle.invalid(format!("build run report: {error}")))?;
+            lifecycle.advance(RunReviewState::Located);
+            report
+        }
+    };
     lifecycle.advance(RunReviewState::Projected);
     validate_run_report(&report)
         .map_err(|error| lifecycle.invalid(format!("validate run report: {error}")))?;
@@ -722,7 +750,10 @@ mod tests {
 
     fn request(path: PathBuf) -> RunReviewRequest {
         RunReviewRequest {
-            report_path: path,
+            input: RunReviewInput::Report {
+                path,
+                allowed_roots: Vec::new(),
+            },
             rubric: "Judge coordination and evidence coverage.".to_string(),
             model: Some("gpt-5.6-luna".to_string()),
         }
@@ -870,6 +901,61 @@ mod tests {
         assert_eq!(review.usage.input_tokens, 120);
         assert_eq!(review.usage.cache_read_tokens, 20);
         assert!(review.usage.cost_usd.is_some_and(|cost| cost > 0.0));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    #[allow(clippy::await_holding_lock)]
+    async fn run_record_input_has_identical_review_provenance_to_materialized_report() {
+        let _env = crate::llm::env_guard();
+        crate::llm::clear_cli_llm_mock_mode();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let run_path = dir.path().join("root.json");
+        let report_path = dir.path().join("report.json");
+        let run = crate::orchestration::RunRecord {
+            type_name: "workflow_run".to_string(),
+            id: "root".to_string(),
+            workflow_id: "workflow".to_string(),
+            status: "completed".to_string(),
+            root_run_id: Some("root".to_string()),
+            ..crate::orchestration::RunRecord::default()
+        };
+        crate::orchestration::save_run_record(&run, Some(run_path.to_str().expect("UTF-8 path")))
+            .expect("save run");
+        let report_request = RunReportRequest {
+            run_record_path: run_path.clone(),
+            source_root: run_path.parent().map(std::path::Path::to_path_buf),
+            ..RunReportRequest::default()
+        };
+        let report = build_run_report(report_request.clone())
+            .await
+            .expect("build report");
+        std::fs::write(
+            &report_path,
+            serde_json::to_vec_pretty(&report).expect("report JSON"),
+        )
+        .expect("write report");
+        let response = r#"{"verdict":"pass","confidence":0.9,"summary":"The evidence is sufficient.","findings":[],"actions":[]}"#;
+
+        install_mock(response);
+        let from_report = review_run_report(request(report_path))
+            .await
+            .expect("review report");
+        crate::llm::clear_cli_llm_mock_mode();
+
+        install_mock(response);
+        let from_run = review_run_report(RunReviewRequest {
+            input: RunReviewInput::RunRecord(report_request),
+            rubric: "Judge coordination and evidence coverage.".to_string(),
+            model: Some("gpt-5.6-luna".to_string()),
+        })
+        .await
+        .expect("review run record");
+        crate::llm::clear_cli_llm_mock_mode();
+
+        assert_eq!(from_run.provenance, from_report.provenance);
+        assert_eq!(from_run.idempotency_key, from_report.idempotency_key);
+        assert_eq!(from_run.findings, from_report.findings);
+        assert_eq!(from_run.limitations, from_report.limitations);
     }
 
     #[tokio::test(flavor = "current_thread")]

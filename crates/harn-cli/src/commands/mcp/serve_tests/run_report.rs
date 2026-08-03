@@ -55,6 +55,93 @@ async fn correlates_delegated_runs() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+#[allow(clippy::await_holding_lock)]
+async fn reviews_a_run_record_without_materializing_a_report_file() {
+    let _guard = lock_harn_state_async().await;
+    harn_vm::llm::clear_cli_llm_mock_mode();
+    let temp = TempDir::new().unwrap();
+    write_fixture(&temp);
+    let run_path = temp.path().join("root.json");
+    let run = harn_vm::orchestration::RunRecord {
+        type_name: "workflow_run".to_string(),
+        id: "root".to_string(),
+        workflow_id: "workflow".to_string(),
+        status: "completed".to_string(),
+        root_run_id: Some("root".to_string()),
+        ..harn_vm::orchestration::RunRecord::default()
+    };
+    harn_vm::orchestration::save_run_record(&run, Some(run_path.to_str().unwrap())).unwrap();
+    let fixture = harn_vm::llm::parse_llm_mocks_jsonl(
+        &json!({
+            "provider": "openai",
+            "model": "gpt-5.6-luna",
+            "text": "{\"verdict\":\"pass\",\"confidence\":0.95,\"summary\":\"The run report is structurally sound.\",\"findings\":[],\"actions\":[]}"
+        })
+        .to_string(),
+    )
+    .unwrap();
+    harn_vm::llm::install_cli_llm_mock_fixture(fixture);
+    let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
+    let mut session = ConnectionState::default();
+
+    let review = call_tool(
+        &service,
+        &mut session,
+        "harn.run.review",
+        json!({
+            "run_record_path": "root.json",
+            "model": "gpt-5.6-luna"
+        }),
+    )
+    .await;
+    harn_vm::llm::clear_cli_llm_mock_mode();
+
+    assert_eq!(review["schema"], "harn.run_review.v1");
+    assert_eq!(review["verdict"], "pass");
+    assert!(review["provenance"]["report_hash"]
+        .as_str()
+        .is_some_and(|hash| hash.starts_with("sha256:")));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn advertises_structurally_distinct_run_review_inputs_and_spend_semantics() {
+    let _guard = lock_harn_state_async().await;
+    let temp = TempDir::new().unwrap();
+    write_fixture(&temp);
+    let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
+    let mut session = ConnectionState::default();
+    let response = service
+        .handle_request(&mut session, stable_request(3, "tools/list", json!({})))
+        .await;
+    let tool = response["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == "harn.run.review")
+        .expect("run review tool");
+
+    assert_eq!(tool["inputSchema"]["oneOf"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        tool["inputSchema"]["oneOf"][0]["required"],
+        json!(["report_path"])
+    );
+    assert_eq!(
+        tool["inputSchema"]["oneOf"][1]["required"],
+        json!(["run_record_path"])
+    );
+    assert_eq!(tool["annotations"]["readOnlyHint"], false);
+    assert_eq!(tool["annotations"]["destructiveHint"], false);
+    assert_eq!(tool["annotations"]["openWorldHint"], true);
+    // Task capability is server-owned since the rmcp cutover: it is keyed by
+    // tool name rather than advertised on the descriptor. A run review makes a
+    // billable model call, so it must be eligible for asynchronous execution.
+    assert!(matches!(
+        crate::commands::mcp::serve::tools::task_policy_for_tool("harn.run.review"),
+        Some(crate::commands::mcp::serve::tools::TaskPolicy::Async)
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn rejects_project_root_escape() {
     let _guard = lock_harn_state_async().await;
     let temp = TempDir::new().unwrap();

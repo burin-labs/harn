@@ -184,6 +184,7 @@ impl McpOrchestratorService {
                 "Run Report",
                 "Build a versioned, read-only report from a root run record and its delegated children.",
             ),
+            run_review_tool_def(),
             tool_def(
                 "harn.trust.query",
                 "Query trust-graph records with the same filters exposed by trust_query(filters).",
@@ -318,6 +319,7 @@ impl McpOrchestratorService {
             "harn.orchestrator.dlq.retry" => self.tool_orchestrator_dlq_retry(arguments).await,
             "harn.orchestrator.inspect" => self.tool_orchestrator_inspect(arguments).await,
             "harn.run.report" => self.tool_run_report(arguments).await,
+            "harn.run.review" => self.tool_run_review(arguments).await,
             "harn.trust.query" => self.tool_trust_query(arguments).await,
             _ => Err(format!("unknown tool '{name}'")),
         }
@@ -748,6 +750,55 @@ impl McpOrchestratorService {
         serde_json::to_value(report).map_err(|error| error.to_string())
     }
 
+    pub(super) async fn tool_run_review(&self, arguments: JsonValue) -> Result<JsonValue, String> {
+        let request: McpRunReviewRequest =
+            serde_json::from_value(arguments).map_err(|error| error.to_string())?;
+        let project_root = self.project_root();
+        let allowed_roots = vec![project_root.clone(), self.effective_state_dir()];
+        let (input, rubric, model) = match request {
+            McpRunReviewRequest::Report(McpRunReviewReportRequest {
+                report_path,
+                rubric,
+                model,
+            }) => (
+                harn_vm::orchestration::RunReviewInput::Report {
+                    path: resolve_report_path(&project_root, report_path),
+                    allowed_roots,
+                },
+                rubric,
+                model,
+            ),
+            McpRunReviewRequest::RunRecord(McpRunReviewRunRecordRequest {
+                run_record_path,
+                events_db,
+                rubric,
+                model,
+            }) => (
+                harn_vm::orchestration::RunReviewInput::RunRecord(
+                    harn_vm::orchestration::RunReportRequest {
+                        run_record_path: resolve_report_path(&project_root, run_record_path),
+                        events_db: events_db.map(|path| resolve_report_path(&project_root, path)),
+                        allowed_roots,
+                        source_root: Some(project_root),
+                    },
+                ),
+                rubric,
+                model,
+            ),
+        };
+        let review =
+            harn_vm::orchestration::review_run_report(harn_vm::orchestration::RunReviewRequest {
+                input,
+                rubric: rubric.unwrap_or_else(|| {
+                    harn_vm::orchestration::DEFAULT_RUN_REVIEW_RUBRIC.to_string()
+                }),
+                model,
+            })
+            .await
+            .map_err(|error| error.to_string())?;
+        serde_json::to_value(review).map_err(|error| error.to_string())
+    }
+
     pub(super) async fn tool_trust_query(&self, arguments: JsonValue) -> Result<JsonValue, String> {
         let request: TrustQueryRequest =
             serde_json::from_value(arguments).map_err(|error| error.to_string())?;
@@ -790,6 +841,30 @@ impl McpOrchestratorService {
 struct McpRunReportRequest {
     path: PathBuf,
     events_db: Option<PathBuf>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum McpRunReviewRequest {
+    Report(McpRunReviewReportRequest),
+    RunRecord(McpRunReviewRunRecordRequest),
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct McpRunReviewReportRequest {
+    report_path: PathBuf,
+    rubric: Option<String>,
+    model: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct McpRunReviewRunRecordRequest {
+    run_record_path: PathBuf,
+    events_db: Option<PathBuf>,
+    rubric: Option<String>,
+    model: Option<String>,
 }
 
 fn resolve_report_path(project_root: &Path, path: PathBuf) -> PathBuf {
@@ -871,6 +946,50 @@ fn run_report_tool_def(name: &str, title: &str, description: &str) -> JsonValue 
     )
 }
 
+fn run_review_tool_def() -> JsonValue {
+    tool_def(
+        "harn.run.review",
+        "Build or read a run report and assess it with one provenance-bound model call.",
+        model_call_tool_annotations("Run Review"),
+        json!({
+            "oneOf": [
+                {
+                    "type": "object",
+                    "required": ["report_path"],
+                    "properties": {
+                        "report_path": { "type": "string" },
+                        "rubric": { "type": "string" },
+                        "model": { "type": "string" }
+                    },
+                    "additionalProperties": false
+                },
+                {
+                    "type": "object",
+                    "required": ["run_record_path"],
+                    "properties": {
+                        "run_record_path": { "type": "string" },
+                        "events_db": { "type": "string" },
+                        "rubric": { "type": "string" },
+                        "model": { "type": "string" }
+                    },
+                    "additionalProperties": false
+                }
+            ]
+        }),
+        Some(json!({
+            "type": "object",
+            "required": ["schema", "schema_version", "provenance", "lifecycle", "verdict"],
+            "properties": {
+                "schema": { "const": "harn.run_review.v1" },
+                "schema_version": { "const": 1 },
+                "provenance": { "type": "object" },
+                "lifecycle": { "type": "object" },
+                "verdict": { "enum": ["pass", "concerns", "fail"] }
+            }
+        })),
+    )
+}
+
 pub(super) fn read_only_tool_annotations(title: &str) -> JsonValue {
     json!({
         "title": title,
@@ -891,6 +1010,16 @@ pub(super) fn mutating_open_world_tool_annotations(title: &str) -> JsonValue {
     })
 }
 
+fn model_call_tool_annotations(title: &str) -> JsonValue {
+    json!({
+        "title": title,
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true,
+    })
+}
+
 #[derive(Clone, Copy)]
 pub(super) enum TaskPolicy {
     Inline,
@@ -899,9 +1028,10 @@ pub(super) enum TaskPolicy {
 
 pub(super) fn task_policy_for_tool(name: &str) -> Option<TaskPolicy> {
     match name {
-        "harn.trigger.fire" | "harn.trigger.replay" | "harn.orchestrator.dlq.retry" => {
-            Some(TaskPolicy::Async)
-        }
+        "harn.trigger.fire"
+        | "harn.trigger.replay"
+        | "harn.orchestrator.dlq.retry"
+        | "harn.run.review" => Some(TaskPolicy::Async),
         "harn.secret_scan"
         | "harn::secret_scan"
         | "harn.trigger.list"

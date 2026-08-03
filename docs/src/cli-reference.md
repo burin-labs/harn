@@ -2516,8 +2516,8 @@ harn runs view --json .harn-runs/<run>.json
 harn runs view --json --session .harn-runs/
 harn runs report .harn-runs/<run>.json
 harn runs report .harn-runs/<run>.json --events-db .harn/events.sqlite
-harn runs review run-report.json
-harn runs review run-report.json --rubric review-rubric.md --model <model>
+harn runs review --report run-report.json --rubric review-rubric.md --model <model>
+harn runs review --run-record .harn-runs/<run>.json --events-db .harn/events.sqlite
 ```
 
 `harn runs report` follows the root record's typed child-run pointers and emits
@@ -2541,8 +2541,10 @@ snapshot. Increase the timeline query's `limit` to recover more nodes. The
 topic cursor remains a subscription watermark, not a continuation token for a
 snapshot that combines sorted run spans and event topics.
 
-`harn runs review` reads one `harn.run_report.v1` file and makes one structured
-model call. It emits `harn.run_review.v1` JSON with the verdict, confidence,
+`harn runs review` either reads one `harn.run_report.v1` file or builds that
+same report in memory from `--run-record`, then makes one structured model
+call. `--events-db` is available with `--run-record`; no intermediate report
+file is required. The command emits `harn.run_review.v1` JSON with the verdict, confidence,
 findings, actions, usage, and lifecycle receipts. Each finding must cite an
 existing JSON Pointer in the report. The command rejects a changed report hash,
 an unsupported report schema, and a response with an invalid evidence pointer.
@@ -2577,9 +2579,13 @@ events. Inspect the report's `sources` entries and authorized source artifacts
 when the review names missing evidence. A review is an assessment, not a
 replacement for the report's deterministic checks.
 
-Agents can request the same projection through the read-only
-`harn.run.report` MCP tool. MCP paths are confined to the server's project and
-state roots; the local CLI accepts an explicit local path.
+Agents can request the deterministic projection through the read-only
+`harn.run.report` MCP tool, or build/read and assess it in one call through
+`harn.run.review`. The review tool accepts exactly one of `report_path` or
+`run_record_path`; its optional `rubric` is text rather than another file path.
+MCP paths are confined to the server's project and state roots; the local CLI
+accepts an explicit local path. A run review is not marked read-only because it
+spends a model call, but it is non-destructive and supports MCP task execution.
 
 Project one authoritative run into a `harn.agent_training_example.v1`
 training example.
