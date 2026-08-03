@@ -421,7 +421,13 @@ mkdir -p "${SETUP_STATE_DIR}"
 
 # Reclaim per-worktree target dirs left behind by worktrees that have since
 # been removed. Best-effort; never fail setup over housekeeping.
-if [[ -x ./scripts/prune_stale_targets.sh ]]; then
+#
+# The state dir this is stamped against is per-worktree, so every new worktree
+# would otherwise pay a full sweep of the shared target root -- measured at
+# ~40s across 12 roots. Bootstrap exists to configure a worktree for its first
+# Cargo probe and to be waited on interactively, so housekeeping stays out of
+# it; the profiles that already compile absorb the sweep instead.
+if [[ "${SETUP_PROFILE}" != "bootstrap" ]] && [[ -x ./scripts/prune_stale_targets.sh ]]; then
   prune_stamp="${SETUP_STATE_DIR}/prune-stale-targets.stamp"
   prune_interval="${HARN_DEV_SETUP_PRUNE_SECONDS:-86400}"
   should_prune=1
