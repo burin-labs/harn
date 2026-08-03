@@ -1377,3 +1377,38 @@ fn capability_apply_threads_testing_into_a_retired_host_mock_wrapper() {
         "expected a carrier ahead of `task`, got {params:?}\n{updated}"
     );
 }
+
+#[test]
+fn capability_apply_projects_with_mocks_onto_with_scenario() {
+    // `with_mocks` was superseded by `with_scenario`, which takes the root
+    // `Harness` and spells the two config keys `capabilities` / `llm`. Legacy
+    // host entries also still say `operation` where fixtures now say `method`.
+    // Falsifier: without the recipe, `with_mocks` survives the apply verbatim.
+    let (result, updated) = apply_single(
+        "import { with_mocks } from \"std/testing\"\n\npipeline probe(task) {\n  with_mocks(\n    {\n      host_mocks: [{capability: \"workspace\", operation: \"project_root\", result: \".\"}],\n      llm_mocks: [],\n    },\n    { _ -> task },\n  )\n}\n",
+    );
+    assert_eq!(
+        result.post_apply_diagnostics_count, 0,
+        "{result:#?}\n{updated}"
+    );
+    assert!(
+        !updated.contains("with_mocks"),
+        "retired wrapper survived the apply:\n{updated}"
+    );
+    assert!(
+        updated.contains("with_scenario"),
+        "wrapper was not projected onto its successor:\n{updated}"
+    );
+    assert!(
+        updated.contains("capabilities:") && updated.contains("llm:"),
+        "config keys were not renamed onto the with_scenario contract:\n{updated}"
+    );
+    assert!(
+        !updated.contains("host_mocks") && !updated.contains("llm_mocks"),
+        "legacy config keys survived:\n{updated}"
+    );
+    assert!(
+        updated.contains("method:") && !updated.contains("operation:"),
+        "legacy fixture field was not migrated:\n{updated}"
+    );
+}

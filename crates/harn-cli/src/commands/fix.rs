@@ -1002,6 +1002,41 @@ fn insert_call_argument_before_span(
     edit
 }
 
+/// Name of the root `Harness` parameter in the narrowest declaration enclosing
+/// `span`.
+///
+/// `capability_argument_for_span` resolves narrow capability handles and can
+/// fall back to a root, but it is keyed by `CapabilityId`, so it cannot be asked
+/// for the root itself. Replacements that take a whole `Harness` — such as
+/// `with_scenario` — need exactly that.
+fn root_harness_argument_for_span(program: &[SNode], span: Span) -> Option<String> {
+    let mut candidates = Vec::new();
+    visit::walk_program(program, &mut |node| {
+        let params = match &node.node {
+            Node::FnDecl { params, .. }
+            | Node::ToolDecl { params, .. }
+            | Node::Pipeline { params, .. }
+                if node.span.start <= span.start && node.span.end >= span.end =>
+            {
+                params
+            }
+            _ => return,
+        };
+        for param in params {
+            if matches!(param.type_expr.as_ref(), Some(TypeExpr::Named(name)) if name == "Harness")
+            {
+                candidates.push((
+                    node.span.end.saturating_sub(node.span.start),
+                    param.name.clone(),
+                ));
+                break;
+            }
+        }
+    });
+    candidates.sort_by_key(|(width, _)| *width);
+    candidates.into_iter().next().map(|(_, name)| name)
+}
+
 fn capability_argument_for_span(program: &[SNode], span: Span, expected: &str) -> Option<String> {
     let capability = harn_builtin_meta::CapabilityId::from_type_name(expected)?;
     let field_name = capability.field_name();
