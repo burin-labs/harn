@@ -31,7 +31,7 @@
     "@redocly/cli": "^2.40.0",
     "concurrently": "^10.0.4",
     "eslint": "^10.8.0",
-    "markdownlint-cli2": "^0.23.1",
+    "markdownlint-cli2": "^0.23.2",
     "prettier": "^3.9.6",
     "typescript": "^7.0.2"
   }
