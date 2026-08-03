@@ -569,3 +569,75 @@ fn test_cross_module_hostlib_prefix_is_not_source_callable() {
         "ambient hostlib calls must be rejected in favor of Harness handles: {errs:?}"
     );
 }
+
+/// The capability roots on `Harness` are a closed set. Before #6093 the
+/// checker deferred every miss to the VM, so `harness.crypto.sha256(..)`
+/// passed `harn check` and `harn lint` and only failed once a live release
+/// executed that line for the first time.
+#[test]
+fn test_unknown_harness_capability_root_is_rejected() {
+    let errs = strict_errors(
+        r#"pipeline t(harness: Harness, task) {
+  log(harness.crypto.sha256("hello"))
+}"#,
+    );
+    assert!(
+        errs.iter()
+            .any(|message| message.contains("capability `crypto` does not exist on `Harness`")),
+        "an unknown capability root must be a check-time error: {errs:?}"
+    );
+}
+
+/// The valid roots must stay silent — the whole point of deferring before was
+/// to never reject a valid program.
+#[test]
+fn test_known_harness_capability_roots_are_accepted() {
+    for root in ["fs", "stdio", "env", "clock", "process", "llm"] {
+        let source = format!(
+            r#"pipeline t(harness: Harness, task) {{
+  const cap = harness.{root}
+  log(cap)
+}}"#
+        );
+        let errs = strict_errors(&source);
+        assert!(
+            !errs
+                .iter()
+                .any(|message| message.contains("does not exist on `Harness`")),
+            "`harness.{root}` must type-check: {errs:?}"
+        );
+    }
+}
+
+/// The VM answers `harness?.missing` with `nil` rather than raising, so the
+/// checker must reject exactly what the runtime rejects and no more.
+#[test]
+fn test_optional_harness_capability_access_stays_gradual() {
+    let errs = strict_errors(
+        r#"pipeline t(harness: Harness, task) {
+  log(harness?.crypto)
+}"#,
+    );
+    assert!(
+        !errs
+            .iter()
+            .any(|message| message.contains("does not exist on `Harness`")),
+        "optional capability access must stay gradual: {errs:?}"
+    );
+}
+
+/// A near-miss should name the intended root instead of only listing all of
+/// them.
+#[test]
+fn test_unknown_harness_capability_root_suggests_closest() {
+    let errs = strict_errors(
+        r#"pipeline t(harness: Harness, task) {
+  log(harness.clocks)
+}"#,
+    );
+    assert!(
+        errs.iter()
+            .any(|message| message.contains("did you mean `clock`?")),
+        "a near-miss root must suggest the real one: {errs:?}"
+    );
+}

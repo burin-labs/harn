@@ -171,6 +171,21 @@ impl TypeChecker {
                 let help = format!("available fields: {}", actual.join(", "));
                 self.error_at_with_help(Code::UnknownField, msg, span, help);
             }
+            // The capability roots on `Harness` are a closed set owned by
+            // `CapabilityId`, and the VM rejects anything outside it with a
+            // hard `TypeError`. Deferring here let `harness.crypto.sha256(..)`
+            // pass `harn check`, `harn lint`, and a package test suite, then
+            // crash a live release on the one path that first executed it
+            // (#6093). Optional access stays gradual because the VM answers
+            // `harness?.missing` with `nil` rather than an error, so this
+            // rejects exactly what the runtime rejects.
+            TypeExpr::Named(name)
+                if name == "Harness"
+                    && !optional
+                    && harn_builtin_meta::CapabilityId::from_field_name(property).is_none() =>
+            {
+                self.error_unknown_capability_root(property, span);
+            }
             TypeExpr::Named(name) if scope.get_struct(name).is_some() => {
                 self.check_struct_property(name, property, scope, span);
             }
@@ -180,6 +195,25 @@ impl TypeChecker {
             _ if !optional => self.check_nilable_property_access(&resolved, property, scope, span),
             _ => {}
         }
+    }
+
+    /// Report a capability root that does not exist on `Harness`, naming the
+    /// closed set from the same [`harn_builtin_meta::CapabilityId`] registry
+    /// the VM enumerates, so the checker and the runtime cannot drift.
+    fn error_unknown_capability_root(&mut self, property: &str, span: Span) {
+        let roots: Vec<&str> = harn_builtin_meta::CapabilityId::ALL
+            .iter()
+            .map(|capability| capability.field_name())
+            .collect();
+        let max_dist = if property.len() <= 4 { 1 } else { 2 };
+        let suggestion =
+            crate::diagnostic::find_closest_match(property, roots.iter().copied(), max_dist);
+        let mut msg = format!("capability `{property}` does not exist on `Harness`");
+        if let Some(close) = suggestion {
+            msg.push_str(&format!(" — did you mean `{close}`?"));
+        }
+        let help = format!("Harness exposes: {}", roots.join(", "));
+        self.error_at_with_help(Code::UnknownField, msg, span, help);
     }
 
     /// Decide whether an access (`.`, `[]`, or `.()`) should take the
