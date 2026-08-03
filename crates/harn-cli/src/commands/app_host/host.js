@@ -5,7 +5,7 @@
  * @typedef {object} AppDescriptor
  * @property {string} resourceUri
  * @property {string} html
- * @property {{ui?: {csp?: Record<string, unknown>, permissions?: Record<string, unknown>}}} meta
+ * @property {{csp: ResourcePolicy, permissions: Record<string, object>}} sandbox
  */
 
 (() => {
@@ -14,7 +14,7 @@
   const title = __HARN_TITLE__;
   const sandboxOrigin = __HARN_SANDBOX_ORIGIN__;
   const hostVersion = __HARN_VERSION__;
-  const appProtocolVersion = "2026-01-26";
+  const viewConnection = HarnAppHostProtocol.createViewConnection();
   const frame = /** @type {HTMLIFrameElement} */ (
     document.getElementById("sandbox")
   );
@@ -24,8 +24,6 @@
 
   /** @type {AppDescriptor | null} */
   let descriptor = null;
-  let initialized = false;
-
   name.textContent = title;
   document.title = `${title} — Harn App`;
 
@@ -77,6 +75,24 @@
     if (!message || message.jsonrpc !== "2.0") {
       return;
     }
+    if (message.method === undefined) {
+      return;
+    }
+    if (typeof message.method !== "string") {
+      if (HarnAppHostProtocol.hasRequestId(message)) {
+        failure(message.id, -32600, "Request method must be a string");
+      }
+      return;
+    }
+    if (
+      HarnAppHostProtocol.isViewNotificationMethod(message.method) &&
+      !HarnAppHostProtocol.isNotification(message)
+    ) {
+      if (HarnAppHostProtocol.hasRequestId(message)) {
+        failure(message.id, -32600, "Notification must not include an ID");
+      }
+      return;
+    }
 
     if (message.method === "ui/notifications/sandbox-proxy-ready") {
       descriptor = /** @type {AppDescriptor} */ (
@@ -88,24 +104,36 @@
         method: "ui/notifications/sandbox-resource-ready",
         params: {
           html: descriptor.html,
-          csp: descriptor.meta.ui?.csp ?? {},
-          permissions: descriptor.meta.ui?.permissions ?? {},
+          csp: descriptor.sandbox.csp,
+          permissions: descriptor.sandbox.permissions,
         },
       });
       status.textContent = "ready";
       return;
     }
 
-    if (message.method === "ui/initialize" && message.id !== undefined) {
+    if (HarnAppHostProtocol.isSandboxMessage(message)) {
+      return;
+    }
+
+    if (
+      message.method === "ui/initialize" &&
+      HarnAppHostProtocol.hasRequestId(message)
+    ) {
+      const started = viewConnection.initialize(message.params);
+      if (!started.ok) {
+        failure(message.id, started.code, started.message);
+        return;
+      }
       result(message.id, {
-        protocolVersion: appProtocolVersion,
+        protocolVersion: started.protocolVersion,
         hostCapabilities: {
-          serverTools: { listChanged: true },
-          serverResources: { listChanged: true },
+          serverTools: {},
+          serverResources: {},
           logging: {},
           sandbox: {
-            permissions: descriptor?.meta.ui?.permissions ?? {},
-            csp: descriptor?.meta.ui?.csp ?? {},
+            permissions: descriptor?.sandbox.permissions ?? {},
+            csp: descriptor?.sandbox.csp ?? {},
           },
         },
         hostInfo: { name: "harn-app", version: hostVersion },
@@ -130,15 +158,26 @@
     }
 
     if (message.method === "ui/notifications/initialized") {
-      initialized = true;
-      status.textContent = "connected";
+      if (viewConnection.markReady()) {
+        status.textContent = "connected";
+      }
+      return;
+    }
+    if (!viewConnection.isReady()) {
+      if (HarnAppHostProtocol.hasRequestId(message)) {
+        failure(message.id, -32002, "View is not initialized");
+      }
       return;
     }
     if (
       message.method === "ui/update-model-context" &&
-      message.id !== undefined
+      HarnAppHostProtocol.hasRequestId(message)
     ) {
-      result(message.id, {});
+      failure(
+        message.id,
+        -32000,
+        "Model context is not available in standalone apps",
+      );
       return;
     }
     if (message.method === "ui/notifications/size-changed") {
@@ -149,16 +188,19 @@
       return;
     }
     if (message.method?.startsWith("ui/")) {
-      if (message.id !== undefined) {
+      if (HarnAppHostProtocol.hasRequestId(message)) {
         failure(message.id, -32601, "Host method not supported");
       }
       return;
     }
-    if (message.method) {
+    if (HarnAppHostProtocol.isServerRequestMethod(message.method)) {
+      if (!HarnAppHostProtocol.hasRequestId(message)) {
+        return;
+      }
       try {
         await HarnAppHostProtocol.proxyServerRequest(message, proxy, reply);
       } catch (error) {
-        if (message.id !== undefined) {
+        if (HarnAppHostProtocol.hasRequestId(message)) {
           failure(
             message.id,
             -32000,
@@ -166,12 +208,16 @@
           );
         }
       }
+      return;
+    }
+    if (HarnAppHostProtocol.hasRequestId(message)) {
+      failure(message.id, -32601, "Server method not supported");
     }
   }
 
   window.addEventListener("message", receive);
   window.addEventListener("resize", () => {
-    if (!initialized) {
+    if (!viewConnection.isReady()) {
       return;
     }
     reply({
@@ -183,7 +229,7 @@
     });
   });
   window.addEventListener("beforeunload", () => {
-    if (!initialized) {
+    if (!viewConnection.isReady()) {
       return;
     }
     reply({

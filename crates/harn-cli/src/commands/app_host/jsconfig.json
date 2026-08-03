@@ -3,6 +3,8 @@
     "allowJs": true,
     "checkJs": true,
     "lib": ["ES2023", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
     "moduleDetection": "force",
     "noEmit": true,
     "strict": true,

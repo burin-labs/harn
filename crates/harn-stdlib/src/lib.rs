@@ -157,6 +157,7 @@ pub const STDLIB_SOURCES: &[StdlibSource] = embedded_catalog!(StdlibSource, modu
     "model_job/testing" => "stdlib/model_job/testing.harn",
     "model_job/comfyui" => "stdlib/model_job/comfyui.harn",
     "model_job/openai" => "stdlib/model_job/openai.harn",
+    "portable" => "stdlib/stdlib_portable.harn",
     "ui" => "stdlib/stdlib_ui.harn",
     "ui/contracts" => "stdlib/ui/contracts.harn",
     "ui/renderer" => "stdlib/ui/renderer.harn",

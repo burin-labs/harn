@@ -8,12 +8,45 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+use harn_builtin_meta::CapabilityId;
 use harn_lexer::{FixEdit, Span};
 use harn_parser::{visit, DiagnosticCode as Code, Node, Repair, RepairSafety};
 
-use super::{capability_argument_for_span, RepairCandidate, RepairImpactWire};
+use super::{
+    capability_argument_for_span, root_harness_argument_for_span, RepairCandidate, RepairImpactWire,
+};
 
 const RETIRED_UNUSED_HELPERS: &[&str] = &["with_mocks", "with_host_mocks"];
+
+/// Capabilities a retired `std/testing` wrapper needs once it is projected onto
+/// its typed replacement.
+///
+/// The replacements take explicit handles — `with_host_mocks` becomes
+/// `with_capability_fixtures(testing, ..)`, and `with_mocks` becomes
+/// `with_scenario(harness, ..)`, which scopes both capabilities. The
+/// whole-program pass seeds these so the enclosing callable actually receives a
+/// carrier; without the seed the rewrite has no handle to name, declines the
+/// file, and the plan converges while retired calls remain.
+///
+/// `with_mocks` additionally needs the root — see
+/// [`retired_wrapper_requires_root`].
+pub(super) fn retired_wrapper_capabilities(callee: &str) -> &'static [CapabilityId] {
+    match callee {
+        "with_host_mocks" => &[CapabilityId::Testing],
+        "with_mocks" => &[CapabilityId::Testing, CapabilityId::Llm],
+        _ => &[],
+    }
+}
+
+/// Whether a retired wrapper's successor takes the whole `Harness`.
+///
+/// `with_mocks` maps onto `with_scenario(harness, ..)`, so its enclosing
+/// callable must carry the root. Seeding only `Testing` + `Llm` lets the
+/// carrier collapse to a `{llm, testing}` bundle, which cannot be passed where
+/// a `Harness` is expected.
+pub(super) fn retired_wrapper_requires_root(callee: &str) -> bool {
+    callee == "with_mocks"
+}
 
 #[derive(Clone)]
 struct TestingCall {
@@ -103,6 +136,75 @@ pub(super) fn repair(file: &Path) -> Option<RepairCandidate> {
         let fixture_scopes = fixture_source_scopes(&program, &fixture_arguments);
         edits.extend(legacy_host_fixture_field_edits(&program, &fixture_scopes));
     }
+
+    // `with_mocks(config, body)` was superseded by `with_scenario(harness,
+    // config, body)`, which is the same combinator over an explicit root plus
+    // `fs`/`temp_dir` scopes. Only the wrapper name, the leading argument, and
+    // two config keys differ, so this is a rename — not a structural split into
+    // nested `with_capability_fixtures` / `with_llm_mocks` scopes.
+    let imports_mock_wrapper = program.iter().any(|node| {
+        matches!(
+            &node.node,
+            Node::SelectiveImport { names, path, .. }
+                if path == "std/testing" && names.iter().any(|name| name == "with_mocks")
+        )
+    });
+    let mock_call_edits = if imports_mock_wrapper && !value_references.contains("with_mocks") {
+        calls
+            .get("with_mocks")
+            .filter(|calls| !calls.is_empty())
+            .and_then(|calls| {
+                calls
+                    .iter()
+                    .map(|call| {
+                        if call.args.len() != 2 {
+                            return None;
+                        }
+                        let harness = root_harness_argument_for_span(&program, call.span)?;
+                        let name_end = call.span.start.checked_add("with_mocks".len())?;
+                        let config = call.args.first()?;
+                        let mut call_edits = vec![
+                            FixEdit {
+                                span: Span::with_offsets(
+                                    call.span.start,
+                                    name_end,
+                                    call.span.line,
+                                    call.span.column,
+                                ),
+                                replacement: "with_scenario".to_string(),
+                            },
+                            FixEdit {
+                                span: Span::with_offsets(
+                                    config.start,
+                                    config.start,
+                                    config.line,
+                                    config.column,
+                                ),
+                                replacement: format!("{harness}, "),
+                            },
+                        ];
+                        call_edits.extend(scenario_config_key_edits(&program, *config));
+                        Some(call_edits)
+                    })
+                    .collect::<Option<Vec<_>>>()
+            })
+    } else {
+        None
+    };
+    let migrate_mock_wrapper = mock_call_edits.is_some();
+    if let Some(call_edits) = mock_call_edits {
+        edits.extend(call_edits.into_iter().flatten());
+        // Legacy host entries still spell the operation `operation`; the
+        // fixture scope walk reaches entries built by helper functions too.
+        let host_entries = calls
+            .get("with_mocks")
+            .into_iter()
+            .flatten()
+            .filter_map(|call| call.args.first().copied())
+            .collect::<Vec<_>>();
+        let fixture_scopes = fixture_source_scopes(&program, &host_entries);
+        edits.extend(legacy_host_fixture_field_edits(&program, &fixture_scopes));
+    }
     for node in &program {
         let Node::SelectiveImport {
             names,
@@ -160,7 +262,9 @@ pub(super) fn repair(file: &Path) -> Option<RepairCandidate> {
 
         let rename_host_mock_wrapper =
             migrate_host_mock_wrapper && names.iter().any(|name| name == "with_host_mocks");
-        if removable.is_empty() && !rename_host_mock_wrapper {
+        let rename_mock_wrapper =
+            migrate_mock_wrapper && names.iter().any(|name| name == "with_mocks");
+        if removable.is_empty() && !rename_host_mock_wrapper && !rename_mock_wrapper {
             continue;
         }
         removed.extend(removable.iter().cloned());
@@ -171,6 +275,8 @@ pub(super) fn repair(file: &Path) -> Option<RepairCandidate> {
             .map(|name| {
                 if rename_host_mock_wrapper && name == "with_host_mocks" {
                     "with_capability_fixtures".to_string()
+                } else if rename_mock_wrapper && name == "with_mocks" {
+                    "with_scenario".to_string()
                 } else {
                     name.clone()
                 }
@@ -223,6 +329,40 @@ pub(super) fn repair(file: &Path) -> Option<RepairCandidate> {
         impact: RepairImpactWire::local_ambient("retired-testing-helper"),
         edits,
     })
+}
+
+/// Rename `with_mocks` config keys onto their `with_scenario` spellings.
+///
+/// Only keys of the dict literal passed directly as the config argument are
+/// touched; nested dicts (fixture entries, LLM turns) keep their own field
+/// names. A non-literal config carries no keys to rewrite and yields nothing,
+/// which is correct — `with_scenario` reads the same field names off whatever
+/// the expression produces.
+fn scenario_config_key_edits(program: &[harn_parser::SNode], config: Span) -> Vec<FixEdit> {
+    let mut edits = Vec::new();
+    visit::walk_program(program, &mut |node| {
+        if node.span.start != config.start || node.span.end != config.end {
+            return;
+        }
+        let Node::DictLiteral(entries) = &node.node else {
+            return;
+        };
+        for entry in entries {
+            let (Node::Identifier(key) | Node::StringLiteral(key)) = &entry.key.node else {
+                continue;
+            };
+            let renamed = match key.as_str() {
+                "host_mocks" => "capabilities",
+                "llm_mocks" => "llm",
+                _ => continue,
+            };
+            edits.push(FixEdit {
+                span: entry.key.span,
+                replacement: renamed.to_string(),
+            });
+        }
+    });
+    edits
 }
 
 fn fixture_source_scopes(program: &[harn_parser::SNode], fixture_arguments: &[Span]) -> Vec<Span> {

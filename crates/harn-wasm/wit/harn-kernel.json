@@ -23,7 +23,6 @@
         "diagnostic": 8,
         "entry-kind": 9,
         "program": 10,
-        "suspendable-grants": 12,
         "grant-set": 13,
         "value-shape": 14,
         "capability-request": 15,
@@ -299,7 +298,14 @@
       "owner": null
     },
     {
-      "name": "suspendable-grants",
+      "name": null,
+      "kind": {
+        "option": 1
+      },
+      "owner": null
+    },
+    {
+      "name": "grant-set",
       "kind": {
         "record": {
           "fields": [
@@ -309,30 +315,10 @@
             },
             {
               "name": "snapshot-key",
-              "type": 1,
+              "type": 12,
               "docs": {
-                "contents": "Exactly 32 bytes. Hosts retain this secret and use it to authenticate\nsnapshots returned across their untrusted storage seam."
+                "contents": "When present, this is exactly 32 bytes. Hosts retain the secret and use\nit to authenticate snapshots returned across untrusted storage."
               }
-            }
-          ]
-        }
-      },
-      "owner": {
-        "interface": 0
-      }
-    },
-    {
-      "name": "grant-set",
-      "kind": {
-        "variant": {
-          "cases": [
-            {
-              "name": "pure",
-              "type": 11
-            },
-            {
-              "name": "suspendable",
-              "type": 12
             }
           ]
         }

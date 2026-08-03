@@ -245,7 +245,13 @@ fn build_expected(
             .map_err(|error| format!("compile CLI script `{}`: {error}", script.name))?;
         let safe_name = safe_filename(script.name);
         let synthetic_source = PathBuf::from("stdlib-cli").join(format!("{safe_name}.harn"));
-        let key = CacheKey::from_source(&synthetic_source, &source);
+        // Stamp the version the *shipped* binary will report, not the version
+        // this generator was built at. Release preparation snapshots the
+        // generator before rewriting Cargo.toml, so those differ by exactly one
+        // patch bump; a payload stamped with the pre-bump version is rejected by
+        // the released runtime and silently falls back to source compilation.
+        let key = CacheKey::from_source(&synthetic_source, &source)
+            .for_artifact_version(contract.harn_version.clone());
         let bytes = serialize_chunk_artifact(&key, &chunk)
             .map_err(|error| format!("serialize CLI script `{}`: {error}", script.name))?;
         let artifact_path = PathBuf::from("generated")

@@ -863,19 +863,42 @@ fn seed_ambient_requirements(
                 .iter()
                 .filter_map(|access| CapabilityId::from_field_name(&access.property)),
         );
-        callable.direct_root_requirement = file_diagnostics.is_some_and(|diagnostics| {
-            diagnostics
-                .missing_capability_arguments
+        // Retired `std/testing` wrappers are not ambient builtins, so nothing
+        // above observes them. Their typed replacements still take explicit
+        // handles, so seed that demand from the call itself.
+        callable.direct_requirements.extend(
+            callable
+                .info
+                .calls
                 .iter()
-                .any(|diagnostic| {
-                    matches!(
-                        diagnostic.expected_type.as_ref(),
-                        Some(TypeExpr::Named(expected)) if expected == "Harness"
-                    ) && diagnostic.span.is_some_and(|span| {
-                        callable.info.span.start <= span.start && callable.info.span.end >= span.end
+                .flat_map(|call| super::retired_testing::retired_wrapper_capabilities(&call.callee))
+                .copied(),
+        );
+        // A wrapper whose successor takes the whole `Harness` needs the root
+        // itself, not a narrow bundle. Demanding only its constituent
+        // capabilities lets the carrier collapse to `{llm, testing}`, which
+        // satisfies the requirement but cannot be passed where a `Harness` is
+        // expected — so the rewrite finds no argument and declines the file.
+        let retired_wrapper_needs_root = callable
+            .info
+            .calls
+            .iter()
+            .any(|call| super::retired_testing::retired_wrapper_requires_root(&call.callee));
+        callable.direct_root_requirement = retired_wrapper_needs_root
+            || file_diagnostics.is_some_and(|diagnostics| {
+                diagnostics
+                    .missing_capability_arguments
+                    .iter()
+                    .any(|diagnostic| {
+                        matches!(
+                            diagnostic.expected_type.as_ref(),
+                            Some(TypeExpr::Named(expected)) if expected == "Harness"
+                        ) && diagnostic.span.is_some_and(|span| {
+                            callable.info.span.start <= span.start
+                                && callable.info.span.end >= span.end
+                        })
                     })
-                })
-        });
+            });
     }
 
     let mut file_indices = BTreeMap::new();

@@ -44,6 +44,27 @@ fn artifact_is_deterministic_and_round_trips() {
 }
 
 #[test]
+fn portable_compiler_policy_is_shared_by_every_adapter() {
+    assert_eq!(
+        "function".parse::<EntryKind>().unwrap(),
+        EntryKind::Function
+    );
+    assert_eq!(
+        "pipeline".parse::<EntryKind>().unwrap(),
+        EntryKind::Pipeline
+    );
+    assert_eq!(
+        "worker".parse::<EntryKind>().unwrap_err().code,
+        "entry_kind"
+    );
+
+    let source = " ".repeat(PORTABLE_SOURCE_MAX_BYTES + 1);
+    let diagnostics = compile_program(&source, "main", EntryKind::Function).unwrap_err();
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].code, "source_too_large");
+}
+
+#[test]
 fn typed_defaults_fail_at_the_portable_compile_boundary() {
     let diagnostics = compile_program(
         "fn reduce(input: int = 1) -> int { return input }",

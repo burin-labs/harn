@@ -29,11 +29,16 @@ pipeline test(harness: Harness, task) {
   harness.stdio.println(update.effects[0].kind)
   const resource = ui.app_resource("ui://test/paint", "Paint", "paint.handle_event")
   harness.stdio.println(resource.validation.ok)
+  harness.stdio.println(resource.capabilities == ["tools/call"])
   harness.stdio.println(resource.contents.contains("harn.ui_update.v1"))
   harness.stdio.println(resource.contents.contains("paint.handle_event"))
   const escaped_renderer = ui.renderer_html("</script><script>alert(1)</script>")
   harness.stdio.println(!escaped_renderer.contains("</script><script>alert(1)</script>"))
   harness.stdio.println(escaped_renderer.contains("\\u003c/script"))
+  harness.stdio.println(escaped_renderer.contains("appCapabilities"))
+  harness.stdio.println(escaped_renderer.contains("appInfo"))
+  harness.stdio.println(!escaped_renderer.contains("clientInfo"))
+  harness.stdio.println(escaped_renderer.contains("availableDisplayModes: ['fullscreen']"))
   const duplicate = try {
     ui.document("Bad", 0, [{id: "same", kind: "text"}, {id: "same", kind: "text"}])
   }

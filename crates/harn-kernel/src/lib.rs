@@ -22,7 +22,7 @@ pub mod value;
 
 pub use artifact::{
     compile_program, semantic_abi_fingerprint_hex, ArtifactLimits, Diagnostic, EntryKind,
-    ProgramArtifact, ARTIFACT_VERSION,
+    ProgramArtifact, ARTIFACT_VERSION, PORTABLE_SOURCE_MAX_BYTES,
 };
 pub use benchmark::{
     benchmark_terminal_digest, portable_benchmark_json_schema, BenchmarkBuildProfile,

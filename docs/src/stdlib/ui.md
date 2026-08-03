@@ -63,7 +63,8 @@ progress and cancellation without a blocking polling loop.
 
 `ui.renderer_html(tool_name) -> string` returns the shared renderer.
 `ui.app_resource(uri, name, tool_name, options?) -> UiResource` validates it
-and packages it for `harness.tools.mcp_resource`.
+and packages it for `harness.tools.mcp_resource`. The resource declares only
+`tools/call`, because that is the only host request the shared renderer sends.
 
 `ui.tool_metadata(resource, options?)` returns the MCP tool metadata that opens
 the app. `ui.mcp_resource(resource, options?)` returns the config accepted by
@@ -72,6 +73,29 @@ the app. `ui.mcp_resource(resource, options?)` returns the config accepted by
 The renderer contains browser implementation code because the browser owns DOM
 and canvas APIs. Applications do not copy or modify that code. Their behavior
 remains Harn.
+
+## Browser reducers
+
+`ui.portable_app_resource(uri, name, fallback_tool, program, state,
+capabilities?, options?) -> UiResource` runs one `PortableProgram` in the
+standalone host's browser worker. The reducer receives `{state, event}` and
+must return `{state, update}`. The worker sends the next state with every
+update.
+
+The fallback tool must run the same artifact. When browser execution is
+unavailable, the renderer calls it with `{event, state}` and requires the same
+`{state, update}` result. Returning the full reducer result keeps later
+fallback events on the latest state.
+
+The optional capability list currently accepts only `tools.invoke`. The host
+performs that request through the standard MCP `tools/call` method, then
+resumes the paused program with the matching result. The app view has no worker
+or Harn-runtime network authority; the trusted sandbox owns those resources.
+
+Follow [Run Harn app logic in the browser](../cookbooks/run-app-logic-in-browser.md)
+for a complete reducer, fallback, resource, and verification path. See
+[`std/portable`](../portable-kernel-reference.md) for the artifact and execution
+contract.
 
 ## Event handler tests
 

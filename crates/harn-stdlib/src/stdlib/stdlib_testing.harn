@@ -536,7 +536,7 @@ pub fn assert_golden_transcript(actual, golden, message = nil) {
 
 // LLM mock turn builders
 //
-// `with_llm_mocks` / `with_mocks` already accept a list of LLM response
+// `with_llm_mocks` / `with_scenario` already accept a list of LLM response
 // dicts, but hand-building `{tool_calls: [{id, name, arguments}]}` and
 // `{text: "##DONE##"}` literals is the reason most fixtures still reach
 // for the raw `harness.llm.mock_clear()` + sequential `harness.llm.mock_enqueue(...)` form. These

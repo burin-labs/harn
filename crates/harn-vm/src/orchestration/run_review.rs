@@ -268,9 +268,10 @@ async fn review_run_report_with_clock(
     let data = response_dict.get("data").ok_or_else(|| {
         lifecycle.failed("run review model response did not contain structured data".to_string())
     })?;
-    let review: ModelRunReview = serde_json::from_value(vm_value_to_json(data))
+    let mut review: ModelRunReview = serde_json::from_value(vm_value_to_json(data))
         .map_err(|error| lifecycle.failed(format!("decode run review model response: {error}")))?;
-    validate_model_review(&review, &report_value).map_err(|message| lifecycle.failed(message))?;
+    normalize_model_review(&mut review, &report_value)
+        .map_err(|message| lifecycle.failed(message))?;
     let mut limitations = report_limitations(&report);
     limitations.extend(projection_limitations(&evidence_projection));
     let duration_ms = clock.monotonic_ms().saturating_sub(started_ms).max(0) as u64;
@@ -493,7 +494,7 @@ fn child_pointer(parent: &str, segment: &str) -> String {
 }
 
 fn build_system_prompt() -> String {
-    "You review one Harn run report through a deterministic, provenance-bound evidence projection. Use only the supplied JSON evidence. Return only JSON matching the requested schema. Every finding must cite one or more exact RFC 6901 JSON Pointers into the original report. For bounded arrays, cite the report_pointer attached to an included item; never cite projection-only fields. Do not infer omitted evidence, missing private prompts, reasoning, host presentation, or unreported events. Treat projection omissions and checks that mark evidence unavailable, incomplete, or truncated as limits on confidence, not as evidence of failure.".to_string()
+    "You review one Harn run report through a deterministic, provenance-bound evidence projection. Use only the supplied JSON evidence. Return only JSON matching the requested schema. Every finding must cite one or more exact RFC 6901 JSON Pointers into the run report evidence document, whose paths mirror the original report. For bounded arrays, cite the report_pointer attached to an included item; never cite projection-only fields. Do not infer omitted evidence, missing private prompts, reasoning, host presentation, or unreported events. Treat projection omissions and checks that mark evidence unavailable, incomplete, or truncated as limits on confidence, not as evidence of failure.".to_string()
 }
 
 fn build_prompt(
@@ -501,53 +502,90 @@ fn build_prompt(
     projection: &RunReviewEvidenceProjection,
     rubric: &str,
 ) -> String {
-    let evidence_json = crate::canonical_json::to_string(&serde_json::json!({
-        "projection": projection,
-        "evidence": evidence,
-    }));
+    // The evidence is serialized as its own top-level document rather than
+    // nested beside the projection receipt. A model cites the document it is
+    // shown, so a wrapper key would invite pointers rooted at that key instead
+    // of at the report. `normalize_pointer` still repairs the wrapped form, but
+    // the prompt should not be the thing creating it.
+    let projection_json = crate::canonical_json::to_string(&serde_json::json!(projection));
+    let evidence_json = crate::canonical_json::to_string(evidence);
     format!(
-        "Rubric:\n{rubric}\n\nDeterministic run-report evidence projection (the only evidence):\n{evidence_json}\n\nReturn a concise verdict, findings, and actions. Cite exact original-report JSON Pointers supplied by this projection."
+        "Rubric:\n{rubric}\n\nProjection receipt (how the evidence below was bounded; not citable):\n{projection_json}\n\nRun report evidence (the only evidence; JSON Pointers are rooted at this document):\n{evidence_json}\n\nReturn a concise verdict, findings, and actions. Cite exact JSON Pointers into the run report evidence document."
     )
 }
 
-fn validate_model_review(review: &ModelRunReview, report: &Value) -> Result<(), String> {
+/// Validate the model's review and rewrite its citations into canonical
+/// report-rooted JSON Pointers.
+fn normalize_model_review(review: &mut ModelRunReview, report: &Value) -> Result<(), String> {
     if !review.confidence.is_finite() || !(0.0..=1.0).contains(&review.confidence) {
         return Err("run review confidence must be between 0 and 1".to_string());
     }
     if review.summary.trim().is_empty() {
         return Err("run review summary must not be empty".to_string());
     }
-    for (index, finding) in review.findings.iter().enumerate() {
+    for (index, finding) in review.findings.iter_mut().enumerate() {
         if finding.evidence_pointers.is_empty() {
             return Err(format!(
                 "run review finding {index} has no evidence pointers"
             ));
         }
-        validate_pointers(
+        normalize_pointers(
             report,
-            &finding.evidence_pointers,
+            &mut finding.evidence_pointers,
             &format!("finding {index}"),
         )?;
     }
-    for (index, action) in review.actions.iter().enumerate() {
-        validate_pointers(
+    for (index, action) in review.actions.iter_mut().enumerate() {
+        normalize_pointers(
             report,
-            &action.evidence_pointers,
+            &mut action.evidence_pointers,
             &format!("action {index}"),
         )?;
     }
     Ok(())
 }
 
-fn validate_pointers(report: &Value, pointers: &[String], owner: &str) -> Result<(), String> {
-    for pointer in pointers {
-        if pointer.is_empty() || !pointer.starts_with('/') || report.pointer(pointer).is_none() {
-            return Err(format!(
-                "run review {owner} cites invalid report JSON Pointer {pointer:?}"
-            ));
+/// Wrapper key an earlier prompt shape nested the evidence under. Models that
+/// saw it cite `/evidence/...`; the report itself has no such member, so the
+/// prefix is stripped when—and only when—the remainder resolves in the report.
+const LEGACY_EVIDENCE_POINTER_PREFIX: &str = "/evidence";
+
+/// Rewrite each citation to its canonical report-rooted form, rejecting any
+/// pointer that resolves under no accepted rooting. Normalizing here—at the one
+/// boundary that owns the model response shape—keeps every stored review
+/// citable against the full report while leaving hallucinated pointers
+/// fail-closed.
+fn normalize_pointers(report: &Value, pointers: &mut [String], owner: &str) -> Result<(), String> {
+    for pointer in pointers.iter_mut() {
+        match normalize_pointer(report, pointer) {
+            Some(canonical) => *pointer = canonical,
+            None => {
+                return Err(format!(
+                    "run review {owner} cites invalid report JSON Pointer {pointer:?}"
+                ))
+            }
         }
     }
     Ok(())
+}
+
+fn normalize_pointer(report: &Value, pointer: &str) -> Option<String> {
+    if pointer.is_empty() || !pointer.starts_with('/') {
+        return None;
+    }
+    if report.pointer(pointer).is_some() {
+        return Some(pointer.to_string());
+    }
+    let stripped = pointer.strip_prefix(LEGACY_EVIDENCE_POINTER_PREFIX)?;
+    // Only a whole path segment counts: `/evidenced/0` must not become `d/0`.
+    // An exact `/evidence` leaves `""`, the RFC 6901 whole-document pointer.
+    if !stripped.is_empty() && !stripped.starts_with('/') {
+        return None;
+    }
+    report
+        .pointer(stripped)
+        .is_some()
+        .then(|| stripped.to_string())
 }
 
 fn report_limitations(report: &RunReport) -> Vec<RunReviewLimitation> {
@@ -974,6 +1012,94 @@ mod tests {
         crate::llm::clear_cli_llm_mock_mode();
         assert_eq!(error.lifecycle.state, RunReviewState::Failed);
         assert!(error.message.contains("invalid report JSON Pointer"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    #[allow(clippy::await_holding_lock)]
+    async fn review_normalizes_projection_rooted_pointers_to_the_report() {
+        let _env = crate::llm::env_guard();
+        crate::llm::clear_cli_llm_mock_mode();
+        let (_dir, path) = report_file(vec![RunReportCheck {
+            code: "timeline_coverage_incomplete".to_string(),
+            severity: "info".to_string(),
+            status: "unavailable".to_string(),
+            agent_id: Some("run:root".to_string()),
+            message: "the timeline omitted events after its bounded query".to_string(),
+        }]);
+        // A model that cites the evidence document it was shown, rather than the
+        // report, must still produce a usable review: the citation resolves, so
+        // it is rewritten to its canonical report-rooted form.
+        install_mock(
+            r#"{"verdict":"concerns","confidence":0.6,"summary":"Coverage is limited.","findings":[{"severity":"warning","title":"Timeline evidence is incomplete","detail":"Coverage is marked unavailable.","evidence_pointers":["/evidence/checks/0"]}],"actions":[{"priority":"next","action":"Inspect the continuation.","evidence_pointers":["/evidence/root_run_id"]}]}"#,
+        );
+
+        let review = review_run_report(request(path)).await.expect("review");
+        crate::llm::clear_cli_llm_mock_mode();
+
+        assert_eq!(review.findings[0].evidence_pointers, ["/checks/0"]);
+        assert_eq!(review.actions[0].evidence_pointers, ["/root_run_id"]);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    #[allow(clippy::await_holding_lock)]
+    async fn review_fails_closed_on_projection_rooted_pointer_that_resolves_nowhere() {
+        let _env = crate::llm::env_guard();
+        crate::llm::clear_cli_llm_mock_mode();
+        let (_dir, path) = report_file(Vec::new());
+        // Stripping the wrapper must not become a way to launder a hallucinated
+        // citation: `/missing` is absent from the report either way.
+        install_mock(
+            r#"{"verdict":"pass","confidence":0.9,"summary":"Looks good.","findings":[{"severity":"info","title":"Unsupported","detail":"Not in the report.","evidence_pointers":["/evidence/missing"]}],"actions":[]}"#,
+        );
+
+        let error = review_run_report(request(path))
+            .await
+            .expect_err("unresolvable pointer must fail");
+        crate::llm::clear_cli_llm_mock_mode();
+        assert_eq!(error.lifecycle.state, RunReviewState::Failed);
+        assert!(error.message.contains("invalid report JSON Pointer"));
+    }
+
+    #[test]
+    fn pointer_normalization_only_strips_a_whole_wrapper_segment() {
+        let report = serde_json::json!({
+            "checks": [{"code": "example"}],
+            "evidenced": ["not the wrapper"],
+        });
+        assert_eq!(
+            normalize_pointer(&report, "/checks/0/code").as_deref(),
+            Some("/checks/0/code")
+        );
+        assert_eq!(
+            normalize_pointer(&report, "/evidence/checks/0/code").as_deref(),
+            Some("/checks/0/code")
+        );
+        // `/evidenced/0` resolves in the report as written and must be left alone.
+        assert_eq!(
+            normalize_pointer(&report, "/evidenced/0").as_deref(),
+            Some("/evidenced/0")
+        );
+        assert_eq!(normalize_pointer(&report, "/evidence/nope"), None);
+        assert_eq!(normalize_pointer(&report, "checks/0"), None);
+        assert_eq!(normalize_pointer(&report, ""), None);
+    }
+
+    #[test]
+    fn prompt_presents_evidence_as_its_own_rooted_document() {
+        let evidence = serde_json::json!({"checks": [{"code": "example"}]});
+        let projection = RunReviewEvidenceProjection {
+            schema: RUN_REVIEW_EVIDENCE_SCHEMA.to_string(),
+            hash: "sha256:abc".to_string(),
+            source_bytes: 10,
+            projected_bytes: 10,
+            omissions: Vec::new(),
+        };
+        let prompt = build_prompt(&evidence, &projection, "Judge it.");
+        // The evidence must not be nested under a key that reads as a pointer
+        // root; that nesting is what produced `/evidence/...` citations.
+        assert!(!prompt.contains(r#""evidence":{"#));
+        assert!(prompt.contains("JSON Pointers are rooted at this document"));
+        assert!(prompt.contains(r#"{"checks":[{"code":"example"}]}"#));
     }
 
     #[tokio::test]
