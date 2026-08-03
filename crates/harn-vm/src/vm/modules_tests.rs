@@ -827,11 +827,12 @@ fn namespace_import_binds_alias_dict_not_flattened_members() {
         assert!(map.get("greet").is_some());
         assert!(map.get("other").is_some());
 
-        // Call through the namespace object.
+        // Escaping the alias forces the complete-namespace bytecode path.
         let chunk_source = r#"
 import * as lib from "./lib"
+const complete = lib
 pipeline default(harness: Harness) {
-  return lib.greet("world")
+  return complete.greet("world")
 }
 "#;
         let mut lexer = harn_lexer::Lexer::new(chunk_source);
@@ -840,6 +841,9 @@ pipeline default(harness: Harness) {
         let program = parser.parse().expect("parse");
         let compiler = crate::Compiler::new();
         let chunk = compiler.compile(&program).expect("compile");
+        let disassembly = chunk.disassemble("escaped namespace import");
+        assert!(disassembly.contains("NAMESPACE_IMPORT"));
+        assert!(!disassembly.contains("NAMESPACE_IMPORT_MEMBERS"));
         let mut run_vm = Vm::new();
         crate::stdlib::register_vm_stdlib(&mut run_vm);
         run_vm.set_source_dir(temp.path());
