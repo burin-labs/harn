@@ -8,6 +8,7 @@ pub mod diagnostic;
 pub mod diagnostic_codes;
 pub mod interpolation;
 pub mod lexical;
+mod namespace_demand;
 mod parser;
 pub mod stdlib_metadata;
 pub mod typechecker;
@@ -18,6 +19,7 @@ pub use diagnostic_codes::{
     Category as DiagnosticCodeCategory, Code as DiagnosticCode, ParseRepairSafetyError, Repair,
     RepairId, RepairSafety, RepairTemplate, REPAIR_REGISTRY,
 };
+pub use namespace_demand::{namespace_import_demands, NamespaceDemand};
 pub use parser::*;
 pub use stdlib_metadata::{
     parse_for_span as parse_stdlib_metadata, synthesize_example, StdlibMetadata,
