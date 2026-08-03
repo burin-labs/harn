@@ -191,6 +191,14 @@ pub(super) fn plan(
                 carrier.as_ref(),
                 root_attenuation.as_ref(),
             );
+            // Retired `std/testing` wrappers are not ambient builtins, so
+            // nothing above observes them. Their typed replacements still take
+            // explicit handles, so seed that demand from the call itself. This
+            // reads the parsed program because the demand depends on what each
+            // call site declared, not just on the callee's name.
+            direct_requirements.extend(info.calls.iter().flat_map(|call| {
+                super::retired_testing::retired_wrapper_capabilities(&program, call)
+            }));
             let mut direct_root_requirement = false;
             for call in &info.calls {
                 let Some(signature) = imported_capability_signatures.get(&call.callee) else {
@@ -862,17 +870,6 @@ fn seed_ambient_requirements(
             accesses
                 .iter()
                 .filter_map(|access| CapabilityId::from_field_name(&access.property)),
-        );
-        // Retired `std/testing` wrappers are not ambient builtins, so nothing
-        // above observes them. Their typed replacements still take explicit
-        // handles, so seed that demand from the call itself.
-        callable.direct_requirements.extend(
-            callable
-                .info
-                .calls
-                .iter()
-                .flat_map(|call| super::retired_testing::retired_wrapper_capabilities(&call.callee))
-                .copied(),
         );
         callable.direct_root_requirement = file_diagnostics.is_some_and(|diagnostics| {
             diagnostics

@@ -624,6 +624,93 @@ fn capability_apply_keeps_the_burin_peer_coordination_fixture_parse_safe() {
     );
 }
 
+/// `with_mocks` bundled a fixture scope and an LLM scope behind one untyped
+/// config. Its replacement is a split, not a rename, so the recipe reads the
+/// config literal and nests the LLM scope inside the fixture scope — the same
+/// order the retired wrapper used, so teardown order and the body's context
+/// argument both survive.
+#[test]
+fn capability_apply_splits_a_retired_mock_wrapper_into_both_typed_scopes() {
+    let (result, updated) = apply_single(
+        "import { with_mocks } from \"std/testing\"\n\npipeline test_both(task) {\n  return with_mocks(\n    {host_mocks: [{capability: \"project\", operation: \"peers\", result: true}], llm_mocks: [{text: \"hi\"}]},\n    { _ -> \"ok\" },\n  )\n}\n",
+    );
+    assert_eq!(
+        result.post_apply_diagnostics_count, 0,
+        "{result:#?}\n{updated}"
+    );
+    assert!(updated.contains("with_capability_fixtures("), "{updated}");
+    assert!(updated.contains("harness.testing,"), "{updated}");
+    assert!(
+        updated.contains("with_llm_mocks(harness.llm,"),
+        "the LLM scope must nest inside the fixture scope: {updated}"
+    );
+    assert!(updated.contains("method: \"peers\""), "{updated}");
+    assert!(!updated.contains("with_mocks("), "{updated}");
+    assert!(!updated.contains("host_mocks"), "{updated}");
+    assert!(!updated.contains("llm_mocks:"), "{updated}");
+}
+
+/// Demand is read per call site. A site that only declared host fixtures must
+/// not acquire an LLM handle it never uses, or the attenuation pass would
+/// immediately try to narrow the handle back off again.
+#[test]
+fn capability_apply_does_not_widen_a_host_only_retired_mock_wrapper_to_the_llm_handle() {
+    let (result, updated) = apply_single(
+        "import { with_mocks } from \"std/testing\"\n\nfn observe(host: HarnessTesting, mocks) {\n  return with_mocks({host_mocks: mocks}, { _ -> len(host.calls()) })\n}\n\npipeline test_observe(harness: Harness, task) {\n  return observe(harness.testing, [])\n}\n",
+    );
+    assert_eq!(
+        result.post_apply_diagnostics_count, 0,
+        "{result:#?}\n{updated}"
+    );
+    assert!(
+        updated.contains("with_capability_fixtures(host,"),
+        "{updated}"
+    );
+    assert!(
+        !updated.contains("with_llm_mocks"),
+        "a host-only site must not gain an LLM scope: {updated}"
+    );
+    assert!(
+        !updated.contains("HarnessLlm"),
+        "a host-only site must not gain an LLM handle: {updated}"
+    );
+}
+
+#[test]
+fn capability_apply_projects_an_llm_only_retired_mock_wrapper_through_the_llm_handle() {
+    let (result, updated) = apply_single(
+        "import { with_mocks } from \"std/testing\"\n\npipeline test_llm(task) {\n  return with_mocks({llm_mocks: [{text: \"hi\"}]}, { _ -> \"ok\" })\n}\n",
+    );
+    assert_eq!(
+        result.post_apply_diagnostics_count, 0,
+        "{result:#?}\n{updated}"
+    );
+    assert!(updated.contains("with_llm_mocks(harness.llm,"), "{updated}");
+    assert!(!updated.contains("with_capability_fixtures"), "{updated}");
+}
+
+/// A config the recipe cannot read is left for a human rather than guessed at.
+/// Splitting a forwarded config would have to evaluate the caller's expression
+/// twice, and an unknown key means the site is doing something the recipe has
+/// not been taught.
+#[test]
+fn capability_apply_leaves_an_unreadable_retired_mock_config_for_a_human() {
+    for source in [
+        "import { with_mocks } from \"std/testing\"\n\npub fn forward(config, body) {\n  return with_mocks(config, body)\n}\n",
+        "import { with_mocks } from \"std/testing\"\n\npipeline test_extra(task) {\n  return with_mocks({host_mocks: [], unsupported: 1}, { _ -> \"ok\" })\n}\n",
+    ] {
+        let (_, updated) = apply_single(source);
+        assert!(
+            updated.contains("with_mocks("),
+            "an unreadable config must stay inert: {updated}"
+        );
+        assert!(
+            !updated.contains("with_capability_fixtures"),
+            "an unreadable config must not be guessed at: {updated}"
+        );
+    }
+}
+
 #[test]
 fn capability_apply_recognizes_a_local_named_capability_bundle() {
     let (result, updated) = apply_single(
