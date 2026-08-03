@@ -124,6 +124,16 @@ const HOST_EVENT_POLICIES: &[HostEventPolicy] = &[
     host_event("agent_loop_stall_warning", ASSISTANT),
     host_event("cache_hit", None),
     host_event("cache_miss", None),
+    // `std/llm` handler telemetry. Every one of these shipped in the embedded
+    // stdlib while this registry refused it, so the events were emitted and
+    // dropped; the drift check in `from_host_tests` is what keeps the two
+    // halves together from here.
+    host_event("llm_call_log", None),
+    host_event("llm_routing_decision", None),
+    host_event("llm_fallback_attempt", None),
+    host_event("llm_shadow_diff", None),
+    host_event("semantic_cache_hit", None),
+    host_event("semantic_cache_miss", None),
     host_event("agent_scratchpad_reorganization", None),
     host_event("stance_armed", None),
     host_event("stance_write_access_granted", None),
@@ -137,6 +147,13 @@ const HOST_EVENT_POLICIES: &[HostEventPolicy] = &[
     host_event("llm_auto_continue", None),
     host_event("context_overflow_recovery", ASSISTANT),
 ];
+
+/// Every `event_type` this boundary accepts, for the drift check that keeps
+/// the embedded stdlib's emitters and this registry in sync.
+#[cfg(test)]
+pub(super) fn registered_host_event_types() -> impl Iterator<Item = &'static str> {
+    HOST_EVENT_POLICIES.iter().map(|policy| policy.event_type)
+}
 
 fn host_event_policy(event_type: &str) -> Option<&'static HostEventPolicy> {
     HOST_EVENT_POLICIES
@@ -229,6 +246,53 @@ fn from_host_special(session_id: &str, event_type: &str, payload: &Value) -> Opt
             key: obj_string(payload, "key"),
             backend: obj_string(payload, "backend"),
             namespace: obj_string(payload, "namespace"),
+            payload: payload.clone(),
+        },
+        "llm_call_log" => AgentEvent::LlmCallLog {
+            session_id: sid(),
+            model: obj_string(payload, "model"),
+            provider: obj_string(payload, "provider"),
+            status: obj_string(payload, "status"),
+            latency_ms: obj_usize(payload, "latency_ms"),
+            iteration: obj_usize(payload, "iteration"),
+            attempt: obj_usize(payload, "attempt"),
+            payload: payload.clone(),
+        },
+        "llm_routing_decision" => AgentEvent::LlmRoutingDecision {
+            session_id: sid(),
+            route_index: obj_i64(payload, "route_index"),
+            route_name: obj_string(payload, "route_name"),
+            used_default: obj_bool(payload, "used_default"),
+            payload: payload.clone(),
+        },
+        "llm_fallback_attempt" => AgentEvent::LlmFallbackAttempt {
+            session_id: sid(),
+            fallback_index: obj_usize(payload, "fallback_index"),
+            fallback_total: obj_usize(payload, "fallback_total"),
+            ok: obj_bool(payload, "ok"),
+            status: obj_string(payload, "status"),
+            payload: payload.clone(),
+        },
+        "llm_shadow_diff" => AgentEvent::LlmShadowDiff {
+            session_id: sid(),
+            primary_ok: obj_bool(payload, "primary_ok"),
+            shadow_ok: obj_bool(payload, "shadow_ok"),
+            primary_status: obj_string(payload, "primary_status"),
+            shadow_status: obj_string(payload, "shadow_status"),
+            primary_len: obj_usize(payload, "primary_len"),
+            shadow_len: obj_usize(payload, "shadow_len"),
+            payload: payload.clone(),
+        },
+        "semantic_cache_hit" => AgentEvent::SemanticCacheHit {
+            session_id: sid(),
+            similarity: obj_f64(payload, "similarity"),
+            provider: obj_string(payload, "provider"),
+            model: obj_string(payload, "model"),
+            payload: payload.clone(),
+        },
+        "semantic_cache_miss" => AgentEvent::SemanticCacheMiss {
+            session_id: sid(),
+            nearest_similarity: obj_f64(payload, "nearest_similarity"),
             payload: payload.clone(),
         },
         "agent_scratchpad_reorganization" => {
@@ -491,4 +555,18 @@ fn obj_string(payload: &Value, key: &str) -> String {
 
 fn obj_usize(payload: &Value, key: &str) -> usize {
     payload.get(key).and_then(Value::as_u64).unwrap_or(0) as usize
+}
+
+fn obj_bool(payload: &Value, key: &str) -> bool {
+    payload.get(key).and_then(Value::as_bool).unwrap_or(false)
+}
+
+fn obj_f64(payload: &Value, key: &str) -> f64 {
+    payload.get(key).and_then(Value::as_f64).unwrap_or(0.0)
+}
+
+/// A route index is `-1` when the router fell through to its default, so this
+/// one cannot borrow [`obj_usize`].
+fn obj_i64(payload: &Value, key: &str) -> i64 {
+    payload.get(key).and_then(Value::as_i64).unwrap_or(0)
 }

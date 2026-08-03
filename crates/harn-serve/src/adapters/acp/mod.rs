@@ -17,6 +17,7 @@ mod checkpoints;
 mod commands;
 mod core;
 mod dispatch;
+mod event_projection;
 mod events;
 mod execute;
 mod host_ownership;

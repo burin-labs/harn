@@ -981,6 +981,69 @@ pub enum AgentEvent {
         namespace: String,
         payload: serde_json::Value,
     },
+    /// Emitted by `std/llm::with_logging` once per provider call. Carries the
+    /// per-call latency, route, and outcome that spend and slow-call
+    /// attribution read, with the full record kept in `payload` so an
+    /// `include_prompt` caller loses nothing on the way through this boundary.
+    LlmCallLog {
+        session_id: String,
+        model: String,
+        provider: String,
+        status: String,
+        latency_ms: usize,
+        iteration: usize,
+        attempt: usize,
+        payload: serde_json::Value,
+    },
+    /// Emitted by `std/llm::with_routing` when the router picks a caller.
+    /// `route_index` is `-1` when it fell through to the default route.
+    LlmRoutingDecision {
+        session_id: String,
+        route_index: i64,
+        route_name: String,
+        used_default: bool,
+        payload: serde_json::Value,
+    },
+    /// Emitted by `std/llm::with_fallback` once per caller it tries, so a run
+    /// shows how far down the chain it had to go and why each rung failed.
+    LlmFallbackAttempt {
+        session_id: String,
+        fallback_index: usize,
+        fallback_total: usize,
+        ok: bool,
+        status: String,
+        payload: serde_json::Value,
+    },
+    /// Emitted by `std/llm::with_shadow` when the shadow caller's result
+    /// differs from the primary's under the configured comparison policy.
+    LlmShadowDiff {
+        session_id: String,
+        primary_ok: bool,
+        shadow_ok: bool,
+        primary_status: String,
+        shadow_status: String,
+        primary_len: usize,
+        shadow_len: usize,
+        payload: serde_json::Value,
+    },
+    /// Emitted by `std/llm::with_semantic_cache` when an embedding lookup
+    /// clears the similarity threshold. `payload.metrics` carries the same
+    /// cost-moat receipts as [`AgentEvent::CacheHit`].
+    SemanticCacheHit {
+        session_id: String,
+        similarity: f64,
+        provider: String,
+        model: String,
+        payload: serde_json::Value,
+    },
+    /// Paired with [`AgentEvent::SemanticCacheHit`]. `nearest_similarity` is
+    /// how close the best candidate came, which is what tells an operator
+    /// whether the threshold is set wrong or the corpus is simply cold.
+    SemanticCacheMiss {
+        session_id: String,
+        nearest_similarity: f64,
+        payload: serde_json::Value,
+    },
     /// A language-neutral tool-composition snippet has started. The envelope
     /// identifies the snippet and binding manifest hashes plus the side-effect
     /// ceiling requested for the whole parent run.
@@ -1204,6 +1267,12 @@ impl AgentEvent {
             | Self::ToolBatchDisposition { session_id, .. }
             | Self::CacheHit { session_id, .. }
             | Self::CacheMiss { session_id, .. }
+            | Self::LlmCallLog { session_id, .. }
+            | Self::LlmRoutingDecision { session_id, .. }
+            | Self::LlmFallbackAttempt { session_id, .. }
+            | Self::LlmShadowDiff { session_id, .. }
+            | Self::SemanticCacheHit { session_id, .. }
+            | Self::SemanticCacheMiss { session_id, .. }
             | Self::CompositionStart { session_id, .. }
             | Self::CompositionChildCall { session_id, .. }
             | Self::CompositionChildResult { session_id, .. }
