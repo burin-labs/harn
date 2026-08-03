@@ -1529,6 +1529,44 @@ fn validate_manifest_contract(
         &bundle.entrypoint,
         "entrypoint is required",
     );
+    if bundle.schema_version >= WORKFLOW_BUNDLE_SCHEMA_VERSION {
+        match &bundle.execution_artifact {
+            Some(artifact) => {
+                if artifact.format != "harn.linked_program.v1" {
+                    push_error(
+                        report,
+                        "execution_artifact.format",
+                        "execution artifact format must be harn.linked_program.v1",
+                        None,
+                    );
+                }
+                validate_relative_path(
+                    report,
+                    "execution_artifact.path",
+                    &artifact.path,
+                    "execution artifact path is required",
+                );
+                validate_blake3_hash(
+                    report,
+                    "execution_artifact.hash_blake3",
+                    &artifact.hash_blake3,
+                    true,
+                );
+                validate_blake3_hash(
+                    report,
+                    "execution_artifact.graph_digest_blake3",
+                    &artifact.graph_digest_blake3,
+                    true,
+                );
+            }
+            None => push_error(
+                report,
+                "execution_artifact",
+                "schema-v3 bundles require a linked execution artifact",
+                None,
+            ),
+        }
+    }
     if bundle.transitive_modules.is_empty() {
         push_error(
             report,
@@ -1564,12 +1602,14 @@ fn validate_manifest_contract(
             &module.source_hash_blake3,
             true,
         );
-        validate_blake3_hash(
-            report,
-            format!("{path}.harnbc_hash_blake3"),
-            &module.harnbc_hash_blake3,
-            true,
-        );
+        if bundle.schema_version == LEGACY_WORKFLOW_BUNDLE_SCHEMA_VERSION {
+            validate_blake3_hash(
+                report,
+                format!("{path}.harnbc_hash_blake3"),
+                &module.harnbc_hash_blake3,
+                true,
+            );
+        }
     }
     if bundle.stdlib_version.trim().is_empty() {
         push_error(report, "stdlib_version", "stdlib_version is required", None);

@@ -140,6 +140,9 @@ pub fn prepare_harnpack<W: Write>(
         }
     };
 
+    // Keep the public unsafe-path error contract at the host-synthesized
+    // entrypoint boundary, before the shared payload verifier runs.
+    let entrypoint_rel = join_safe_nonempty(Path::new(""), &manifest.entrypoint)?;
     crate::commands::pack::verify_runtime_payloads(&manifest, &contents, signature_verified)
         .map_err(|error| HarnpackError::new("harnpack.archive_validation", error.message))?;
 
@@ -157,7 +160,6 @@ pub fn prepare_harnpack<W: Write>(
     }
     ensure_replay_projection(&cache_dir, &manifest, &replay_plan)?;
 
-    let entrypoint_rel = join_safe_nonempty(Path::new(""), &manifest.entrypoint)?;
     let entrypoint_path = cache_dir.join("sources").join(entrypoint_rel);
     if !entrypoint_path.exists() {
         return Err(HarnpackError::new(
@@ -801,6 +803,53 @@ mod tests {
         ];
         let error = plan_replay(&contents).expect_err("collision must fail closed");
         assert_eq!(error.code, "harnpack.replay_collision");
+    }
+
+    #[test]
+    fn incompatible_linked_program_fails_closed_or_reports_explicit_fallback() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let entry_path = temp.path().join("entry.harn");
+        let source = "fn main(harness: Harness) { harness.stdio.println(\"linked\") }\n";
+        fs::write(&entry_path, source).expect("entry source");
+        let linked =
+            harn_vm::linked_program::link_program(&entry_path, temp.path()).expect("link program");
+        let mut bytes = linked.encode().expect("encode linked program");
+        bytes[8..12].copy_from_slice(&2_u32.to_le_bytes());
+        let hash = format!("blake3:{}", blake3::hash(&bytes).to_hex());
+        let descriptor = harn_vm::orchestration::ExecutionArtifact {
+            format: "harn.linked_program.v1".to_string(),
+            path: PathBuf::from(harn_vm::linked_program::LINKED_PROGRAM_ARCHIVE_PATH),
+            hash_blake3: hash,
+            graph_digest_blake3: linked.identity.graph_digest_blake3.clone(),
+            fallback: ExecutionArtifactFallback::Deny,
+            link_report: linked.report.clone(),
+        };
+        let mut manifest = WorkflowBundle {
+            entrypoint: PathBuf::from("entry.harn"),
+            execution_artifact: Some(descriptor),
+            transitive_modules: vec![harn_vm::orchestration::ModuleEntry {
+                path: PathBuf::from("entry.harn"),
+                source_hash_blake3: format!("blake3:{}", blake3::hash(source.as_bytes()).to_hex()),
+                harnbc_hash_blake3: String::new(),
+            }],
+            ..WorkflowBundle::default()
+        };
+        let contents = vec![
+            HarnpackEntry::new("sources/entry.harn", source.as_bytes()),
+            HarnpackEntry::new(harn_vm::linked_program::LINKED_PROGRAM_ARCHIVE_PATH, bytes),
+        ];
+
+        let error = prepare_execution_artifact(&manifest, &contents)
+            .expect_err("default policy must fail closed");
+        assert_eq!(error.code, "linked_program.incompatible");
+
+        manifest.execution_artifact.as_mut().unwrap().fallback =
+            ExecutionArtifactFallback::ExactSources;
+        let (artifact, state, reason) = prepare_execution_artifact(&manifest, &contents)
+            .expect("signed policy explicitly allows exact sources");
+        assert!(artifact.is_none());
+        assert_eq!(state, "source_fallback");
+        assert!(reason.is_some_and(|reason| reason.contains("schema 2")));
     }
 
     #[test]

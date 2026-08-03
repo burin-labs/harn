@@ -7,8 +7,8 @@
 //! manifest, and emits a deterministic tar.zst archive.
 //!
 //! `harn pack verify <bundle.harnpack>` (#1779) reads a bundle back,
-//! recomputes its canonical hash, verifies the embedded Ed25519
-//! signature (if any), and cross-checks every per-module BLAKE3.
+//! recomputes its canonical hash, verifies the embedded Ed25519 signature (if
+//! any), and cross-checks every source and linked-artifact BLAKE3 identity.
 
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};

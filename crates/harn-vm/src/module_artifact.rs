@@ -194,14 +194,16 @@ pub fn specialize_module_artifact(
         .iter()
         .cloned()
         .collect::<BTreeSet<_>>();
-    artifact.type_schema_init_chunk =
+    artifact.type_schema_init_chunks =
         crate::Compiler::compile_selected_public_type_schema_initializers(
             program,
             source_file,
             Some(&selected_type_names),
         )
         .map_err(|error| VmError::Runtime(format!("Import schema compile error: {error}")))?
-        .map(|chunk| chunk.freeze_for_cache());
+        .into_iter()
+        .map(|chunk| chunk.freeze_for_cache())
+        .collect();
     Ok(artifact)
 }
 
@@ -747,6 +749,44 @@ pub type UserList = list<UserShape>
         assert!(artifact.public_type_names.contains("UserShape"));
         assert!(artifact.public_type_names.contains("UserList"));
         assert_eq!(artifact.type_schema_init_chunks.len(), 2);
+    }
+
+    #[test]
+    fn specialization_prunes_dead_pipeline_struct_and_enum_exports() {
+        let source = r#"
+pub enum KeptStatus { Ready }
+pub enum DeadStatus { Gone }
+pub struct KeptConfig { value: int }
+pub struct DeadConfig { value: string }
+pub pipeline kept_pipeline(harness: Harness) { return KeptConfig({value: 7}) }
+pub pipeline dead_pipeline(harness: Harness) { return DeadConfig({value: "dead"}) }
+"#;
+        let source_path = Path::new("<test>/declarations.harn");
+        let parsed = parse_module_source(source_path, source).expect("module parses");
+        let full = compile_module_artifact(&parsed, Some(source_path.display().to_string()))
+            .expect("module compiles");
+        let selected = super::specialize_module_artifact(
+            &parsed,
+            Some(source_path.display().to_string()),
+            full,
+            &harn_modules::ExportDemand::Members(std::collections::BTreeSet::from([
+                "KeptStatus".to_string(),
+                "KeptConfig".to_string(),
+                "kept_pipeline".to_string(),
+            ])),
+        )
+        .expect("specialization succeeds");
+
+        assert!(selected.public_exports.contains_key("KeptStatus"));
+        assert!(selected.public_exports.contains_key("KeptConfig"));
+        assert!(selected.public_exports.contains_key("kept_pipeline"));
+        assert!(!selected.public_exports.contains_key("DeadStatus"));
+        assert!(!selected.public_exports.contains_key("DeadConfig"));
+        assert!(!selected.public_exports.contains_key("dead_pipeline"));
+        assert!(selected.functions.contains_key("KeptConfig"));
+        assert!(selected.functions.contains_key("kept_pipeline"));
+        assert!(!selected.functions.contains_key("DeadConfig"));
+        assert!(!selected.functions.contains_key("dead_pipeline"));
     }
 
     #[test]

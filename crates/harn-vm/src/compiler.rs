@@ -149,13 +149,13 @@ impl Compiler {
         program: &[harn_parser::SNode],
         source_file: Option<String>,
         selected_names: Option<&std::collections::BTreeSet<String>>,
-    ) -> Result<Option<Chunk>, CompileError> {
+    ) -> Result<Vec<Chunk>, CompileError> {
         harn_kernel::Compiler::compile_selected_public_type_schema_initializers(
             program,
             source_file,
             selected_names,
         )
-        .map(|chunk| chunk.map(Chunk::from_portable))
+        .map(|chunks| chunks.into_iter().map(Chunk::from_portable).collect())
     }
 
     pub fn collect_type_aliases(&mut self, program: &[harn_parser::SNode]) {

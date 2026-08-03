@@ -165,9 +165,11 @@ pub fn link_program(
         let initializer_bytes = selected.init_chunk.as_ref().map_or(0, |chunk| {
             postcard::to_allocvec(chunk).map_or(0, |bytes| bytes.len() as u64)
         });
-        let type_schema_bytes = selected.type_schema_init_chunk.as_ref().map_or(0, |chunk| {
-            postcard::to_allocvec(chunk).map_or(0, |bytes| bytes.len() as u64)
-        });
+        let type_schema_bytes = selected
+            .type_schema_init_chunks
+            .iter()
+            .map(|chunk| postcard::to_allocvec(chunk).map_or(0, |bytes| bytes.len() as u64))
+            .sum();
         if initializer_bytes > 0 {
             retained_symbols.push(LinkSymbolReason {
                 symbol: "<module_initializer>".to_string(),
@@ -607,5 +609,89 @@ mod tests {
         assert!(report.removed_symbols.iter().any(|name| name == "dead"));
         assert!(report.initializer_bytes > 0);
         assert!(report.output_bytes < report.input_bytes);
+    }
+
+    #[test]
+    fn selective_type_import_retains_only_its_schema_initializer() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path().join("types.harn");
+        let entry = dir.path().join("entry.harn");
+        fs::write(
+            &library,
+            r#"
+            pub type KeptShape = { value: int }
+            pub type DeadShape = { value: string }
+            "#,
+        )
+        .unwrap();
+        fs::write(
+            &entry,
+            r#"
+            import { KeptShape } from "./types.harn"
+            fn accept(value: KeptShape) { value.value }
+            fn main() { accept({ value: 7 }) }
+            "#,
+        )
+        .unwrap();
+
+        let linked = link_program(&entry, dir.path()).expect("link succeeds");
+        let types = &linked.modules[Path::new("types.harn")];
+        assert_eq!(
+            types.public_type_names.iter().cloned().collect::<Vec<_>>(),
+            ["KeptShape"]
+        );
+        assert_eq!(types.type_schema_init_chunks.len(), 1);
+        let report = linked
+            .report
+            .modules
+            .iter()
+            .find(|module| module.path == Path::new("types.harn"))
+            .unwrap();
+        assert!(report.type_schema_bytes > 0);
+        assert!(report
+            .removed_symbols
+            .iter()
+            .any(|name| name == "DeadShape"));
+    }
+
+    #[test]
+    fn public_reexport_records_conservative_widening() {
+        let dir = tempfile::tempdir().unwrap();
+        let inner = dir.path().join("inner.harn");
+        let facade = dir.path().join("facade.harn");
+        let entry = dir.path().join("entry.harn");
+        fs::write(&inner, "pub fn kept() { 7 }\npub fn dead() { 8 }\n").unwrap();
+        fs::write(
+            &facade,
+            r#"
+            pub import { kept } from "./inner.harn"
+            pub fn local_dead() { 9 }
+            "#,
+        )
+        .unwrap();
+        fs::write(
+            &entry,
+            r#"
+            import { kept } from "./facade.harn"
+            fn main() { println(kept()) }
+            "#,
+        )
+        .unwrap();
+
+        let linked = link_program(&entry, dir.path()).expect("link succeeds");
+        let facade_report = linked
+            .report
+            .modules
+            .iter()
+            .find(|module| module.path == Path::new("facade.harn"))
+            .unwrap();
+        assert_eq!(facade_report.demand, LinkModuleDemand::WholeNamespace);
+        assert!(facade_report
+            .widening_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("public re-export")));
+        assert!(linked.modules[Path::new("facade.harn")]
+            .functions
+            .contains_key("local_dead"));
     }
 }

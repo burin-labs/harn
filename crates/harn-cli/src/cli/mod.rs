@@ -489,17 +489,18 @@ SCRIPTING
     /// Build or verify a `.harnpack` content-addressed run bundle.
     ///
     /// `harn pack <entrypoint>` walks the entrypoint's transitive imports,
-    /// precompiles every module, snapshots the provider catalog and
-    /// stdlib pin, generates a minimal SBOM, and emits a deterministic
-    /// tar.zst container under `<entrypoint>.harnpack` (or `--out`).
+    /// links one closed program, snapshots the provider catalog and stdlib
+    /// pin, generates a minimal SBOM, and emits a deterministic tar.zst
+    /// container under `<entrypoint>.harnpack` (or `--out`).
     ///
     /// `harn pack verify <bundle.harnpack>` reads a bundle back, recomputes
     /// its canonical hash, verifies the embedded Ed25519 signature (if any),
-    /// and cross-checks every per-module BLAKE3 against the manifest.
+    /// and cross-checks source and linked-artifact BLAKE3 identities against
+    /// the manifest.
     /// Exits non-zero on any mismatch.
     ///
     /// `--upgrade <old.harnpack>` reads an existing bundle (v1 or v2) and
-    /// re-emits it under the v2 manifest, preserving the prior bundle's
+    /// re-emits it under the v3 manifest, preserving the prior bundle's
     /// workflow graph, triggers, and prompt capsules. `--exclude-secrets`
     /// refuses to bundle paths that look like secrets (`.env`, `*.pem`,
     /// `credentials*`, anything under `secrets/`).

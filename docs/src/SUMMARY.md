@@ -270,6 +270,7 @@
 
 - [CLI reference](./cli-reference.md)
 - [Benchmark the portable kernel](./portable-kernel-benchmarking.md)
+- [Linked-program reachability](./dev/linked-program-reachability.md)
 - [CLI `--json` contract](./cli-json-contract.md)
 - [Extending the CLI in `.harn`](./cli-extending-in-harn.md)
 - [`std/cli/argparse`](./cli-argparse-reference.md)
