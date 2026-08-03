@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use crate::package_imports::acquire_package_snapshots;
 use crate::package_snapshot::PackageSnapshot;
 use harn_lexer::Span;
-use harn_parser::{Node, Parser, SNode};
+use harn_parser::{Parser, SNode};
 
 pub mod asset_paths;
 mod declarations;
@@ -21,7 +21,10 @@ mod stdlib;
 mod symbol_reachability;
 mod type_dependencies;
 
-use declarations::pattern_names;
+use declarations::{
+    callable_decl_name, collect_callable_declarations, collect_module_info,
+    collect_type_declarations, decl_site, type_decl_name,
+};
 pub use declarations::{public_declarations, DefKind, PublicDeclaration};
 pub use namespace_imports::NamespaceImportInfo;
 pub use package_imports::{
@@ -1315,145 +1318,6 @@ fn load_module(
 fn stdlib_module_from_path(path: &Path) -> Option<&str> {
     let s = path.to_str()?;
     s.strip_prefix("<std>/")
-}
-
-fn collect_module_info(
-    file: &Path,
-    snode: &SNode,
-    module: &mut ModuleInfo,
-    package_snapshots: &[PackageSnapshot],
-) {
-    if let Node::AttributedDecl { inner, .. } = &snode.node {
-        collect_module_info(file, inner, module, package_snapshots);
-        return;
-    }
-
-    for public in public_declarations(snode) {
-        module.own_exports.insert(public.name);
-    }
-
-    match &snode.node {
-        Node::FnDecl { name, params, .. } => {
-            module.declarations.insert(
-                name.clone(),
-                decl_site(file, snode.span, name, DefKind::Function),
-            );
-            for param_name in params.iter().map(|param| param.name.clone()) {
-                module.declarations.insert(
-                    param_name.clone(),
-                    decl_site(file, snode.span, &param_name, DefKind::Parameter),
-                );
-            }
-        }
-        Node::Pipeline { name, .. } => {
-            module.declarations.insert(
-                name.clone(),
-                decl_site(file, snode.span, name, DefKind::Pipeline),
-            );
-        }
-        Node::ToolDecl { name, .. } => {
-            module.declarations.insert(
-                name.clone(),
-                decl_site(file, snode.span, name, DefKind::Tool),
-            );
-        }
-        Node::SkillDecl { name, .. } => {
-            module.declarations.insert(
-                name.clone(),
-                decl_site(file, snode.span, name, DefKind::Skill),
-            );
-        }
-        Node::EvalPackDecl { binding_name, .. } => {
-            module.declarations.insert(
-                binding_name.clone(),
-                decl_site(file, snode.span, binding_name, DefKind::EvalPack),
-            );
-        }
-        Node::StructDecl { name, .. } => {
-            module.declarations.insert(
-                name.clone(),
-                decl_site(file, snode.span, name, DefKind::Struct),
-            );
-        }
-        Node::EnumDecl { name, .. } => {
-            module.declarations.insert(
-                name.clone(),
-                decl_site(file, snode.span, name, DefKind::Enum),
-            );
-        }
-        Node::InterfaceDecl { name, .. } => {
-            module.declarations.insert(
-                name.clone(),
-                decl_site(file, snode.span, name, DefKind::Interface),
-            );
-        }
-        Node::TypeDecl { name, .. } => {
-            module.declarations.insert(
-                name.clone(),
-                decl_site(file, snode.span, name, DefKind::Type),
-            );
-        }
-        Node::LetBinding { pattern, .. } | Node::ConstBinding { pattern, .. } => {
-            for name in pattern_names(pattern) {
-                module.declarations.insert(
-                    name.clone(),
-                    decl_site(file, snode.span, &name, DefKind::Variable),
-                );
-            }
-        }
-        _ if import_recording::record_import_node(module, file, snode, package_snapshots) => {}
-        _ => {}
-    }
-}
-
-fn collect_type_declarations(snode: &SNode, decls: &mut Vec<SNode>) {
-    match &snode.node {
-        Node::TypeDecl { .. }
-        | Node::StructDecl { .. }
-        | Node::EnumDecl { .. }
-        | Node::InterfaceDecl { .. } => decls.push(snode.clone()),
-        Node::AttributedDecl { inner, .. } => collect_type_declarations(inner, decls),
-        _ => {}
-    }
-}
-
-fn collect_callable_declarations(snode: &SNode, decls: &mut Vec<SNode>) {
-    match &snode.node {
-        Node::FnDecl { .. } | Node::Pipeline { .. } | Node::ToolDecl { .. } => {
-            decls.push(snode.clone());
-        }
-        Node::AttributedDecl { inner, .. } => collect_callable_declarations(inner, decls),
-        _ => {}
-    }
-}
-
-fn type_decl_name(snode: &SNode) -> Option<&str> {
-    match &snode.node {
-        Node::TypeDecl { name, .. }
-        | Node::StructDecl { name, .. }
-        | Node::EnumDecl { name, .. }
-        | Node::InterfaceDecl { name, .. } => Some(name.as_str()),
-        _ => None,
-    }
-}
-
-fn callable_decl_name(snode: &SNode) -> Option<&str> {
-    match &snode.node {
-        Node::FnDecl { name, .. } | Node::Pipeline { name, .. } | Node::ToolDecl { name, .. } => {
-            Some(name.as_str())
-        }
-        Node::AttributedDecl { inner, .. } => callable_decl_name(inner),
-        _ => None,
-    }
-}
-
-fn decl_site(file: &Path, span: Span, name: &str, kind: DefKind) -> DefSite {
-    DefSite {
-        name: name.to_string(),
-        file: file.to_path_buf(),
-        kind,
-        span,
-    }
 }
 
 fn normalize_path(path: &Path) -> PathBuf {
