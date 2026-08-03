@@ -163,6 +163,9 @@ pub(super) fn repair(file: &Path) -> Option<RepairCandidate> {
                         let harness = root_harness_argument_for_span(&program, call.span)?;
                         let name_end = call.span.start.checked_add("with_mocks".len())?;
                         let config = call.args.first()?;
+                        if !scenario_config_is_readable(&program, *config) {
+                            return None;
+                        }
                         let mut call_edits = vec![
                             FixEdit {
                                 span: Span::with_offsets(
@@ -363,6 +366,39 @@ fn scenario_config_key_edits(program: &[harn_parser::SNode], config: Span) -> Ve
         }
     });
     edits
+}
+
+/// Whether the callee rename is safe for this config expression.
+///
+/// The two wrappers do not share a vocabulary: `with_mocks` read `host_mocks`
+/// and `llm_mocks`, while `with_scenario` reads `capabilities` and `llm`. The
+/// rename is therefore only complete when the keys travel with it, and keys can
+/// only be rewritten on a dict literal. Renaming the callee over a config this
+/// pass cannot see into leaves `with_scenario` reading two fields that are not
+/// there: both scopes install empty, the body runs against the real host, and
+/// nothing about the migration looks wrong — the call site is gone and the plan
+/// converges.
+///
+/// So a config that is not a literal, or that carries a key outside the
+/// two-scope contract, keeps its call site inert for a human instead.
+fn scenario_config_is_readable(program: &[harn_parser::SNode], config: Span) -> bool {
+    let mut readable = false;
+    visit::walk_program(program, &mut |node| {
+        if node.span.start != config.start || node.span.end != config.end {
+            return;
+        }
+        let Node::DictLiteral(entries) = &node.node else {
+            return;
+        };
+        readable = entries.iter().all(|entry| {
+            matches!(
+                &entry.key.node,
+                Node::Identifier(key) | Node::StringLiteral(key)
+                    if matches!(key.as_str(), "host_mocks" | "llm_mocks")
+            )
+        });
+    });
+    readable
 }
 
 fn fixture_source_scopes(program: &[harn_parser::SNode], fixture_arguments: &[Span]) -> Vec<Span> {

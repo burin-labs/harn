@@ -426,6 +426,7 @@ pub(super) fn explicit_capability_argument_edits(
     desired: &CarrierKind,
     additions: &BTreeMap<CapabilityId, String>,
     diagnostics: Option<&FileDiagnostics<'_>>,
+    imported_capability_signatures: &BTreeMap<String, super::imported_calls::Signature>,
 ) -> Vec<FixEdit> {
     let Some(diagnostics) = diagnostics else {
         return Vec::new();
@@ -479,6 +480,17 @@ pub(super) fn explicit_capability_argument_edits(
                 span: call.args[argument_index],
                 replacement: argument,
             });
+            continue;
+        }
+        if imported_capability_signatures.contains_key(&call.callee) {
+            // Only the in-place projection above is safe for an imported
+            // callee. Inserting here would duplicate the imported-signature
+            // pass, which reads the callee's whole capability prefix while a
+            // diagnostic names only the capability the typechecker reported
+            // first. Both insert at the same argument index, so emitting both
+            // leaves two conflicting zero-width edits at one offset —
+            // `harness.env, ` against `harness.env, harness.fs, ` — and the
+            // apply refuses the whole ambiguous candidate.
             continue;
         }
         if let Some(edit) = add_call_argument_at_index_edit(source, call, argument_index, &argument)
