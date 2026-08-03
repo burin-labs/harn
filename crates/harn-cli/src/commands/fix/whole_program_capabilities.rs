@@ -863,6 +863,17 @@ fn seed_ambient_requirements(
                 .iter()
                 .filter_map(|access| CapabilityId::from_field_name(&access.property)),
         );
+        // Retired `std/testing` wrappers are not ambient builtins, so nothing
+        // above observes them. Their typed replacements still take explicit
+        // handles, so seed that demand from the call itself.
+        callable.direct_requirements.extend(
+            callable
+                .info
+                .calls
+                .iter()
+                .flat_map(|call| super::retired_testing::retired_wrapper_capabilities(&call.callee))
+                .copied(),
+        );
         callable.direct_root_requirement = file_diagnostics.is_some_and(|diagnostics| {
             diagnostics
                 .missing_capability_arguments
