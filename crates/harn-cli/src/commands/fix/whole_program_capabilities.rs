@@ -428,6 +428,7 @@ pub(super) fn plan(
                 desired,
                 &added_capabilities[idx],
                 diagnostics_by_file.get(&program_files[callable.file_idx].path),
+                &program_files[callable.file_idx].imported_capability_signatures,
             ),
         );
         edits_by_file
