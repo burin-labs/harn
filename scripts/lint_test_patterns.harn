@@ -665,6 +665,20 @@ pub fn recv_timeout_pattern() -> string {
   return r"recv_timeout\(Duration::from_(millis|nanos|micros)"
 }
 
+/**
+ * A measured duration compared against a millisecond-scale budget, such as
+ * `elapsed < Duration::from_millis(500)`.
+ *
+ * Matches the bare binding as well as the direct call, because the usual shape
+ * binds `let elapsed = started.elapsed()` on an earlier line. Second-scale
+ * comparisons are deliberately not matched: those are liveness guards ("did not
+ * hang"), which tolerate a loaded machine. A sub-second budget is a performance
+ * claim, and `make test` shares hosts with release audit lanes.
+ */
+pub fn elapsed_millis_budget_pattern() -> string {
+  return r"elapsed(\(\))? *[<>]=? *[A-Za-z_:]*Duration::from_millis"
+}
+
 pub fn harn_command_pattern() -> string {
   return r"harn_command\("
 }
@@ -888,6 +902,17 @@ pipeline main(harness: Harness, task) {
     recv_timeout_pattern(),
     [
       "    hint: Use an event-driven wait (channel recv with tokio::time::timeout) instead of busy-polling.",
+    ],
+  )
+  harness.stdio.println("--- wall-clock millisecond budget asserted in a test ---")
+  violations = violations
+    + report_pattern(
+    harness.stdio,
+    test_files,
+    { rel -> false },
+    elapsed_millis_budget_pattern(),
+    [
+      "    hint: Assert the correctness contract here and move the latency budget to the benchmark gate; `make test` shares hosts with release audit lanes, so a sub-second budget measures contention.",
     ],
   )
   harness.stdio.println("--- obsolete harn_command helper ---")
