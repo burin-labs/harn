@@ -16,6 +16,10 @@ fn peer_presence_mock(result: dict) -> list {
   ]
 }
 
+fn unrelated_operation_record() -> dict {
+  return {capability: "audit", operation: "unrelated", result: true}
+}
+
 pipeline test_gate_is_noop_when_flag_off(_task) {
   pin_peer_coordination(nil)
   assert(!peer_coordination_enabled(), "default must be OFF")

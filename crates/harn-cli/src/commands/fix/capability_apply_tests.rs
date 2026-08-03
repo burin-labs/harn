@@ -613,6 +613,15 @@ fn capability_apply_keeps_the_burin_peer_coordination_fixture_parse_safe() {
     assert!(!updated.contains("asserharness"), "{updated}");
     assert!(updated.contains("harness.store_set("), "{updated}");
     assert!(updated.contains("harness.testing.calls()"), "{updated}");
+    assert!(updated.contains("with_capability_fixtures("), "{updated}");
+    assert!(updated.contains("harness.testing,"), "{updated}");
+    assert!(updated.contains("method: \"peer_presence\""), "{updated}");
+    assert!(updated.contains("operation: \"unrelated\""), "{updated}");
+    assert!(!updated.contains("with_host_mocks"), "{updated}");
+    assert!(
+        !updated.contains("operation: \"peer_presence\""),
+        "{updated}"
+    );
 }
 
 #[test]
