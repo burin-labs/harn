@@ -900,25 +900,26 @@ fn namespace_member_projection_keeps_target_complete_and_nested_dict_narrow() {
 
         let wrapper_key = wrapper.canonicalize().unwrap_or(wrapper.clone());
         let loaded_wrapper = vm.module_cache.get(&wrapper_key).expect("wrapper cached");
-        let state = loaded_wrapper._module_state.lock();
-        let Some(VmValue::Dict(namespace)) = state.get("lib") else {
-            panic!("wrapper namespace is bound");
-        };
-        assert_eq!(
-            namespace.keys().map(|key| key.as_str()).collect::<Vec<_>>(),
-            vec!["_namespace", "greet"]
-        );
-        let Some(VmValue::Dict(unused_namespace)) = state.get("unused") else {
-            panic!("unused namespace is bound");
-        };
-        assert_eq!(
-            unused_namespace
-                .keys()
-                .map(|key| key.as_str())
-                .collect::<Vec<_>>(),
-            vec!["_namespace"]
-        );
-        drop(state);
+        {
+            let state = loaded_wrapper._module_state.lock();
+            let Some(VmValue::Dict(namespace)) = state.get("lib") else {
+                panic!("wrapper namespace is bound");
+            };
+            assert_eq!(
+                namespace.keys().map(|key| key.as_str()).collect::<Vec<_>>(),
+                vec!["_namespace", "greet"]
+            );
+            let Some(VmValue::Dict(unused_namespace)) = state.get("unused") else {
+                panic!("unused namespace is bound");
+            };
+            assert_eq!(
+                unused_namespace
+                    .keys()
+                    .map(|key| key.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["_namespace"]
+            );
+        }
 
         let lib_key = lib.canonicalize().unwrap_or(lib.clone());
         let loaded_lib = vm.module_cache.get(&lib_key).expect("target cached");

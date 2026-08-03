@@ -140,22 +140,35 @@ impl ImportProjection<'_> {
 /// Resolve the names an import may introduce from one loaded module. The
 /// artifact's typed export contract is authoritative for ordinary imports,
 /// re-exports, and delayed cycle binding alike.
+#[derive(Clone, Copy)]
+enum ImportNameUse {
+    Binding,
+    Namespace,
+}
+
 fn module_import_names(
     module_name: &str,
     loaded: &LoadedModule,
     selected_names: Option<&[String]>,
+    name_use: ImportNameUse,
 ) -> Result<Vec<String>, VmError> {
     if let Some(names) = selected_names {
         for name in names {
             if !loaded.public_exports.contains_key(name) {
-                let hint = if loaded.functions.contains_key(name) {
-                    " — it is defined there but not `pub`; mark it `pub` to export it"
-                } else {
-                    ""
+                let message = match name_use {
+                    ImportNameUse::Binding => {
+                        let hint = if loaded.functions.contains_key(name) {
+                            " — it is defined there but not `pub`; mark it `pub` to export it"
+                        } else {
+                            ""
+                        };
+                        format!("Import error: '{name}' is not exported by {module_name}{hint}")
+                    }
+                    ImportNameUse::Namespace => {
+                        format!("module `{module_name}` has no exported member `{name}`")
+                    }
                 };
-                return Err(VmError::Runtime(format!(
-                    "Import error: '{name}' is not exported by {module_name}{hint}"
-                )));
+                return Err(VmError::Runtime(message));
             }
         }
         return Ok(names.to_vec());
@@ -179,7 +192,7 @@ fn build_namespace_dict(
         "_namespace".to_string(),
         VmValue::String(arcstr::ArcStr::from(module_path)),
     );
-    let names = module_import_names(module_path, loaded, members)?;
+    let names = module_import_names(module_path, loaded, members, ImportNameUse::Namespace)?;
     for name in names {
         let kind = loaded
             .public_exports
@@ -745,7 +758,12 @@ impl Vm {
                 ModuleImportBinding::Wildcard => None,
                 ModuleImportBinding::Namespace { .. } => unreachable!("handled above"),
             };
-            let names_to_reexport = module_import_names(&import.path, &loaded, selected_names)?;
+            let names_to_reexport = module_import_names(
+                &import.path,
+                &loaded,
+                selected_names,
+                ImportNameUse::Binding,
+            )?;
             for name in names_to_reexport {
                 let Some(kind) = loaded.public_exports.get(&name).copied() else {
                     return Err(VmError::Runtime(format!(
@@ -826,7 +844,8 @@ impl Vm {
         selected_names: Option<&[String]>,
     ) -> Result<(), VmError> {
         let module_name = module_path.display().to_string();
-        let export_names = module_import_names(&module_name, loaded, selected_names)?;
+        let export_names =
+            module_import_names(&module_name, loaded, selected_names, ImportNameUse::Binding)?;
 
         for name in export_names {
             // `pub const` / `pub let` values: bind by value.
@@ -1219,6 +1238,7 @@ impl Vm {
                 &import.target.display().to_string(),
                 &target,
                 import.selected_names.as_deref(),
+                ImportNameUse::Binding,
             )?;
 
             for name in export_names {
