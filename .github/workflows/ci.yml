@@ -1707,7 +1707,15 @@ jobs:
         run: |
           set -euo pipefail
           archive="${RUNNER_TEMP}/actionlint.tar.gz"
-          curl -fsSL \
+          # --retry-all-errors, not plain --retry: a truncated transfer exits
+          # 18, which is outside curl's default retry set, and surfaces one
+          # line later as a sha256 mismatch that reads like a supply-chain
+          # alarm rather than the network blip it is. --max-time covers the
+          # other half — a stalled-but-alive connection never errors, so
+          # retrying alone never escapes it.
+          # Flags match burin-code's .github/actions/run-actionlint.
+          curl -fsSL --retry 3 --retry-all-errors \
+            --connect-timeout 15 --max-time 120 \
             -o "${archive}" \
             "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
           echo "${ACTIONLINT_SHA256}  ${archive}" | sha256sum -c -
