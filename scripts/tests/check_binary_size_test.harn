@@ -297,11 +297,11 @@ pipeline test_binary_size_policy_is_typed_and_ratchets_observed_candidate(harnes
   assert_eq(policy.default_target, "x86_64-unknown-linux-gnu")
   assert_eq(policy.targets.count, 1)
   const target = policy.targets[0]
-  assert_eq(target?.budget_bytes, 230686720)
-  assert_eq(target?.baseline.version, "0.10.51")
-  assert_eq(target?.baseline.source_sha, "1347f161a30aaaaa7c36546f2101c65aed2154a7")
-  assert_eq(target?.baseline.bytes, 228819544)
-  assert_eq(target?.budget_bytes - target?.baseline.bytes, 1867176)
+  assert_eq(target?.budget_bytes, 234881024)
+  assert_eq(target?.baseline.version, "0.10.53")
+  assert_eq(target?.baseline.source_sha, "14aad890335fd4a9a0084007cab0383ede96205d")
+  assert_eq(target?.baseline.bytes, 233410816)
+  assert_eq(target?.budget_bytes - target?.baseline.bytes, 1470208)
   assert_eq(release_binary_size_target_policy(policy, policy.default_target), target)
 }
 
