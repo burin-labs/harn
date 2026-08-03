@@ -177,9 +177,40 @@ impl TypeChecker {
             TypeExpr::Applied { name, .. } if scope.get_struct(name).is_some() => {
                 self.check_struct_property(name, property, scope, span);
             }
+            // `Harness` is not a struct in scope, so without this arm an
+            // unknown capability falls through to the nilable check and is
+            // only rejected when the expression executes. Optional access is
+            // exempt because `harness?.missing` evaluates to nil by design.
+            TypeExpr::Named(name) if name == "Harness" && !optional => {
+                self.check_harness_capability(property, span);
+            }
             _ if !optional => self.check_nilable_property_access(&resolved, property, scope, span),
             _ => {}
         }
+    }
+
+    /// Reject `harness.<name>` when `<name>` is not a capability.
+    ///
+    /// The capability set comes from [`CapabilityId::ALL`], which is also
+    /// what the VM enumerates when it raises this as a runtime type error, so
+    /// the two surfaces cannot disagree about which names exist.
+    pub(super) fn check_harness_capability(&mut self, property: &str, span: Span) {
+        if harn_builtin_meta::CapabilityId::from_field_name(property).is_some() {
+            return;
+        }
+        let fields: Vec<&str> = harn_builtin_meta::CapabilityId::ALL
+            .iter()
+            .map(|capability| capability.field_name())
+            .collect();
+        let max_dist = if property.len() <= 4 { 1 } else { 2 };
+        let suggestion =
+            crate::diagnostic::find_closest_match(property, fields.iter().copied(), max_dist);
+        let mut message = format!("`Harness` has no capability `{property}`");
+        if let Some(close) = suggestion {
+            message.push_str(&format!(" — did you mean `{close}`?"));
+        }
+        let help = format!("available capabilities: {}", fields.join(", "));
+        self.error_at_with_help(Code::UnknownField, message, span, help);
     }
 
     /// Decide whether an access (`.`, `[]`, or `.()`) should take the
