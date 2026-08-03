@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -49,8 +49,33 @@ struct AppDescriptor {
     resource_uri: String,
     title: String,
     html: String,
-    meta: JsonValue,
+    sandbox: SandboxSettings,
 }
+
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SandboxSettings {
+    csp: ContentPolicy,
+    // Serializes as `{"camera": {}}`, which is the shape the View reads with
+    // `Object.keys` to build the iframe permission policy. The value is the
+    // per-permission options object the MCP Apps contract reserves; it is
+    // empty today, so a set would be smaller but would serialize as an array
+    // and break the wire format.
+    #[allow(clippy::zero_sized_map_values)]
+    permissions: BTreeMap<String, BrowserPermission>,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ContentPolicy {
+    connect_domains: Vec<String>,
+    resource_domains: Vec<String>,
+    frame_domains: Vec<String>,
+    base_uri_domains: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct BrowserPermission {}
 
 #[derive(Clone)]
 struct AppHostState {
@@ -202,7 +227,7 @@ async fn discover_app(
         ));
     }
     let meta = content.get("_meta").cloned().unwrap_or_else(|| json!({}));
-    validate_resource_meta(&meta)?;
+    let sandbox = sandbox_settings(&meta)?;
     let title = resources
         .iter()
         .find(|resource| resource.get("uri").and_then(JsonValue::as_str) == Some(uri.as_str()))
@@ -215,7 +240,7 @@ async fn discover_app(
             resource_uri: uri,
             title,
             html: html.to_string(),
-            meta,
+            sandbox,
         },
         app_tools,
     ))
@@ -261,36 +286,35 @@ fn mcp_app_params(params: JsonValue) -> JsonValue {
     JsonValue::Object(params)
 }
 
-fn validate_resource_meta(meta: &JsonValue) -> Result<(), String> {
+fn sandbox_settings(meta: &JsonValue) -> Result<SandboxSettings, String> {
     let Some(ui) = meta.get("ui") else {
-        return Ok(());
+        return Ok(SandboxSettings::default());
     };
     let ui = ui
         .as_object()
         .ok_or_else(|| "app resource _meta.ui must be an object".to_string())?;
+    let mut settings = SandboxSettings::default();
     if let Some(csp) = ui.get("csp") {
         let csp = csp
             .as_object()
             .ok_or_else(|| "app resource _meta.ui.csp must be an object".to_string())?;
-        for key in [
+        settings.csp.connect_domains = origin_list(
+            csp.get("connectDomains"),
             "connectDomains",
+            &["http", "https", "ws", "wss"],
+        )?;
+        settings.csp.resource_domains = origin_list(
+            csp.get("resourceDomains"),
             "resourceDomains",
-            "frameDomains",
+            &["http", "https"],
+        )?;
+        settings.csp.frame_domains =
+            origin_list(csp.get("frameDomains"), "frameDomains", &["http", "https"])?;
+        settings.csp.base_uri_domains = origin_list(
+            csp.get("baseUriDomains"),
             "baseUriDomains",
-        ] {
-            let Some(values) = csp.get(key) else {
-                continue;
-            };
-            let values = values
-                .as_array()
-                .ok_or_else(|| format!("app resource CSP {key} must be a list"))?;
-            for value in values {
-                let source = value
-                    .as_str()
-                    .ok_or_else(|| format!("app resource CSP {key} entries must be strings"))?;
-                validate_csp_source(source)?;
-            }
-        }
+            &["http", "https"],
+        )?;
     }
     if let Some(permissions) = ui.get("permissions") {
         let permissions = permissions
@@ -304,12 +328,39 @@ fn validate_resource_meta(meta: &JsonValue) -> Result<(), String> {
             {
                 return Err(format!("unsupported app browser permission {permission:?}"));
             }
+            settings
+                .permissions
+                .insert(permission.clone(), BrowserPermission {});
         }
     }
-    Ok(())
+    Ok(settings)
 }
 
-fn validate_csp_source(source: &str) -> Result<(), String> {
+fn origin_list(
+    value: Option<&JsonValue>,
+    name: &str,
+    allowed_schemes: &[&str],
+) -> Result<Vec<String>, String> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let values = value
+        .as_array()
+        .ok_or_else(|| format!("app resource CSP {name} must be a list"))?;
+    let mut origins = Vec::with_capacity(values.len());
+    for value in values {
+        let origin = value
+            .as_str()
+            .ok_or_else(|| format!("app resource CSP {name} entries must be strings"))?;
+        validate_allowed_origin(origin, allowed_schemes)?;
+        if !origins.iter().any(|existing| existing == origin) {
+            origins.push(origin.to_string());
+        }
+    }
+    Ok(origins)
+}
+
+fn validate_allowed_origin(source: &str, allowed_schemes: &[&str]) -> Result<(), String> {
     if source.is_empty()
         || source
             .chars()
@@ -317,11 +368,25 @@ fn validate_csp_source(source: &str) -> Result<(), String> {
     {
         return Err(format!("invalid app CSP source {source:?}"));
     }
-    let parseable = source.replace("://*.", "://wildcard.");
+    let (scheme, rest) = source
+        .split_once("://")
+        .ok_or_else(|| format!("app CSP source must be an absolute origin: {source:?}"))?;
+    let wildcard_suffix = rest.strip_prefix("*.");
+    if rest.contains('*')
+        && !wildcard_suffix.is_some_and(|suffix| !suffix.is_empty() && !suffix.contains('*'))
+    {
+        return Err(format!("invalid app CSP wildcard origin {source:?}"));
+    }
+    let parseable = wildcard_suffix.map_or_else(
+        || source.to_string(),
+        |suffix| format!("{scheme}://harn-wildcard.{suffix}"),
+    );
     let url = url::Url::parse(&parseable)
         .map_err(|_| format!("app CSP source must be an absolute origin: {source:?}"))?;
-    if !matches!(url.scheme(), "http" | "https" | "ws" | "wss")
+    if !allowed_schemes.contains(&url.scheme())
         || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
         || url.path() != "/"
         || url.query().is_some()
         || url.fragment().is_some()
@@ -450,15 +515,69 @@ mod tests {
     }
 
     #[test]
-    fn resource_meta_rejects_csp_directive_injection() {
-        let malicious = json!({
-            "ui": {"csp": {"connectDomains": ["https://ok.test; img-src *"]}}
-        });
-        assert!(validate_resource_meta(&malicious).is_err());
+    fn resource_meta_builds_one_checked_sandbox_record() {
+        for malicious in [
+            json!({"ui": {"csp": {
+                "connectDomains": ["https://ok.test; img-src *"]
+            }}}),
+            json!({"ui": {"csp": {
+                "resourceDomains": ["wss://events.example.test"]
+            }}}),
+            json!({"ui": {"csp": {
+                "frameDomains": ["https://user:secret@frame.example.test"]
+            }}}),
+            json!({"ui": {"permissions": {"usb": {}}}}),
+        ] {
+            assert!(sandbox_settings(&malicious).is_err(), "{malicious}");
+        }
         let valid = json!({
-            "ui": {"csp": {"connectDomains": ["https://api.example.test"]}}
+            "ui": {
+                "csp": {
+                    "connectDomains": [
+                        "https://api.example.test",
+                        "wss://events.example.test",
+                        "https://api.example.test"
+                    ],
+                    "resourceDomains": ["https://*.static.example.test"]
+                },
+                "permissions": {"camera": {}, "clipboardWrite": {}}
+            }
         });
-        assert!(validate_resource_meta(&valid).is_ok());
+        let settings = sandbox_settings(&valid).expect("valid settings");
+        assert_eq!(
+            settings.csp.connect_domains,
+            [
+                "https://api.example.test".to_string(),
+                "wss://events.example.test".to_string()
+            ]
+        );
+        assert_eq!(
+            settings.csp.resource_domains,
+            ["https://*.static.example.test".to_string()]
+        );
+        assert_eq!(
+            settings
+                .permissions
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            ["camera", "clipboardWrite"]
+        );
+        assert_eq!(
+            serde_json::to_value(settings).expect("settings serialize"),
+            json!({
+                "csp": {
+                    "connectDomains": [
+                        "https://api.example.test",
+                        "wss://events.example.test"
+                    ],
+                    "resourceDomains": ["https://*.static.example.test"],
+                    "frameDomains": [],
+                    "baseUriDomains": []
+                },
+                "permissions": {"camera": {}, "clipboardWrite": {}}
+            })
+        );
     }
 
     #[test]

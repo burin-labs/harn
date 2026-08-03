@@ -1,4 +1,5 @@
 // @ts-check
+/* global HarnAppHostProtocol */
 
 /**
  * @typedef {object} ResourcePolicy
@@ -95,10 +96,16 @@
         );
         return;
       }
+      if (HarnAppHostProtocol.isSandboxMessage(message)) {
+        return;
+      }
       view.contentWindow?.postMessage(message, "*");
       return;
     }
     if (event.source === view.contentWindow) {
+      if (HarnAppHostProtocol.isSandboxMessage(event.data)) {
+        return;
+      }
       send(event.data);
     }
   }

@@ -82,6 +82,14 @@ for tool and resource metadata. Use provider-owned workflow examples, such as
 the [ComfyUI FLUX.2 Klein guide](https://docs.comfy.org/tutorials/flux/flux-2-klein),
 when constructing model graphs.
 
+A custom View sends `protocolVersion`, `appCapabilities`, and `appInfo` in
+its `ui/initialize` request. Include `fullscreen` in `availableDisplayModes`
+when running in Harn's standalone host. Wait for the response, send
+`ui/notifications/initialized`, then call tools or read resources. Do not send
+`ui/notifications/sandbox-*`; those messages belong to the host's sandbox
+frame. Check `hostCapabilities` before using optional host behavior, and do not
+assume that `listChanged` is available when it is omitted.
+
 ## Verify the change
 
 - Run the narrow conformance fixture for the changed UI or model-job contract.

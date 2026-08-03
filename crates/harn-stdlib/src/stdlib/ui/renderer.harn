@@ -316,11 +316,14 @@ hr { width: 100%; border: 0; border-top: 1px solid var(--line); }
   }
 
   async function start() {
-    await request('ui/initialize', {
+    const initialized = await request('ui/initialize', {
       protocolVersion: '2026-01-26',
-      capabilities: {},
-      clientInfo: { name: 'harn-ui-renderer', version: '1' },
+      appCapabilities: { availableDisplayModes: ['fullscreen'] },
+      appInfo: { name: 'harn-ui-renderer', version: '1' },
     });
+    if (initialized?.protocolVersion !== '2026-01-26') {
+      throw new Error('Harn UI host selected an unsupported protocol version');
+    }
     parent.postMessage({ jsonrpc: '2.0', method: 'ui/notifications/initialized', params: {} }, '*');
     await sendEvent(uiEvent('ready', 'app'));
   }
@@ -369,7 +372,7 @@ pub fn app_resource(
     {
       description: options?.description,
       version: options?.version ?? "1",
-      capabilities: ["tools/call", "ui/update-model-context"],
+      capabilities: ["tools/call"],
       validation: {allow_network: false}.merging(options?.validation ?? {}),
     },
   )

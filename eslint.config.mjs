@@ -35,4 +35,20 @@ export default [
       curly: ["error", "all"],
     },
   },
+  {
+    files: ["scripts/*app_host*.mjs"],
+    ...eslint.configs.recommended,
+    languageOptions: {
+      ecmaVersion: "latest",
+      sourceType: "module",
+      globals: {
+        URL: "readonly",
+        URLSearchParams: "readonly",
+      },
+    },
+    rules: {
+      ...eslint.configs.recommended.rules,
+      curly: ["error", "all"],
+    },
+  },
 ];

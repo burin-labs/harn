@@ -63,7 +63,8 @@ progress and cancellation without a blocking polling loop.
 
 `ui.renderer_html(tool_name) -> string` returns the shared renderer.
 `ui.app_resource(uri, name, tool_name, options?) -> UiResource` validates it
-and packages it for `harness.tools.mcp_resource`.
+and packages it for `harness.tools.mcp_resource`. The resource declares only
+`tools/call`, because that is the only host request the shared renderer sends.
 
 `ui.tool_metadata(resource, options?)` returns the MCP tool metadata that opens
 the app. `ui.mcp_resource(resource, options?)` returns the config accepted by
