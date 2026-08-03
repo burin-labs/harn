@@ -968,12 +968,72 @@ fn synthesize_missing_zero_arg_capability_repair(
     ))
 }
 
+/// Names bound to a capability by the narrowest declaration enclosing `span`.
+fn capability_carrier_param_names(program: &[SNode], span: Span) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    visit::walk_program(program, &mut |node| {
+        let params = match &node.node {
+            Node::FnDecl { params, .. }
+            | Node::ToolDecl { params, .. }
+            | Node::Pipeline { params, .. }
+                if node.span.start <= span.start && node.span.end >= span.end =>
+            {
+                params
+            }
+            _ => return,
+        };
+        for param in params {
+            let carries = match param.type_expr.as_ref() {
+                Some(TypeExpr::Named(name)) => {
+                    name == "Harness"
+                        || harn_builtin_meta::CapabilityId::from_type_name(name).is_some()
+                }
+                Some(TypeExpr::Shape(fields)) => fields.iter().any(|field| {
+                    matches!(&field.type_expr, TypeExpr::Named(name)
+                        if harn_builtin_meta::CapabilityId::from_type_name(name).is_some())
+                }),
+                _ => false,
+            };
+            if carries {
+                names.insert(param.name.clone());
+            }
+        }
+    });
+    names
+}
+
+fn argument_carries_a_capability(argument: &SNode, carriers: &BTreeSet<String>) -> bool {
+    match &argument.node {
+        Node::Identifier(name) => carriers.contains(name),
+        Node::PropertyAccess { object, .. } => argument_carries_a_capability(object, carriers),
+        _ => false,
+    }
+}
+
+/// Insert a capability argument immediately before the argument at `span`.
+///
+/// Every per-diagnostic capability repair funnels through here, so this is
+/// where the prefix invariant is enforced. A diagnostic names one argument
+/// slot, not the callee's declared capability prefix. When a callee takes
+/// several capabilities and the call omits all of them, the reported slot is
+/// the second or later one; inserting there leaves the preceding ordinary
+/// argument sitting in a capability position and shifts every later argument
+/// one slot. The call is then wrong rather than incomplete, and the shift
+/// resurfaces as an unrelated type error a slot away.
+///
+/// Capability parameters are always a contiguous leading prefix, so a lone
+/// insertion is sound only when every preceding argument already carries a
+/// capability. Calls that fail that test belong to the whole-program pass,
+/// which reads the callee's declared prefix from the module graph and inserts
+/// it whole; when that pass cannot resolve the call, the site is left for a
+/// human instead of being silently shifted.
 fn insert_call_argument_before_span(
     source: &str,
     program: &[SNode],
     span: Span,
     argument: &str,
 ) -> Option<FixEdit> {
+    let carriers = capability_carrier_param_names(program, span);
     let mut edit = None;
     visit::walk_program(program, &mut |node| {
         let Node::FunctionCall { args, .. } = &node.node else {
@@ -984,6 +1044,12 @@ fn insert_call_argument_before_span(
         }) else {
             return;
         };
+        if !args[..index]
+            .iter()
+            .all(|preceding| argument_carries_a_capability(preceding, &carriers))
+        {
+            return;
+        }
         edit = if index == 0 {
             add_call_argument_edit(source, &node.span, argument)
         } else {
