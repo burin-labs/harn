@@ -350,7 +350,7 @@
 
 # Migrations
 
-- [Portable kernel v1](./migrations/portable-kernel-v1.md)
+- [Portable kernel artifacts](./migrations/portable-kernel-v1.md)
 
 - [0.6.x → 0.7.0](./migrations/v0.7.md)
 - [Migrating to 0.10](./migrations/v0.10.md)

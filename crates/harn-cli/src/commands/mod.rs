@@ -67,6 +67,8 @@ pub mod persona_supervision;
 pub(crate) mod persona_test_support;
 pub(crate) mod pg_codegen;
 pub mod playground;
+pub(crate) mod portable;
+pub(crate) mod portable_source;
 pub(crate) mod portal;
 pub mod precompile;
 pub(crate) mod protocol_conformance;

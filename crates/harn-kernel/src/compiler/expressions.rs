@@ -188,6 +188,7 @@ impl Compiler {
             if contract.is_none()
                 && harn_parser::builtin_signatures::is_builtin(name)
                 && !harn_parser::builtin_signatures::is_language_intrinsic(name)
+                && !self.options.defers_builtin_linking()
                 && !(self.options.legacy_ambient_capabilities()
                     && (harn_parser::is_registered_legacy_hostlib_name(name)
                         || harn_parser::builtin_signatures::legacy_capability_method_entry(name)

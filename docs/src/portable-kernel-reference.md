@@ -11,13 +11,69 @@ operations through generated `wasm-bindgen` bindings:
 
 ```text
 compile(source, entry, entry_kind) -> program | diagnostics
+compilePackage(manifest_json, entry, entry_kind) -> program | diagnostics
 start(program, input, grants) -> execution_result
 resume(program, snapshot, capability_result, grants) -> execution_result
 ```
 
+`compile` accepts a self-contained source module. `compilePackage` accepts the
+bounded JSON representation below and resolves the complete import closure
+before producing bytes. The canonical frontend parses every module and checks
+the requested root with imported dependency signatures, matching `harn check`
+for an entry file. The manifest is only a transport projection.
+
+```json
+{
+  "rootSource": "import { increment } from \"math\" ...",
+  "rootImports": [{
+    "path": "math",
+    "target": "module/0",
+    "selectedNames": ["increment"],
+    "namespaceAlias": null,
+    "isPub": false
+  }],
+  "modules": [{
+    "id": "module/0",
+    "source": "pub fn increment(amount) { return amount }",
+    "imports": [],
+    "exports": {"increment": "function"}
+  }]
+}
+```
+
+Targets and module identifiers are validated at the artifact boundary. Missing
+exports, duplicate module identifiers, import cycles, and ambiguous bindings
+are deterministic diagnostics; the host cannot smuggle an unresolved source
+path into execution.
+
 The checked WIT world in `crates/harn-wasm/wit/harn-kernel.wit` expresses the
-same value, grant, request, result, and transition types. Core Wasm remains the
-browser delivery artifact in v1.
+same value, grant, request, result, and transition types. Core Wasm is the
+browser delivery artifact.
+
+Native hosts use the same boundary through the CLI:
+
+```console
+harn portable package reducer.harn --output reducer.package.json
+harn portable compile reducer.harn --entry reduce --output reducer.hbc
+harn portable start reducer.hbc \
+  --input event.json \
+  --grants grants.json \
+  --snapshot-out reducer.snapshot
+harn portable resume reducer.hbc \
+  --snapshot reducer.snapshot \
+  --result capability-result.json \
+  --grants grants.json \
+  --snapshot-out next.snapshot
+```
+
+`package` resolves the filesystem import graph once and writes the data-only
+manifest accepted by browser `compilePackage`; it is also the generator behind
+the checked-in browser demo manifest. `--check` fails when that projection is
+stale.
+
+Each command emits the canonical Harn JSON envelope. `start` and `resume`
+return `completed`, `suspended`, or `failed`; a suspended transition writes
+the opaque snapshot to the requested path.
 
 ## Program artifact v2
 
@@ -35,19 +91,24 @@ An artifact starts with:
 The semantic ABI fingerprint inside the payload covers the opcode schema,
 portable builtin registry, and typed capability contracts. Opcode bytes and
 operand layouts have explicit stable discriminants and a golden fingerprint.
-Changing those contracts without an artifact version or compatibility decision
-causes a mechanical test failure.
+Changing those contracts without updating the wire contract causes a
+mechanical test failure.
 
 Version 2 adds the `NamespaceImportMembers` opcode to the shared bytecode ABI.
-Imports remain outside the Portable Kernel v1 execution feature set, so a
-portable artifact containing that opcode is still rejected. Version 1 program
-artifacts must be recompiled from source.
+The kernel executes it, and the other import opcodes, against the package
+closure recorded in the artifact. Version 1 program artifacts must be
+recompiled from source.
 
-Decoding is an untrusted boundary. It rejects bad magic or version, feature
-bits, truncation, trailing bytes, digest corruption, unsupported operations,
+Decoding is an untrusted boundary. It rejects bad magic or format number,
+feature bits, truncation, trailing bytes, digest corruption, unknown opcodes,
 invalid instruction boundaries and jumps, cyclic function graphs, inconsistent
-builtin identities, excessive type nesting, and all configured byte/count
-limits. The decoder reconstructs domain objects; it never deserializes Rust
+named-call identities, excessive type nesting, and all configured byte/count
+limits. The `CallBuiltin` opcode also represents functions,
+imports, and captured callable parameters, so decoding verifies its stable
+name-derived identity and execution performs the one authoritative lexical
+resolution. Known semantics that this kernel cannot execute remain valid
+artifact data and produce an exact unsupported diagnostic only when reached.
+The decoder reconstructs domain objects; it never deserializes Rust
 implementation state.
 
 Default limits include 1 MiB of UTF-8 source, an 8 MiB artifact, 128 levels of
@@ -57,7 +118,7 @@ limited to 1 MiB; the browser grant document is limited to 64 KiB.
 
 Execution has separate deterministic ceilings:
 
-| Resource | v1 limit |
+| Resource | Limit |
 |---|---:|
 | Instructions (fuel) | 2,000,000 |
 | Call frames | 1,024 |
@@ -111,8 +172,8 @@ shape. Tampering, replay under different grants, a wrong key, or cumulative
 fuel exhaustion fails deterministically.
 
 The snapshot is opaque and untrusted outside the kernel. Hosts should store it
-as bytes and keep the snapshot key outside that storage. A snapshot is not a
-durable cross-version format unless a future contract explicitly says so.
+as bytes, keep the snapshot key outside that storage, and resume it only with
+the artifact and kernel that created it.
 
 ## Execution outcomes
 
@@ -129,33 +190,29 @@ runs each instance in a dedicated Web Worker; the generated bindings do not
 enforce worker placement. Multiple workers can reuse the same artifact bytes;
 the contract does not require Wasm threads or shared memory.
 
-## Portable v1 support
+## Current portable support
 
-| Class | v1 behavior | Examples |
+| Class | Behavior | Examples |
 |---|---|---|
-| Pure computation | Executes | Records, lists, closures, branching, arithmetic, comparison, slicing, throw/catch, sibling named calls, typed/rest calls, direct and mutual recursion, JSON-shaped input/output |
+| Pure computation | Executes | Named records and enums, `Result` and `?`, lists and maps, closures, branching, arithmetic, structural equality, slicing, throw/catch, sibling named calls, typed/default/rest calls, direct and mutual recursion, `for` iteration, copy-on-write mutation, pure package imports, JSON-shaped input/output |
+| Shared pure builtins | Executes through one native/Wasm implementation | Length and string conversion; trim, replace, prefix checks; hex encode/decode; deterministic path joining; JSON stringify; regex match/replace/captures/split; SHA-256; secret scanning |
 | Portable host capability | Suspends when exactly granted; otherwise fails | Canonical `harness` methods whose complete parameter and result contracts use `nil`, booleans, integers, floats, strings, bytes, lists, records, unions/options, or literal types |
-| Outside v1 | Artifact rejection or exact unsupported diagnostic | Capability contracts containing native objects or unsupported constructors such as channels, streams, closures, schemas, generics, or `Result`; typed default parameters; `for` iteration; concurrency; imports; mutation opcodes; dynamic check opcodes outside the portable call contract; unregistered builtins |
+| Unavailable | Exact unsupported diagnostic when reached | Capability contracts containing native objects or unsupported constructors such as channels, streams, closures, schemas, or generics; concurrency; hostful operations; callback registration; dynamic check opcodes outside the portable call contract; known but unimplemented builtins |
 
 Declared entry and nested-call parameters use the same structural type-contract
 matcher as the native VM. That does not make every type-related opcode
-portable: `CheckType`, `TryWrapOk`, and `TryUnwrap` remain rejected in v1.
-Ordinary `throw`/`catch` control flow is supported; programs whose `Result`
-syntax lowers through the rejected wrapping opcodes are not.
+portable: `CheckType` remains rejected. Enum construction and matching,
+`TryWrapOk`, and `TryUnwrap` execute in the shared kernel.
 
-Passing type checking is necessary but does not imply portable-v1 support.
-The compiler validates the resulting artifact and reports unsupported semantics
-before handing bytes to a host.
+Passing type checking is necessary but does not imply portable support.
+The compiler validates the resulting artifact structurally. Execution reports
+unavailable semantics at their actual trigger, so an unused hostful branch does
+not prevent a pure entry path from loading.
 
 Capability grants are checked against the canonical registry when the host
 constructs a `GrantSet`. A registered method whose full contract cannot cross
 the `DataValue` boundary fails with
 `unsupported_portable_capability_type`; the kernel never weakens an unsupported
 type to `any`. Invocation repeats this check defensively before execution can
-suspend.
-
-Untyped default parameters execute portably. A parameter that combines a type
-annotation and a default currently fails compilation with
-`unsupported_portable_typed_default`; the canonical compiler otherwise lowers
-its omitted-value check through the host VM's schema subsystem, which v1 does
-not ship into the authority-free kernel.
+suspend. Typed defaults use the compiler-generated schema contract implemented
+by the shared kernel.

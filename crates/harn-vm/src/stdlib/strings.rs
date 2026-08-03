@@ -189,11 +189,14 @@ fn format_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> 
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "trim(text: string?) -> string", category = "strings"
+    sig_expr = harn_builtin_meta::signatures::PORTABLE_TRIM,
+    category = "strings"
 )]
 fn trim_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(s.trim())))
+    Ok(VmValue::String(arcstr::ArcStr::from(
+        harn_kernel::pure::trim_text(&s),
+    )))
 }
 
 #[harn_builtin(
@@ -322,13 +325,15 @@ fn str_pad_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError>
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "starts_with(text: string?, prefix: string?) -> bool",
+    sig_expr = harn_builtin_meta::signatures::PORTABLE_STARTS_WITH,
     category = "strings"
 )]
 fn starts_with_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     let prefix = args.get(1).map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::Bool(s.starts_with(&prefix)))
+    Ok(VmValue::Bool(harn_kernel::pure::starts_with_text(
+        &s, &prefix,
+    )))
 }
 
 #[harn_builtin(
@@ -340,7 +345,9 @@ fn starts_with_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 fn ends_with_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     let suffix = args.get(1).map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::Bool(s.ends_with(&suffix)))
+    Ok(VmValue::Bool(harn_kernel::pure::ends_with_text(
+        &s, &suffix,
+    )))
 }
 
 #[harn_builtin(
@@ -391,14 +398,16 @@ fn index_of_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "replace(text: string?, old: string, new: string) -> string",
+    sig_expr = harn_builtin_meta::signatures::PORTABLE_REPLACE,
     category = "strings"
 )]
 fn replace_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let s = args.first().map(|a| a.display()).unwrap_or_default();
     let old = args.get(1).map(|a| a.display()).unwrap_or_default();
     let new = args.get(2).map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::String(arcstr::ArcStr::from(s.replace(&old, &new))))
+    Ok(VmValue::String(arcstr::ArcStr::from(
+        harn_kernel::pure::replace_text(&s, &old, &new),
+    )))
 }
 
 #[harn_builtin(

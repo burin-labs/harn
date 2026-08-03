@@ -1,11 +1,11 @@
 use std::path::PathBuf;
 
-use clap::{Args, Subcommand, ValueEnum};
+use clap::{Args, Subcommand};
 use harn_kernel::{
     PORTABLE_MAX_COMPILE_ITERATIONS, PORTABLE_MAX_DISPATCH_ITERATIONS, PORTABLE_MAX_WORKERS,
 };
 
-use super::ProfileArgs;
+use super::{PortableEntryKindArg, ProfileArgs};
 
 #[derive(Debug, Args)]
 #[command(arg_required_else_help = true)]
@@ -27,12 +27,6 @@ pub(crate) enum BenchCommand {
     Portable(BenchPortableArgs),
     /// Score deterministic replay fixtures and emit a leaderboard-ready report.
     Replay(BenchReplayArgs),
-}
-
-#[derive(Debug, Clone, Copy, ValueEnum)]
-pub(crate) enum PortableEntryKindArg {
-    Function,
-    Pipeline,
 }
 
 #[derive(Debug, Args)]

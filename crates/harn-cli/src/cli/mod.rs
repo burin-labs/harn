@@ -48,6 +48,7 @@ mod parse_tokens;
 mod persona;
 mod pg;
 mod playground;
+mod portable;
 mod portal;
 mod precompile;
 mod profile;
@@ -83,9 +84,7 @@ mod watch;
 mod workflow;
 
 pub(crate) use app::{AppArgs, AppCommand};
-pub(crate) use bench::{
-    BenchArgs, BenchCommand, BenchPortableArgs, BenchReplayArgs, PortableEntryKindArg,
-};
+pub(crate) use bench::{BenchArgs, BenchCommand, BenchPortableArgs, BenchReplayArgs};
 pub(crate) use canon::{CanonArgs, CanonCheckArgs, CanonCommand};
 pub(crate) use check::{CheckArgs, CheckOutputFormat};
 pub(crate) use codemod::CodemodArgs;
@@ -194,6 +193,10 @@ pub(crate) use persona::{
 };
 pub(crate) use pg::{PgArgs, PgCodegenArgs, PgCommand};
 pub(crate) use playground::PlaygroundArgs;
+pub(crate) use portable::{
+    PortableArgs, PortableCommand, PortableCompileArgs, PortableEntryKindArg, PortablePackageArgs,
+    PortableResumeArgs, PortableStartArgs,
+};
 pub(crate) use portal::PortalArgs;
 pub use precompile::PrecompileArgs;
 pub(crate) use profile::ProfileArgs;
@@ -309,6 +312,8 @@ pub(crate) struct Cli {
 pub(crate) enum Command {
     /// Build and run interactive AI applications written in Harn.
     App(AppArgs),
+    /// Compile and host deterministic portable Harn programs.
+    Portable(PortableArgs),
     /// Execute a .harn file or an inline expression.
     #[command(long_about = "\
 Execute a .harn file or an inline expression.

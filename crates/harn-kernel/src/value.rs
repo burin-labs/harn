@@ -21,6 +21,11 @@ pub(crate) enum ValueView<'a, T> {
     Duration(i64),
     List(&'a [T]),
     Record(&'a BTreeMap<String, T>),
+    Enum {
+        enum_name: &'a str,
+        variant: &'a str,
+        fields: &'a [T],
+    },
     Opaque,
 }
 
@@ -155,6 +160,23 @@ pub(crate) fn semantic_values_equal<T: SemanticValue>(left: &T, right: &T) -> bo
                     };
                     pending.push((left_value, right_value));
                 }
+            }
+            (
+                ValueView::Enum {
+                    enum_name: left_enum,
+                    variant: left_variant,
+                    fields: left_fields,
+                },
+                ValueView::Enum {
+                    enum_name: right_enum,
+                    variant: right_variant,
+                    fields: right_fields,
+                },
+            ) if left_enum == right_enum
+                && left_variant == right_variant
+                && left_fields.len() == right_fields.len() =>
+            {
+                pending.extend(left_fields.iter().zip(right_fields.iter()));
             }
             _ => return false,
         }

@@ -4,10 +4,15 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::portable_builtin::PortableBuiltin;
-use crate::type_contract::{manifest_signature_is_portable, matches_manifest_type};
+use crate::type_contract::{
+    manifest_signature_is_portable, matches_compiler_schema, matches_manifest_type,
+};
 use crate::{Chunk, CompiledFunction, Constant, Diagnostic, Op, ProgramArtifact};
 
 mod arithmetic;
+mod builtins;
+mod methods;
+mod ops;
 mod resource;
 mod runtime_value;
 mod snapshot;
@@ -19,8 +24,9 @@ mod tests;
 
 use crate::value::{semantic_try_compare, semantic_values_equal};
 use arithmetic::{add, div, modulo, mul, negate, pow, sub};
+use ops::*;
 use resource::{validate_runtime_value, MAX_VALUE_BYTES};
-use runtime_value::{Closure, RuntimeValue};
+use runtime_value::{Closure, EnumValue, RuntimeValue};
 use snapshot::{decode_snapshot, encode_snapshot, ReplaySnapshot};
 use type_guard::validate_call;
 use types::value_kind;
@@ -30,6 +36,8 @@ const DEFAULT_FUEL: u64 = 2_000_000;
 const MAX_FRAMES: usize = 1_024;
 const MAX_SCOPE_DEPTH: usize = 256;
 const MAX_OPERAND_STACK: usize = 16_384;
+const MAX_ITERATORS: usize = 1_024;
+pub const PORTABLE_MAX_SNAPSHOT_BYTES: usize = 1024 * 1024;
 
 pub fn start(program: &ProgramArtifact, input: DataValue, grants: &GrantSet) -> Execution {
     run(program, input, grants, Vec::new())
@@ -167,6 +175,9 @@ struct Machine<'a> {
     fuel: u64,
     replay_credit: u64,
     environments: Vec<Rc<Env>>,
+    modules: BTreeMap<String, Rc<ModuleInstance>>,
+    loading_modules: Vec<String>,
+    iterators: Vec<IteratorState>,
 }
 
 impl<'a> Machine<'a> {
@@ -186,7 +197,191 @@ impl<'a> Machine<'a> {
             fuel: DEFAULT_FUEL.saturating_sub(fuel_consumed),
             replay_credit: fuel_consumed.min(DEFAULT_FUEL),
             environments: vec![root],
+            modules: BTreeMap::new(),
+            loading_modules: Vec::new(),
+            iterators: Vec::new(),
         }
+    }
+
+    fn import_root_module(
+        &mut self,
+        path: &str,
+        selected_names: Option<&[String]>,
+        namespace_alias: Option<NamespaceProjection<'_>>,
+        env: &Rc<Env>,
+    ) -> OpStep {
+        let Some(spec) = self
+            .program
+            .root_imports()
+            .iter()
+            .find(|spec| spec.path == path)
+        else {
+            return OpStep::Error(diagnostic(
+                "portable_import",
+                format!("root import `{path}` is not present in the package closure"),
+            ));
+        };
+        let target = spec.target.clone();
+        let module = match self.load_module(&target) {
+            ModuleStep::Ready(module) => module,
+            ModuleStep::Suspend(request) => return OpStep::Suspend(request),
+            ModuleStep::Error(error) => return OpStep::Error(error),
+        };
+        match self.bind_module_projection(&module, selected_names, namespace_alias, env) {
+            Ok(()) => OpStep::Continue,
+            Err(error) => OpStep::Error(error),
+        }
+    }
+
+    fn load_module(&mut self, id: &str) -> ModuleStep {
+        if let Some(module) = self.modules.get(id).cloned() {
+            return ModuleStep::Ready(module);
+        }
+        if self.loading_modules.iter().any(|loading| loading == id) {
+            return ModuleStep::Error(diagnostic(
+                "portable_import_cycle",
+                format!("portable package import cycle reaches `{id}`"),
+            ));
+        }
+        let Some(module) = self
+            .program
+            .modules()
+            .iter()
+            .find(|module| module.id() == id)
+            .cloned()
+        else {
+            return ModuleStep::Error(diagnostic(
+                "portable_import",
+                format!("portable package does not contain module `{id}`"),
+            ));
+        };
+        let module_env = Env::root();
+        self.retain_environment(&module_env);
+        self.loading_modules.push(id.to_string());
+
+        for import in module.imports() {
+            let imported = match self.load_module(&import.target) {
+                ModuleStep::Ready(imported) => imported,
+                ModuleStep::Suspend(request) => {
+                    self.loading_modules.pop();
+                    return ModuleStep::Suspend(request);
+                }
+                ModuleStep::Error(error) => {
+                    self.loading_modules.pop();
+                    return ModuleStep::Error(error);
+                }
+            };
+            if let Err(error) = self.bind_module_projection(
+                &imported,
+                import.selected_names.as_deref(),
+                // The manifest records an alias without member demand, so a
+                // module-to-module namespace import is projected whole.
+                import.namespace_alias.as_deref().map(|alias| (alias, None)),
+                &module_env,
+            ) {
+                self.loading_modules.pop();
+                return ModuleStep::Error(error);
+            }
+        }
+
+        if let Some(init) = module.init() {
+            match self.execute(init.clone(), module_env.clone(), Vec::new()) {
+                Step::Value(_) => {}
+                Step::Suspend(request) => {
+                    self.loading_modules.pop();
+                    return ModuleStep::Suspend(request);
+                }
+                Step::Error(error) => {
+                    self.loading_modules.pop();
+                    return ModuleStep::Error(error);
+                }
+            }
+        }
+
+        for (name, function) in module.functions() {
+            self.retain_environment(&module_env);
+            let value = RuntimeValue::Closure(Closure {
+                function: function.clone(),
+                env: Rc::downgrade(&module_env),
+            });
+            module_env.define(name.clone(), value.clone());
+        }
+        let instance = Rc::new(ModuleInstance {
+            env: module_env,
+            exports: module.exports().clone(),
+        });
+        self.modules.insert(id.to_string(), instance.clone());
+        self.loading_modules.pop();
+        ModuleStep::Ready(instance)
+    }
+
+    fn bind_module_projection(
+        &self,
+        module: &ModuleInstance,
+        selected_names: Option<&[String]>,
+        namespace_alias: Option<NamespaceProjection<'_>>,
+        env: &Rc<Env>,
+    ) -> Result<(), Diagnostic> {
+        if let Some((alias, demanded)) = namespace_alias {
+            if env.contains_local(alias) {
+                return Err(diagnostic(
+                    "portable_import_collision",
+                    format!("import namespace `{alias}` collides with an existing binding"),
+                ));
+            }
+            let mut entries = BTreeMap::new();
+            for (name, kind) in &module.exports {
+                if !kind.has_runtime_value() {
+                    continue;
+                }
+                if demanded.is_some_and(|members| !members.iter().any(|member| member == name)) {
+                    continue;
+                }
+                if let Some(value) = module.env.get(name) {
+                    entries.insert(name.clone(), value);
+                }
+            }
+            if let Some(members) = demanded {
+                for member in members {
+                    if !module.exports.contains_key(member) {
+                        return Err(diagnostic(
+                            "portable_import",
+                            format!("module does not export `{member}`"),
+                        ));
+                    }
+                }
+            }
+            env.define(alias.to_string(), RuntimeValue::Record(Rc::new(entries)));
+            return Ok(());
+        }
+        let names = selected_names
+            .map(|names| names.to_vec())
+            .unwrap_or_else(|| module.exports.keys().cloned().collect());
+        for name in names {
+            let Some(kind) = module.exports.get(&name) else {
+                return Err(diagnostic(
+                    "portable_import",
+                    format!("module does not export `{name}`"),
+                ));
+            };
+            if !kind.has_runtime_value() {
+                continue;
+            }
+            let Some(value) = module.env.get(&name) else {
+                return Err(diagnostic(
+                    "portable_import",
+                    format!("module export `{name}` has no runtime value"),
+                ));
+            };
+            if env.contains_local(&name) {
+                return Err(diagnostic(
+                    "portable_import_collision",
+                    format!("imported binding `{name}` collides with an existing binding"),
+                ));
+            }
+            env.define(name, value);
+        }
+        Ok(())
     }
 
     fn child_env(&mut self, parent: Rc<Env>) -> Result<Rc<Env>, Diagnostic> {
@@ -238,6 +433,13 @@ impl<'a> Machine<'a> {
     fn render_value(&mut self, value: &RuntimeValue) -> Result<String, Diagnostic> {
         self.charge_value_work(value)?;
         Ok(value.display())
+    }
+
+    fn push_charged(&mut self, value: RuntimeValue) -> OpStep {
+        match self.charge_value_work(&value) {
+            Ok(()) => OpStep::Push(value),
+            Err(diagnostic) => OpStep::Error(diagnostic),
+        }
     }
 
     fn values_equal(
@@ -562,13 +764,13 @@ impl<'a> Machine<'a> {
                 frame.stack.push(RuntimeValue::Bool(!value.truthy()));
             }
             Op::Equal | Op::EqualInt | Op::EqualFloat | Op::EqualBool | Op::EqualString => {
-                compare(self, frame, |value| value == 0)?;
+                compare_equality(self, frame, true)?;
             }
             Op::NotEqual
             | Op::NotEqualInt
             | Op::NotEqualFloat
             | Op::NotEqualBool
-            | Op::NotEqualString => compare(self, frame, |value| value != 0)?,
+            | Op::NotEqualString => compare_equality(self, frame, false)?,
             Op::Less | Op::LessInt | Op::LessFloat => compare(self, frame, |value| value < 0)?,
             Op::Greater | Op::GreaterInt | Op::GreaterFloat => {
                 compare(self, frame, |value| value > 0)?;
@@ -667,6 +869,78 @@ impl<'a> Machine<'a> {
                     }
                 }
             }
+            Op::SetProperty => {
+                let property = read_constant_string(frame)?;
+                let binding = read_constant_string(frame)?;
+                let value = pop!();
+                let Some(target) = frame.env.get(&binding) else {
+                    return Err(OpStep::Error(diagnostic(
+                        "undefined_variable",
+                        format!("cannot assign property on undefined binding `{binding}`"),
+                    )));
+                };
+                let updated =
+                    set_property_value(target, &property, value).map_err(OpStep::Error)?;
+                self.charge_value_work(&updated).map_err(OpStep::Error)?;
+                frame.env.set(&binding, updated);
+            }
+            Op::SetSubscript => {
+                let binding = read_constant_string(frame)?;
+                let index = pop!();
+                let value = pop!();
+                let Some(target) = frame.env.get(&binding) else {
+                    return Err(OpStep::Error(diagnostic(
+                        "undefined_variable",
+                        format!("cannot assign subscript on undefined binding `{binding}`"),
+                    )));
+                };
+                let updated = set_subscript_value(target, index, value).map_err(OpStep::Error)?;
+                self.charge_value_work(&updated).map_err(OpStep::Error)?;
+                frame.env.set(&binding, updated);
+            }
+            Op::SetLocalSlotProperty => {
+                let property = read_constant_string(frame)?;
+                let slot = read_u16(frame)?;
+                let value = pop!();
+                let Some(local) = frame.chunk.local_slots.get(slot) else {
+                    return Err(invalid_index("local", slot));
+                };
+                if !local.mutable {
+                    return Err(OpStep::Error(diagnostic(
+                        "immutable_assignment",
+                        format!("cannot assign to immutable binding `{}`", local.name),
+                    )));
+                }
+                let Some(target) = frame.locals.get(slot).and_then(Clone::clone) else {
+                    return Err(invalid_index("local", slot));
+                };
+                let updated =
+                    set_property_value(target, &property, value).map_err(OpStep::Error)?;
+                self.charge_value_work(&updated).map_err(OpStep::Error)?;
+                frame.locals[slot] = Some(updated.clone());
+                frame.env.set(&local.name, updated);
+            }
+            Op::SetLocalSlotSubscript => {
+                let slot = read_u16(frame)?;
+                let index = pop!();
+                let value = pop!();
+                let Some(local) = frame.chunk.local_slots.get(slot) else {
+                    return Err(invalid_index("local", slot));
+                };
+                if !local.mutable {
+                    return Err(OpStep::Error(diagnostic(
+                        "immutable_assignment",
+                        format!("cannot assign to immutable binding `{}`", local.name),
+                    )));
+                }
+                let Some(target) = frame.locals.get(slot).and_then(Clone::clone) else {
+                    return Err(invalid_index("local", slot));
+                };
+                let updated = set_subscript_value(target, index, value).map_err(OpStep::Error)?;
+                self.charge_value_work(&updated).map_err(OpStep::Error)?;
+                frame.locals[slot] = Some(updated.clone());
+                frame.env.set(&local.name, updated);
+            }
             Op::Slice => {
                 let end = pop!();
                 let start = pop!();
@@ -708,6 +982,78 @@ impl<'a> Machine<'a> {
                 let found = self.contains(&container, &item).map_err(OpStep::Error)?;
                 frame.stack.push(RuntimeValue::Bool(found));
             }
+            Op::IterInit => {
+                if self.iterators.len() >= MAX_ITERATORS {
+                    return Err(OpStep::Error(diagnostic(
+                        "iterator_limit",
+                        "portable execution exceeded its iterator limit",
+                    )));
+                }
+                let iterable = pop!();
+                let iterator = match iterable {
+                    RuntimeValue::List(values) => IteratorState::List { values, index: 0 },
+                    RuntimeValue::Record(values) => IteratorState::Record {
+                        keys: values.keys().cloned().collect(),
+                        values,
+                        index: 0,
+                    },
+                    other => {
+                        return Err(OpStep::Error(diagnostic(
+                            "iterator_type",
+                            format!(
+                                "cannot iterate over {} in the portable kernel",
+                                runtime_value_kind(&other)
+                            ),
+                        )))
+                    }
+                };
+                self.iterators.push(iterator);
+            }
+            Op::IterNext => {
+                let target = read_u16(frame)?;
+                let Some(iterator) = self.iterators.last_mut() else {
+                    return Err(OpStep::Error(diagnostic(
+                        "iterator_state",
+                        "iterator step has no active iterator",
+                    )));
+                };
+                match iterator {
+                    IteratorState::List { values, index } => {
+                        if let Some(value) = values.get(*index).cloned() {
+                            *index += 1;
+                            frame.stack.push(value);
+                        } else {
+                            self.iterators.pop();
+                            frame.ip = target;
+                        }
+                    }
+                    IteratorState::Record {
+                        keys,
+                        values,
+                        index,
+                    } => {
+                        if let Some(key) = keys.get(*index) {
+                            let value = values.get(key).cloned().unwrap_or(RuntimeValue::Nil);
+                            *index += 1;
+                            frame
+                                .stack
+                                .push(RuntimeValue::Record(Rc::new(BTreeMap::from([
+                                    (
+                                        "key".to_string(),
+                                        RuntimeValue::String(Arc::from(key.as_str())),
+                                    ),
+                                    ("value".to_string(), value),
+                                ]))));
+                        } else {
+                            self.iterators.pop();
+                            frame.ip = target;
+                        }
+                    }
+                }
+            }
+            Op::PopIterator => {
+                self.iterators.pop();
+            }
             Op::TryCatchSetup => {
                 let target = read_u16(frame)?;
                 let _type_name = read_u16(frame)?;
@@ -721,10 +1067,121 @@ impl<'a> Machine<'a> {
                 frame.handlers.pop();
             }
             Op::Throw => return Ok(OpStep::Throw(pop!())),
-            Op::CheckType | Op::TryWrapOk | Op::TryUnwrap => {
+            Op::Import => {
+                let path = read_constant_string(frame)?;
+                let env = frame.env.clone();
+                return Ok(self.import_root_module(&path, None, None, &env));
+            }
+            Op::SelectiveImport => {
+                let path = read_constant_string(frame)?;
+                let names = read_constant_string(frame)?;
+                let selected = names
+                    .split(',')
+                    .filter(|name| !name.is_empty())
+                    .map(str::to_string)
+                    .collect::<Vec<_>>();
+                let env = frame.env.clone();
+                return Ok(self.import_root_module(&path, Some(&selected), None, &env));
+            }
+            Op::NamespaceImport => {
+                let path = read_constant_string(frame)?;
+                let alias = read_constant_string(frame)?;
+                let env = frame.env.clone();
+                return Ok(self.import_root_module(&path, None, Some((&alias, None)), &env));
+            }
+            // The narrowed form the compiler emits when every use of the
+            // namespace is a statically known member. The projection is the
+            // demand set rather than the module's whole export surface;
+            // escaping or dynamic uses compile to `NamespaceImport` instead,
+            // so a missing member here is a compiler contract violation, not a
+            // program error.
+            Op::NamespaceImportMembers => {
+                let path = read_constant_string(frame)?;
+                let alias = read_constant_string(frame)?;
+                let members = read_constant_string(frame)?;
+                let demanded = members
+                    .split(',')
+                    .filter(|name| !name.is_empty())
+                    .map(str::to_string)
+                    .collect::<Vec<_>>();
+                let env = frame.env.clone();
+                return Ok(self.import_root_module(
+                    &path,
+                    None,
+                    Some((&alias, Some(&demanded))),
+                    &env,
+                ));
+            }
+            Op::BuildEnum => {
+                let enum_name = read_constant_string(frame)?;
+                let variant = read_constant_string(frame)?;
+                let field_count = read_u16(frame)?;
+                let fields = pop_args(frame, field_count)?;
+                let value = RuntimeValue::Enum(Rc::new(EnumValue {
+                    enum_name: Arc::from(enum_name),
+                    variant: Arc::from(variant),
+                    fields: Rc::new(fields),
+                }));
+                self.charge_value_work(&value).map_err(OpStep::Error)?;
+                frame.stack.push(value);
+            }
+            Op::MatchEnum => {
+                let enum_name = read_constant_string(frame)?;
+                let variant = read_constant_string(frame)?;
+                let value = pop!();
+                let matches = matches!(
+                    &value,
+                    RuntimeValue::Enum(candidate)
+                        if candidate.is_variant(&enum_name, &variant)
+                );
+                frame.stack.push(value);
+                frame.stack.push(RuntimeValue::Bool(matches));
+            }
+            Op::TryWrapOk => {
+                let value = pop!();
+                if matches!(&value, RuntimeValue::Enum(candidate) if candidate.enum_name.as_ref() == "Result")
+                {
+                    frame.stack.push(value);
+                } else {
+                    frame.stack.push(RuntimeValue::Enum(Rc::new(EnumValue {
+                        enum_name: Arc::from("Result"),
+                        variant: Arc::from("Ok"),
+                        fields: Rc::new(vec![value]),
+                    })));
+                }
+            }
+            Op::TryUnwrap => {
+                let value = pop!();
+                let RuntimeValue::Enum(result) = &value else {
+                    return Err(OpStep::Error(diagnostic(
+                        "try_unwrap_type",
+                        format!(
+                            "? operator requires a Result value, got {}",
+                            runtime_value_kind(&value)
+                        ),
+                    )));
+                };
+                if result.enum_name.as_ref() != "Result" {
+                    return Err(OpStep::Error(diagnostic(
+                        "try_unwrap_type",
+                        format!(
+                            "? operator requires a Result value, got {}",
+                            runtime_value_kind(&value)
+                        ),
+                    )));
+                }
+                if result.variant.as_ref() == "Ok" {
+                    frame
+                        .stack
+                        .push(result.fields.first().cloned().unwrap_or(RuntimeValue::Nil));
+                } else {
+                    return Ok(OpStep::Return(value));
+                }
+            }
+            Op::CheckType => {
                 return Err(OpStep::Error(diagnostic(
                     "unsupported_portable_opcode",
-                    format!("{} is not part of Portable Kernel v1", op.name()),
+                    format!("{} is not implemented by the portable kernel", op.name()),
                 )))
             }
             Op::CallBuiltin => {
@@ -752,18 +1209,7 @@ impl<'a> Machine<'a> {
                     false,
                 ));
             }
-            Op::SetProperty
-            | Op::SetSubscript
-            | Op::SetLocalSlotProperty
-            | Op::SetLocalSlotSubscript => {
-                return Err(OpStep::Error(diagnostic(
-                    "unsupported_portable_opcode",
-                    format!("{} mutation is not yet portable", op.name()),
-                )))
-            }
-            unsupported @ (Op::IterInit
-            | Op::IterNext
-            | Op::Pipe
+            unsupported @ (Op::Pipe
             | Op::Parallel
             | Op::ParallelMap
             | Op::ParallelMapStream
@@ -773,260 +1219,21 @@ impl<'a> Machine<'a> {
             | Op::SyncMutexEnterKeyed
             | Op::TaskScopeEnter
             | Op::TaskScopeExit
-            | Op::Import
-            | Op::SelectiveImport
-            | Op::NamespaceImport
-            | Op::NamespaceImportMembers
             | Op::DeadlineSetup
             | Op::DeadlineEnd
-            | Op::BuildEnum
-            | Op::MatchEnum
-            | Op::PopIterator
             | Op::CallSpread
             | Op::MethodCallSpread
             | Op::Yield) => {
                 return Err(OpStep::Error(diagnostic(
                     "unsupported_portable_opcode",
-                    format!("{} is outside Portable Kernel v1", unsupported.name()),
+                    format!(
+                        "{} is not implemented by the portable kernel",
+                        unsupported.name()
+                    ),
                 )))
             }
         }
         Ok(OpStep::Continue)
-    }
-
-    fn call_method(
-        &mut self,
-        receiver: RuntimeValue,
-        method: &str,
-        args: Vec<RuntimeValue>,
-    ) -> OpStep {
-        if let Err(diagnostic) = self.charge_call_validation(&args) {
-            return OpStep::Error(diagnostic);
-        }
-        if let RuntimeValue::Harness(capability) = receiver {
-            let capability = if capability == "root" {
-                "root".to_string()
-            } else {
-                capability
-            };
-            let Some(contract) =
-                harn_capability_contracts::capability_method_entry(&capability, method)
-            else {
-                return OpStep::Error(diagnostic(
-                    "unsupported_capability",
-                    format!("capability `{capability}.{method}` is not in the canonical registry"),
-                ));
-            };
-            if !manifest_signature_is_portable(contract.signature) {
-                return OpStep::Error(diagnostic(
-                    "unsupported_portable_capability_type",
-                    format!(
-                        "capability `{capability}.{method}` uses a type outside the portable value contract"
-                    ),
-                ));
-            }
-            let required = contract
-                .signature
-                .params
-                .iter()
-                .filter(|parameter| !parameter.optional)
-                .count();
-            let maximum = (!contract.signature.has_rest).then_some(contract.signature.params.len());
-            if args.len() < required || maximum.is_some_and(|maximum| args.len() > maximum) {
-                return OpStep::Error(diagnostic(
-                    "capability_arguments",
-                    format!(
-                        "capability `{capability}.{method}` expected {}..{} arguments, got {}",
-                        required,
-                        maximum.map_or_else(|| "unbounded".to_string(), |value| value.to_string()),
-                        args.len()
-                    ),
-                ));
-            }
-            if !self.grants.allows(&capability, method) {
-                return OpStep::Error(diagnostic(
-                    "capability_denied",
-                    format!("capability `{capability}.{method}` was not granted"),
-                ));
-            }
-            let argument_values = match args
-                .into_iter()
-                .map(DataValue::try_from)
-                .collect::<Result<Vec<_>, _>>()
-            {
-                Ok(arguments) => DataValue::List(arguments),
-                Err(diagnostic) => return OpStep::Error(diagnostic),
-            };
-            let DataValue::List(argument_items) = &argument_values else {
-                unreachable!("capability arguments are constructed as a list")
-            };
-            for (index, value) in argument_items.iter().enumerate() {
-                let parameter = contract
-                    .signature
-                    .params
-                    .get(index)
-                    .or_else(|| {
-                        contract
-                            .signature
-                            .has_rest
-                            .then(|| contract.signature.params.last())
-                            .flatten()
-                    })
-                    .expect("arity validation guarantees a parameter contract");
-                let omitted_sentinel = parameter.optional && matches!(value, DataValue::Nil);
-                if !omitted_sentinel && !matches_manifest_type(value, &parameter.ty) {
-                    return OpStep::Error(diagnostic(
-                        "capability_argument_type",
-                        format!(
-                            "capability `{capability}.{method}` argument `{}` is {}, expected {}",
-                            parameter.name,
-                            value_kind(value),
-                            parameter.ty
-                        ),
-                    ));
-                }
-            }
-            let arguments = argument_values;
-            if let Err(diagnostic) = arguments.validate() {
-                return OpStep::Error(diagnostic);
-            }
-            let id = request_id(
-                self.program.digest(),
-                self.request_ordinal,
-                &capability,
-                method,
-                &arguments,
-            );
-            self.request_ordinal += 1;
-            let expected = ValueShape::from_type(contract.signature.returns);
-            let request = CapabilityRequest {
-                id,
-                capability,
-                operation: method.to_string(),
-                arguments,
-                expected: expected.clone(),
-            };
-            if let Some(response) = self.responses.get(self.response_cursor).cloned() {
-                if response.request_id() != request.id {
-                    return OpStep::Error(diagnostic(
-                        "capability_replay_mismatch",
-                        "recorded capability response does not match deterministic request",
-                    ));
-                }
-                self.response_cursor += 1;
-                return match response {
-                    CapabilityResult::Ok { value, .. }
-                        if matches_manifest_type(&value, &contract.signature.returns) =>
-                    {
-                        let value = RuntimeValue::from(value);
-                        match self.charge_value_work(&value) {
-                            Ok(()) => OpStep::Push(value),
-                            Err(diagnostic) => OpStep::Error(diagnostic),
-                        }
-                    }
-                    CapabilityResult::Ok { value, .. } => OpStep::Error(diagnostic(
-                        "capability_result_type",
-                        format!(
-                            "capability `{}` returned {}, expected {expected:?}",
-                            request.operation,
-                            value_kind(&value)
-                        ),
-                    )),
-                    CapabilityResult::Err { code, message, .. } => {
-                        let value = RuntimeValue::Record(Rc::new(BTreeMap::from([
-                            ("code".to_string(), RuntimeValue::String(Arc::from(code))),
-                            (
-                                "message".to_string(),
-                                RuntimeValue::String(Arc::from(message)),
-                            ),
-                        ])));
-                        match self.charge_value_work(&value) {
-                            Ok(()) => OpStep::Throw(value),
-                            Err(diagnostic) => OpStep::Error(diagnostic),
-                        }
-                    }
-                };
-            }
-            return OpStep::Suspend(request);
-        }
-        match (receiver, method, args.as_slice()) {
-            (RuntimeValue::List(values), "count" | "len", []) => {
-                OpStep::Push(RuntimeValue::Int(values.len() as i64))
-            }
-            (RuntimeValue::List(values), "empty", []) => {
-                OpStep::Push(RuntimeValue::Bool(values.is_empty()))
-            }
-            (RuntimeValue::List(values), "contains" | "includes", [value]) => {
-                for item in values.iter() {
-                    match self.values_equal(item, value) {
-                        Ok(true) => return OpStep::Push(RuntimeValue::Bool(true)),
-                        Ok(false) => {}
-                        Err(diagnostic) => return OpStep::Error(diagnostic),
-                    }
-                }
-                OpStep::Push(RuntimeValue::Bool(false))
-            }
-            (RuntimeValue::String(value), "count" | "len", []) => {
-                OpStep::Push(RuntimeValue::Int(value.chars().count() as i64))
-            }
-            (RuntimeValue::String(value), "empty", []) => {
-                OpStep::Push(RuntimeValue::Bool(value.is_empty()))
-            }
-            (RuntimeValue::String(value), "contains", [RuntimeValue::String(needle)]) => {
-                OpStep::Push(RuntimeValue::Bool(value.contains(needle.as_ref())))
-            }
-            (RuntimeValue::Record(values), "count", []) => {
-                OpStep::Push(RuntimeValue::Int(values.len() as i64))
-            }
-            (RuntimeValue::Record(values), "has", [key]) => match self.render_value(key) {
-                Ok(key) => OpStep::Push(RuntimeValue::Bool(values.contains_key(&key))),
-                Err(diagnostic) => OpStep::Error(diagnostic),
-            },
-            _ => OpStep::Error(diagnostic(
-                "unsupported_method",
-                format!("method `{method}` is not portable for this value"),
-            )),
-        }
-    }
-
-    fn subscript(
-        &mut self,
-        value: &RuntimeValue,
-        index: &RuntimeValue,
-    ) -> Result<Option<RuntimeValue>, Diagnostic> {
-        Ok(match (value, index) {
-            (RuntimeValue::List(values), RuntimeValue::Int(index)) => {
-                normalized_index(values.len(), *index).and_then(|index| values.get(index).cloned())
-            }
-            (RuntimeValue::Record(values), key) => values.get(&self.render_value(key)?).cloned(),
-            (RuntimeValue::String(value), RuntimeValue::Int(index)) => {
-                let length = value.chars().count();
-                normalized_index(length, *index)
-                    .and_then(|index| value.chars().nth(index))
-                    .map(|value| RuntimeValue::String(Arc::from(value.to_string())))
-            }
-            _ => None,
-        })
-    }
-
-    fn contains(
-        &mut self,
-        container: &RuntimeValue,
-        item: &RuntimeValue,
-    ) -> Result<bool, Diagnostic> {
-        match container {
-            RuntimeValue::List(values) => {
-                for value in values.iter() {
-                    if self.values_equal(value, item)? {
-                        return Ok(true);
-                    }
-                }
-                Ok(false)
-            }
-            RuntimeValue::Record(values) => Ok(values.contains_key(&self.render_value(item)?)),
-            RuntimeValue::String(value) => Ok(value.contains(&self.render_value(item)?)),
-            _ => Ok(false),
-        }
     }
 }
 
@@ -1035,6 +1242,35 @@ struct Env {
     parent: Option<Rc<Env>>,
     depth: usize,
 }
+
+struct ModuleInstance {
+    env: Rc<Env>,
+    exports: BTreeMap<String, crate::PortableExportKind>,
+}
+
+enum IteratorState {
+    List {
+        values: Rc<Vec<RuntimeValue>>,
+        index: usize,
+    },
+    Record {
+        values: Rc<BTreeMap<String, RuntimeValue>>,
+        keys: Vec<String>,
+        index: usize,
+    },
+}
+
+enum ModuleStep {
+    Ready(Rc<ModuleInstance>),
+    Suspend(CapabilityRequest),
+    Error(Diagnostic),
+}
+
+/// A namespace import's alias and, when the compiler proved the whole set of
+/// members a module actually demands, that demand set. `None` members means
+/// the namespace escaped static analysis and must be projected whole.
+type NamespaceProjection<'a> = (&'a str, Option<&'a [String]>);
+
 impl Env {
     fn root() -> Rc<Self> {
         Rc::new(Self {
@@ -1059,6 +1295,9 @@ impl Env {
     }
     fn define(&self, name: String, value: RuntimeValue) {
         self.values.borrow_mut().insert(name, value);
+    }
+    fn contains_local(&self, name: &str) -> bool {
+        self.values.borrow().contains_key(name)
     }
     fn get(&self, name: &str) -> Option<RuntimeValue> {
         self.values
@@ -1233,221 +1472,5 @@ fn call_named(
     match env.get(name) {
         Some(callee) => call_value(machine, env, callee, args, tail),
         None => machine.call_builtin(name, args),
-    }
-}
-
-impl Machine<'_> {
-    fn call_builtin(&mut self, name: &str, args: Vec<RuntimeValue>) -> OpStep {
-        if let Err(diagnostic) = self.charge_call_validation(&args) {
-            return OpStep::Error(diagnostic);
-        }
-        let Some(builtin) = PortableBuiltin::from_name(name) else {
-            return OpStep::Error(diagnostic(
-                "unsupported_builtin",
-                format!("builtin `{name}` is outside Portable Kernel v1"),
-            ));
-        };
-        match (builtin, args.as_slice()) {
-            (PortableBuiltin::Len | PortableBuiltin::Count, [RuntimeValue::List(v)]) => {
-                OpStep::Push(RuntimeValue::Int(v.len() as i64))
-            }
-            (PortableBuiltin::Len | PortableBuiltin::Count, [RuntimeValue::String(v)]) => {
-                OpStep::Push(RuntimeValue::Int(v.chars().count() as i64))
-            }
-            (PortableBuiltin::String, [value]) => match self.render_value(value) {
-                Ok(value) => OpStep::Push(RuntimeValue::String(Arc::from(value))),
-                Err(diagnostic) => OpStep::Error(diagnostic),
-            },
-            (
-                PortableBuiltin::MakeStruct,
-                [RuntimeValue::String(_), RuntimeValue::Record(values), _],
-            ) => OpStep::Push(RuntimeValue::Record(values.clone())),
-            (PortableBuiltin::AssertList, [RuntimeValue::List(_)]) => {
-                OpStep::Push(RuntimeValue::Nil)
-            }
-            (PortableBuiltin::AssertList, [value]) => OpStep::Error(diagnostic(
-                "list_type",
-                format!(
-                    "cannot destructure {} with [...] pattern — expected list",
-                    runtime_value_kind(value)
-                ),
-            )),
-            _ => OpStep::Error(diagnostic(
-                "unsupported_builtin",
-                format!("builtin `{name}` is outside Portable Kernel v1"),
-            )),
-        }
-    }
-}
-
-fn binary(
-    frame: &mut Frame,
-    operation: fn(RuntimeValue, RuntimeValue) -> Result<RuntimeValue, Diagnostic>,
-) -> Result<RuntimeValue, OpStep> {
-    let right = frame
-        .stack
-        .pop()
-        .ok_or_else(|| OpStep::Error(diagnostic("stack_underflow", "binary rhs missing")))?;
-    let left = frame
-        .stack
-        .pop()
-        .ok_or_else(|| OpStep::Error(diagnostic("stack_underflow", "binary lhs missing")))?;
-    operation(left, right).map_err(OpStep::Error)
-}
-fn compare(
-    machine: &mut Machine<'_>,
-    frame: &mut Frame,
-    predicate: fn(i8) -> bool,
-) -> Result<(), OpStep> {
-    let right = frame
-        .stack
-        .pop()
-        .ok_or_else(|| OpStep::Error(diagnostic("stack_underflow", "comparison rhs missing")))?;
-    let left = frame
-        .stack
-        .pop()
-        .ok_or_else(|| OpStep::Error(diagnostic("stack_underflow", "comparison lhs missing")))?;
-    machine
-        .charge_values_work(&[&left, &right])
-        .map_err(OpStep::Error)?;
-    let value = ordering(&left, &right).map(predicate).unwrap_or(false);
-    frame.stack.push(RuntimeValue::Bool(value));
-    Ok(())
-}
-fn equal(a: &RuntimeValue, b: &RuntimeValue) -> bool {
-    semantic_values_equal(a, b)
-}
-fn ordering(a: &RuntimeValue, b: &RuntimeValue) -> Option<i8> {
-    semantic_try_compare(a, b)
-}
-fn get_property(value: &RuntimeValue, name: &str) -> Option<RuntimeValue> {
-    match value {
-        RuntimeValue::Record(values) => values.get(name).cloned(),
-        RuntimeValue::List(values) if name == "count" => {
-            Some(RuntimeValue::Int(values.len() as i64))
-        }
-        RuntimeValue::String(value) if name == "count" => {
-            Some(RuntimeValue::Int(value.chars().count() as i64))
-        }
-        RuntimeValue::Harness(root) if root == "root" => {
-            Some(RuntimeValue::Harness(name.to_string()))
-        }
-        _ => None,
-    }
-}
-fn slice(
-    value: RuntimeValue,
-    start: RuntimeValue,
-    end: RuntimeValue,
-) -> Result<RuntimeValue, Diagnostic> {
-    match value {
-        RuntimeValue::List(values) => {
-            let (start, end) = slice_bounds(values.len(), start, end)?;
-            Ok(RuntimeValue::List(Rc::new(values[start..end].to_vec())))
-        }
-        RuntimeValue::String(value) => {
-            let chars: Vec<_> = value.chars().collect();
-            let (start, end) = slice_bounds(chars.len(), start, end)?;
-            Ok(RuntimeValue::String(Arc::from(
-                chars[start..end].iter().collect::<String>(),
-            )))
-        }
-        _ => Err(diagnostic(
-            "slice_type",
-            "slice receiver must be list or string",
-        )),
-    }
-}
-
-fn normalized_index(length: usize, index: i64) -> Option<usize> {
-    let length = i64::try_from(length).ok()?;
-    let index = if index < 0 {
-        length.checked_add(index)?
-    } else {
-        index
-    };
-    (0..length).contains(&index).then_some(index as usize)
-}
-
-fn slice_bounds(
-    length: usize,
-    start: RuntimeValue,
-    end: RuntimeValue,
-) -> Result<(usize, usize), Diagnostic> {
-    let length = i64::try_from(length)
-        .map_err(|_| diagnostic("slice_range", "slice receiver is too large"))?;
-    let bound = |value: RuntimeValue, default: i64, label: &str| match value {
-        RuntimeValue::Nil => Ok(default),
-        RuntimeValue::Int(value) if value < 0 => Ok((length + value).max(0)),
-        RuntimeValue::Int(value) => Ok(value.min(length)),
-        _ => Err(diagnostic(
-            "slice_type",
-            format!("slice {label} must be int or nil"),
-        )),
-    };
-    let start = bound(start, 0, "start")?;
-    let end = bound(end, length, "end")?;
-    if start >= end {
-        Ok((0, 0))
-    } else {
-        Ok((start as usize, end as usize))
-    }
-}
-fn runtime_value_kind(value: &RuntimeValue) -> &'static str {
-    match value {
-        RuntimeValue::Nil => "nil",
-        RuntimeValue::Bool(_) => "bool",
-        RuntimeValue::Int(_) => "int",
-        RuntimeValue::Float(_) => "float",
-        RuntimeValue::String(_) => "string",
-        RuntimeValue::Bytes(_) => "bytes",
-        RuntimeValue::List(_) => "list",
-        RuntimeValue::Record(_) => "record",
-        RuntimeValue::Closure(_) => "closure",
-        RuntimeValue::Builtin(_) => "builtin",
-        RuntimeValue::Harness(_) => "harness",
-    }
-}
-fn handle_throw(frames: &mut Vec<Frame>, value: RuntimeValue) -> bool {
-    while let Some(frame) = frames.last_mut() {
-        if let Some(handler) = frame.handlers.pop() {
-            frame.stack.truncate(handler.stack_depth);
-            frame.env = handler.env;
-            frame.stack.push(value);
-            frame.ip = handler.target;
-            return true;
-        }
-        frames.pop();
-    }
-    false
-}
-
-fn request_id(
-    digest: [u8; 32],
-    ordinal: u64,
-    capability: &str,
-    operation: &str,
-    arguments: &DataValue,
-) -> String {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(&digest);
-    hasher.update(&ordinal.to_be_bytes());
-    hasher.update(capability.as_bytes());
-    hasher.update(&[0]);
-    hasher.update(operation.as_bytes());
-    hasher.update(&serde_json::to_vec(arguments).unwrap_or_default());
-    hasher.finalize().to_hex()[..32].to_string()
-}
-fn diagnostic(code: &str, message: impl Into<String>) -> Diagnostic {
-    Diagnostic {
-        code: code.to_string(),
-        message: message.into(),
-        line: None,
-        column: None,
-    }
-}
-fn failed(code: &str, message: impl Into<String>) -> Execution {
-    Execution::Failed {
-        diagnostic: diagnostic(code, message),
     }
 }

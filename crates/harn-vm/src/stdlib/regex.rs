@@ -1,61 +1,14 @@
 use crate::value::VmDictExt;
-use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
-use std::rc::Rc;
+use std::collections::BTreeMap;
 
-use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
-const REGEX_CACHE_LIMIT: usize = RuntimeLimits::DEFAULT.max_regex_cache_entries;
-
-thread_local! {
-    // `regex::Regex` is stored behind an `Rc` because `Regex::clone` deep-copies
-    // the compiled program and its match-cache pool — ~3.5us per call, which
-    // dominated repeated `regex_match` over a file's lines. Handing callers an
-    // `Rc<Regex>` makes each lookup a refcount bump instead.
-    static REGEX_CACHE: RefCell<HashMap<String, Rc<regex::Regex>>> = RefCell::new(HashMap::new());
-    // Scan loops almost always reuse the same pattern (e.g. `regex_match(p, line)`
-    // across every line of a file). This single-slot memo short-circuits those
-    // calls before the cache-key allocation and the HashMap hash, leaving only a
-    // string compare plus the `Rc` bump.
-    static LAST_REGEX: RefCell<Option<(String, String, Rc<regex::Regex>)>> =
-        const { RefCell::new(None) };
-}
-
-pub(crate) fn get_cached_regex(pattern: &str, flags: &str) -> Result<Rc<regex::Regex>, VmError> {
-    if let Some(re) = LAST_REGEX.with(|slot| {
-        slot.borrow()
-            .as_ref()
-            .filter(|(p, f, _)| p == pattern && f == flags)
-            .map(|(_, _, re)| Rc::clone(re))
-    }) {
-        return Ok(re);
-    }
-
-    let re = REGEX_CACHE.with(|cache| -> Result<Rc<regex::Regex>, VmError> {
-        let cache_key = format!("{flags}\0{pattern}");
-        let mut cache = cache.borrow_mut();
-        if let Some(re) = cache.get(&cache_key) {
-            return Ok(Rc::clone(re));
-        }
-        let re = Rc::new(build_regex(pattern, flags).map_err(|e| {
-            VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
-                "Invalid regex: {e}"
-            ))))
-        })?);
-        if cache.len() >= REGEX_CACHE_LIMIT {
-            cache.clear();
-        }
-        cache.insert(cache_key, Rc::clone(&re));
-        Ok(re)
-    })?;
-
-    LAST_REGEX.with(|slot| {
-        *slot.borrow_mut() = Some((pattern.to_string(), flags.to_string(), Rc::clone(&re)));
-    });
-    Ok(re)
+fn regex_error(error: String) -> VmError {
+    VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+        "Invalid regex: {error}"
+    ))))
 }
 
 /// Read an optional trailing `flags` argument. An absent arg *and* an explicit
@@ -83,24 +36,6 @@ fn required_str(args: &[VmValue], idx: usize) -> Option<std::borrow::Cow<'_, str
     }
 }
 
-fn build_regex(pattern: &str, flags: &str) -> Result<regex::Regex, String> {
-    let mut builder = regex::RegexBuilder::new(pattern);
-    for flag in flags.chars() {
-        match flag {
-            'i' => builder.case_insensitive(true),
-            'm' => builder.multi_line(true),
-            's' => builder.dot_matches_new_line(true),
-            'x' => builder.ignore_whitespace(true),
-            _ => {
-                return Err(format!(
-                    "unsupported regex flag '{flag}', expected one of i/m/s/x"
-                ));
-            }
-        };
-    }
-    builder.build().map_err(|e| e.to_string())
-}
-
 pub(crate) fn register_regex_builtins(vm: &mut Vm) {
     for def in MODULE_BUILTINS {
         vm.register_builtin_def(def);
@@ -117,7 +52,7 @@ pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "regex_match(pattern: string?, text: string?, flags?: string) -> list | nil",
+    sig_expr = harn_builtin_meta::signatures::PORTABLE_REGEX_MATCH,
     category = "regex"
 )]
 fn regex_match_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -125,10 +60,10 @@ fn regex_match_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         return Ok(VmValue::Nil);
     };
     let flags = optional_flags(args, 2);
-    let re = get_cached_regex(&pattern, &flags)?;
-    let matches: Vec<VmValue> = re
-        .find_iter(&text)
-        .map(|m| VmValue::String(arcstr::ArcStr::from(m.as_str())))
+    let matches: Vec<VmValue> = harn_kernel::pure::regex_matches(&pattern, &text, &flags)
+        .map_err(regex_error)?
+        .into_iter()
+        .map(|matched| VmValue::String(arcstr::ArcStr::from(matched)))
         .collect();
     if matches.is_empty() {
         return Ok(VmValue::Nil);
@@ -141,7 +76,7 @@ fn regex_match_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "regex_replace(pattern: string?, replacement: string?, text: string?, flags?: string) -> string",
+    sig_expr = harn_builtin_meta::signatures::PORTABLE_REGEX_REPLACE,
     category = "regex"
 )]
 fn regex_replace_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -153,16 +88,15 @@ fn regex_replace_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
         return Ok(VmValue::Nil);
     };
     let flags = optional_flags(args, 3);
-    let re = get_cached_regex(&pattern, &flags)?;
-    Ok(VmValue::String(arcstr::ArcStr::from(
-        re.replace_all(&text, replacement.as_ref()).into_owned(),
-    )))
+    let replaced = harn_kernel::pure::regex_replace(&pattern, &replacement, &text, &flags)
+        .map_err(regex_error)?;
+    Ok(VmValue::String(arcstr::ArcStr::from(replaced)))
 }
 
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "regex_captures(pattern: string?, text: string?, flags?: string) -> list",
+    sig_expr = harn_builtin_meta::signatures::PORTABLE_REGEX_CAPTURES,
     category = "regex"
 )]
 fn regex_captures_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -170,72 +104,34 @@ fn regex_captures_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
         return Ok(VmValue::List(std::sync::Arc::new(Vec::new())));
     };
     let flags = optional_flags(args, 2);
-    let re = get_cached_regex(&pattern, &flags)?;
-
-    // `start`/`end` are *character* (code-point) offsets, not byte offsets, so
-    // they compose with Harn's char-based `substring`/`index_of`/`len` (and
-    // match Python's `re` offsets). `line` is the 1-based line of the match
-    // start — the equivalent of Python's `text.count("\n", 0, m.start()) + 1` —
-    // so callers can report diagnostics positionally without re-scanning the
-    // input in Harn.
-    //
-    // The `regex` crate reports byte offsets, so we walk a cursor forward over
-    // the gaps between successive matches (which arrive in ascending order),
-    // accumulating the char count and newline count of each gap. That keeps the
-    // whole pass O(n) rather than O(n * matches).
-    let mut scanned_byte: usize = 0;
-    let mut chars_before: usize = 0;
-    let mut newlines_before: usize = 0;
-
-    let mut results: Vec<VmValue> = Vec::new();
-    for caps in re.captures_iter(&text) {
+    let captures =
+        harn_kernel::pure::regex_captures(&pattern, &text, &flags).map_err(regex_error)?;
+    let mut results: Vec<VmValue> = Vec::with_capacity(captures.len());
+    for capture in captures {
         let mut dict = BTreeMap::new();
-
-        dict.put_str("match", caps.get(0).map_or("", |m| m.as_str()));
-
-        let groups: Vec<VmValue> = (1..caps.len())
-            .map(|i| match caps.get(i) {
-                Some(m) => VmValue::String(arcstr::ArcStr::from(m.as_str())),
-                None => VmValue::Nil,
+        dict.put_str("match", &capture.full_match);
+        let groups: Vec<VmValue> = capture
+            .groups
+            .into_iter()
+            .map(|value| {
+                value.map_or(VmValue::Nil, |value| {
+                    VmValue::String(arcstr::ArcStr::from(value))
+                })
             })
             .collect();
         dict.insert(
             "groups".to_string(),
             VmValue::List(std::sync::Arc::new(groups)),
         );
-
-        if let Some(whole) = caps.get(0) {
-            let (start_byte, end_byte) = (whole.start(), whole.end());
-            // Advance the cursor to the match start, tallying chars + newlines.
-            // `captures_iter` never yields a start before a previous one, so the
-            // cursor only moves forward.
-            let gap = &text[scanned_byte..start_byte];
-            chars_before += gap.chars().count();
-            newlines_before += gap.bytes().filter(|&b| b == b'\n').count();
-            let start_char = chars_before;
-            let line = newlines_before + 1;
-            // Tally the match interior too, so a match that spans newlines does
-            // not throw off the line number of subsequent matches.
-            let matched = whole.as_str();
-            chars_before += matched.chars().count();
-            newlines_before += matched.bytes().filter(|&b| b == b'\n').count();
-            let end_char = chars_before;
-            scanned_byte = end_byte;
-
-            dict.insert("start".to_string(), VmValue::Int(start_char as i64));
-            dict.insert("end".to_string(), VmValue::Int(end_char as i64));
-            dict.insert("line".to_string(), VmValue::Int(line as i64));
-        }
-
-        for name in re.capture_names().flatten() {
-            if let Some(m) = caps.name(name) {
-                dict.insert(
-                    name.to_string(),
-                    VmValue::String(arcstr::ArcStr::from(m.as_str())),
-                );
-            }
-        }
-
+        dict.insert("start".to_string(), VmValue::Int(capture.start as i64));
+        dict.insert("end".to_string(), VmValue::Int(capture.end as i64));
+        dict.insert("line".to_string(), VmValue::Int(capture.line as i64));
+        dict.extend(
+            capture
+                .named
+                .into_iter()
+                .map(|(name, value)| (name, VmValue::String(arcstr::ArcStr::from(value)))),
+        );
         results.push(VmValue::dict(dict));
     }
     Ok(VmValue::List(std::sync::Arc::new(results)))
@@ -244,7 +140,7 @@ fn regex_captures_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "regex_split(text: string?, pattern: string?, flags?: string) -> list",
+    sig_expr = harn_builtin_meta::signatures::PORTABLE_REGEX_SPLIT,
     category = "regex"
 )]
 fn regex_split_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -252,9 +148,10 @@ fn regex_split_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         return Ok(VmValue::Nil);
     };
     let flags = optional_flags(args, 2);
-    let re = get_cached_regex(&pattern, &flags)?;
+    let parts = harn_kernel::pure::regex_split(&pattern, &text, &flags).map_err(regex_error)?;
     Ok(VmValue::List(std::sync::Arc::new(
-        re.split(&text)
+        parts
+            .into_iter()
             .map(|part| VmValue::String(arcstr::ArcStr::from(part)))
             .collect(),
     )))
@@ -642,21 +539,11 @@ mod tests {
     fn cache_eviction_still_works() {
         for i in 0..70 {
             let pattern = format!("pat{i}");
-            let _ = get_cached_regex(&pattern, "");
+            let _ = harn_kernel::pure::regex_matches(&pattern, "", "");
         }
-        let re = get_cached_regex("pat0", "").unwrap();
-        assert!(re.is_match("pat0"));
-    }
-
-    // A repeated lookup must hand back the *same* compiled regex, not a deep
-    // clone. `regex::Regex::clone` re-copies the compiled program and match
-    // cache (~3.5us/call), so cloning per call is what made line-oriented
-    // scans slow (#2796). Sharing via `Rc` keeps the hot path a refcount bump;
-    // this guards against a regression back to per-call cloning.
-    #[test]
-    fn cache_returns_shared_instance() {
-        let first = get_cached_regex("shared_pattern", "").unwrap();
-        let second = get_cached_regex("shared_pattern", "").unwrap();
-        assert!(Rc::ptr_eq(&first, &second));
+        assert_eq!(
+            harn_kernel::pure::regex_matches("pat0", "pat0", "").unwrap(),
+            ["pat0"]
+        );
     }
 }

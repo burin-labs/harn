@@ -97,6 +97,9 @@ interface kernel {
   }
 
   compile: func(source: string, entry: string, kind: entry-kind) -> result<program, list<diagnostic>>;
+  /// Compile a host-linked JSON source package. The manifest contains stable
+  /// module IDs, resolved import targets, and public export projections.
+  compile-package: func(manifest-json: string, entry: string, kind: entry-kind) -> result<program, list<diagnostic>>;
   start: func(program: program, input: value, grants: grant-set) -> execution-result;
   resume: func(program: program, snapshot: list<u8>, outcome: capability-result, grants: grant-set) -> execution-result;
 }

@@ -8,6 +8,14 @@
 /// the version of whichever host happens to emit a receipt.
 pub const KERNEL_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Shared adapter ingress limits. Native and browser hosts enforce these
+/// before allocating or parsing untrusted wire inputs.
+pub const PORTABLE_MAX_SOURCE_BYTES: usize = 1024 * 1024;
+pub const PORTABLE_MAX_PACKAGE_BYTES: usize = 8 * 1024 * 1024;
+pub const PORTABLE_MAX_PACKAGE_MODULES: usize = 1_024;
+pub const PORTABLE_MAX_VALUE_JSON_BYTES: usize = 1024 * 1024;
+pub const PORTABLE_MAX_GRANTS_JSON_BYTES: usize = 64 * 1024;
+
 pub mod artifact;
 pub mod benchmark;
 mod builtin_id;
@@ -15,14 +23,16 @@ pub mod compiler;
 pub mod opcode;
 mod portable_builtin;
 pub mod program;
+pub mod pure;
 mod runtime_limits;
 mod schema;
 pub mod type_contract;
 pub mod value;
 
 pub use artifact::{
-    compile_program, semantic_abi_fingerprint_hex, ArtifactLimits, Diagnostic, EntryKind,
-    ProgramArtifact, ARTIFACT_VERSION, PORTABLE_SOURCE_MAX_BYTES,
+    compile_program, compile_program_package, compile_source_package, semantic_abi_fingerprint_hex,
+    ArtifactLimits, Diagnostic, EntryKind, PortableModuleSource, PortablePackageSource,
+    ProgramArtifact, ProgramModule, ARTIFACT_VERSION,
 };
 pub use benchmark::{
     benchmark_terminal_digest, portable_benchmark_json_schema, BenchmarkBuildProfile,
@@ -32,20 +42,21 @@ pub use benchmark::{
     PORTABLE_MAX_DISPATCH_ITERATIONS, PORTABLE_MAX_WORKERS,
 };
 pub use builtin_id::BuiltinId;
-pub use compiler::{CompileError, CompiledCallableEntry, Compiler, CompilerOptions};
+pub use compiler::{
+    CompileError, CompiledCallableEntry, CompiledPortableModule, Compiler, CompilerOptions,
+    PortableExportKind, PortableImport, PortableSourceModule, PortableSourcePackage,
+};
 pub use execution::{
     replay, resume, start, CapabilityRequest, CapabilityResult, DataValue, Execution, GrantSet,
-    ValueShape,
+    ValueShape, PORTABLE_MAX_SNAPSHOT_BYTES,
 };
 pub use opcode::{
     opcode_abi_fingerprint, Op, OperandKind, Portability, OPCODE_ABI_ARTIFACT_VERSION,
-    OPCODE_ABI_FINGERPRINT_V1, OPCODE_ABI_FINGERPRINT_V2,
+    OPCODE_ABI_FINGERPRINT_V2,
 };
 pub use program::{Chunk, CompiledFunction, Constant, LocalSlotInfo, ParamSlot};
 
-/// Compatibility namespace kept private to the compiler implementation while
-/// the public contract calls this immutable structure a program image.
-pub mod chunk {
+mod chunk {
     pub use crate::program::*;
     pub use crate::Op;
 }

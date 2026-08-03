@@ -2,7 +2,7 @@ import init, {
   benchmarkProvenanceJson,
   benchmarkSchemaVersion,
   benchmarkTerminalDigest,
-  compile,
+  compilePackage,
   normalizeBenchmarkReceiptJson,
   start,
   summarizeBenchmarkSamples,
@@ -10,7 +10,7 @@ import init, {
 
 const COMPILE_ITERATIONS = 30;
 const START_ITERATIONS = 500;
-const SOURCE_PATH = "crates/harn-wasm/demo/reducer.harn";
+const SOURCE_PATH = "crates/harn-wasm/demo/package-root.harn";
 const ENTRY = "reduce";
 const ENTRY_KIND = "function";
 
@@ -36,13 +36,13 @@ try {
   const initializationStarted = performance.now();
   await init();
   const initializationMs = performance.now() - initializationStarted;
-  const source = await fetch(new URL("./reducer.harn", import.meta.url)).then((response) => {
-    if (!response.ok) throw new Error(`load reducer source: HTTP ${response.status}`);
+  const manifest = await fetch(new URL("./package.json", import.meta.url)).then((response) => {
+    if (!response.ok) throw new Error(`load reducer package: HTTP ${response.status}`);
     return response.text();
   });
 
   const firstCompileStarted = performance.now();
-  const compiled = compile(source, ENTRY, ENTRY_KIND);
+  const compiled = compilePackage(manifest, ENTRY, ENTRY_KIND);
   const firstCompileMs = performance.now() - firstCompileStarted;
   if (!compiled.ok) throw new Error(compiled.diagnosticsJson());
 
@@ -51,7 +51,7 @@ try {
   const compileSamples = [];
   for (let index = 0; index < COMPILE_ITERATIONS; index += 1) {
     const started = performance.now();
-    const sample = compile(source, ENTRY, ENTRY_KIND);
+    const sample = compilePackage(manifest, ENTRY, ENTRY_KIND);
     compileSamples.push(performance.now() - started);
     if (!sample.ok) throw new Error(sample.diagnosticsJson());
     if (sample.digest !== artifactDigest || !equalBytes(sample.artifactBytes(), artifact)) {

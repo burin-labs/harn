@@ -45,7 +45,7 @@ const denied = imports.filter(
 );
 
 const exportNames = new Set(exports.map((entry) => entry.name));
-const missingKernelExports = ["compile", "start", "resume"].filter(
+const missingKernelExports = ["compile", "compilePackage", "start", "resume"].filter(
   (name) => !exportNames.has(name),
 );
 

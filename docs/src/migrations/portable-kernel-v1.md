@@ -1,4 +1,4 @@
-# Migrate to Portable Harn Kernel v1
+# Migrate to the Portable Harn Kernel
 
 Portable Kernel v1 replaces the former `harn-wasm` source interpreter. The old
 adapter parsed and evaluated a subset of Harn independently; it is removed.
@@ -45,9 +45,10 @@ The full native VM remains the hostful Harn runtime. Portable v1 is not a drop-i
 replacement for programs using modules, orchestration, concurrency, generators,
 streams, or unsupported builtins.
 
-Typed default parameters are also outside v1 and fail at compilation with
-`unsupported_portable_typed_default`. Use an untyped default, or initialize and
-validate the omitted value explicitly in the function body. Supplied typed
+Typed default parameters compiled to `unsupported_portable_typed_default` in
+v1. They are supported from artifact v2 onward: the default is evaluated
+through the same shared guard the native runtime uses, so an omitted typed
+parameter yields its declared default rather than a diagnostic. Supplied typed
 parameters continue to use the shared native/portable structural type matcher.
 
 ## Former native-codegen callers
@@ -60,6 +61,26 @@ or evaluate Harn independently.
 
 ## Compatibility policy
 
-Artifact v1 rejects unknown versions, feature bits, semantic ABI fingerprints,
-and unsupported semantics. Recompile from source when compatibility fails.
-There is no best-effort decoding and no fallback to the former interpreter.
+Portable artifacts reject unknown versions, feature bits, semantic ABI
+fingerprints, and unsupported semantics. Recompile from source when
+compatibility fails. There is no best-effort decoding and no fallback to the
+former interpreter.
+
+## Artifact version 2
+
+Version 2 is the current artifact version. It adds the packaged module closure
+and the `NamespaceImportMembers` opcode to the shared bytecode ABI.
+
+**Version 1 artifacts must be recompiled from source.** The kernel fails closed
+rather than reading them:
+
+```text
+artifact_version: artifact version 1 is not supported; expected 2
+```
+
+Recompile a single-file program with `harn portable compile`. When the program
+has imports, run `harn portable package` first and compile the resulting
+manifest, so the artifact carries its whole module closure and the host never
+re-resolves an import.
+
+The adapter interface is unchanged: `compile`, then `start` or `resume`.

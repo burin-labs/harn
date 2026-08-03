@@ -67,6 +67,17 @@ pub(crate) fn disasm_const_pool_local_slot(chunk: &Chunk, ip: &mut usize, label:
     out
 }
 
+pub(crate) fn disasm_const_pool_pair(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
+    let first = chunk.read_u16(*ip);
+    *ip += 2;
+    let second = chunk.read_u16(*ip);
+    *ip += 2;
+    format!(
+        "{label} {first:>4} ({}) {second:>4} ({})",
+        chunk.constants[first as usize], chunk.constants[second as usize]
+    )
+}
+
 pub(crate) fn disasm_method_call(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
     let idx = chunk.read_u16(*ip);
     *ip += 2;

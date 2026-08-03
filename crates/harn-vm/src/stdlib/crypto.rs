@@ -912,27 +912,27 @@ fn base32_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "hex_encode(input: string | bytes) -> string",
+    sig_expr = harn_builtin_meta::signatures::PORTABLE_HEX_ENCODE,
     category = "crypto"
 )]
 fn hex_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let bytes = bytes_or_string_input(args.first())?;
-    Ok(VmValue::String(arcstr::ArcStr::from(hex::encode(bytes))))
+    Ok(VmValue::String(arcstr::ArcStr::from(
+        harn_kernel::pure::hex_encode(&bytes),
+    )))
 }
 
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "hex_decode(text: string?) -> string", category = "crypto"
+    sig_expr = harn_builtin_meta::signatures::PORTABLE_HEX_DECODE,
+    category = "crypto"
 )]
 fn hex_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = display_arg(args);
-    match hex::decode(val.as_bytes()) {
-        Ok(bytes) => Ok(VmValue::String(arcstr::ArcStr::from(
-            String::from_utf8_lossy(&bytes).into_owned(),
-        ))),
-        Err(e) => Err(VmError::Runtime(format!("hex decode error: {e}"))),
-    }
+    harn_kernel::pure::hex_decode_text(&val)
+        .map(|text| VmValue::String(arcstr::ArcStr::from(text)))
+        .map_err(VmError::Runtime)
 }
 
 // Stable FNV-1a over the canonical display form so logically-equal values
@@ -956,14 +956,14 @@ fn hash_value_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "sha256(input: string | bytes) -> string", category = "crypto"
+    sig_expr = harn_builtin_meta::signatures::PORTABLE_SHA256,
+    category = "crypto"
 )]
 fn sha256_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    use sha2::Digest;
     let bytes = bytes_or_string_input(args.first())?;
-    Ok(VmValue::String(arcstr::ArcStr::from(hex::encode(
-        sha2::Sha256::digest(&bytes),
-    ))))
+    Ok(VmValue::String(arcstr::ArcStr::from(
+        harn_kernel::pure::sha256_hex(&bytes),
+    )))
 }
 
 #[harn_builtin(

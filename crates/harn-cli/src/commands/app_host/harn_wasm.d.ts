@@ -54,6 +54,15 @@ export function benchmarkTerminalDigest(value_json: string): string;
 export function compile(source: string, entry: string, entry_kind: string): CompileOutcome;
 
 /**
+ * Compile a host-linked source package through the same canonical lexer,
+ * parser, compiler, and artifact encoder as native Harn. The manifest is
+ * deliberately data-only: import targets and public export projections are
+ * resolved by the host build step, while this adapter has no filesystem or
+ * package-loader authority.
+ */
+export function compilePackage(manifest_json: string, entry: string, entry_kind: string): CompileOutcome;
+
+/**
  * Validate and canonically serialize a browser-captured benchmark receipt
  * through the same closed Rust type used by the native CLI.
  */
@@ -89,6 +98,7 @@ export interface InitOutput {
     readonly benchmarkSchemaVersion: () => [number, number];
     readonly benchmarkTerminalDigest: (a: number, b: number) => [number, number, number, number];
     readonly compile: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
+    readonly compilePackage: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
     readonly compileoutcome_artifactBytes: (a: number) => [number, number];
     readonly compileoutcome_diagnosticsJson: (a: number) => [number, number];
     readonly compileoutcome_digest: (a: number) => [number, number];

@@ -1,7 +1,8 @@
 # Run a portable reducer in a browser
 
-This guide builds the core WebAssembly adapter and runs the standalone reducer
-in a dedicated browser worker. It does not depend on the interactive app stack.
+This guide builds the core WebAssembly adapter and runs a two-module reducer
+package in a dedicated browser worker. It does not depend on the interactive
+app stack.
 
 ## Prerequisites
 
@@ -35,13 +36,22 @@ make wasm-demo
 ```
 
 Open `http://127.0.0.1:8765`. The page loads `demo/worker.js`; the worker loads
-the generated ES module, compiles `demo/reducer.harn`, and retains reducer state
-between typed events. “Restore saved state” sends a structured clone back to
-the worker to demonstrate serializable application state.
+the generated ES module and `demo/package.json`, compiles the root reducer plus
+its imported math module with `compilePackage`, and retains reducer state between
+typed events. “Restore saved state” sends a structured clone back to the worker
+to demonstrate serializable application state. The manifest is generated from
+`demo/package-root.harn` and `demo/package-reducer-math.harn`; run
+`make check-portable-demo-package` when changing either source.
 
 The page owns HTML, controls, and presentation. Harn owns reducer policy. The
 Wasm kernel owns deterministic execution. No DOM or canvas object crosses the
 worker boundary.
+
+For a quick manual proof, press **Increment** and then **Add ten**. The worker
+returns count `11` with history `[1, 11]`. Press **Reset**, then **Restore saved
+state**; the structured-cloned initial state returns. Expanding the source panel
+also shows syntax highlighting generated from Harn's canonical language
+vocabulary rather than a demo-owned keyword list.
 
 The adapter does not require `SharedArrayBuffer` or Wasm threads. For parallel
 dispatch, create multiple dedicated workers, reuse the same artifact bytes,
@@ -53,16 +63,17 @@ transitions on the browser main thread.
 The worker path is intentionally small:
 
 ```js
-import init, { compile, start } from "../pkg/harn_wasm.js"
+import init, { compilePackage, start } from "../pkg/harn_wasm.js"
 
 await init()
-const compiled = compile(source, "reduce", "function")
+const manifest = await fetch("./package.json").then((response) => response.text())
+const compiled = compilePackage(manifest, "reduce", "function")
 if (!compiled.ok) throw new Error(compiled.diagnosticsJson())
 
 const result = start(
   compiled.artifactBytes(),
   JSON.stringify({ state, event }),
-  "[]",
+  '{"capabilities":[]}',
 )
 
 if (result.status === "completed") {

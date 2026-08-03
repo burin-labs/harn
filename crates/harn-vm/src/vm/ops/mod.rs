@@ -127,7 +127,7 @@ harn_opcode_macros::define_opcodes! {
     // === Object operations ===
     GetProperty { sync(self.execute_get_property(false)), disasm: const_pool_u16("GET_PROPERTY") };
     GetPropertyOpt { sync(self.execute_get_property(true)), disasm: const_pool_u16("GET_PROPERTY_OPT") };
-    SetProperty { sync(self.execute_set_property()), disasm: const_pool_u16("SET_PROPERTY") };
+    SetProperty { sync(self.execute_set_property()), disasm: const_pool_pair("SET_PROPERTY") };
     SetSubscript { sync(self.execute_set_subscript()), disasm: const_pool_u16("SET_SUBSCRIPT") };
     SetLocalSlotProperty { sync(self.execute_set_local_slot_property()), disasm: const_pool_local_slot("SET_LOCAL_SLOT_PROPERTY") };
     SetLocalSlotSubscript { sync(self.execute_set_local_slot_subscript()), disasm: local_slot_u16("SET_LOCAL_SLOT_SUBSCRIPT") };

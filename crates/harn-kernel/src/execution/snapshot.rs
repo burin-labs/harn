@@ -1,10 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use super::{diagnostic, CapabilityResult, DataValue};
+use super::{diagnostic, CapabilityResult, DataValue, PORTABLE_MAX_SNAPSHOT_BYTES};
 use crate::Diagnostic;
 
 const SNAPSHOT_MAGIC: &[u8; 8] = b"HARNSP01";
-const MAX_SNAPSHOT_BYTES: usize = 1024 * 1024;
 pub(super) const SNAPSHOT_TAG_BYTES: usize = 32;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,7 +28,7 @@ pub(super) fn encode_snapshot(
     bytes.extend_from_slice(&(payload.len() as u32).to_be_bytes());
     bytes.extend_from_slice(&payload);
     bytes.extend_from_slice(tag.as_bytes());
-    if bytes.len() > MAX_SNAPSHOT_BYTES {
+    if bytes.len() > PORTABLE_MAX_SNAPSHOT_BYTES {
         return Err(diagnostic(
             "snapshot_too_large",
             "snapshot exceeds its byte limit",
@@ -48,7 +47,7 @@ pub(super) fn decode_snapshot(
             "resuming a suspended execution requires its host-owned snapshot key",
         ));
     };
-    if bytes.len() > MAX_SNAPSHOT_BYTES {
+    if bytes.len() > PORTABLE_MAX_SNAPSHOT_BYTES {
         return Err(diagnostic(
             "snapshot_too_large",
             "snapshot exceeds its byte limit",

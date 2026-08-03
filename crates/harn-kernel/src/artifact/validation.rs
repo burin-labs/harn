@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use harn_parser::{ShapeField, TypeExpr};
 
 use crate::{Constant, OperandKind};
@@ -169,8 +167,8 @@ pub(super) fn semantic_abi_fingerprint() -> [u8; 32] {
     hash.bytes(SEMANTIC_ABI_DOMAIN);
     hash.bytes(&crate::opcode_abi_fingerprint());
     hash.len(crate::portable_builtin::PortableBuiltin::ALL.len());
-    for (name, _) in crate::portable_builtin::PortableBuiltin::ALL {
-        hash.string(name);
+    for builtin in crate::portable_builtin::PortableBuiltin::ALL {
+        hash.string(builtin.name());
     }
     let manifest = harn_capability_contracts::manifest();
     hash.len(manifest.len());
@@ -385,14 +383,12 @@ fn hash_effect(hash: &mut AbiHasher, effect: &harn_builtin_meta::EffectSpec) {
 pub(super) fn validate_code(
     code: &[u8],
     constants: &[Constant],
-    user_callables: &HashSet<&str>,
     functions: usize,
     locals: usize,
     chunk: usize,
 ) -> Result<(), Diagnostic> {
     let mut instruction_boundaries = vec![false; code.len()];
     let mut jump_targets = Vec::new();
-    let mut unsupported = Vec::new();
     let mut ip = 0usize;
     while ip < code.len() {
         instruction_boundaries[ip] = true;
@@ -405,9 +401,6 @@ pub(super) fn validate_code(
                 ),
             )
         })?;
-        if !op.is_portable_v1() {
-            unsupported.push((ip, op));
-        }
         let width = op.instruction_len();
         if ip.checked_add(width).is_none_or(|end| end > code.len()) {
             return Err(Diagnostic::artifact(
@@ -484,17 +477,11 @@ pub(super) fn validate_code(
             operand_offset += operand.width();
         }
         if let (Some(id), Some(name)) = (builtin_id, builtin_name) {
-            if crate::portable_builtin::PortableBuiltin::from_name(name).is_none()
-                && !user_callables.contains(name)
-            {
-                return Err(Diagnostic::artifact(
-                    "artifact_unsupported_builtin",
-                    format!(
-                        "chunk {chunk} {} at {ip} calls builtin `{name}`, which is outside Portable Kernel v1",
-                        op.name()
-                    ),
-                ));
-            }
+            // `CallBuiltin` is the historical bytecode name for every named
+            // call. Its callee may be a function, imported binding, or captured
+            // closure parameter, so the decoder cannot classify it from a
+            // builtin table. The name-derived ID still detects corruption;
+            // execution resolves Harn bindings before its closed builtin table.
             if crate::BuiltinId::from_name(name).raw() != id {
                 return Err(Diagnostic::artifact(
                     "artifact_builtin_id_mismatch",
@@ -517,15 +504,6 @@ pub(super) fn validate_code(
                 ),
             ));
         }
-    }
-    if let Some((ip, op)) = unsupported.first() {
-        return Err(Diagnostic::artifact(
-            "artifact_unsupported_opcode",
-            format!(
-                "chunk {chunk} instruction at {ip} uses {}, which is outside Portable Kernel v1",
-                op.name()
-            ),
-        ));
     }
     Ok(())
 }

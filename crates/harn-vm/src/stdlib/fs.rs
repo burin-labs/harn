@@ -1023,17 +1023,13 @@ fn mkdir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "path_join(...args: any) -> string",
+    sig_expr = harn_builtin_meta::signatures::PORTABLE_PATH_JOIN,
     category = "fs",
-    doc = "Join path segments with the platform path separator."
+    doc = "Join path segments in Harn's target-independent forward-slash form."
 )]
 fn path_join_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let mut path = std::path::PathBuf::new();
-    for arg in args {
-        path.push(arg.display());
-    }
     Ok(VmValue::String(arcstr::ArcStr::from(
-        path.to_string_lossy().into_owned().as_str(),
+        harn_kernel::pure::join_path_segments(args.iter().map(VmValue::display)),
     )))
 }
 

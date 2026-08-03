@@ -908,6 +908,69 @@ fn test_parses_bench_portable_args() {
 }
 
 #[test]
+fn test_parses_portable_compile_package_start_and_resume() {
+    let compile = Cli::parse_from([
+        "harn", "portable", "compile", "app.harn", "--entry", "reduce", "--output", "app.hbc",
+    ]);
+    let Command::Portable(args) = compile.command.unwrap() else {
+        panic!("expected portable command");
+    };
+    let crate::cli::PortableCommand::Compile(args) = args.command else {
+        panic!("expected portable compile command");
+    };
+    assert_eq!(args.source, std::path::Path::new("app.harn"));
+    assert_eq!(args.output, std::path::Path::new("app.hbc"));
+    assert_eq!(args.entry, "reduce");
+
+    let package = Cli::parse_from([
+        "harn",
+        "portable",
+        "package",
+        "app.harn",
+        "--output",
+        "app.package.json",
+        "--check",
+    ]);
+    let Command::Portable(args) = package.command.unwrap() else {
+        panic!("expected portable command");
+    };
+    let crate::cli::PortableCommand::Package(args) = args.command else {
+        panic!("expected portable package command");
+    };
+    assert_eq!(args.source, std::path::Path::new("app.harn"));
+    assert_eq!(args.output, std::path::Path::new("app.package.json"));
+    assert!(args.check);
+
+    let start = Cli::try_parse_from([
+        "harn",
+        "portable",
+        "start",
+        "app.hbc",
+        "--input",
+        "input.json",
+        "--snapshot-out",
+        "state.bin",
+    ]);
+    assert!(start.is_ok());
+
+    let resume = Cli::try_parse_from([
+        "harn",
+        "portable",
+        "resume",
+        "app.hbc",
+        "--snapshot",
+        "state.bin",
+        "--result",
+        "result.json",
+        "--grants",
+        "grants.json",
+        "--snapshot-out",
+        "next.bin",
+    ]);
+    assert!(resume.is_ok());
+}
+
+#[test]
 fn test_bench_portable_rejects_out_of_range_counts_during_parsing() {
     for (flag, value) in [
         ("--iterations", "0"),

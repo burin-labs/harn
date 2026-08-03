@@ -424,6 +424,12 @@ impl Chunk {
             let Some(op) = Op::from_byte(byte) else { break };
             ip += 1;
             let rendered = self.disassemble_instruction(op, &mut ip);
+            debug_assert_eq!(
+                ip,
+                offset + op.instruction_len(),
+                "disassembler operand width drifted for {}",
+                op.name(),
+            );
             output.push_str(&format!("{offset:04} [{line:>4}] {rendered}\n"));
         }
         output
@@ -446,7 +452,6 @@ impl Chunk {
                 | Op::SetVar
                 | Op::GetProperty
                 | Op::GetPropertyOpt
-                | Op::SetProperty
                 | Op::Import
         ) {
             let Some(index) = read_u16(*ip) else {
@@ -457,6 +462,26 @@ impl Chunk {
                 Some(value) => format!("{label} {index:>4} ({value})"),
                 None => format!("{label} {index:>4}"),
             };
+        }
+        if op == Op::SetProperty {
+            let Some(property) = read_u16(*ip) else {
+                return label;
+            };
+            let Some(binding) = read_u16(*ip + 2) else {
+                return label;
+            };
+            *ip += 4;
+            let render = |index: u16| {
+                self.constants
+                    .get(index as usize)
+                    .map(ToString::to_string)
+                    .unwrap_or_default()
+            };
+            return format!(
+                "{label} property {property:>4} ({}) binding {binding:>4} ({})",
+                render(property),
+                render(binding)
+            );
         }
         if matches!(
             op,

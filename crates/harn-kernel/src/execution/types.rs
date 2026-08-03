@@ -224,6 +224,35 @@ impl GrantSet {
         })
     }
 
+    /// Decode the shared host grant contract used by native and Wasm adapters.
+    ///
+    /// A string list grants exact operations for a terminal execution. An
+    /// object additionally carries the host-owned snapshot authentication key
+    /// required for suspend/resume.
+    pub fn from_host_json(json: &str) -> Result<Self, Diagnostic> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct HostGrants {
+            capabilities: Vec<String>,
+            snapshot_key: Option<Vec<u8>>,
+        }
+
+        let input: HostGrants = serde_json::from_str(json).map_err(|error| {
+            diagnostic(
+                "invalid_capability_grants",
+                format!("invalid grants JSON: {error}"),
+            )
+        })?;
+        let grants = Self::from_names(input.capabilities)?;
+        match input.snapshot_key {
+            Some(snapshot_key) => {
+                let key = decode_snapshot_key(&snapshot_key)?;
+                Ok(grants.with_snapshot_key(key))
+            }
+            None => Ok(grants),
+        }
+    }
+
     /// Install a host-owned key that authenticates resumable snapshots.
     ///
     /// The key is never serialized by the kernel. A host that grants a
@@ -249,6 +278,18 @@ impl GrantSet {
     pub fn allows(&self, capability: &str, operation: &str) -> bool {
         self.grants.contains(&format!("{capability}.{operation}"))
     }
+}
+
+fn decode_snapshot_key(encoded: &[u8]) -> Result<[u8; 32], Diagnostic> {
+    if encoded.len() != 32 {
+        return Err(diagnostic(
+            "invalid_snapshot_key",
+            "snapshotKey must contain exactly 32 bytes",
+        ));
+    }
+    let mut key = [0_u8; 32];
+    key.copy_from_slice(encoded);
+    Ok(key)
 }
 
 impl std::fmt::Debug for GrantSet {

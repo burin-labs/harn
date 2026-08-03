@@ -341,8 +341,12 @@ fn assert_matches_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
             pattern.type_name()
         )));
     };
-    let regex = crate::stdlib::regex::get_cached_regex(pattern, "")?;
-    if regex.is_match(text) {
+    let matches = harn_kernel::pure::regex_matches(pattern, text, "").map_err(|error| {
+        VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
+            "Invalid regex: {error}"
+        ))))
+    })?;
+    if !matches.is_empty() {
         return Ok(actual.clone());
     }
     let message = args

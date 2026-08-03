@@ -9,7 +9,7 @@ distribute independent dispatches across operating-system threads.
 ## Prepare an input
 
 The benchmark accepts one JSON value as the entry function's input. For the
-standalone reducer in `crates/harn-wasm/demo/reducer.harn`, save this as
+package reducer in `crates/harn-wasm/demo/package-root.harn`, save this as
 `/tmp/reducer-input.json`:
 
 ```json
@@ -22,7 +22,7 @@ standalone reducer in `crates/harn-wasm/demo/reducer.harn`, save this as
 ## Run a native benchmark
 
 ```console
-harn bench portable crates/harn-wasm/demo/reducer.harn \
+harn bench portable crates/harn-wasm/demo/package-root.harn \
   --entry reduce \
   --entry-kind function \
   --input /tmp/reducer-input.json \
@@ -94,7 +94,7 @@ make wasm-check
 Then start the local server with `make wasm-demo` and open
 `http://127.0.0.1:8765/demo/benchmark.html`. A dedicated module worker records
 Wasm initialization, first and repeated compilation, and 500 calls through the
-same generated `compile` and `start` exports used by the reducer worker. The
+same generated `compilePackage` and `start` exports used by the reducer worker. The
 page only presents the worker's result. Read the JSON receipt from the page or
 `window.__HARN_BENCHMARK__`.
 
@@ -106,7 +106,7 @@ receipts use one percentile and standard-deviation definition.
 
 Browser instances run in dedicated Web Workers. To measure parallel browser
 throughput, create several workers and give each worker the same artifact bytes
-and independent input state. Portable Kernel v1 does not require
+and independent input state. The portable kernel does not require
 `SharedArrayBuffer`, Wasm atomics, JavaScript Promise Integration, or Wasm
 threads.
 
@@ -149,48 +149,45 @@ part of portable execution semantics.
 ## Measured cutover snapshot
 
 These measurements are evidence for this implementation boundary, not a
-performance promise. They were collected on 2026-08-01 on an Apple M5 Pro
+performance promise. They were collected on 2026-08-02 on an Apple M5 Pro
 (18 logical CPUs, 48 GiB), macOS 26.5.1, Chrome 150.0.7871.187, and
-`wasm-pack 0.15.0`. Both modules used the release profile and `wasm-opt`.
+`wasm-pack 0.15.0`. Both adapters used release builds; their measured boundaries
+still differ as described above.
 
-The repository state immediately before the cutover (`49773b492`) could not
-produce the documented browser artifact: the excluded crate could not inherit
-workspace lints, and its transitive linker-section capability registry was not
-implemented for `wasm32-unknown-unknown`. For a useful size reference, the
-legacy module below is the last revision before that linker-section dependency
-(`4c1655014`), with only the invalid inherited-lints stanza removed. Its
-942-line interpreter is otherwise unchanged.
-
-| Release module | Raw Wasm | gzip -9 | Scope |
+| Release browser module | Raw Wasm | gzip -9 | SHA-256 |
 |---|---:|---:|---|
-| Legacy subset interpreter | 755,233 bytes | 254,183 bytes | Lexer, parser, formatter, and separate AST interpreter |
-| Portable Kernel v1 | 2,267,799 bytes | 784,917 bytes | Canonical strict frontend, compiler, artifact verifier, and resumable execution kernel |
+| Portable kernel browser module | 3,505,267 bytes | 1,231,341 bytes | `d1618ef72d386dbc738ec4693118044d87baad9e0ced2d6d423e6f74a24e457d` |
 
-The portable artifact is about 3.0 times the legacy module size. That cost is
-currently the canonical compiler and hardened artifact/runtime contract, not a
-second language implementation. Size remains a deployment constraint: future
-work should profile code-size ownership and split compilation from execution
-only behind the same artifact interface. Removing validation or restoring a
-subset compiler would invalidate the architectural result.
+The shared Unicode regex, secret catalog, hashing, package compiler, and safety
+machinery add 1,120,115 raw bytes and 407,484 gzip bytes over the earlier pure
+reducer baseline. No file, process, network, clock, randomness, or model import
+appears in the module; `make wasm-audit-imports` enforces that boundary.
 
-Five fresh dedicated-worker trials produced these medians:
+One fresh dedicated-worker receipt for the generated two-module package
+reported:
 
-| Browser measurement | Legacy | Portable Kernel v1 |
-|---|---:|---:|
-| Wasm initialization | 5.8 ms | 11.6 ms |
-| First compile | Included in first execute | 50.2 ms |
-| Repeated compile p50 / p95 | Included in every execute | 3.95 / 12.83 ms |
-| First execute/start | 9.3 ms | 6.5 ms |
-| Repeated execute/start p50 / p95 | 0.0 / 0.10 ms | 1.30 / 2.70 ms |
-| 500-call batch wall time | 47.1 ms | 845.1 ms |
-| Batch throughput | 10,616 calls/s | 592 starts/s |
+| Browser measurement | Observed value |
+|---|---:|
+| Wasm initialization | 57.1 ms |
+| First package compile | 827.3 ms |
+| Repeated package compile p50 / p95 | 42.05 / 2,476.25 ms |
+| First execute/start | 1,480.1 ms |
+| Repeated execute/start p50 / p95 | 4.10 / 35.46 ms |
+| 500-call batch wall time | 10,916.6 ms |
+| Batch throughput | 45.8 starts/s |
 
-The timing columns are not equivalent workloads. The legacy number uses a
-small arithmetic pipeline and its combined parse-plus-subset-interpreter
-`execute(source)` call; sub-millisecond samples also fall below Chrome's timer
-resolution. The v1 number uses the typed reducer and public
-`start(artifactBytes, inputJson, grantsJson)` adapter, so every start includes
+That manual Chrome receipt overlapped a CPU-heavy release build; its large
+compile and dispatch outliers are an observed contention result, not a clean
+latency baseline. A native release receipt collected after the build, for the
+same source, input, 30 repeated compiles, 500 dispatches, and four host threads,
+reported 3.526 ms first compile, 2.021 / 2.379 ms repeated compile p50 / p95,
+1.141 / 1.428 ms decode p50 / p95, 0.0053 / 0.0077 ms dispatch p50 / p95, and
+290,114 dispatches/s. Both adapters produced the exact 2,256-byte artifact with
+digest `42765c0eb8bd02a0ed15435f19743f838c0cfc40566647448660425c6f693c5a`.
+The matching bytes are parity evidence; the timing difference reflects distinct
+adapter boundaries and browser contention.
+
+The browser `start(artifactBytes, inputJson, grantsJson)` measurement includes
 artifact decoding, validation, JSON conversion, grant adaptation, execution,
-and result projection. The separated v1 receipt is the useful baseline for
-subsequent optimization. Its Wasm SHA-256 for this snapshot is
-`c4b28f2d20416d8f2f6ca183bef7fd6225a1c57f9d6f5e4d29d958279d5b1a4f`.
+and result projection on every call. Preserve complete receipts and repeat
+trials before using these observations for optimization decisions.

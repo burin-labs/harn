@@ -183,6 +183,12 @@ pub fn catalog() -> Vec<SchemaEntry> {
             schema_json: None,
         },
         SchemaEntry {
+            command: "portable compile|start|resume",
+            schema_version: crate::commands::portable::PORTABLE_CLI_SCHEMA_VERSION,
+            description: "Portable artifact compilation and deterministic execute/resume terminal states.",
+            schema_json: None,
+        },
+        SchemaEntry {
             command: "parse",
             schema_version: crate::commands::parse_tokens::PARSE_JSON_SCHEMA_VERSION,
             description: "Tagged Harn AST tree with byte spans for parser tooling.",

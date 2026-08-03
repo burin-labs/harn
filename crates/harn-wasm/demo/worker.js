@@ -1,4 +1,4 @@
-import init, { compile, start } from "../pkg/harn_wasm.js";
+import init, { compilePackage, start } from "../pkg/harn_wasm.js";
 
 let artifact;
 let digest = "";
@@ -35,8 +35,11 @@ onmessage = ({ data }) => {
 try {
   const started = performance.now();
   await init();
-  const source = await fetch(new URL("./reducer.harn", import.meta.url)).then((response) => response.text());
-  const result = compile(source, "reduce", "function");
+  const manifest = await fetch(new URL("./package.json", import.meta.url)).then((response) => {
+    if (!response.ok) throw new Error(`load reducer package: HTTP ${response.status}`);
+    return response.text();
+  });
+  const result = compilePackage(manifest, "reduce", "function");
   if (!result.ok) throw new Error(result.diagnosticsJson());
   artifact = result.artifactBytes();
   digest = result.digest;

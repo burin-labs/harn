@@ -712,6 +712,38 @@ harn bench replay \
   --json
 ```
 
+## harn portable
+
+Compile Harn sources into a portable artifact and execute it through the
+same kernel that browser Workers and embedding hosts use. See the
+[Portable Kernel reference](./portable-kernel-reference.md) for the artifact
+format, the source-package manifest, and the grant contract.
+
+```bash
+harn portable package reducer.harn --output reducer.package.json
+harn portable compile reducer.harn --entry reduce --output reducer.hbc
+harn portable start reducer.hbc \
+  --input event.json \
+  --grants grants.json \
+  --snapshot-out reducer.snapshot
+harn portable resume reducer.hbc \
+  --snapshot reducer.snapshot \
+  --result capability-result.json \
+  --grants grants.json \
+  --snapshot-out next.snapshot
+```
+
+`package` resolves the filesystem import graph once and writes the data-only
+manifest that hosts without filesystem access compile from; `--check` fails
+when a checked-in projection is stale. `compile` writes the deterministic
+artifact, defaulting to the `main` function; pass `--entry-kind pipeline` to
+name a pipeline instead.
+
+`start` and `resume` emit the canonical Harn JSON envelope with a status of
+`completed`, `suspended`, or `failed`. A suspended transition writes its
+opaque snapshot to `--snapshot-out`, and `resume` feeds one typed capability
+result back in. Omit `--grants` for pure execution.
+
 ## harn time
 
 Wrap a subcommand with phase-level wall-clock timing plus per-LLM-call

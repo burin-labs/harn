@@ -68,7 +68,45 @@ pub(in crate::artifact) fn encode_wire_program(
         writer.boolean(function.has_rest_param);
         writer.boolean(function.has_runtime_type_checks);
     }
+    writer.import_vec(&program.root_imports)?;
+    writer.len(program.modules.len(), "modules")?;
+    for module in &program.modules {
+        writer.string(&module.id)?;
+        writer.import_vec(&module.imports)?;
+        match module.init {
+            Some(chunk) => {
+                writer.u8(1);
+                writer.u32(chunk);
+            }
+            None => writer.u8(0),
+        }
+        writer.len(module.functions.len(), "module functions")?;
+        for (name, function) in &module.functions {
+            writer.string(name)?;
+            writer.u32(*function);
+        }
+        writer.len(module.exports.len(), "module exports")?;
+        for (name, kind) in &module.exports {
+            writer.string(name)?;
+            writer.u8(export_kind_tag(*kind));
+        }
+    }
     Ok(writer.finish())
+}
+
+fn export_kind_tag(kind: crate::PortableExportKind) -> u8 {
+    match kind {
+        crate::PortableExportKind::Function => 0,
+        crate::PortableExportKind::Pipeline => 1,
+        crate::PortableExportKind::Tool => 2,
+        crate::PortableExportKind::Skill => 3,
+        crate::PortableExportKind::EvalPack => 4,
+        crate::PortableExportKind::Struct => 5,
+        crate::PortableExportKind::Enum => 6,
+        crate::PortableExportKind::Interface => 7,
+        crate::PortableExportKind::Type => 8,
+        crate::PortableExportKind::Variable => 9,
+    }
 }
 
 struct ArtifactWriter {
@@ -156,6 +194,30 @@ impl ArtifactWriter {
         self.len(value.len(), kind)?;
         for item in value {
             self.string(item)?;
+        }
+        Ok(())
+    }
+
+    fn import_vec(&mut self, imports: &[crate::PortableImport]) -> Result<(), Diagnostic> {
+        self.len(imports.len(), "imports")?;
+        for import in imports {
+            self.string(&import.path)?;
+            self.string(&import.target)?;
+            match &import.selected_names {
+                Some(names) => {
+                    self.u8(1);
+                    self.string_vec(names, "selected import names")?;
+                }
+                None => self.u8(0),
+            }
+            match &import.namespace_alias {
+                Some(alias) => {
+                    self.u8(1);
+                    self.string(alias)?;
+                }
+                None => self.u8(0),
+            }
+            self.boolean(import.is_pub);
         }
         Ok(())
     }

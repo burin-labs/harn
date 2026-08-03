@@ -84,6 +84,13 @@ pub(super) fn validate_runtime_value(root: &RuntimeValue) -> Result<ResourceUsag
                     stack.push((value, depth + 1));
                 }
             }
+            RuntimeValue::Enum(value) => {
+                bytes = bytes
+                    .saturating_add(value.enum_name.len())
+                    .saturating_add(value.variant.len());
+                reserve_children(value.fields.len(), depth, &mut nodes, "runtime value")?;
+                stack.extend(value.fields.iter().map(|value| (value, depth + 1)));
+            }
             RuntimeValue::Nil
             | RuntimeValue::Bool(_)
             | RuntimeValue::Int(_)
