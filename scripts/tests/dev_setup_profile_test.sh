@@ -24,7 +24,12 @@ make_fixture_repo() {
   printf '[package]\nname = "setup-fixture"\nversion = "0.1.0"\n' > "$repo/Cargo.toml"
   printf '#!/usr/bin/env bash\nset -euo pipefail\n' > "$repo/scripts/configure_merge_drivers.sh"
   printf '#!/usr/bin/env bash\nset -euo pipefail\n' > "$repo/scripts/sign_local_macos.sh"
-  chmod +x "$repo/scripts/configure_merge_drivers.sh" "$repo/scripts/sign_local_macos.sh"
+  {
+    printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
+    printf '%s\n' 'printf "%s\\n" "$PWD" >> "$DEV_SETUP_TEST_PRUNE_RECORD"'
+  } > "$repo/scripts/prune_stale_targets.sh"
+  chmod +x "$repo/scripts/configure_merge_drivers.sh" "$repo/scripts/sign_local_macos.sh" \
+    "$repo/scripts/prune_stale_targets.sh"
   {
     printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
     printf '%s\n' 'printf "%s\\n" "$*" >> "$DEV_SETUP_TEST_CARGO_RECORD"'
@@ -64,6 +69,7 @@ run_setup() {
     HARN_DEV_SETUP_STATE_DIR="$tmp_root/state-$profile" \
     HARN_DEV_TARGET_WORKTREE_PATH="${SETUP_TEST_WORKTREE_PATH:-$repo}" \
     DEV_SETUP_TEST_CARGO_RECORD="$cargo_record" \
+    DEV_SETUP_TEST_PRUNE_RECORD="$tmp_root/prune-$profile.txt" \
     "$repo/scripts/dev_setup.sh" > "$output" 2>&1
 }
 
@@ -101,6 +107,17 @@ bootstrap_target_dir="$tmp_root/cache-bootstrap/harn/dev-setup/harn-target/$(bas
 if ! grep -Fxq "target-dir = \"$bootstrap_target_dir\" # harn-dev-setup-managed" \
   "$bootstrap_repo/.cargo/config.toml"; then
   echo "bootstrap setup did not configure a durable private target directory" >&2
+  exit 1
+fi
+# Bootstrap is the phase an interactive session waits on, so it must not sweep
+# the shared target root; the compiling profiles below own that housekeeping.
+if [[ -s "$tmp_root/prune-bootstrap.txt" ]]; then
+  echo "bootstrap setup swept the shared target root instead of deferring it" >&2
+  cat "$tmp_root/prune-bootstrap.txt" >&2
+  exit 1
+fi
+if [[ ! -s "$tmp_root/prune-rust.txt" ]]; then
+  echo "rust setup did not reclaim stale target directories" >&2
   exit 1
 fi
 
