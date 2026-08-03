@@ -10,7 +10,7 @@ mod validation;
 mod wire;
 
 const MAGIC: &[u8; 8] = b"HARNPK01";
-pub const ARTIFACT_VERSION: u16 = 1;
+pub const ARTIFACT_VERSION: u16 = 2;
 const HEADER_BYTES: usize = 8 + 2 + 2 + 4 + 32;
 const SEMANTIC_ABI_DOMAIN: &[u8] = b"harn-portable-kernel-semantic-abi-v1\0";
 

@@ -813,7 +813,7 @@ fn namespace_import_binds_alias_dict_not_flattened_members() {
         let mut vm = Vm::new();
         crate::stdlib::register_vm_stdlib(&mut vm);
         vm.set_source_dir(temp.path());
-        vm.execute_namespace_import_bind("./lib", "lib")
+        vm.execute_namespace_import_bind("./lib", "lib", None)
             .await
             .expect("namespace import binds");
         assert!(
@@ -827,11 +827,12 @@ fn namespace_import_binds_alias_dict_not_flattened_members() {
         assert!(map.get("greet").is_some());
         assert!(map.get("other").is_some());
 
-        // Call through the namespace object.
+        // Escaping the alias forces the complete-namespace bytecode path.
         let chunk_source = r#"
 import * as lib from "./lib"
+const complete = lib
 pipeline default(harness: Harness) {
-  return lib.greet("world")
+  return complete.greet("world")
 }
 "#;
         let mut lexer = harn_lexer::Lexer::new(chunk_source);
@@ -840,6 +841,9 @@ pipeline default(harness: Harness) {
         let program = parser.parse().expect("parse");
         let compiler = crate::Compiler::new();
         let chunk = compiler.compile(&program).expect("compile");
+        let disassembly = chunk.disassemble("escaped namespace import");
+        assert!(disassembly.contains("NAMESPACE_IMPORT"));
+        assert!(!disassembly.contains("NAMESPACE_IMPORT_MEMBERS"));
         let mut run_vm = Vm::new();
         crate::stdlib::register_vm_stdlib(&mut run_vm);
         run_vm.set_source_dir(temp.path());
@@ -852,6 +856,153 @@ pipeline default(harness: Harness) {
         matches!(result, VmValue::String(ref value) if value.as_str() == "hi world"),
         "unexpected result: {result:?}"
     );
+}
+
+#[test]
+fn namespace_member_projection_keeps_target_complete_and_nested_dict_narrow() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime builds");
+    let temp = tempfile::tempdir().expect("tempdir");
+    let lib = temp.path().join("lib.harn");
+    let initializer = temp.path().join("initializer.harn");
+    let wrapper = temp.path().join("wrapper.harn");
+    std::fs::write(
+        &lib,
+        "let greeting = \"hello\"\npub fn greet() { return greeting }\npub fn unused() { return 2 }\n",
+    )
+    .expect("write lib");
+    std::fs::write(
+        &initializer,
+        "let initialized = \"yes\"\npub fn status() { return initialized }\n",
+    )
+    .expect("write initializer");
+    std::fs::write(
+        &wrapper,
+        "import * as lib from \"./lib\"\nimport * as unused from \"./initializer\"\npub fn call() { return lib.greet() }\n",
+    )
+    .expect("write wrapper");
+
+    runtime.block_on(async {
+        let mut vm = Vm::new();
+        let recorder = vm.enable_module_phase_timing();
+        vm.set_source_dir(temp.path());
+        let exports = vm
+            .load_module_exports(&wrapper)
+            .await
+            .expect("wrapper loads");
+        let result = vm
+            .call_closure_pub(exports.get("call").expect("call export"), &[])
+            .await
+            .expect("projected member remains callable");
+        assert!(matches!(result, VmValue::String(value) if value.as_str() == "hello"));
+
+        let wrapper_key = wrapper.canonicalize().unwrap_or(wrapper.clone());
+        let loaded_wrapper = vm.module_cache.get(&wrapper_key).expect("wrapper cached");
+        {
+            let state = loaded_wrapper._module_state.lock();
+            let Some(VmValue::Dict(namespace)) = state.get("lib") else {
+                panic!("wrapper namespace is bound");
+            };
+            assert_eq!(
+                namespace.keys().map(|key| key.as_str()).collect::<Vec<_>>(),
+                vec!["_namespace", "greet"]
+            );
+            let Some(VmValue::Dict(unused_namespace)) = state.get("unused") else {
+                panic!("unused namespace is bound");
+            };
+            assert_eq!(
+                unused_namespace
+                    .keys()
+                    .map(|key| key.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["_namespace"]
+            );
+        }
+
+        let lib_key = lib.canonicalize().unwrap_or(lib.clone());
+        let loaded_lib = vm.module_cache.get(&lib_key).expect("target cached");
+        assert!(loaded_lib.functions.contains_key("greet"));
+        assert!(
+            loaded_lib.functions.contains_key("unused"),
+            "target artifacts and caches remain complete"
+        );
+
+        let initializer_key = initializer.canonicalize().unwrap_or(initializer.clone());
+        let loaded_initializer = vm
+            .module_cache
+            .get(&initializer_key)
+            .expect("unused target cached");
+        let status = Arc::clone(
+            loaded_initializer
+                .functions
+                .get("status")
+                .expect("unused target remains complete"),
+        );
+        let initialized = vm
+            .call_closure_pub(&status, &[])
+            .await
+            .expect("unused target initialization is observable");
+        assert!(matches!(initialized, VmValue::String(value) if value.as_str() == "yes"));
+        assert_eq!(
+            recorder.snapshot().modules_loaded,
+            3,
+            "wrapper and both dependencies each initialize exactly once"
+        );
+    });
+}
+
+#[test]
+fn cyclic_namespace_import_applies_projection_after_both_modules_load() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime builds");
+    let temp = tempfile::tempdir().expect("tempdir");
+    let a = temp.path().join("a.harn");
+    let b = temp.path().join("b.harn");
+    std::fs::write(
+        &a,
+        r#"
+import * as b from "./b"
+pub fn local() { return 7 }
+pub fn extra() { return 8 }
+pub fn run() { return b.via_a() }
+"#,
+    )
+    .expect("write a");
+    std::fs::write(
+        &b,
+        r#"
+import * as a from "./a"
+pub fn via_a() { return a.local() }
+pub fn spare() { return 9 }
+"#,
+    )
+    .expect("write b");
+
+    runtime.block_on(async {
+        let mut vm = Vm::new();
+        vm.set_source_dir(temp.path());
+        let exports = vm.load_module_exports(&a).await.expect("cycle loads");
+        let result = vm
+            .call_closure_pub(exports.get("run").expect("run export"), &[])
+            .await
+            .expect("deferred projected binding is visible");
+        assert!(matches!(result, VmValue::Int(7)));
+
+        let b_key = b.canonicalize().unwrap_or(b.clone());
+        let loaded_b = vm.module_cache.get(&b_key).expect("b cached");
+        let state = loaded_b._module_state.lock();
+        let Some(VmValue::Dict(namespace)) = state.get("a") else {
+            panic!("deferred namespace is bound");
+        };
+        assert_eq!(
+            namespace.keys().map(|key| key.as_str()).collect::<Vec<_>>(),
+            vec!["_namespace", "local"]
+        );
+    });
 }
 
 #[test]

@@ -312,7 +312,7 @@ impl PreparedModuleCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::module_artifact::compile_module_artifact_from_source;
+    use crate::module_artifact::{compile_module_artifact_from_source, ModuleImportBinding};
     use crate::module_source::ModuleSource;
     use harn_parser::TypeExpr;
 
@@ -427,12 +427,11 @@ pub fn answer(items: list<string>) {
 
         let imports = artifact.imports.as_ptr();
         let import_path = artifact.imports[0].path.as_ptr();
-        let selected_names = artifact.imports[0]
-            .selected_names
-            .as_ref()
-            .unwrap()
-            .as_ptr();
-        let selected_name = artifact.imports[0].selected_names.as_ref().unwrap()[0].as_ptr();
+        let ModuleImportBinding::Selected(selected) = &artifact.imports[0].binding else {
+            panic!("expected selective import");
+        };
+        let selected_names = selected.as_ptr();
+        let selected_name = selected[0].as_ptr();
         let init_code = artifact.init_chunk.as_ref().unwrap().code.as_ptr();
         let schema_init_codes = artifact
             .type_schema_init_chunks
@@ -460,18 +459,11 @@ pub fn answer(items: list<string>) {
 
         assert_eq!(hydrated.imports.as_ptr(), imports);
         assert_eq!(hydrated.imports[0].path.as_ptr(), import_path);
-        assert_eq!(
-            hydrated.imports[0]
-                .selected_names
-                .as_ref()
-                .unwrap()
-                .as_ptr(),
-            selected_names
-        );
-        assert_eq!(
-            hydrated.imports[0].selected_names.as_ref().unwrap()[0].as_ptr(),
-            selected_name
-        );
+        let ModuleImportBinding::Selected(selected) = &hydrated.imports[0].binding else {
+            panic!("expected selective import");
+        };
+        assert_eq!(selected.as_ptr(), selected_names);
+        assert_eq!(selected[0].as_ptr(), selected_name);
         assert_eq!(
             hydrated.init_chunk.as_ref().unwrap().code.as_ptr(),
             init_code

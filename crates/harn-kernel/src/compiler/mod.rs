@@ -329,6 +329,8 @@ pub struct Compiler {
     /// emits. Identity includes the declaration span, so a shadowing parameter
     /// or block-local never boxes an unrelated same-named `let`.
     captured_bindings: std::collections::HashSet<harn_parser::lexical::BindingId>,
+    /// Conservative projection for each namespace import in the source file.
+    namespace_import_demands: std::collections::BTreeMap<String, harn_parser::NamespaceDemand>,
 }
 
 impl Compiler {
@@ -750,30 +752,34 @@ impl Compiler {
                 let path_idx = self.string_constant(path);
                 let names_str = names.join(",");
                 let names_idx = self.owned_string_constant(names_str);
-                self.chunk
-                    .emit_u16(Op::SelectiveImport, path_idx, self.line);
-                let hi = (names_idx >> 8) as u8;
-                let lo = names_idx as u8;
-                self.chunk.code.push(hi);
-                self.chunk.code.push(lo);
-                self.chunk.lines.push(self.line);
-                self.chunk.columns.push(self.column);
-                self.chunk.lines.push(self.line);
-                self.chunk.columns.push(self.column);
+                self.chunk.emit_u16_operands(
+                    Op::SelectiveImport,
+                    &[path_idx, names_idx],
+                    self.line,
+                );
             }
             Node::NamespaceImport { alias, path, .. } => {
                 let path_idx = self.string_constant(path);
                 let alias_idx = self.string_constant(alias);
-                self.chunk
-                    .emit_u16(Op::NamespaceImport, path_idx, self.line);
-                let hi = (alias_idx >> 8) as u8;
-                let lo = alias_idx as u8;
-                self.chunk.code.push(hi);
-                self.chunk.code.push(lo);
-                self.chunk.lines.push(self.line);
-                self.chunk.columns.push(self.column);
-                self.chunk.lines.push(self.line);
-                self.chunk.columns.push(self.column);
+                match self.namespace_import_demands.get(alias) {
+                    Some(harn_parser::NamespaceDemand::Members(members)) => {
+                        let names_idx = self.owned_string_constant(
+                            members.iter().cloned().collect::<Vec<_>>().join(","),
+                        );
+                        self.chunk.emit_u16_operands(
+                            Op::NamespaceImportMembers,
+                            &[path_idx, alias_idx, names_idx],
+                            self.line,
+                        );
+                    }
+                    Some(harn_parser::NamespaceDemand::Whole) | None => {
+                        self.chunk.emit_u16_operands(
+                            Op::NamespaceImport,
+                            &[path_idx, alias_idx],
+                            self.line,
+                        );
+                    }
+                }
             }
             Node::TryOperator { operand } => {
                 self.compile_node(operand)?;

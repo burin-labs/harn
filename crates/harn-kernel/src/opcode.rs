@@ -207,6 +207,7 @@ define_opcodes! {
     DefLocalSlot = 110 => [LocalU16],
     SetLocalSlot = 111 => [LocalU16],
     ConcatAssignLocal = 112 => [LocalU16],
+    NamespaceImportMembers = 113 => [StringConstantU16, StringConstantU16, StringConstantU16],
 }
 
 impl Op {
@@ -318,6 +319,7 @@ impl Op {
             | Self::Import
             | Self::SelectiveImport
             | Self::NamespaceImport
+            | Self::NamespaceImportMembers
             | Self::DeadlineSetup
             | Self::DeadlineEnd
             | Self::BuildEnum
@@ -338,7 +340,7 @@ impl Op {
 }
 
 /// Artifact format version whose golden opcode fingerprint is pinned below.
-pub const OPCODE_ABI_ARTIFACT_VERSION: u16 = 1;
+pub const OPCODE_ABI_ARTIFACT_VERSION: u16 = 2;
 
 /// Golden BLAKE3 digest of opcode bytes, names, and operand-role tags for v1.
 ///
@@ -347,6 +349,12 @@ pub const OPCODE_ABI_ARTIFACT_VERSION: u16 = 1;
 pub const OPCODE_ABI_FINGERPRINT_V1: [u8; 32] = [
     0x76, 0x1f, 0x93, 0x67, 0xa5, 0x69, 0xd4, 0x18, 0x8b, 0x00, 0xf7, 0xaf, 0x36, 0xe5, 0x51, 0x20,
     0xcb, 0xb6, 0xed, 0x92, 0xf3, 0x47, 0x95, 0xa0, 0x59, 0x3d, 0x02, 0x9e, 0x57, 0xbe, 0x20, 0x0e,
+];
+
+/// Golden BLAKE3 digest of opcode bytes, names, and operand-role tags for v2.
+pub const OPCODE_ABI_FINGERPRINT_V2: [u8; 32] = [
+    0x20, 0x00, 0xe6, 0xcc, 0xaa, 0xdc, 0x12, 0x69, 0x66, 0x9c, 0xec, 0xfa, 0xc9, 0x1c, 0x0a, 0x45,
+    0x47, 0xbe, 0x0f, 0x5e, 0x15, 0x93, 0x35, 0x89, 0xd0, 0x95, 0xeb, 0x91, 0x22, 0x9d, 0x0d, 0x87,
 ];
 
 /// Compute the fingerprint of the compiled opcode schema.
@@ -367,7 +375,7 @@ pub fn opcode_abi_fingerprint() -> [u8; 32] {
 #[cfg(test)]
 mod tests {
     use super::{
-        opcode_abi_fingerprint, Op, OPCODE_ABI_ARTIFACT_VERSION, OPCODE_ABI_FINGERPRINT_V1,
+        opcode_abi_fingerprint, Op, OPCODE_ABI_ARTIFACT_VERSION, OPCODE_ABI_FINGERPRINT_V2,
     };
 
     #[test]
@@ -380,8 +388,8 @@ mod tests {
     }
 
     #[test]
-    fn opcode_schema_matches_artifact_v1_golden() {
+    fn opcode_schema_matches_artifact_v2_golden() {
         assert_eq!(OPCODE_ABI_ARTIFACT_VERSION, crate::ARTIFACT_VERSION);
-        assert_eq!(opcode_abi_fingerprint(), OPCODE_ABI_FINGERPRINT_V1);
+        assert_eq!(opcode_abi_fingerprint(), OPCODE_ABI_FINGERPRINT_V2);
     }
 }

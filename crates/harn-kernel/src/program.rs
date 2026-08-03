@@ -273,6 +273,23 @@ impl Chunk {
         }
     }
 
+    /// Emit an instruction whose complete operand list consists of `u16`
+    /// values. The opcode schema remains the authority for arity and width.
+    pub fn emit_u16_operands(&mut self, op: Op, values: &[u16], line: u32) {
+        debug_assert_eq!(op.operands().len(), values.len());
+        debug_assert!(op.operands().iter().all(|operand| operand.width() == 2));
+        self.note_balance(op, values.first().copied().unwrap_or_default());
+        let mut bytes = Vec::with_capacity(op.instruction_len());
+        bytes.push(op as u8);
+        for value in values {
+            bytes.extend_from_slice(&value.to_be_bytes());
+        }
+        self.push_bytes(&bytes, line);
+        if reads_outer_name(op) {
+            self.references_outer_names = true;
+        }
+    }
+
     pub fn emit_u8(&mut self, op: Op, value: u8, line: u32) {
         self.note_balance(op, u16::from(value));
         self.push_bytes(&[op as u8, value], line);
@@ -562,10 +579,35 @@ fn stack_delta(op: Op, count: u16) -> Option<i32> {
         BuildList | Concat | CallBuiltin => 1 - count,
         BuildDict => 1 - 2 * count,
         Call | MethodCall | MethodCallOpt => -count,
-        Jump | JumpIfFalse | JumpIfTrue | IterNext | Return | TailCall | Throw | TryCatchSetup
-        | Spawn | Pipe | Parallel | ParallelMap | ParallelMapStream | ParallelSettle
-        | SyncMutexEnter | SyncMutexEnterKeyed | TaskScopeEnter | TaskScopeExit | Import
-        | SelectiveImport | NamespaceImport | DeadlineSetup | DeadlineEnd | BuildEnum
-        | MatchEnum | Yield | CallSpread | CallBuiltinSpread | MethodCallSpread => return None,
+        Jump
+        | JumpIfFalse
+        | JumpIfTrue
+        | IterNext
+        | Return
+        | TailCall
+        | Throw
+        | TryCatchSetup
+        | Spawn
+        | Pipe
+        | Parallel
+        | ParallelMap
+        | ParallelMapStream
+        | ParallelSettle
+        | SyncMutexEnter
+        | SyncMutexEnterKeyed
+        | TaskScopeEnter
+        | TaskScopeExit
+        | Import
+        | SelectiveImport
+        | NamespaceImport
+        | NamespaceImportMembers
+        | DeadlineSetup
+        | DeadlineEnd
+        | BuildEnum
+        | MatchEnum
+        | Yield
+        | CallSpread
+        | CallBuiltinSpread
+        | MethodCallSpread => return None,
     })
 }
