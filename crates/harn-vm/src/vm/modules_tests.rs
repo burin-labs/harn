@@ -866,6 +866,7 @@ fn namespace_member_projection_keeps_target_complete_and_nested_dict_narrow() {
         .expect("runtime builds");
     let temp = tempfile::tempdir().expect("tempdir");
     let lib = temp.path().join("lib.harn");
+    let initializer = temp.path().join("initializer.harn");
     let wrapper = temp.path().join("wrapper.harn");
     std::fs::write(
         &lib,
@@ -873,8 +874,13 @@ fn namespace_member_projection_keeps_target_complete_and_nested_dict_narrow() {
     )
     .expect("write lib");
     std::fs::write(
+        &initializer,
+        "let initialized = \"yes\"\npub fn status() { return initialized }\n",
+    )
+    .expect("write initializer");
+    std::fs::write(
         &wrapper,
-        "import * as lib from \"./lib\"\npub fn call() { return lib.greet() }\n",
+        "import * as lib from \"./lib\"\nimport * as unused from \"./initializer\"\npub fn call() { return lib.greet() }\n",
     )
     .expect("write wrapper");
 
@@ -902,6 +908,16 @@ fn namespace_member_projection_keeps_target_complete_and_nested_dict_narrow() {
             namespace.keys().map(|key| key.as_str()).collect::<Vec<_>>(),
             vec!["_namespace", "greet"]
         );
+        let Some(VmValue::Dict(unused_namespace)) = state.get("unused") else {
+            panic!("unused namespace is bound");
+        };
+        assert_eq!(
+            unused_namespace
+                .keys()
+                .map(|key| key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["_namespace"]
+        );
         drop(state);
 
         let lib_key = lib.canonicalize().unwrap_or(lib.clone());
@@ -911,10 +927,27 @@ fn namespace_member_projection_keeps_target_complete_and_nested_dict_narrow() {
             loaded_lib.functions.contains_key("unused"),
             "target artifacts and caches remain complete"
         );
+
+        let initializer_key = initializer.canonicalize().unwrap_or(initializer.clone());
+        let loaded_initializer = vm
+            .module_cache
+            .get(&initializer_key)
+            .expect("unused target cached");
+        let status = Arc::clone(
+            loaded_initializer
+                .functions
+                .get("status")
+                .expect("unused target remains complete"),
+        );
+        let initialized = vm
+            .call_closure_pub(&status, &[])
+            .await
+            .expect("unused target initialization is observable");
+        assert!(matches!(initialized, VmValue::String(value) if value.as_str() == "yes"));
         assert_eq!(
             recorder.snapshot().modules_loaded,
-            2,
-            "wrapper and dependency each initialize exactly once"
+            3,
+            "wrapper and both dependencies each initialize exactly once"
         );
     });
 }
