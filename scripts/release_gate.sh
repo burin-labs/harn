@@ -821,7 +821,9 @@ cmd_prepare() {
     # The package/release payload is intentionally ignored rather than committed.
     # Generate it once after the version bump with the stable pre-bump generator;
     # later audit/package steps verify the same target-independent bytes.
-    HARN_CLI_AOT_GEN_BIN="$RELEASE_PREPARE_AOT_BIN" make gen-cli-aot
+    HARN_CLI_AOT_GEN_BIN="$RELEASE_PREPARE_AOT_BIN" \
+      HARN_CLI_AOT_ARTIFACT_VERSION="$next" \
+      make gen-cli-aot
     echo "Version updated: $current -> $next"
     echo "Next steps:"
     echo "  1. Review docs/release notes diff"

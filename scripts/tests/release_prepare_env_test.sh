@@ -164,6 +164,7 @@ fi
   printf 'version=%s\n' "$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)"
   printf 'HARN_BIN=%s\n' "${HARN_BIN-__unset__}"
   printf 'HARN_CLI_AOT_GEN_BIN=%s\n' "${HARN_CLI_AOT_GEN_BIN-__unset__}"
+  printf 'HARN_CLI_AOT_ARTIFACT_VERSION=%s\n' "${HARN_CLI_AOT_ARTIFACT_VERSION-__unset__}"
   printf 'CARGO_INCREMENTAL=%s\n' "${CARGO_INCREMENTAL-__unset__}"
   printf 'RUSTC_WRAPPER=%s\n' "${RUSTC_WRAPPER-__unset__}"
   printf 'CARGO_BUILD_RUSTC_WRAPPER=%s\n' "${CARGO_BUILD_RUSTC_WRAPPER-__unset__}"
@@ -183,6 +184,16 @@ HARN_CLI_AOT_GEN_BIN="$fake_bin/harn-cli-aot-gen" \
   make -s -C "$repo_root" gen-cli-aot
 if ! grep -Fxq "aot-argv=--workspace-root $repo_root" "$record_aot"; then
   echo "gen-cli-aot did not execute the supplied generator directly" >&2
+  cat "$record_aot" >&2
+  exit 1
+fi
+: > "$record_aot"
+FAKE_AOT_RECORD="$record_aot" \
+HARN_CLI_AOT_GEN_BIN="$fake_bin/harn-cli-aot-gen" \
+HARN_CLI_AOT_ARTIFACT_VERSION="1.2.4" \
+  make -s -C "$repo_root" gen-cli-aot
+if ! grep -Fxq "aot-argv=--workspace-root $repo_root --artifact-version 1.2.4" "$record_aot"; then
+  echo "gen-cli-aot did not project the typed artifact version into the generator CLI" >&2
   cat "$record_aot" >&2
   exit 1
 fi
@@ -237,6 +248,12 @@ fi
 if ! grep -A3 -Fx 'target=gen-cli-aot' "$record_make" \
   | grep -Eq '^HARN_CLI_AOT_GEN_BIN=.+/harn-cli-aot-gen$'; then
   echo "release_gate prepare did not route a stable AOT generator snapshot through Make" >&2
+  cat "$record_make" >&2
+  exit 1
+fi
+if ! grep -A4 -Fx 'target=gen-cli-aot' "$record_make" \
+  | grep -Fxq 'HARN_CLI_AOT_ARTIFACT_VERSION=1.3.0'; then
+  echo "release_gate prepare did not pass the bumped AOT artifact version explicitly" >&2
   cat "$record_make" >&2
   exit 1
 fi

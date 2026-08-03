@@ -28,6 +28,13 @@ struct ExpectedArtifacts {
     artifacts: BTreeMap<PathBuf, Vec<u8>>,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct CliOptions {
+    workspace_root: PathBuf,
+    check: bool,
+    artifact_version: Option<String>,
+}
+
 struct CheckoutContract {
     manifest_dir: PathBuf,
     harn_version: String,
@@ -51,20 +58,23 @@ struct WorkspacePackage {
 
 fn main() -> ExitCode {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
-    let (workspace_root, check) = match args.as_slice() {
-        [root_flag, root] if root_flag == "--workspace-root" => (PathBuf::from(root), false),
-        [root_flag, root, check_flag]
-            if root_flag == "--workspace-root" && check_flag == "--check" =>
-        {
-            (PathBuf::from(root), true)
-        }
-        _ => {
-            eprintln!("usage: harn-cli-aot-gen --workspace-root <path> [--check]");
+    let options = match parse_options(&args) {
+        Ok(options) => options,
+        Err(error) => {
+            eprintln!("error: {error}");
+            eprintln!(
+                "usage: harn-cli-aot-gen --workspace-root <path> \
+                 [--artifact-version <version>] [--check]"
+            );
             return ExitCode::from(2);
         }
     };
 
-    match run(&workspace_root, check) {
+    match run(
+        &options.workspace_root,
+        options.check,
+        options.artifact_version.as_deref(),
+    ) {
         Ok(message) => {
             println!("{message}");
             ExitCode::SUCCESS
@@ -76,9 +86,59 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(workspace_root: &Path, check: bool) -> Result<&'static str, String> {
+fn parse_options(args: &[String]) -> Result<CliOptions, String> {
+    let mut workspace_root = None;
+    let mut artifact_version = None;
+    let mut check = false;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--workspace-root" => {
+                if workspace_root.is_some() {
+                    return Err("--workspace-root may be supplied only once".to_string());
+                }
+                index += 1;
+                let value = args
+                    .get(index)
+                    .filter(|value| !value.is_empty())
+                    .ok_or_else(|| "--workspace-root requires a path".to_string())?;
+                workspace_root = Some(PathBuf::from(value));
+            }
+            "--artifact-version" => {
+                if artifact_version.is_some() {
+                    return Err("--artifact-version may be supplied only once".to_string());
+                }
+                index += 1;
+                let value = args
+                    .get(index)
+                    .filter(|value| !value.is_empty())
+                    .ok_or_else(|| "--artifact-version requires a version".to_string())?;
+                artifact_version = Some(value.clone());
+            }
+            "--check" => {
+                if check {
+                    return Err("--check may be supplied only once".to_string());
+                }
+                check = true;
+            }
+            unknown => return Err(format!("unknown argument: {unknown}")),
+        }
+        index += 1;
+    }
+    Ok(CliOptions {
+        workspace_root: workspace_root.ok_or_else(|| "--workspace-root is required".to_string())?,
+        check,
+        artifact_version,
+    })
+}
+
+fn run(
+    workspace_root: &Path,
+    check: bool,
+    artifact_version: Option<&str>,
+) -> Result<&'static str, String> {
     let contract = checkout_contract(workspace_root)?;
-    let expected = build_expected(&contract)?;
+    let expected = build_expected(&contract, artifact_version)?;
     if check {
         check_expected(&contract.manifest_dir, &expected)?;
         Ok("CLI AOT payload is current")
@@ -114,7 +174,35 @@ fn checkout_contract(workspace_root: &Path) -> Result<CheckoutContract, String> 
     })
 }
 
-fn build_expected(contract: &CheckoutContract) -> Result<ExpectedArtifacts, String> {
+fn validate_artifact_version(
+    contract: &CheckoutContract,
+    artifact_version: Option<&str>,
+) -> Result<(), String> {
+    if let Some(requested) = artifact_version {
+        if requested != contract.harn_version {
+            return Err(format!(
+                "artifact version mismatch: requested={requested}, workspace={}",
+                contract.harn_version
+            ));
+        }
+        return Ok(());
+    }
+    if contract.harn_version != harn_vm::bytecode_cache::HARN_VERSION {
+        return Err(format!(
+            "Harn version mismatch: workspace={}, runtime={}; release preparation must pass \
+             --artifact-version {} explicitly",
+            contract.harn_version,
+            harn_vm::bytecode_cache::HARN_VERSION,
+            contract.harn_version
+        ));
+    }
+    Ok(())
+}
+
+fn build_expected(
+    contract: &CheckoutContract,
+    artifact_version: Option<&str>,
+) -> Result<ExpectedArtifacts, String> {
     if contract.compiler_fingerprint != harn_vm::bytecode_cache::CODEGEN_FINGERPRINT {
         return Err(format!(
             "compiler fingerprint mismatch: source={}, runtime={}",
@@ -122,13 +210,7 @@ fn build_expected(contract: &CheckoutContract) -> Result<ExpectedArtifacts, Stri
             harn_vm::bytecode_cache::CODEGEN_FINGERPRINT
         ));
     }
-    if contract.harn_version != harn_vm::bytecode_cache::HARN_VERSION {
-        return Err(format!(
-            "Harn version mismatch: workspace={}, runtime={}",
-            contract.harn_version,
-            harn_vm::bytecode_cache::HARN_VERSION
-        ));
-    }
+    validate_artifact_version(contract, artifact_version)?;
 
     let mut scripts = Vec::new();
     let mut artifacts = BTreeMap::new();
@@ -299,6 +381,41 @@ fn normalize_path(path: &Path) -> String {
 mod tests {
     use super::*;
     use std::io::Write as _;
+
+    #[test]
+    fn options_make_artifact_version_an_explicit_typed_input() {
+        let options = parse_options(&[
+            "--check".to_string(),
+            "--workspace-root".to_string(),
+            "/tmp/harn".to_string(),
+            "--artifact-version".to_string(),
+            "1.2.4".to_string(),
+        ])
+        .expect("options");
+        assert_eq!(
+            options,
+            CliOptions {
+                workspace_root: PathBuf::from("/tmp/harn"),
+                check: true,
+                artifact_version: Some("1.2.4".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn explicit_artifact_version_can_differ_from_frozen_generator_runtime() {
+        let workspace = test_workspace("1.2.4", "source");
+        let contract = checkout_contract(workspace.path()).expect("contract");
+        validate_artifact_version(&contract, Some("1.2.4")).expect("explicit release target");
+
+        let error = validate_artifact_version(&contract, None)
+            .expect_err("implicit cross-version generation must fail");
+        assert!(error.contains("must pass --artifact-version 1.2.4 explicitly"));
+
+        let error = validate_artifact_version(&contract, Some("1.2.5"))
+            .expect_err("wrong explicit target must fail");
+        assert!(error.contains("requested=1.2.5, workspace=1.2.4"));
+    }
 
     #[test]
     fn checkout_contract_uses_the_requested_workspace() {
