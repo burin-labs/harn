@@ -1,3 +1,4 @@
+import { omit } from "std/json"
 import {
   release_audit_contract_parse,
   release_audit_receipt_plan,
@@ -39,6 +40,12 @@ fn platform(kind: string, id: int, job_id: int, duration_ms: int) {
   const run_url = "https://github.com/burin-labs/harn/actions/runs/${id}"
   return {
     platform: kind,
+    acquisition: {
+      action: "dispatch_new",
+      selection_reason: "no_reusable_exact_run",
+      reused: false,
+      cancellations: [],
+    },
     workflow_path: workflow,
     required_job: job_name,
     run: {
@@ -187,6 +194,88 @@ pipeline test_release_audit_contract_and_hosted_receipt(harness: Harness, task) 
   )
   assert_eq(
     release_audit_receipt_plan(cfg, {...receipt(), extra: true}, SHA, BINARY_SHA).reason,
+    "invalid_receipt",
+  )
+  // The certifier records how it obtained each run. A reused run is only as
+  // strong as its exact-SHA match, so the decision is proof and is validated
+  // rather than merely tolerated: the receipt carried `acquisition` for two
+  // releases while the closed schema rejected every one of them.
+  const reused_platform = {
+    ...platform("windows", 123, 456, 900),
+    acquisition: {
+      action: "reuse_success",
+      selection_reason: "successful_exact_run",
+      reused: true,
+      cancellations: [
+        {repo: "burin-labs/harn", run_id: 77, accepted: true, state: "cancel_requested"},
+      ],
+    },
+  }
+  assert_eq(
+    release_audit_receipt_plan(
+      cfg,
+      {...receipt(), platforms: [reused_platform, platform("macos", 124, 457, 700)]},
+      SHA,
+      BINARY_SHA,
+    ).reason,
+    "receipt_accepted",
+  )
+  for bad_acquisition in [
+    {
+      action: "not_a_real_action",
+      selection_reason: "successful_exact_run",
+      reused: true,
+      cancellations: [],
+    },
+    {
+      action: "reuse_success",
+      selection_reason: "not_a_real_reason",
+      reused: true,
+      cancellations: [],
+    },
+    {
+      action: "reuse_success",
+      selection_reason: "successful_exact_run",
+      reused: true,
+      cancellations: [],
+      unexpected: 1,
+    },
+    {
+      action: "reuse_success",
+      selection_reason: "successful_exact_run",
+      reused: true,
+      cancellations: [{malformed: true}],
+    },
+  ] {
+    assert_eq(
+      release_audit_receipt_plan(
+        cfg,
+        {
+          ...receipt(),
+          platforms: [
+            {...platform("windows", 123, 456, 900), acquisition: bad_acquisition},
+            platform("macos", 124, 457, 700),
+          ],
+        },
+        SHA,
+        BINARY_SHA,
+      ).reason,
+      "invalid_receipt",
+    )
+  }
+  assert_eq(
+    release_audit_receipt_plan(
+      cfg,
+      {
+        ...receipt(),
+        platforms: [
+          omit(platform("windows", 123, 456, 900), ["acquisition"]),
+          platform("macos", 124, 457, 700),
+        ],
+      },
+      SHA,
+      BINARY_SHA,
+    ).reason,
     "invalid_receipt",
   )
 }

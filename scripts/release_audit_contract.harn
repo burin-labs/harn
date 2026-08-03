@@ -2,6 +2,8 @@ import { help_requested, parse, parser } from "std/cli/argparse"
 import { count_where } from "std/collections"
 import { read_json_result, read_yaml } from "std/fs"
 import {
+  schema_any,
+  schema_bool,
   schema_closed_object,
   schema_enum,
   schema_field,
@@ -9,6 +11,7 @@ import {
   schema_list,
   schema_literal,
   schema_string,
+  schema_union,
   schema_validator,
 } from "std/schema"
 import {
@@ -40,8 +43,23 @@ pub type ReleaseAuditContract = {
   merge_group_jobs: list<ReleaseAuditCiJob>,
 }
 
+pub type ReleaseAcquisitionSelectionReason = "successful_exact_run" \
+  | "active_exact_run" \
+  | "retryable_failed_run" \
+  | "no_reusable_exact_run" \
+  | "nonretryable_terminal_run" \
+  | "concurrent_exact_run"
+
+pub type ReleaseAcquisitionProof = {
+  action: "reuse_success" | "reuse_active" | "rerun_failed" | "dispatch_new",
+  selection_reason: ReleaseAcquisitionSelectionReason,
+  reused: bool,
+  cancellations: list<dict>,
+}
+
 pub type ReleasePlatformProof = {
   platform: "windows" | "macos",
+  acquisition: ReleaseAcquisitionProof,
   workflow_path: string,
   required_job: string,
   run: dict,
@@ -124,10 +142,64 @@ fn warm_schema() {
   )
 }
 
+/**
+ * One cancellation attempt recorded while acquiring an exact workflow run.
+ *
+ * The certifier cancels superseded dispatches, so each entry is either the
+ * connector's accepted-cancel receipt or a local record of a cancel that the
+ * connector refused. Both shapes are proof of what the certifier did to the
+ * sibling runs, so both are typed rather than admitted as free-form objects.
+ */
+fn cancellation_proof_schema() {
+  return schema_union(
+    [
+      schema_closed_object(
+        {
+          repo: schema_string() + {pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
+          run_id: schema_int() + {minimum: 1},
+          accepted: schema_bool(),
+          state: schema_literal("cancel_requested"),
+        },
+      ),
+      schema_closed_object(
+        {run_id: schema_int() + {minimum: 1}, accepted: schema_literal(false), error: schema_any()},
+      ),
+    ],
+  )
+}
+
+/**
+ * How the certifier obtained the workflow run it is proving.
+ *
+ * A reused run is as strong as a freshly dispatched one only because the
+ * reuse is exact-SHA matched, so the decision that produced it belongs in
+ * the receipt beside the run itself rather than in a log.
+ */
+fn acquisition_proof_schema() {
+  return schema_closed_object(
+    {
+      action: schema_enum(["reuse_success", "reuse_active", "rerun_failed", "dispatch_new"]),
+      selection_reason: schema_enum(
+        [
+          "successful_exact_run",
+          "active_exact_run",
+          "retryable_failed_run",
+          "no_reusable_exact_run",
+          "nonretryable_terminal_run",
+          "concurrent_exact_run",
+        ],
+      ),
+      reused: schema_bool(),
+      cancellations: schema_list(cancellation_proof_schema()),
+    },
+  )
+}
+
 fn platform_proof_schema() {
   return schema_closed_object(
     {
       platform: schema_enum(["windows", "macos"]),
+      acquisition: acquisition_proof_schema(),
       workflow_path: schema_string() + {pattern: "^[.]github/workflows/[a-z0-9-]+[.]yml$"},
       required_job: schema_string() + {min_len: 1},
       run: schema_closed_object(
