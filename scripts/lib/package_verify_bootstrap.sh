@@ -29,7 +29,7 @@ package_verify_prepare_tools() {
   if [[ -z "$target_dir" ]]; then
     target_dir="$(cd "$root_dir" && harn_cargo_metadata_target_dir)"
   fi
-  aot_generator="$target_dir/debug/harn-cli-aot-gen$(harn_debug_bin_suffix)"
+  aot_generator="$(CARGO_TARGET_DIR="$target_dir" harn_debug_named_binary_path harn-cli-aot-gen)"
 
   if [[ "$no_build" == "1" ]]; then
     if [[ ! -x "$aot_generator" ]]; then

@@ -22,7 +22,8 @@ harn_internal_executable_path_command() {
   printf '__internal-executable-path'
 }
 
-harn_debug_binary_path() {
+harn_debug_named_binary_path() {
+  local binary_name="$1"
   local target_dir="${CARGO_TARGET_DIR:-}"
   if [[ -z "$target_dir" ]]; then
     # Cargo metadata resolves layered target-dir configuration without
@@ -31,7 +32,11 @@ harn_debug_binary_path() {
     # parent shell did not export CARGO_TARGET_DIR.
     target_dir="$(harn_cargo_metadata_target_dir)" || return $?
   fi
-  printf '%s/debug/harn%s\n' "$target_dir" "$(harn_debug_bin_suffix)"
+  printf '%s/debug/%s%s\n' "$target_dir" "$binary_name" "$(harn_debug_bin_suffix)"
+}
+
+harn_debug_binary_path() {
+  harn_debug_named_binary_path harn
 }
 
 harn_require_executable_bin() {
@@ -48,6 +53,7 @@ harn_require_executable_bin() {
 harn_snapshot_binary() {
   local source_bin="$1"
   local destination_dir="$2"
+  local destination_name="${3:-harn}"
   local suffix=""
   local snapshot=""
 
@@ -56,7 +62,7 @@ harn_snapshot_binary() {
     *.exe) suffix=".exe" ;;
   esac
   mkdir -p "$destination_dir" || return $?
-  snapshot="$destination_dir/harn$suffix"
+  snapshot="$destination_dir/$destination_name$suffix"
   cp "$source_bin" "$snapshot" || return $?
   chmod +x "$snapshot" || return $?
   printf '%s\n' "$snapshot"

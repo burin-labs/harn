@@ -613,12 +613,14 @@ portal-demo:
 # Generate a target-independent CLI AOT payload for package/release assembly.
 # The generator validates the full workspace; harn-cli's build script validates
 # and embeds only the package-local payload. Source builds use source fallback.
+HARN_CLI_AOT_GEN_CMD = $(if $(strip $(HARN_CLI_AOT_GEN_BIN)),"$(HARN_CLI_AOT_GEN_BIN)",$(HARN_CARGO_CMD) run -p harn-cli-aot-gen --)
+
 gen-cli-aot:
-	$(HARN_CARGO_CMD) run -p harn-cli-aot-gen -- --workspace-root "$(CURDIR)"
+	$(HARN_CLI_AOT_GEN_CMD) --workspace-root "$(CURDIR)"
 
 check-cli-aot:
 	@echo "=== Checking release/package CLI AOT payload ==="
-	@$(HARN_CARGO_CMD) run -p harn-cli-aot-gen -- --workspace-root "$(CURDIR)" --check
+	@$(HARN_CLI_AOT_GEN_CMD) --workspace-root "$(CURDIR)" --check
 	@echo "    CLI AOT payload OK."
 
 # Regenerate docs/theme/harn-keywords.js from the live lexer + stdlib.
