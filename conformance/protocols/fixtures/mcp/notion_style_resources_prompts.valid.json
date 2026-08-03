@@ -1,14 +1,23 @@
 {
   "name": "mcp.notion_style.resources_prompts",
   "protocol": "mcp",
-  "schema": "schemas/mcp-2025-11-25.schema.json",
+  "schema": "schemas/mcp-2026-07-28.schema.json",
   "expect": "valid",
   "documents": [
     {
       "jsonrpc": "2.0",
       "id": 10,
       "method": "resources/list",
-      "params": {}
+      "params": {
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientInfo": {
+            "name": "harn-conformance",
+            "version": "0.10.52"
+          },
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
     },
     {
       "jsonrpc": "2.0",
@@ -22,7 +31,8 @@
             "description": "Notion page mirrored through a connector-backed Harn context resource.",
             "mimeType": "application/json"
           }
-        ]
+        ],
+        "resultType": "complete"
       }
     },
     {
@@ -30,7 +40,15 @@
       "id": 11,
       "method": "resources/read",
       "params": {
-        "uri": "harn://connector/notion/page/page_123"
+        "uri": "harn://connector/notion/page/page_123",
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientInfo": {
+            "name": "harn-conformance",
+            "version": "0.10.52"
+          },
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
       }
     },
     {
@@ -43,14 +61,24 @@
             "mimeType": "application/json",
             "text": "{\"provider\":\"notion\",\"kind\":\"page\",\"id\":\"page_123\",\"title\":\"Launch Plan\",\"blocks\":[{\"type\":\"paragraph\",\"text\":\"Ship the first MCP resource slice.\"}]}"
           }
-        ]
+        ],
+        "resultType": "complete"
       }
     },
     {
       "jsonrpc": "2.0",
       "id": 12,
       "method": "resources/templates/list",
-      "params": {}
+      "params": {
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientInfo": {
+            "name": "harn-conformance",
+            "version": "0.10.52"
+          },
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
     },
     {
       "jsonrpc": "2.0",
@@ -64,14 +92,24 @@
             "description": "Read a page-like record from a connector-backed Notion database.",
             "mimeType": "application/json"
           }
-        ]
+        ],
+        "resultType": "complete"
       }
     },
     {
       "jsonrpc": "2.0",
       "id": 13,
       "method": "prompts/list",
-      "params": {}
+      "params": {
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientInfo": {
+            "name": "harn-conformance",
+            "version": "0.10.52"
+          },
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
     },
     {
       "jsonrpc": "2.0",
@@ -95,7 +133,8 @@
               }
             ]
           }
-        ]
+        ],
+        "resultType": "complete"
       }
     },
     {
@@ -107,6 +146,14 @@
         "arguments": {
           "page_uri": "harn://connector/notion/page/page_123",
           "focus": "implementation risks"
+        },
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientInfo": {
+            "name": "harn-conformance",
+            "version": "0.10.52"
+          },
+          "io.modelcontextprotocol/clientCapabilities": {}
         }
       }
     },
@@ -122,12 +169,13 @@
               "text": "Use harn://connector/notion/page/page_123 to brief implementation risks."
             }
           }
-        ]
+        ],
+        "resultType": "complete"
       }
     }
   ],
   "matrix": {
-    "version": "2025-11-25",
+    "version": "2026-07-28",
     "family": "notion_style_resources_prompts",
     "case": "success",
     "source": {

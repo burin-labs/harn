@@ -27,7 +27,7 @@
 fn server_specs() {
   return [
     {name: "alpha", transport: "stdio", command: "/bin/true", args: []},
-    {name: "beta", transport: "http", url: "http://127.0.0.1:1/mcp", protocol_mode: "rc"},
+    {name: "beta", transport: "http", url: "http://127.0.0.1:1/mcp"},
   ]
 }
 

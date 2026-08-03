@@ -23,8 +23,8 @@ pipeline test(harness: Harness, task) {
   } catch (e) {
     const message = e
     const ok = contains(message, "mcp_elicit")
-      && contains(message, "no active MCP client connection")
-    assert(ok, "expected 'no active MCP client connection' error, got: " + message)
+      && contains(message, "no active MCP request")
+    assert(ok, "expected 'no active MCP request' error, got: " + message)
     harness.stdio.log("mcp_elicit: outside-tool-handler call raised expected error")
   }
 }

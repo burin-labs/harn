@@ -1853,16 +1853,16 @@ async fn host_mcp_bootstrap_impl(
                 if let Some(fixtures) = fixtures.as_ref() {
                     handle.set_capability_fixtures(fixtures.clone()).await;
                 }
-                let initialize = handle
-                    .initialize_result
+                let discovery = handle
+                    .discovery_result
                     .lock()
                     .await
                     .clone()
                     .unwrap_or(serde_json::Value::Null);
-                let instructions = initialize
+                let instructions = discovery
                     .get("instructions")
                     .or_else(|| {
-                        initialize
+                        discovery
                             .get("serverInfo")
                             .and_then(|value| value.get("instructions"))
                     })
@@ -1871,7 +1871,7 @@ async fn host_mcp_bootstrap_impl(
                     .to_string();
                 server_infos.push(serde_json::json!({
                     "name": server_name.clone(),
-                    "initialize": initialize,
+                    "discovery": discovery,
                     "instructions": instructions,
                 }));
                 let list_result = handle.call("tools/list", serde_json::json!({})).await;

@@ -1,11 +1,12 @@
-//! MCP `elicitation/create` plumbing — server-to-client structured prompts.
+//! MCP form elicitation across stable MRTR and SDK-managed older peers.
 //!
 //! When Harn is acting as an MCP **server**, a tool handler can call
-//! `mcp_elicit({ message, requestedSchema })` to ask the connected
-//! client to surface a structured prompt to its end user. The reply
+//! `mcp_elicit({ message, requestedSchema })` to return a stable
+//! `input_required` round that asks the client to surface a structured
+//! prompt to its end user. On retry, the builtin returns the reply
 //! envelope is `{ action: "accept" | "decline" | "cancel", content?: ... }`,
 //! where `content` is validated against `requestedSchema` (a JSON Schema
-//! restricted to a flat object of primitives per MCP 2025-11-25).
+//! restricted to a flat object of primitives per MCP 2026-07-28).
 //!
 //! When Harn is acting as an MCP **client**, an inbound
 //! `elicitation/create` request from a peer server is dispatched to the
@@ -15,48 +16,36 @@
 //! sensible fallback decision.
 //!
 //! See the spec at
-//! <https://modelcontextprotocol.io/specification/2025-11-25/client/elicitation>.
+//! <https://modelcontextprotocol.io/specification/2026-07-28/client/elicitation>.
 
 use serde_json::{json, Value as JsonValue};
 
-use crate::mcp_client_request::ClientRequestBus;
 use crate::schema::{elicitation_validate, elicitation_validate_schema, json_to_vm_value};
 use crate::stdlib::host::{dispatch_host_call_bridge, dispatch_mock_host_call};
 use crate::value::VmDictExt;
 use crate::value::{VmError, VmValue};
 
-pub use crate::mcp_client_request::{
-    current_bus, install_bus, ClientRequestBus as ElicitationBus, OutboundSender,
-};
-
 /// JSON-RPC method name for elicitation requests.
 pub const ELICITATION_METHOD: &str = "elicitation/create";
 
-impl ClientRequestBus {
-    /// Send an `elicitation/create` request to the peer and await its
-    /// reply. The returned envelope follows the spec: `{ action, content? }`.
-    /// `content` is validated against `requested_schema` when present
-    /// and the action is `accept`.
-    pub async fn elicit(
-        &self,
-        message: String,
-        requested_schema: JsonValue,
-    ) -> Result<VmValue, VmError> {
-        validate_requested_schema(&requested_schema)?;
-
-        let result = self
-            .request(
-                "elicit",
-                ELICITATION_METHOD,
-                json!({
-                    "message": message,
-                    "requestedSchema": requested_schema,
-                }),
-                "mcp_elicit",
-            )
-            .await?;
-        envelope_from_response(&result, &requested_schema)
-    }
+/// Resolve a stable form-mode elicitation round. The first invocation
+/// suspends the handler with `input_required`; the retry returns the client's
+/// response and validates accepted content.
+pub(crate) fn elicit_form(
+    message: String,
+    requested_schema: JsonValue,
+) -> Result<VmValue, VmError> {
+    validate_requested_schema(&requested_schema)?;
+    let result = crate::mcp_input::request_input(
+        ELICITATION_METHOD,
+        json!({
+            "mode": "form",
+            "message": message,
+            "requestedSchema": requested_schema,
+        }),
+        "mcp_elicit",
+    )?;
+    envelope_from_response(&result, &requested_schema)
 }
 
 /// Spec-compliant elicitation request schemas are flat objects whose
@@ -140,8 +129,8 @@ pub(crate) fn validate_accepted_content(
     })
 }
 
-/// Dispatch an inbound server-to-client `elicitation/create` request
-/// (received while Harn is acting as an MCP client) and return the
+/// Dispatch an embedded stable input request or an SDK-managed older
+/// `elicitation/create` request while Harn is acting as an MCP client, and return the
 /// JSON-RPC response we should send back to the server.
 ///
 /// The implementation order matches existing HITL primitives:
@@ -161,6 +150,11 @@ pub(crate) async fn dispatch_inbound_elicitation(
         .and_then(|value| value.as_str())
         .unwrap_or("")
         .to_string();
+    let mode = params
+        .get("mode")
+        .and_then(JsonValue::as_str)
+        .unwrap_or("form")
+        .to_string();
     let requested_schema = params
         .get("requestedSchema")
         .cloned()
@@ -177,7 +171,7 @@ pub(crate) async fn dispatch_inbound_elicitation(
             server: server_name.to_string(),
             method: ELICITATION_METHOD.to_string(),
             direction: "request".to_string(),
-            params,
+            params: params.clone(),
         });
     }
 
@@ -186,11 +180,23 @@ pub(crate) async fn dispatch_inbound_elicitation(
     // by source, and copies the raw schema through unmodified.
     let mut bridge_params: crate::value::DictMap = crate::value::DictMap::new();
     bridge_params.put_str("server", server_name);
+    bridge_params.put_str("mode", &mode);
     bridge_params.put_str("message", message.as_str());
-    bridge_params.insert(
-        crate::value::intern_key("requestedSchema"),
-        json_to_vm_value(&requested_schema),
-    );
+    if mode == "form" {
+        bridge_params.insert(
+            crate::value::intern_key("requestedSchema"),
+            json_to_vm_value(&requested_schema),
+        );
+    }
+    if let Some(url) = params.get("url") {
+        bridge_params.insert(crate::value::intern_key("url"), json_to_vm_value(url));
+    }
+    if let Some(elicitation_id) = params.get("elicitationId") {
+        bridge_params.insert(
+            crate::value::intern_key("elicitationId"),
+            json_to_vm_value(elicitation_id),
+        );
+    }
 
     let bridge_result = match fixtures
         .and_then(|fixtures| fixtures.dispatch_host("mcp", "elicit", &bridge_params))
@@ -227,7 +233,7 @@ pub(crate) async fn dispatch_inbound_elicitation(
 
     // Enforce schema validation on accept so we don't propagate garbage
     // up to the calling MCP server.
-    if envelope.get("action").and_then(JsonValue::as_str) == Some("accept") {
+    if mode == "form" && envelope.get("action").and_then(JsonValue::as_str) == Some("accept") {
         if let Some(content) = envelope.get("content") {
             if let Err(error) = validate_accepted_content(content, &requested_schema) {
                 let detail = match error {
@@ -268,8 +274,6 @@ fn normalize_inbound_envelope(value: JsonValue) -> JsonValue {
 
 #[cfg(test)]
 mod tests {
-    use tokio::sync::mpsc;
-
     use super::*;
 
     #[test]
@@ -331,23 +335,6 @@ mod tests {
     }
 
     #[test]
-    fn route_response_returns_false_for_request() {
-        let (tx, _rx) = mpsc::unbounded_channel();
-        let bus = ElicitationBus::new(tx);
-        assert!(!bus.route_response(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})));
-        assert!(
-            !bus.route_response(&json!({"jsonrpc": "2.0", "method": "notifications/cancelled"}))
-        );
-    }
-
-    #[test]
-    fn route_response_ignores_unknown_id() {
-        let (tx, _rx) = mpsc::unbounded_channel();
-        let bus = ElicitationBus::new(tx);
-        assert!(!bus.route_response(&json!({"jsonrpc": "2.0", "id": "ghost", "result": {}})));
-    }
-
-    #[test]
     fn normalize_inbound_envelope_passes_action_through() {
         let v = normalize_inbound_envelope(json!({"action": "decline"}));
         assert_eq!(v["action"], json!("decline"));
@@ -367,59 +354,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn elicit_round_trip_validates_accept() {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let bus = ElicitationBus::new(tx);
-        let bus_for_responder = bus.clone();
-        tokio::spawn(async move {
-            let outbound = rx.recv().await.expect("elicit request emitted");
-            let id = outbound["id"].clone();
-            assert_eq!(outbound["method"], json!(ELICITATION_METHOD));
-            let response = json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": {"action": "accept", "content": {"choice": "A"}}
-            });
-            assert!(bus_for_responder.route_response(&response));
-        });
-        let result = bus
-            .elicit(
-                "Pick one".to_string(),
-                json!({
-                    "type": "object",
-                    "properties": {"choice": {"type": "string"}},
-                    "required": ["choice"],
-                }),
-            )
-            .await
-            .expect("elicit succeeds");
+    async fn elicit_reentry_validates_accept() {
+        let result = crate::mcp_input::scope_input_context(
+            &json!({"inputResponses": {
+                "harn-input-0": {"action": "accept", "content": {"choice": "A"}}
+            }}),
+            json!({"elicitation": {"form": {}}}),
+            async {
+                elicit_form(
+                    "Pick one".to_string(),
+                    json!({
+                        "type": "object",
+                        "properties": {"choice": {"type": "string"}},
+                        "required": ["choice"],
+                    }),
+                )
+            },
+        )
+        .await
+        .unwrap()
+        .expect("elicit succeeds");
         let dict = result.as_dict().unwrap();
         assert_eq!(dict.get("action").unwrap().display(), "accept");
-    }
-
-    #[tokio::test]
-    async fn elicit_propagates_jsonrpc_error_from_client() {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        let bus = ElicitationBus::new(tx);
-        let bus_for_responder = bus.clone();
-        tokio::spawn(async move {
-            let outbound = rx.recv().await.expect("elicit request emitted");
-            let id = outbound["id"].clone();
-            let response = json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "error": {"code": -32601, "message": "client refused"}
-            });
-            assert!(bus_for_responder.route_response(&response));
-        });
-        let result = bus
-            .elicit("Pick one".to_string(), json!({"type": "object"}))
-            .await;
-        let err = result.expect_err("error is propagated");
-        let message = match err {
-            VmError::Thrown(VmValue::String(s)) => s.to_string(),
-            other => format!("{other:?}"),
-        };
-        assert!(message.contains("client refused"), "got: {message}");
     }
 }

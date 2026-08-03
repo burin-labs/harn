@@ -1,14 +1,11 @@
 use serde_json::{json, Value as JsonValue};
 
 use harn_vm::mcp_protocol::{
-    self, apply_rc_result_envelope, enforce_request_protocol_version,
-    is_supported_protocol_version, parse_request_metadata, server_discover_result, McpCacheHint,
-    McpProtocolMode,
+    self, apply_result_envelope, enforce_request_protocol_version, parse_request_metadata,
+    server_discover_result, McpCacheHint,
 };
 
 use super::types::{ConnectionState, McpOrchestratorService};
-use super::MCP_PROTOCOL_VERSION;
-
 impl McpOrchestratorService {
     pub(super) async fn handle_request(
         &self,
@@ -22,68 +19,40 @@ impl McpOrchestratorService {
             .unwrap_or_default();
         let params = request.get("params").cloned().unwrap_or_else(|| json!({}));
 
-        // Per-request RC negotiation: a Modern client tags every payload
-        // with `_meta.io.modelcontextprotocol/protocolVersion`. We never
-        // promote a connection to Modern based on initialize alone — the
-        // RC explicitly forbids that — but a session may still receive
-        // a mix of Legacy and Modern requests over its lifetime.
         let metadata = parse_request_metadata(&params);
-        let request_mode = match enforce_request_protocol_version(&id, &metadata) {
-            Ok(Some(mode)) => mode,
-            Ok(None) => McpProtocolMode::Legacy,
-            Err(response) => return response,
-        };
-
-        // server/discover and initialize are the two compatibility
-        // probes: server/discover is the modern entry point, initialize
-        // is the legacy one. Both must work without prior session state.
-        if method == mcp_protocol::METHOD_SERVER_DISCOVER {
-            session.protocol_mode = McpProtocolMode::Modern;
-            // The orchestrator advertises itself as authenticated once
-            // it has accepted a discover from a peer that survived the
-            // HTTP-layer auth check; legacy clients still get the same
-            // capability negotiation through `initialize`.
-            session.authenticated = true;
-            session.initialized = true;
-            return self.handle_server_discover(id);
+        if let Err(response) = enforce_request_protocol_version(&id, &metadata) {
+            return response;
+        }
+        if let Some(name) = params
+            .pointer("/_meta/io.modelcontextprotocol~1clientInfo/name")
+            .and_then(JsonValue::as_str)
+        {
+            let version = params
+                .pointer("/_meta/io.modelcontextprotocol~1clientInfo/version")
+                .and_then(JsonValue::as_str)
+                .unwrap_or("unknown");
+            session.client_identity = format!("{name}/{version}");
         }
 
-        if method == "initialize" {
-            return self.handle_initialize(id, session, &params);
+        if method == mcp_protocol::METHOD_SERVER_DISCOVER {
+            session.authenticated = true;
+            return self.handle_server_discover(id);
         }
 
         if request.get("id").is_none() {
             return JsonValue::Null;
         }
 
-        // RC clients can skip `initialize` entirely: any RC-tagged
-        // request implicitly bootstraps the session and pins the
-        // connection mode forward. Legacy clients still get the
-        // original "server not initialized" guard.
-        if request_mode.is_modern() {
-            session.initialized = true;
-            session.authenticated = true;
-            session.protocol_mode = McpProtocolMode::Modern;
-            session.protocol_version = mcp_protocol::DRAFT_PROTOCOL_VERSION.to_string();
-        }
-
-        if !session.initialized && method != "ping" {
-            return harn_vm::jsonrpc::error_response(id, -32002, "server not initialized");
-        }
-        let mode = session.protocol_mode;
+        session.authenticated = true;
 
         if let Some(response) =
-            mcp_protocol::unsupported_client_bound_method_response(id.clone(), method)
+            mcp_protocol::explicit_unsupported_method_response(id.clone(), method)
         {
             return response;
         }
 
         let response = match method {
-            "initialized" => return JsonValue::Null,
             "ping" => harn_vm::jsonrpc::response(id, json!({})),
-            mcp_protocol::METHOD_LOGGING_SET_LEVEL => {
-                self.handle_logging_set_level(id, session, &params)
-            }
             "tools/list" => self.handle_tools_list(id, &params),
             // Tool execution is the deepest request branch (trigger dispatch
             // can enter a child VM and agent machinery). Keep that state
@@ -91,15 +60,10 @@ impl McpOrchestratorService {
             // already broad protocol dispatcher frame.
             "tools/call" => Box::pin(self.handle_tools_call(id, session, &params)).await,
             mcp_protocol::METHOD_TASKS_GET => self.handle_tasks_get(id, session, &params),
-            mcp_protocol::METHOD_TASKS_RESULT => {
-                self.handle_tasks_result(id, session, &params).await
-            }
-            mcp_protocol::METHOD_TASKS_LIST => self.handle_tasks_list(id, session, &params),
+            mcp_protocol::METHOD_TASKS_UPDATE => self.handle_tasks_update(id, session, &params),
             mcp_protocol::METHOD_TASKS_CANCEL => self.handle_tasks_cancel(id, session, &params),
             "resources/list" => self.handle_resources_list(id, &params).await,
             "resources/read" => self.handle_resources_read(id, &params).await,
-            "resources/subscribe" => self.handle_resources_subscribe(id, session, &params).await,
-            "resources/unsubscribe" => self.handle_resources_unsubscribe(id, session, &params),
             "resources/templates/list" => self.handle_resource_templates_list(id, &params),
             "prompts/list" => self.handle_prompts_list(id, &params),
             "prompts/get" => self.handle_prompts_get(id, &params),
@@ -110,7 +74,7 @@ impl McpOrchestratorService {
                 harn_vm::jsonrpc::error_response(id, -32601, &format!("Method not found: {method}"))
             }
         };
-        apply_envelope(response, mode, cache_hint_for_method(method))
+        apply_envelope(response, cache_hint_for_method(method))
     }
 
     pub(super) fn handle_server_discover(&self, id: JsonValue) -> JsonValue {
@@ -121,61 +85,6 @@ impl McpOrchestratorService {
                 orchestrator_server_info(),
                 Some("Expose Harn trigger and orchestrator controls over MCP."),
             ),
-        )
-    }
-
-    pub(super) fn handle_initialize(
-        &self,
-        id: JsonValue,
-        session: &mut ConnectionState,
-        params: &JsonValue,
-    ) -> JsonValue {
-        let client_name = params
-            .pointer("/clientInfo/name")
-            .and_then(JsonValue::as_str)
-            .unwrap_or("unknown");
-        let client_version = params
-            .pointer("/clientInfo/version")
-            .and_then(JsonValue::as_str)
-            .unwrap_or("unknown");
-        session.client_identity = format!("{client_name}/{client_version}");
-        // Echo the version the client asked for when we support it,
-        // falling back to the stable default. Unknown versions silently
-        // negotiate down rather than failing initialize — the RC's
-        // `-32004` path is reserved for explicit `_meta` negotiation.
-        let advertised_version = params
-            .get("protocolVersion")
-            .and_then(JsonValue::as_str)
-            .filter(|version| is_supported_protocol_version(version))
-            .unwrap_or(MCP_PROTOCOL_VERSION);
-        session.protocol_version = advertised_version.to_string();
-
-        if super::http::initialize_api_key(params).is_some() {
-            eprintln!(
-                "[harn] warning: MCP initialize capabilities.harn.apiKey is deprecated; use HTTP Authorization: Bearer tokens with OAuth protected-resource metadata instead"
-            );
-        }
-
-        if self.auth.has_api_keys() && !session.authenticated {
-            let api_key = super::http::initialize_api_key(params);
-            if api_key.is_none_or(|value| !self.auth.matches_api_key(value)) {
-                return harn_vm::jsonrpc::error_response(id, -32001, "unauthorized");
-            }
-            session.authenticated = true;
-        } else {
-            session.authenticated = true;
-        }
-        session.initialized = true;
-        session.protocol_mode = McpProtocolMode::Legacy;
-
-        harn_vm::jsonrpc::response(
-            id,
-            json!({
-                "protocolVersion": advertised_version,
-                "capabilities": orchestrator_capabilities(),
-                "serverInfo": orchestrator_server_info(),
-                "instructions": "Expose Harn trigger and orchestrator controls over MCP.",
-            }),
         )
     }
 
@@ -213,30 +122,6 @@ impl McpOrchestratorService {
             }
             Err(error) => harn_vm::jsonrpc::error_response(id, -32603, &error),
         }
-    }
-
-    pub(super) fn handle_logging_set_level(
-        &self,
-        id: JsonValue,
-        session: &mut ConnectionState,
-        params: &JsonValue,
-    ) -> JsonValue {
-        let Some(level_str) = params.get("level").and_then(JsonValue::as_str) else {
-            return harn_vm::jsonrpc::error_response(
-                id,
-                -32602,
-                "logging/setLevel requires params.level",
-            );
-        };
-        let Some(level) = mcp_protocol::McpLogLevel::from_str_ci(level_str) else {
-            return harn_vm::jsonrpc::error_response(
-                id,
-                -32602,
-                &format!("logging/setLevel: unsupported level '{level_str}'"),
-            );
-        };
-        session.log_level = level;
-        harn_vm::jsonrpc::response(id, json!({}))
     }
 
     pub(super) async fn handle_completion_complete(
@@ -394,15 +279,13 @@ impl McpOrchestratorService {
     }
 }
 
-/// Capabilities advertised by both `initialize` and `server/discover`.
-/// Kept in a single place so the two paths cannot drift apart silently.
+/// Capabilities advertised by `server/discover`.
 pub(super) fn orchestrator_capabilities() -> JsonValue {
     json!({
-        "tools": { "listChanged": true },
-        "resources": { "listChanged": true, "subscribe": true },
-        "prompts": { "listChanged": true },
-        "logging": mcp_protocol::logging_capability(),
-        "tasks": mcp_protocol::tasks_capability(),
+        "tools": {},
+        "resources": {},
+        "prompts": {},
+        "extensions": mcp_protocol::tasks_capability(),
         "completions": mcp_protocol::completions_capability(),
     })
 }
@@ -417,31 +300,28 @@ pub(super) fn orchestrator_server_info() -> JsonValue {
 
 /// Map a JSON-RPC method to its conservative cache hint. Read/list
 /// methods get a TTL; everything else is `None`, which still routes
-/// through [`apply_envelope`] so Modern clients see `resultType`.
+/// through [`apply_envelope`] so Stable clients see `resultType`.
 pub(super) fn cache_hint_for_method(method: &str) -> Option<&'static McpCacheHint> {
     const LIST: McpCacheHint = McpCacheHint::list_default();
     const READ: McpCacheHint = McpCacheHint::read_default();
     match method {
-        "tools/list"
-        | "resources/list"
-        | "resources/templates/list"
-        | "prompts/list"
-        | mcp_protocol::METHOD_TASKS_LIST => Some(&LIST),
+        "tools/list" | "resources/list" | "resources/templates/list" | "prompts/list" => {
+            Some(&LIST)
+        }
         "resources/read" => Some(&READ),
         _ => None,
     }
 }
 
-/// Stamp the RC `resultType`/cache-hint envelope onto a handler's
+/// Stamp the stable `resultType`/cache-hint envelope onto a handler's
 /// response in one place. Error responses pass through untouched —
-/// the RC envelope only applies to `result` bodies.
+/// the stable envelope only applies to `result` bodies.
 pub(super) fn apply_envelope(
     mut response: JsonValue,
-    mode: McpProtocolMode,
     hint: Option<&'static McpCacheHint>,
 ) -> JsonValue {
     if let Some(result) = response.get_mut("result") {
-        apply_rc_result_envelope(result, mode, hint);
+        apply_result_envelope(result, hint);
     }
     response
 }

@@ -122,7 +122,6 @@ pub(crate) async fn connect_mcp_servers(
             },
             "token_exchange": server.token_exchange.clone(),
             "protocol_version": server.protocol_version,
-            "protocol_mode": server.protocol_mode,
             "proxy_server_name": server.proxy_server_name,
         });
 

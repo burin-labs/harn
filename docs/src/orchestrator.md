@@ -296,22 +296,15 @@ harn orchestrator serve \
   --mcp
 ```
 
-The default paths are:
+The server accepts stable MCP requests at `POST /mcp`. Override that path with
+`--mcp-path`. Harn does not expose the older split-channel SSE routes or an
+HTTP session lifecycle.
 
-- `POST /mcp` for Streamable HTTP — the recommended transport for new
-  integrations.
-- `GET /sse` and `POST /messages` for the older split-channel SSE
-  transport, kept for compatibility with MCP clients that haven't yet
-  adopted Streamable HTTP. Both endpoints remain supported; they are
-  not slated for removal, but Streamable HTTP is preferred.
-
-Override them with `--mcp-path`, `--mcp-sse-path`, and
-`--mcp-messages-path`. Embedded MCP requires
+Embedded MCP requires
 `HARN_ORCHESTRATOR_API_KEYS` or HTTP OAuth resource-server settings through
 `HARN_MCP_OAUTH_*`. OAuth clients authenticate with `Authorization: Bearer
-<token>` on every HTTP request. Legacy API-key clients authenticate with
-`Authorization: Bearer <api-key>` or `x-api-key`; the old MCP `initialize`
-API-key extension is still accepted with a warning. See
+<token>` on every HTTP request. API-key clients authenticate with
+`Authorization: Bearer <api-key>` or `x-api-key`. See
 [Orchestrator MCP Server](./mcp-server.md).
 
 ## Deployment

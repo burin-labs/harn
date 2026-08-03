@@ -17,8 +17,7 @@ servers and remote HTTP MCP servers.
 
 ### Connecting manually
 
-Use `mcp_connect` to spawn an MCP server process and perform the
-initialize handshake:
+Use `mcp_connect` to spawn an MCP server process and negotiate the connection:
 
 ```harn
 const client = harness.tools.mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
@@ -27,7 +26,7 @@ const info = harness.tools.mcp_server_info(client)
 harness.stdio.log("Connected to: ${info.name}")
 ```
 
-`harness.tools.mcp_server_info(...)` also exposes the raw initialize response and an
+`harness.tools.mcp_server_info(...)` also exposes the negotiated server information and an
 `instructions` string when the server supplied one. `agent_loop(harness, ...,
 {mcp_servers: [...]})` can include those instructions as advisory context in
 the Harn-built system prompt; set `mcp_initialize_advisory: false` when a
@@ -49,67 +48,6 @@ harness.stdio.log(content)
 dicts for multi-block results, or nil when empty. If the tool reports an
 error, `mcp_call` throws.
 
-### Experimental file inputs
-
-Harn implements [SEP-2356][mcp-file-sep] (the leading draft, not the older
-multipart upload proposal upstream closed) behind an explicit runtime
-opt-in: tool schemas mark file fields with `x-mcp-file`, and clients pass
-the selected file inline as an RFC 2397 `data:` URI.
-
-```harn
-harn.mcp.configure({
-  experimental: {
-    file_upload: {
-      spec_revision: "modelcontextprotocol/modelcontextprotocol#2356",
-    },
-  },
-})
-
-const client = harness.tools.mcp_connect("python3", ["./image-server.py"])
-const image = harn.mcp.upload_file(client, "photo.png", {
-  accept: ["image/png", "image/jpeg"],
-  max_size: 5242880,
-})
-const result = harness.tools.mcp_call(client, "describe_image", {image: image})
-harness.stdio.log(result)
-```
-
-`harn.mcp.upload_file(...)` reads a local file under Harn's filesystem
-policy, validates optional `accept` / `max_size` hints, and returns
-`data:<media-type>;base64,...`. Harn redacts `data:` URI payloads from
-replay keys and server-side diagnostics; scripts should still avoid
-printing them.
-
-When Harn serves an MCP tool, use `harn.mcp.file_input(...)` in a
-`tool_define` parameter schema. The MCP server validates incoming `data:` URIs
-against the declared media-type and size constraints before invoking the
-handler.
-
-```harn
-fn register_upload_tool(tools_cap: HarnessTools) {
-  let tools = tool_registry()
-
-  tools = tool_define(tools, "inspect_upload", "Inspect a small text file", {
-    parameters: {
-      upload: tools_cap.mcp_file_input({
-        accept: ["text/*"],
-        max_size: 64,
-        description: "Small text file to inspect",
-      }),
-    },
-    handler: { args -> "received " + args.upload },
-  })
-
-  tools_cap.mcp_tools(tools)
-}
-```
-
-Because SEP-2356 is still draft, the wire shape can change. The opt-in records
-the implemented proposal revision so experimental users have a clear cutover
-point when MCP ratifies file input support.
-
-[mcp-file-sep]: https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2356
-
 ### Resources and prompts
 
 ```harn
@@ -122,28 +60,29 @@ const prompt = harness.tools.mcp_get_prompt(client, "review", {code: "fn main() 
 
 ### MCP client support matrix
 
-Harn's standard MCP client prefers protocol version `2025-11-25` and can fall
-back to `2025-06-18` when a server only advertises that version. RC mode also
-understands Harn's `DRAFT-2026-v1` profile when a server exposes it through
-`server/discover`. Harn advertises the `elicitation`, `sampling`, and `roots`
-client capabilities. It answers server `roots/list` requests with the resolved
-project roots for the active script and emits
-`notifications/roots/list_changed` when that root snapshot changes. It does not
-advertise task capabilities, so servers should treat MCP tasks as unavailable
-when connected to Harn.
+Harn uses the official Rust MCP SDK and prefers stable `2026-07-28`. For stdio
+peers, the SDK can negotiate its released `2025-11-25`, `2025-06-18`,
+`2025-03-26`, and `2024-11-05` implementations. If a peer does not implement
+`server/discover`, the SDK owns the older initialize lifecycle. Harn's HTTP
+client is stable-only and does not emulate session-based transports.
+
+Harn advertises roots, form and URL elicitation, sampling, and the stable tasks
+extension. It resolves those operations when they appear as stable MRTR input
+requests and polls task results through `tasks/get`. The SDK handler supplies
+the equivalent direct callbacks only for older stdio peers selected by the SDK.
 
 | Method or feature | Harn as MCP client |
 |---|---|
-| `initialize`, `notifications/initialized` | Supported |
+| `initialize`, `notifications/initialized` | SDK-managed stdio compatibility for older servers; not emitted by Harn's stable HTTP client |
 | `ping` | Supported when Harn sends it to a server |
 | `tools/list`, `tools/call` | Supported through `mcp_list_tools` and `mcp_call` |
 | `resources/list`, `resources/read`, `resources/templates/list` | Supported through resource builtins |
 | `prompts/list`, `prompts/get` | Supported through prompt builtins |
 | `completion/complete` | Not exposed as a Harn builtin |
-| `roots/list` | Supported; Harn advertises `roots.listChanged`, serves resolved script/project roots, and exposes the same data through `harn.mcp.roots()` / `harness.tools.mcp_roots()` |
-| `sampling/createMessage` | Supported; Harn advertises sampling and dispatches inbound requests to the host bridge (`capability="mcp"`, `operation="sample"`). Approved requests route to Harn's `llm_call` and return `{role, content, model, stopReason}` to the originating server. Without an installed bridge, requests are declined with a structured `mcp.samplingDeclined` error so servers can fall back gracefully. |
-| `elicitation/create` | Supported; Harn advertises elicitation and dispatches inbound requests to the host bridge (`capability="mcp"`, `operation="elicit"`) |
-| MCP task methods and task-augmented requests | Unsupported; Harn does not advertise task support |
+| Embedded `roots/list` input | Supported; returns resolved script/project roots, also exposed through `harn.mcp.roots()` / `harness.tools.mcp_roots()` |
+| Embedded `sampling/createMessage` input | Supported; dispatches to the host bridge (`capability="mcp"`, `operation="sample"`). Approved requests route to `llm_call`; absent approval returns a structured decline error. |
+| Embedded `elicitation/create` input | Form and URL modes are supported through the host bridge (`capability="mcp"`, `operation="elicit"`); URL values are never prefetched or opened by Harn |
+| `tasks/get`, `tasks/update`, `tasks/cancel` | Supported through the stable tasks extension; `mcp_call` polls task results and supplies MRTR input responses |
 
 ### Disconnecting
 
@@ -173,22 +112,14 @@ name = "notion"
 transport = "http"
 url = "https://mcp.notion.com/mcp"
 
-[[mcp]]
-name = "modern"
-transport = "http"
-url = "https://example.com/mcp"
-protocol_mode = "rc"
-protocol_version = "DRAFT-2026-v1"
 ```
 
-`protocol_mode = "rc"` opts a server into Harn's draft MCP client profile.
-RC mode probes stdio servers with `server/discover`, sends protocol/client
-metadata on every request, uses stateless Streamable HTTP headers instead of
-requiring `MCP-Session-Id`, consumes cache hints from list/read calls, mirrors
-valid `x-mcp-header` tool-schema annotations into `Mcp-Param-*` HTTP headers,
-and resolves `input_required` tool results for roots, elicitation, and
-sampling before retrying the call. Omit `protocol_mode` for the legacy
-`2025-11-25` initialize/session behavior.
+Stdio connections use stable discovery with SDK-managed fallback for older
+released peers. Harn's HTTP client implements only the stable stateless lifecycle.
+Stable HTTP requests carry the standard MCP routing headers, consume cache
+hints from list/read calls, mirror valid
+`x-mcp-header` tool-schema annotations into `Mcp-Param-*` headers, and resolve
+MRTR input requests before retrying the operation.
 
 ### Lazy boot
 
@@ -561,8 +492,7 @@ through `pub fn` exports or through the `harness.tools.mcp_tools(...)` /
 `harness.tools.mcp_resource(...)` / `harness.tools.mcp_prompt(...)` methods shown
 above and serves the appropriate one over stdio or Streamable HTTP. All
 `print`/`println` output goes to stderr when stdio is the MCP transport.
-The server supports the `2025-11-25` and `2025-06-18` MCP protocol versions on
-both transports, plus Harn's draft profile where advertised.
+The server implements stable MCP `2026-07-28` on both transports.
 
 List endpoints are cursor-paginated. `tools/list`, `resources/list`,
 `resources/templates/list`, and `prompts/list` return up to 100 entries by
@@ -571,29 +501,26 @@ default and include `nextCursor` when another page is available. Set
 
 ### MCP server support matrix
 
-Harn's MCP servers implement the core tool/resource/prompt path and explicitly
-reject latest-spec features that are out of scope for this release with a
+Harn's MCP servers implement the stable tool/resource/prompt path and explicitly
+reject features that are out of scope for this release with a
 JSON-RPC error containing `error.data.type = "mcp.unsupportedFeature"`.
-Servers advertise `resources.subscribe` when resources are present. The
-orchestrator MCP server wires `harn://topic/*` resources to EventLog-backed
-`notifications/resources/updated`; script-driven servers accept subscriptions
-for registered resource URIs.
+`subscriptions/listen` is not advertised; Harn rejects it explicitly until it
+implements the stable request-scoped stream.
 
 | Method or feature | Harn as MCP server |
 |---|---|
-| `initialize`, `notifications/initialized`, `ping` | Supported |
-| `logging/setLevel` | Accepted |
+| `server/discover`, `ping` | Supported |
 | `tools/list`, `tools/call` | Supported |
 | `notifications/progress`, `notifications/cancelled` | Supported for long-running tool calls |
 | `resources/list`, `resources/read`, `resources/templates/list` | Supported for registered entries, cards, package context, prompt sources, and orchestrator EventLog resources |
-| `resources/subscribe`, `resources/unsubscribe` | Supported for registered resource URIs; orchestrator topic resources emit update notifications |
+| `subscriptions/listen` | Not advertised; rejected with an explicit unsupported-feature error |
 | `prompts/list`, `prompts/get` | Supported for registered prompts |
 | `completion/complete` | Supported for prompt arguments and resource template arguments |
-| `roots/list` | Supported outbound from script-driven handlers through `harness.tools.mcp_client_roots()` / `harn.mcp.client_roots()` |
-| `sampling/createMessage` | Server-initiated sampling against the connected client is not currently emitted by the orchestrator-mode catalog; Harn declares the `sampling` capability when acting as a client (see the [client matrix](#mcp-client-support-matrix)). |
-| `elicitation/create` | Supported outbound from script-driven handlers via `mcp_elicit(...)`; inbound client requests to the server are rejected with an explicit unsupported-feature error |
-| `tasks/get`, `tasks/result`, `tasks/list`, `tasks/cancel` | Supported for task-augmented orchestrator tool calls |
-| `tools/call` with `params.task` | Supported for tools that advertise optional task execution; rejected with `-32602` for non-taskable tools |
+| Embedded `roots/list` input | Script-driven handlers emit an `input_required` result through `harness.tools.mcp_client_roots()` / `harn.mcp.client_roots()` |
+| Embedded `sampling/createMessage` input | Not currently emitted by Harn's server catalogs |
+| Embedded `elicitation/create` input | Script-driven handlers emit a form-mode `input_required` result through `mcp_elicit(...)` |
+| `tasks/get`, `tasks/update`, `tasks/cancel` | Supported for async orchestrator tool calls when the client declares the stable tasks extension |
+| `tools/call` task results | Async orchestrator tools return `resultType = "task"`; other tools return inline results |
 
 #### Publishing a server card
 
@@ -604,8 +531,8 @@ capabilities before connecting:
 harn serve mcp agent.harn --card ./card.json
 ```
 
-The card JSON is embedded in the `initialize` response's
-`serverInfo.card` field and also exposed as a read-only resource at
+The card JSON is embedded in the `server/discover` response's
+`io.modelcontextprotocol/serverInfo.card` metadata and also exposed as a read-only resource at
 `well-known://mcp-card`. Minimal shape:
 
 ```json
@@ -613,7 +540,7 @@ The card JSON is embedded in the `initialize` response's
   "name": "my-agent",
   "version": "1.0.0",
   "description": "Short one-line summary shown in pickers.",
-  "protocolVersion": "2025-11-25",
+  "protocolVersion": "2026-07-28",
   "capabilities": { "tools": true, "resources": false, "prompts": false },
   "tools": [
     {"name": "greet", "description": "Greet someone by name"}

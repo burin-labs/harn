@@ -46,16 +46,6 @@ pub(super) fn generate_swift_for_version(artifact_version: &str) -> String {
     ));
     for (name, value) in [
         ("mcpProtocolVersion", MCP_PROTOCOL_VERSION),
-        ("mcpStableProtocolVersion", MCP_PROTOCOL_VERSION),
-        ("mcpDraftProtocolVersion", MCP_DRAFT_PROTOCOL_VERSION),
-        (
-            "mcpLegacy20250618ProtocolVersion",
-            MCP_LEGACY_2025_06_18_PROTOCOL_VERSION,
-        ),
-        (
-            "mcpFinal2026ProtocolVersion",
-            MCP_FINAL_2026_PROTOCOL_VERSION,
-        ),
         (
             "mcpJsonSchema202012Dialect",
             MCP_JSON_SCHEMA_2020_12_DIALECT,
@@ -1182,7 +1172,8 @@ public struct HarnMCPDiscoverResult: Codable, Sendable, Equatable {
     public var resultType: HarnMCPResultType
     public var supportedVersions: [String]
     public var capabilities: HarnACPObject
-    public var serverInfo: HarnMCPImplementation
+    public var ttlMs: Int
+    public var cacheScope: HarnMCPCacheScope
     public var instructions: String?
     public var meta: HarnACPObject?
 
@@ -1190,7 +1181,8 @@ public struct HarnMCPDiscoverResult: Codable, Sendable, Equatable {
         case resultType
         case supportedVersions
         case capabilities
-        case serverInfo
+        case ttlMs
+        case cacheScope
         case instructions
         case meta = "_meta"
     }

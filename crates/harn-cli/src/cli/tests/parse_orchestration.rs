@@ -1007,10 +1007,6 @@ fn test_parses_orchestrator_serve_args() {
         "--mcp",
         "--mcp-path",
         "/ops/mcp",
-        "--mcp-sse-path",
-        "/ops/sse",
-        "--mcp-messages-path",
-        "/ops/messages",
         "--log-format",
         "json",
         "--role",
@@ -1034,8 +1030,6 @@ fn test_parses_orchestrator_serve_args() {
     assert_eq!(serve.pump_max_outstanding, Some(4));
     assert!(serve.mcp);
     assert_eq!(serve.mcp_path, "/ops/mcp");
-    assert_eq!(serve.mcp_sse_path, "/ops/sse");
-    assert_eq!(serve.mcp_messages_path, "/ops/messages");
     assert_eq!(serve.log_format, OrchestratorLogFormat::Json);
     assert_eq!(
         serve.role,

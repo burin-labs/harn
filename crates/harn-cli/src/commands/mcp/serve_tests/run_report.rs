@@ -35,7 +35,7 @@ async fn correlates_delegated_runs() {
     harn_vm::orchestration::save_run_record(&child, Some(child_path.to_str().unwrap())).unwrap();
     harn_vm::orchestration::save_run_record(&parent, Some(parent_path.to_str().unwrap())).unwrap();
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
-    let mut session = init_session(&service).await;
+    let mut session = ConnectionState::default();
 
     let report = call_tool(
         &service,
@@ -69,19 +69,18 @@ async fn rejects_project_root_escape() {
     };
     harn_vm::orchestration::save_run_record(&run, Some(outside_path.to_str().unwrap())).unwrap();
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
-    let mut session = init_session(&service).await;
+    let mut session = ConnectionState::default();
     let response = service
         .handle_request(
             &mut session,
-            json!({
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": {
+            stable_request(
+                2,
+                "tools/call",
+                json!({
                     "name": "harn.run.report",
                     "arguments": { "path": outside_path },
-                }
-            }),
+                }),
+            ),
         )
         .await;
     assert_eq!(response["result"]["isError"], true, "response={response}");
@@ -108,19 +107,18 @@ async fn rejects_symlink_escape() {
     harn_vm::orchestration::save_run_record(&run, Some(outside_path.to_str().unwrap())).unwrap();
     std::os::unix::fs::symlink(&outside_path, &link_path).unwrap();
     let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
-    let mut session = init_session(&service).await;
+    let mut session = ConnectionState::default();
     let response = service
         .handle_request(
             &mut session,
-            json!({
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": {
+            stable_request(
+                2,
+                "tools/call",
+                json!({
                     "name": "harn.run.report",
                     "arguments": { "path": "linked-run.json" },
-                }
-            }),
+                }),
+            ),
         )
         .await;
 

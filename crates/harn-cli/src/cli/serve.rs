@@ -301,16 +301,6 @@ pub(crate) struct ServeMcpArgs {
     /// Streamable HTTP endpoint path.
     #[arg(long, default_value = "/mcp", value_name = "PATH")]
     pub path: String,
-    /// Legacy SSE endpoint path for older MCP clients.
-    #[arg(long = "sse-path", default_value = "/sse", value_name = "PATH")]
-    pub sse_path: String,
-    /// Legacy SSE POST endpoint path for older MCP clients.
-    #[arg(
-        long = "messages-path",
-        default_value = "/messages",
-        value_name = "PATH"
-    )]
-    pub messages_path: String,
     /// Static API keys accepted over HTTP via `Authorization: Bearer` or `X-API-Key`.
     #[arg(long = "api-key", env = "HARN_SERVE_API_KEY", value_delimiter = ',')]
     pub api_key: Vec<String>,

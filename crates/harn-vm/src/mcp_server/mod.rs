@@ -17,7 +17,6 @@ mod uri;
 #[cfg(test)]
 mod tests;
 
-use crate::mcp_protocol::PROTOCOL_VERSION;
 pub use defs::{
     McpCompletionSource, McpPromptArgDef, McpPromptDef, McpResourceDef, McpResourceTemplateDef,
     McpServerMetadata, McpToolDef,

@@ -22,9 +22,7 @@ The generated contract includes:
   with their stability tier and (for Go) the canonical module path.
 - `schemas/*.schema.json`: stable copies of the ACP, A2A, MCP, tool-receipt,
   and collaborative plan-document contracts validated by generated drift and
-  protocol checks. MCP publishes both the stable
-  `2025-11-25` profile and the opt-in `DRAFT-2026-v1` RC profile so
-  downstreams can prepare without changing runtime negotiation behavior.
+  protocol checks. MCP publishes only the stable `2026-07-28` profile.
 - `harn-protocol.ts`: TypeScript bindings for JSON-RPC messages, ACP
   `session/update`, collaborative plan documents, Harn tool lifecycle metadata,
   A2A task events, and MCP tool/resource/prompt metadata.
@@ -47,13 +45,16 @@ The generated contract includes:
   decodes and re-encodes these through the Python and Go bindings on every
   CI run, catching wire-vocabulary drift before downstream consumers see it.
 
-MCP RC helpers include `DRAFT-2026-v1`, the final scheduled
-`2026-07-28` identity, required request `_meta` keys, standard Streamable HTTP
+MCP helpers include the stable `2026-07-28` identity, required request `_meta`
+keys, standard Streamable HTTP
 headers (`MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`), `server/discover`,
-`ttlMs`/`cacheScope` cache hints, `input_required` results, the `-32004`
-unsupported-version error, and the JSON Schema 2020-12 dialect URL. The RC
-profile is data-only until the final spec lands; servers and clients should
-opt in explicitly instead of assuming Harn's stable MCP runtime negotiates it.
+`ttlMs`/`cacheScope` cache hints, `input_required` results, the stable tasks
+extension, the `-32022` unsupported-version error, and the JSON Schema 2020-12
+dialect URL. Harn's runtime and generated bindings share this registry.
+The generated `MCPDiscoverResult` follows the released SDK shape: `ttlMs` and
+`cacheScope` are required, and server identity lives at
+`_meta["io.modelcontextprotocol/serverInfo"]`, not in a top-level
+`serverInfo` field.
 
 ## Stability
 

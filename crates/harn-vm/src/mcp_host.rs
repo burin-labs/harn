@@ -910,22 +910,6 @@ fn insert_cache(
     });
 }
 
-/// Compatibility shim for tests that previously inserted a cached
-/// payload from a JSON envelope. Resolves the hint via
-/// [`McpCacheHint::from_result`] and delegates to [`insert_cache`].
-#[cfg(test)]
-fn insert_cache_if_hinted(
-    server: &str,
-    tool: &str,
-    args_hash: &str,
-    payload: &JsonValue,
-    now: Instant,
-) {
-    if let Some(hint) = McpCacheHint::from_result(payload) {
-        insert_cache(server, tool, args_hash, payload, hint, now);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1012,25 +996,18 @@ mod tests {
             "value": 1
         });
         let now = Instant::now();
-        insert_cache_if_hinted("srv", "ping", "deadbeef", &payload, now);
+        insert_cache(
+            "srv",
+            "ping",
+            "deadbeef",
+            &payload,
+            McpCacheHint::from_result(&payload).unwrap(),
+            now,
+        );
         let hit = take_cache_hit("srv", "ping", "deadbeef", now);
         assert!(hit.is_some(), "fresh entry should hit");
         let stale = take_cache_hit("srv", "ping", "deadbeef", now + Duration::from_millis(200));
         assert!(stale.is_none(), "expired entry should miss");
-    }
-
-    #[test]
-    fn cache_skips_payload_without_hint() {
-        let _g = lock();
-        reset_for_tests();
-        insert_cache_if_hinted(
-            "srv",
-            "ping",
-            "h",
-            &serde_json::json!({"value": 1}),
-            Instant::now(),
-        );
-        assert!(take_cache_hit("srv", "ping", "h", Instant::now()).is_none());
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use serde_json::Value as JsonValue;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::mpsc;
 
 use super::types::{ConnectionState, McpOrchestratorService};
 use harn_serve::transport::{
@@ -11,10 +11,6 @@ use harn_serve::transport::{
 pub(super) async fn run_stdio(service: Arc<McpOrchestratorService>) -> Result<(), String> {
     let mut stdin = tokio::io::BufReader::new(tokio::io::stdin());
     let mut session = ConnectionState::default();
-    let mut list_notifications = service.subscribe_list_notifications();
-    let mut resource_notifications = service.subscribe_resource_notifications();
-    let mut task_notifications = service.subscribe_task_notifications();
-    let mut log_notifications = service.subscribe_log_notifications();
     let (in_tx, mut in_rx) = mpsc::unbounded_channel();
     let input_reader = tokio::spawn(async move {
         loop {
@@ -107,43 +103,6 @@ pub(super) async fn run_stdio(service: Arc<McpOrchestratorService>) -> Result<()
                 let response = service.handle_request(&mut session, request).await;
                 if !response.is_null() {
                     let _ = out_tx.send(response);
-                }
-            }
-            notification = list_notifications.recv() => {
-                match notification {
-                    Ok(notification) => { let _ = out_tx.send(notification); }
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(broadcast::error::RecvError::Closed) => break,
-                }
-            }
-            notification = resource_notifications.recv() => {
-                match notification {
-                    Ok(notification) if session.subscribed_resources.contains(&notification.uri) => {
-                        let _ = out_tx.send(notification.message);
-                    }
-                    Ok(_) => continue,
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(broadcast::error::RecvError::Closed) => break,
-                }
-            }
-            notification = task_notifications.recv() => {
-                match notification {
-                    Ok(notification) if notification.owner == session.client_identity => {
-                        let _ = out_tx.send(notification.message);
-                    }
-                    Ok(_) => continue,
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(broadcast::error::RecvError::Closed) => break,
-                }
-            }
-            notification = log_notifications.recv() => {
-                match notification {
-                    Ok(notification) if notification.level >= session.log_level => {
-                        let _ = out_tx.send(notification.message);
-                    }
-                    Ok(_) => continue,
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(broadcast::error::RecvError::Closed) => break,
                 }
             }
         }

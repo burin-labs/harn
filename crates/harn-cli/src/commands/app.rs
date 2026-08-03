@@ -116,8 +116,7 @@ async fn rpc(
 ) -> Result<JsonValue, String> {
     runtime
         .call(
-            json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}),
-            None,
+            json!({"jsonrpc": "2.0", "id": id, "method": method, "params": mcp_app_params(params)}),
         )
         .await?
         .ok_or_else(|| format!("{method} returned no response"))
@@ -130,24 +129,10 @@ async fn discover_app(
     rpc(
         runtime,
         1,
-        "initialize",
-        json!({
-            "protocolVersion": harn_vm::mcp_protocol::PROTOCOL_VERSION,
-            "capabilities": {
-                "extensions": {
-                    MCP_APP_EXTENSION: {"mimeTypes": [MCP_APP_MIME]}
-                }
-            },
-            "clientInfo": {"name": "harn-app", "version": env!("CARGO_PKG_VERSION")}
-        }),
+        harn_vm::mcp_protocol::METHOD_SERVER_DISCOVER,
+        json!({}),
     )
     .await?;
-    runtime
-        .call(
-            json!({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}}),
-            None,
-        )
-        .await?;
     let tools_response = rpc(runtime, 2, "tools/list", json!({})).await?;
     let tools = tools_response
         .pointer("/result/tools")
@@ -239,20 +224,41 @@ async fn discover_app(
 fn tool_ui_resource_uri(tool: &JsonValue) -> Option<&str> {
     tool.pointer("/_meta/ui/resourceUri")
         .and_then(JsonValue::as_str)
-        .or_else(|| {
-            tool.pointer("/_meta/ui~1resourceUri")
-                .and_then(JsonValue::as_str)
-        })
 }
 
 fn tool_ui_visibility(tool: &JsonValue) -> Option<&[JsonValue]> {
     tool.pointer("/_meta/ui/visibility")
         .and_then(JsonValue::as_array)
-        .or_else(|| {
-            tool.pointer("/_meta/ui~1visibility")
-                .and_then(JsonValue::as_array)
-        })
         .map(Vec::as_slice)
+}
+
+fn mcp_app_params(params: JsonValue) -> JsonValue {
+    let mut params = params.as_object().cloned().unwrap_or_default();
+    let mut meta = params
+        .remove("_meta")
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default();
+    meta.insert(
+        harn_vm::mcp_protocol::MCP_META_KEY_PROTOCOL_VERSION.to_string(),
+        json!(harn_vm::mcp_protocol::PROTOCOL_VERSION),
+    );
+    meta.insert(
+        harn_vm::mcp_protocol::MCP_META_KEY_CLIENT_INFO.to_string(),
+        json!({
+            "name": "harn-app",
+            "version": env!("CARGO_PKG_VERSION"),
+        }),
+    );
+    meta.insert(
+        harn_vm::mcp_protocol::MCP_META_KEY_CLIENT_CAPABILITIES.to_string(),
+        json!({
+            "extensions": {
+                MCP_APP_EXTENSION: {"mimeTypes": [MCP_APP_MIME]}
+            }
+        }),
+    );
+    params.insert("_meta".to_string(), JsonValue::Object(meta));
+    JsonValue::Object(params)
 }
 
 fn validate_resource_meta(meta: &JsonValue) -> Result<(), String> {
@@ -404,7 +410,17 @@ async fn app_rpc(
                 .into_response();
         }
     }
-    match state.runtime.call(request, None).await {
+    let mut request = request;
+    let params = mcp_app_params(request.get("params").cloned().unwrap_or_else(|| json!({})));
+    let Some(request_object) = request.as_object_mut() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "app RPC request must be a JSON object"})),
+        )
+            .into_response();
+    };
+    request_object.insert("params".to_string(), params);
+    match state.runtime.call(request).await {
         Ok(Some(response)) => Json(response).into_response(),
         Ok(None) => StatusCode::ACCEPTED.into_response(),
         Err(error) => (
@@ -462,24 +478,25 @@ mod tests {
     }
 
     #[test]
-    fn tool_link_accepts_current_and_legacy_mcp_apps_metadata() {
+    fn tool_link_uses_stable_nested_mcp_apps_metadata() {
         let current = json!({"_meta": {"ui": {
             "resourceUri": "ui://current",
             "visibility": ["app"]
         }}});
-        let legacy = json!({"_meta": {
-            "ui/resourceUri": "ui://legacy",
-            "ui/visibility": ["model"]
-        }});
         assert_eq!(tool_ui_resource_uri(&current), Some("ui://current"));
-        assert_eq!(tool_ui_resource_uri(&legacy), Some("ui://legacy"));
         assert_eq!(
             tool_ui_visibility(&current),
             Some([json!("app")].as_slice())
         );
+    }
+
+    #[test]
+    fn app_metadata_preserves_request_scoped_fields() {
+        let params = mcp_app_params(json!({"_meta": {"progressToken": "progress-1"}}));
+        assert_eq!(params["_meta"]["progressToken"], json!("progress-1"));
         assert_eq!(
-            tool_ui_visibility(&legacy),
-            Some([json!("model")].as_slice())
+            params["_meta"][harn_vm::mcp_protocol::MCP_META_KEY_PROTOCOL_VERSION],
+            json!(harn_vm::mcp_protocol::PROTOCOL_VERSION)
         );
     }
 

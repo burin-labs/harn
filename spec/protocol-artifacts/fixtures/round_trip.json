@@ -176,20 +176,22 @@
   "harnAgentEventMethod": "_harn/agentEvent",
   "harnProviderCatalogMethod": "_harn/providerCatalog",
   "mcpDiscoverResult": {
+    "_meta": {
+      "io.modelcontextprotocol/serverInfo": {
+        "name": "harn",
+        "version": "0.10.52"
+      }
+    },
+    "cacheScope": "private",
     "capabilities": {
       "tools": {}
     },
-    "instructions": "Use the stable MCP version unless the RC is explicitly enabled.",
+    "instructions": "Use MCP 2026-07-28. Harn server endpoints do not emulate older lifecycles.",
     "resultType": "complete",
-    "serverInfo": {
-      "name": "harn",
-      "version": "0.10.52"
-    },
     "supportedVersions": [
-      "DRAFT-2026-v1",
-      "2025-11-25",
-      "2025-06-18"
-    ]
+      "2026-07-28"
+    ],
+    "ttlMs": 0
   },
   "mcpInputRequiredResult": {
     "inputRequests": {
@@ -232,13 +234,11 @@
   },
   "mcpUnsupportedProtocolVersionError": {
     "error": {
-      "code": -32004,
+      "code": -32022,
       "data": {
-        "requested": "DRAFT-2026-v0",
+        "requested": "2026-01-01",
         "supported": [
-          "DRAFT-2026-v1",
-          "2025-11-25",
-          "2025-06-18"
+          "2026-07-28"
         ]
       },
       "message": "Unsupported protocol version"

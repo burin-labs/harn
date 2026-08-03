@@ -76,27 +76,7 @@ pub(super) fn generate_go_for_version(artifact_version: &str) -> String {
             MCP_PROTOCOL_VERSION,
         ),
         (
-            "// MCPStableProtocolVersion is the stable MCP protocol version Harn implements at runtime.\n",
-            "MCPStableProtocolVersion",
-            MCP_PROTOCOL_VERSION,
-        ),
-        (
-            "// MCPDraftProtocolVersion is the opt-in MCP release-candidate profile identity.\n",
-            "MCPDraftProtocolVersion",
-            MCP_DRAFT_PROTOCOL_VERSION,
-        ),
-        (
-            "// MCPLegacy20250618ProtocolVersion is the prior stable MCP protocol Harn still accepts.\n",
-            "MCPLegacy20250618ProtocolVersion",
-            MCP_LEGACY_2025_06_18_PROTOCOL_VERSION,
-        ),
-        (
-            "// MCPFinal2026ProtocolVersion is the scheduled final identity for the RC profile.\n",
-            "MCPFinal2026ProtocolVersion",
-            MCP_FINAL_2026_PROTOCOL_VERSION,
-        ),
-        (
-            "// MCPJSONSchema202012Dialect is the JSON Schema dialect used by the MCP RC artifact profile.\n",
+            "// MCPJSONSchema202012Dialect is the JSON Schema dialect used by the MCP stable artifact profile.\n",
             "MCPJSONSchema202012Dialect",
             MCP_JSON_SCHEMA_2020_12_DIALECT,
         ),
@@ -793,7 +773,7 @@ type A2ATask struct {
 	Metadata  JSONObject        `json:"metadata,omitempty"`
 }
 
-// MCPJSONSchema202012 is the JSON Schema dialect surface used by the MCP RC
+// MCPJSONSchema202012 is the JSON Schema dialect surface used by the MCP stable
 // tool input/output schema profile.
 type MCPJSONSchema202012 = JSONObject
 
@@ -806,7 +786,7 @@ type MCPImplementation struct {
 	WebsiteURL  *string `json:"websiteUrl,omitempty"`
 }
 
-// MCPRequestMeta is the per-request metadata required by the MCP RC profile.
+// MCPRequestMeta is the per-request metadata required by the MCP stable profile.
 type MCPRequestMeta struct {
 	ProtocolVersion    string            `json:"io.modelcontextprotocol/protocolVersion"`
 	ClientInfo         MCPImplementation `json:"io.modelcontextprotocol/clientInfo"`
@@ -818,14 +798,14 @@ type MCPRequestMeta struct {
 	Baggage            *string           `json:"baggage,omitempty"`
 }
 
-// MCPHTTPHeaders names the HTTP headers used by the MCP RC Streamable HTTP profile.
+// MCPHTTPHeaders names the HTTP headers used by the MCP stable Streamable HTTP profile.
 type MCPHTTPHeaders struct {
 	ProtocolVersion string  `json:"MCP-Protocol-Version"`
 	Method          string  `json:"Mcp-Method"`
 	Name            *string `json:"Mcp-Name,omitempty"`
 }
 
-// MCPCacheHints captures the RC ttlMs/cacheScope cache fields.
+// MCPCacheHints captures the stable ttlMs/cacheScope cache fields.
 type MCPCacheHints struct {
 	TTLMS      uint64        `json:"ttlMs"`
 	CacheScope MCPCacheScope `json:"cacheScope"`
@@ -833,12 +813,13 @@ type MCPCacheHints struct {
 
 // MCPDiscoverResult is the result returned by server/discover.
 type MCPDiscoverResult struct {
-	ResultType        MCPResultType     `json:"resultType"`
-	SupportedVersions []string          `json:"supportedVersions"`
-	Capabilities      JSONObject        `json:"capabilities"`
-	ServerInfo        MCPImplementation `json:"serverInfo"`
-	Instructions      *string           `json:"instructions,omitempty"`
-	Meta              JSONObject        `json:"_meta,omitempty"`
+	ResultType        MCPResultType `json:"resultType"`
+	SupportedVersions []string      `json:"supportedVersions"`
+	Capabilities      JSONObject    `json:"capabilities"`
+	TTLMS             uint64        `json:"ttlMs"`
+	CacheScope        MCPCacheScope `json:"cacheScope"`
+	Instructions      *string       `json:"instructions,omitempty"`
+	Meta              JSONObject    `json:"_meta,omitempty"`
 }
 
 // MCPInputRequiredResult carries server-to-client requests for multi round-trip calls.
@@ -849,7 +830,7 @@ type MCPInputRequiredResult struct {
 	Meta          JSONObject    `json:"_meta,omitempty"`
 }
 
-// MCPUnsupportedProtocolVersionErrorData is the typed data payload for -32004.
+// MCPUnsupportedProtocolVersionErrorData is the typed data payload for -32022.
 type MCPUnsupportedProtocolVersionErrorData struct {
 	Requested string   `json:"requested"`
 	Supported []string `json:"supported"`

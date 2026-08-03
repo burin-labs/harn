@@ -10,7 +10,7 @@
 //!   per-process LRU with a TTL so repeated reads are free.
 //! - **Publisher**: `load_server_card_from_path` parses a local card
 //!   file for `harn serve mcp --card path/to/card.json`, which embeds
-//!   the card into the `initialize` response and exposes it as a static
+//!   the card in `server/discover` and exposes it as a static
 //!   resource at `well-known://mcp-card`.
 //!
 //! The card schema intentionally mirrors the MCP v2.1 draft rather than

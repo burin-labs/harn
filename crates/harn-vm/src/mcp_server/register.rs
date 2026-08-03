@@ -3,7 +3,6 @@ use std::collections::BTreeMap;
 
 use serde_json::Value as JsonValue;
 
-use crate::mcp_client_request::current_bus;
 use crate::mcp_progress::{current_context as current_progress_context, is_valid_progress_token};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -284,17 +283,15 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
 
     // mcp_elicit({message, requestedSchema}) -> {action, content?}
     //
-    // Send a structured-input prompt to the connected MCP client and
-    // await its reply. Only valid while a Harn-as-MCP-server tool
-    // handler is running (the run loop installs the elicitation bus
-    // for the lifetime of the connection).
+    // Return a stable input_required round and resolve the client response
+    // when the original handler is re-entered.
     //
     // The client may respond with one of:
     //   - {action: "accept", content: <validated against requestedSchema>}
     //   - {action: "decline"}
     //   - {action: "cancel"}
     //
-    // Spec: https://modelcontextprotocol.io/specification/2025-11-25/client/elicitation
+    // Spec: https://modelcontextprotocol.io/specification/2026-07-28/client/elicitation
     vm.register_async_capability_method(
         harn_builtin_meta::CapabilityId::Tools,
         "mcp_elicit",
@@ -320,20 +317,11 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
             })?;
             let requested_schema_json: JsonValue = crate::mcp::vm_value_to_serde(requested_schema);
 
-            let bus = current_bus().ok_or_else(|| {
-                VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-                    "mcp_elicit: no active MCP client connection — \
-                 mcp_elicit can only be called from within a tool/resource/prompt handler \
-                 served via `harn serve mcp`",
-                )))
-            })?;
-
-            bus.elicit(message, requested_schema_json).await
+            crate::mcp_elicit::elicit_form(message, requested_schema_json)
         },
     );
 
-    // Ask the connected MCP client for its roots via `roots/list`.
-    // Only valid while a Harn-as-MCP-server handler is running.
+    // Ask the MCP client for roots through a stable input_required round.
     vm.register_async_capability_method(
         harn_builtin_meta::CapabilityId::Tools,
         "mcp_client_roots",
@@ -360,7 +348,7 @@ pub fn register_mcp_server_builtins(vm: &mut Vm) {
     //     useful only when manually fanning out progress for nested work)
     //
     // Spec:
-    //   https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/progress
+    //   https://modelcontextprotocol.io/specification/2026-07-28/basic/utilities/progress
     vm.register_capability_method(
         harn_builtin_meta::CapabilityId::Tools,
         "mcp_report_progress",

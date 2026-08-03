@@ -3,13 +3,9 @@
 
 export const HARN_PROTOCOL_ARTIFACT_VERSION = "0.10.52"
 
-export const MCP_PROTOCOL_VERSION = "2025-11-25"
-export const MCP_STABLE_PROTOCOL_VERSION = "2025-11-25"
-export const MCP_DRAFT_PROTOCOL_VERSION = "DRAFT-2026-v1"
-export const MCP_LEGACY_2025_06_18_PROTOCOL_VERSION = "2025-06-18"
-export const MCP_FINAL_2026_PROTOCOL_VERSION = "2026-07-28"
+export const MCP_PROTOCOL_VERSION = "2026-07-28"
 export const MCP_JSON_SCHEMA_2020_12_DIALECT = "https://json-schema.org/draft/2020-12/schema"
-export const MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR = { code: -32004, message: "Unsupported protocol version" } as const
+export const MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR = { code: -32022, message: "Unsupported protocol version" } as const
 
 export const ACP_AGENT_METHODS = [
   "initialize",
@@ -338,15 +334,12 @@ export const A2A_TASK_EVENT_TYPES = [
 export type A2ATaskEventType = (typeof A2A_TASK_EVENT_TYPES)[number]
 
 export const MCP_PROTOCOL_VERSIONS = [
-  "DRAFT-2026-v1",
-  "2025-11-25",
-  "2025-06-18",
+  "2026-07-28",
 ] as const
 export type MCPProtocolVersion = (typeof MCP_PROTOCOL_VERSIONS)[number]
 
 export const MCP_METHODS = [
   "server/discover",
-  "initialize",
   "tools/list",
   "tools/call",
   "resources/list",
@@ -355,11 +348,12 @@ export const MCP_METHODS = [
   "prompts/list",
   "prompts/get",
   "completion/complete",
-  "logging/setLevel",
   "sampling/createMessage",
   "elicitation/create",
-  "notifications/initialized",
   "notifications/message",
+  "tasks/get",
+  "tasks/update",
+  "tasks/cancel",
 ] as const
 export type MCPMethod = (typeof MCP_METHODS)[number]
 
@@ -404,6 +398,7 @@ export type MCPCacheScope = (typeof MCP_CACHE_SCOPES)[number]
 export const MCP_RESULT_TYPES = [
   "complete",
   "input_required",
+  "task",
 ] as const
 export type MCPResultType = (typeof MCP_RESULT_TYPES)[number]
 
@@ -939,7 +934,8 @@ export interface MCPDiscoverResult {
   resultType: "complete"
   supportedVersions: (MCPProtocolVersion | string)[]
   capabilities: ACPObject
-  serverInfo: MCPImplementation
+  ttlMs: number
+  cacheScope: MCPCacheScope
   instructions?: string
   _meta?: ACPObject
 }

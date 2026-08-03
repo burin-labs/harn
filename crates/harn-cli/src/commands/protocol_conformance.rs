@@ -442,10 +442,10 @@ mod tests {
             r#"{
               "name": "sample",
               "protocol": "mcp",
-              "schema": "schemas/mcp-2025-11-25.schema.json",
+              "schema": "schemas/mcp-2026-07-28.schema.json",
               "matrix": {
-                "version": "2025-11-25",
-                "family": "initialize",
+                "version": "2026-07-28",
+                "family": "server_discover",
                 "case": "success",
                 "source": {
                   "kind": "hand_authored",
@@ -465,10 +465,10 @@ mod tests {
             r#"{
               "name": "sample",
               "protocol": "mcp",
-              "schema": "schemas/mcp-2025-11-25.schema.json",
+              "schema": "schemas/mcp-2026-07-28.schema.json",
               "matrix": {
-                "version": "2025-11-25",
-                "family": "initialize",
+                "version": "2026-07-28",
+                "family": "server_discover",
                 "case": "success",
                 "source": {"kind": "adapter_generated"}
               },

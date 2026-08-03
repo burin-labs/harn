@@ -4,8 +4,7 @@ pub(crate) async fn mcp_connect_stdio_impl(
     command: &str,
     args: &[String],
     env: &BTreeMap<String, String>,
-    protocol_mode: McpProtocolMode,
-    protocol_version: String,
+    requested_protocol_version: String,
 ) -> Result<VmMcpClientHandle, VmError> {
     let mut cmd = tokio::process::Command::new(command);
     cmd.args(args)
@@ -15,41 +14,45 @@ pub(crate) async fn mcp_connect_stdio_impl(
         .envs(env);
     cmd.kill_on_drop(true);
 
-    let mut child = cmd.spawn().map_err(|e| {
+    let transport = rmcp::transport::TokioChildProcess::new(cmd).map_err(|e| {
         VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
             "mcp_connect: failed to spawn '{command}': {e}"
         ))))
     })?;
-
-    let stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| VmError::Runtime("mcp_connect: failed to open stdin".into()))?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| VmError::Runtime("mcp_connect: failed to open stdout".into()))?;
+    let requested_version = sdk_protocol_version(&requested_protocol_version);
+    let handler = HarnSdkClientHandler::new(command, requested_version.clone());
+    let mut preferred_versions = vec![requested_version];
+    for version in rmcp::model::ProtocolVersion::KNOWN_VERSIONS.iter().rev() {
+        if version.as_str() != requested_protocol_version {
+            preferred_versions.push(version.clone());
+        }
+    }
+    let lifecycle = rmcp::service::ClientLifecycleMode::Auto {
+        preferred_versions,
+        legacy_version: Some(rmcp::model::ProtocolVersion::V_2025_11_25),
+    };
+    use rmcp::service::ClientServiceExt;
+    let running = handler
+        .clone()
+        .serve_with_lifecycle(transport, lifecycle)
+        .await
+        .map_err(|error| VmError::Runtime(format!("MCP SDK initialization failed: {error}")))?;
+    let peer_info = running
+        .peer_info()
+        .ok_or_else(|| VmError::Runtime("MCP SDK did not retain negotiated server info".into()))?;
+    let discovery_result = serde_json::to_value(peer_info.as_ref())
+        .map_err(|error| VmError::Runtime(format!("MCP SDK server info error: {error}")))?;
 
     let handle = VmMcpClientHandle {
         name: command.to_string(),
-        inner: Arc::new(Mutex::new(Some(McpClientInner::Stdio(
-            StdioMcpClientInner {
-                child,
-                stdin,
-                reader: BufReader::new(stdout),
-                next_id: 1,
-                protocol_mode,
-                protocol_version,
-                response_deadline: MCP_TIMEOUT,
-                fixtures: None,
-            },
-        )))),
+        inner: Arc::new(Mutex::new(Some(McpClientInner::Sdk(SdkMcpClientInner {
+            running,
+            handler,
+        })))),
         last_roots: Arc::new(Mutex::new(Vec::new())),
-        initialize_result: Arc::new(Mutex::new(None)),
+        discovery_result: Arc::new(Mutex::new(Some(discovery_result))),
         cache_hints: Arc::new(Mutex::new(BTreeMap::new())),
     };
-
-    initialize_client(&handle).await?;
     Ok(handle)
 }
 
@@ -61,10 +64,12 @@ pub(crate) async fn mcp_connect_http_impl(
     let client = crate::egress::install_ssrf_guard(builder)
         .build()
         .map_err(|e| VmError::Runtime(format!("MCP HTTP client error: {e}")))?;
-    let options = resolve_connect_protocol_options(
-        spec.protocol_mode.as_deref(),
-        spec.protocol_version.as_deref(),
-    )?;
+    let options = resolve_connect_protocol_options(spec.protocol_version.as_deref())?;
+    if options.protocol_version != PROTOCOL_VERSION {
+        return Err(VmError::Runtime(format!(
+            "mcp_connect: HTTP transport requires protocol_version {PROTOCOL_VERSION:?}; older versions are negotiated only by the SDK-managed stdio transport"
+        )));
+    }
     let resolved_auth = resolve_http_auth_token_source(spec).await;
 
     let handle = VmMcpClientHandle {
@@ -75,21 +80,18 @@ pub(crate) async fn mcp_connect_http_impl(
             auth_token: resolved_auth.token,
             auth_token_source: resolved_auth.source,
             token_exchange: spec.token_exchange.clone().map(Arc::new),
-            protocol_mode: options.protocol_mode,
             protocol_version: options.protocol_version,
-            session_id: None,
             next_id: 1,
             proxy_server_name: spec.proxy_server_name.clone(),
-            get_stream_task: None,
             tool_headers: BTreeMap::new(),
             fixtures: None,
         })))),
         last_roots: Arc::new(Mutex::new(Vec::new())),
-        initialize_result: Arc::new(Mutex::new(None)),
+        discovery_result: Arc::new(Mutex::new(None)),
         cache_hints: Arc::new(Mutex::new(BTreeMap::new())),
     };
 
-    initialize_client(&handle).await?;
+    discover_server(&handle).await?;
     Ok(handle)
 }
 
@@ -132,34 +134,12 @@ where
     }
 }
 
-pub(crate) async fn initialize_client(handle: &VmMcpClientHandle) -> Result<(), VmError> {
-    if handle.protocol_mode().await? == McpProtocolMode::Modern {
-        let discover = handle
-            .call_raw("server/discover", serde_json::json!({}))
-            .await?;
-        if is_method_not_found_response(&discover) {
-            handle.switch_to_legacy_protocol().await?;
-            return initialize_legacy_client(handle).await;
-        }
-        let discover_result = parse_jsonrpc_result(discover)?;
-        *handle.initialize_result.lock().await = Some(discover_result);
-        return Ok(());
-    }
-
-    initialize_legacy_client(handle).await
-}
-
-pub(crate) async fn initialize_legacy_client(handle: &VmMcpClientHandle) -> Result<(), VmError> {
-    let protocol_version = handle.protocol_version().await?;
-    let initialize_result = handle
-        .call("initialize", legacy_initialize_params(&protocol_version))
+pub(crate) async fn discover_server(handle: &VmMcpClientHandle) -> Result<(), VmError> {
+    let discover = handle
+        .call_raw("server/discover", serde_json::json!({}))
         .await?;
-    *handle.initialize_result.lock().await = Some(initialize_result);
-
-    handle
-        .notify("notifications/initialized", serde_json::json!({}))
-        .await?;
-
+    let discover_result = parse_jsonrpc_result(discover)?;
+    *handle.discovery_result.lock().await = Some(discover_result);
     Ok(())
 }
 
@@ -168,15 +148,11 @@ pub async fn connect_mcp_server_from_spec(
 ) -> Result<VmMcpClientHandle, VmError> {
     let mut handle = match spec.transport {
         McpTransport::Stdio => {
-            let options = resolve_connect_protocol_options(
-                spec.protocol_mode.as_deref(),
-                spec.protocol_version.as_deref(),
-            )?;
+            let options = resolve_connect_protocol_options(spec.protocol_version.as_deref())?;
             mcp_connect_stdio_impl(
                 &spec.command,
                 &spec.args,
                 &spec.env,
-                options.protocol_mode,
                 options.protocol_version,
             )
             .await?

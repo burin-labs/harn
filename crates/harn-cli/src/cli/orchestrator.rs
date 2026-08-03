@@ -171,16 +171,6 @@ pub(crate) struct OrchestratorServeArgs {
     /// Streamable HTTP endpoint path for the embedded MCP server.
     #[arg(long = "mcp-path", default_value = "/mcp", value_name = "PATH")]
     pub mcp_path: String,
-    /// Legacy SSE endpoint path for older MCP clients.
-    #[arg(long = "mcp-sse-path", default_value = "/sse", value_name = "PATH")]
-    pub mcp_sse_path: String,
-    /// Legacy SSE POST endpoint path for older MCP clients.
-    #[arg(
-        long = "mcp-messages-path",
-        default_value = "/messages",
-        value_name = "PATH"
-    )]
-    pub mcp_messages_path: String,
     /// Watch the manifest file and trigger reloads on changes.
     #[arg(long)]
     pub watch: bool,

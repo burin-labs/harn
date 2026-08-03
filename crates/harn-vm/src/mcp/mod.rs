@@ -8,11 +8,7 @@ pub(crate) use std::path::{Path, PathBuf};
 pub(crate) use std::sync::Arc;
 
 pub(crate) use base64::Engine;
-pub(crate) use futures::StreamExt;
-pub(crate) use reqwest_eventsource::{Event as SseEvent, EventSource};
 pub(crate) use serde::Deserialize;
-pub(crate) use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-pub(crate) use tokio::process::{Child, ChildStdin, ChildStdout};
 pub(crate) use tokio::sync::Mutex;
 
 pub(crate) use crate::stdlib::json_to_vm_value;
@@ -20,11 +16,10 @@ pub(crate) use crate::value::{VmError, VmValue};
 pub(crate) use crate::vm::Vm;
 
 pub(crate) use crate::mcp_protocol::{
-    cache_hints_to_json, rc_name_header_value, McpCacheHint, McpProtocolMode,
-    DRAFT_PROTOCOL_VERSION, LEGACY_2025_06_18_PROTOCOL_VERSION, MCP_SESSION_HEADER_LEGACY,
-    PROTOCOL_VERSION, RC_HEADER_METHOD, RC_HEADER_NAME, RC_HEADER_PROTOCOL_VERSION,
-    RC_META_KEY_CLIENT_CAPABILITIES, RC_META_KEY_CLIENT_INFO, RC_META_KEY_PROTOCOL_VERSION,
-    RESULT_TYPE_INPUT_REQUIRED, UNSUPPORTED_PROTOCOL_VERSION_CODE,
+    cache_hints_to_json, standard_name_header_value, McpCacheHint, MCP_HEADER_METHOD,
+    MCP_HEADER_NAME, MCP_HEADER_PROTOCOL_VERSION, MCP_META_KEY_CLIENT_CAPABILITIES,
+    MCP_META_KEY_CLIENT_INFO, MCP_META_KEY_PROTOCOL_VERSION, PROTOCOL_VERSION,
+    RESULT_TYPE_INPUT_REQUIRED, TASKS_EXTENSION_ID,
 };
 
 mod builtins;
@@ -32,6 +27,7 @@ mod connect;
 mod notifications;
 mod protocol;
 mod roots;
+mod sdk;
 mod transport;
 
 pub use builtins::*;
@@ -39,11 +35,12 @@ pub use connect::*;
 pub(crate) use notifications::*;
 pub(crate) use protocol::*;
 pub(crate) use roots::*;
+pub(crate) use sdk::*;
 pub(crate) use transport::*;
 
 const X_MCP_HEADER: &str = "x-mcp-header";
 
-const MCP_INPUT_REQUIRED_MAX_ROUNDS: usize = 8;
+const MCP_INPUT_REQUIRED_MAX_ROUNDS: usize = rmcp::model::DEFAULT_MRTR_MAX_ROUNDS;
 
 /// Default timeout for MCP requests (60 seconds).
 ///
@@ -83,8 +80,6 @@ pub struct McpServerSpec {
     #[serde(default)]
     pub protocol_version: Option<String>,
     #[serde(default)]
-    pub protocol_mode: Option<String>,
-    #[serde(default)]
     pub proxy_server_name: Option<String>,
 }
 
@@ -94,23 +89,8 @@ fn default_transport() -> McpTransport {
 
 /// Internal state for an MCP client connection.
 pub(crate) enum McpClientInner {
-    Stdio(StdioMcpClientInner),
+    Sdk(SdkMcpClientInner),
     Http(HttpMcpClientInner),
-}
-
-pub(crate) struct StdioMcpClientInner {
-    child: Child,
-    stdin: ChildStdin,
-    reader: BufReader<ChildStdout>,
-    next_id: u64,
-    protocol_mode: McpProtocolMode,
-    protocol_version: String,
-    /// Cumulative budget for one request's response wait; defaults to
-    /// [`MCP_TIMEOUT`]. A field (rather than a bare use of the constant)
-    /// keeps the deadline injectable so tests can prove the cumulative bound
-    /// without waiting the full production budget (harn#4390).
-    response_deadline: std::time::Duration,
-    fixtures: Option<Arc<crate::harness::CapabilityFixtureState>>,
 }
 
 pub(crate) struct HttpMcpClientInner {
@@ -119,12 +99,9 @@ pub(crate) struct HttpMcpClientInner {
     auth_token: Option<String>,
     auth_token_source: HttpAuthTokenSource,
     token_exchange: Option<Arc<crate::mcp_oauth::McpTokenExchangeConfig>>,
-    protocol_mode: McpProtocolMode,
     protocol_version: String,
-    session_id: Option<String>,
     next_id: u64,
     proxy_server_name: Option<String>,
-    get_stream_task: Option<tokio::task::JoinHandle<()>>,
     tool_headers: BTreeMap<String, Vec<McpToolHeader>>,
     fixtures: Option<Arc<crate::harness::CapabilityFixtureState>>,
 }
@@ -172,33 +149,13 @@ impl McpRoot {
     }
 }
 
-impl HttpMcpClientInner {
-    fn abort_get_stream(&mut self) {
-        if let Some(task) = self.get_stream_task.take() {
-            task.abort();
-        }
-    }
-}
-
-impl Drop for StdioMcpClientInner {
-    fn drop(&mut self) {
-        let _ = self.child.start_kill();
-    }
-}
-
-impl Drop for HttpMcpClientInner {
-    fn drop(&mut self) {
-        self.abort_get_stream();
-    }
-}
-
 /// Handle to an MCP client connection, stored in VmValue.
 #[derive(Clone)]
 pub struct VmMcpClientHandle {
     pub name: String,
     inner: Arc<Mutex<Option<McpClientInner>>>,
     last_roots: Arc<Mutex<Vec<McpRoot>>>,
-    pub(crate) initialize_result: Arc<Mutex<Option<serde_json::Value>>>,
+    pub(crate) discovery_result: Arc<Mutex<Option<serde_json::Value>>>,
     cache_hints: Arc<Mutex<BTreeMap<String, McpCacheHint>>>,
 }
 
@@ -215,73 +172,47 @@ impl VmMcpClientHandle {
     ) {
         let mut guard = self.inner.lock().await;
         match guard.as_mut() {
-            Some(McpClientInner::Stdio(inner)) => inner.fixtures = Some(fixtures),
+            Some(McpClientInner::Sdk(inner)) => inner.handler.set_fixtures(fixtures).await,
             Some(McpClientInner::Http(inner)) => {
-                inner.abort_get_stream();
                 inner.fixtures = Some(fixtures);
-                ensure_http_get_stream(inner, &self.name);
             }
             None => {}
         }
     }
 
-    async fn protocol_mode(&self) -> Result<McpProtocolMode, VmError> {
+    async fn capability_fixtures(&self) -> Option<Arc<crate::harness::CapabilityFixtureState>> {
         let guard = self.inner.lock().await;
-        let inner = guard
-            .as_ref()
-            .ok_or_else(|| VmError::Runtime("MCP client is disconnected".into()))?;
-        Ok(match inner {
-            McpClientInner::Stdio(inner) => inner.protocol_mode,
-            McpClientInner::Http(inner) => inner.protocol_mode,
-        })
-    }
-
-    async fn protocol_version(&self) -> Result<String, VmError> {
-        let guard = self.inner.lock().await;
-        let inner = guard
-            .as_ref()
-            .ok_or_else(|| VmError::Runtime("MCP client is disconnected".into()))?;
-        Ok(match inner {
-            McpClientInner::Stdio(inner) => inner.protocol_version.clone(),
-            McpClientInner::Http(inner) => inner.protocol_version.clone(),
-        })
-    }
-
-    async fn switch_to_legacy_protocol(&self) -> Result<(), VmError> {
-        let mut guard = self.inner.lock().await;
-        let inner = guard
-            .as_mut()
-            .ok_or_else(|| VmError::Runtime("MCP client is disconnected".into()))?;
-        match inner {
-            McpClientInner::Stdio(inner) => {
-                inner.protocol_mode = McpProtocolMode::Legacy;
-                inner.protocol_version = PROTOCOL_VERSION.to_string();
-            }
-            McpClientInner::Http(inner) => {
-                inner.protocol_mode = McpProtocolMode::Legacy;
-                inner.protocol_version = PROTOCOL_VERSION.to_string();
-            }
-        }
-        Ok(())
-    }
-
-    /// Shorten the stdio cumulative response deadline so a test can prove
-    /// the end-to-end bound without waiting the full production budget.
-    #[cfg(test)]
-    pub(crate) async fn set_stdio_response_deadline_for_test(&self, deadline: std::time::Duration) {
-        let mut guard = self.inner.lock().await;
-        if let Some(McpClientInner::Stdio(inner)) = guard.as_mut() {
-            inner.response_deadline = deadline;
+        match guard.as_ref() {
+            Some(McpClientInner::Sdk(inner)) => inner.handler.fixtures().await,
+            Some(McpClientInner::Http(inner)) => inner.fixtures.clone(),
+            None => None,
         }
     }
 
-    pub(crate) async fn call(
+    pub async fn call(
         &self,
         method: &str,
-        params: serde_json::Value,
+        mut params: serde_json::Value,
     ) -> Result<serde_json::Value, VmError> {
-        let msg = self.call_raw(method, params).await?;
-        parse_jsonrpc_result(msg)
+        for _ in 0..MCP_INPUT_REQUIRED_MAX_ROUNDS {
+            let result = parse_jsonrpc_result(self.call_raw(method, params.clone()).await?)?;
+            if !matches!(method, "tools/call" | "prompts/get" | "resources/read")
+                || result.get("resultType").and_then(serde_json::Value::as_str)
+                    != Some(RESULT_TYPE_INPUT_REQUIRED)
+            {
+                return Ok(result);
+            }
+            let Some(input_round) = builtins::resolve_input_required_result(self, &result).await?
+            else {
+                return Err(VmError::Runtime(format!(
+                    "MCP {method} returned input_required without inputRequests or requestState"
+                )));
+            };
+            params = builtins::with_input_round(params, input_round)?;
+        }
+        Err(VmError::Runtime(format!(
+            "MCP {method} still required input after {MCP_INPUT_REQUIRED_MAX_ROUNDS} rounds"
+        )))
     }
 
     async fn call_raw(
@@ -289,7 +220,7 @@ impl VmMcpClientHandle {
         method: &str,
         params: serde_json::Value,
     ) -> Result<serde_json::Value, VmError> {
-        if method != "initialize" && method != "server/discover" {
+        if method != "server/discover" {
             self.notify_roots_list_changed_if_needed().await?;
         }
         let record_request = serde_json::json!({
@@ -304,7 +235,7 @@ impl VmMcpClientHandle {
             .ok_or_else(|| VmError::Runtime("MCP client is disconnected".into()))?;
 
         let result = match inner {
-            McpClientInner::Stdio(inner) => stdio_call_raw(inner, &self.name, method, params).await,
+            McpClientInner::Sdk(inner) => sdk_call_raw(inner, method, params).await,
             McpClientInner::Http(inner) => http_call_raw(inner, &self.name, method, params).await,
         };
         let latency_ms = crate::clock_mock::instant_now()
@@ -337,7 +268,7 @@ impl VmMcpClientHandle {
             .ok_or_else(|| VmError::Runtime("MCP client is disconnected".into()))?;
 
         match inner {
-            McpClientInner::Stdio(inner) => stdio_notify(inner, method, params).await,
+            McpClientInner::Sdk(inner) => sdk_notify(inner, method, params).await,
             McpClientInner::Http(inner) => http_notify(inner, &self.name, method, params).await,
         }
     }
@@ -346,21 +277,16 @@ impl VmMcpClientHandle {
         let mut guard = self.inner.lock().await;
         if let Some(inner) = guard.take() {
             match inner {
-                McpClientInner::Stdio(mut inner) => {
-                    let _ = inner.child.kill().await;
+                McpClientInner::Sdk(mut inner) => {
+                    let _ = inner.running.close_with_timeout(MCP_TIMEOUT).await;
                 }
-                McpClientInner::Http(mut inner) => {
-                    inner.abort_get_stream();
-                }
+                McpClientInner::Http(_) => {}
             }
         }
         Ok(())
     }
 
     async fn notify_roots_list_changed_if_needed(&self) -> Result<(), VmError> {
-        if self.protocol_mode().await? == McpProtocolMode::Modern {
-            return Ok(());
-        }
         let roots = current_mcp_roots();
         let mut last_roots = self.last_roots.lock().await;
         if *last_roots == roots {
@@ -417,20 +343,7 @@ impl VmMcpClientHandle {
 }
 
 #[derive(Clone)]
-pub(crate) struct HttpStreamConfig {
-    client: reqwest::Client,
-    url: String,
-    auth_token: Option<String>,
-    protocol_mode: McpProtocolMode,
-    protocol_version: String,
-    session_id: Option<String>,
-    proxy_server_name: Option<String>,
-    server_name: String,
-    fixtures: Option<Arc<crate::harness::CapabilityFixtureState>>,
-}
-
 pub(crate) struct McpConnectOptions {
-    protocol_mode: McpProtocolMode,
     protocol_version: String,
 }
 
@@ -522,6 +435,3 @@ pub(crate) struct McpInputRound {
 
 #[cfg(test)]
 mod tests;
-
-#[cfg(test)]
-mod tests_stdio_deadline;

@@ -50,16 +50,6 @@ pub(super) fn generate_python_for_version(artifact_version: &str) -> String {
         ("ACP_PROMPT_ERROR_DATA_SCHEMA", ACP_PROMPT_ERROR_DATA_SCHEMA),
         ("A2A_PROTOCOL_VERSION", A2A_PROTOCOL_VERSION),
         ("MCP_PROTOCOL_VERSION", MCP_PROTOCOL_VERSION),
-        ("MCP_STABLE_PROTOCOL_VERSION", MCP_PROTOCOL_VERSION),
-        ("MCP_DRAFT_PROTOCOL_VERSION", MCP_DRAFT_PROTOCOL_VERSION),
-        (
-            "MCP_LEGACY_2025_06_18_PROTOCOL_VERSION",
-            MCP_LEGACY_2025_06_18_PROTOCOL_VERSION,
-        ),
-        (
-            "MCP_FINAL_2026_PROTOCOL_VERSION",
-            MCP_FINAL_2026_PROTOCOL_VERSION,
-        ),
         (
             "MCP_JSON_SCHEMA_2020_12_DIALECT",
             MCP_JSON_SCHEMA_2020_12_DIALECT,
@@ -771,7 +761,8 @@ class MCPDiscoverResult(_HarnDataclass):
     resultType: str
     supportedVersions: List[str]
     capabilities: JsonObject
-    serverInfo: MCPImplementation
+    ttlMs: int
+    cacheScope: str
     instructions: Optional[str] = None
     _meta: Optional[JsonObject] = None
 
@@ -842,10 +833,6 @@ pub(super) fn python_public_names() -> Vec<String> {
         "ACP_PROMPT_ERROR_DATA_SCHEMA",
         "A2A_PROTOCOL_VERSION",
         "MCP_PROTOCOL_VERSION",
-        "MCP_STABLE_PROTOCOL_VERSION",
-        "MCP_DRAFT_PROTOCOL_VERSION",
-        "MCP_LEGACY_2025_06_18_PROTOCOL_VERSION",
-        "MCP_FINAL_2026_PROTOCOL_VERSION",
         "MCP_JSON_SCHEMA_2020_12_DIALECT",
         "MCP_INPUT_REQUIRED_RESULT_TYPE",
         "MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE",

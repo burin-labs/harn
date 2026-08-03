@@ -59,20 +59,14 @@ Example prompts:
 
 HTTP mode exposes:
 
-- Streamable HTTP POST, GET, and DELETE at `--path` (default `/mcp`)
-- Legacy SSE GET at `--sse-path` (default `/sse`), marked with
-  `Deprecation: true`
-- Legacy SSE POST at `--messages-path` (default `/messages`), marked with
-  `Deprecation: true`
+- Streamable HTTP POST at `--path` (default `/mcp`)
 - Unofficial MCP endpoint discovery at `/.well-known/mcp.json`
 
-Streamable HTTP clients initialize with `POST /mcp`. The initialize response
-includes an `Mcp-Session-Id` header, and clients must echo that header on later
-POST, GET, and DELETE requests. Requests normally return one
-`application/json` JSON-RPC response; clients that only accept
-`text/event-stream` receive an SSE stream containing `message` events. `GET
-/mcp` opens the server-to-client SSE stream for notifications, and `DELETE
-/mcp` terminates the session.
+Clients call `server/discover` with `POST /mcp`, carry self-contained metadata
+and standard routing headers on every request, and do not use sessions.
+Requests normally return one `application/json` JSON-RPC response; clients
+that only accept `text/event-stream` receive an SSE stream containing
+`message` events.
 
 Example:
 
@@ -150,35 +144,21 @@ second answers "which authorization server protects this resource?" Keep both
 responses aligned with the public URL and resource value clients use during
 OAuth.
 
-`HARN_ORCHESTRATOR_API_KEYS` remains available as a legacy compatibility mode.
-Set it to a comma-separated key list to require API keys.
+Set `HARN_ORCHESTRATOR_API_KEYS` to a comma-separated key list to require API
+keys.
 
 HTTP clients can authenticate with either:
 
 - `Authorization: Bearer <key>`
 - `x-api-key: <key>`
 
-Legacy clients that do not yet send an Authorization header can authenticate
-during `initialize` using a deprecated Harn extension field:
-
-```json
-{
-  "capabilities": {
-    "harn": {
-      "apiKey": "test-key"
-    }
-  }
-}
-```
-
-The server prints a warning when this `apiKey` initialize extension is used. If
-neither OAuth mode nor `HARN_ORCHESTRATOR_API_KEYS` is configured, the MCP
+If neither OAuth mode nor `HARN_ORCHESTRATOR_API_KEYS` is configured, the MCP
 server runs without auth.
 
 ## Tool catalog
 
 MCP list endpoints use cursor pagination. `tools/list`, `resources/list`,
-`resources/templates/list`, `prompts/list`, and `tasks/list` return up to 100
+`resources/templates/list`, and `prompts/list` return up to 100
 entries by default and include `nextCursor` when more entries are available.
 Set `HARN_MCP_LIST_PAGE_SIZE` to a positive integer to change the per-page
 limit for large local catalogs.
@@ -313,13 +293,9 @@ after discovering concrete examples:
 completion includes static trigger topics and discovered agent transcript
 topics; event and DLQ completion use recorded trigger and pending DLQ ids.
 
-`harn://topic/*` resources expose recent EventLog entries for subscribable
-orchestrator topics. `resources/subscribe` starts a live EventLog watcher for
-the resource URI and the server sends `notifications/resources/updated` when a
-new record is appended. `resources/unsubscribe` stops delivery for that client
-connection. Streamable HTTP clients receive these notifications over `GET
-/mcp`; stdio and legacy SSE clients receive the same JSON-RPC notification on
-their existing server-to-client channel.
+`harn://topic/*` resources expose recent EventLog entries for orchestrator
+topics. Harn does not advertise `subscriptions/listen`; requests for that
+optional notification stream return an explicit unsupported-feature error.
 
 ## Prompts
 
@@ -347,56 +323,50 @@ Review this:
 `prompts/get` renders the template with the supplied `arguments` object.
 `completion/complete` uses the optional `suggestions`/`completions` list on
 front-matter arguments when a client asks for prompt argument completions.
-The server advertises `tools.listChanged`, `resources.listChanged`, and
-`prompts.listChanged`. It emits the corresponding `notifications/*/list_changed`
-messages when watched manifest, prompt, lockfile, or package metadata changes.
+The server reads the current manifest, prompt, lockfile, and package metadata
+when clients request a catalog page.
 
 ## Protocol support
 
-`harn mcp serve` negotiates MCP protocol version `2025-11-25`. It is a
-control-plane server for Harn orchestration state, so it supports tools,
-resources, prompts, completions, logging, MCP tasks, cancellation, progress,
-and streamable HTTP sessions. It does not expose roots. The
-orchestrator-mode catalog does not currently issue
-`sampling/createMessage` against connected clients (Harn's outbound MCP
-clients accept inbound sampling — see the
+`harn mcp serve` implements stable MCP `2026-07-28`. It is a control-plane
+server for Harn orchestration state, so it supports tools, resources, prompts,
+completions, MCP tasks, cancellation, and progress. It does not expose roots.
+The orchestrator-mode catalog does not currently embed sampling input requests
+(Harn's MCP clients resolve sampling input — see the
 [client docs](mcp-and-acp.md#mcp-client-support-matrix)).
 
 | Method or feature | Status |
 |---|---|
-| `initialize`, `notifications/initialized`, `ping` | Supported |
-| `logging/setLevel`, `notifications/message` | Supported; see [Logging notifications](#logging-notifications) |
+| `server/discover`, `ping` | Supported |
 | `tools/list`, `tools/call` | Supported for the Harn tool catalog above |
 | `notifications/progress`, `notifications/cancelled` | Supported for cancellable work |
 | `resources/list`, `resources/read` | Supported for manifest, EventLog topic, event, and DLQ resources |
 | `resources/templates/list` | Supported for EventLog topic, trigger event, and DLQ URI patterns |
-| `resources/subscribe`, `resources/unsubscribe` | Supported for EventLog topic resources; updates emit `notifications/resources/updated` |
+| `subscriptions/listen` | Not advertised; rejected with an explicit unsupported-feature error |
 | `prompts/list` | Supported for `.harn.prompt` files in the project and prompt-library packages |
 | `prompts/get` | Supported; renders prompt templates with supplied arguments |
 | `completion/complete` | Supported for prompt arguments with front-matter suggestions and orchestrator resource template arguments |
-| `elicitation/create` | Supported on script-driven `harn run --serve mcp` surfaces via the `mcp_elicit(...)` builtin (see [Elicitation](#elicitation)). The orchestrator-mode tool catalog does not currently issue elicitations. |
-| `roots/list` | Supported outbound from script-driven `harn serve mcp` surfaces via the `harness.tools.mcp_client_roots(...)` builtin |
-| `sampling/createMessage` | Server-initiated sampling against the connected client is not emitted by the orchestrator catalog. Harn-as-MCP-client *does* accept inbound `sampling/createMessage` (routed to `llm_call` via the host bridge) — see the [client matrix](mcp-and-acp.md#mcp-client-support-matrix). |
-| `tasks/get`, `tasks/result`, `tasks/list`, `tasks/cancel` | Supported for task-augmented orchestrator tool calls |
-| `tools/call` with `params.task` | Supported for tools that advertise optional task execution; rejected with `-32602` for tools that advertise `execution.taskSupport="forbidden"` |
+| Embedded `elicitation/create` input | Script-driven servers return it in an `input_required` result when a handler calls `mcp_elicit(...)` (see [Elicitation](#elicitation)) |
+| Embedded `roots/list` input | Script-driven servers return it in an `input_required` result when a handler calls `harness.tools.mcp_client_roots()` |
+| Embedded `sampling/createMessage` input | Resolved when Harn is the client; not currently emitted by Harn's server catalogs |
+| `tasks/get`, `tasks/update`, `tasks/cancel` | Supported for asynchronous orchestrator tool calls through the stable tasks extension |
+| `tools/call` task results | Asynchronous orchestrator tools return `resultType = "task"`; other tools return inline results |
 
 Explicitly unsupported methods return a JSON-RPC error with code `-32601` and
-`error.data.type = "mcp.unsupportedFeature"`. Tool calls that request
-task-augmented execution for a non-taskable tool return `-32602` because the
-request conflicts with the tool's advertised execution metadata.
+`error.data.type = "mcp.unsupportedFeature"`. Task polling, input responses,
+and cancellation use the stable tasks extension.
 
-`roots/list`, `sampling/createMessage`, and `elicitation/create` are client-bound
-MCP requests. Script-driven Harn handlers can initiate `roots/list` and
-`elicitation/create`; when a client sends client-bound methods to a Harn MCP
-server endpoint, Harn returns an explicit `mcp.unsupportedFeature` JSON-RPC
-error instead of treating the request as an ordinary unknown method.
+`roots/list`, `sampling/createMessage`, and `elicitation/create` are embedded
+input requests in stable multi-round-trip results. They are not top-level calls
+to an MCP server endpoint. Harn returns an explicit `mcp.unsupportedFeature`
+error when a client sends one as a top-level server request.
 
 ## Elicitation
 
 Script-driven MCP servers (those built with `harness.tools.mcp_tools(...)` /
 `harness.tools.mcp_resource(...)` / `harness.tools.mcp_prompt(...)` and started with `harn run --serve mcp`
-or `harn serve mcp`) can prompt the connected client for structured user
-input mid-tool-call via the `mcp_elicit(...)` builtin:
+or `harn serve mcp`) can request structured user input during a handler with
+the `mcp_elicit(...)` builtin:
 
 ```harn
 const answer = mcp_elicit({
@@ -416,30 +386,35 @@ const answer = mcp_elicit({
 //   { action: "cancel" }
 ```
 
-The builtin returns the canonical `{action, content?}` envelope from the
-[MCP elicitation spec](https://modelcontextprotocol.io/specification/2025-11-25/client/elicitation).
+On the first pass, Harn returns `resultType = "input_required"` with an embedded
+form-mode `elicitation/create` request. The client collects an answer and
+retries the original operation with `inputResponses` and Harn's opaque
+`requestState`. Harn re-enters the handler, and the builtin returns the
+canonical `{action, content?}` envelope from the
+[MCP elicitation spec](https://modelcontextprotocol.io/specification/2026-07-28/client/elicitation).
 On `accept`, `content` is validated against `requestedSchema` before
 returning so scripts can rely on its shape. On `decline` / `cancel`,
 `content` is omitted.
 
-`mcp_elicit(...)` is only valid while a client connection is active. If
-called outside a tool / resource / prompt handler — e.g. at pipeline
+`mcp_elicit(...)` is only valid while Harn is handling an MCP tool, resource,
+or prompt request. If called at pipeline
 top-level — it raises a structured error rather than hanging.
 
 ## Client roots
 
-Script-driven MCP servers can ask the connected client for its roots:
+Script-driven MCP servers can ask the client for its roots:
 
 ```harn
 const roots = harness.tools.mcp_client_roots()
 ```
 
-`harness.tools.mcp_client_roots()` is only valid while a client connection is active and
-returns the client's `roots/list` result as a list of root objects.
+Like elicitation, this uses an `input_required` result and a retry of the
+original operation. The builtin is only valid inside a served handler and
+returns the resolved `roots/list` result as a list of root objects.
 
 When Harn is on the *client* side of an MCP connection (`harness.tools.mcp_connect(...)`
-or `harness.tools.mcp_call(...)`) and a remote server sends an `elicitation/create`
-request, Harn dispatches it to the embedder via the `HostCallBridge`
+or `harness.tools.mcp_call(...)`) and a stable server embeds an
+`elicitation/create` input request, Harn dispatches it to the embedder via the `HostCallBridge`
 (`capability="mcp"`, `operation="elicit"`). If no host bridge is wired
 up, Harn responds with `{ action: "decline" }` so the server can fall
 back to a sensible default rather than blocking forever.
@@ -483,7 +458,7 @@ milestones (`loading runtime`, `preparing event`, `firing trigger`,
 `trigger complete`) so MCP clients can render meaningful progress for
 long trigger fan-outs without any user-side wiring.
 
-[mcp-progress]: https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/progress
+[mcp-progress]: https://modelcontextprotocol.io/specification/2026-07-28/basic/utilities/progress
 
 ## Observability
 
@@ -502,34 +477,3 @@ calling MCP client.
 `harn.secret_scan` additionally appends `audit.secret_scan` records with only
 redacted findings plus stable fingerprints so future trust-graph consumers can
 reason about scan hygiene without storing raw secret material.
-
-## Logging notifications
-
-The server advertises the `logging` capability and forwards Harn's structured
-audit and observability streams as MCP `notifications/message` envelopes. Each
-notification carries `level`, `logger`, and `data` fields per the
-[MCP logging spec](https://modelcontextprotocol.io/specification/2025-11-25/server/utilities/logging).
-The `data` payload is the raw event-log entry: `event_id`, `kind`,
-`occurred_at_ms`, `headers`, and `payload`.
-
-`logging/setLevel` updates the per-session minimum severity. Subsequent
-notifications below the requested level are dropped before they hit the wire;
-the default is `info`. Levels follow RFC 5424 ordering: `debug`, `info`,
-`notice`, `warning`, `error`, `critical`, `alert`, `emergency`. The server
-returns `-32602` for an unknown or missing level.
-
-The streams the orchestrator currently surfaces:
-
-| Logger | Source topic | Default level |
-|---|---|---|
-| `harn.audit.secret_scan` | `audit.secret_scan` | `notice` |
-| `harn.audit.signature_verify` | `audit.signature_verify` | `notice` |
-| `harn.connectors.egress.audit` | `connectors.egress.audit` | `notice` |
-| `harn.trigger.operations.audit` | `trigger.operations.audit` | `notice` |
-| `harn.trigger.dlq` | `trigger.dlq` | `warning` |
-| `harn.observability.action_graph` | `observability.action_graph` | `debug` |
-
-A producer can override the level for a specific event by setting an explicit
-`severity` header on the event-log entry; otherwise the server escalates events
-whose `kind` contains `error`/`panic` to `error` and `fail`/`denied`/`blocked`/
-`rejected`/`dropped`/`dlq` to `warning`.
