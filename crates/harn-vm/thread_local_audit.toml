@@ -492,6 +492,12 @@ category = "thread_private"
 plan = "thread_private_test"
 
 [[thread_local]]
+path = "src/stdlib/host/fixtured_operations.rs"
+statics = ["FIXTURED_HOST_OPERATIONS"]
+category = "thread_private"
+plan = "thread_private_test"
+
+[[thread_local]]
 path = "src/stdlib/host/bridge.rs"
 statics = ["HOST_CALL_BRIDGE"]
 category = "logical_task"

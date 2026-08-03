@@ -10,6 +10,7 @@ use crate::value::{values_equal, VmError, VmValue};
 use crate::vm::{AsyncBuiltinCtx, Vm};
 
 mod bridge;
+pub(crate) mod fixtured_operations;
 mod operation_registry;
 mod process_dispatch;
 mod process_exec;
@@ -435,10 +436,6 @@ fn apply_registered_operations(root: &mut crate::value::DictMap) {
     operation_registry::apply_callable(root);
 }
 
-fn apply_mockable_operations(root: &mut crate::value::DictMap) {
-    operation_registry::apply_mockable(root);
-}
-
 fn capability_manifest_with_mocks() -> VmValue {
     let mut root = capability_manifest_map();
     apply_registered_operations(&mut root);
@@ -447,13 +444,14 @@ fn capability_manifest_with_mocks() -> VmValue {
             ensure_mocked_capability(&mut root, &host_mock.capability, &host_mock.operation);
         }
     });
+    fixtured_operations::apply_to_manifest(&mut root, ensure_mocked_capability);
     VmValue::dict(root)
 }
 
 fn known_host_operations() -> Vec<(String, String)> {
     let mut root = capability_manifest_map();
     apply_registered_operations(&mut root);
-    apply_mockable_operations(&mut root);
+    operation_registry::apply_mockable(&mut root);
     root.into_iter()
         .flat_map(|(capability_name, capability)| {
             let capability_name = capability_name.to_string();
