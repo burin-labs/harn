@@ -5,6 +5,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot};
 
 mod conversion;
+mod http_fixtures;
 mod support;
 use support::execute_test_harn;
 

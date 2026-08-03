@@ -2159,6 +2159,13 @@ pipeline default(harness: Harness) {
 - Selective, wildcard, and namespace imports may appear together in the
   same file.
 
+For a private namespace used only through statically named members, the
+compiler records those members in import bytecode and cached module metadata.
+The runtime still loads the complete target module and runs its initialization
+exactly once; it narrows only the namespace dict bound in the importing module.
+Returning, passing, indexing, mutating, or publicly re-exporting the namespace
+keeps the complete dict. This optimization does not change source behavior.
+
 `pub import * as ns from "module"` re-exports the **alias namespace
 object** on this module's public surface. It does **not** flatten the
 target's members into the facade (contrast `pub import "module"`).

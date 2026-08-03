@@ -50,12 +50,19 @@ fn imported_enum_cache() -> &'static Mutex<ImportedEnumCache> {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ModuleImportSpec {
     pub path: String,
-    pub selected_names: Option<Vec<String>>,
-    /// When set, bind `import * as alias from path` as a namespace dict
-    /// instead of flattening exports into the caller.
-    #[serde(default)]
-    pub namespace_alias: Option<String>,
+    pub binding: ModuleImportBinding,
     pub is_pub: bool,
+}
+
+/// The mutually exclusive binding forms of an import declaration.
+#[derive(Debug, Serialize, Deserialize)]
+pub enum ModuleImportBinding {
+    Wildcard,
+    Selected(Vec<String>),
+    Namespace {
+        alias: String,
+        demand: harn_parser::NamespaceDemand,
+    },
 }
 
 /// Serializable compile artifact for one `.harn` module. The runtime
@@ -159,13 +166,13 @@ fn compile_module_artifact_with_provenance(
     imported_enum_candidates: &[String],
     provenance: ModuleProvenance,
 ) -> Result<ModuleArtifact, VmError> {
+    let namespace_demands = harn_parser::namespace_import_demands(program);
     let imports: Vec<ModuleImportSpec> = program
         .iter()
         .filter_map(|node| match &node.node {
             harn_parser::Node::ImportDecl { path, is_pub } => Some(ModuleImportSpec {
                 path: path.clone(),
-                selected_names: None,
-                namespace_alias: None,
+                binding: ModuleImportBinding::Wildcard,
                 is_pub: *is_pub,
             }),
             harn_parser::Node::SelectiveImport {
@@ -174,8 +181,7 @@ fn compile_module_artifact_with_provenance(
                 is_pub,
             } => Some(ModuleImportSpec {
                 path: path.clone(),
-                selected_names: Some(names.clone()),
-                namespace_alias: None,
+                binding: ModuleImportBinding::Selected(names.clone()),
                 is_pub: *is_pub,
             }),
             harn_parser::Node::NamespaceImport {
@@ -184,8 +190,13 @@ fn compile_module_artifact_with_provenance(
                 is_pub,
             } => Some(ModuleImportSpec {
                 path: path.clone(),
-                selected_names: None,
-                namespace_alias: Some(alias.clone()),
+                binding: ModuleImportBinding::Namespace {
+                    alias: alias.clone(),
+                    demand: namespace_demands
+                        .get(alias)
+                        .cloned()
+                        .unwrap_or(harn_parser::NamespaceDemand::Whole),
+                },
                 is_pub: *is_pub,
             }),
             _ => None,
@@ -557,7 +568,7 @@ mod tests {
     use super::{
         compile_module_artifact, compile_module_artifact_from_source,
         compile_privileged_wire_module_artifact_from_source, needs_imported_enum_candidates,
-        parse_module_source, ModuleProvenance,
+        parse_module_source, ModuleImportBinding, ModuleProvenance,
     };
     use crate::chunk::Constant;
 
@@ -602,6 +613,29 @@ pub type UserList = list<UserShape>
         assert!(artifact.public_type_names.contains("UserShape"));
         assert!(artifact.public_type_names.contains("UserList"));
         assert_eq!(artifact.type_schema_init_chunks.len(), 2);
+    }
+
+    #[test]
+    fn nested_namespace_import_retains_static_member_demand() {
+        let artifact = compile_module_artifact_from_source(
+            Path::new("<test>/wrapper.harn"),
+            r#"
+import * as lib from "./lib"
+pub fn call() { return lib.greet() }
+"#,
+        )
+        .expect("module compiles");
+
+        let ModuleImportBinding::Namespace { alias, demand } = &artifact.imports[0].binding else {
+            panic!("expected namespace import metadata");
+        };
+        assert_eq!(alias, "lib");
+        assert_eq!(
+            demand,
+            &harn_parser::NamespaceDemand::Members(std::collections::BTreeSet::from([
+                "greet".to_string(),
+            ]))
+        );
     }
 
     #[test]

@@ -66,6 +66,7 @@ fn test_parses_runs_review_provenance_inputs() {
         "harn",
         "runs",
         "review",
+        "--report",
         "run-report.json",
         "--rubric",
         "rubric.md",
@@ -79,7 +80,57 @@ fn test_parses_runs_review_provenance_inputs() {
     let RunsCommand::Review(review) = args.command else {
         panic!("expected runs review command");
     };
-    assert_eq!(review.path, PathBuf::from("run-report.json"));
+    assert_eq!(review.report, Some(PathBuf::from("run-report.json")));
+    assert_eq!(review.run_record, None);
+    assert_eq!(review.events_db, None);
     assert_eq!(review.rubric, Some(PathBuf::from("rubric.md")));
     assert_eq!(review.model.as_deref(), Some("gpt-5.6-luna"));
+}
+
+#[test]
+fn test_parses_runs_review_from_run_record() {
+    let cli = Cli::parse_from([
+        "harn",
+        "runs",
+        "review",
+        "--run-record",
+        "root.json",
+        "--events-db",
+        "events.sqlite",
+    ]);
+
+    let Command::Runs(args) = cli.command.unwrap() else {
+        panic!("expected runs command");
+    };
+    let RunsCommand::Review(review) = args.command else {
+        panic!("expected runs review command");
+    };
+    assert_eq!(review.report, None);
+    assert_eq!(review.run_record, Some(PathBuf::from("root.json")));
+    assert_eq!(review.events_db, Some(PathBuf::from("events.sqlite")));
+}
+
+#[test]
+fn test_runs_review_requires_exactly_one_typed_input() {
+    assert!(Cli::try_parse_from(["harn", "runs", "review"]).is_err());
+    assert!(Cli::try_parse_from([
+        "harn",
+        "runs",
+        "review",
+        "--report",
+        "report.json",
+        "--run-record",
+        "run.json",
+    ])
+    .is_err());
+    assert!(Cli::try_parse_from([
+        "harn",
+        "runs",
+        "review",
+        "--report",
+        "report.json",
+        "--events-db",
+        "events.sqlite",
+    ])
+    .is_err());
 }

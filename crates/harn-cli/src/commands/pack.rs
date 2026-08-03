@@ -36,7 +36,7 @@ use crate::skill_provenance;
 
 /// Stable schema version for the `harn pack --json` envelope. Bump when
 /// [`PackJsonData`] changes shape in a way that agents need to detect.
-pub const PACK_SCHEMA_VERSION: u32 = 2;
+pub const PACK_SCHEMA_VERSION: u32 = 3;
 pub const PACK_SBOM_ARCHIVE_PATH: &str = "sbom.spdx.json";
 const DEFAULT_PACK_FILE_MODE: u32 = 0o644;
 
@@ -70,6 +70,9 @@ pub struct PackSbomSummary {
 #[derive(Debug, Clone, Serialize)]
 pub struct PackDebugSymbolMetadata {
     pub harnbc_count: usize,
+    pub harnbc_bytes: u64,
+    pub harnmod_count: usize,
+    pub harnmod_bytes: u64,
     pub total_bytes: u64,
 }
 
@@ -240,9 +243,18 @@ pub fn json_schema() -> serde_json::Value {
                     },
                     "debug_symbol_metadata": {
                         "type": "object",
-                        "required": ["harnbc_count", "total_bytes"],
+                        "required": [
+                            "harnbc_count",
+                            "harnbc_bytes",
+                            "harnmod_count",
+                            "harnmod_bytes",
+                            "total_bytes"
+                        ],
                         "properties": {
                             "harnbc_count": { "type": "integer", "minimum": 1 },
+                            "harnbc_bytes": { "type": "integer", "minimum": 1 },
+                            "harnmod_count": { "type": "integer", "minimum": 0 },
+                            "harnmod_bytes": { "type": "integer", "minimum": 0 },
                             "total_bytes": { "type": "integer", "minimum": 1 }
                         }
                     },
@@ -289,6 +301,7 @@ impl PackError {
 
 mod archive;
 
+pub(crate) use archive::verify_runtime_payloads;
 pub use archive::{
     repack, run_repack, run_unpack, run_verify, unpack, verify, verify_json_schema,
     verify_to_envelope, PackRepackOutcome, PackUnpackOutcome, PackVerifyJsonData,
@@ -397,6 +410,9 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
     let mut skipped_assets = Vec::new();
     let mut debug_symbol_metadata = PackDebugSymbolMetadata {
         harnbc_count: 0,
+        harnbc_bytes: 0,
+        harnmod_count: 0,
+        harnmod_bytes: 0,
         total_bytes: 0,
     };
 
@@ -459,7 +475,8 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
             )
             .ok();
 
-        let entry_cache_key = bytecode_cache::CacheKey::from_source(module_path, &source);
+        let entry_cache_key =
+            bytecode_cache::CacheKey::from_relocatable_source(module_path, &source);
         let chunk_bytes = bytecode_cache::serialize_chunk_artifact(&entry_cache_key, &entry_chunk)
             .map_err(|err| {
                 PackError::new(
@@ -514,6 +531,7 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
         let source_hash = blake3_hash(source.as_bytes());
         let harnbc_hash = blake3_hash(&chunk_bytes);
         debug_symbol_metadata.harnbc_count += 1;
+        debug_symbol_metadata.harnbc_bytes += chunk_bytes.len() as u64;
         debug_symbol_metadata.total_bytes += chunk_bytes.len() as u64;
 
         transitive_modules.push(ModuleEntry {
@@ -528,6 +546,8 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
         ));
         contents.push(HarnpackEntry::new(chunk_archive_path, chunk_bytes));
         if let Some(artifact_bytes) = module_artifact_bytes {
+            debug_symbol_metadata.harnmod_count += 1;
+            debug_symbol_metadata.harnmod_bytes += artifact_bytes.len() as u64;
             debug_symbol_metadata.total_bytes += artifact_bytes.len() as u64;
             let module_rel = adjacent_with_extension(&rel, bytecode_cache::MODULE_CACHE_EXTENSION)
                 .ok_or_else(|| {

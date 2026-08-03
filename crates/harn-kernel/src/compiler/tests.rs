@@ -700,6 +700,40 @@ fn test_disassemble() {
 }
 
 #[test]
+fn static_namespace_use_emits_projected_import_opcode() {
+    let projected = compile_source(
+        r#"
+import * as ui from "./ui"
+pipeline test(harness: Harness) {
+  return ui.render(ui.page)
+}
+"#,
+    );
+    let disassembly = projected.disassemble("projected namespace import");
+    assert!(
+        disassembly.contains("NAMESPACE_IMPORT_MEMBERS")
+            && projected
+                .constants
+                .contains(&Constant::String("page,render".to_string())),
+        "static namespace demand did not reach bytecode:\n{disassembly}\nconstants: {:?}",
+        projected.constants
+    );
+    assert!(!disassembly.contains(" NAMESPACE_IMPORT "));
+
+    let escaped = compile_source(
+        r#"
+import * as ui from "./ui"
+pipeline test(harness: Harness) {
+  return ui
+}
+"#,
+    );
+    let disassembly = escaped.disassemble("whole namespace import");
+    assert!(disassembly.contains("NAMESPACE_IMPORT"));
+    assert!(!disassembly.contains("NAMESPACE_IMPORT_MEMBERS"));
+}
+
+#[test]
 fn test_compile_discard_bindings_do_not_define_underscore() {
     let chunk = compile_source(
         r#"

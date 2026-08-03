@@ -9,7 +9,7 @@
             "type": "command",
             "command": "${CLAUDE_PROJECT_DIR}/scripts/claude-dev-setup-once.sh",
             "args": [],
-            "timeout": 600
+            "timeout": 120
           }
         ]
       }

@@ -39,7 +39,7 @@ pub use execution::{
 };
 pub use opcode::{
     opcode_abi_fingerprint, Op, OperandKind, Portability, OPCODE_ABI_ARTIFACT_VERSION,
-    OPCODE_ABI_FINGERPRINT_V1,
+    OPCODE_ABI_FINGERPRINT_V1, OPCODE_ABI_FINGERPRINT_V2,
 };
 pub use program::{Chunk, CompiledFunction, Constant, LocalSlotInfo, ParamSlot};
 

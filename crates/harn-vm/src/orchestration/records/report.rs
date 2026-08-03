@@ -738,6 +738,17 @@ fn checked_path(path: &Path, allowed_roots: &[PathBuf]) -> Result<PathBuf, RunRe
     Ok(canonical)
 }
 
+pub(crate) fn read_checked_run_report_bytes(
+    path: &Path,
+    allowed_roots: &[PathBuf],
+) -> Result<Vec<u8>, RunReportError> {
+    let allowed_roots = canonical_allowed_roots(allowed_roots)?;
+    let path = checked_path(path, &allowed_roots)?;
+    std::fs::read(&path).map_err(|error| {
+        RunReportError::Read(format!("read run report {}: {error}", path.display()))
+    })
+}
+
 fn agent_from_view(
     view: &RunView,
     worker_id: Option<String>,

@@ -61,7 +61,7 @@ fn typed_defaults_fail_at_the_portable_compile_boundary() {
 fn rejects_version_corruption_trailing_and_size() {
     let artifact = compile_program(SOURCE, "reduce", EntryKind::Function).unwrap();
     let mut version = artifact.bytes().to_vec();
-    version[9] = 2;
+    version[8..10].copy_from_slice(&(ARTIFACT_VERSION + 1).to_be_bytes());
     assert_eq!(
         ProgramArtifact::decode(&version, ArtifactLimits::default())
             .unwrap_err()
@@ -394,6 +394,25 @@ fn validates_secondary_operands_and_builtin_identity() {
             &[
                 Constant::String("input".into()),
                 Constant::String("int".into()),
+            ],
+            &Default::default(),
+            0,
+            0,
+            0,
+        )
+        .unwrap_err()
+        .code,
+        "artifact_unsupported_opcode"
+    );
+
+    let namespace_members = [crate::Op::NamespaceImportMembers as u8, 0, 0, 0, 1, 0, 2];
+    assert_eq!(
+        validate_code(
+            &namespace_members,
+            &[
+                Constant::String("./ui".into()),
+                Constant::String("ui".into()),
+                Constant::String("render".into()),
             ],
             &Default::default(),
             0,

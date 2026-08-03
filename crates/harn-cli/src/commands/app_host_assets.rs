@@ -1,12 +1,14 @@
 const HOST_DOCUMENT: &str = include_str!("app_host/host.html");
 const HOST_STYLE: &str = include_str!("app_host/host.css");
+const HOST_PROTOCOL_SCRIPT: &str = include_str!("app_host/protocol.js");
 const HOST_SCRIPT: &str = include_str!("app_host/host.js");
 const SANDBOX_DOCUMENT: &str = include_str!("app_host/sandbox.html");
 const SANDBOX_STYLE: &str = include_str!("app_host/sandbox.css");
 const SANDBOX_SCRIPT: &str = include_str!("app_host/sandbox.js");
 
 pub(crate) fn host_document(title: &str, sandbox_origin: &str) -> String {
-    render_document(HOST_DOCUMENT, HOST_STYLE, HOST_SCRIPT)
+    let script = format!("{HOST_PROTOCOL_SCRIPT}\n{HOST_SCRIPT}");
+    render_document(HOST_DOCUMENT, HOST_STYLE, &script)
         .replace("__HARN_SANDBOX_ORIGIN__", &script_json(sandbox_origin))
         .replace("__HARN_TITLE__", &script_json(title))
         .replace("__HARN_VERSION__", &script_json(env!("CARGO_PKG_VERSION")))
@@ -42,6 +44,8 @@ mod tests {
         for required in [
             "serverTools",
             "serverResources",
+            "ui/notifications/tool-input",
+            "ui/notifications/tool-result",
             "ui/notifications/host-context-changed",
             "ui/resource-teardown",
         ] {

@@ -1,15 +1,6 @@
 // @ts-check
+/* global HarnAppHostProtocol */
 
-/** @typedef {string | number} JsonRpcId */
-/**
- * @typedef {object} JsonRpcMessage
- * @property {'2.0'} jsonrpc
- * @property {JsonRpcId=} id
- * @property {string=} method
- * @property {Record<string, unknown>=} params
- * @property {unknown=} result
- * @property {{code: number, message: string}=} error
- */
 /**
  * @typedef {object} AppDescriptor
  * @property {string} resourceUri
@@ -71,8 +62,7 @@
           : response.statusText;
       throw new Error(responseError);
     }
-    const rpcBody = /** @type {JsonRpcMessage} */ (body);
-    reply(rpcBody);
+    return /** @type {JsonRpcMessage} */ (body);
   }
 
   /** @param {MessageEvent<JsonRpcMessage>} event */
@@ -166,7 +156,7 @@
     }
     if (message.method) {
       try {
-        await proxy(message);
+        await HarnAppHostProtocol.proxyServerRequest(message, proxy, reply);
       } catch (error) {
         if (message.id !== undefined) {
           failure(

@@ -1,6 +1,6 @@
 # Portable kernel contract
 
-This page specifies Portable Harn Kernel artifact version 1 and its
+This page specifies Portable Harn Kernel artifact version 2 and its
 execute/resume boundary.
 
 ## Interfaces
@@ -19,15 +19,15 @@ The checked WIT world in `crates/harn-wasm/wit/harn-kernel.wit` expresses the
 same value, grant, request, result, and transition types. Core Wasm remains the
 browser delivery artifact in v1.
 
-## Program artifact v1
+## Program artifact v2
 
 An artifact starts with:
 
 | Field | Encoding | Meaning |
 |---|---:|---|
 | Magic | 8 bytes | `HARNPK01` |
-| Version | big-endian `u16` | `1` |
-| Feature flags | big-endian `u16` | Must be zero in v1 |
+| Version | big-endian `u16` | `2` |
+| Feature flags | big-endian `u16` | Must be zero in v2 |
 | Payload length | big-endian `u32` | Exact remaining byte count |
 | Payload digest | 32 bytes | BLAKE3 digest of the payload |
 | Payload | bounded binary graph | Program image and entry metadata |
@@ -37,6 +37,11 @@ portable builtin registry, and typed capability contracts. Opcode bytes and
 operand layouts have explicit stable discriminants and a golden fingerprint.
 Changing those contracts without an artifact version or compatibility decision
 causes a mechanical test failure.
+
+Version 2 adds the `NamespaceImportMembers` opcode to the shared bytecode ABI.
+Imports remain outside the Portable Kernel v1 execution feature set, so a
+portable artifact containing that opcode is still rejected. Version 1 program
+artifacts must be recompiled from source.
 
 Decoding is an untrusted boundary. It rejects bad magic or version, feature
 bits, truncation, trailing bytes, digest corruption, unsupported operations,

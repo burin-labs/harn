@@ -7,14 +7,7 @@ use std::path::PathBuf;
 use crate::cli::RunsReportArgs;
 
 pub(crate) async fn run(args: RunsReportArgs) -> i32 {
-    let path = PathBuf::from(args.path);
-    let source_root = path.parent().map(PathBuf::from);
-    let request = harn_vm::orchestration::RunReportRequest {
-        run_record_path: path,
-        events_db: args.events_db,
-        source_root,
-        ..harn_vm::orchestration::RunReportRequest::default()
-    };
+    let request = request_for_run_record(PathBuf::from(args.path), args.events_db);
     match harn_vm::orchestration::build_run_report(request).await {
         Ok(report) => match serde_json::to_string_pretty(&report) {
             Ok(rendered) => {
@@ -30,5 +23,18 @@ pub(crate) async fn run(args: RunsReportArgs) -> i32 {
             eprintln!("error: failed to build run report: {error}");
             1
         }
+    }
+}
+
+pub(crate) fn request_for_run_record(
+    path: PathBuf,
+    events_db: Option<PathBuf>,
+) -> harn_vm::orchestration::RunReportRequest {
+    let source_root = path.parent().map(PathBuf::from);
+    harn_vm::orchestration::RunReportRequest {
+        run_record_path: path,
+        events_db,
+        source_root,
+        ..harn_vm::orchestration::RunReportRequest::default()
     }
 }

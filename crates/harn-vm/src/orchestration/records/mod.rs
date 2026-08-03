@@ -32,6 +32,7 @@ pub use persistence::{
     load_agent_session_replay_events, load_agent_session_replay_events_from_log, load_run_record,
     normalize_run_record, save_run_record, AgentSessionReplayEvent,
 };
+pub(crate) use report::read_checked_run_report_bytes;
 pub use report::{
     build_run_report, run_report_projection_hash, validate_run_report, RunReport, RunReportAgent,
     RunReportCheck, RunReportCoordination, RunReportDelegation, RunReportError, RunReportExecution,

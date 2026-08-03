@@ -474,7 +474,10 @@ mod browser_tests {
 
         let provenance: serde_json::Value =
             serde_json::from_str(&benchmark_provenance_json()).unwrap();
-        assert_eq!(provenance["artifactFormatVersion"], 1);
+        assert_eq!(
+            provenance["artifactFormatVersion"],
+            harn_kernel::ARTIFACT_VERSION
+        );
         assert_eq!(
             provenance["semanticAbiFingerprint"].as_str().unwrap().len(),
             64

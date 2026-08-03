@@ -13,8 +13,21 @@ pub(crate) async fn run(args: RunsReviewArgs) -> i32 {
         },
         None => harn_vm::orchestration::DEFAULT_RUN_REVIEW_RUBRIC.to_string(),
     };
+    let input = match (args.report, args.run_record) {
+        (Some(path), None) => harn_vm::orchestration::RunReviewInput::Report {
+            path,
+            allowed_roots: Vec::new(),
+        },
+        (None, Some(run_record_path)) => harn_vm::orchestration::RunReviewInput::RunRecord(
+            super::run_report::request_for_run_record(run_record_path, args.events_db),
+        ),
+        _ => {
+            eprintln!("error: exactly one of --report or --run-record is required");
+            return 2;
+        }
+    };
     let request = harn_vm::orchestration::RunReviewRequest {
-        report_path: args.path,
+        input,
         rubric,
         model: args.model,
     };
@@ -83,7 +96,9 @@ mod tests {
         harn_vm::llm::install_cli_llm_mock_fixture(fixture);
 
         let code = run(RunsReviewArgs {
-            path: report_path,
+            report: Some(report_path),
+            run_record: None,
+            events_db: None,
             rubric: None,
             model: Some("gpt-5.6-luna".to_string()),
         })
