@@ -47,9 +47,10 @@ Resources and prompts use `mcp_list_resources`, `mcp_read_resource`,
 
 ## Declare servers instead of connecting by hand
 
-Put a fixed server set in `harn.toml` under `[[mcp]]` with `name` plus either
-`command` and `args` for stdio or `transport = "http"` and `url`. Declared
-servers connect before the pipeline runs and appear in the global `mcp` dict.
+Put a fixed server set in `harn.toml` as repeated `mcp` array-of-tables
+entries, each with `name` plus either `command` and `args` for stdio or
+`transport = "http"` and `url`. Declared servers connect before the pipeline
+runs and appear in the global `mcp` dict.
 
 - Mark a server `lazy = true` when most runs never call it. It boots on the
   first `mcp_call`, `mcp_ensure_active("name")`, or skill activation that names
