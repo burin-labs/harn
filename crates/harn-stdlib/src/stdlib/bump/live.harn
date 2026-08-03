@@ -1,48 +1,60 @@
 /**
- * std/bump/live — the live [`BumpAdapter`] that binds std/bump/runtime's pure
- * state machine to real effects: git and the caller's validation entrypoint via
- * `std/command`, and GitHub through the `gh` CLI (also via `std/command`).
+ * std/bump/live — local effects for the provider-neutral Harn bump runtime.
  *
- * GitHub access still goes through `gh api` as a compatibility adapter while
- * harn#6029 moves remote provider behavior behind the package connector seam.
- * Plain `harn run` can activate declared package connectors, but this reusable
- * workflow does not yet inject a GitHub connector facade. Keep provider
- * contracts out of this module; `gh` is only the bootstrap transport until the
- * typed connector migration lands.
+ * This module owns filesystem, git, command, validation, and readiness polling.
+ * Remote repository behavior enters through one typed [`LiveBumpRemote`]
+ * capability. Provider packages implement that capability; stdlib never speaks
+ * REST, GraphQL, or a provider CLI and therefore cannot drift into a second
+ * connector implementation.
  *
- * This module is deliberately branch-free. It performs the I/O the orchestrator
- * asks for and normalizes the result; ALL control flow lives in
- * `std/bump/runtime`, which is exercised by the in-process fixtures. That seam
- * is why the fixtures need no network: they replace this adapter wholesale, so
- * none of the `gh` calls below run under `harn test`. The live GitHub-mutation
- * surface here (ref lease reset, signed `createCommitOnBranch`, PR upsert,
- * auto-merge arm/disarm) is first exercised against real GitHub in CI.
- *
- * Auth is the GitHub App installation token, passed to `gh` via GH_TOKEN (see
- * `__gh_spec`). Signed commits use the GraphQL `createCommitOnBranch` mutation
- * rather than a local `git commit` + push: commits created through the App token
- * are signed by GitHub, satisfying an org `required_signatures` ruleset that an
- * unsigned local push would violate.
+ * All orchestration decisions remain in `std/bump/runtime`. Tests can replace
+ * the remote capability with a recording fake without a network or subprocess.
  */
-import { BumpAdapter } from "std/bump/runtime"
+import {
+  BumpAdapter,
+  BumpAutoMerge,
+  BumpChangeSet,
+  BumpCommitRequest,
+  BumpCommitResult,
+  BumpPrState,
+  BumpPrUpsert,
+} from "std/bump/runtime"
 import { command_run } from "std/command"
-import { merge } from "std/json"
 import { poll_until } from "std/poll"
 import { is_v_semver, strip_v } from "std/semver"
 
-/** Everything the live adapter needs to reach git, GitHub, and validation. */
+/** Everything the local adapter needs for mutation, validation, and polling. */
 pub type LiveBumpConfig = {
-  repo: string,
   release_repo: string,
-  token: string,
-  branch: string,
-  base: string,
+  repo_dir: string,
   version_file: string,
   refresh_command: string,
   validation_command: string,
   readiness_max_attempts: int,
   readiness_interval_ms: int,
   readiness_timeout_ms: int,
+}
+
+/** Closed release projection needed by the readiness gate. */
+pub type LiveBumpRelease = {found: bool, draft: bool, prerelease: bool, asset_names: list<string>}
+
+/**
+ * Provider package boundary for remote bump effects.
+ *
+ * One constructed instance is already bound to repository, branch, base, and
+ * authentication. The stdlib surface therefore exposes behavior rather than
+ * provider transport or configuration details.
+ */
+pub type LiveBumpRemote = {
+  latest_release_tag: fn() -> string,
+  release_view: fn(string) -> LiveBumpRelease,
+  find_bump_pr: fn() -> BumpPrState?,
+  disable_auto_merge: fn(BumpPrState, string) -> bool,
+  publish_commit: fn(BumpCommitRequest) -> BumpCommitResult,
+  branch_matches_base: fn() -> bool,
+  upsert_pr: fn(BumpPrState?, string) -> BumpPrUpsert,
+  close_pr: fn(int, string) -> bool,
+  enable_auto_merge: fn(int, string) -> BumpAutoMerge,
 }
 
 /** Release finalization sidecars that prove a Harn release is fully published. */
@@ -53,8 +65,7 @@ type VersionWriteResult = {ok: bool, detail: string}
 type VersionApplyResult = {ok: bool, changed: bool, refreshed: list<string>, detail: string}
 
 /**
- * Fill a caller's partial config with the canonical defaults used by the
- * reusable workflow.
+ * Fill a partial config with the reusable workflow defaults.
  *
  * @effects: []
  * @errors: []
@@ -62,15 +73,8 @@ type VersionApplyResult = {ok: bool, changed: bool, refreshed: list<string>, det
 pub fn live_bump_config(overrides: dict = {}) -> LiveBumpConfig {
   const o = overrides ?? {}
   return {
-    repo: to_string(o.repo ?? ""),
-    // Where the target's releases are published. Defaults to the consumer repo
-    // itself (same-repo bump semantics); the Harn runtime bump overrides this
-    // with burin-labs/harn, because readiness must gate on the HARN release,
-    // not on releases of the repo being bumped.
-    release_repo: to_string(o.release_repo ?? to_string(o.repo ?? "")),
-    token: to_string(o.token ?? ""),
-    branch: to_string(o.branch ?? "automation/bump-harn-runtime"),
-    base: to_string(o.base ?? "main"),
+    release_repo: to_string(o.release_repo ?? "burin-labs/harn"),
+    repo_dir: to_string(o.repo_dir ?? "."),
     version_file: to_string(o.version_file ?? ".harn-version"),
     refresh_command: to_string(o.refresh_command ?? "harn install --locked || harn install"),
     validation_command: to_string(o.validation_command ?? ""),
@@ -80,59 +84,43 @@ pub fn live_bump_config(overrides: dict = {}) -> LiveBumpConfig {
   }
 }
 
-/**
- * GitHub App installation token used to authenticate the `gh` CLI. Set once by
- * the live adapter builder. The bump runs one repo per process, so a
- * module-level value needs no per-call threading.
- */
-let __bump_gh_token = ""
-
-/**
- * Build a command_run spec for a `gh` invocation. GH_TOKEN is patched INTO the
- * inherited environment (env_mode "patch") so gh keeps PATH/HOME/its config —
- * the default env_mode is "replace", which would wipe them.
- */
-fn __gh_spec(argv: list<string>, stdin_body = nil) {
-  let spec = {argv: argv}
-  if trim(__bump_gh_token) != "" {
-    spec = merge(spec, {env: {GH_TOKEN: __bump_gh_token}, env_mode: "patch"})
-  }
-  if stdin_body != nil {
-    spec = merge(spec, {stdin: stdin_body})
-  }
-  return spec
+fn __git(tools: HarnessTools, repo_dir: string, argv: list<string>) {
+  return command_run(tools, ["git", "-C", repo_dir] + argv)
 }
 
-fn __json_or_nil(text) {
-  const t = trim(to_string(text ?? ""))
-  if t == "" {
-    return nil
-  }
-  const parsed = try {
-    json_parse(t)
-  }
-  return if is_err(parsed) {
-    nil
+fn __shell(tools: HarnessTools, repo_dir: string, command: string) {
+  return command_run(tools, {mode: "shell", command: command, cwd: repo_dir})
+}
+
+fn __lines(text) -> list<string> {
+  const value = trim(to_string(text ?? ""))
+  return if value == "" {
+    []
   } else {
-    // unwrap: returning the raw try-result leaked an Ok enum into record
-    // positions (merge() in __release_view), which the typed runtime rejects.
-    unwrap(parsed)
+    split(value, "\n").filter({ line -> trim(line) != "" }).to_list()
   }
 }
 
-fn __git(tools: HarnessTools, argv: list<string>) {
-  return command_run(tools, argv)
+fn __working_changes(tools: HarnessTools, repo_dir: string) -> BumpChangeSet {
+  const tracked_additions = __lines(
+    __git(tools, repo_dir, ["diff", "--name-only", "--diff-filter=ACMRTUXB", "HEAD"]).stdout,
+  )
+  const untracked_additions = __lines(
+    __git(tools, repo_dir, ["ls-files", "--others", "--exclude-standard"]).stdout,
+  )
+  return {
+    additions: tracked_additions
+      + untracked_additions.filter(
+      { name -> !contains(tracked_additions, name) },
+    )
+      .to_list(),
+    deletions: __lines(
+      __git(tools, repo_dir, ["diff", "--name-only", "--diff-filter=D", "HEAD"]).stdout,
+    ),
+  }
 }
 
-fn __shell(tools: HarnessTools, command: string) {
-  return command_run(tools, {mode: "shell", command: command})
-}
-
-/**
- * Update the pin through the typed filesystem capability. A shell redirect is
- * intentionally not used here: command policy must reject arbitrary tracked
- * writes, while this adapter owns the one deliberate version-file mutation.
- */
+/** Update the pin through typed filesystem authority, never shell redirection. */
 fn __write_version(fs: HarnessFs?, path: string, version: string) -> VersionWriteResult {
   if fs == nil {
     return {
@@ -165,27 +153,21 @@ fn __apply_version(
   cfg: LiveBumpConfig,
   target: string,
 ) -> VersionApplyResult {
-  // Release tags carry the conventional `v`; .harn-version stores the bare
-  // semver accepted by both old and new Harn installers.
   const write = __write_version(fs, cfg.version_file, strip_v(target))
-  const refresh = if write.ok ?? false {
-    __shell(tools, cfg.refresh_command)
+  const refresh = if write.ok {
+    __shell(tools, cfg.repo_dir, cfg.refresh_command)
   } else {
     nil
   }
   const refresh_ok = refresh?.success ?? false
-  const changed = !(__git(tools, ["git", "diff", "--quiet"]).success ?? false)
-  const names = trim(__git(tools, ["git", "diff", "--name-only"]).stdout ?? "")
+  const changes = __working_changes(tools, cfg.repo_dir)
+  const refreshed = changes.additions + changes.deletions
   return {
-    ok: (write.ok ?? false) && refresh_ok,
-    changed: changed,
-    refreshed: if names == "" {
-      []
-    } else {
-      split(names, "\n").filter({ name -> trim(name) != "" }).to_list()
-    },
-    detail: if !(write.ok ?? false) {
-      "version-file write failed: " + to_string(write.detail ?? "unknown error")
+    ok: write.ok && refresh_ok,
+    changed: len(refreshed) > 0,
+    refreshed: refreshed,
+    detail: if !write.ok {
+      "version-file write failed: " + write.detail
     } else if refresh_ok {
       "refresh ok"
     } else {
@@ -194,134 +176,36 @@ fn __apply_version(
   }
 }
 
-/**
- * One REST call through the `gh` CLI, authenticated by the App token in
- * GH_TOKEN. Returns the parsed JSON body, or nil on any non-zero exit —
- * preserving the previous adapter's fail-soft contract. This temporary
- * transport is retired by the connector-facade migration tracked in harn#6029.
- */
-fn __rest(tools: HarnessTools, method: string, path: string, body = nil) {
-  const spec = if body == nil {
-    __gh_spec(["gh", "api", path, "-X", method])
-  } else {
-    __gh_spec(["gh", "api", path, "-X", method, "--input", "-"], json_stringify(body))
-  }
-  const result = command_run(tools, spec)
-  return if result.success ?? false {
-    __json_or_nil(result.stdout ?? "")
-  } else {
-    nil
-  }
-}
-
-/** One GraphQL call through `gh api /graphql`; nil on failure. */
-fn __graphql(tools: HarnessTools, query: string, variables: dict) {
-  const spec = __gh_spec(
-    ["gh", "api", "/graphql", "-X", "POST", "--input", "-"],
-    json_stringify({query: query, variables: variables}),
-  )
-  const result = command_run(tools, spec)
-  return if result.success ?? false {
-    __json_or_nil(result.stdout ?? "")
-  } else {
-    nil
-  }
-}
-
-/** Release lookup normalized to the `{ok, ...release}` shape the adapter reads. */
-fn __release_view(tools: HarnessTools, repo: string, tag: string) {
-  const release = __rest(tools, "GET", "/repos/${repo}/releases/tags/${tag}")
-  return if release == nil {
-    {ok: false}
-  } else {
-    merge(release, {ok: true})
-  }
-}
-
-/** Close a PR (commenting first when a comment is given); `{ok}` mirrors the old helper. */
-fn __close_pr(tools: HarnessTools, repo: string, number, comment) {
-  if trim(to_string(comment ?? "")) != "" {
-    __rest(tools, "POST", "/repos/${repo}/issues/${number}/comments", {body: comment})
-  }
-  const closed = __rest(tools, "PATCH", "/repos/${repo}/pulls/${number}", {state: "closed"})
-  return {ok: closed != nil}
-}
-
-/** Arm squash auto-merge via GraphQL; `{ok, state, error}` mirrors the old helper. */
-fn __enable_auto_merge(tools: HarnessTools, repo: string, number) {
-  const pr = __rest(tools, "GET", "/repos/${repo}/pulls/${number}")
-  const node_id = to_string(pr?.node_id ?? "")
-  if node_id == "" {
-    return {ok: false, state: "", error: "could not resolve PR node id"}
-  }
-  const mutation =
-    "mutation($id: ID!) { enablePullRequestAutoMerge(input: {pullRequestId: $id, mergeMethod: SQUASH}) { pullRequest { autoMergeRequest { enabledAt } } } }"
-  const result = __graphql(tools, mutation, {id: node_id})
-  const enabled = result?.data?.enablePullRequestAutoMerge?.pullRequest?.autoMergeRequest?.enabledAt
-    != nil
-  return {
-    ok: enabled,
-    state: if enabled {
-      "armed"
-    } else {
-      ""
-    },
-    error: if enabled {
-      nil
-    } else {
-      result?.errors ?? "auto-merge not enabled"
-    },
-  }
-}
-
-fn __release_finalized(release) -> bool {
-  const draft = release?.draft ?? true
-  const prerelease = release?.prerelease ?? true
-  const asset_names = release?.asset_names ?? (release?.assets ?? []).map({ a -> a.name }).to_list()
-  const missing = REQUIRED_RELEASE_ASSETS.filter({ name -> !contains(asset_names, name) }).to_list()
-  return !draft && !prerelease && len(missing) == 0
-}
-
-/** Fetch the open bump PR via the REST list endpoint (there is no typed helper). */
-fn __find_open_pr(tools: HarnessTools, cfg: LiveBumpConfig, owner: string) {
-  const list = __rest(
-    tools,
-    "GET",
-    "/repos/${cfg.repo}/pulls?head=${owner}:${cfg.branch}&base=${cfg.base}&state=open",
-  )
-  return (list ?? [])[0]
+fn __release_finalized(release: LiveBumpRelease) -> bool {
+  const missing = REQUIRED_RELEASE_ASSETS.filter({ name -> !contains(release.asset_names, name) })
+    .to_list()
+  return release.found && !release.draft && !release.prerelease && len(missing) == 0
 }
 
 /**
- * Build the live BumpAdapter for one repository and token. Pass the result
- * straight to `run_bump`.
+ * Build the local adapter around one package-owned remote capability.
  *
- * @effects: [net, process]
- * @errors: []
+ * @effects: [fs, process, net]
+ * @errors: [invalid target tags or delegated local/provider failures]
  */
 pub fn live_bump_adapter(
   clock: HarnessClock,
   tools: HarnessTools,
+  remote: LiveBumpRemote,
   config: dict = {},
   fs: HarnessFs? = nil,
 ) -> BumpAdapter {
   const cfg = live_bump_config(config)
-  const owner = split(cfg.repo, "/")[0] ?? ""
-  // Authenticate every `gh` CLI call as the GitHub App for this run.
-  __bump_gh_token = cfg.token
   return {
     resolve_target_tag: fn(tag) {
       const requested = trim(tag ?? "")
-      if requested != "" {
-        if !is_v_semver(requested) {
-          throw "std/bump/live: --tag must look like vX.Y.Z, got '${requested}'"
-        }
-        return requested
+      const resolved = if requested == "" {
+        trim(remote.latest_release_tag())
+      } else {
+        requested
       }
-      const latest = __rest(tools, "GET", "/repos/${cfg.release_repo}/releases/latest")
-      const resolved = trim(to_string(latest?.tag_name ?? ""))
       if !is_v_semver(resolved) {
-        throw "std/bump/live: could not resolve a semver latest release for ${cfg.release_repo}"
+        throw "std/bump/live: expected a tag like vX.Y.Z, got '${resolved}'"
       }
       return resolved
     },
@@ -332,8 +216,8 @@ pub fn live_bump_adapter(
         clock,
         { ->
           attempts = attempts + 1
-          const view = __release_view(tools, cfg.release_repo, target)
-          const ready = view.ok && __release_finalized(view)
+          const view = remote.release_view(target)
+          const ready = __release_finalized(view)
           lines = lines + ["attempt ${attempts}: ${target} finalized=${ready}"]
           return if ready {
             view
@@ -353,20 +237,20 @@ pub fn live_bump_adapter(
         detail: if ready {
           "${target} finalized with required assets present"
         } else {
-          "${target} is not fully published yet"
+          "${target} is not fully published yet in ${cfg.release_repo}"
         },
         attempts: attempts,
         attempt_lines: lines,
       }
     },
     read_current_version: fn() { return __read_version(fs, cfg.version_file) },
-    base_sha: fn() { return trim(__git(tools, ["git", "rev-parse", "HEAD"]).stdout ?? "") },
+    base_sha: fn() { return trim(__git(tools, cfg.repo_dir, ["rev-parse", "HEAD"]).stdout ?? "") },
     apply_version: fn(target) { return __apply_version(fs, tools, cfg, target) },
     run_validation: fn() {
       if trim(cfg.validation_command) == "" {
         return {ok: true, steps: [], detail: "no validation command declared"}
       }
-      const result = __shell(tools, cfg.validation_command)
+      const result = __shell(tools, cfg.repo_dir, cfg.validation_command)
       const ok = result.success ?? false
       return {
         ok: ok,
@@ -378,151 +262,13 @@ pub fn live_bump_adapter(
         },
       }
     },
-    working_changes: fn() {
-      const adds = trim(
-        __git(tools, ["git", "diff", "--name-only", "--diff-filter=ACMRTUXB", "HEAD"]).stdout
-          ?? "",
-      )
-      const dels = trim(
-        __git(tools, ["git", "diff", "--name-only", "--diff-filter=D", "HEAD"]).stdout
-          ?? "",
-      )
-      return {
-        additions: if adds == "" {
-          []
-        } else {
-          split(adds, "\n").filter({ n -> trim(n) != "" }).to_list()
-        },
-        deletions: if dels == "" {
-          []
-        } else {
-          split(dels, "\n").filter({ n -> trim(n) != "" }).to_list()
-        },
-      }
-    },
-    find_bump_pr: fn() {
-      const first = __find_open_pr(tools, cfg, owner)
-      if first == nil {
-        return nil
-      }
-      return {
-        number: first.number,
-        head_oid: first.head?.sha ?? "",
-        auto_merge_enabled: first.auto_merge != nil,
-        url: first.html_url ?? "",
-        state: first.state ?? "open",
-      }
-    },
-    disable_auto_merge: fn(number) {
-      const detail = __rest(tools, "GET", "/repos/${cfg.repo}/pulls/${number}")
-      const node_id = detail?.node_id ?? ""
-      if node_id == "" {
-        return false
-      }
-      const result = __graphql(
-        tools,
-        "mutation($id: ID!) { disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId } }",
-        {id: node_id},
-      )
-      return result != nil && len(result?.errors ?? []) == 0
-    },
-    reset_branch: fn(base_sha) {
-      const ref = "/repos/${cfg.repo}/git/refs/heads/${cfg.branch}"
-      const existing = __rest(tools, "GET", ref)
-      if existing != nil {
-        return __rest(tools, "PATCH", ref, {sha: base_sha, force: true}) != nil
-      }
-      return __rest(
-        tools,
-        "POST",
-        "/repos/${cfg.repo}/git/refs",
-        {ref: "refs/heads/${cfg.branch}", sha: base_sha},
-      )
-        != nil
-    },
-    create_signed_commit: fn(request) {
-      let additions = []
-      for path in request.additions {
-        const encoded = __shell(tools, "base64 -w0 < '${path}' || base64 < '${path}' | tr -d '\\n'")
-        additions = additions + [{path: path, contents: trim(encoded.stdout ?? "")}]
-      }
-      const deletions = request.deletions.map({ p -> {path: p} }).to_list()
-      const result = __graphql(
-        tools,
-        "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }",
-        {
-          input: {
-            branch: {repositoryNameWithOwner: cfg.repo, branchName: request.branch},
-            message: {headline: request.headline},
-            fileChanges: {additions: additions, deletions: deletions},
-            expectedHeadOid: request.base_sha,
-          },
-        },
-      )
-      const commit = result?.data?.createCommitOnBranch?.commit
-      if commit == nil {
-        throw "std/bump/live: createCommitOnBranch returned no commit; errors="
-          + json_stringify(
-          result?.errors ?? [],
-        )
-      }
-      return {oid: commit.oid, url: commit.url ?? ""}
-    },
-    branch_matches_base: fn() {
-      const branch = __rest(tools, "GET", "/repos/${cfg.repo}/commits/${cfg.branch}")
-      const base = __rest(tools, "GET", "/repos/${cfg.repo}/commits/${cfg.base}")
-      const branch_tree = branch?.commit?.tree?.sha ?? "branch"
-      const base_tree = base?.commit?.tree?.sha ?? "base"
-      return branch_tree == base_tree
-    },
-    upsert_pr: fn(existing) {
-      const title = "Bump Harn runtime"
-      const body =
-        "Automated Harn runtime bump. Regenerated the lockfile and ran the declared validation entrypoint. Merges through the normal queue.\n\nProduced by the reusable `bump-harn` workflow."
-      if existing != nil {
-        __rest(
-          tools,
-          "PATCH",
-          "/repos/${cfg.repo}/pulls/${existing.number}",
-          {title: title, body: body},
-        )
-        const detail = __rest(tools, "GET", "/repos/${cfg.repo}/pulls/${existing.number}")
-        return {
-          number: existing.number,
-          head_oid: detail?.head?.sha ?? existing.head_oid,
-          url: detail?.html_url ?? existing.url,
-          created: false,
-        }
-      }
-      const created = __rest(
-        tools,
-        "POST",
-        "/repos/${cfg.repo}/pulls",
-        {title: title, head: cfg.branch, base: cfg.base, body: body},
-      )
-      return {
-        number: created?.number ?? 0,
-        head_oid: created?.head?.sha ?? "",
-        url: created?.html_url ?? "",
-        created: true,
-      }
-    },
-    close_pr: fn(number, comment) {
-      const result = __close_pr(tools, cfg.repo, number, comment)
-      return result.ok
-    },
-    enable_auto_merge: fn(number, _head) {
-      const result = __enable_auto_merge(tools, cfg.repo, number)
-      const ok = result.ok
-      return {
-        enabled: ok,
-        state: result.state,
-        detail: if ok {
-          ""
-        } else {
-          json_stringify(result.error ?? "auto-merge not enabled")
-        },
-      }
-    },
+    working_changes: fn() { return __working_changes(tools, cfg.repo_dir) },
+    find_bump_pr: remote.find_bump_pr,
+    disable_auto_merge: remote.disable_auto_merge,
+    publish_commit: remote.publish_commit,
+    branch_matches_base: remote.branch_matches_base,
+    upsert_pr: remote.upsert_pr,
+    close_pr: remote.close_pr,
+    enable_auto_merge: remote.enable_auto_merge,
   }
 }

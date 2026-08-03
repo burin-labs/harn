@@ -1,4 +1,23 @@
-import { live_bump_adapter } from "std/bump/live"
+import { LiveBumpRemote, live_bump_adapter } from "std/bump/live"
+import { command_run } from "std/command"
+import { assert_eq } from "std/testing"
+
+fn unreachable_remote() -> LiveBumpRemote {
+  const unreachable = fn() {
+    throw "test remote must not be reached"
+  }
+  return {
+    latest_release_tag: unreachable,
+    release_view: fn(_tag) { return unreachable() },
+    find_bump_pr: unreachable,
+    disable_auto_merge: fn(_pr, _base_sha) { return unreachable() },
+    publish_commit: fn(_request) { return unreachable() },
+    branch_matches_base: unreachable,
+    upsert_pr: fn(_existing, _head_oid) { return unreachable() },
+    close_pr: fn(_number, _comment) { return unreachable() },
+    enable_auto_merge: fn(_number, _head_oid) { return unreachable() },
+  }
+}
 
 pipeline test_apply_version_writes_bare_semver(harness: Harness) {
   const root = path_join(harness.fs.workspace_temp_dir(), "harn-bump-live-" + harness.random.uuid())
@@ -7,6 +26,7 @@ pipeline test_apply_version_writes_bare_semver(harness: Harness) {
   const adapter = live_bump_adapter(
     harness.clock,
     harness.tools,
+    unreachable_remote(),
     {version_file: version_file, refresh_command: "true"},
     harness.fs,
   )
@@ -23,12 +43,13 @@ pipeline test_apply_version_reports_refresh_failure(harness: Harness) {
   const adapter = live_bump_adapter(
     harness.clock,
     harness.tools,
+    unreachable_remote(),
     {version_file: version_file, refresh_command: "echo refresh-broke >&2; false"},
     harness.fs,
   )
   const outcome = adapter.apply_version("v1.2.3")
   assert(!outcome.ok)
-  assert(contains(outcome.detail, "refresh-broke"))
+  assert_eq(outcome.detail, "refresh-broke")
   harness.fs.delete(root)
 }
 
@@ -39,6 +60,7 @@ pipeline test_apply_version_write_failure_skips_refresh(harness: Harness) {
   const adapter = live_bump_adapter(
     harness.clock,
     harness.tools,
+    unreachable_remote(),
     {
       // Writing text onto an existing directory deterministically fails.
       version_file: root,
@@ -50,5 +72,28 @@ pipeline test_apply_version_write_failure_skips_refresh(harness: Harness) {
   assert(!outcome.ok)
   assert(starts_with(outcome.detail, "version-file write failed:"))
   assert(!harness.fs.exists(refresh_sentinel))
+  harness.fs.delete(root)
+}
+
+pipeline test_apply_version_includes_untracked_generated_files(harness: Harness) {
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-bump-live-" + harness.random.uuid())
+  harness.fs.mkdir(root)
+  assert_eq(command_run(harness.tools, ["git", "-C", root, "init", "--quiet"]).success, true)
+  harness.fs.write_text(path_join(root, "generated.json"), "{}\n")
+  const adapter = live_bump_adapter(
+    harness.clock,
+    harness.tools,
+    unreachable_remote(),
+    {repo_dir: root, version_file: path_join(root, ".harn-version"), refresh_command: "true"},
+    harness.fs,
+  )
+  const outcome = adapter.apply_version("v1.2.3")
+  assert_eq(outcome.ok, true)
+  assert_eq(outcome.changed, true)
+  assert_eq(outcome.refreshed, [".harn-version", "generated.json"])
+  assert_eq(
+    adapter.working_changes(),
+    {additions: [".harn-version", "generated.json"], deletions: []},
+  )
   harness.fs.delete(root)
 }

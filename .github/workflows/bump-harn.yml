@@ -2,8 +2,8 @@
 #
 # One published, immutable-ref workflow that every Harn package repo calls to
 # roll its pinned Harn runtime forward. The orchestration is Harn code
-# (scripts/bump_harn_runtime.harn -> std/bump/runtime), not shell: this file is
-# limited to bootstrap + capability wiring.
+# (`scripts/bump-driver` -> `std/bump/runtime`), not shell. This file is limited
+# to bootstrap and package installation.
 #
 # A consuming repo needs only a tiny trigger wrapper (schedule/dispatch) plus
 # its own declared refresh and validation commands. See
@@ -143,6 +143,14 @@ jobs:
         with:
           version: ${{ steps.resolve.outputs.version }}
 
+      # std/bump/live deliberately has no provider transport. Install the
+      # target release's locked driver package so one reviewed connector owns
+      # GitHub REST/GraphQL, leases, worktree encoding, and signed publication.
+      - name: Install bump driver dependencies
+        working-directory: .harn-runtime/scripts/bump-driver
+        shell: bash
+        run: harn install --locked
+
       - name: Run bump orchestration
         working-directory: package
         env:
@@ -174,4 +182,4 @@ jobs:
           # shellcheck disable=SC2016 # expand in the child shell, not here
           export HARN_BUMP_VALIDATE='set -euo pipefail; test -f "$HARN_BUMP_REFRESH_SENTINEL"; eval "$HARN_BUMP_VALIDATE_COMMAND"'
           harn --version
-          harn run --no-sandbox ../.harn-runtime/scripts/bump_harn_runtime.harn
+          harn run --no-sandbox ../.harn-runtime/scripts/bump-driver/bump_harn_runtime.harn
