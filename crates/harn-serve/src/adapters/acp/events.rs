@@ -1,6 +1,7 @@
 //! ACP AgentEventSink — translates canonical `AgentEvent` variants into ACP
 //! `session/update` notifications. Registered per-session at prompt start.
 
+use super::event_projection::{has_progress_entries, passthrough_projection};
 use super::AcpOutput;
 use harn_vm::agent_events::{AgentEvent, AgentEventSink, ToolExecutor};
 use harn_vm::composition::{CompositionChildCall, CompositionChildResult, CompositionRunEnvelope};
@@ -168,16 +169,25 @@ fn mark_replayed_params(method: &str, params: &mut serde_json::Value) {
     }
 }
 
-fn has_progress_entries(entries: &serde_json::Value) -> bool {
-    entries
-        .as_array()
-        .map(|entries| !entries.is_empty())
-        .unwrap_or(false)
-}
-
 impl AgentEventSink for AcpAgentEventSink {
     fn handle_event(&self, event: &AgentEvent) {
         match event {
+            // Diagnostics that differ only in wire name and carry their whole
+            // emitted record. `event_projection` owns that table; listing the
+            // family here keeps the match exhaustive, so a new variant must
+            // still make a deliberate choice rather than hit a catch-all.
+            event @ (AgentEvent::CacheHit { .. }
+            | AgentEvent::CacheMiss { .. }
+            | AgentEvent::LlmCallLog { .. }
+            | AgentEvent::LlmRoutingDecision { .. }
+            | AgentEvent::LlmFallbackAttempt { .. }
+            | AgentEvent::LlmShadowDiff { .. }
+            | AgentEvent::SemanticCacheHit { .. }
+            | AgentEvent::SemanticCacheMiss { .. }) => {
+                if let Some((kind, payload)) = passthrough_projection(event) {
+                    self.emit_agent_event_ext(kind, event.session_id(), payload.clone());
+                }
+            }
             AgentEvent::AgentMessageChunk {
                 session_id,
                 content,
@@ -1604,20 +1614,6 @@ impl AgentEventSink for AcpAgentEventSink {
                     session_id,
                     serde_json::json!({"receipt": receipt}),
                 );
-            }
-            AgentEvent::CacheHit {
-                session_id,
-                payload,
-                ..
-            } => {
-                self.emit_agent_event_ext("cache_hit", session_id, payload.clone());
-            }
-            AgentEvent::CacheMiss {
-                session_id,
-                payload,
-                ..
-            } => {
-                self.emit_agent_event_ext("cache_miss", session_id, payload.clone());
             }
             AgentEvent::CompositionStart { session_id, run } => {
                 self.emit_agent_event_ext(

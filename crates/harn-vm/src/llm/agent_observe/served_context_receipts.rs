@@ -1,5 +1,42 @@
 pub(super) use crate::llm::content_hash::{stable_redacted_json_hash, stable_redacted_string_hash};
 
+/// Names of the tools the model was actually offered, in served order.
+///
+/// The hashes below prove two calls served the *same* surface; only the names
+/// answer "was the tool this task asked for even on the menu?" — the first
+/// question anyone asks when an agent ignores an instruction, and one a
+/// persisted run could not previously answer at any cost. A tool name is
+/// vocabulary rather than payload, so it is recorded in full.
+fn served_tool_names(
+    tool_schemas: &[crate::llm::tools::ToolSchema],
+    native_tools: &serde_json::Value,
+) -> Vec<String> {
+    let native = native_tools
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|tool| {
+            // Providers disagree on where the name sits: alongside the schema, or
+            // nested under the `function` wrapper. Both are the same fact.
+            tool.get("name")
+                .or_else(|| tool.pointer("/function/name"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        });
+    // The two lists usually describe the SAME surface — a native-tool call
+    // carries `tool_schema_count == native_tool_count` — so this must dedupe
+    // across the whole sequence, not just consecutive pairs the way
+    // `Vec::dedup` does. First-seen order is kept because served order is what
+    // an operator is reading the list to reconstruct.
+    let mut seen = std::collections::HashSet::new();
+    tool_schemas
+        .iter()
+        .map(|schema| schema.name.clone())
+        .chain(native)
+        .filter(|name| seen.insert(name.clone()))
+        .collect()
+}
+
 pub(super) fn served_context_receipt(
     payload: &super::super::api::LlmRequestPayload,
     manifest: &crate::llm::prompt::ContextAssemblyManifest,
@@ -27,6 +64,7 @@ pub(super) fn served_context_receipt(
         "message_count": payload.messages.len(),
         "tool_schemas_content_hash": stable_redacted_json_hash(&tool_schemas_value),
         "tool_schema_count": tool_schemas.len(),
+        "served_tool_names": served_tool_names(tool_schemas, &native_tools),
         "native_tools_content_hash": stable_redacted_json_hash(&native_tools),
         "native_tool_count": payload.native_tools.as_ref().map(|tools| tools.len()).unwrap_or(0),
     })
@@ -35,6 +73,47 @@ pub(super) fn served_context_receipt(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn served_tool_names_reports_each_tool_once_in_served_order() {
+        // A native-tool call carries the same surface twice: once as VM tool
+        // schemas, once as provider-shaped native tools. Both provider name
+        // placements appear here because both are in the wild.
+        let schemas = vec![
+            crate::llm::tools::ToolSchema {
+                name: "look".to_string(),
+                description: String::new(),
+                params: Vec::new(),
+                compact: false,
+            },
+            crate::llm::tools::ToolSchema {
+                name: "dispatch".to_string(),
+                description: String::new(),
+                params: Vec::new(),
+                compact: false,
+            },
+        ];
+        let native = serde_json::json!([
+            {"name": "look"},
+            {"type": "function", "function": {"name": "dispatch"}},
+            {"name": "run"}
+        ]);
+
+        assert_eq!(
+            served_tool_names(&schemas, &native),
+            vec![
+                "look".to_string(),
+                "dispatch".to_string(),
+                "run".to_string()
+            ],
+            "duplicates across the two lists must collapse even when they are not adjacent"
+        );
+    }
+
+    #[test]
+    fn served_tool_names_is_empty_when_no_tools_were_offered() {
+        assert!(served_tool_names(&[], &serde_json::Value::Null).is_empty());
+    }
 
     fn set_env_for_test(key: &str, value: Option<&str>) -> Option<String> {
         let previous = std::env::var(key).ok();

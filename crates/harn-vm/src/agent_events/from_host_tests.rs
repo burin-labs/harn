@@ -739,3 +739,294 @@ fn an_accepted_host_event_reports_no_boundary_failure() {
         .expect("accepted");
     assert!(captured.boundary_failures().is_empty());
 }
+
+// ---------------------------------------------------------------------------
+// Emitter/registry drift.
+//
+// The embedded stdlib and `HOST_EVENT_POLICIES` are two halves of one
+// contract: a `.harn` module names an event, the registry decides whether it
+// may enter. Nothing mechanical connected them, so `std/llm::with_logging`
+// shipped for releases while every `llm_call_log` it emitted was rejected at
+// this boundary — per-call latency and route attribution silently absent from
+// run records, visible only as `boundary_failure` noise in the event log.
+// ---------------------------------------------------------------------------
+
+/// The third top-level argument of an already-opened argument list, when that
+/// argument is a plain string literal. A computed or variable event name
+/// returns `None`: no static check can resolve it, and guessing would be worse
+/// than skipping.
+fn third_argument_literal(rest: &str) -> Option<String> {
+    let mut depth = 0i32;
+    let mut arg_index = 0usize;
+    let mut in_string = false;
+    let mut current = String::new();
+    let mut literal = None;
+    let mut chars = rest.chars();
+    while let Some(ch) = chars.next() {
+        if in_string {
+            match ch {
+                '\\' => {
+                    chars.next();
+                }
+                '"' => {
+                    in_string = false;
+                    if arg_index == 2 {
+                        literal = Some(std::mem::take(&mut current));
+                    }
+                }
+                _ if arg_index == 2 => current.push(ch),
+                _ => {}
+            }
+            continue;
+        }
+        match ch {
+            '"' => {
+                in_string = true;
+                current.clear();
+            }
+            '(' | '[' | '{' => depth += 1,
+            ')' if depth == 0 => break,
+            ')' | ']' | '}' => depth -= 1,
+            ',' if depth == 0 => {
+                arg_index += 1;
+                if arg_index > 2 {
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    // An interpolated literal is a computed name wearing a literal's clothes.
+    literal.filter(|name| !name.contains("${"))
+}
+
+/// Event-type literals the module emits through the host path. Both the
+/// builtin and the `__emit_event` wrapper take the name as their third
+/// argument, so one shape covers every emitter.
+fn emitted_event_types(source: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    for call in ["agent_emit_event(", "__emit_event("] {
+        let mut search = 0usize;
+        while let Some(offset) = source[search..].find(call) {
+            let call_start = search + offset;
+            let args_start = call_start + call.len();
+            search = args_start;
+            let line_start = source[..call_start]
+                .rfind('\n')
+                .map_or(0, |index| index + 1);
+            // `fn __emit_event(...)` declares the wrapper; it does not emit.
+            if source[line_start..call_start]
+                .trim_start()
+                .starts_with("fn ")
+            {
+                continue;
+            }
+            if let Some(name) = third_argument_literal(&source[args_start..]) {
+                found.push(name);
+            }
+        }
+    }
+    found
+}
+
+#[test]
+fn every_event_type_the_embedded_stdlib_emits_is_registered() {
+    let registered: std::collections::BTreeSet<&str> =
+        crate::agent_events::from_host::registered_host_event_types().collect();
+    let mut unregistered: Vec<String> = harn_stdlib::STDLIB_SOURCES
+        .iter()
+        .flat_map(|entry| {
+            emitted_event_types(entry.source)
+                .into_iter()
+                .map(move |event_type| (entry.module, event_type))
+        })
+        .filter(|(_, event_type)| !registered.contains(event_type.as_str()))
+        .map(|(module, event_type)| format!("{module}: {event_type}"))
+        .collect();
+    unregistered.sort();
+    unregistered.dedup();
+    assert!(
+        unregistered.is_empty(),
+        "these embedded-stdlib emits can never enter the host boundary. Either add a \
+         HOST_EVENT_POLICIES row (and an AgentEvent variant) or stop emitting them: {unregistered:?}"
+    );
+}
+
+#[test]
+fn the_emitter_scan_actually_finds_emitters() {
+    // A scanner that silently matches nothing would make the drift check above
+    // vacuously green, so pin that it sees a known emitter in the real sources.
+    let found: std::collections::BTreeSet<String> = harn_stdlib::STDLIB_SOURCES
+        .iter()
+        .flat_map(|entry| emitted_event_types(entry.source))
+        .collect();
+    assert!(
+        found.contains("llm_call_log"),
+        "expected the `with_logging` emitter; scanner found {found:?}"
+    );
+    assert!(
+        found.contains("typed_checkpoint"),
+        "expected the checkpoint emitter; scanner found {found:?}"
+    );
+}
+
+#[test]
+fn llm_call_log_enters_the_host_boundary_with_its_route_and_latency() {
+    let event = AgentEvent::from_host_payload(
+        "s1",
+        "llm_call_log",
+        &json!({
+            "event": "llm_call_log",
+            "level": "info",
+            "latency_ms": 3067,
+            "model": "gpt-5.6-luna",
+            "provider": "openai",
+            "status": "ok",
+            "iteration": 1,
+            "attempt": 1,
+            "prompt": "kept for an include_prompt caller"
+        }),
+    )
+    .expect("the shipped stdlib's own event must be accepted");
+    match event {
+        AgentEvent::LlmCallLog {
+            session_id,
+            model,
+            provider,
+            status,
+            latency_ms,
+            iteration,
+            attempt,
+            payload,
+        } => {
+            assert_eq!(session_id, "s1");
+            assert_eq!(model, "gpt-5.6-luna");
+            assert_eq!(provider, "openai");
+            assert_eq!(status, "ok");
+            assert_eq!(latency_ms, 3067);
+            assert_eq!(iteration, 1);
+            assert_eq!(attempt, 1);
+            assert_eq!(
+                payload["prompt"], "kept for an include_prompt caller",
+                "the full record must survive so include_prompt loses nothing"
+            );
+        }
+        other => panic!("expected LlmCallLog, got {other:?}"),
+    }
+}
+
+#[test]
+fn every_llm_handler_event_keeps_its_typed_head_and_its_whole_record() {
+    // One case per arm the drift check turned up. Each asserts the scalar a
+    // consumer joins on plus that nothing was dropped on the way through.
+    let routing = AgentEvent::from_host_payload(
+        "s1",
+        "llm_routing_decision",
+        &json!({"route_index": -1, "route_name": "default", "used_default": true}),
+    )
+    .expect("accepted");
+    match routing {
+        AgentEvent::LlmRoutingDecision {
+            route_index,
+            route_name,
+            used_default,
+            ..
+        } => {
+            assert_eq!(
+                route_index, -1,
+                "a default fall-through must survive as -1, not saturate to 0"
+            );
+            assert_eq!(route_name, "default");
+            assert!(used_default);
+        }
+        other => panic!("expected LlmRoutingDecision, got {other:?}"),
+    }
+
+    let fallback = AgentEvent::from_host_payload(
+        "s1",
+        "llm_fallback_attempt",
+        &json!({"fallback_index": 2, "fallback_total": 3, "ok": false, "status": "rate_limit"}),
+    )
+    .expect("accepted");
+    match fallback {
+        AgentEvent::LlmFallbackAttempt {
+            fallback_index,
+            fallback_total,
+            ok,
+            status,
+            ..
+        } => {
+            assert_eq!((fallback_index, fallback_total), (2, 3));
+            assert!(!ok);
+            assert_eq!(status, "rate_limit");
+        }
+        other => panic!("expected LlmFallbackAttempt, got {other:?}"),
+    }
+
+    let shadow = AgentEvent::from_host_payload(
+        "s1",
+        "llm_shadow_diff",
+        &json!({"primary_ok": true, "shadow_ok": false, "primary_status": "ok",
+                "shadow_status": "timeout", "primary_len": 120, "shadow_len": 0}),
+    )
+    .expect("accepted");
+    match shadow {
+        AgentEvent::LlmShadowDiff {
+            primary_ok,
+            shadow_ok,
+            shadow_status,
+            primary_len,
+            ..
+        } => {
+            assert!(primary_ok && !shadow_ok);
+            assert_eq!(shadow_status, "timeout");
+            assert_eq!(primary_len, 120);
+        }
+        other => panic!("expected LlmShadowDiff, got {other:?}"),
+    }
+
+    let hit = AgentEvent::from_host_payload(
+        "s1",
+        "semantic_cache_hit",
+        &json!({"similarity": 0.94, "provider": "openai", "model": "gpt-5.6-luna",
+                "metrics": {"model_calls_avoided": 1}}),
+    )
+    .expect("accepted");
+    match hit {
+        AgentEvent::SemanticCacheHit {
+            similarity,
+            provider,
+            payload,
+            ..
+        } => {
+            assert!((similarity - 0.94).abs() < f64::EPSILON);
+            assert_eq!(provider, "openai");
+            assert_eq!(
+                payload["metrics"]["model_calls_avoided"], 1,
+                "the cost-moat receipt must ride along like CacheHit's"
+            );
+        }
+        other => panic!("expected SemanticCacheHit, got {other:?}"),
+    }
+
+    let miss = AgentEvent::from_host_payload(
+        "s1",
+        "semantic_cache_miss",
+        &json!({"nearest_similarity": 0.61, "metrics": {"compute_ms": 42}}),
+    )
+    .expect("accepted");
+    match miss {
+        AgentEvent::SemanticCacheMiss {
+            nearest_similarity,
+            payload,
+            ..
+        } => {
+            assert!(
+                (nearest_similarity - 0.61).abs() < f64::EPSILON,
+                "how close the best candidate came is the whole diagnostic value"
+            );
+            assert_eq!(payload["metrics"]["compute_ms"], 42);
+        }
+        other => panic!("expected SemanticCacheMiss, got {other:?}"),
+    }
+}
