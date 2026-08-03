@@ -399,8 +399,23 @@ hook_write_staged_markdown_files() {
   git diff --cached --name-only -z --no-renames --diff-filter=ACMR -- '*.md' > "$1"
 }
 
-hook_push_base() {
+# Resolve the upstream branch name, but only when it names a real commit.
+# `git rev-parse --abbrev-ref --symbolic-full-name @{upstream}` exits 128 and
+# still prints the literal string `@{upstream}` on stdout when the branch has a
+# configured upstream whose remote-tracking ref is gone — the normal state after
+# a merged branch is auto-deleted on the remote. `|| true` swallows the exit
+# code, so the caller would otherwise treat `@{upstream}` as a revision, and the
+# `merge-base` against it fails under `set -e`. That aborted every push from
+# such a branch, including deletions and refs that touch no local commits.
+hook_resolved_upstream() {
   upstream=$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)
+  if [ -n "$upstream" ] && git rev-parse --verify --quiet "${upstream}^{commit}" >/dev/null 2>&1; then
+    printf '%s\n' "$upstream"
+  fi
+}
+
+hook_push_base() {
+  upstream=$(hook_resolved_upstream)
   if [ -n "$upstream" ]; then
     git merge-base HEAD "$upstream"
   elif git rev-parse --verify origin/main >/dev/null 2>&1; then
