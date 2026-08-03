@@ -456,7 +456,7 @@ fn set_file_mode(_path: &Path, _mode: u32) -> Result<(), PackError> {
 /// Stable schema version for the `harn pack verify --json` envelope.
 /// Bump when [`PackVerifyJsonData`] changes shape in a way agents need
 /// to detect.
-pub const PACK_VERIFY_SCHEMA_VERSION: u32 = 1;
+pub const PACK_VERIFY_SCHEMA_VERSION: u32 = 2;
 
 /// JSON payload emitted under `JsonEnvelope.data` for `harn pack verify`.
 #[derive(Debug, Clone, Serialize)]
@@ -471,6 +471,7 @@ pub struct PackVerifyJsonData {
     pub entrypoint: PathBuf,
     pub module_count: usize,
     pub content_entry_count: usize,
+    pub link_report: Option<harn_vm::linked_program::LinkReport>,
 }
 
 struct PackVerifyJsonOutput(PackVerifyJsonData);
@@ -507,7 +508,8 @@ pub fn verify_json_schema() -> serde_json::Value {
                     "schema_version",
                     "entrypoint",
                     "module_count",
-                    "content_entry_count"
+                    "content_entry_count",
+                    "link_report"
                 ],
                 "properties": {
                     "bundle": { "type": "string", "minLength": 1 },
@@ -519,7 +521,8 @@ pub fn verify_json_schema() -> serde_json::Value {
                     "schema_version": { "type": "integer", "minimum": 1 },
                     "entrypoint": { "type": "string", "minLength": 1 },
                     "module_count": { "type": "integer", "minimum": 1 },
-                    "content_entry_count": { "type": "integer", "minimum": 1 }
+                    "content_entry_count": { "type": "integer", "minimum": 1 },
+                    "link_report": { "type": ["object", "null"] }
                 }
             }
         }
@@ -707,35 +710,82 @@ pub fn verify(args: &PackVerifyArgs) -> Result<PackVerifyJsonData, PackError> {
                 ),
             ));
         }
-        let chunk_rel = adjacent_with_extension(&module.path, bytecode_cache::CACHE_EXTENSION)
-            .ok_or_else(|| {
+        if manifest.execution_artifact.is_none() {
+            let chunk_rel = adjacent_with_extension(&module.path, bytecode_cache::CACHE_EXTENSION)
+                .ok_or_else(|| {
+                    PackError::new(
+                        "verify.module_invalid_path",
+                        format!("module {} has no stem", module.path.display()),
+                    )
+                })?;
+            let chunk_entry = bytecode_map.get(&chunk_rel).ok_or_else(|| {
                 PackError::new(
-                    "verify.module_invalid_path",
-                    format!("module {} has no stem", module.path.display()),
+                    "verify.module_missing",
+                    format!(
+                        "manifest lists bytecode for {} but archive has no bytecode/{} entry",
+                        module.path.display(),
+                        chunk_rel.display()
+                    ),
                 )
             })?;
-        let chunk_entry = bytecode_map.get(&chunk_rel).ok_or_else(|| {
+            let actual_harnbc = blake3_hash(&chunk_entry.bytes);
+            if actual_harnbc != module.harnbc_hash_blake3 {
+                return Err(PackError::new(
+                    "verify.bytecode_mismatch",
+                    format!(
+                        "bytecode hash mismatch for {}: manifest {}, archive {}",
+                        module.path.display(),
+                        module.harnbc_hash_blake3,
+                        actual_harnbc
+                    ),
+                ));
+            }
+        }
+    }
+
+    if manifest.schema_version >= harn_vm::orchestration::WORKFLOW_BUNDLE_SCHEMA_VERSION {
+        let descriptor = manifest.execution_artifact.as_ref().ok_or_else(|| {
             PackError::new(
-                "verify.module_missing",
-                format!(
-                    "manifest lists bytecode for {} but archive has no bytecode/{} entry",
-                    module.path.display(),
-                    chunk_rel.display()
-                ),
+                "verify.linked_artifact_missing",
+                "schema-v3 bundle is missing its execution_artifact descriptor",
             )
         })?;
-        let actual_harnbc = blake3_hash(&chunk_entry.bytes);
-        if actual_harnbc != module.harnbc_hash_blake3 {
+        let artifact_entry = contents
+            .iter()
+            .find(|entry| entry.path == descriptor.path)
+            .ok_or_else(|| {
+                PackError::new(
+                    "verify.linked_artifact_missing",
+                    format!("archive is missing {}", descriptor.path.display()),
+                )
+            })?;
+        let actual_hash = blake3_hash(&artifact_entry.bytes);
+        if actual_hash != descriptor.hash_blake3 {
             return Err(PackError::new(
-                "verify.bytecode_mismatch",
+                "verify.linked_artifact_mismatch",
                 format!(
-                    "bytecode hash mismatch for {}: manifest {}, archive {}",
-                    module.path.display(),
-                    module.harnbc_hash_blake3,
-                    actual_harnbc
+                    "linked artifact hash mismatch: manifest {}, archive {}",
+                    descriptor.hash_blake3, actual_hash
                 ),
             ));
         }
+        let linked = harn_vm::linked_program::LinkedProgramArtifact::decode(&artifact_entry.bytes)
+            .map_err(|error| PackError::new(error.code, error.message))?;
+        if linked.entrypoint != manifest.entrypoint
+            || linked.identity.graph_digest_blake3 != descriptor.graph_digest_blake3
+            || linked.report != descriptor.link_report
+        {
+            return Err(PackError::new(
+                "verify.linked_artifact_mismatch",
+                "linked artifact identity, entrypoint, or report disagrees with the manifest",
+            ));
+        }
+        harn_vm::linked_program::verify_graph_binding(
+            &descriptor.link_report,
+            &descriptor.graph_digest_blake3,
+            |path| source_map.get(path).map(|entry| entry.bytes.clone()),
+        )
+        .map_err(|error| PackError::new("verify.linked_graph_mismatch", error.message))?;
     }
 
     if args.strict {
@@ -773,6 +823,10 @@ pub fn verify(args: &PackVerifyArgs) -> Result<PackVerifyJsonData, PackError> {
         entrypoint: manifest.entrypoint.clone(),
         module_count: manifest.transitive_modules.len(),
         content_entry_count: contents.len(),
+        link_report: manifest
+            .execution_artifact
+            .as_ref()
+            .map(|artifact| artifact.link_report.clone()),
     })
 }
 

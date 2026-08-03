@@ -10,11 +10,12 @@ use std::fmt::Write;
 use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use harn_vm::bytecode_cache;
 use harn_vm::orchestration::{
-    read_harnpack, verify_workflow_bundle_signature, workflow_bundle_hash, HarnpackEntry,
-    WorkflowBundle, WorkflowBundleError,
+    read_harnpack, verify_workflow_bundle_signature, workflow_bundle_hash,
+    ExecutionArtifactFallback, HarnpackEntry, WorkflowBundle, WorkflowBundleError,
 };
 
 /// Zstandard magic prefix. `.harnpack` archives are zstd-compressed tar
@@ -44,6 +45,10 @@ pub struct PreparedHarnpack {
     pub cache_dir: PathBuf,
     pub entrypoint_path: PathBuf,
     pub manifest: WorkflowBundle,
+    pub linked_program: Option<harn_vm::linked_program::LinkedProgramArtifact>,
+    pub execution_artifact_state: &'static str,
+    pub fallback_reason: Option<String>,
+    pub artifact_decode_elapsed: Duration,
 }
 
 #[derive(Debug)]
@@ -135,6 +140,10 @@ pub fn prepare_harnpack<W: Write>(
     };
 
     check_harn_version_compat(&manifest.harn_version, stderr)?;
+    let decode_started = Instant::now();
+    let (linked_program, execution_artifact_state, fallback_reason) =
+        prepare_execution_artifact(&manifest, &contents)?;
+    let artifact_decode_elapsed = decode_started.elapsed();
     let bundle_hash = workflow_bundle_hash(&manifest, &contents)?;
     let cache_dir = bytecode_cache::packs_cache_dir().join(sanitize_bundle_hash(&bundle_hash));
     let cache_hit = manifest_already_replayed(&cache_dir, &manifest)?;
@@ -163,7 +172,113 @@ pub fn prepare_harnpack<W: Write>(
         cache_dir,
         entrypoint_path,
         manifest,
+        linked_program,
+        execution_artifact_state,
+        fallback_reason,
+        artifact_decode_elapsed,
     })
+}
+
+fn prepare_execution_artifact(
+    manifest: &WorkflowBundle,
+    contents: &[HarnpackEntry],
+) -> Result<
+    (
+        Option<harn_vm::linked_program::LinkedProgramArtifact>,
+        &'static str,
+        Option<String>,
+    ),
+    HarnpackError,
+> {
+    for module in &manifest.transitive_modules {
+        let source_path = PathBuf::from("sources").join(&module.path);
+        let source = contents
+            .iter()
+            .find(|entry| entry.path == source_path)
+            .ok_or_else(|| {
+                HarnpackError::new(
+                    "harnpack.source_missing",
+                    format!("archive is missing {}", source_path.display()),
+                )
+            })?;
+        let actual = format!("blake3:{}", blake3::hash(&source.bytes).to_hex());
+        if actual != module.source_hash_blake3 {
+            return Err(HarnpackError::new(
+                "harnpack.source_mismatch",
+                format!("source hash mismatch for {}", module.path.display()),
+            ));
+        }
+    }
+    let Some(descriptor) = manifest.execution_artifact.as_ref() else {
+        if manifest.schema_version >= harn_vm::orchestration::WORKFLOW_BUNDLE_SCHEMA_VERSION {
+            return Err(HarnpackError::new(
+                "harnpack.linked_artifact_missing",
+                "schema-v3 bundle is missing its execution_artifact descriptor",
+            ));
+        }
+        return Ok((None, "legacy_v2", None));
+    };
+    if descriptor.format != "harn.linked_program.v1" {
+        return Err(HarnpackError::new(
+            "harnpack.linked_artifact_incompatible",
+            format!(
+                "unsupported execution artifact format {}",
+                descriptor.format
+            ),
+        ));
+    }
+    let entry = contents
+        .iter()
+        .find(|entry| entry.path == descriptor.path)
+        .ok_or_else(|| {
+            HarnpackError::new(
+                "harnpack.linked_artifact_missing",
+                format!("archive is missing {}", descriptor.path.display()),
+            )
+        })?;
+    let actual_hash = format!("blake3:{}", blake3::hash(&entry.bytes).to_hex());
+    if actual_hash != descriptor.hash_blake3 {
+        return Err(HarnpackError::new(
+            "harnpack.linked_artifact_mismatch",
+            format!(
+                "linked artifact hash mismatch: manifest {}, archive {}",
+                descriptor.hash_blake3, actual_hash
+            ),
+        ));
+    }
+    harn_vm::linked_program::verify_graph_binding(
+        &descriptor.link_report,
+        &descriptor.graph_digest_blake3,
+        |path| {
+            let source_path = PathBuf::from("sources").join(path);
+            contents
+                .iter()
+                .find(|entry| entry.path == source_path)
+                .map(|entry| entry.bytes.clone())
+        },
+    )
+    .map_err(|error| HarnpackError::new("harnpack.linked_graph_mismatch", error.message))?;
+    let decoded = harn_vm::linked_program::LinkedProgramArtifact::decode(&entry.bytes);
+    let linked = match decoded {
+        Ok(linked) => linked,
+        Err(error)
+            if error.code == "linked_program.incompatible"
+                && descriptor.fallback == ExecutionArtifactFallback::ExactSources =>
+        {
+            return Ok((None, "source_fallback", Some(error.message)));
+        }
+        Err(error) => return Err(HarnpackError::new(error.code, error.message)),
+    };
+    if linked.entrypoint != manifest.entrypoint
+        || linked.identity.graph_digest_blake3 != descriptor.graph_digest_blake3
+        || linked.report != descriptor.link_report
+    {
+        return Err(HarnpackError::new(
+            "harnpack.linked_artifact_mismatch",
+            "linked artifact identity, entrypoint, or report disagrees with the manifest",
+        ));
+    }
+    Ok((Some(linked), "linked", None))
 }
 
 /// Translate a `blake3:<hex>` digest into a filename-safe directory

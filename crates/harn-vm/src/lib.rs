@@ -67,6 +67,7 @@ pub mod host_attachments;
 mod http;
 pub mod jsonrpc;
 pub(crate) mod limits;
+pub mod linked_program;
 pub mod llm;
 pub mod llm_config;
 pub mod mcp;

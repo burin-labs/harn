@@ -47,7 +47,7 @@ fn imported_enum_cache() -> &'static Mutex<ImportedEnumCache> {
 /// A single `import`-style declaration inside a module. Re-resolved at
 /// instantiation time so that the cached artifact does not bake in
 /// stale resolved paths.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ModuleImportSpec {
     pub path: String,
     pub selected_names: Option<Vec<String>>,
@@ -63,7 +63,7 @@ pub struct ModuleImportSpec {
 /// into a fresh env, minting closures for each entry in
 /// [`functions`](Self::functions), and re-issuing every nested
 /// [`imports`](Self::imports).
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ModuleArtifact {
     #[serde(default)]
     pub provenance: ModuleProvenance,
@@ -87,6 +87,140 @@ pub struct ModuleArtifact {
     /// in selective imports. Public structs and enums are excluded because
     /// they export runtime constructors/namespaces.
     pub public_type_names: HashSet<String>,
+}
+
+/// Specialize a fully compiled module for one closed-program export demand.
+///
+/// Module initialization and every import spec remain intact. Only public
+/// projection metadata, exported type schema initialization, and callable
+/// bytecode proven unreachable from initialization or retained members are
+/// removed. Generic module caches never call this function.
+pub fn specialize_module_artifact(
+    program: &[harn_parser::SNode],
+    source_file: Option<String>,
+    mut artifact: ModuleArtifact,
+    demand: &harn_modules::ExportDemand,
+) -> Result<ModuleArtifact, VmError> {
+    use harn_parser::Node;
+    use std::collections::{BTreeSet, HashMap};
+
+    if matches!(demand, harn_modules::ExportDemand::WholeNamespace) {
+        return Ok(artifact);
+    }
+
+    // Public re-exports currently share one projection with local bindings.
+    // Until that runtime contract gains a distinct re-export projection,
+    // pruning such a module could either leak extra exports or remove names its
+    // own code uses. Widen locally rather than weakening semantics.
+    if artifact.imports.iter().any(|import| import.is_pub) {
+        return Ok(artifact);
+    }
+
+    let callable_names = artifact.functions.keys().cloned().collect::<HashSet<_>>();
+    let mut declarations = HashMap::<String, &harn_parser::SNode>::new();
+    for node in program {
+        let inner = match &node.node {
+            Node::AttributedDecl { inner, .. } => inner.as_ref(),
+            _ => node,
+        };
+        let name = match &inner.node {
+            Node::FnDecl { name, .. }
+            | Node::Pipeline { name, .. }
+            | Node::StructDecl { name, .. } => Some(name),
+            _ => None,
+        };
+        if let Some(name) = name {
+            declarations.insert(name.clone(), inner);
+        }
+    }
+
+    let mut pending = Vec::new();
+    if let harn_modules::ExportDemand::Members(members) = demand {
+        pending.extend(
+            members
+                .iter()
+                .filter(|name| callable_names.contains(*name))
+                .cloned(),
+        );
+    }
+    // Every initializer is preserved, so every callable it can reach is a root.
+    for node in program {
+        let inner = match &node.node {
+            Node::AttributedDecl { inner, .. } => inner.as_ref(),
+            _ => node,
+        };
+        if matches!(
+            &inner.node,
+            Node::LetBinding { .. }
+                | Node::ConstBinding { .. }
+                | Node::EnumDecl { is_pub: true, .. }
+                | Node::ToolDecl { .. }
+                | Node::SkillDecl { .. }
+                | Node::EvalPackDecl { .. }
+        ) {
+            collect_callable_references(inner, &callable_names, &mut pending);
+        }
+    }
+
+    let mut retained = HashSet::new();
+    while let Some(name) = pending.pop() {
+        if !retained.insert(name.clone()) {
+            continue;
+        }
+        if let Some(declaration) = declarations.get(&name) {
+            collect_callable_references(declaration, &callable_names, &mut pending);
+        }
+    }
+    artifact.functions.retain(|name, _| retained.contains(name));
+    artifact
+        .public_exports
+        .retain(|name, _| demand.contains(name));
+    artifact
+        .public_value_names
+        .retain(|name| demand.contains(name));
+    artifact
+        .public_type_names
+        .retain(|name| demand.contains(name));
+
+    let selected_type_names = artifact
+        .public_type_names
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    artifact.type_schema_init_chunk =
+        crate::Compiler::compile_selected_public_type_schema_initializers(
+            program,
+            source_file,
+            Some(&selected_type_names),
+        )
+        .map_err(|error| VmError::Runtime(format!("Import schema compile error: {error}")))?
+        .map(|chunk| chunk.freeze_for_cache());
+    Ok(artifact)
+}
+
+fn collect_callable_references(
+    node: &harn_parser::SNode,
+    callable_names: &HashSet<String>,
+    out: &mut Vec<String>,
+) {
+    use harn_parser::Node;
+    let referenced = match &node.node {
+        Node::Identifier(name)
+        | Node::FunctionCall { name, .. }
+        | Node::StructConstruct {
+            struct_name: name, ..
+        }
+        | Node::EnumConstruct {
+            enum_name: name, ..
+        } => Some(name),
+        _ => None,
+    };
+    if let Some(name) = referenced.filter(|name| callable_names.contains(*name)) {
+        out.push(name.clone());
+    }
+    for child in harn_parser::visit::immediate_children(node) {
+        collect_callable_references(child, callable_names, out);
+    }
 }
 
 impl ModuleArtifact {

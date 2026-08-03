@@ -698,6 +698,7 @@ async fn execute_run_inner_scoped(
     // outcome path (entrypoint inside the unpacked tree) replaces the
     // CLI-supplied `path` for everything below.
     let owned_run_path: String;
+    let mut prepared_harnpack: Option<PreparedHarnpack> = None;
     let resolved_path: &str = if harnpack::looks_like_harnpack(Path::new(path)) {
         let outcome = match harnpack::prepare_harnpack(Path::new(path), &harnpack, &mut stderr) {
             Ok(prepared) => prepared,
@@ -719,6 +720,9 @@ async fn execute_run_inner_scoped(
             key_id: outcome.key_id.clone(),
             cache_hit: outcome.cache_hit,
             dry_run_verify: harnpack.dry_run_verify,
+            execution_artifact_state: outcome.execution_artifact_state.to_string(),
+            fallback_reason: outcome.fallback_reason.clone(),
+            artifact_decode_ms: outcome.artifact_decode_elapsed.as_millis() as u64,
         });
         if harnpack.dry_run_verify {
             return finalize_harnpack_dry_run(
@@ -733,16 +737,59 @@ async fn execute_run_inner_scoped(
             );
         }
         owned_run_path = outcome.entrypoint_path.to_string_lossy().into_owned();
+        prepared_harnpack = Some(outcome);
         owned_run_path.as_str()
     } else {
         path
     };
 
+    let mut linked_runtime = None;
+    let loaded = if let Some(linked) = prepared_harnpack
+        .as_mut()
+        .and_then(|prepared| prepared.linked_program.take())
+    {
+        let source = match std::fs::read_to_string(resolved_path) {
+            Ok(source) => source,
+            Err(error) => {
+                stderr.push_str(&format!("Error reading {resolved_path}: {error}\n"));
+                return finalize_run_error(
+                    stdout,
+                    stderr.clone(),
+                    json_session,
+                    summary.as_ref(),
+                    phase.as_ref(),
+                    rusage.as_ref(),
+                    run_started,
+                    None,
+                    timing.as_deref(),
+                    0,
+                    cpu_started_ms.map(|start| time::cpu_ms().saturating_sub(start)),
+                    "linked_program_source",
+                    stderr,
+                );
+            }
+        };
+        let source_root = prepared_harnpack
+            .as_ref()
+            .expect("linked program came from a prepared pack")
+            .cache_dir
+            .join("sources");
+        let runtime = linked.into_runtime(&source_root);
+        let chunk = runtime.entry_chunk.clone();
+        linked_runtime = Some(runtime);
+        Some(LoadedChunk {
+            source,
+            chunk,
+            link_table: None,
+        })
+    } else {
+        compile_or_load_chunk_with_timing(resolved_path, &mut stderr, timing.as_deref_mut())
+    };
     let Some(LoadedChunk {
         source,
         chunk,
         link_table,
-    }) = compile_or_load_chunk_with_timing(resolved_path, &mut stderr, timing.as_deref_mut())
+    }) = loaded
     else {
         let message = stderr.clone();
         return finalize_run_error(
@@ -798,6 +845,9 @@ async fn execute_run_inner_scoped(
 
     let mut vm = harn_vm::Vm::new();
     vm.set_graph_link_table(link_table);
+    if let Some(runtime) = &linked_runtime {
+        vm.set_linked_program_runtime(runtime);
+    }
     if let Some(timing) = timing.as_deref_mut() {
         timing.module_phases = Some(vm.enable_module_phase_timing());
     }
@@ -1320,8 +1370,11 @@ fn finalize_harnpack_dry_run(
     prepared: &PreparedHarnpack,
 ) -> RunOutcome {
     let summary = format!(
-        "[harn] harnpack verify ok: bundle_hash={}, signature_verified={}, cache_hit={}\n",
-        prepared.bundle_hash, prepared.signature_verified, prepared.cache_hit
+        "[harn] harnpack verify ok: bundle_hash={}, signature_verified={}, cache_hit={}, execution_artifact={}\n",
+        prepared.bundle_hash,
+        prepared.signature_verified,
+        prepared.cache_hit,
+        prepared.execution_artifact_state
     );
     stderr.push_str(&summary);
     let aux_emission = emit_run_aux_for_exit(
@@ -1354,6 +1407,10 @@ fn finalize_harnpack_dry_run(
             "key_id": prepared.key_id,
             "cache_hit": prepared.cache_hit,
             "dry_run_verify": true,
+            "execution_artifact_state": prepared.execution_artifact_state,
+            "fallback_reason": prepared.fallback_reason,
+            "artifact_decode_ms": prepared.artifact_decode_elapsed.as_millis() as u64,
+            "link_report": prepared.manifest.execution_artifact.as_ref().map(|artifact| &artifact.link_report),
         });
         let mut outcome = session.finalize_result(value, aux_emission.exit_code);
         outcome.stderr = aux_emission.stderr;

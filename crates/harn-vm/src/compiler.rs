@@ -145,6 +145,19 @@ impl Compiler {
             .map(|chunks| chunks.into_iter().map(Chunk::from_portable).collect())
     }
 
+    pub fn compile_selected_public_type_schema_initializers(
+        program: &[harn_parser::SNode],
+        source_file: Option<String>,
+        selected_names: Option<&std::collections::BTreeSet<String>>,
+    ) -> Result<Option<Chunk>, CompileError> {
+        harn_kernel::Compiler::compile_selected_public_type_schema_initializers(
+            program,
+            source_file,
+            selected_names,
+        )
+        .map(|chunk| chunk.map(Chunk::from_portable))
+    }
+
     pub fn collect_type_aliases(&mut self, program: &[harn_parser::SNode]) {
         self.inner.collect_type_aliases(program);
     }

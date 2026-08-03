@@ -13,7 +13,8 @@ use sha2::{Digest, Sha256};
 use super::{validate_workflow, WorkflowEdge, WorkflowGraph};
 use crate::tool_annotations::ToolAnnotations;
 
-pub const WORKFLOW_BUNDLE_SCHEMA_VERSION: u32 = 2;
+pub const WORKFLOW_BUNDLE_SCHEMA_VERSION: u32 = 3;
+pub const LEGACY_WORKFLOW_BUNDLE_SCHEMA_VERSION: u32 = 2;
 pub const WORKFLOW_BUNDLE_RECEIPT_TYPE: &str = "harn.workflow_bundle.run";
 pub const HARNPACK_MANIFEST_PATH: &str = "harnpack.json";
 
@@ -51,6 +52,9 @@ fn decompress_harnpack_zstd(bytes: &[u8]) -> Result<Vec<u8>, WorkflowBundleError
 pub struct WorkflowBundle {
     pub schema_version: u32,
     pub entrypoint: PathBuf,
+    /// Closed execution payload for schema-v3 bundles. Schema-v2 archives omit
+    /// this field and use the explicit legacy source/bytecode adapter.
+    pub execution_artifact: Option<ExecutionArtifact>,
     pub transitive_modules: Vec<ModuleEntry>,
     pub stdlib_version: String,
     pub harn_version: String,
@@ -77,6 +81,7 @@ impl Default for WorkflowBundle {
         Self {
             schema_version: WORKFLOW_BUNDLE_SCHEMA_VERSION,
             entrypoint: PathBuf::new(),
+            execution_artifact: None,
             transitive_modules: Vec::new(),
             stdlib_version: env!("CARGO_PKG_VERSION").to_string(),
             harn_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -106,6 +111,38 @@ pub struct ModuleEntry {
     pub path: PathBuf,
     pub source_hash_blake3: String,
     pub harnbc_hash_blake3: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ExecutionArtifact {
+    pub format: String,
+    pub path: PathBuf,
+    pub hash_blake3: String,
+    pub graph_digest_blake3: String,
+    pub fallback: ExecutionArtifactFallback,
+    pub link_report: crate::linked_program::LinkReport,
+}
+
+impl Default for ExecutionArtifact {
+    fn default() -> Self {
+        Self {
+            format: "harn.linked_program.v1".to_string(),
+            path: PathBuf::from(crate::linked_program::LINKED_PROGRAM_ARCHIVE_PATH),
+            hash_blake3: String::new(),
+            graph_digest_blake3: String::new(),
+            fallback: ExecutionArtifactFallback::Deny,
+            link_report: crate::linked_program::LinkReport::default(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionArtifactFallback {
+    #[default]
+    Deny,
+    ExactSources,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -581,7 +618,7 @@ pub fn parse_workflow_bundle_manifest(bytes: &[u8]) -> Result<WorkflowBundle, Wo
             ),
         )
     })?;
-    if actual != WORKFLOW_BUNDLE_SCHEMA_VERSION {
+    if actual != WORKFLOW_BUNDLE_SCHEMA_VERSION && actual != LEGACY_WORKFLOW_BUNDLE_SCHEMA_VERSION {
         return Err(WorkflowBundleError::unsupported_schema_version(actual));
     }
     serde_json::from_value(value).map_err(Into::into)
@@ -601,16 +638,45 @@ pub fn workflow_bundle_hash(
     let mut canonical = canonical_workflow_bundle_manifest(bundle);
     canonical.signature = None;
     let manifest_bytes = serde_json::to_vec(&canonical)?;
+    if bundle.schema_version >= WORKFLOW_BUNDLE_SCHEMA_VERSION {
+        hasher.update(b"harn.workflow-bundle.v3\0");
+    }
     hasher.update(&manifest_bytes);
 
-    let mut content_hashes = contents
-        .iter()
-        .map(|entry| blake3_hash_bytes(&entry.bytes))
-        .collect::<Vec<_>>();
-    content_hashes.sort();
-    for content_hash in content_hashes {
-        hasher.update(b"\n");
-        hasher.update(content_hash.as_bytes());
+    if bundle.schema_version >= WORKFLOW_BUNDLE_SCHEMA_VERSION {
+        let mut entries = contents
+            .iter()
+            .map(|entry| normalize_archive_path(&entry.path).map(|path| (path, entry)))
+            .collect::<Result<Vec<_>, _>>()?;
+        entries.sort_by(|left, right| left.0.cmp(&right.0));
+        for pair in entries.windows(2) {
+            if pair[0].0 == pair[1].0 {
+                return Err(WorkflowBundleError::new(
+                    WorkflowBundleErrorKind::DuplicateArchiveEntry,
+                    format!("duplicate archive entry {}", pair[0].0.display()),
+                ));
+            }
+        }
+        for (path, entry) in entries {
+            let path_bytes = path.to_string_lossy();
+            hasher.update(b"\nentry\0");
+            hasher.update(&(path_bytes.len() as u64).to_le_bytes());
+            hasher.update(path_bytes.as_bytes());
+            hasher.update(&entry.mode.to_le_bytes());
+            hasher.update(blake3_hash_bytes(&entry.bytes).as_bytes());
+        }
+    } else {
+        // Schema-v2 compatibility: preserve the historical path-agnostic
+        // multiset hash so existing signatures remain verifiable.
+        let mut content_hashes = contents
+            .iter()
+            .map(|entry| blake3_hash_bytes(&entry.bytes))
+            .collect::<Vec<_>>();
+        content_hashes.sort();
+        for content_hash in content_hashes {
+            hasher.update(b"\n");
+            hasher.update(content_hash.as_bytes());
+        }
     }
 
     Ok(blake3_digest_string(hasher.finalize()))
@@ -1403,7 +1469,9 @@ fn validate_bundle_identity(
     graph: &WorkflowGraph,
     report: &mut WorkflowBundleValidationReport,
 ) {
-    if bundle.schema_version != WORKFLOW_BUNDLE_SCHEMA_VERSION {
+    if bundle.schema_version != WORKFLOW_BUNDLE_SCHEMA_VERSION
+        && bundle.schema_version != LEGACY_WORKFLOW_BUNDLE_SCHEMA_VERSION
+    {
         push_error(
             report,
             "schema_version",

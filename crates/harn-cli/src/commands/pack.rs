@@ -1,9 +1,9 @@
 //! `harn pack <entrypoint>` — build a signed-ready `.harnpack` from a
 //! Harn entrypoint.
 //!
-//! Walks the entrypoint's transitive imports, precompiles every module
-//! into a `.harnbc` artifact, snapshots the provider catalog and
-//! stdlib pin, generates a minimal SBOM, assembles a v2 `WorkflowBundle`
+//! Walks the entrypoint's transitive imports, links one closed-program
+//! artifact, snapshots the provider catalog and stdlib pin, generates a
+//! minimal SBOM, assembles a v3 `WorkflowBundle`
 //! manifest, and emits a deterministic tar.zst archive.
 //!
 //! `harn pack verify <bundle.harnpack>` (#1779) reads a bundle back,
@@ -17,13 +17,12 @@ use std::process;
 use ed25519_dalek::Signer;
 use harn_parser::DiagnosticSeverity;
 use harn_vm::bytecode_cache;
-use harn_vm::module_artifact;
 use harn_vm::orchestration::{
     build_harnpack, load_workflow_bundle_any_version, workflow_bundle_hash, CatchupPolicySpec,
-    ConnectorRequirement, Ed25519Signature, EnvironmentRequirements, HarnpackEntry, ModuleEntry,
-    RetryPolicySpec, SBOMDoc, SBOMPackage, SBOMRelationship, ToolEntry, WorkflowBundle,
-    WorkflowBundlePolicy, WorkflowBundleReplayMetadata, WorkflowBundleTrigger,
-    WORKFLOW_BUNDLE_SCHEMA_VERSION,
+    ConnectorRequirement, Ed25519Signature, EnvironmentRequirements, ExecutionArtifact,
+    ExecutionArtifactFallback, HarnpackEntry, ModuleEntry, RetryPolicySpec, SBOMDoc, SBOMPackage,
+    SBOMRelationship, ToolEntry, WorkflowBundle, WorkflowBundlePolicy,
+    WorkflowBundleReplayMetadata, WorkflowBundleTrigger, WORKFLOW_BUNDLE_SCHEMA_VERSION,
 };
 use harn_vm::{AutonomyTier, TrustRecord};
 use serde::{Deserialize, Serialize};
@@ -36,7 +35,7 @@ use crate::skill_provenance;
 
 /// Stable schema version for the `harn pack --json` envelope. Bump when
 /// [`PackJsonData`] changes shape in a way that agents need to detect.
-pub const PACK_SCHEMA_VERSION: u32 = 2;
+pub const PACK_SCHEMA_VERSION: u32 = 3;
 pub const PACK_SBOM_ARCHIVE_PATH: &str = "sbom.spdx.json";
 const DEFAULT_PACK_FILE_MODE: u32 = 0o644;
 
@@ -48,7 +47,7 @@ pub struct PackJsonData {
     pub size_bytes: u64,
     pub signature: PackSignatureSummary,
     pub sbom_summary: PackSbomSummary,
-    pub debug_symbol_metadata: PackDebugSymbolMetadata,
+    pub link_report: harn_vm::linked_program::LinkReport,
     pub manifest: WorkflowBundle,
 }
 
@@ -65,12 +64,6 @@ pub struct PackSbomSummary {
     pub stdlib_modules: usize,
     pub providers: usize,
     pub tools: usize,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct PackDebugSymbolMetadata {
-    pub harnbc_count: usize,
-    pub total_bytes: u64,
 }
 
 struct PackJsonOutput {
@@ -212,7 +205,7 @@ pub fn json_schema() -> serde_json::Value {
                     "size_bytes",
                     "signature",
                     "sbom_summary",
-                    "debug_symbol_metadata",
+                    "link_report",
                     "manifest"
                 ],
                 "properties": {
@@ -238,12 +231,23 @@ pub fn json_schema() -> serde_json::Value {
                             "tools": { "type": "integer", "minimum": 0 }
                         }
                     },
-                    "debug_symbol_metadata": {
+                    "link_report": {
                         "type": "object",
-                        "required": ["harnbc_count", "total_bytes"],
+                        "required": ["graph_digest_blake3", "linker_algorithm_version", "harn_version", "codegen_fingerprint", "input_bytecode_bytes", "output_bytecode_bytes", "user_input_bytes", "user_output_bytes", "stdlib_input_bytes", "stdlib_output_bytes", "retained_symbols", "removed_symbols", "modules"],
                         "properties": {
-                            "harnbc_count": { "type": "integer", "minimum": 1 },
-                            "total_bytes": { "type": "integer", "minimum": 1 }
+                            "graph_digest_blake3": { "type": "string", "pattern": "^blake3:" },
+                            "linker_algorithm_version": { "type": "integer", "minimum": 1 },
+                            "harn_version": { "type": "string", "minLength": 1 },
+                            "codegen_fingerprint": { "type": "string", "minLength": 1 },
+                            "input_bytecode_bytes": { "type": "integer", "minimum": 1 },
+                            "output_bytecode_bytes": { "type": "integer", "minimum": 1 },
+                            "user_input_bytes": { "type": "integer", "minimum": 1 },
+                            "user_output_bytes": { "type": "integer", "minimum": 1 },
+                            "stdlib_input_bytes": { "type": "integer", "minimum": 0 },
+                            "stdlib_output_bytes": { "type": "integer", "minimum": 0 },
+                            "retained_symbols": { "type": "integer", "minimum": 0 },
+                            "removed_symbols": { "type": "integer", "minimum": 0 },
+                            "modules": { "type": "array", "minItems": 1 }
                         }
                     },
                     "manifest": { "type": "object" }
@@ -395,10 +399,13 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
     let mut sbom_relationships = Vec::new();
     let mut warnings = Vec::new();
     let mut skipped_assets = Vec::new();
-    let mut debug_symbol_metadata = PackDebugSymbolMetadata {
-        harnbc_count: 0,
-        total_bytes: 0,
-    };
+    let linked_program = harn_vm::linked_program::link_program(&entrypoint, &project_root)
+        .map_err(|error| PackError::new(error.code, error.message))?;
+    let link_report = linked_program.report.clone();
+    let linked_program_bytes = linked_program
+        .encode()
+        .map_err(|error| PackError::new(error.code, error.message))?;
+    let linked_program_hash = blake3_hash(&linked_program_bytes);
 
     let stdlib_version = bytecode_cache::HARN_VERSION.to_string();
     let harn_version = bytecode_cache::HARN_VERSION.to_string();
@@ -439,58 +446,6 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
         debug_assert_eq!(parsed_source, source);
         type_check_or_fail(&source, &module_str, &program)?;
 
-        let imported_enum_candidates =
-            crate::imported_enum_candidates_for_source(module_path, &source);
-        let entry_chunk =
-            crate::compiler_with_imported_enum_candidates(imported_enum_candidates.iter().cloned())
-                .compile(&program)
-                .map_err(|err| {
-                    PackError::new(
-                        "module.compile_failed",
-                        format!("compile error in {}: {err}", module_path.display()),
-                    )
-                })?;
-
-        let module_artifact_opt =
-            module_artifact::compile_module_artifact_from_source_with_imported_enums(
-                module_path,
-                &source,
-                imported_enum_candidates,
-            )
-            .ok();
-
-        let entry_cache_key = bytecode_cache::CacheKey::from_source(module_path, &source);
-        let chunk_bytes = bytecode_cache::serialize_chunk_artifact(&entry_cache_key, &entry_chunk)
-            .map_err(|err| {
-                PackError::new(
-                    "module.serialize_failed",
-                    format!(
-                        "failed to serialize chunk for {}: {err}",
-                        module_path.display()
-                    ),
-                )
-            })?;
-
-        let module_artifact_bytes = module_artifact_opt
-            .as_ref()
-            .map(|artifact| {
-                let module_cache_key = bytecode_cache::CacheKey::from_module_source(
-                    &harn_vm::module_source::ModuleSource::from_text(source.as_str()),
-                );
-                bytecode_cache::serialize_module_artifact(&module_cache_key, artifact).map_err(
-                    |err| {
-                        PackError::new(
-                            "module.serialize_failed",
-                            format!(
-                                "failed to serialize module artifact for {}: {err}",
-                                module_path.display()
-                            ),
-                        )
-                    },
-                )
-            })
-            .transpose()?;
-
         let rel = relativize(&project_root, module_path).ok_or_else(|| {
             PackError::new(
                 "module.outside_root",
@@ -502,44 +457,18 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
             )
         })?;
         let source_archive_path = PathBuf::from("sources").join(&rel);
-        let chunk_archive_path = adjacent_with_extension(&rel, bytecode_cache::CACHE_EXTENSION)
-            .ok_or_else(|| {
-                PackError::new(
-                    "module.invalid_path",
-                    format!("module path has no stem: {}", module_path.display()),
-                )
-            })?;
-        let chunk_archive_path = PathBuf::from("bytecode").join(chunk_archive_path);
-
         let source_hash = blake3_hash(source.as_bytes());
-        let harnbc_hash = blake3_hash(&chunk_bytes);
-        debug_symbol_metadata.harnbc_count += 1;
-        debug_symbol_metadata.total_bytes += chunk_bytes.len() as u64;
 
         transitive_modules.push(ModuleEntry {
             path: rel.clone(),
             source_hash_blake3: source_hash.clone(),
-            harnbc_hash_blake3: harnbc_hash.clone(),
+            harnbc_hash_blake3: String::new(),
         });
 
         contents.push(HarnpackEntry::new(
             source_archive_path,
             source.as_bytes().to_vec(),
         ));
-        contents.push(HarnpackEntry::new(chunk_archive_path, chunk_bytes));
-        if let Some(artifact_bytes) = module_artifact_bytes {
-            debug_symbol_metadata.total_bytes += artifact_bytes.len() as u64;
-            let module_rel = adjacent_with_extension(&rel, bytecode_cache::MODULE_CACHE_EXTENSION)
-                .ok_or_else(|| {
-                    PackError::new(
-                        "module.invalid_path",
-                        format!("module path has no stem: {}", module_path.display()),
-                    )
-                })?;
-            let module_archive_path = PathBuf::from("bytecode").join(module_rel);
-            contents.push(HarnpackEntry::new(module_archive_path, artifact_bytes));
-        }
-
         let module_id = logical_bundle_path(&rel);
         if module_path != &entrypoint {
             sbom_relationships.push(SBOMRelationship {
@@ -675,6 +604,18 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
         },
         prior.as_ref(),
     );
+    bundle.execution_artifact = Some(ExecutionArtifact {
+        format: "harn.linked_program.v1".to_string(),
+        path: PathBuf::from(harn_vm::linked_program::LINKED_PROGRAM_ARCHIVE_PATH),
+        hash_blake3: linked_program_hash,
+        graph_digest_blake3: link_report.graph_digest_blake3.clone(),
+        fallback: ExecutionArtifactFallback::Deny,
+        link_report: link_report.clone(),
+    });
+    contents.push(HarnpackEntry::new(
+        harn_vm::linked_program::LINKED_PROGRAM_ARCHIVE_PATH,
+        linked_program_bytes,
+    ));
     if !skipped_assets.is_empty() {
         bundle.metadata.insert(
             "skipped_assets".to_string(),
@@ -753,7 +694,7 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
             size_bytes,
             signature: signature_summary(&bundle),
             sbom_summary: sbom_summary(&bundle),
-            debug_symbol_metadata,
+            link_report,
             manifest: bundle,
         },
         warnings,
