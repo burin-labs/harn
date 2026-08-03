@@ -515,12 +515,16 @@ pipeline test_workflow_projects_typed_binary_size_policy(harness: Harness, task)
 
 @test
 pipeline test_workflow_preserves_bloat_after_failed_budget_gate(harness: Harness, task) {
-  const diagnostic_mode =
-    "matrix.target == 'x86_64-unknown-linux-gnu' && (needs.setup.outputs.build_mode == 'warm' || (needs.setup.outputs.build_mode == 'benchmark' && inputs.benchmark_cargo_bloat))"
+  const measured_target = "matrix.target == 'x86_64-unknown-linux-gnu'"
+  const diagnostic_mode = measured_target
+    + " && (needs.setup.outputs.build_mode == 'warm' || (needs.setup.outputs.build_mode == 'benchmark' && inputs.benchmark_cargo_bloat) || steps.binary_size_budget.outcome == 'failure')"
   const diagnostics = "always() && " + diagnostic_mode
   const steps = release_workflow(harness.fs).jobs.build.steps
   const bloat = release_workflow_step(steps, "Generate cargo-bloat report")
-  assert_eq(release_workflow_step(steps, "Install cargo-bloat").if, diagnostic_mode)
+  // Install precedes the budget gate, so it cannot read that outcome. It must
+  // stay unconditional on the measured target or a budget failure would try to
+  // attribute itself with cargo-bloat missing.
+  assert_eq(release_workflow_step(steps, "Install cargo-bloat").if, measured_target)
   assert_eq(bloat.if, diagnostics)
   assert_eq(bloat["continue-on-error"], true)
   assert(bloat.run?.contains("cargo-bloat-deserialize.txt") ?? false)
