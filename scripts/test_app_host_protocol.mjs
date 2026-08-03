@@ -197,6 +197,12 @@ test("only reserved sandbox methods are classified as sandbox messages", () => {
     protocol.isSandboxMessage({ method: "ui/notifications/initialized" }),
     false,
   );
+  assert.equal(
+    protocol.isSandboxMessage({
+      method: "ui/notifications/harn-portable-worker",
+    }),
+    true,
+  );
   assert.equal(protocol.isSandboxMessage(null), false);
 });
 

@@ -48,6 +48,7 @@
 - [Run a FLUX.2 Klein image job with ComfyUI](./cookbooks/run-comfyui-model-job.md)
 - [Run an OpenAI image job](./cookbooks/run-openai-image-job.md)
 - [Build an interactive Harn app](./cookbooks/build-interactive-app.md)
+- [Run Harn app logic in the browser](./cookbooks/run-app-logic-in-browser.md)
 - [OAuth client + provider cookbook](./oauth.md)
 - [Debugging agent runs](./debugging.md)
 - [Editor setup (VS Code, Neovim, Zed)](./editor-setup.md)

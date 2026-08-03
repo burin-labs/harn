@@ -1,9 +1,11 @@
+import { PortableProgram } from "std/portable"
 import { UiAppOptions } from "std/ui/contracts"
 import {
   UiMcpResourceOptions,
   UiMcpResourceRegistration,
   UiMcpToolMetadata,
   UiResource,
+  UiResourceOptions,
   UiToolMetaOptions,
   ui_resource,
   ui_resource_to_mcp,
@@ -71,12 +73,20 @@ hr { width: 100%; border: 0; border-top: 1px solid var(--line); }
   'use strict';
 
   const TOOL = __HARN_UI_TOOL__;
+  const PORTABLE = __HARN_UI_PORTABLE__;
+  const PORTABLE_SCHEMA = 'harn.portable_worker.v1';
+  const PORTABLE_METHOD = 'ui/notifications/harn-portable-worker';
   const MAX_STROKE_POINTS = 4096;
   const root = document.getElementById('app');
   const pending = new Map();
   let nextRequestId = 1;
   let currentDocument = null;
   let eventChain = Promise.resolve();
+  let portableState = PORTABLE?.state ?? null;
+  let portableReady = null;
+  let portableReadyResolve = null;
+  let portableReadyReject = null;
+  let portableEvent = null;
 
   function request(method, params) {
     const id = nextRequestId++;
@@ -88,6 +98,10 @@ hr { width: 100%; border: 0; border-top: 1px solid var(--line); }
     if (messageEvent.source !== parent) return;
     const message = messageEvent.data;
     if (!message || message.jsonrpc !== '2.0') return;
+    if (message.method === PORTABLE_METHOD) {
+      receivePortable(message.params);
+      return;
+    }
     if (message.method === 'ui/resource-teardown') {
       if (message.id !== undefined) {
         parent.postMessage({ jsonrpc: '2.0', id: message.id, result: {} }, '*');
@@ -133,12 +147,147 @@ hr { width: 100%; border: 0; border-top: 1px solid var(--line); }
     document.getElementById('harn-ui-error')?.remove();
   }
 
+  function toolValue(result) {
+    if (result?.structuredContent !== undefined) return result.structuredContent;
+    const text = result?.content?.find(item => item.type === 'text')?.text;
+    if (text) {
+      try { return JSON.parse(text); } catch {}
+    }
+    return result;
+  }
+
+  function readPortableFallback(result) {
+    const value = toolValue(result);
+    if (value?.update?.schema === 'harn.ui_update.v1' && 'state' in value) {
+      portableState = structuredClone(value.state);
+      return value.update;
+    }
+    throw new Error('portable fallback tool must return {state, update}');
+  }
+
+  function sendPortable(message) {
+    parent.postMessage({jsonrpc: '2.0', method: PORTABLE_METHOD, params: message}, '*');
+  }
+
+  async function serviceCapability(spec) {
+    const args = spec?.arguments;
+    if (spec?.capability !== 'tools' || spec?.operation !== 'invoke'
+      || !Array.isArray(args) || typeof args[0] !== 'string') {
+      sendPortable({
+        schema: PORTABLE_SCHEMA,
+        kind: 'result',
+        result: {
+          status: 'err',
+          request_id: spec?.id || '',
+          code: 'unsupported_browser_capability',
+          message: 'the Harn app renderer supports tools.invoke capability requests',
+        },
+      });
+      return;
+    }
+    try {
+      const result = await request('tools/call', {name: args[0], arguments: args[1] || {}});
+      sendPortable({
+        schema: PORTABLE_SCHEMA,
+        kind: 'result',
+        result: {status: 'ok', request_id: spec.id, value: toolValue(result)},
+      });
+    } catch (error) {
+      sendPortable({
+        schema: PORTABLE_SCHEMA,
+        kind: 'result',
+        result: {
+          status: 'err',
+          request_id: spec.id,
+          code: 'tool_call',
+          message: String(error?.message || error),
+        },
+      });
+    }
+  }
+
+  function receivePortable(data) {
+    if (data?.schema !== PORTABLE_SCHEMA) return;
+    if (data.kind === 'ready') {
+      portableState = structuredClone(data.state);
+      root.dataset.runtime = 'portable';
+      portableReadyResolve?.();
+      portableReadyResolve = null;
+      portableReadyReject = null;
+    } else if (data.kind === 'restored') {
+      portableState = structuredClone(data.state);
+    } else if (data.kind === 'request') {
+      serviceCapability(data.request);
+    } else if (data.kind === 'update') {
+      portableState = structuredClone(data.state);
+      applyUpdate(data.update);
+      portableEvent?.resolve();
+      portableEvent = null;
+    } else if (data.kind === 'failed') {
+      const code = data.diagnostic?.code || 'portable_reducer';
+      const error = new Error(code + ': ' + (data.diagnostic?.message || 'portable reducer failed'));
+      error.code = code;
+      portableReadyReject?.(error);
+      portableReadyResolve = null;
+      portableReadyReject = null;
+      portableEvent?.reject(error);
+      portableEvent = null;
+    }
+  }
+
+  function portableConnection() {
+    if (portableReady) return portableReady;
+    if (!document.querySelector('meta[name="harn-portable-worker"]')) {
+      const error = new Error('this host does not provide portable browser execution');
+      error.code = 'portable_worker_unavailable';
+      throw error;
+    }
+    portableReady = new Promise((resolve, reject) => {
+      portableReadyResolve = resolve;
+      portableReadyReject = reject;
+      const artifact = Uint8Array.from(atob(PORTABLE.artifact), value => value.charCodeAt(0));
+      sendPortable({
+        schema: PORTABLE_SCHEMA,
+        kind: 'load',
+        artifact,
+        state: PORTABLE.state,
+        grants: {capabilities: PORTABLE.capabilities},
+      });
+    });
+    return portableReady;
+  }
+
   function sendEvent(event) {
     eventChain = eventChain.then(async () => {
       root.dataset.busy = 'true';
       try {
-        const result = await request('tools/call', { name: TOOL, arguments: { event } });
-        applyUpdate(readUpdate(result));
+        if (PORTABLE) {
+          try {
+            await portableConnection();
+            await new Promise((resolve, reject) => {
+              portableEvent = {resolve, reject};
+              sendPortable({schema: PORTABLE_SCHEMA, kind: 'event', event});
+            });
+          } catch (error) {
+            if (!TOOL || !String(error?.code || '').startsWith('portable_worker_')) {
+              throw error;
+            }
+            portableReady = null;
+            portableReadyResolve = null;
+            portableReadyReject = null;
+            root.dataset.runtime = 'native';
+            console.warn('[harn portable] using the native tool fallback:', error);
+            const result = await request('tools/call', {
+              name: TOOL,
+              arguments: {event, state: portableState},
+            });
+            applyUpdate(readPortableFallback(result));
+          }
+        } else {
+          root.dataset.runtime = 'native';
+          const result = await request('tools/call', {name: TOOL, arguments: {event}});
+          applyUpdate(readUpdate(result));
+        }
         clearError();
       } catch (error) {
         showError(error);
@@ -346,11 +495,71 @@ pub fn renderer_html(tool_name: string) -> string {
   if name == "" {
     throw "std/ui: event tool name is required"
   }
-  let encoded = json_stringify(name)
+  return __ui_renderer_html(name, nil)
+}
+
+fn __ui_script_json(value) -> string {
+  let encoded = json_stringify(value)
   encoded = replace(encoded, "<", "\\u003c")
   encoded = replace(encoded, ">", "\\u003e")
-  encoded = replace(encoded, "&", "\\u0026")
-  return replace(UI_RENDERER_HTML, "__HARN_UI_TOOL__", encoded)
+  return replace(encoded, "&", "\\u0026")
+}
+
+fn __ui_renderer_html(tool_name: string, portable) -> string {
+  const html = replace(UI_RENDERER_HTML, "__HARN_UI_TOOL__", __ui_script_json(tool_name))
+  const portable_json = portable == nil ? "null" : __ui_script_json(portable)
+  return replace(html, "__HARN_UI_PORTABLE__", portable_json)
+}
+
+/**
+ * Return the shared renderer configured for one Portable Harn reducer.
+ *
+ * The reducer receives `{state, event}` and returns `{state, update}`. The
+ * browser runs it in a worker when the host ships the Portable Kernel runtime;
+ * other MCP Apps hosts call `fallback_tool` through the standard tool route.
+ *
+ * @effects: []
+ * @errors: [invalid_argument]
+ */
+pub fn portable_renderer_html(
+  fallback_tool: string,
+  program: PortableProgram,
+  state: unknown,
+  capabilities: list<string> = [],
+) -> string {
+  const name = trim(fallback_tool)
+  if name == "" {
+    throw "std/ui: fallback event tool name is required"
+  }
+  for capability in capabilities {
+    if capability != "tools.invoke" {
+      throw "std/ui: browser reducers currently support only the tools.invoke capability"
+    }
+  }
+  const config = {
+    artifact: bytes_to_base64(program.artifact),
+    state: state,
+    capabilities: capabilities,
+  }
+  return __ui_renderer_html(name, config)
+}
+
+fn __ui_resource_options(options: UiAppOptions, capabilities: list<string>) -> UiResourceOptions {
+  const base = {
+    version: options?.version ?? "1",
+    capabilities: capabilities,
+    validation: {allow_network: false}.merging(options?.validation ?? {}),
+  }
+  const description = options?.description
+  if description != nil {
+    return {
+      description: description,
+      version: base.version,
+      capabilities: base.capabilities,
+      validation: base.validation,
+    }
+  }
+  return base
 }
 
 /**
@@ -369,12 +578,30 @@ pub fn app_resource(
     uri,
     name,
     renderer_html(tool_name),
-    {
-      description: options?.description,
-      version: options?.version ?? "1",
-      capabilities: ["tools/call"],
-      validation: {allow_network: false}.merging(options?.validation ?? {}),
-    },
+    __ui_resource_options(options, ["tools/call"]),
+  )
+}
+
+/**
+ * Build an MCP Apps resource whose state reducer runs in the browser worker.
+ *
+ * @effects: []
+ * @errors: [invalid_argument]
+ */
+pub fn portable_app_resource(
+  uri: string,
+  name: string,
+  fallback_tool: string,
+  program: PortableProgram,
+  state: unknown,
+  capabilities: list<string> = [],
+  options: UiAppOptions = nil,
+) -> UiResource {
+  return ui_resource(
+    uri,
+    name,
+    portable_renderer_html(fallback_tool, program, state, capabilities),
+    __ui_resource_options(options, ["tools/call", "harn.portable.v1"]),
   )
 }
 

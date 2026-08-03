@@ -370,6 +370,23 @@ typed fallback record instead of an anonymous raw payload. See
 [examples/ui_resource](https://github.com/burin-labs/harn/tree/main/examples/ui_resource)
 for a dashboard widget and a multi-step review form.
 
+### std/portable
+
+Compile and run one versioned Harn program through the native Portable Kernel:
+
+| Function | Description |
+|---|---|
+| `portable.compile(source, entry, kind?)` | Compile a function or pipeline into a typed `PortableProgram`, or return exact diagnostics |
+| `portable.grants(capabilities?, snapshot_key?)` | Build the exact capability ceiling and optional 32-byte snapshot key |
+| `portable.start(program, input, grants?)` | Start deterministic execution and return `completed`, `suspended`, or `failed` |
+| `portable.resume(program, snapshot, result, grants)` | Continue one suspended execution with its matching typed result |
+| `portable.accept(request, value)` / `portable.reject(request, code, message)` | Build a matching capability result |
+| `portable.run(program, input, grants, handle, options?)` | Let Harn code service capability requests until the program finishes or reaches the step limit |
+
+Use `std/portable` when native and browser hosts must run the same artifact.
+See the [portable kernel contract](./portable-kernel-reference.md) for values,
+limits, grants, diagnostics, and supported Harn constructs.
+
 ### std/ui
 
 Build interactive apps over `std/ui_resource` with checked Harn records:
@@ -384,7 +401,9 @@ import * as ui from "std/ui"
 | `ui.event(raw)` | Check browser input, including canvas coordinates from `0.0` to `1.0` and snapshots |
 | `ui.update(document, effects?)` | Return the structured document and optional scheduled, capture, or download effects |
 | `ui.renderer_html(tool_name)` | Configure the shared browser and canvas view for one Harn event tool |
+| `ui.portable_renderer_html(fallback_tool, program, state, capabilities?)` | Configure the shared view to run one Harn reducer in a host-owned browser worker |
 | `ui.app_resource(uri, name, tool_name, options?)` | Package the renderer as a validated MCP Apps resource |
+| `ui.portable_app_resource(uri, name, fallback_tool, program, state, capabilities?, options?)` | Package one browser reducer and its same-artifact server fallback |
 | `ui.tool_metadata(resource, options?)` | Return the MCP tool metadata that opens the app |
 | `ui.mcp_resource(resource, options?)` | Return the config accepted by `harness.tools.mcp_resource` |
 | `ui.test.run(handle, events, options?)` | Drive event handling and scheduled effects in process without waiting for real time |
@@ -392,6 +411,8 @@ import * as ui from "std/ui"
 Application code owns state and decisions in Harn. Browser JavaScript exists
 once inside the shared renderer. See the [`std/ui` reference](./stdlib/ui.md)
 and [interactive app guide](./cookbooks/build-interactive-app.md).
+Use [Run Harn app logic in the browser](./cookbooks/run-app-logic-in-browser.md)
+for the worker and fallback path.
 
 ### std/llm/budget
 

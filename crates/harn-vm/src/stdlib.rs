@@ -83,6 +83,7 @@ pub(crate) use package_snapshot::PackageSnapshotRegistry;
 mod path;
 pub(crate) mod path_scope_guard;
 pub(crate) mod pool;
+mod portable;
 #[cfg(feature = "postgres")]
 mod postgres;
 #[cfg(feature = "postgres")]
@@ -175,6 +176,7 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     lifecycle_receipts::register_lifecycle_receipt_builtins(vm);
     net_policy::register_net_policy_builtins(vm);
     http_response::register_http_response_builtins(vm);
+    portable::register_portable_builtins(vm);
 }
 
 /// Register I/O builtins (requires OS access).

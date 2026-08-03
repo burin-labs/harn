@@ -10,7 +10,11 @@ function publish(kind, elapsedMs) {
 
 function dispatch(event) {
   const started = performance.now();
-  const result = start(artifact, JSON.stringify({ state, event }), "[]");
+  const result = start(
+    artifact,
+    JSON.stringify({ state, event }),
+    JSON.stringify({ capabilities: [] }),
+  );
   if (result.status === "completed") {
     state = JSON.parse(result.valueJson());
     publish("state", performance.now() - started);

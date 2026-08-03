@@ -5,6 +5,10 @@ const HOST_SCRIPT: &str = include_str!("app_host/host.js");
 const SANDBOX_DOCUMENT: &str = include_str!("app_host/sandbox.html");
 const SANDBOX_STYLE: &str = include_str!("app_host/sandbox.css");
 const SANDBOX_SCRIPT: &str = include_str!("app_host/sandbox.js");
+const PORTABLE_RUNNER_SCRIPT: &str = include_str!("app_host/portable_runner.js");
+const PORTABLE_WORKER_SCRIPT: &str = include_str!("app_host/portable_worker.js");
+pub(crate) const HARN_WASM_SCRIPT: &str = include_str!("app_host/runtime/harn_wasm.js");
+pub(crate) const HARN_WASM_GZIP: &[u8] = include_bytes!("app_host/runtime/harn_wasm_bg.wasm.gz");
 
 pub(crate) fn host_document(title: &str, sandbox_origin: &str) -> String {
     let script = format!("{HOST_PROTOCOL_SCRIPT}\n{HOST_SCRIPT}");
@@ -17,6 +21,10 @@ pub(crate) fn host_document(title: &str, sandbox_origin: &str) -> String {
 pub(crate) fn sandbox_document() -> String {
     let script = format!("{HOST_PROTOCOL_SCRIPT}\n{SANDBOX_SCRIPT}");
     render_document(SANDBOX_DOCUMENT, SANDBOX_STYLE, &script)
+}
+
+pub(crate) fn portable_worker_script() -> String {
+    format!("{PORTABLE_RUNNER_SCRIPT}\n{PORTABLE_WORKER_SCRIPT}")
 }
 
 fn render_document(template: &str, style: &str, script: &str) -> String {
@@ -62,5 +70,14 @@ mod tests {
         assert!(document.contains("sandbox-proxy-ready"));
         assert!(document.contains("sandbox=\"allow-scripts allow-downloads\""));
         assert!(!document.contains("__HARN_"));
+    }
+
+    #[test]
+    fn portable_runtime_keeps_policy_readable_and_wasm_compressed() {
+        let worker = portable_worker_script();
+        assert!(worker.contains("harn.portable_worker.v1"));
+        assert!(worker.contains("from \"./harn_wasm.js\""));
+        assert!(HARN_WASM_SCRIPT.contains("harn_wasm_bg.wasm"));
+        assert_eq!(&HARN_WASM_GZIP[..2], &[0x1f, 0x8b]);
     }
 }

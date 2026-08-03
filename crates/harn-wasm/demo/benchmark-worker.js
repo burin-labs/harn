@@ -66,14 +66,15 @@ try {
     event: { kind: "increment", amount: 1 },
   });
   const firstStartStarted = performance.now();
-  const expectedTerminal = completedValue(start(artifact, inputJson, "[]"));
+  const grants = JSON.stringify({ capabilities: [] });
+  const expectedTerminal = completedValue(start(artifact, inputJson, grants));
   const firstStartMs = performance.now() - firstStartStarted;
 
   const startSamples = [];
   const batchStarted = performance.now();
   for (let index = 0; index < START_ITERATIONS; index += 1) {
     const started = performance.now();
-    const terminal = completedValue(start(artifact, inputJson, "[]"));
+    const terminal = completedValue(start(artifact, inputJson, grants));
     startSamples.push(performance.now() - started);
     if (terminal !== expectedTerminal) {
       throw new Error("portable start returned a different terminal value for identical input");

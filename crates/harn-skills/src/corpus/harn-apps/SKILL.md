@@ -50,6 +50,24 @@ Start with `examples/apps/decision-card.harn` for forms and
 `examples/apps/logo-studio.harn` for canvas input, model jobs, result files,
 and restart recovery.
 
+## Run one reducer in browser and server
+
+Use `std/portable.compile` plus `ui.portable_app_resource` when frequent events
+should update the view without a server round trip. The reducer receives
+`{state, event}` and returns `{state, update}`. Keep its state to plain Harn
+values.
+
+The fallback event tool must run the same `PortableProgram`, prefer the
+`raw.state` supplied by the renderer, and return the complete reducer result.
+This keeps fallback on the latest browser state after a worker restart. Do not
+copy the reducer into JavaScript, Rust, or a second Harn implementation.
+
+The shared host owns the browser worker and Wasm runtime outside the untrusted
+app view. The current reducer capability list accepts only `tools.invoke`.
+Keep externally visible tool actions safe to retry. Read
+`docs/src/cookbooks/run-app-logic-in-browser.md` for the full path and
+`examples/apps/portable-counter.harn` for the smallest working app.
+
 ## Compose model work
 
 Represent generated media with `MediaAsset`. Submit local and hosted work

@@ -127,6 +127,26 @@ ci = true
 make_all = false
 
 [[artifact]]
+id = "app-runtime"
+description = "Compressed browser runtime embedded by the standalone Apps host, generated from the canonical harn-wasm adapter."
+lifecycle = "release-package"
+gen = "gen-app-runtime"
+check = "check-app-runtime"
+outputs = [
+  "crates/harn-cli/src/commands/app_host/runtime/harn_wasm.js",
+  "crates/harn-cli/src/commands/app_host/harn_wasm.d.ts",
+  "crates/harn-cli/src/commands/app_host/runtime/harn_wasm_bg.wasm.d.ts",
+  "crates/harn-cli/src/commands/app_host/runtime/harn_wasm_bg.wasm.gz",
+]
+sources = [
+  "crates/harn-kernel/",
+  "crates/harn-wasm/",
+  "scripts/package_app_runtime.mjs",
+]
+ci = true
+make_all = false
+
+[[artifact]]
 id = "portable-benchmark-schema"
 description = "Public JSON Schema generated from the Portable Kernel benchmark receipt type, validation constants, and serialization contract."
 gen = "gen-portable-benchmark-schema"
@@ -483,6 +503,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-docs-model-refs" = "source"
 "check-docs-links" = "source"
 "check-app-host" = "source"
+"check-app-runtime" = "excluded"
 "check-receipt-structs" = "source"
 "check-ported-handler-loc" = "source"
 "check-source-file-lengths" = "source"

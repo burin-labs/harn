@@ -50,16 +50,11 @@ interface kernel {
     expected: value-shape,
   }
 
-  record suspendable-grants {
+  record grant-set {
     capabilities: list<string>,
-    /// Exactly 32 bytes. Hosts retain this secret and use it to authenticate
-    /// snapshots returned across their untrusted storage seam.
-    snapshot-key: list<u8>,
-  }
-
-  variant grant-set {
-    pure(list<string>),
-    suspendable(suspendable-grants),
+    /// When present, this is exactly 32 bytes. Hosts retain the secret and use
+    /// it to authenticate snapshots returned across untrusted storage.
+    snapshot-key: option<list<u8>>,
   }
 
   enum value-shape {
