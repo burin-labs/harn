@@ -1304,6 +1304,49 @@ fn capability_apply_replaces_an_existing_imported_carrier_in_place() {
     );
 }
 
+/// An imported callee with a multi-capability prefix has two would-be edit
+/// producers: the imported-signature pass, which reads the whole prefix, and
+/// the per-diagnostic pass, which sees only the capability the typechecker
+/// reported first. Both insert at the same argument index, so emitting both
+/// left two conflicting zero-width edits at one offset and the apply refused
+/// the entire candidate — writing nothing for the whole pass.
+#[test]
+fn capability_apply_does_not_double_insert_a_multi_capability_imported_prefix() {
+    let temp = tempfile::TempDir::new().unwrap();
+    fs::write(
+        temp.path().join("trailers.harn"),
+        "pub fn append_trailers(env: HarnessEnv, fs: HarnessFs, message: string) -> string {\n  const _ = env.get(\"USER\")\n  const _ = fs.read_text(message)\n  return message\n}\n",
+    )
+    .unwrap();
+    let entry = temp.path().join("main.harn");
+    fs::write(
+        &entry,
+        "import { append_trailers } from \"./trailers\"\n\npipeline render_trailers(task) {\n  return append_trailers(\"note.txt\")\n}\n",
+    )
+    .unwrap();
+
+    let result = apply_repairs_with_options(
+        temp.path(),
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions {
+            capability_migrations_only: true,
+        },
+    )
+    .unwrap();
+    assert_eq!(result.post_apply_diagnostics_count, 0, "{result:#?}");
+    let updated = fs::read_to_string(entry).unwrap();
+    assert_eq!(
+        call_argument_paths(&updated, "append_trailers")[0],
+        [
+            Some("harness.env".to_string()),
+            Some("harness.fs".to_string()),
+            None
+        ],
+        "the whole declared prefix must be inserted exactly once: {updated}"
+    );
+}
+
 #[test]
 fn capability_apply_follows_selective_re_exports_to_the_definition() {
     let temp = tempfile::TempDir::new().unwrap();
