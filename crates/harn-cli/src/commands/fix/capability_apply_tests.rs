@@ -586,6 +586,36 @@ fn capability_only_plan_excludes_unrelated_preflight_repairs_at_fixed_point() {
 }
 
 #[test]
+fn capability_apply_keeps_the_burin_peer_coordination_fixture_parse_safe() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("test_peer_coordination.harn");
+    fs::write(
+        &script,
+        include_str!("../../../tests/fixtures/capability_migration/peer_coordination_before.harn"),
+    )
+    .unwrap();
+
+    let result = apply_repairs_with_options(
+        &script,
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions {
+            capability_migrations_only: true,
+        },
+    )
+    .unwrap();
+    let updated = fs::read_to_string(&script).unwrap();
+    harn_parser::parse_source(&updated)
+        .unwrap_or_else(|errors| panic!("migration output must parse: {errors:?}\n{updated}"));
+    assert_eq!(result.skipped_files.len(), 0, "{result:#?}");
+    assert!(!updated.contains("strharness"), "{updated}");
+    assert!(!updated.contains("foharness"), "{updated}");
+    assert!(!updated.contains("asserharness"), "{updated}");
+    assert!(updated.contains("harness.store_set("), "{updated}");
+    assert!(updated.contains("harness.testing.calls()"), "{updated}");
+}
+
+#[test]
 fn capability_apply_recognizes_a_local_named_capability_bundle() {
     let (result, updated) = apply_single(
         "type ScenarioCapabilities = {testing: HarnessTesting, llm: HarnessLlm}\n\nfn with_host_fixture(testing: HarnessTesting, body) {\n  testing.calls()\n  return body()\n}\n\nfn with_scenario(capabilities: ScenarioCapabilities, body) {\n  return with_host_fixture(capabilities.testing, body)\n}\n\nfn main(harness: Harness) {\n  with_scenario({testing: harness.testing, llm: harness.llm}, { -> nil })\n}\n",

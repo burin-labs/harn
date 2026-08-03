@@ -580,6 +580,57 @@ fn capability_only_plan_excludes_unrelated_repairs() {
 }
 
 #[test]
+fn capability_pass_rejects_stale_offsets_before_writing_any_file() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let valid = temp.path().join("valid.harn");
+    let stale = temp.path().join("stale.harn");
+    fs::write(&valid, "fn valid() -> nil { return nil }\n").unwrap();
+    fs::write(&stale, "fn pin(variant: string?) -> nil { return nil }\n").unwrap();
+    let original_valid = fs::read_to_string(&valid).unwrap();
+    let original_stale = fs::read_to_string(&stale).unwrap();
+
+    let edits = BTreeMap::from([
+        (
+            valid.display().to_string(),
+            vec![FixEditWire {
+                span: SpanWire {
+                    start: 3,
+                    end: 8,
+                    line: 1,
+                    column: 4,
+                    end_line: 1,
+                },
+                replacement: "still_valid".to_string(),
+            }],
+        ),
+        (
+            stale.display().to_string(),
+            vec![FixEditWire {
+                // Twelve-byte drift from a removed `, with_mocks` import:
+                // the intended parameter insertion now lands inside `string`.
+                span: SpanWire {
+                    start: 20,
+                    end: 20,
+                    line: 1,
+                    column: 21,
+                    end_line: 1,
+                },
+                replacement: "harness: Harness, ".to_string(),
+            }],
+        ),
+    ]);
+
+    let error = render_capability_migration_pass(&edits)
+        .expect_err("a stale byte offset must reject the complete pass");
+    assert!(
+        error.contains("no files from this pass were written"),
+        "{error}"
+    );
+    assert_eq!(fs::read_to_string(valid).unwrap(), original_valid);
+    assert_eq!(fs::read_to_string(stale).unwrap(), original_stale);
+}
+
+#[test]
 fn plan_json_reports_cross_module_public_signature_impact() {
     let temp = tempfile::TempDir::new().unwrap();
     let lib = temp.path().join("lib.harn");

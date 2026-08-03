@@ -17,7 +17,7 @@ pub fn agent_session_init(
   session_id: string,
   run_id: string,
   task: string,
-  system: string | nil,
+  system: string?,
   max_iterations: int,
   max_verify_attempts: int,
   done: bool,

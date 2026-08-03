@@ -35,7 +35,7 @@ use lint_context::FixLintContext;
 mod apply;
 use apply::apply_repairs_with_options;
 #[cfg(test)]
-use apply::{apply_file_edits, apply_repairs, repair_path};
+use apply::{apply_file_edits, apply_repairs, render_capability_migration_pass, repair_path};
 use reporting::{print_apply_result, print_human_plan, skipped_files_error};
 use signature_threading::{
     add_call_argument_edit, add_harness_param_edit, build_reverse_callers, collect_callable_infos,
