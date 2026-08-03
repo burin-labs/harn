@@ -13,6 +13,7 @@ const HarnAppHostProtocol = (() => {
   const appProtocolVersion = "2026-01-26";
   const displayModeNames = new Set(["inline", "fullscreen", "pip"]);
   const sandboxMethodPrefix = "ui/notifications/sandbox-";
+  const portableWorkerMethod = "ui/notifications/harn-portable-worker";
   const serverRequestMethods = new Set([
     "ping",
     "tools/call",
@@ -140,7 +141,8 @@ const HarnAppHostProtocol = (() => {
     const value = record(message);
     return (
       typeof value?.method === "string" &&
-      value.method.startsWith(sandboxMethodPrefix)
+      (value.method.startsWith(sandboxMethodPrefix) ||
+        value.method === portableWorkerMethod)
     );
   }
 

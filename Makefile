@@ -1,6 +1,6 @@
 .PHONY: setup setup-rust setup-bootstrap clean-stale-targets install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-app-host fmt-harn fmt-harn-fix lint lint-md lint-actions lint-actions-source lint-actions-harn lint-harn check-app-host spec-lint gen-openapi-snapshot check-openapi-snapshot test test-one test-e2e test-cargo test-fast test-harn-scripts test-agent-scripts test-pr-gate-scripts conformance mechanism-contracts protocol-conformance mcp-conformance replay-oracle replay-bench eval-tool-calls bench bench-vm bench-vm-micro bench-vm-clone check-vm-rss-soak check-test-case-performance bench-llm bench-orchestration bench-cli-cold-start loadgen-postgres all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-cli-aot check-cli-aot gen-highlight check-highlight gen-prompt-grammar check-prompt-grammar gen-protocol-artifacts check-protocol-artifacts gen-connector-schemas check-connector-schemas check-burin-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-run-view-fixtures check-run-view-fixtures gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix check-provider-support check-provider-catalog check-connector-matrix check-trigger-examples check-docs-model-refs check-docs-snippets check-docs-cli-flags check-docs-links check-site-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-stdlib-strict-types check-stdlib-public-return-types check-schema-strict check-optional-dep-feature-contracts check-receipt-structs lint-no-rust-prompt-prose lint-agent-path-normalization lint-no-xfail-regression check-provider-catalog-drift check-ported-handler-loc check-source-file-lengths update-source-file-length-baseline check-python-boundary check-harn-syntax-sensitive-scans check-agent-guidance check-crate-sibling-versions check-dependabot-groups gen-tree-sitter-keywords check-tree-sitter-keywords gen-tree-sitter-parser check-tree-sitter-parser check-grammar-keywords gen-grammar-fitness check-grammar-fitness check-loud-boundaries check-generated-registry check-release-audit-contract check-ci-cache-policy check-binary-size-policy check-all-features
 .PHONY: test-pr-gate-post-warm-integrations test-rust-lint-lane-cache
-.PHONY: setup-wasm setup-wasm-tools gen-wasm-wit check-wasm-wit wasm-build wasm-audit-imports wasm-test-browser wasm-check wasm-demo kernel-check kernel-test kernel-vm-parity vm-check cli-check cli-test gen-portable-benchmark-schema check-portable-benchmark-schema
+.PHONY: setup-wasm setup-wasm-tools gen-wasm-wit check-wasm-wit wasm-build gen-app-runtime check-app-runtime wasm-audit-imports wasm-test-browser wasm-check wasm-demo kernel-check kernel-test kernel-vm-parity vm-check cli-check cli-test gen-portable-benchmark-schema check-portable-benchmark-schema
 
 HARN_BIN ?=
 HARN_PROTOCOL_ARTIFACT_VERSION ?=
@@ -27,6 +27,16 @@ HARN_WASM_COMPONENT_TOOLS_DIR ?= $(or $(TMPDIR),/tmp)/harn-tools/wasm-tools-$(HA
 HARN_WASM_TOOLS ?= $(HARN_WASM_COMPONENT_TOOLS_DIR)/bin/wasm-tools
 HARN_WASM_OUT_DIR ?= pkg
 HARN_WASM_BINARY ?= crates/harn-wasm/$(HARN_WASM_OUT_DIR)/harn_wasm_bg.wasm
+HARN_APP_RUNTIME_WASM ?= crates/harn-cli/src/commands/app_host/runtime/harn_wasm_bg.wasm.gz
+# Panic locations embed absolute paths from the builder's Cargo registry and
+# toolchain sysroot, and this module ships to users inside the CLI. Without
+# remapping, whoever regenerates the runtime publishes their home directory and
+# host triple in it. Map both roots to fixed names so the artifact says nothing
+# about the machine that produced it. RUSTFLAGS is set rather than appended so
+# the flags do not vary with an inherited value (CI exports one).
+HARN_CARGO_HOME ?= $(or $(CARGO_HOME),$(HOME)/.cargo)
+HARN_RUST_SYSROOT ?= $(shell rustc --print sysroot)
+HARN_WASM_RUSTFLAGS ?= --remap-path-prefix=$(HARN_CARGO_HOME)/registry=/cargo-registry --remap-path-prefix=$(HARN_RUST_SYSROOT)=/rust-toolchain
 HARN_CHROMEDRIVER ?=
 
 # Full quality check: format first, then lint/test in parallel.
@@ -86,19 +96,31 @@ check-wasm-wit: setup-wasm-tools
 # Core-Wasm ES modules are the immediate browser Adapter. Override
 # HARN_WASM_OUT_DIR for a disposable baseline or a packaging lane.
 wasm-build: setup-wasm
-	cd crates/harn-wasm && "$(HARN_WASM_PACK)" build --target web --release --out-dir "$(HARN_WASM_OUT_DIR)"
+	cd crates/harn-wasm && RUSTFLAGS="$(HARN_WASM_RUSTFLAGS)" "$(HARN_WASM_PACK)" build --target web --release --out-dir "$(HARN_WASM_OUT_DIR)"
+
+# The standalone Apps host embeds one compressed copy of the same Wasm adapter
+# tested below. Generated JavaScript remains readable and type checked; Rust
+# only serves the immutable files with the correct browser headers.
+gen-app-runtime: wasm-build
+	node scripts/package_app_runtime.mjs
+
+check-app-runtime: wasm-build
+	node scripts/package_app_runtime.mjs --check
 
 # Core Wasm must import only the tiny generated wasm-bindgen exception Adapter.
 # Any other host import is an authority change and fails closed for review.
+# Audit both the module CI just built and the compressed copy the CLI ships,
+# so a committed runtime cannot carry authority the fresh build would reject.
 wasm-audit-imports: wasm-build
 	node scripts/check_wasm_imports.mjs "$(HARN_WASM_BINARY)"
+	node scripts/check_wasm_imports.mjs "$(HARN_APP_RUNTIME_WASM)"
 
 # Browser tests are intentionally a real dedicated-worker path, not Node.
 wasm-test-browser: setup-wasm
 	@driver="$${HARN_CHROMEDRIVER:-$$(./scripts/resolve_chromedriver.sh)}"; \
 	cd crates/harn-wasm && "$(HARN_WASM_PACK)" test --headless --chrome --chromedriver "$$driver"
 
-wasm-check: check-wasm-wit wasm-build wasm-audit-imports wasm-test-browser
+wasm-check: check-wasm-wit wasm-build check-app-runtime wasm-audit-imports wasm-test-browser
 
 # Serve the standalone reducer with correct Wasm MIME types on every Node
 # platform. The worker remains the execution owner; this process only serves

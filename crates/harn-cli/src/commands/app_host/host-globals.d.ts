@@ -42,3 +42,53 @@ declare const HarnAppHostProtocol: {
     reply: (message: JsonRpcMessage) => void,
   ): Promise<void>;
 };
+
+type PortableRequest = {
+  id: string;
+  capability: string;
+  operation: string;
+  arguments: unknown;
+  expected: string;
+};
+
+type PortableResult =
+  | { status: "ok"; request_id: string; value: unknown }
+  | { status: "err"; request_id: string; code: string; message: string };
+
+type PortableWorkerMessage =
+  | {
+      schema: "harn.portable_worker.v1";
+      kind: "load";
+      artifact: Uint8Array;
+      state: unknown;
+      grants: Record<string, unknown> & { capabilities: string[] };
+    }
+  | { schema: "harn.portable_worker.v1"; kind: "restore"; state: unknown }
+  | { schema: "harn.portable_worker.v1"; kind: "event"; event: unknown }
+  | {
+      schema: "harn.portable_worker.v1";
+      kind: "result";
+      result: PortableResult;
+    };
+
+type PortableOutcome = {
+  status: string;
+  valueJson(): string;
+  requestJson(): string;
+  snapshotBytes(): Uint8Array;
+  diagnosticJson(): string;
+};
+
+declare const HarnPortableRunner: {
+  schema: "harn.portable_worker.v1";
+  create(options: {
+    start(artifact: Uint8Array, input: string, grants: string): PortableOutcome;
+    resume(
+      artifact: Uint8Array,
+      snapshot: Uint8Array,
+      result: string,
+      grants: string,
+    ): PortableOutcome;
+    send(message: Record<string, unknown>): void;
+  }): { receive(message: PortableWorkerMessage): void };
+};

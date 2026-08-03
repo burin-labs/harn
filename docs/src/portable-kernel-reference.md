@@ -5,9 +5,9 @@ execute/resume boundary.
 
 ## Interfaces
 
-The Rust API is owned by `harn-kernel`. `harn-vm::portable` is the native byte
-adapter. `harn-wasm` projects the same operations through generated
-`wasm-bindgen` bindings:
+The contract is owned by `harn-kernel`. Harn programs use `std/portable`;
+`harn-vm::portable` is its native byte adapter. `harn-wasm` projects the same
+operations through generated `wasm-bindgen` bindings:
 
 ```text
 compile(source, entry, entry_kind) -> program | diagnostics
@@ -50,10 +50,10 @@ builtin identities, excessive type nesting, and all configured byte/count
 limits. The decoder reconstructs domain objects; it never deserializes Rust
 implementation state.
 
-Default limits include an 8 MiB artifact, 128 levels of type nesting, 16,384
-chunks, 16,384 functions, and bounded instruction, constant, string, and
-metadata totals. Browser source and JSON inputs are separately limited to 1
-MiB; the browser grant document is limited to 64 KiB.
+Default limits include 1 MiB of UTF-8 source, an 8 MiB artifact, 128 levels of
+type nesting, 16,384 chunks, 16,384 functions, and bounded instruction,
+constant, string, and metadata totals. Browser JSON inputs are separately
+limited to 1 MiB; the browser grant document is limited to 64 KiB.
 
 Execution has separate deterministic ceilings:
 
@@ -86,12 +86,16 @@ enforces byte, node, and depth limits before recursive allocation.
 
 ## Grants and capability requests
 
-Pure execution uses an empty grant list. A suspendable grant set contains exact
-capability method names and a host-retained 32-byte snapshot key. Prefix grants
-and wildcards are invalid. Every name and complete argument/result type comes
+Pure execution uses `{capabilities: []}`. A suspendable grant record contains
+exact capability method names and a host-retained 32-byte snapshot key. Prefix
+grants and wildcards are invalid. Every name and complete argument/result type comes
 from the canonical capability registry. The `expected` field is a compact host
 display summary; the kernel always validates resumed values against the full
 canonical nested type contract before execution continues.
+
+Harn calls the optional byte field `snapshot_key`. The browser JSON adapter
+calls its 64-character hexadecimal form `snapshotKey`; both project the same
+optional field in the WIT `grant-set` record. Bare capability lists are invalid.
 
 A suspension returns:
 

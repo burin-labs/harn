@@ -12,7 +12,6 @@ use harn_kernel::{
 };
 use wasm_bindgen::prelude::*;
 
-const MAX_SOURCE_BYTES: usize = 1024 * 1024;
 const MAX_VALUE_JSON_BYTES: usize = 1024 * 1024;
 const MAX_GRANTS_JSON_BYTES: usize = 64 * 1024;
 const MAX_BENCHMARK_SAMPLES_JSON_BYTES: usize = 8 * 1024 * 1024;
@@ -91,21 +90,9 @@ impl ExecutionOutcome {
 /// Compile a function or pipeline through the canonical Harn frontend.
 #[wasm_bindgen]
 pub fn compile(source: &str, entry: &str, entry_kind: &str) -> CompileOutcome {
-    if source.len() > MAX_SOURCE_BYTES {
-        return compile_failure(vec![diagnostic(
-            "source_too_large",
-            "source exceeds the browser compiler's 1 MiB limit",
-        )]);
-    }
-    let entry_kind = match entry_kind {
-        "function" => EntryKind::Function,
-        "pipeline" => EntryKind::Pipeline,
-        other => {
-            return compile_failure(vec![diagnostic(
-                "entry_kind",
-                format!("entry kind `{other}` is invalid; use `function` or `pipeline`"),
-            )]);
-        }
+    let entry_kind = match entry_kind.parse::<EntryKind>() {
+        Ok(kind) => kind,
+        Err(diagnostic) => return compile_failure(vec![diagnostic]),
     };
 
     match harn_kernel::compile_program(source, entry, entry_kind) {
@@ -264,28 +251,19 @@ fn decode_grants(json: &str) -> Result<GrantSet, JsError> {
         return Err(JsError::new("grants JSON exceeds the 64 KiB limit"));
     }
     #[derive(serde::Deserialize)]
-    #[serde(untagged)]
-    enum GrantsInput {
-        Pure(Vec<String>),
-        Suspendable {
-            capabilities: Vec<String>,
-            #[serde(rename = "snapshotKey")]
-            snapshot_key: String,
-        },
+    struct GrantsInput {
+        capabilities: Vec<String>,
+        #[serde(default, rename = "snapshotKey")]
+        snapshot_key: Option<String>,
     }
     let input: GrantsInput = serde_json::from_str(json)
         .map_err(|error| JsError::new(&format!("invalid grants JSON: {error}")))?;
-    match input {
-        GrantsInput::Pure(names) => GrantSet::from_names(names),
-        GrantsInput::Suspendable {
-            capabilities,
-            snapshot_key,
-        } => {
-            let key = decode_snapshot_key(&snapshot_key)?;
-            GrantSet::from_names(capabilities).map(|grants| grants.with_snapshot_key(key))
-        }
+    let grants = GrantSet::from_names(input.capabilities)
+        .map_err(|error| JsError::new(&format!("{}: {}", error.code, error.message)))?;
+    match input.snapshot_key {
+        Some(snapshot_key) => Ok(grants.with_snapshot_key(decode_snapshot_key(&snapshot_key)?)),
+        None => Ok(grants),
     }
-    .map_err(|error| JsError::new(&format!("{}: {}", error.code, error.message)))
 }
 
 fn decode_snapshot_key(encoded: &str) -> Result<[u8; 32], JsError> {
@@ -300,15 +278,6 @@ fn decode_snapshot_key(encoded: &str) -> Result<[u8; 32], JsError> {
             .map_err(|_| JsError::new("snapshotKey contains invalid hexadecimal"))?;
     }
     Ok(key)
-}
-
-fn diagnostic(code: &str, message: impl Into<String>) -> Diagnostic {
-    Diagnostic {
-        code: code.to_string(),
-        message: message.into(),
-        line: None,
-        column: None,
-    }
 }
 
 impl From<Execution> for ExecutionOutcome {
@@ -361,10 +330,16 @@ mod browser_tests {
     fn canonical_compiler_and_kernel_execute_in_browser_wasm() {
         let compiled = compile(REDUCER, "reduce", "function");
         assert!(compiled.ok());
+        assert!(start(
+            &compiled.artifact_bytes(),
+            r#"{"count":40,"delta":2}"#,
+            "[]"
+        )
+        .is_err());
         let execution = start(
             &compiled.artifact_bytes(),
             r#"{"count":40,"delta":2}"#,
-            "[]",
+            r#"{"capabilities":[]}"#,
         )
         .expect("browser adapter starts");
         assert_eq!(execution.status(), "completed");
@@ -413,7 +388,7 @@ mod browser_tests {
         let browser = start(
             &compiled.artifact_bytes(),
             r#"{"count":"forty","delta":2}"#,
-            "[]",
+            r#"{"capabilities":[]}"#,
         )
         .expect("browser adapter returns a structured failure");
         assert_eq!(browser.status(), "failed");
@@ -428,8 +403,12 @@ mod browser_tests {
         for case in PURE_CASES {
             let compiled = compile(case.source, case.entry, "function");
             assert!(compiled.ok(), "{} did not compile", case.id);
-            let execution = start(&compiled.artifact_bytes(), case.input_json, "[]")
-                .unwrap_or_else(|error| panic!("{} failed to start: {error:?}", case.id));
+            let execution = start(
+                &compiled.artifact_bytes(),
+                case.input_json,
+                r#"{"capabilities":[]}"#,
+            )
+            .unwrap_or_else(|error| panic!("{} failed to start: {error:?}", case.id));
             assert_eq!(
                 execution.status(),
                 "completed",

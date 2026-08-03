@@ -14,8 +14,10 @@ on:
       - "crates/harn-lexer/**"
       - "crates/harn-parser/**"
       - "crates/harn-wasm/**"
+      - "crates/harn-cli/src/commands/app_host/**"
       - "rust-toolchain.toml"
       - "scripts/check_wasm_imports.mjs"
+      - "scripts/package_app_runtime.mjs"
       - "scripts/generated_artifacts.toml"
       - "scripts/resolve_chromedriver.sh"
   push:
@@ -32,8 +34,10 @@ on:
       - "crates/harn-lexer/**"
       - "crates/harn-parser/**"
       - "crates/harn-wasm/**"
+      - "crates/harn-cli/src/commands/app_host/**"
       - "rust-toolchain.toml"
       - "scripts/check_wasm_imports.mjs"
+      - "scripts/package_app_runtime.mjs"
       - "scripts/generated_artifacts.toml"
       - "scripts/resolve_chromedriver.sh"
   merge_group:

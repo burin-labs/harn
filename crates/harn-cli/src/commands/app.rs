@@ -2,8 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, State};
-use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
+use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -11,7 +12,9 @@ use serde::Serialize;
 use serde_json::{json, Value as JsonValue};
 
 use crate::cli::{AppArgs, AppCommand};
-use crate::commands::app_host_assets::{host_document, sandbox_document};
+use crate::commands::app_host_assets::{
+    host_document, portable_worker_script, sandbox_document, HARN_WASM_GZIP, HARN_WASM_SCRIPT,
+};
 use crate::commands::run::{RunFileAppServe, RunFileMcpServeMode};
 use crate::commands::serve::ScriptMcpRuntime;
 
@@ -19,7 +22,7 @@ const MCP_APP_MIME: &str = "text/html;profile=mcp-app";
 const MCP_APP_EXTENSION: &str = "io.modelcontextprotocol/ui";
 const MAX_APP_HTML_BYTES: usize = 2 * 1024 * 1024;
 const MAX_APP_RPC_BYTES: usize = 16 * 1024 * 1024;
-const SANDBOX_DOCUMENT_CSP: &str = "default-src 'none'; script-src 'unsafe-inline'; frame-src 'self'; style-src 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' data: blob:; base-uri 'none'; form-action 'none'";
+const SANDBOX_DOCUMENT_CSP: &str = "default-src 'none'; script-src 'unsafe-inline'; worker-src 'self'; connect-src 'self'; frame-src 'self'; style-src 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' data: blob:; base-uri 'none'; form-action 'none'";
 
 pub(crate) async fn run(args: AppArgs) {
     match args.command {
@@ -115,6 +118,9 @@ pub(crate) async fn run_script_app_server(
         .route("/sandbox", get(sandbox_page))
         .route("/app", get(app_descriptor))
         .route("/rpc", post(app_rpc))
+        .route("/runtime/portable-worker.js", get(portable_worker))
+        .route("/runtime/harn_wasm.js", get(portable_wasm_script))
+        .route("/runtime/harn_wasm_bg.wasm", get(portable_wasm_binary))
         .route("/health", get(|| async { Json(json!({"ok": true})) }))
         .layer(DefaultBodyLimit::max(MAX_APP_RPC_BYTES))
         .with_state(state);
@@ -424,6 +430,45 @@ async fn sandbox_page() -> Response {
     response
 }
 
+async fn portable_worker() -> Response {
+    runtime_asset(
+        "text/javascript; charset=utf-8",
+        Body::from(portable_worker_script()),
+        false,
+    )
+}
+
+async fn portable_wasm_script() -> Response {
+    runtime_asset(
+        "text/javascript; charset=utf-8",
+        Body::from(HARN_WASM_SCRIPT),
+        false,
+    )
+}
+
+async fn portable_wasm_binary() -> Response {
+    runtime_asset("application/wasm", Body::from(HARN_WASM_GZIP), true)
+}
+
+fn runtime_asset(content_type: &'static str, body: Body, gzip: bool) -> Response {
+    let mut response = Response::new(body);
+    let headers = response.headers_mut();
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+    headers.insert(
+        HeaderName::from_static("cross-origin-resource-policy"),
+        HeaderValue::from_static("same-origin"),
+    );
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    if gzip {
+        headers.insert(header::CONTENT_ENCODING, HeaderValue::from_static("gzip"));
+    }
+    response
+}
+
 fn add_document_headers(response: &mut Response) {
     response
         .headers_mut()
@@ -620,9 +665,25 @@ mod tests {
     }
 
     #[test]
-    fn sandbox_outer_policy_leaves_media_control_to_the_inner_policy() {
+    fn sandbox_outer_policy_limits_runtime_authority_to_its_own_origin() {
         assert!(SANDBOX_DOCUMENT_CSP.contains("img-src 'self' data: blob:"));
         assert!(SANDBOX_DOCUMENT_CSP.contains("media-src 'self' data: blob:"));
-        assert!(!SANDBOX_DOCUMENT_CSP.contains("connect-src"));
+        assert!(SANDBOX_DOCUMENT_CSP.contains("worker-src 'self'"));
+        assert!(SANDBOX_DOCUMENT_CSP.contains("connect-src 'self'"));
+    }
+
+    #[test]
+    fn portable_runtime_assets_stay_same_origin() {
+        let response = runtime_asset("application/wasm", Body::empty(), false);
+        assert_eq!(
+            response
+                .headers()
+                .get("cross-origin-resource-policy")
+                .and_then(|value| value.to_str().ok()),
+            Some("same-origin")
+        );
+        assert!(!response
+            .headers()
+            .contains_key(header::ACCESS_CONTROL_ALLOW_ORIGIN));
     }
 }

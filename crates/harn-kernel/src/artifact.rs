@@ -11,6 +11,8 @@ mod wire;
 
 const MAGIC: &[u8; 8] = b"HARNPK01";
 pub const ARTIFACT_VERSION: u16 = 2;
+/// Maximum UTF-8 source size accepted by every portable compiler adapter.
+pub const PORTABLE_SOURCE_MAX_BYTES: usize = 1024 * 1024;
 const HEADER_BYTES: usize = 8 + 2 + 2 + 4 + 32;
 const SEMANTIC_ABI_DOMAIN: &[u8] = b"harn-portable-kernel-semantic-abi-v1\0";
 
@@ -62,13 +64,17 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
-    fn artifact(code: &str, message: impl Into<String>) -> Self {
+    pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
-            code: code.to_string(),
+            code: code.into(),
             message: message.into(),
             line: None,
             column: None,
         }
+    }
+
+    fn artifact(code: &str, message: impl Into<String>) -> Self {
+        Self::new(code, message)
     }
 }
 
@@ -77,6 +83,30 @@ impl Diagnostic {
 pub enum EntryKind {
     Function,
     Pipeline,
+}
+
+impl std::str::FromStr for EntryKind {
+    type Err = Diagnostic;
+
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
+        match name {
+            "function" => Ok(Self::Function),
+            "pipeline" => Ok(Self::Pipeline),
+            _ => Err(Diagnostic::new(
+                "entry_kind",
+                format!("entry kind `{name}` is invalid; use `function` or `pipeline`"),
+            )),
+        }
+    }
+}
+
+impl EntryKind {
+    pub const fn name(&self) -> &'static str {
+        match self {
+            Self::Function => "function",
+            Self::Pipeline => "pipeline",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -197,6 +227,12 @@ pub fn compile_program(
     entry: &str,
     entry_kind: EntryKind,
 ) -> Result<ProgramArtifact, Vec<Diagnostic>> {
+    if source.len() > PORTABLE_SOURCE_MAX_BYTES {
+        return Err(vec![Diagnostic::new(
+            "source_too_large",
+            "source exceeds the portable compiler's 1 MiB limit",
+        )]);
+    }
     let program = harn_parser::check_source_strict(source).map_err(|error| {
         vec![Diagnostic {
             code: "compile_frontend".to_string(),
