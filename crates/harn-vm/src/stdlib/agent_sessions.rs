@@ -313,7 +313,7 @@ const AGENT_SESSION_METADATA_OPT_KEYS: &[&str] = &["metadata"];
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
-    sig = "agent_session_open(id?: string, opts?: dict) -> any",
+    sig = "agent_session_open(id?: string, opts?: dict) -> string",
     category = "agent.session",
     doc = "Open or create a first-class agent session. opts may carry workspace_anchor and workspace_policy."
 )]

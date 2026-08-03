@@ -4,7 +4,7 @@
 //! diagnostics into one program-wide edit graph so a narrowed signature and
 //! every reachable caller move in the same apply pass.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 
 use harn_builtin_meta::CapabilityId;
@@ -19,12 +19,17 @@ use super::{CallableInfo, RepairCandidate, RepairImpactWire, SignatureChangeWire
 
 #[path = "whole_program_capabilities/edits.rs"]
 mod edits;
+#[path = "whole_program_capabilities/imported_calls.rs"]
+mod imported_calls;
 
 use edits::{
     add_call_argument_at_index_edit, add_call_arguments_at_index_edit, ambient_edits,
     argument_for_kind, carrier_supplies, explicit_capability_argument_edits,
     receiver_projection_edits, signature_edit, split_call_extension,
-    split_capability_signature_edit, undefined_harness_edits,
+    split_capability_receiver_edits, split_capability_signature_edit, undefined_harness_edits,
+};
+use imported_calls::{
+    argument_edits as imported_argument_edits, signatures as imported_signatures,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,6 +51,7 @@ struct Carrier {
 struct ProgramFile {
     path: PathBuf,
     source: String,
+    imported_capability_signatures: BTreeMap<String, imported_calls::Signature>,
 }
 
 #[derive(Debug)]
@@ -53,14 +59,19 @@ struct ProgramCallable {
     file_idx: usize,
     info: CallableInfo,
     receiver_accesses: Vec<ReceiverAccess>,
+    direct_receiver_spans: Vec<Span>,
     undefined_harness_accesses: Vec<ReceiverAccess>,
     boundary: bool,
     flow_predicate: bool,
     carrier: Option<Carrier>,
     carriers: Vec<Carrier>,
+    imported_binding_evidence:
+        BTreeMap<harn_parser::lexical::BindingId, imported_calls::BindingEvidence>,
+    resolved_imported_bindings: HashMap<(usize, usize), harn_parser::lexical::BindingId>,
     has_split_capability_params: bool,
     root_attenuation: Option<BTreeSet<CapabilityId>>,
     direct_requirements: BTreeSet<CapabilityId>,
+    direct_root_requirement: bool,
 }
 
 #[derive(Debug)]
@@ -140,14 +151,30 @@ pub(super) fn plan(
                 )
             })
             .collect::<BTreeMap<_, _>>();
+        let type_aliases = capability_type_aliases(&program, file, module_graph);
+        let type_facts = crate::commands::check::typecheck_config(
+            file,
+            &crate::package::CheckConfig::default(),
+            module_graph,
+        )
+        .check_with_facts(&program, &source);
         let infos = collect_callable_infos(&program, &source, &exported);
+        let imported_capability_signatures = imported_signatures(file, module_graph, &type_aliases);
         for info in infos {
             let Some((params, body, boundary, flow_predicate)) =
                 declaration_parts(&program, info.span)
             else {
                 continue;
             };
-            let carriers = capability_carriers(params);
+            let carriers = capability_carriers(params, &type_aliases);
+            let imported_binding_evidence = imported_calls::binding_evidence(
+                params,
+                body,
+                &type_aliases,
+                &type_facts.binding_types,
+            );
+            let resolved_imported_bindings =
+                harn_parser::lexical::resolved_identifier_bindings(params, body);
             let has_split_capability_params = carriers.len() > 1
                 || matches!(
                     carriers.first().map(|carrier| &carrier.kind),
@@ -157,39 +184,73 @@ pub(super) fn plan(
             let root_attenuation = root_attenuations
                 .get(&(info.span.start, info.span.end))
                 .cloned();
-            let direct_requirements = direct_requirements(
+            let mut direct_requirements = direct_requirements(
                 params,
                 body,
                 &carriers,
                 carrier.as_ref(),
                 root_attenuation.as_ref(),
             );
+            let mut direct_root_requirement = false;
+            for call in &info.calls {
+                let Some(signature) = imported_capability_signatures.get(&call.callee) else {
+                    continue;
+                };
+                let Some(repair) = imported_calls::prefix_repair(
+                    &source,
+                    &carriers,
+                    &imported_binding_evidence,
+                    &resolved_imported_bindings,
+                    call,
+                    signature,
+                ) else {
+                    continue;
+                };
+                for kind in repair.missing_kinds(signature) {
+                    match kind {
+                        CarrierKind::Root => direct_root_requirement = true,
+                        CarrierKind::Narrow(capability) => {
+                            direct_requirements.insert(*capability);
+                        }
+                        CarrierKind::Bundle(capabilities) => {
+                            direct_requirements.extend(capabilities.iter().copied());
+                        }
+                    }
+                }
+            }
             let receiver = carrier
                 .as_ref()
                 .map_or("harness", |carrier| carrier.name.as_str());
             let receiver_accesses = collect_receiver_accesses(body, receiver);
-            let undefined_harness_accesses = if receiver != "harness" {
-                collect_receiver_accesses(body, "harness")
-            } else {
-                Vec::new()
-            };
+            let direct_receiver_spans = collect_direct_receiver_spans(body, receiver);
+            let undefined_harness_accesses =
+                if receiver != "harness" && !info.bound_names.contains("harness") {
+                    collect_receiver_accesses(body, "harness")
+                } else {
+                    Vec::new()
+                };
             callables.push(ProgramCallable {
                 file_idx,
                 info,
                 receiver_accesses,
+                direct_receiver_spans,
                 undefined_harness_accesses,
                 boundary,
                 flow_predicate,
                 carrier,
                 carriers,
+                imported_binding_evidence,
+                resolved_imported_bindings,
                 has_split_capability_params,
                 root_attenuation,
                 direct_requirements,
+                direct_root_requirement,
             });
         }
         program_files.push(ProgramFile {
             path: canonical(file),
             source,
+            imported_capability_signatures,
         });
     }
     if callables.is_empty() {
@@ -203,9 +264,20 @@ pub(super) fn plan(
         .iter()
         .map(|callable| callable.direct_requirements.clone())
         .collect::<Vec<_>>();
-    propagate_requirements(&edges, &mut requirements);
+    let mut root_requirements = callables
+        .iter()
+        .map(|callable| callable.direct_root_requirement)
+        .collect::<Vec<_>>();
+    propagate_carrier_requirements(
+        &edges,
+        &callables,
+        &mut requirements,
+        &mut root_requirements,
+    );
 
-    for (callable, required) in callables.iter().zip(&requirements) {
+    for ((callable, required), root_required) in
+        callables.iter().zip(&requirements).zip(&root_requirements)
+    {
         if !callable.flow_predicate {
             continue;
         }
@@ -214,6 +286,12 @@ pub(super) fn plan(
             .filter(|capability| **capability != CapabilityId::Ast)
             .map(|capability| capability.field_name())
             .collect::<Vec<_>>();
+        if *root_required {
+            return Err(format!(
+                "flow predicate `{}` requires unsupported root Harness authority; flow evaluation injects only HarnessAst",
+                callable.info.name
+            ));
+        }
         if !unsupported.is_empty() {
             return Err(format!(
                 "flow predicate `{}` requires unsupported injected capabilities: {}; flow evaluation injects only HarnessAst",
@@ -226,12 +304,17 @@ pub(super) fn plan(
     let desired = callables
         .iter()
         .enumerate()
-        .map(|(idx, callable)| desired_carrier(callable, &requirements[idx]))
+        .map(|(idx, callable)| {
+            desired_carrier(callable, &requirements[idx], root_requirements[idx])
+        })
         .collect::<Vec<_>>();
     let added_capabilities = callables
         .iter()
         .zip(&requirements)
-        .map(|(callable, required)| added_split_capability_bindings(callable, required))
+        .enumerate()
+        .map(|(idx, (callable, required))| {
+            added_split_capability_bindings(callable, required, root_requirements[idx])
+        })
         .collect::<Vec<_>>();
     let changed = callables
         .iter()
@@ -243,10 +326,29 @@ pub(super) fn plan(
         .zip(&added_capabilities)
         .map(|(changed, added)| *changed || !added.is_empty())
         .collect::<Vec<_>>();
+    let has_missing_imported_capability_arguments = callables.iter().any(|callable| {
+        let file = &program_files[callable.file_idx];
+        callable.info.calls.iter().any(|call| {
+            file.imported_capability_signatures
+                .get(&call.callee)
+                .is_some_and(|signature| {
+                    imported_calls::prefix_repair(
+                        &file.source,
+                        &callable.carriers,
+                        &callable.imported_binding_evidence,
+                        &callable.resolved_imported_bindings,
+                        call,
+                        signature,
+                    )
+                    .is_some()
+                })
+        })
+    });
     if !signature_changed.iter().any(|changed| *changed)
         && !callables
             .iter()
             .any(|callable| !callable.info.ambient_capability_calls.is_empty())
+        && !has_missing_imported_capability_arguments
         && !diagnostics.iter().any(is_missing_capability_argument)
     {
         return Ok(Vec::new());
@@ -289,6 +391,9 @@ pub(super) fn plan(
             edits_by_file.entry(callable.file_idx).or_default().push(
                 split_capability_signature_edit(callable, &added_capabilities[idx])?,
             );
+            edits_by_file.entry(callable.file_idx).or_default().extend(
+                split_capability_receiver_edits(callable, &added_capabilities[idx]),
+            );
         }
         edits_by_file
             .entry(callable.file_idx)
@@ -307,7 +412,6 @@ pub(super) fn plan(
                 callable,
                 desired,
                 &added_capabilities[idx],
-                diagnostics_by_file.get(&program_files[callable.file_idx].path),
             ));
         edits_by_file.entry(callable.file_idx).or_default().extend(
             explicit_capability_argument_edits(
@@ -318,6 +422,15 @@ pub(super) fn plan(
                 diagnostics_by_file.get(&program_files[callable.file_idx].path),
             ),
         );
+        edits_by_file
+            .entry(callable.file_idx)
+            .or_default()
+            .extend(imported_argument_edits(
+                &program_files[callable.file_idx],
+                callable,
+                desired,
+                &added_capabilities[idx],
+            ));
     }
     for edge in &edges {
         if !signature_changed[edge.callee] && !signature_changed[edge.caller] {
@@ -338,7 +451,16 @@ pub(super) fn plan(
                 caller_desired,
                 &added_capabilities[edge.caller],
                 callee_desired,
-            )?;
+            )
+            .map_err(|error| {
+                call_edge_error(
+                    &program_files[caller.file_idx].path,
+                    &caller.info.name,
+                    &callee.info.name,
+                    call.span,
+                    &error,
+                )
+            })?;
             let edit = if let Some(carrier) = &callee.carrier {
                 if let Some(argument_span) = call.args.get(carrier.param_index).copied() {
                     FixEdit {
@@ -387,7 +509,16 @@ pub(super) fn plan(
                             caller_desired,
                             &added_capabilities[edge.caller],
                             &carrier.kind,
-                        )?;
+                        )
+                        .map_err(|error| {
+                            call_edge_error(
+                                &program_files[caller.file_idx].path,
+                                &caller.info.name,
+                                &callee.info.name,
+                                call.span,
+                                &error,
+                            )
+                        })?;
                         edits_by_file
                             .entry(caller.file_idx)
                             .or_default()
@@ -407,7 +538,16 @@ pub(super) fn plan(
                 callee,
                 &added_capabilities[edge.callee],
                 call.args.len(),
-            )?
+            )
+            .map_err(|error| {
+                call_edge_error(
+                    &program_files[caller.file_idx].path,
+                    &caller.info.name,
+                    &callee.info.name,
+                    call.span,
+                    &error,
+                )
+            })?
             else {
                 // The call omits a non-capability positional argument. The
                 // fixer cannot synthesize that value, so leave it untouched.
@@ -423,7 +563,6 @@ pub(super) fn plan(
             edits_by_file.entry(caller.file_idx).or_default().push(edit);
         }
     }
-
     let mut planned = Vec::new();
     for (file_idx, edits) in edits_by_file {
         let edits = dedupe(edits);
@@ -532,26 +671,68 @@ fn collect_receiver_accesses(body: &[SNode], receiver: &str) -> Vec<ReceiverAcce
     accesses
 }
 
-fn capability_carriers(params: &[TypedParam]) -> Vec<Carrier> {
+fn collect_direct_receiver_spans(body: &[SNode], receiver: &str) -> Vec<Span> {
+    let mut spans = Vec::new();
+    visit::walk_program(body, &mut |node| {
+        let Node::MethodCall { object, .. } = &node.node else {
+            return;
+        };
+        if matches!(&object.node, Node::Identifier(name) if name == receiver) {
+            spans.push(object.span);
+        }
+    });
+    spans
+}
+
+fn capability_type_aliases(
+    program: &[SNode],
+    file: &Path,
+    module_graph: &harn_modules::ModuleGraph,
+) -> BTreeMap<String, TypeExpr> {
+    let mut aliases = BTreeMap::new();
+    if let Some(imported) = module_graph.imported_type_declarations_for_file(file) {
+        collect_type_aliases(&imported, &mut aliases);
+    }
+    // The typechecker registers local declarations after imports, so a valid
+    // local alias has the same precedence here as it does during checking.
+    collect_type_aliases(program, &mut aliases);
+    aliases
+}
+
+fn collect_type_aliases(nodes: &[SNode], aliases: &mut BTreeMap<String, TypeExpr>) {
+    for node in nodes {
+        let node = match &node.node {
+            Node::AttributedDecl { inner, .. } => inner.as_ref(),
+            _ => node,
+        };
+        let Node::TypeDecl {
+            name,
+            type_params,
+            type_expr,
+            ..
+        } = &node.node
+        else {
+            continue;
+        };
+        if type_params.is_empty() {
+            aliases.insert(name.clone(), type_expr.clone());
+        }
+    }
+}
+
+fn capability_carriers(
+    params: &[TypedParam],
+    type_aliases: &BTreeMap<String, TypeExpr>,
+) -> Vec<Carrier> {
     params
         .iter()
         .enumerate()
         .filter_map(|(param_index, param)| {
-            let kind = match param.type_expr.as_ref()? {
-                TypeExpr::Named(name) if name == "Harness" => CarrierKind::Root,
-                TypeExpr::Named(name) => CarrierKind::Narrow(CapabilityId::from_type_name(name)?),
-                TypeExpr::Shape(fields) => {
-                    let capabilities = fields
-                        .iter()
-                        .map(|field| match &field.type_expr {
-                            TypeExpr::Named(name) => CapabilityId::from_type_name(name),
-                            _ => None,
-                        })
-                        .collect::<Option<BTreeSet<_>>>()?;
-                    (!capabilities.is_empty()).then_some(CarrierKind::Bundle(capabilities))?
-                }
-                _ => return None,
-            };
+            let kind = capability_carrier_kind(
+                param.type_expr.as_ref()?,
+                type_aliases,
+                &mut BTreeSet::new(),
+            )?;
             Some(Carrier {
                 name: param.name.clone(),
                 param_index,
@@ -560,6 +741,41 @@ fn capability_carriers(params: &[TypedParam]) -> Vec<Carrier> {
             })
         })
         .collect()
+}
+
+fn capability_carrier_kind(
+    type_expr: &TypeExpr,
+    type_aliases: &BTreeMap<String, TypeExpr>,
+    resolving: &mut BTreeSet<String>,
+) -> Option<CarrierKind> {
+    match type_expr {
+        TypeExpr::Named(name) if name == "Harness" => Some(CarrierKind::Root),
+        TypeExpr::Named(name) => {
+            if let Some(capability) = CapabilityId::from_type_name(name) {
+                return Some(CarrierKind::Narrow(capability));
+            }
+            let alias = type_aliases.get(name)?;
+            if !resolving.insert(name.clone()) {
+                return None;
+            }
+            let kind = capability_carrier_kind(alias, type_aliases, resolving);
+            resolving.remove(name);
+            kind
+        }
+        TypeExpr::Shape(fields) => {
+            let capabilities = fields
+                .iter()
+                .map(|field| {
+                    match capability_carrier_kind(&field.type_expr, type_aliases, resolving)? {
+                        CarrierKind::Narrow(capability) => Some(capability),
+                        CarrierKind::Root | CarrierKind::Bundle(_) => None,
+                    }
+                })
+                .collect::<Option<BTreeSet<_>>>()?;
+            (!capabilities.is_empty()).then_some(CarrierKind::Bundle(capabilities))
+        }
+        _ => None,
+    }
 }
 
 fn direct_requirements(
@@ -624,24 +840,42 @@ fn seed_ambient_requirements(
     diagnostics_by_file: &BTreeMap<PathBuf, FileDiagnostics<'_>>,
 ) {
     for callable in callables.iter_mut() {
-        let undefined = diagnostics_by_file
-            .get(&files[callable.file_idx].path)
-            .map(|diagnostics| &diagnostics.undefined_harness_spans);
+        let file_diagnostics = diagnostics_by_file.get(&files[callable.file_idx].path);
+        let undefined = file_diagnostics.map(|diagnostics| &diagnostics.undefined_harness_spans);
         let accesses = if callable.carrier.is_none() {
             &mut callable.receiver_accesses
         } else {
             &mut callable.undefined_harness_accesses
         };
-        accesses.retain(|access| {
-            undefined.is_some_and(|spans| {
-                spans.contains(&(access.object_span.start, access.object_span.end))
-            })
-        });
+        // With no explicit carrier, diagnostics distinguish a genuinely
+        // undefined ambient receiver from a local `harness` binding. Once a
+        // differently named carrier exists, the legacy ambient bridge makes
+        // stale `harness.*` accesses typecheck, so syntax is the only signal.
+        if callable.carrier.is_none() {
+            accesses.retain(|access| {
+                undefined.is_some_and(|spans| {
+                    spans.contains(&(access.object_span.start, access.object_span.end))
+                })
+            });
+        }
         callable.direct_requirements.extend(
             accesses
                 .iter()
                 .filter_map(|access| CapabilityId::from_field_name(&access.property)),
         );
+        callable.direct_root_requirement = file_diagnostics.is_some_and(|diagnostics| {
+            diagnostics
+                .missing_capability_arguments
+                .iter()
+                .any(|diagnostic| {
+                    matches!(
+                        diagnostic.expected_type.as_ref(),
+                        Some(TypeExpr::Named(expected)) if expected == "Harness"
+                    ) && diagnostic.span.is_some_and(|span| {
+                        callable.info.span.start <= span.start && callable.info.span.end >= span.end
+                    })
+                })
+        });
     }
 
     let mut file_indices = BTreeMap::new();
@@ -743,7 +977,11 @@ fn resolve_edges(
     edges
 }
 
-fn propagate_requirements(edges: &[ProgramEdge], requirements: &mut [BTreeSet<CapabilityId>]) {
+fn propagate_requirements(
+    edges: &[ProgramEdge],
+    requirements: &mut [BTreeSet<CapabilityId>],
+    root_requirements: &mut [bool],
+) {
     let mut callers_by_callee = vec![BTreeSet::new(); requirements.len()];
     for edge in edges {
         callers_by_callee[edge.callee].insert(edge.caller);
@@ -751,7 +989,8 @@ fn propagate_requirements(edges: &[ProgramEdge], requirements: &mut [BTreeSet<Ca
 
     let mut queued = requirements
         .iter()
-        .map(|requirement| !requirement.is_empty())
+        .zip(root_requirements.iter())
+        .map(|(requirement, root_required)| !requirement.is_empty() || *root_required)
         .collect::<Vec<_>>();
     let mut pending = queued
         .iter()
@@ -762,10 +1001,15 @@ fn propagate_requirements(edges: &[ProgramEdge], requirements: &mut [BTreeSet<Ca
     while let Some(callee) = pending.pop_front() {
         queued[callee] = false;
         let propagated = requirements[callee].clone();
+        let root_propagated = root_requirements[callee];
         for &caller in &callers_by_callee[callee] {
             let before = requirements[caller].len();
+            let root_before = root_requirements[caller];
             requirements[caller].extend(propagated.iter().copied());
-            if requirements[caller].len() > before && !queued[caller] {
+            root_requirements[caller] |= root_propagated;
+            if (requirements[caller].len() > before || root_requirements[caller] != root_before)
+                && !queued[caller]
+            {
                 queued[caller] = true;
                 pending.push_back(caller);
             }
@@ -773,11 +1017,48 @@ fn propagate_requirements(edges: &[ProgramEdge], requirements: &mut [BTreeSet<Ca
     }
 }
 
+/// Capability sets alone are not a complete call contract: a root Harness
+/// selected for orchestration cannot be reconstructed from its child handles.
+/// Feed that selected carrier back through the reverse call graph until both
+/// capability requirements and root authority reach a fixed point.
+fn propagate_carrier_requirements(
+    edges: &[ProgramEdge],
+    callables: &[ProgramCallable],
+    requirements: &mut [BTreeSet<CapabilityId>],
+    root_requirements: &mut [bool],
+) {
+    loop {
+        propagate_requirements(edges, requirements, root_requirements);
+        let mut discovered_root = false;
+        for (idx, callable) in callables.iter().enumerate() {
+            if !root_requirements[idx]
+                && matches!(
+                    desired_carrier(callable, &requirements[idx], false),
+                    Some(CarrierKind::Root)
+                )
+            {
+                root_requirements[idx] = true;
+                discovered_root = true;
+            }
+        }
+        if !discovered_root {
+            return;
+        }
+    }
+}
+
 fn desired_carrier(
     callable: &ProgramCallable,
     requirements: &BTreeSet<CapabilityId>,
+    root_required: bool,
 ) -> Option<CarrierKind> {
+    if root_required {
+        return Some(CarrierKind::Root);
+    }
     if callable.has_split_capability_params {
+        if split_carrier_becomes_root(callable, requirements, root_required) {
+            return Some(CarrierKind::Root);
+        }
         return callable
             .carrier
             .as_ref()
@@ -805,12 +1086,16 @@ fn desired_carrier(
     if callable.boundary {
         return Some(CarrierKind::Root);
     }
-    if requirements.len() == 1 {
-        return Some(CarrierKind::Narrow(
+    match requirements.len() {
+        1 => Some(CarrierKind::Narrow(
             *requirements.first().expect("one requirement"),
-        ));
+        )),
+        2 => Some(CarrierKind::Bundle(requirements.clone())),
+        // HARN-LNT-069 defines one handle and a two-field record as the
+        // attenuated helper shapes. Three or more capabilities are genuine
+        // orchestration: retain or introduce the compact root Harness.
+        _ => Some(CarrierKind::Root),
     }
-    Some(CarrierKind::Bundle(requirements.clone()))
 }
 
 fn carrier_changed(current: Option<&Carrier>, desired: Option<&CarrierKind>) -> bool {
@@ -824,8 +1109,11 @@ fn carrier_changed(current: Option<&Carrier>, desired: Option<&CarrierKind>) -> 
 fn added_split_capability_bindings(
     callable: &ProgramCallable,
     requirements: &BTreeSet<CapabilityId>,
+    root_required: bool,
 ) -> BTreeMap<CapabilityId, String> {
-    if !callable.has_split_capability_params {
+    if !callable.has_split_capability_params
+        || split_carrier_becomes_root(callable, requirements, root_required)
+    {
         return BTreeMap::new();
     }
     let mut unavailable = callable.info.bound_names.clone();
@@ -857,6 +1145,34 @@ fn added_split_capability_bindings(
         additions.insert(*capability, name);
     }
     additions
+}
+
+fn split_carrier_becomes_root(
+    callable: &ProgramCallable,
+    requirements: &BTreeSet<CapabilityId>,
+    root_required: bool,
+) -> bool {
+    // Widen the first carrier in place when root authority is required. Keep
+    // every additional hand-authored capability parameter: collapsing or
+    // deleting those parameters is outside this migration.
+    root_required || (callable.carriers.len() == 1 && requirements.len() > 2)
+}
+
+pub(super) fn call_edge_error(
+    file: &Path,
+    caller: &str,
+    callee: &str,
+    span: Span,
+    error: &str,
+) -> String {
+    format!(
+        "cannot migrate call `{caller}` -> `{callee}` at {}:{}:{} (bytes {}..{}): {error}",
+        file.display(),
+        span.line,
+        span.column,
+        span.start,
+        span.end
+    )
 }
 
 fn is_missing_capability_argument(diagnostic: &RepairCandidate) -> bool {
@@ -1016,5 +1332,22 @@ mod tests {
         assert_eq!(indexed.missing_capability_arguments.len(), 1);
         assert_eq!(index[Path::new("b.harn")].ambient_spans.len(), 1);
         assert!(!index.contains_key(Path::new("c.harn")));
+    }
+
+    #[test]
+    fn capability_carrier_alias_resolution_stops_at_cycles() {
+        let aliases = BTreeMap::from([
+            ("First".to_string(), TypeExpr::Named("Second".to_string())),
+            ("Second".to_string(), TypeExpr::Named("First".to_string())),
+        ]);
+
+        assert_eq!(
+            capability_carrier_kind(
+                &TypeExpr::Named("First".to_string()),
+                &aliases,
+                &mut BTreeSet::new(),
+            ),
+            None
+        );
     }
 }

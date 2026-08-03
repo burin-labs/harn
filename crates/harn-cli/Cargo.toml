@@ -28,6 +28,7 @@ include = [
     "build.rs",
     "Cargo.toml",
     "portal-dist/**/*",
+    "tests/fixtures/capability_migration/**/*",
     "tests/fixtures/persona/**/*",
 ]
 

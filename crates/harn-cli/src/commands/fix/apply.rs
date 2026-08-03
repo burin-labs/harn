@@ -44,8 +44,21 @@ fn apply_repairs_with_options_inner(
 
     for _ in 0..max_passes {
         let plan = build_plan_with_options(target, None, options)?;
+        let retired_testing_prerequisite = plan.repairs.iter().any(|repair| {
+            repair.repair.id == "imports/remove-retired-testing-helper"
+                && repair.applies_cleanly
+                && !repair.edits.is_empty()
+        });
         let mut edits_by_file: BTreeMap<String, Vec<FixEditWire>> = BTreeMap::new();
         for repair in &plan.repairs {
+            if retired_testing_prerequisite
+                && repair.repair.id != "imports/remove-retired-testing-helper"
+            {
+                // Removing a retired import changes every later byte offset in
+                // the file. Rebuild the complete program plan from that new
+                // source on the next pass instead of mixing source versions.
+                continue;
+            }
             let path = repair_path(&plan, repair)?;
             let repair_safety = repair.repair.safety.parse::<RepairSafety>().map_err(|_| {
                 format!(
@@ -92,16 +105,22 @@ fn apply_repairs_with_options_inner(
             converged = true;
             break;
         }
-        for (path, edits) in &edits_by_file {
-            let edits = dedupe_wire_edits(edits);
+        for path in edits_by_file.keys() {
             if !original_files.contains_key(path) {
                 let source = std::fs::read_to_string(path)
                     .map_err(|error| format!("failed to snapshot {path} before repair: {error}"))?;
                 original_files.insert(path.clone(), source);
             }
-            if options.capability_migrations_only {
-                apply_capability_file_edits(Path::new(path), &edits)?;
-            } else {
+        }
+        if options.capability_migrations_only {
+            let rendered_files = render_capability_migration_pass(&edits_by_file)?;
+            for (path, rendered) in rendered_files {
+                std::fs::write(&path, rendered)
+                    .map_err(|error| format!("failed to write {path}: {error}"))?;
+            }
+        } else {
+            for (path, edits) in &edits_by_file {
+                let edits = dedupe_wire_edits(edits);
                 apply_file_edits(Path::new(path), &edits)?;
             }
         }
@@ -126,6 +145,30 @@ fn apply_repairs_with_options_inner(
         post_apply_diagnostics_count: remaining.count,
         dry_run,
     })
+}
+
+pub(super) fn render_capability_migration_pass(
+    edits_by_file: &BTreeMap<String, Vec<FixEditWire>>,
+) -> Result<BTreeMap<String, String>, String> {
+    let mut rendered_files = BTreeMap::new();
+    for (path, edits) in edits_by_file {
+        let edits = dedupe_wire_edits(edits);
+        let path_ref = Path::new(path);
+        let candidate = (|| {
+            let edited = edited_source(path_ref, &edits)?;
+            let candidate = format_capability_candidate(path_ref, &edited)?;
+            harn_parser::parse_source(&candidate)
+                .map_err(|errors| format!("invalid Harn syntax: {errors:?}"))?;
+            Ok::<_, String>(candidate)
+        })()
+        .map_err(|error| {
+            format!(
+                "capability migration rejected the candidate for {path}; no files from this pass were written: {error}"
+            )
+        })?;
+        rendered_files.insert(path.clone(), candidate);
+    }
+    Ok(rendered_files)
 }
 
 pub(super) fn restore_original_files(
@@ -197,6 +240,7 @@ pub(super) fn apply_file_edits(path: &Path, edits: &[FixEditWire]) -> Result<(),
         .map_err(|error| format!("failed to write {}: {error}", path.display()))
 }
 
+#[cfg(test)]
 pub(super) fn apply_capability_file_edits(
     path: &Path,
     edits: &[FixEditWire],

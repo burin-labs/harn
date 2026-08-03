@@ -66,7 +66,7 @@ mod visible_messages;
 
 use plan_document::{next_plan_document_event, plan_artifact_from_result};
 pub(crate) use run_identity::active_run_id;
-use run_identity::agent_init_control_done;
+use run_identity::{agent_init_control, agent_init_control_done};
 
 #[cfg(test)]
 pub(crate) use tool_result_messages::record_tool_results_for_test;
@@ -393,7 +393,7 @@ fn now_id() -> String {
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
-    sig = "__host_agent_session_init(message: string, system?: string|nil, options?: dict|nil) -> string",
+    sig = "__host_agent_session_init(message: string, system?: string|nil, options?: dict|nil) -> {session_id: string, run_id: string, task: string, system: string|nil, max_iterations: int, max_verify_attempts: int, done: bool, result: any?}",
     kind = "async",
     category = "agent.host",
     runtime_only = true
@@ -618,26 +618,16 @@ async fn host_agent_session_init(
     .await?;
     crate::agent_session_journal::flush(&resolved).await?;
 
-    let mut control = crate::value::DictMap::new();
-    control.put_str("session_id", resolved);
-    control.put_str("run_id", run_id);
-    control.put_str("task", message);
-    control.insert(
-        crate::value::intern_key("system"),
-        system
-            .map(|s| VmValue::String(arcstr::ArcStr::from(s)))
-            .unwrap_or(VmValue::Nil),
-    );
-    control.insert(
-        crate::value::intern_key("max_iterations"),
-        VmValue::Int(max_iterations),
-    );
-    control.insert(
-        crate::value::intern_key("max_verify_attempts"),
-        VmValue::Int(max_verify_attempts),
-    );
-    control.insert(crate::value::intern_key("done"), VmValue::Bool(false));
-    Ok(VmValue::dict(control))
+    Ok(agent_init_control(
+        &resolved,
+        &run_id,
+        &message,
+        system.as_deref(),
+        max_iterations,
+        max_verify_attempts,
+        false,
+        None,
+    ))
 }
 
 enum AutonomyCheck {

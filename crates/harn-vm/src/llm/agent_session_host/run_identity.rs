@@ -23,6 +23,19 @@ pub(super) fn agent_init_control_done(
         values.put_str("run_id", run_id);
         *map = std::sync::Arc::new(values);
     }
+    agent_init_control(session_id, run_id, task, system, 0, 0, true, Some(result))
+}
+
+pub(super) fn agent_init_control(
+    session_id: &str,
+    run_id: &str,
+    task: &str,
+    system: Option<&str>,
+    max_iterations: i64,
+    max_verify_attempts: i64,
+    done: bool,
+    result: Option<VmValue>,
+) -> VmValue {
     let mut control = crate::value::DictMap::new();
     control.put_str("session_id", session_id);
     control.put_str("run_id", run_id);
@@ -33,12 +46,17 @@ pub(super) fn agent_init_control_done(
             .map(|s| VmValue::String(arcstr::ArcStr::from(s.to_string())))
             .unwrap_or(VmValue::Nil),
     );
-    control.insert(crate::value::intern_key("max_iterations"), VmValue::Int(0));
+    control.insert(
+        crate::value::intern_key("max_iterations"),
+        VmValue::Int(max_iterations),
+    );
     control.insert(
         crate::value::intern_key("max_verify_attempts"),
-        VmValue::Int(0),
+        VmValue::Int(max_verify_attempts),
     );
-    control.insert(crate::value::intern_key("done"), VmValue::Bool(true));
-    control.insert(crate::value::intern_key("result"), result);
+    control.insert(crate::value::intern_key("done"), VmValue::Bool(done));
+    if let Some(result) = result {
+        control.insert(crate::value::intern_key("result"), result);
+    }
     VmValue::dict(control)
 }

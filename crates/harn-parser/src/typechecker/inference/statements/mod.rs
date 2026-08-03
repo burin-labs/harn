@@ -11,12 +11,14 @@
 
 use harn_lexer::{FixEdit, Span};
 mod access;
+mod assignment;
 mod attributes;
 mod blocks;
 mod check_helpers;
 mod check_node;
 mod expressions;
 mod name_resolution;
+mod nil_coalesce;
 mod patterns;
 mod test_attributes;
 

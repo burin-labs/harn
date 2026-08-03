@@ -618,7 +618,6 @@ crates/harn-stdlib/src/stdlib/agent/state.harn::agent_session_drain_bridge_injec
 crates/harn-stdlib/src/stdlib/agent/state.harn::agent_session_drain_feedback
 crates/harn-stdlib/src/stdlib/agent/state.harn::agent_session_drain_host_injections
 crates/harn-stdlib/src/stdlib/agent/state.harn::agent_session_finalize
-crates/harn-stdlib/src/stdlib/agent/state.harn::agent_session_init
 crates/harn-stdlib/src/stdlib/agent/state.harn::agent_session_inject_feedback
 crates/harn-stdlib/src/stdlib/agent/state.harn::agent_session_inject_reminder
 crates/harn-stdlib/src/stdlib/agent/state.harn::agent_session_messages

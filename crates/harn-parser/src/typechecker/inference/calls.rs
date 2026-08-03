@@ -384,10 +384,22 @@ impl TypeChecker {
                     arg_word,
                     args.len()
                 );
-                match sig.kind {
-                    CallKind::Builtin => self.warning_at(Code::BuiltinArity, message, span),
-                    CallKind::Function => self.warning_at(Code::OrchestrationArity, message, span),
-                }
+                let code = match sig.kind {
+                    CallKind::Builtin => Code::BuiltinArity,
+                    CallKind::Function => Code::OrchestrationArity,
+                };
+                self.call_arity_warning_at(
+                    code,
+                    message,
+                    span,
+                    sig.name,
+                    sig.params
+                        .iter()
+                        .map(|param| param.ty.as_deref().cloned())
+                        .collect(),
+                    sig.required_params,
+                    args.len(),
+                );
             }
         }
 

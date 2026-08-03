@@ -3,6 +3,10 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::Path;
 
+use crate::cli::FixArgs;
+use crate::commands;
+use crate::commands::check::collect_preflight_diagnostics_with_module_graph as preflight_diagnostics;
+use crate::package::{self, CheckConfig, PreflightSeverity};
 use harn_lexer::{FixEdit, Span};
 use harn_lint::LintSeverity;
 use harn_parser::analysis::{AnalysisDatabase, AnalysisError};
@@ -10,12 +14,6 @@ use harn_parser::{
     visit, DiagnosticCode as Code, DiagnosticDetails, DiagnosticSeverity, Node, Repair,
     RepairSafety, SNode, TypeExpr,
 };
-use serde::Serialize;
-
-use crate::cli::FixArgs;
-use crate::commands;
-use crate::commands::check::collect_preflight_diagnostics_with_module_graph as preflight_diagnostics;
-use crate::package::{self, CheckConfig, PreflightSeverity};
 
 #[path = "fix/capability_migrations.rs"]
 mod capability_migrations;
@@ -23,10 +21,14 @@ mod capability_migrations;
 mod lint_context;
 #[path = "fix/reporting.rs"]
 mod reporting;
+#[path = "fix/retired_testing.rs"]
+mod retired_testing;
 #[path = "fix/signature_threading.rs"]
 mod signature_threading;
 #[path = "fix/whole_program_capabilities.rs"]
 mod whole_program_capabilities;
+#[path = "fix/wire.rs"]
+mod wire;
 use capability_migrations::{ambient_call_rewrite, ambient_capability_handle, ambient_replacement};
 use lint_context::FixLintContext;
 #[path = "fix/apply.rs"]
@@ -34,7 +36,8 @@ mod apply;
 use apply::apply_repairs_with_options;
 #[cfg(test)]
 use apply::{
-    apply_capability_file_edits, apply_file_edits, apply_repairs, finish_with_rollback, repair_path,
+    apply_capability_file_edits, apply_file_edits, apply_repairs, finish_with_rollback,
+    render_capability_migration_pass, repair_path,
 };
 use reporting::{print_apply_result, print_human_plan, skipped_files_error};
 use signature_threading::{
@@ -42,170 +45,11 @@ use signature_threading::{
     harness_param_name_for_insert, propagate_harness_requirements,
     repair_for_ambient_capability_plan,
 };
+use wire::*;
 
 pub(crate) const FIX_PLAN_SCHEMA_VERSION: u32 = 2;
 pub(crate) const FIX_APPLY_SCHEMA_VERSION: u32 = 2;
 const CAPABILITY_MIGRATION_MAX_PASSES: usize = 64;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum FixRunError {
-    Command(String),
-    PartialFailure(String),
-}
-
-impl FixRunError {
-    pub(crate) fn message(&self) -> &str {
-        match self {
-            Self::Command(message) | Self::PartialFailure(message) => message,
-        }
-    }
-
-    pub(crate) fn is_partial_failure(&self) -> bool {
-        matches!(self, Self::PartialFailure(_))
-    }
-}
-
-impl From<String> for FixRunError {
-    fn from(message: String) -> Self {
-        Self::Command(message)
-    }
-}
-
-impl std::fmt::Display for FixRunError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.message())
-    }
-}
-
-impl std::error::Error for FixRunError {}
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct RepairPlan {
-    #[serde(rename = "schemaVersion")]
-    pub schema_version: u32,
-    pub path: String,
-    pub diagnostics: Vec<DiagnosticWire>,
-    pub repairs: Vec<RepairWire>,
-    #[serde(rename = "skippedFiles")]
-    pub skipped_files: Vec<SkippedFileWire>,
-    #[serde(rename = "safetyLevels")]
-    pub safety_levels: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct ApplyResult {
-    #[serde(rename = "schemaVersion")]
-    pub schema_version: u32,
-    pub applied: Vec<AppliedRepairWire>,
-    pub skipped: Vec<SkippedRepairWire>,
-    #[serde(rename = "skippedFiles")]
-    pub skipped_files: Vec<SkippedFileWire>,
-    #[serde(rename = "post_apply_diagnostics_count")]
-    pub post_apply_diagnostics_count: usize,
-    #[serde(rename = "dryRun")]
-    pub dry_run: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct AppliedRepairWire {
-    pub diagnostic_code: String,
-    pub repair_id: String,
-    pub path: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct SkippedRepairWire {
-    pub diagnostic_index: usize,
-    pub diagnostic_code: String,
-    pub repair_id: String,
-    pub path: String,
-    pub reason: &'static str,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct SkippedFileWire {
-    pub path: String,
-    pub reason: &'static str,
-    pub diagnostics: Vec<SkippedFileDiagnosticWire>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct SkippedFileDiagnosticWire {
-    pub source: &'static str,
-    pub severity: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub code: Option<String>,
-    pub message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub span: Option<SpanWire>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub help: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct DiagnosticWire {
-    pub index: usize,
-    pub file: String,
-    pub source: &'static str,
-    pub severity: &'static str,
-    pub code: String,
-    pub message: String,
-    pub span: Option<SpanWire>,
-    pub repair: RepairMetadataWire,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct RepairWire {
-    pub diagnostic_index: usize,
-    pub diagnostic_code: String,
-    pub repair: RepairMetadataWire,
-    pub impact: RepairImpactWire,
-    pub edits: Vec<FixEditWire>,
-    pub applies_cleanly: bool,
-    pub conflicts_with: Vec<usize>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct RepairImpactWire {
-    pub classification: String,
-    pub strategy: Option<String>,
-    #[serde(rename = "signatureChanges")]
-    pub signature_changes: Vec<SignatureChangeWire>,
-    #[serde(rename = "requiresCrossModuleCallerUpdates")]
-    pub requires_cross_module_caller_updates: bool,
-    pub notes: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub(crate) struct SignatureChangeWire {
-    pub callable: String,
-    #[serde(rename = "isExported")]
-    pub is_exported: bool,
-    #[serde(rename = "isEntrypoint")]
-    pub is_entrypoint: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct RepairMetadataWire {
-    pub id: String,
-    pub summary: String,
-    pub safety: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct FixEditWire {
-    pub span: SpanWire,
-    pub replacement: String,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
-pub(crate) struct SpanWire {
-    pub start: usize,
-    pub end: usize,
-    pub line: usize,
-    pub column: usize,
-    pub end_line: usize,
-}
 
 #[derive(Debug, Clone)]
 struct RepairCandidate {
@@ -415,6 +259,11 @@ fn build_plan_with_options(
     let mut candidates = Vec::new();
     let mut skipped_files = Vec::new();
     for file in &files {
+        if options.capability_migrations_only {
+            if let Some(candidate) = retired_testing::repair(file) {
+                candidates.push(candidate);
+            }
+        }
         if let Err(skipped) = collect_file_candidates(
             &mut analysis,
             file,
@@ -467,6 +316,13 @@ fn build_plan_with_options(
                 )
         });
         candidates.extend(whole_program_repairs);
+    }
+
+    if options.capability_migrations_only {
+        // This mode is consumed as an executable migration plan. A lint that
+        // names a conceptual repair but has no source edit is context for the
+        // whole-program planner, not a repair that apply can perform.
+        candidates.retain(|candidate| !candidate.edits.is_empty());
     }
 
     let conflicts = detect_conflicts(&candidates);
@@ -548,6 +404,11 @@ fn collect_file_candidates(
     let ambient_context = AmbientRepairContext {
         cross_module_importer_count: module_graph.importers_of(file).len(),
     };
+    let deferred_capability_mismatches = if options.capability_migrations_only {
+        deferred_capability_mismatch_spans(&output.diagnostics, &program, &source, &exported_names)
+    } else {
+        BTreeSet::new()
+    };
 
     for diag in &output.diagnostics {
         if harn_lint::type_diagnostic_lint_disabled(diag, &config.disable_rules) {
@@ -557,12 +418,28 @@ fn collect_file_candidates(
             Some(DiagnosticDetails::UnresolvedName { name }) => Some(name.clone()),
             _ => None,
         };
-        let (expected_type, actual_type) = match diag.details.as_ref() {
+        let (mut expected_type, actual_type) = match diag.details.as_ref() {
             Some(DiagnosticDetails::TypeMismatch { expected, actual }) => {
                 (Some(expected.clone()), Some(actual.clone()))
             }
             _ => (None, None),
         };
+        if let Some(DiagnosticDetails::CallArity {
+            parameter_types,
+            actual: 0,
+            ..
+        }) = diag.details.as_ref()
+        {
+            expected_type = parameter_types.first().cloned().flatten().filter(|expected| {
+                matches!(expected, TypeExpr::Named(name) if name == "Harness" || harn_builtin_meta::CapabilityId::from_type_name(name).is_some())
+            });
+        }
+        if diag
+            .span
+            .is_some_and(|span| deferred_capability_mismatches.contains(&(span.start, span.end)))
+        {
+            continue;
+        }
         let synthesized = (diag.code == Code::UndefinedVariable
             && unresolved_name.as_deref() == Some("harness"))
         .then(|| {
@@ -576,6 +453,14 @@ fn collect_file_candidates(
         })
         .flatten();
         let synthesized = synthesized.or_else(|| {
+            if diag.code == Code::OrchestrationArity {
+                return synthesize_missing_zero_arg_capability_repair(
+                    diag.span?,
+                    expected_type.as_ref()?,
+                    &source,
+                    &program,
+                );
+            }
             if diag.code != Code::ArgumentTypeMismatch {
                 return None;
             }
@@ -680,16 +565,78 @@ fn collect_file_candidates(
         });
     }
 
-    collect_preflight(
-        file,
-        &source,
-        &program,
-        &config,
-        module_graph,
-        safety_ceiling,
-        out,
-    );
+    // Capability-only plans are a migration contract, not a general repair
+    // census. Preflight repairs have no capability migration semantics and
+    // must not appear as non-applicable work on every convergence pass.
+    if !options.capability_migrations_only {
+        collect_preflight(
+            file,
+            &source,
+            &program,
+            &config,
+            module_graph,
+            safety_ceiling,
+            out,
+        );
+    }
     Ok(())
+}
+
+fn deferred_capability_mismatch_spans(
+    diagnostics: &[harn_parser::TypeDiagnostic],
+    program: &[SNode],
+    source: &str,
+    exported_names: &BTreeSet<String>,
+) -> BTreeSet<(usize, usize)> {
+    let calls = collect_callable_infos(program, source, exported_names)
+        .into_iter()
+        .flat_map(|callable| callable.calls)
+        .collect::<Vec<_>>();
+    let mut by_call = BTreeMap::<(usize, usize), Vec<(usize, Span)>>::new();
+    for diagnostic in diagnostics {
+        if diagnostic.code != Code::ArgumentTypeMismatch {
+            continue;
+        }
+        let Some(DiagnosticDetails::TypeMismatch {
+            expected: TypeExpr::Named(expected),
+            ..
+        }) = diagnostic.details.as_ref()
+        else {
+            continue;
+        };
+        if expected != "Harness"
+            && harn_builtin_meta::CapabilityId::from_type_name(expected.as_str()).is_none()
+        {
+            continue;
+        }
+        let Some(span) = diagnostic.span else {
+            continue;
+        };
+        let Some((call, argument_index)) = calls.iter().find_map(|call| {
+            call.args
+                .iter()
+                .position(|argument| argument.start == span.start && argument.end == span.end)
+                .map(|index| (call, index))
+        }) else {
+            continue;
+        };
+        by_call
+            .entry((call.span.start, call.span.end))
+            .or_default()
+            .push((argument_index, span));
+    }
+
+    let mut deferred = BTreeSet::new();
+    for mismatches in by_call.values_mut() {
+        mismatches.sort_by_key(|(argument_index, span)| (*argument_index, span.start, span.end));
+        deferred.extend(
+            mismatches
+                .iter()
+                .skip(1)
+                .map(|(_, span)| (span.start, span.end)),
+        );
+    }
+    deferred
 }
 
 fn skipped_file_from_analysis_error(
@@ -759,7 +706,10 @@ fn skipped_file_from_analysis_error(
 }
 
 fn is_capability_migration_repair(repair: &Repair) -> bool {
-    let id = repair.id.as_str();
+    is_capability_migration_repair_id(repair.id.as_str())
+}
+
+fn is_capability_migration_repair_id(id: &str) -> bool {
     id.starts_with("bindings/thread-harness")
         || matches!(
             id,
@@ -769,6 +719,7 @@ fn is_capability_migration_repair(repair: &Repair) -> bool {
                 | "bindings/attenuate-harness"
                 | "bindings/attenuate-capability-argument"
                 | "bindings/attenuate-capability-bundle-argument"
+                | "imports/remove-retired-testing-helper"
         )
 }
 
@@ -874,7 +825,7 @@ fn synthesize_ambient_capability_repair(
 
     for &idx in &needed {
         let info = &infos[idx];
-        edits.push(add_harness_param_edit(info)?);
+        edits.push(add_harness_param_edit(source, info)?);
     }
     for (callee_idx, callers) in reverse_callers.iter().enumerate() {
         if !needed.contains(&callee_idx) {
@@ -975,6 +926,33 @@ fn synthesize_missing_capability_argument_repair(
     let expected_name = expected_name?;
     let argument = capability_argument_for_span(program, span, expected_name)?;
     let edit = insert_call_argument_before_span(source, program, span, &argument)?;
+    Some((
+        Repair {
+            id: harn_parser::RepairId::from_owned(
+                "bindings/prepend-capability-argument".to_string(),
+            ),
+            summary: format!(
+                "Pass the explicit `{expected_name}` capability required by the migrated callable"
+            ),
+            safety: RepairSafety::SurfaceChanging,
+        },
+        vec![edit],
+        RepairImpactWire::local_ambient("prepend-capability-argument"),
+    ))
+}
+
+fn synthesize_missing_zero_arg_capability_repair(
+    call_span: Span,
+    expected: &TypeExpr,
+    source: &str,
+    program: &[SNode],
+) -> Option<(Repair, Vec<FixEdit>, RepairImpactWire)> {
+    let TypeExpr::Named(expected_name) = expected else {
+        return None;
+    };
+    harn_builtin_meta::CapabilityId::from_type_name(expected_name)?;
+    let argument = capability_argument_for_span(program, call_span, expected_name)?;
+    let edit = add_call_argument_edit(source, &call_span, &argument)?;
     Some((
         Repair {
             id: harn_parser::RepairId::from_owned(
@@ -1111,7 +1089,7 @@ fn synthesize_missing_harness_repair(
     let needed = propagate_harness_requirements(&infos, &reverse_callers, owner_idx);
     let mut edits = Vec::new();
     for &idx in &needed {
-        edits.push(add_harness_param_edit(&infos[idx])?);
+        edits.push(add_harness_param_edit(source, &infos[idx])?);
     }
     for (callee_idx, callers) in reverse_callers.iter().enumerate() {
         if !needed.contains(&callee_idx) {
@@ -1181,7 +1159,7 @@ fn synthesize_missing_root_argument_repair(
     )?];
     for &idx in &needed {
         if infos[idx].harness_binding.is_none() {
-            edits.push(add_harness_param_edit(&infos[idx])?);
+            edits.push(add_harness_param_edit(source, &infos[idx])?);
         }
     }
     for (callee_idx, callers) in reverse_callers.iter().enumerate() {

@@ -25,7 +25,8 @@ mod template_lint;
 mod tests;
 
 pub(crate) use analysis::{
-    analyze_file, span_from_lexer_error, span_from_parser_error, FileAnalysisError,
+    analyze_file, span_from_lexer_error, span_from_parser_error, typecheck_config,
+    FileAnalysisError,
 };
 pub(crate) use bundle::build_bundle_manifest;
 pub(crate) use changed_lint::{run_changed_lint_command, ChangedLintScope};
