@@ -1,10 +1,10 @@
 use crate::value::VmDictExt;
+use harn_kernel::pure::sha256_hex;
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value as JsonValue};
-use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::event_log::{
@@ -1405,12 +1405,6 @@ fn string_list_value(
 
 fn display_path(path: &Path) -> String {
     path.to_string_lossy().into_owned()
-}
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    hex::encode(hasher.finalize())
 }
 
 #[cfg(test)]

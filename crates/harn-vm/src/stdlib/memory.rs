@@ -13,6 +13,7 @@
 //! See `docs/src/host-boundary.md` and `docs/src/memory.md`.
 
 use crate::value::VmDictExt;
+use harn_kernel::pure::sha256_hex;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::{self, OpenOptions};
@@ -21,7 +22,6 @@ use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use sha2::{Digest, Sha256};
 
 use crate::stdlib::host::dispatch_host_operation;
 use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
@@ -1215,7 +1215,7 @@ async fn embed_cached(
     } else {
         model_hint
     };
-    let content_hash = sha256_hex(text);
+    let content_hash = sha256_hex(text.as_bytes());
     let path = vector_cache_path(root, namespace, hint, &content_hash)?;
     if let Some(cached) = read_cached_embedding(&path)? {
         return Ok(cached);
@@ -1353,17 +1353,6 @@ fn cosine_similarity(a: &[f64], b: &[f64]) -> f64 {
         return 0.0;
     }
     dot / (norm_a.sqrt() * norm_b.sqrt())
-}
-
-fn sha256_hex(input: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(input.as_bytes());
-    let digest = hasher.finalize();
-    let mut out = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        out.push_str(&format!("{byte:02x}"));
-    }
-    out
 }
 
 fn docs_len_f64(doc: &[String]) -> f64 {
@@ -1864,7 +1853,7 @@ mod tests {
     fn cached_embedding_round_trips() {
         let root = temp_root("cache");
         let namespace = "agent/cache";
-        let hash = sha256_hex("hello world");
+        let hash = sha256_hex(b"hello world");
         let path = vector_cache_path(&root, namespace, "voyage-2", &hash).unwrap();
         let embedding = CachedEmbedding {
             model: "voyage-2".to_string(),

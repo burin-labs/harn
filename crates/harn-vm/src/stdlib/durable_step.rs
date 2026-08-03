@@ -1,8 +1,7 @@
+use harn_kernel::pure::sha256_hex;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-
-use sha2::{Digest, Sha256};
 
 use crate::event_log::{
     active_event_log, install_memory_for_current_thread, sanitize_topic_component, AnyEventLog,
@@ -406,10 +405,6 @@ fn input_hash(input: &VmValue) -> String {
 fn step_occurrence_identity(namespace: &str, key: &str, sequence: u64) -> String {
     let material = format!("{namespace}\u{0}{key}\u{0}{sequence}");
     format!("sha256:{}", sha256_hex(material.as_bytes()))
-}
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    hex::encode(Sha256::digest(bytes))
 }
 
 async fn read_step_records(

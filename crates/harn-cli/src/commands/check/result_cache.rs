@@ -29,6 +29,7 @@
 //! with the bytecode cache; `HARN_CHECK_RESULT_CACHE=0` disables just this
 //! one.
 
+use harn_kernel::pure::sha256_hex;
 use std::cell::RefCell;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -159,7 +160,10 @@ pub(super) fn probe_read_to_string(path: &Path) -> io::Result<String> {
     let result = std::fs::read_to_string(path);
     record(Probe::ReadFile {
         path: path.to_path_buf(),
-        digest: result.as_deref().ok().map(sha256_hex),
+        digest: result
+            .as_deref()
+            .ok()
+            .map(|content| sha256_hex(content.as_bytes())),
     });
     result
 }
@@ -188,7 +192,10 @@ fn probe_still_valid(probe: &Probe, config: &CheckConfig) -> bool {
         Probe::Exists { path, existed } => path.exists() == *existed,
         Probe::IsDir { path, was_dir } => path.is_dir() == *was_dir,
         Probe::ReadFile { path, digest } => {
-            std::fs::read_to_string(path).ok().map(|c| sha256_hex(&c)) == *digest
+            std::fs::read_to_string(path)
+                .ok()
+                .map(|content| sha256_hex(content.as_bytes()))
+                == *digest
         }
         Probe::ResolveTarget {
             anchor,
@@ -460,10 +467,6 @@ pub(super) fn store(key: &[u8; 32], checked: &CheckedFile, probes: Vec<Probe>) {
     if std::fs::write(&tmp, bytes).is_ok() {
         let _ = std::fs::rename(&tmp, &path);
     }
-}
-
-fn sha256_hex(content: &str) -> String {
-    hex(&Sha256::digest(content.as_bytes()).into())
 }
 
 fn hex(bytes: &[u8; 32]) -> String {

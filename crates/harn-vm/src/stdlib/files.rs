@@ -1,3 +1,4 @@
+use harn_kernel::pure::sha256_hex;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
@@ -54,10 +55,6 @@ fn infer_media_type(path: &Path) -> String {
         _ => "application/octet-stream",
     }
     .to_string()
-}
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    hex::encode(Sha256::digest(bytes))
 }
 
 fn api_key_fingerprint(api_key: &str) -> String {

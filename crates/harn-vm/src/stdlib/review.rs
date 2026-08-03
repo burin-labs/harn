@@ -1,8 +1,9 @@
+use harn_kernel::pure::sha256_hex;
+use sha2::Digest;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use sha2::Digest;
 
 use crate::event_log::{active_event_log, install_memory_for_current_thread, AnyEventLog};
 use crate::llm::{execute_llm_call, extract_llm_options, vm_value_to_json};
@@ -700,11 +701,6 @@ fn review_identity() -> (String, AutonomyTier, String) {
         AutonomyTier::Suggest,
         format!("trace-{}", uuid::Uuid::now_v7()),
     )
-}
-
-fn sha256_hex(input: &[u8]) -> String {
-    let digest = sha2::Sha256::digest(input);
-    digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 #[cfg(test)]

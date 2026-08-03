@@ -9,7 +9,6 @@ use std::{fs, process};
 use chrono_tz::Tz;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::str::FromStr;
 use url::Url;
 

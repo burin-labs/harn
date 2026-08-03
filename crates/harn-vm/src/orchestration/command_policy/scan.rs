@@ -1184,5 +1184,5 @@ pub(super) fn vm_i64(value: &VmValue) -> Option<i64> {
 }
 
 pub(super) fn sha256_hex(bytes: &[u8]) -> String {
-    format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
+    format!("sha256:{}", harn_kernel::pure::sha256_hex(bytes))
 }
