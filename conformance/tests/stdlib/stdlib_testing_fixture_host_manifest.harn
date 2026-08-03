@@ -1,0 +1,12 @@
+// A fixtured host operation has to be visible to `host_has`, or a script that
+// gates its host call on the capability manifest skips the call and never
+// reaches the fixture. The retired `with_host_mocks` wrapper got this through
+// the host-mock registry; capability fixtures need the same manifest merge.
+pipeline test(harness: Harness, task) {
+  harness.stdio.println(host_has("runtime", "execute_hook"))
+  harness.testing.push_scope()
+  harness.testing.respond("runtime", "execute_hook", {blocked: false})
+  harness.stdio.println(host_has("runtime", "execute_hook"))
+  harness.testing.pop_scope()
+  harness.stdio.println(host_has("runtime", "execute_hook"))
+}
