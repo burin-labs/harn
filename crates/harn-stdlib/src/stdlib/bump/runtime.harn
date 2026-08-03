@@ -5,10 +5,11 @@
  * The orchestration logic here performs NO I/O. Every side effect (release
  * lookup, working-tree mutation, validation, branch/PR leases, signed commit
  * creation, PR refresh, auto-merge) is reached through the injected
- * [`BumpAdapter`] capability record. `std/bump/live` wires the real adapter
- * over `std/connectors/github`, `std/command`, and git; the in-process
- * fixtures inject fakes. That seam is what lets the whole state machine be
- * exercised with `harn test` — no network, no clock, no sleeps.
+ * [`BumpAdapter`] capability record. `std/bump/live` owns local filesystem,
+ * command, and git effects while a package supplies the remote provider
+ * capability; the in-process fixtures inject fakes. That seam is what lets
+ * the whole state machine be exercised with `harn test` — no network, no
+ * clock, no sleeps.
  *
  * The single entry point is [`run_bump`]. It returns a typed [`BumpReceipt`]
  * that is both the machine-readable receipt the workflow surfaces and the
