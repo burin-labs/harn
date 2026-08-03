@@ -40,6 +40,7 @@
 //! safely — the last writer wins, but every reader observes a consistent file
 //! because the rename is atomic on every supported filesystem.
 
+use std::borrow::Cow;
 use std::fs;
 use std::io::{self, Read as _};
 use std::path::{Path, PathBuf};
@@ -162,7 +163,15 @@ impl LookupOutcome {
 pub struct CacheKey {
     pub source_hash: [u8; 32],
     pub context_hash: [u8; 32],
-    pub harn_version: &'static str,
+    /// Harn version stamped into, and required by, this artifact's header.
+    ///
+    /// Normally the running binary's own [`HARN_VERSION`]. Release preparation
+    /// bumps `Cargo.toml` *after* snapshotting the generator, so that one
+    /// caller must stamp the version the shipped binary will report instead of
+    /// the version the generator was built at — otherwise the shipped runtime
+    /// rejects its own embedded payload and silently falls back to source
+    /// compilation. Use [`CacheKey::for_artifact_version`].
+    pub harn_version: Cow<'static, str>,
     /// Compact tag for active [`CompilerOptions`]. Flipping
     /// `HARN_DISABLE_OPTIMIZATIONS` between runs would otherwise reuse a
     /// chunk compiled under the wrong setting.
@@ -179,7 +188,7 @@ impl CacheKey {
         Self {
             source_hash,
             context_hash,
-            harn_version: HARN_VERSION,
+            harn_version: Cow::Borrowed(HARN_VERSION),
             compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
         }
     }
@@ -198,9 +207,18 @@ impl CacheKey {
         Self {
             source_hash,
             context_hash,
-            harn_version: HARN_VERSION,
+            harn_version: Cow::Borrowed(HARN_VERSION),
             compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
         }
+    }
+
+    /// Restamp this key for an artifact that a *different* Harn version will
+    /// load. Only release preparation needs this; every ordinary compile and
+    /// lookup keeps the running binary's own version.
+    #[must_use]
+    pub fn for_artifact_version(mut self, harn_version: impl Into<String>) -> Self {
+        self.harn_version = Cow::Owned(harn_version.into());
+        self
     }
 
     /// Compute the cache key for one independently-compiled module artifact.
@@ -226,7 +244,7 @@ impl CacheKey {
         Self {
             source_hash: content_hash,
             context_hash: module_compilation_context_hash(),
-            harn_version: HARN_VERSION,
+            harn_version: Cow::Borrowed(HARN_VERSION),
             compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
         }
     }
@@ -317,7 +335,7 @@ pub fn load(source_path: &Path, source: &str) -> LookupOutcome {
     let mut key = CacheKey {
         source_hash: sha256(source.as_bytes()),
         context_hash: [0u8; 32],
-        harn_version: HARN_VERSION,
+        harn_version: Cow::Borrowed(HARN_VERSION),
         compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
     };
     let mut walk = GraphWalk::new(source_path, source);
@@ -677,7 +695,7 @@ fn encode_artifact_fingerprinted(
     let mut buf: Vec<u8> = Vec::with_capacity(payload.len() + 128);
     buf.extend_from_slice(MAGIC);
     buf.extend_from_slice(&SCHEMA_VERSION.to_le_bytes());
-    let version_bytes = HARN_VERSION.as_bytes();
+    let version_bytes = key.harn_version.as_bytes();
     buf.extend_from_slice(&(version_bytes.len() as u32).to_le_bytes());
     buf.extend_from_slice(version_bytes);
     let fingerprint_bytes = codegen_fingerprint.as_bytes();
