@@ -15,6 +15,8 @@ use harn_parser::{
     RepairSafety, SNode, TypeExpr,
 };
 
+#[path = "fix/capability_arguments.rs"]
+mod capability_arguments;
 #[path = "fix/capability_migrations.rs"]
 mod capability_migrations;
 #[path = "fix/lint_context.rs"]
@@ -29,6 +31,9 @@ mod signature_threading;
 mod whole_program_capabilities;
 #[path = "fix/wire.rs"]
 mod wire;
+use capability_arguments::{
+    capability_argument_for_span, insert_call_argument_before_span, root_harness_argument_for_span,
+};
 use capability_migrations::{ambient_call_rewrite, ambient_capability_handle, ambient_replacement};
 use lint_context::FixLintContext;
 #[path = "fix/apply.rs"]
@@ -966,120 +971,6 @@ fn synthesize_missing_zero_arg_capability_repair(
         vec![edit],
         RepairImpactWire::local_ambient("prepend-capability-argument"),
     ))
-}
-
-fn insert_call_argument_before_span(
-    source: &str,
-    program: &[SNode],
-    span: Span,
-    argument: &str,
-) -> Option<FixEdit> {
-    let mut edit = None;
-    visit::walk_program(program, &mut |node| {
-        let Node::FunctionCall { args, .. } = &node.node else {
-            return;
-        };
-        let Some(index) = args.iter().position(|candidate| {
-            candidate.span.start == span.start && candidate.span.end == span.end
-        }) else {
-            return;
-        };
-        edit = if index == 0 {
-            add_call_argument_edit(source, &node.span, argument)
-        } else {
-            let previous = args[index - 1].span;
-            Some(FixEdit {
-                span: Span::with_offsets(
-                    previous.end,
-                    previous.end,
-                    previous.end_line,
-                    previous.column,
-                ),
-                replacement: format!(", {argument}"),
-            })
-        };
-    });
-    edit
-}
-
-/// Name of the root `Harness` parameter in the narrowest declaration enclosing
-/// `span`.
-///
-/// `capability_argument_for_span` resolves narrow capability handles and can
-/// fall back to a root, but it is keyed by `CapabilityId`, so it cannot be asked
-/// for the root itself. Replacements that take a whole `Harness` — such as
-/// `with_scenario` — need exactly that.
-fn root_harness_argument_for_span(program: &[SNode], span: Span) -> Option<String> {
-    let mut candidates = Vec::new();
-    visit::walk_program(program, &mut |node| {
-        let params = match &node.node {
-            Node::FnDecl { params, .. }
-            | Node::ToolDecl { params, .. }
-            | Node::Pipeline { params, .. }
-                if node.span.start <= span.start && node.span.end >= span.end =>
-            {
-                params
-            }
-            _ => return,
-        };
-        for param in params {
-            if matches!(param.type_expr.as_ref(), Some(TypeExpr::Named(name)) if name == "Harness")
-            {
-                candidates.push((
-                    node.span.end.saturating_sub(node.span.start),
-                    param.name.clone(),
-                ));
-                break;
-            }
-        }
-    });
-    candidates.sort_by_key(|(width, _)| *width);
-    candidates.into_iter().next().map(|(_, name)| name)
-}
-
-fn capability_argument_for_span(program: &[SNode], span: Span, expected: &str) -> Option<String> {
-    let capability = harn_builtin_meta::CapabilityId::from_type_name(expected)?;
-    let field_name = capability.field_name();
-    let mut candidates = Vec::new();
-    visit::walk_program(program, &mut |node| {
-        let params = match &node.node {
-            Node::FnDecl { params, .. }
-            | Node::ToolDecl { params, .. }
-            | Node::Pipeline { params, .. }
-                if node.span.start <= span.start && node.span.end >= span.end =>
-            {
-                params
-            }
-            _ => return,
-        };
-        let mut direct = None;
-        let mut bundled = None;
-        let mut root = None;
-        for param in params {
-            match param.type_expr.as_ref() {
-                Some(TypeExpr::Named(name)) if name == expected => {
-                    direct = Some(param.name.clone());
-                }
-                Some(TypeExpr::Named(name)) if name == "Harness" => {
-                    root = Some(format!("{}.{}", param.name, field_name));
-                }
-                Some(TypeExpr::Shape(fields))
-                    if fields.iter().any(|field| {
-                        field.name == field_name
-                            && matches!(&field.type_expr, TypeExpr::Named(name) if name == expected)
-                    }) =>
-                {
-                    bundled = Some(format!("{}.{}", param.name, field_name));
-                }
-                _ => {}
-            }
-        }
-        if let Some(argument) = direct.or(bundled).or(root) {
-            candidates.push((node.span.end.saturating_sub(node.span.start), argument));
-        }
-    });
-    candidates.sort_by_key(|(width, _)| *width);
-    candidates.into_iter().next().map(|(_, argument)| argument)
 }
 
 fn capability_bundle_literal(expected: &TypeExpr, binding: &str) -> Option<String> {

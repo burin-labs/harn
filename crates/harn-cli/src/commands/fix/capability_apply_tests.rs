@@ -1375,6 +1375,9 @@ fn capability_apply_does_not_double_insert_a_multi_capability_imported_prefix() 
     );
 }
 
+#[path = "capability_apply_tests/prefix_invariant.rs"]
+mod prefix_invariant;
+
 #[test]
 fn capability_apply_follows_selective_re_exports_to_the_definition() {
     let temp = tempfile::TempDir::new().unwrap();
