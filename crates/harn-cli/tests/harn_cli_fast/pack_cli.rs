@@ -113,10 +113,18 @@ fn pack_writes_valid_harnpack_archive() {
         .contents
         .iter()
         .any(|entry| entry.path == Path::new("sources/hello.harn")));
+    assert!(
+        archive
+            .contents
+            .iter()
+            .any(|entry| entry.path
+                == Path::new(harn_vm::linked_program::LINKED_PROGRAM_ARCHIVE_PATH))
+    );
     assert!(archive
         .contents
         .iter()
-        .any(|entry| entry.path == Path::new("bytecode/hello.harnbc")));
+        .all(|entry| !entry.path.starts_with("bytecode")));
+    assert!(archive.manifest.execution_artifact.is_some());
     let sbom_entry = archive
         .contents
         .iter()
@@ -205,7 +213,10 @@ fn pack_resolves_transitive_imports() {
         .map(|entry| entry.path.display().to_string())
         .collect();
     assert!(archive_paths.iter().any(|p| p == "sources/lib.harn"));
-    assert!(archive_paths.iter().any(|p| p == "bytecode/lib.harnbc"));
+    assert!(archive_paths
+        .iter()
+        .any(|p| p == harn_vm::linked_program::LINKED_PROGRAM_ARCHIVE_PATH));
+    assert!(!archive_paths.iter().any(|p| p.starts_with("bytecode/")));
 }
 
 #[test]
@@ -319,32 +330,40 @@ fn pack_json_envelope_carries_pack_schema() {
             .unwrap()
             .len() as u64
     );
-    assert_eq!(value["data"]["debug_symbol_metadata"]["harnbc_count"], 1);
     assert!(
-        value["data"]["debug_symbol_metadata"]["harnbc_bytes"]
-            .as_u64()
-            .unwrap()
-            > 0
-    );
-    assert_eq!(value["data"]["debug_symbol_metadata"]["harnmod_count"], 1);
-    assert!(
-        value["data"]["debug_symbol_metadata"]["harnmod_bytes"]
+        value["data"]["link_report"]["input_bytecode_bytes"]
             .as_u64()
             .unwrap()
             > 0
     );
     assert!(
-        value["data"]["debug_symbol_metadata"]["total_bytes"]
+        value["data"]["link_report"]["output_bytecode_bytes"]
             .as_u64()
             .unwrap()
             > 0
+    );
+    // The user and standard-library splits must account for every byte the
+    // linker read and emitted, so a reported reduction cannot hide bytes in an
+    // unattributed bucket.
+    assert_eq!(
+        value["data"]["link_report"]["input_bytecode_bytes"]
+            .as_u64()
+            .unwrap(),
+        value["data"]["link_report"]["user_input_bytes"]
+            .as_u64()
+            .unwrap()
+            + value["data"]["link_report"]["stdlib_input_bytes"]
+                .as_u64()
+                .unwrap()
     );
     assert_eq!(
-        value["data"]["debug_symbol_metadata"]["total_bytes"],
-        value["data"]["debug_symbol_metadata"]["harnbc_bytes"]
+        value["data"]["link_report"]["output_bytecode_bytes"]
+            .as_u64()
+            .unwrap(),
+        value["data"]["link_report"]["user_output_bytes"]
             .as_u64()
             .unwrap()
-            + value["data"]["debug_symbol_metadata"]["harnmod_bytes"]
+            + value["data"]["link_report"]["stdlib_output_bytes"]
                 .as_u64()
                 .unwrap()
     );
@@ -588,7 +607,9 @@ fn pack_unpack_and_repack_round_trip_without_host_archive_tools() {
     assert!(unpacked.content_entry_count >= 3, "{unpacked:?}");
     assert!(unpack_dir.join("harnpack.json").exists());
     assert!(unpack_dir.join("sources/hello.harn").exists());
-    assert!(unpack_dir.join("bytecode/hello.harnbc").exists());
+    assert!(unpack_dir
+        .join(harn_vm::linked_program::LINKED_PROGRAM_ARCHIVE_PATH)
+        .exists());
 
     let repacked = workdir.path().join("repacked.harnpack");
     let repacked_outcome = pack::repack(&PackRepackArgs {

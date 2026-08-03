@@ -66,7 +66,7 @@ fn v2_manifest_deserializes_and_v1_is_typed_error() {
         super::super::workflow_test_fixtures::PR_MONITOR_BUNDLE_JSON.as_bytes(),
     )
     .unwrap();
-    assert_eq!(bundle.schema_version, WORKFLOW_BUNDLE_SCHEMA_VERSION);
+    assert_eq!(bundle.schema_version, LEGACY_WORKFLOW_BUNDLE_SCHEMA_VERSION);
     assert_eq!(
         bundle.entrypoint,
         std::path::PathBuf::from("workflows/github-pr-monitor.harn")
@@ -88,7 +88,8 @@ fn v2_manifest_deserializes_and_v1_is_typed_error() {
 
 #[test]
 fn harnpack_build_read_and_bundle_hash_are_deterministic() {
-    let bundle = fixture_bundle();
+    let mut bundle = fixture_bundle();
+    bundle.schema_version = WORKFLOW_BUNDLE_SCHEMA_VERSION;
     let contents = vec![
         HarnpackEntry::new("bytecode/pr_monitor.harnbc", b"bytecode-v1".to_vec()),
         HarnpackEntry::new("sources/pr_monitor.harn", b"source-v1".to_vec()),
@@ -112,6 +113,25 @@ fn harnpack_build_read_and_bundle_hash_are_deterministic() {
     )
     .unwrap();
     assert_ne!(left_hash, changed_hash);
+
+    let swapped_payloads = vec![
+        HarnpackEntry::new("bytecode/pr_monitor.harnbc", b"source-v1".to_vec()),
+        HarnpackEntry::new("sources/pr_monitor.harn", b"bytecode-v1".to_vec()),
+    ];
+    assert_ne!(
+        left_hash,
+        workflow_bundle_hash(&bundle, &swapped_payloads).unwrap(),
+        "schema-v3 signatures bind bytes to their normalized archive paths"
+    );
+
+    let duplicate = vec![
+        HarnpackEntry::new("sources/pr_monitor.harn", b"one".to_vec()),
+        HarnpackEntry::new("sources/pr_monitor.harn", b"two".to_vec()),
+    ];
+    assert_eq!(
+        workflow_bundle_hash(&bundle, &duplicate).unwrap_err().kind,
+        WorkflowBundleErrorKind::DuplicateArchiveEntry
+    );
 
     let archive = read_harnpack(&left_pack).unwrap();
     assert_eq!(archive.manifest.id, bundle.id);

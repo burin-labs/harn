@@ -18,6 +18,7 @@ pub mod package_snapshot;
 pub mod personas;
 pub mod project_config;
 mod stdlib;
+mod symbol_reachability;
 mod type_dependencies;
 
 use declarations::pattern_names;
@@ -25,6 +26,9 @@ pub use declarations::{public_declarations, DefKind, PublicDeclaration};
 pub use namespace_imports::NamespaceImportInfo;
 pub use package_imports::{
     resolve_import_path, resolve_import_path_with_guard, resolve_import_path_with_snapshot,
+};
+pub use symbol_reachability::{
+    closed_program_reachability, ExportDemand, ModuleSymbolDemand, SymbolReachability,
 };
 
 /// A resolved definition site within a module.
@@ -157,6 +161,7 @@ struct ImportRef {
     /// When set, this is `import * as alias from "..."` — only the alias is
     /// bound in the importer (members stay under the namespace object).
     namespace_alias: Option<String>,
+    is_pub: bool,
     import_span: Span,
 }
 
@@ -171,6 +176,8 @@ pub struct ModuleImport {
     pub selective_names: Option<Vec<String>>,
     /// When set, this is a namespace import (`import * as alias from "..."`).
     pub namespace_alias: Option<String>,
+    /// Whether the import republishes its selected projection.
+    pub is_pub: bool,
 }
 
 /// Return the source for a resolved module path.
@@ -191,7 +198,7 @@ pub fn read_module_source(path: &Path) -> Option<String> {
 /// graph contains every module reachable from the seed set. Cycles and
 /// already-loaded files are skipped via a visited set.
 pub fn build(files: &[PathBuf]) -> ModuleGraph {
-    build_inner(files, None, None).graph
+    build_inner(files, None, false, None).graph
 }
 
 /// Build a module graph using caller-owned source for one root file.
@@ -202,7 +209,7 @@ pub fn build(files: &[PathBuf]) -> ModuleGraph {
 pub fn build_with_source(file: &Path, source: &str) -> ModuleGraph {
     let file = normalize_path(file);
     let source_overrides = HashMap::from([(file.clone(), source.to_string())]);
-    build_inner(&[file], None, Some(&source_overrides)).graph
+    build_inner(&[file], None, false, Some(&source_overrides)).graph
 }
 
 /// Build a module graph while retaining parsed sources for the seed files.
@@ -212,12 +219,22 @@ pub fn build_with_source(file: &Path, source: &str) -> ModuleGraph {
 /// parsed sources they will not reuse.
 pub fn build_with_parsed_sources(files: &[PathBuf]) -> ModuleGraphBuild {
     let parsed_source_targets = files.iter().map(|file| normalize_path(file)).collect();
-    build_inner(files, Some(&parsed_source_targets), None)
+    build_inner(files, Some(&parsed_source_targets), false, None)
+}
+
+/// Build a closed module graph while retaining every reachable parsed source.
+///
+/// This is intentionally separate from editor-oriented graph construction:
+/// package linking consumes every module AST, while ordinary diagnostics should
+/// not retain an entire dependency graph after extracting its public surface.
+pub fn build_closed_program(files: &[PathBuf]) -> ModuleGraphBuild {
+    build_inner(files, None, true, None)
 }
 
 fn build_inner(
     files: &[PathBuf],
     parsed_source_targets: Option<&HashSet<PathBuf>>,
+    retain_all_parsed_sources: bool,
     source_overrides: Option<&HashMap<PathBuf, String>>,
 ) -> ModuleGraphBuild {
     let package_snapshots = acquire_package_snapshots(files);
@@ -242,8 +259,8 @@ fn build_inner(
         let loaded = load_wave(&wave, &package_snapshots, source_overrides);
         let mut next_wave: Vec<PathBuf> = Vec::new();
         for (path, (module, parsed)) in wave.drain(..).zip(loaded) {
-            let retain_parsed_source =
-                parsed_source_targets.is_some_and(|targets| targets.contains(&path));
+            let retain_parsed_source = retain_all_parsed_sources
+                || parsed_source_targets.is_some_and(|targets| targets.contains(&path));
             if retain_parsed_source {
                 if let Some(parsed) = parsed {
                     parsed_sources.insert(path.clone(), parsed);
@@ -459,6 +476,7 @@ impl ModuleGraph {
                     resolved_path: import.path.as_ref().map(|path| normalize_path(path)),
                     selective_names,
                     namespace_alias: import.namespace_alias.clone(),
+                    is_pub: import.is_pub,
                 }
             })
             .collect();

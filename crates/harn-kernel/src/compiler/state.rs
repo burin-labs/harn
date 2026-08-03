@@ -370,6 +370,17 @@ impl Compiler {
         program: &[SNode],
         source_file: Option<String>,
     ) -> Result<Vec<Chunk>, CompileError> {
+        Self::compile_selected_public_type_schema_initializers(program, source_file, None)
+    }
+
+    /// Compile the selected exported type schemas. `None` preserves the
+    /// caller-independent full-module behavior; a closed-program linker passes
+    /// the exact runtime type names its consumers can observe.
+    pub fn compile_selected_public_type_schema_initializers(
+        program: &[SNode],
+        source_file: Option<String>,
+        selected_names: Option<&std::collections::BTreeSet<String>>,
+    ) -> Result<Vec<Chunk>, CompileError> {
         let mut compiler = Compiler::new();
         compiler.collect_type_aliases(program);
         let mut chunks = Vec::new();
@@ -380,6 +391,9 @@ impl Compiler {
             else {
                 continue;
             };
+            if selected_names.is_some_and(|selected| !selected.contains(name)) {
+                continue;
+            }
             compiler.chunk = Chunk::new();
             compiler.string_constants.clear();
             compiler.chunk.source_file.clone_from(&source_file);

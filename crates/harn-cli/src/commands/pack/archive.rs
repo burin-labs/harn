@@ -471,6 +471,9 @@ pub struct PackVerifyJsonData {
     pub entrypoint: PathBuf,
     pub module_count: usize,
     pub content_entry_count: usize,
+    /// Present for schema-v3 bundles, which carry one linked-program artifact
+    /// instead of parallel per-module bytecode.
+    pub link_report: Option<harn_vm::linked_program::LinkReport>,
 }
 
 struct PackVerifyJsonOutput(PackVerifyJsonData);
@@ -714,6 +717,10 @@ pub fn verify(args: &PackVerifyArgs) -> Result<PackVerifyJsonData, PackError> {
         entrypoint: manifest.entrypoint.clone(),
         module_count: manifest.transitive_modules.len(),
         content_entry_count: contents.len(),
+        link_report: manifest
+            .execution_artifact
+            .as_ref()
+            .map(|artifact| artifact.link_report.clone()),
     })
 }
 
@@ -758,32 +765,67 @@ pub(crate) fn verify_module_payloads(
                 ),
             ));
         }
-        let chunk_rel = adjacent_with_extension(&module.path, bytecode_cache::CACHE_EXTENSION)
-            .ok_or_else(|| {
+        // Only schema-v2 bundles carry parallel per-module bytecode. A v3
+        // bundle binds its executable bytes through the linked-program
+        // artifact's own hash, and records an empty per-module bytecode hash.
+        if manifest.execution_artifact.is_none() {
+            let chunk_rel = adjacent_with_extension(&module.path, bytecode_cache::CACHE_EXTENSION)
+                .ok_or_else(|| {
+                    PackError::new(
+                        "verify.module_invalid_path",
+                        format!("module {} has no stem", module.path.display()),
+                    )
+                })?;
+            let chunk_entry = bytecode_map.get(&chunk_rel).ok_or_else(|| {
                 PackError::new(
-                    "verify.module_invalid_path",
-                    format!("module {} has no stem", module.path.display()),
+                    "verify.module_missing",
+                    format!(
+                        "manifest lists bytecode for {} but archive has no bytecode/{} entry",
+                        module.path.display(),
+                        chunk_rel.display()
+                    ),
                 )
             })?;
-        let chunk_entry = bytecode_map.get(&chunk_rel).ok_or_else(|| {
-            PackError::new(
-                "verify.module_missing",
-                format!(
-                    "manifest lists bytecode for {} but archive has no bytecode/{} entry",
-                    module.path.display(),
-                    chunk_rel.display()
-                ),
-            )
-        })?;
-        let actual_harnbc = blake3_hash(&chunk_entry.bytes);
-        if actual_harnbc != module.harnbc_hash_blake3 {
+            let actual_harnbc = blake3_hash(&chunk_entry.bytes);
+            if actual_harnbc != module.harnbc_hash_blake3 {
+                return Err(PackError::new(
+                    "verify.bytecode_mismatch",
+                    format!(
+                        "bytecode hash mismatch for {}: manifest {}, archive {}",
+                        module.path.display(),
+                        module.harnbc_hash_blake3,
+                        actual_harnbc
+                    ),
+                ));
+            }
+        }
+    }
+    // A schema-v3 bundle moved its executable bytes out of the per-module
+    // chunks and into one linked-program artifact, so that artifact is the only
+    // remaining path-bound carrier of anything the VM will run. Bind it here
+    // rather than in the caller: the invariant "every executable byte in this
+    // archive is hash-checked against its exact path" has one owner.
+    if let Some(artifact) = manifest.execution_artifact.as_ref() {
+        let entry = contents
+            .iter()
+            .find(|entry| entry.path == artifact.path)
+            .ok_or_else(|| {
+                PackError::new(
+                    "verify.module_missing",
+                    format!(
+                        "manifest lists execution artifact {} but the archive has no such entry",
+                        artifact.path.display()
+                    ),
+                )
+            })?;
+        let actual = blake3_hash(&entry.bytes);
+        if actual != artifact.hash_blake3 {
             return Err(PackError::new(
                 "verify.bytecode_mismatch",
                 format!(
-                    "bytecode hash mismatch for {}: manifest {}, archive {}",
-                    module.path.display(),
-                    module.harnbc_hash_blake3,
-                    actual_harnbc
+                    "execution artifact hash mismatch for {}: manifest {}, archive {actual}",
+                    artifact.path.display(),
+                    artifact.hash_blake3
                 ),
             ));
         }
@@ -838,6 +880,12 @@ pub(crate) fn verify_runtime_payloads(
 
     let mut bound_paths = std::collections::BTreeSet::new();
     bound_paths.insert(PathBuf::from(super::PACK_SBOM_ARCHIVE_PATH));
+    if let Some(artifact) = manifest.execution_artifact.as_ref() {
+        // The linked-program artifact carries its own path and hash in the
+        // signed manifest, which is exactly the path binding this check exists
+        // to require; `verify_module_payloads` enforces the hash.
+        bound_paths.insert(artifact.path.clone());
+    }
     for module in &manifest.transitive_modules {
         bound_paths.insert(PathBuf::from("sources").join(&module.path));
         for extension in [

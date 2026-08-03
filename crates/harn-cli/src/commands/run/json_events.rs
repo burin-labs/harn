@@ -75,6 +75,10 @@ pub enum RunEventWire {
         key_id: Option<String>,
         cache_hit: bool,
         dry_run_verify: bool,
+        execution_artifact_state: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        fallback_reason: Option<String>,
+        artifact_decode_ms: u64,
     },
     Result {
         seq: u64,
@@ -265,6 +269,9 @@ impl RunEventSink for NdjsonSink {
                 key_id,
                 cache_hit,
                 dry_run_verify,
+                execution_artifact_state,
+                fallback_reason,
+                artifact_decode_ms,
             } => RunEventWire::PackRun {
                 seq,
                 bundle_hash,
@@ -272,6 +279,9 @@ impl RunEventSink for NdjsonSink {
                 key_id,
                 cache_hit,
                 dry_run_verify,
+                execution_artifact_state,
+                fallback_reason,
+                artifact_decode_ms,
             },
         };
         NdjsonEmitter::write_envelope(&self.inner, wire);

@@ -204,7 +204,7 @@ Event types (the `event_type` discriminator lives at
 | `tool_result` | `{ call_id, ok: bool, result }` — outcome of a tool invocation. |
 | `hook` | `{ name, phase, payload? }` — session lifecycle hook fired during the run. |
 | `persona_stage` | `{ persona, stage, transition }` — persona-stage transition (`started` / `completed` / `handoff_started` / …). |
-| `pack_run` | `{ bundle_hash, signature_verified: bool, key_id?: string, cache_hit: bool, dry_run_verify: bool }` — emitted once when `harn run <bundle.harnpack>` resolves a pack to execute. |
+| `pack_run` | `{ bundle_hash, signature_verified: bool, key_id?: string, cache_hit: bool, dry_run_verify: bool, execution_artifact_state, artifact_fallback_reason?, artifact_decode_ms }` — emitted once when `harn run <bundle.harnpack>` resolves a pack to execute. `execution_artifact_state` is `linked`, `legacy_v2`, or `source_fallback`. |
 | `result` | `{ value, exit_code: int }` — terminal event for successful runs. |
 | `error` | `{ error: { code, message, details? } }` — terminal event when a fatal error prevents a `result`. |
 
@@ -367,12 +367,15 @@ zstd magic-byte fallback so renamed bundles still resolve. The runner:
 1. Reads the manifest and embedded contents.
 2. Verifies the Ed25519 signature against the bundle hash through the
    OpenTrustGraph trust store.
-3. Checks `harn_version` compatibility — patch mismatches warn, minor
+3. Validates source identities and the schema-v3 linked program or legacy-v2
+   per-module payloads.
+4. Checks `harn_version` compatibility — patch mismatches warn, minor
    or major mismatches refuse the run.
-4. Replays the archive into `$HARN_CACHE_DIR/packs/<bundle_hash>/`
+5. Replays the archive into `$HARN_CACHE_DIR/packs/<bundle_hash>/`
    atomically (the bundle hash is content-addressed, so a second run
    reuses the unpacked tree).
-5. Executes the manifest's entrypoint with `Harness::real()`.
+6. Installs the schema-v3 linked program without source compilation, or uses
+   the explicit legacy-v2 adapter, then executes with `Harness::real()`.
 
 The verifier refuses to run an unsigned bundle. Pass `--allow-unsigned`
 to opt out (intended for local-dev only). `--dry-run-verify` performs

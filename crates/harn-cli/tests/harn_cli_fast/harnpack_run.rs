@@ -12,6 +12,7 @@
 // monomorphization hits the default rustc query depth, so bump it for
 // this test crate.
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -205,29 +206,43 @@ fn first_run_reaches_packaged_entry_and_nested_module_artifacts() {
     .unwrap();
     let packed = build_pack(&fixture.pack_args(true));
     let archive = read_harnpack(&fs::read(&fixture.pack_path).unwrap()).unwrap();
-    assert_eq!(
-        archive
-            .contents
-            .iter()
-            .filter(|entry| entry.path.extension().and_then(|ext| ext.to_str()) == Some("harnbc"))
-            .count(),
-        3
+    // A schema-v3 pack carries one linked program instead of parallel
+    // per-module bytecode, so "the nested module was reached" is now a claim
+    // about the link report rather than about a `bytecode/` entry count.
+    assert!(
+        archive.contents.iter().all(|entry| !matches!(
+            entry.path.extension().and_then(|ext| ext.to_str()),
+            Some("harnbc" | "harnmod")
+        )),
+        "v3 packs must not ship parallel per-module bytecode"
     );
-    let expected_suffix_module = archive
+    let descriptor = archive
+        .manifest
+        .execution_artifact
+        .as_ref()
+        .expect("schema-v3 pack carries an execution artifact");
+    let linked_paths = descriptor
+        .link_report
+        .modules
+        .iter()
+        .map(|module| module.path.clone())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        linked_paths,
+        BTreeSet::from([
+            PathBuf::from("hello.harn"),
+            PathBuf::from("message.harn"),
+            PathBuf::from("nested/suffix.harn"),
+        ]),
+        "the linker must reach the entry and every nested module"
+    );
+    let expected_linked_program = archive
         .contents
         .iter()
-        .find(|entry| entry.path == Path::new("bytecode/nested/suffix.harnmod"))
-        .expect("suffix module artifact")
+        .find(|entry| entry.path == descriptor.path)
+        .expect("linked program artifact")
         .bytes
         .clone();
-    assert_eq!(
-        archive
-            .contents
-            .iter()
-            .filter(|entry| entry.path.extension().and_then(|ext| ext.to_str()) == Some("harnmod"))
-            .count(),
-        3
-    );
 
     let first = execute(
         &fixture.pack_path,
@@ -241,19 +256,16 @@ fn first_run_reaches_packaged_entry_and_nested_module_artifacts() {
         .cache_dir
         .join("packs")
         .join(packed.bundle_hash.replace(':', "_"));
-    for relative in [
-        "hello.harnbc",
-        "hello.harnmod",
-        "message.harnbc",
-        "message.harnmod",
-        "nested/suffix.harnbc",
-        "nested/suffix.harnmod",
-    ] {
+    for relative in ["hello.harn", "message.harn", "nested/suffix.harn"] {
         assert!(
             replay_dir.join("sources").join(relative).is_file(),
-            "canonical adjacent projection is missing {relative}"
+            "canonical source projection is missing {relative}"
         );
     }
+    assert!(
+        replay_dir.join(&descriptor.path).is_file(),
+        "the replay slot must carry the executable linked program"
+    );
     assert!(
         !replay_dir.join("bytecode").exists(),
         "fresh replay must not duplicate archive bytecode"
@@ -275,10 +287,10 @@ fn first_run_reaches_packaged_entry_and_nested_module_artifacts() {
     );
 
     // A cache hit is not an integrity decision. The verified archive repairs a
-    // damaged adjacent module before the canonical loader can observe it.
+    // damaged executable payload before the canonical loader can observe it.
     fs::write(
-        replay_dir.join("sources/nested/suffix.harnmod"),
-        b"not a harn module artifact",
+        replay_dir.join(&descriptor.path),
+        b"not a linked program artifact",
     )
     .unwrap();
     let fallback = execute(
@@ -289,8 +301,8 @@ fn first_run_reaches_packaged_entry_and_nested_module_artifacts() {
     assert_eq!(fallback.exit_code, 0, "repair failed: {}", fallback.stderr);
     assert!(fallback.stdout.contains("packaged-artifact"));
     assert_eq!(
-        fs::read(replay_dir.join("sources/nested/suffix.harnmod")).unwrap(),
-        expected_suffix_module,
+        fs::read(replay_dir.join(&descriptor.path)).unwrap(),
+        expected_linked_program,
         "verified archive bytes must repair the tampered cache target"
     );
     assert!(
@@ -398,7 +410,7 @@ fn tampered_harnpack_fails_verification() {
 }
 
 #[test]
-fn signed_asset_path_swap_fails_legacy_path_binding() {
+fn signed_asset_path_swap_breaks_the_path_bound_signature() {
     let fixture = HarnpackFixture::new(
         "import \"./assets/a.txt\"\n\
          import \"./assets/b.txt\"\n\
@@ -409,9 +421,12 @@ fn signed_asset_path_swap_fails_legacy_path_binding() {
     fs::write(fixture.workdir.path().join("assets/b.txt"), b"asset B\n").unwrap();
     build_pack(&fixture.pack_args(true));
 
-    // v2 signatures cover the multiset of payload hashes. Swapping two paths
-    // therefore preserves the signature but must fail the SBOM path binding
-    // that `harn run` applies before replay.
+    // v2 signatures covered only the multiset of payload hashes, so a path swap
+    // survived them and had to be caught later by the SBOM path binding (still
+    // covered by `pack_verify_strict_rejects_tampered_sbom_asset_hash`). A v3
+    // signature hashes each entry's path alongside its bytes, so the swap now
+    // fails at the signature itself — earlier, and for every payload kind
+    // rather than only those the SBOM happens to name.
     let mut archive = read_harnpack(&fs::read(&fixture.pack_path).unwrap()).unwrap();
     let a = archive
         .contents
@@ -440,8 +455,13 @@ fn signed_asset_path_swap_fails_legacy_path_binding() {
         strict: false,
         json: false,
     })
-    .expect_err("standalone verification must enforce the same path binding");
-    assert!(verify_error.message.contains("SBOM package asset:assets/"));
+    .expect_err("standalone verification must enforce the path binding");
+    assert_eq!(verify_error.code, "verify.signature_failed");
+    assert!(
+        verify_error.message.contains("signature hash mismatch"),
+        "the path-bound signature should decide the failure: {}",
+        verify_error.message
+    );
 
     let outcome = execute(
         &fixture.pack_path,
@@ -450,8 +470,8 @@ fn signed_asset_path_swap_fails_legacy_path_binding() {
     );
     assert_eq!(outcome.exit_code, 1);
     assert!(
-        outcome.stderr.contains("SBOM package asset:assets/"),
-        "path-bound asset verification should decide the failure: {}",
+        outcome.stderr.contains("signature hash mismatch"),
+        "path-bound signature verification should decide the failure: {}",
         outcome.stderr
     );
     assert!(outcome.stdout.is_empty());

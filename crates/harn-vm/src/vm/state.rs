@@ -496,6 +496,11 @@ pub struct Vm {
     /// digest instead of reading the file to recompute the same digest. `None`
     /// means every module takes the ordinary read-and-hash path.
     pub(crate) graph_link_table: Option<Arc<crate::context_manifest::GraphLinkTable>>,
+    /// Verified, closed-program module templates for this execution tree.
+    /// Unlike the generic graph link table, absence is never interpreted as a
+    /// source-cache miss by the linked-program path.
+    pub(crate) linked_program_repository:
+        Option<Arc<crate::linked_program::LinkedProgramRepository>>,
     /// Source file path for error reporting.
     pub(crate) source_file: Option<String>,
     /// Source text for error reporting.
@@ -574,6 +579,7 @@ pub struct VmBaseline {
     /// Carried so a VM rebuilt from this baseline keeps resolving modules
     /// through the same link table the original spawn was handed.
     graph_link_table: Option<Arc<crate::context_manifest::GraphLinkTable>>,
+    linked_program_repository: Option<Arc<crate::linked_program::LinkedProgramRepository>>,
     runtime_limits: RuntimeLimits,
 }
 
@@ -596,6 +602,7 @@ impl VmBaseline {
             prepared_module_cache: vm.prepared_module_cache.clone(),
             module_provenance: vm.module_provenance,
             graph_link_table: vm.graph_link_table.clone(),
+            linked_program_repository: vm.linked_program_repository.clone(),
             runtime_limits: vm.runtime_limits,
         }
     }
@@ -659,6 +666,7 @@ impl VmBaseline {
             lazy_callable_modules: Arc::new(crate::value::VmMutex::new(BTreeMap::new())),
             source_cache: Arc::new(source_cache),
             graph_link_table: self.graph_link_table.clone(),
+            linked_program_repository: self.linked_program_repository.clone(),
             source_file: self.source_file.clone(),
             source_text: self.source_text.clone(),
             coverage: crate::coverage::for_primary(self.source_file.as_deref()),
@@ -919,6 +927,7 @@ impl Vm {
             lazy_callable_modules: Arc::new(crate::value::VmMutex::new(BTreeMap::new())),
             source_cache: Arc::new(BTreeMap::new()),
             graph_link_table: None,
+            linked_program_repository: None,
             source_file: None,
             source_text: None,
             coverage: crate::coverage::for_primary(None),
@@ -1001,6 +1010,17 @@ impl Vm {
         link_table: Option<Arc<crate::context_manifest::GraphLinkTable>>,
     ) {
         self.graph_link_table = link_table;
+    }
+
+    /// Install the verified module-template repository carried by one linked
+    /// program. Templates remain scoped to this VM tree and never enter the
+    /// ordinary caller-independent cache.
+    pub fn set_linked_program_runtime(
+        &mut self,
+        runtime: &crate::linked_program::LinkedProgramRuntime,
+    ) {
+        self.linked_program_repository = Some(Arc::clone(&runtime.repository));
+        self.graph_link_table = None;
     }
 
     /// Return the effective runtime limit profile for this VM.
@@ -1167,6 +1187,7 @@ impl Vm {
             lazy_callable_modules: Arc::clone(&self.lazy_callable_modules),
             source_cache: Arc::clone(&self.source_cache),
             graph_link_table: self.graph_link_table.clone(),
+            linked_program_repository: self.linked_program_repository.clone(),
             source_file: self.source_file.clone(),
             source_text: self.source_text.clone(),
             coverage: crate::coverage::for_primary(self.source_file.as_deref()),
