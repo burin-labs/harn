@@ -124,6 +124,11 @@ case "$*" in
   "metadata --format-version=1 --locked")
     grep -Fq '# reconciled by fake Cargo' Cargo.lock
     ;;
+  "build -p harn-cli --bin harn --quiet")
+    mkdir -p "$CARGO_TARGET_DIR/debug"
+    cp "$FAKE_HARN_SOURCE" "$CARGO_TARGET_DIR/debug/harn"
+    chmod +x "$CARGO_TARGET_DIR/debug/harn"
+    ;;
   *)
     echo "unexpected cargo invocation: $*" >&2
     exit 2
@@ -199,7 +204,7 @@ if ! grep -Fxq "aot-argv=--workspace-root $repo_root --artifact-version 1.2.4" "
 fi
 
 HARN_RELEASE_ROOT="$release_root" \
-HARN_BIN="$fake_bin/harn" \
+HARN_RELEASE_TOOLS_BIN="$fake_bin/harn" \
 HARN_RELEASE_CLI_AOT_GEN_BIN="$fake_bin/harn-cli-aot-gen" \
 FAKE_HARN_RECORD="$record_harn" \
 FAKE_AOT_RECORD="$record_aot" \
@@ -209,8 +214,22 @@ PATH="$fake_bin:$PATH" \
   "$repo_root/scripts/release_gate.sh" prepare --bump minor
 
 if ! grep -Fxq "argv=run scripts/sync_protocol_fixture_runtime_versions.harn -- --from 1.2.3 --to 1.3.0" "$record_harn"; then
-  echo "release_gate prepare did not route fixture sync through HARN_BIN" >&2
+  echo "release_gate prepare did not route fixture sync through the release-tools CLI" >&2
   cat "$record_harn" >&2
+  exit 1
+fi
+
+# One CLI for every prepare-time Harn tool. Resolving each through
+# `cargo run` recompiled the runtime graph after every metadata mutation,
+# inside a single nominal shell step that hid it (#6023).
+if grep -q "^argv=run --quiet --bin harn" "$record_cargo"; then
+  echo "release_gate prepare still resolved a Harn tool through cargo run" >&2
+  cat "$record_cargo" >&2
+  exit 1
+fi
+if [[ "$(grep -c "^argv=build -p harn-cli --bin harn --quiet$" "$record_cargo")" -ne 0 ]]; then
+  echo "an asserted HARN_RELEASE_TOOLS_BIN must not be rebuilt" >&2
+  cat "$record_cargo" >&2
   exit 1
 fi
 
@@ -335,7 +354,7 @@ ln -s "$fake_bin/make" "$fake_make_only/make"
 : > "$record_make"
 
 HARN_RELEASE_ROOT="$real_release_root" \
-HARN_BIN="$fake_bin/harn" \
+HARN_RELEASE_TOOLS_BIN="$fake_bin/harn" \
 HARN_RELEASE_CLI_AOT_GEN_BIN="$fake_bin/harn-cli-aot-gen" \
 FAKE_HARN_RECORD="$record_harn" \
 FAKE_AOT_RECORD="$record_aot" \
