@@ -824,7 +824,7 @@ fn capability_plan_repairs_imported_helpers_without_type_diagnostics() {
     let files = vec![script.clone()];
     let graph = commands::check::build_module_graph(&files);
 
-    let repairs = whole_program_capabilities::plan(&files, &graph, &[]).unwrap();
+    let repairs = whole_program_capabilities::plan(&files, &graph, &[], &BTreeSet::new()).unwrap();
 
     assert_eq!(
         repairs
@@ -849,7 +849,8 @@ fn capability_plan_repairs_imported_helpers_without_type_diagnostics() {
     }
     fs::write(&script, updated).unwrap();
     let repaired_graph = commands::check::build_module_graph(&files);
-    let fixed_point = whole_program_capabilities::plan(&files, &repaired_graph, &[]).unwrap();
+    let fixed_point =
+        whole_program_capabilities::plan(&files, &repaired_graph, &[], &BTreeSet::new()).unwrap();
     assert!(
         fixed_point.is_empty(),
         "already-migrated imported calls must be a planner fixed point: {fixed_point:#?}"
@@ -868,7 +869,7 @@ fn capability_plan_preserves_explicit_imported_capability_expressions() {
     let files = vec![script];
     let graph = commands::check::build_module_graph(&files);
 
-    let repairs = whole_program_capabilities::plan(&files, &graph, &[]).unwrap();
+    let repairs = whole_program_capabilities::plan(&files, &graph, &[], &BTreeSet::new()).unwrap();
 
     assert!(
         repairs.is_empty(),
@@ -888,7 +889,7 @@ fn capability_plan_preserves_an_unknown_capability_identifier_when_ordinary_args
     let files = vec![script];
     let graph = commands::check::build_module_graph(&files);
 
-    let repairs = whole_program_capabilities::plan(&files, &graph, &[]).unwrap();
+    let repairs = whole_program_capabilities::plan(&files, &graph, &[], &BTreeSet::new()).unwrap();
 
     assert!(
         !repairs
@@ -917,7 +918,7 @@ fn capability_plan_uses_inferred_capability_types_to_repair_a_different_missing_
     let files = vec![entrypoint, library];
     let graph = commands::check::build_module_graph(&files);
 
-    let repairs = whole_program_capabilities::plan(&files, &graph, &[]).unwrap();
+    let repairs = whole_program_capabilities::plan(&files, &graph, &[], &BTreeSet::new()).unwrap();
 
     assert!(
         repairs
@@ -940,7 +941,7 @@ fn capability_plan_disambiguates_shadowed_inferred_bindings_by_declaration() {
     let files = vec![script];
     let graph = commands::check::build_module_graph(&files);
 
-    let repairs = whole_program_capabilities::plan(&files, &graph, &[]).unwrap();
+    let repairs = whole_program_capabilities::plan(&files, &graph, &[], &BTreeSet::new()).unwrap();
 
     assert_eq!(
         repairs
@@ -1000,7 +1001,7 @@ fn capability_plan_completes_a_partial_imported_capability_prefix() {
     let files = vec![script.clone()];
     let graph = commands::check::build_module_graph(&files);
 
-    let repairs = whole_program_capabilities::plan(&files, &graph, &[]).unwrap();
+    let repairs = whole_program_capabilities::plan(&files, &graph, &[], &BTreeSet::new()).unwrap();
     let edits = repairs
         .iter()
         .flat_map(|repair| &repair.edits)
@@ -1036,7 +1037,7 @@ fn capability_plan_completes_a_partial_imported_capability_prefix() {
     fs::write(&script, updated).unwrap();
     let repaired_graph = commands::check::build_module_graph(&files);
     assert!(
-        whole_program_capabilities::plan(&files, &repaired_graph, &[])
+        whole_program_capabilities::plan(&files, &repaired_graph, &[], &BTreeSet::new())
             .unwrap()
             .is_empty(),
         "a completed imported prefix must be a planner fixed point"
@@ -1061,7 +1062,7 @@ fn capability_plan_resolves_private_imported_capability_aliases() {
     let files = vec![entrypoint, library];
     let graph = commands::check::build_module_graph(&files);
 
-    let repairs = whole_program_capabilities::plan(&files, &graph, &[]).unwrap();
+    let repairs = whole_program_capabilities::plan(&files, &graph, &[], &BTreeSet::new()).unwrap();
 
     assert!(
         repairs.iter().flat_map(|repair| &repair.edits).any(|edit| {
@@ -1377,6 +1378,8 @@ fn capability_apply_does_not_double_insert_a_multi_capability_imported_prefix() 
 
 #[path = "capability_apply_tests/prefix_invariant.rs"]
 mod prefix_invariant;
+#[path = "capability_apply_tests/value_escape.rs"]
+mod value_escape;
 
 #[test]
 fn capability_apply_follows_selective_re_exports_to_the_definition() {

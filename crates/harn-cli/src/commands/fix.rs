@@ -47,7 +47,7 @@ use apply::{
 use reporting::{print_apply_result, print_human_plan, skipped_files_error};
 use signature_threading::{
     add_call_argument_edit, add_harness_param_edit, build_reverse_callers, collect_callable_infos,
-    harness_param_name_for_insert, propagate_harness_requirements,
+    collect_value_references, harness_param_name_for_insert, propagate_harness_requirements,
     repair_for_ambient_capability_plan,
 };
 use wire::*;
@@ -261,6 +261,22 @@ fn build_plan_with_options(
     let module_graph = commands::check::build_module_graph(&files);
     let cross_file_imports = commands::check::collect_cross_file_imports(&module_graph);
     let mut analysis = AnalysisDatabase::new();
+    // A callable whose value is read as a first-class reference is invoked at
+    // its declared arity through a call site no per-file pass can see — a
+    // registry entry in one module dispatching a handler defined in another.
+    // Collect those names across the whole program before planning any file.
+    let mut referenced_by_value = BTreeSet::new();
+    for file in &files {
+        let Ok(source) = std::fs::read_to_string(file) else {
+            continue;
+        };
+        let Ok(program) = harn_parser::parse_source(&source) else {
+            continue;
+        };
+        collect_value_references(&program, &mut referenced_by_value);
+    }
+    let referenced_by_value = &referenced_by_value;
+
     let mut candidates = Vec::new();
     let mut skipped_files = Vec::new();
     for file in &files {
@@ -277,6 +293,7 @@ fn build_plan_with_options(
             &module_graph,
             options,
             &mut candidates,
+            referenced_by_value,
         ) {
             skipped_files.push(skipped);
         }
@@ -297,8 +314,12 @@ fn build_plan_with_options(
         })
         .cloned()
         .collect::<Vec<_>>();
-    let whole_program_repairs =
-        whole_program_capabilities::plan(&valid_files, &module_graph, &candidates)?;
+    let whole_program_repairs = whole_program_capabilities::plan(
+        &valid_files,
+        &module_graph,
+        &candidates,
+        referenced_by_value,
+    )?;
     if !whole_program_repairs.is_empty() {
         let whole_program_files = whole_program_repairs
             .iter()
@@ -394,6 +415,7 @@ fn collect_file_candidates(
     module_graph: &harn_modules::ModuleGraph,
     options: FixOptions,
     out: &mut Vec<RepairCandidate>,
+    referenced_by_value: &BTreeSet<String>,
 ) -> Result<(), SkippedFileWire> {
     let path_str = file.to_string_lossy().into_owned();
     let mut config = package::load_check_config(Some(file));
@@ -410,7 +432,13 @@ fn collect_file_candidates(
         cross_module_importer_count: module_graph.importers_of(file).len(),
     };
     let deferred_capability_mismatches = if options.capability_migrations_only {
-        deferred_capability_mismatch_spans(&output.diagnostics, &program, &source, &exported_names)
+        deferred_capability_mismatch_spans(
+            &output.diagnostics,
+            &program,
+            &source,
+            &exported_names,
+            referenced_by_value,
+        )
     } else {
         BTreeSet::new()
     };
@@ -454,6 +482,7 @@ fn collect_file_candidates(
                 &program,
                 &exported_names,
                 &ambient_context,
+                referenced_by_value,
             )
         })
         .flatten();
@@ -476,6 +505,7 @@ fn collect_file_candidates(
                     &program,
                     &exported_names,
                     &ambient_context,
+                    referenced_by_value,
                 );
             }
             synthesize_missing_capability_argument_repair(
@@ -496,6 +526,7 @@ fn collect_file_candidates(
                     &program,
                     &exported_names,
                     &ambient_context,
+                    referenced_by_value,
                 )
             })
         });
@@ -544,9 +575,14 @@ fn collect_file_candidates(
         &lint_options,
     );
     for diag in &lint_diagnostics {
-        let Some((repair, edits, impact)) =
-            lint_candidate_repair(diag, file, &source, &program, module_graph)
-        else {
+        let Some((repair, edits, impact)) = lint_candidate_repair(
+            diag,
+            file,
+            &source,
+            &program,
+            module_graph,
+            referenced_by_value,
+        ) else {
             continue;
         };
         if !repair_allowed(&repair, safety_ceiling) {
@@ -592,8 +628,9 @@ fn deferred_capability_mismatch_spans(
     program: &[SNode],
     source: &str,
     exported_names: &BTreeSet<String>,
+    referenced_by_value: &BTreeSet<String>,
 ) -> BTreeSet<(usize, usize)> {
-    let calls = collect_callable_infos(program, source, exported_names)
+    let calls = collect_callable_infos(program, source, exported_names, referenced_by_value)
         .into_iter()
         .flat_map(|callable| callable.calls)
         .collect::<Vec<_>>();
@@ -745,6 +782,7 @@ fn lint_candidate_repair(
     source: &str,
     program: &[SNode],
     module_graph: &harn_modules::ModuleGraph,
+    referenced_by_value: &BTreeSet<String>,
 ) -> Option<(Repair, Vec<FixEdit>, RepairImpactWire)> {
     if ambient_capability_handle(diag.code).is_some() {
         let exported_names = module_graph
@@ -760,6 +798,7 @@ fn lint_candidate_repair(
             program,
             &exported_names,
             &context,
+            referenced_by_value,
         );
     }
     let repair = diag.repair()?;
@@ -776,9 +815,10 @@ fn synthesize_ambient_capability_repair(
     program: &[SNode],
     exported_names: &BTreeSet<String>,
     context: &AmbientRepairContext,
+    referenced_by_value: &BTreeSet<String>,
 ) -> Option<(Repair, Vec<FixEdit>, RepairImpactWire)> {
     ambient_capability_handle(diag.code)?;
-    let infos = collect_callable_infos(program, source, exported_names);
+    let infos = collect_callable_infos(program, source, exported_names, referenced_by_value);
     let owner_idx = infos.iter().position(|info| {
         info.ambient_capability_calls.iter().any(|call| {
             call.code == diag.code
@@ -1000,8 +1040,9 @@ fn synthesize_missing_harness_repair(
     program: &[SNode],
     exported_names: &BTreeSet<String>,
     context: &AmbientRepairContext,
+    referenced_by_value: &BTreeSet<String>,
 ) -> Option<(Repair, Vec<FixEdit>, RepairImpactWire)> {
-    let infos = collect_callable_infos(program, source, exported_names);
+    let infos = collect_callable_infos(program, source, exported_names, referenced_by_value);
     let owner_idx = infos
         .iter()
         .enumerate()
@@ -1054,8 +1095,9 @@ fn synthesize_missing_root_argument_repair(
     program: &[SNode],
     exported_names: &BTreeSet<String>,
     context: &AmbientRepairContext,
+    referenced_by_value: &BTreeSet<String>,
 ) -> Option<(Repair, Vec<FixEdit>, RepairImpactWire)> {
-    let infos = collect_callable_infos(program, source, exported_names);
+    let infos = collect_callable_infos(program, source, exported_names, referenced_by_value);
     let owner_idx = infos
         .iter()
         .enumerate()
