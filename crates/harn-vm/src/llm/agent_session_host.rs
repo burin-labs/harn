@@ -266,14 +266,14 @@ pub(crate) fn vm_to_json(value: &VmValue) -> serde_json::Value {
     crate::llm::vm_value_to_json(value)
 }
 
-fn list_items(value: &VmValue) -> Vec<VmValue> {
+pub(crate) fn list_items(value: &VmValue) -> Vec<VmValue> {
     match value {
         VmValue::List(items) => (**items).clone(),
         _ => Vec::new(),
     }
 }
 
-fn dict_get<'a>(value: &'a VmValue, key: &str) -> Option<&'a VmValue> {
+pub(crate) fn dict_get<'a>(value: &'a VmValue, key: &str) -> Option<&'a VmValue> {
     match value {
         VmValue::Dict(d) => d.get(key),
         _ => None,
@@ -865,11 +865,23 @@ async fn host_agent_session_finalize(
         .unwrap_or(serde_json::Value::Null);
     let visible_text = snapshot
         .as_ref()
-        .and_then(last_assistant_text)
+        .and_then(super::agent_result_projection::last_assistant_text)
         .unwrap_or_default();
 
     emit_event(&terminal_outcome.checkpoint(&session_id, &canonical_status, &stop_reason));
-    let trace_summary = super::trace::agent_trace_summary();
+    // The trace event log never carried tool or loop-lifecycle facts (#5997),
+    // so the summary reads them from the same session state that produces
+    // `tools` and `llm` below. Deriving both projections from one owner is
+    // what keeps `trace.tool_executions` from reporting zero while the
+    // transcript holds the calls.
+    let trace_summary = super::trace::agent_trace_summary_with_loop(
+        &super::agent_result_projection::terminal_loop_facts(
+            &canonical_status,
+            iterations,
+            &session.successful_tools,
+            &session.rejected_tools,
+        ),
+    );
     let result = serde_json::json!({
         "status": if final_status.is_empty() { "done" } else { final_status.as_str() },
         "final_status": final_status,
@@ -883,6 +895,12 @@ async fn host_agent_session_finalize(
         "private_reasoning": serde_json::Value::Null,
         "thinking_summary": serde_json::Value::Null,
         "llm": {
+            // One accepted result per agent turn. Schema retries, empty
+            // completions, and model-ladder advances never reach this
+            // accounting, so it is legitimately smaller than the trace's
+            // `total_input_tokens` — sometimes by a large factor. Naming the
+            // scope is what lets a reader tell that apart from a defect.
+            "token_scope": "accepted_turn_results",
             "iterations": iterations,
             "duration_ms": 0,
             "input_tokens": session.input_tokens,
@@ -1020,25 +1038,6 @@ pub(crate) fn truncated_tool_call_should_continue(
         return false;
     }
     has_parse_errors || text_has_tool_call_prefix(text)
-}
-
-fn last_assistant_text(snapshot: &VmValue) -> Option<String> {
-    let messages_value = dict_get(snapshot, "messages")?;
-    let messages = list_items(messages_value);
-    for msg in messages.iter().rev() {
-        let role = dict_get(msg, "role")
-            .map(|v| v.display())
-            .unwrap_or_default();
-        if role == "assistant" {
-            let visible = dict_get(msg, "content")
-                .map(|v| crate::visible_text::sanitize_visible_assistant_text(&v.display(), false))
-                .unwrap_or_default();
-            if !visible.trim().is_empty() {
-                return Some(visible);
-            }
-        }
-    }
-    None
 }
 
 /// Return the visible message list for an agent session.

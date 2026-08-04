@@ -12,6 +12,7 @@ pub(crate) mod acp_permission;
 mod agent_config;
 mod agent_host_primitives;
 pub(crate) mod agent_observe;
+mod agent_result_projection;
 mod agent_runtime;
 pub(crate) mod agent_session_host;
 mod agent_session_transcript;
