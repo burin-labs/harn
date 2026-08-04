@@ -101,3 +101,55 @@ fn every_declared_capability_is_accepted() {
         );
     }
 }
+
+// --- unknown method on a known capability --------------------------------
+
+/// Before this check, `harn check` accepted a misspelled capability method and
+/// the failure surfaced only when the expression executed. The parser could
+/// not tell the difference, because the only method set it could read was the
+/// one the VM installs at startup (#6101).
+#[test]
+fn unknown_method_on_a_capability_is_error() {
+    let errs = errors("fn main(harness: Harness) {\n  log(harness.fs.bogus_method())\n}");
+    assert!(
+        has(
+            &errs,
+            "value of type HarnessFs has no method `bogus_method`"
+        ),
+        "got: {errs:?}"
+    );
+}
+
+#[test]
+fn a_near_miss_method_suggests_the_real_name() {
+    let errs = errors("fn main(harness: Harness) {\n  log(harness.fs.read_txt(\"a\"))\n}");
+    assert!(has(&errs, "did you mean `read_text`?"), "got: {errs:?}");
+}
+
+/// The falsifier for the whole change. `harness.runtime.shared_cell` is
+/// declared by `#[harn_builtin]` inside `harn-vm`, so it is absent from the
+/// installed manifest in a parser-only process. Reporting the miss without
+/// consulting the generated projection regressed 41 `harn-vm` tests with
+/// exactly this shape.
+#[test]
+fn a_vm_declared_method_is_accepted_without_the_vm() {
+    let errs =
+        errors("fn main(harness: Harness) {\n  log(harness.runtime.shared_cell(\"k\", 1))\n}");
+    assert!(
+        !has(&errs, "has no method"),
+        "a VM-declared method must not be reported as unknown: {errs:?}"
+    );
+}
+
+/// A narrowed handle reaches the same check through its own type name.
+#[test]
+fn unknown_method_on_a_narrow_handle_is_error() {
+    let errs = errors("fn read(fs: HarnessFs) {\n  log(fs.bogus_method())\n}");
+    assert!(
+        has(
+            &errs,
+            "value of type HarnessFs has no method `bogus_method`"
+        ),
+        "got: {errs:?}"
+    );
+}

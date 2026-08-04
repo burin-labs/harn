@@ -769,18 +769,56 @@ impl TypeChecker {
         else {
             return false;
         };
-        // A miss here cannot be reported as an unknown method. `harn-parser`
-        // only sees capability methods that `harn-vm` has installed into the
-        // builtin manifest, so before the VM installs it a perfectly valid
-        // `harness.runtime.shared_cell` is indistinguishable from a typo. See
-        // #6101.
+        // A miss is a typo only when the name is declared nowhere. The
+        // installed manifest alone cannot answer that: `harn-vm` declares 280
+        // capability methods through `#[harn_builtin]`, so before
+        // `install_builtin_manifest` runs, a perfectly valid
+        // `harness.runtime.shared_cell` looks exactly like a misspelling.
+        // `is_declared_capability_method` reads the leaf-crate contracts plus
+        // the generated projection of those declarations, and therefore gives
+        // the same answer whether or not a VM ever starts (#6101).
         let Some(sig) = builtin_signatures::lookup_capability_method(capability, method) else {
+            if !harn_capability_contracts::is_declared_capability_method(
+                capability.field_name(),
+                method,
+            ) {
+                self.report_unknown_capability_method(capability, method, span);
+            }
+            // The signature is still unavailable, so there is nothing to check
+            // the arguments against either way.
             return false;
         };
         let display_name = format!("harness.{}.{method}", capability.field_name());
         let has_spread = args.iter().any(|arg| matches!(&arg.node, Node::Spread(_)));
         self.check_builtin_signature_call(&display_name, sig, &[], args, has_spread, scope, span);
         true
+    }
+
+    /// Report a capability method that no declaration in the workspace owns.
+    ///
+    /// Phrased as the VM phrases the same rejection at run time, so the two
+    /// surfaces read as one contract rather than two opinions. The candidate
+    /// list is deliberately omitted: `harness.runtime` alone has 132 methods,
+    /// and a near-miss suggestion is what actually helps.
+    fn report_unknown_capability_method(
+        &mut self,
+        capability: harn_builtin_meta::CapabilityId,
+        method: &str,
+        span: Span,
+    ) {
+        let names =
+            harn_capability_contracts::declared_capability_method_names(capability.field_name());
+        let max_dist = if method.len() <= 4 { 1 } else { 2 };
+        let suggestion =
+            crate::diagnostic::find_closest_match(method, names.iter().copied(), max_dist);
+        let mut message = format!(
+            "value of type {} has no method `{method}`",
+            capability.type_name()
+        );
+        if let Some(close) = suggestion {
+            message.push_str(&format!(" — did you mean `{close}`?"));
+        }
+        self.error_at(Code::UnknownMethod, message, span);
     }
 
     pub(in crate::typechecker) fn bind_type_param(
