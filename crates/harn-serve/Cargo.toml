@@ -79,7 +79,7 @@ full = ["hostlib-full", "vm-postgres", "vm-sqlite"]
 # JWT signing algorithm (e.g. HS256 for HMAC providers; default is
 # RS256). harn-vm already pins this transitive dep, but we name it
 # directly so the parse helper can refer to `jsonwebtoken::Algorithm`.
-version = "10"
+version = "11"
 default-features = false
 features = ["use_pem", "aws_lc_rs"]
 
