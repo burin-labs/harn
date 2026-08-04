@@ -700,7 +700,7 @@ pub fn stdlib_builtin_metadata() -> Vec<crate::vm::VmBuiltinMetadata> {
 /// treats that set as the callable surface goes quiet on exactly the calls the
 /// typechecker will reject. `host_call` is the case that surfaced it: declared
 /// `privileged_wire`, rejected by `harn check`, and silent under `harn lint`
-/// across 254 call sites in one downstream repo (harn#6126).
+/// across 114 call sites in one downstream repo (harn#6126).
 pub fn builtin_exposure(name: &str) -> Option<harn_builtin_meta::BuiltinExposure> {
     use std::sync::OnceLock;
     static BY_NAME: OnceLock<

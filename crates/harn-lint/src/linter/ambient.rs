@@ -347,7 +347,7 @@ impl Linter<'_> {
     /// even though the typechecker rejects it. That silence is worse than a
     /// name error, because nothing points at the surface that replaced it.
     /// `host_call` is the case that surfaced it (harn#6126): declared
-    /// `privileged_wire`, 254 call sites in one downstream repo, zero lint
+    /// `privileged_wire`, 114 call sites in one downstream repo, zero lint
     /// findings. Names that *do* have a migration recipe never reach here —
     /// the caller reports `HARN-LNT-071` and its repair instead.
     fn check_non_source_callable_builtin(&mut self, name: &str, span: Span) {
