@@ -22,6 +22,14 @@ inputs:
     description: Delay between bounded release-asset attempts.
     required: false
     default: "10"
+  token:
+    description: >-
+      Token for api.github.com, used only to read a release asset's SHA-256
+      digest while SHA256SUMS is still unpublished. Optional; the release
+      download host needs none, but unauthenticated API requests are rate
+      limited per runner IP.
+    required: false
+    default: ${{ github.token }}
   cache-dir:
     description: Explicit bootstrap archive/metadata cache directory.
     required: false
@@ -104,6 +112,7 @@ runs:
         HARN_BOOTSTRAP_INSTALL_DIR: ${{ steps.resolve.outputs.install-dir }}
         HARN_BOOTSTRAP_MAX_ATTEMPTS: ${{ inputs.max-attempts }}
         HARN_BOOTSTRAP_RETRY_DELAY_SECONDS: ${{ inputs.retry-delay-seconds }}
+        HARN_BOOTSTRAP_TOKEN: ${{ inputs.token }}
         NODE_USE_ENV_PROXY: "1"
       run: >-
         node "$GITHUB_ACTION_PATH/../../../scripts/bootstrap_harn.mjs"

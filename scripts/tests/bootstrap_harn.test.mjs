@@ -811,3 +811,134 @@ test("the cached paths are the ones bootstrap uses", (context) => {
     path.join(root, "cache", "downloads", TEST_VERSION, TEST_ASSET),
   );
 });
+
+// --- release-asset digest fallback (#6036) ----------------------------------
+//
+// A downstream repo pinning a just-published version could burn its whole CI
+// timeout waiting for SHA256SUMS, which appears only when the release is
+// finalized -- while the exact asset it needs had been uploaded, and digested
+// by GitHub, for minutes. Both sources are now consulted on every attempt.
+
+/**
+ * A release whose asset is uploaded and digested but whose SHA256SUMS has not
+ * been published yet.
+ */
+function pendingRelease(archiveBytes, options = {}) {
+  const digest =
+    options.digest === undefined
+      ? `sha256:${sha256(archiveBytes)}`
+      : options.digest;
+  const calls = { metadata: 0, api: 0, archive: 0 };
+  const body = {
+    assets: [
+      {
+        name: "harn-some-other-target.tar.gz",
+        digest: `sha256:${"0".repeat(64)}`,
+      },
+      ...(options.omitAsset ? [] : [{ name: TEST_ASSET, digest }]),
+    ],
+  };
+  return {
+    calls,
+    fetchImpl: async (url) => {
+      if (url.endsWith("/SHA256SUMS")) {
+        calls.metadata += 1;
+        if (options.manifest) return new Response(options.manifest);
+        return new Response("not found", { status: 404 });
+      }
+      if (url.includes("/releases/tags/")) {
+        calls.api += 1;
+        if (options.apiStatus) {
+          return new Response("nope", { status: options.apiStatus });
+        }
+        return new Response(JSON.stringify(body));
+      }
+      if (url.endsWith(`/${TEST_ASSET}`)) {
+        calls.archive += 1;
+        return new Response(archiveBytes);
+      }
+      return new Response("missing", { status: 404 });
+    },
+  };
+}
+
+test("an asset digest installs before SHA256SUMS is published", async (t) => {
+  const root = temporaryRoot(t);
+  const archive = makeArchive(root);
+  const release = pendingRelease(archive);
+
+  const result = await bootstrap(bootstrapOptions(root, release.fetchImpl));
+
+  assert.equal(result.checksum_source, "release asset digest");
+  assert.equal(result.checksum, sha256(archive));
+  assert.ok(fs.existsSync(result.binary_path));
+  // SHA256SUMS was still preferred and tried first on the attempt.
+  assert.equal(release.calls.metadata, 1);
+  assert.equal(release.calls.api, 1);
+});
+
+test("a digest that does not match the bytes is a hard failure", async (t) => {
+  const root = temporaryRoot(t);
+  const archive = makeArchive(root);
+  const release = pendingRelease(archive, {
+    digest: `sha256:${"1".repeat(64)}`,
+  });
+
+  await assert.rejects(
+    bootstrap(bootstrapOptions(root, release.fetchImpl)),
+    /checksum mismatch/,
+  );
+});
+
+test("a malformed or absent digest exhausts the bounded budget and explains both sources", async (t) => {
+  const root = temporaryRoot(t);
+  const archive = makeArchive(root);
+  const malformed = pendingRelease(archive, { digest: "not-a-digest" });
+
+  await assert.rejects(
+    bootstrap({ ...bootstrapOptions(root, malformed.fetchImpl), attempts: 2 }),
+    (error) =>
+      /no verification source for/.test(error.message) &&
+      /SHA256SUMS/.test(error.message) &&
+      /well-formed sha256 digest/.test(error.message),
+  );
+  // Bounded: two attempts, each consulting both sources. No unbounded wait.
+  assert.equal(malformed.calls.metadata, 2);
+  assert.equal(malformed.calls.api, 2);
+
+  const missing = pendingRelease(archive, { omitAsset: true });
+  await assert.rejects(
+    bootstrap({ ...bootstrapOptions(root, missing.fetchImpl), attempts: 1 }),
+    /has no asset named/,
+  );
+});
+
+test("SHA256SUMS disagreeing with a verified digest fails an exact release", async (t) => {
+  const root = temporaryRoot(t);
+  const archive = makeArchive(root);
+  const options = bootstrapOptions(root, pendingRelease(archive).fetchImpl);
+
+  const first = await bootstrap(options);
+  assert.equal(first.checksum_source, "release asset digest");
+
+  // The release is later finalized, but SHA256SUMS states a different
+  // checksum for the same asset of the same tag. That is a mutated release.
+  const contradicting = pendingRelease(archive, {
+    manifest: `${"2".repeat(64)}  ${TEST_ASSET}\n`,
+  });
+  await assert.rejects(
+    bootstrap({ ...options, fetchImpl: contradicting.fetchImpl }),
+    /disagrees with the verified asset digest for an exact release/,
+  );
+
+  // An agreeing SHA256SUMS finalizes normally and becomes the source.
+  const agreeing = pendingRelease(archive, {
+    manifest: `${sha256(archive)}  ${TEST_ASSET}\n`,
+  });
+  const finalized = await bootstrap({
+    ...options,
+    fetchImpl: agreeing.fetchImpl,
+  });
+  assert.equal(finalized.checksum_source, "SHA256SUMS");
+  assert.equal(finalized.cache_hit, true);
+});
