@@ -222,6 +222,12 @@ fn fmt_error(path: &str, code: &str, message: String) -> FmtFileReport {
     }
 }
 
+/// Render the format report for a human reader.
+///
+/// Denied per-function rather than per-module: this module's `--json` envelope
+/// on stdout is correct, and the text report must not share that stream. See
+/// [`super::outcome::print_lint_diagnostics`].
+#[deny(clippy::print_stdout)]
 fn print_text_report(report: &FmtReport) {
     if report.files.is_empty() {
         eprintln!("No .harn files found");
@@ -229,7 +235,7 @@ fn print_text_report(report: &FmtReport) {
     }
     for file in &report.files {
         match file.status {
-            FmtFileStatus::Formatted => println!("formatted {}", file.path),
+            FmtFileStatus::Formatted => eprintln!("formatted {}", file.path),
             FmtFileStatus::Error => {
                 for diagnostic in &file.diagnostics {
                     if diagnostic.code == Code::FormatterWouldReformat.to_string() {

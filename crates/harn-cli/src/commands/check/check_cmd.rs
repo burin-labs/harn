@@ -1,3 +1,9 @@
+//! `harn check` per-file analysis and its rendered text report.
+//!
+//! The report is human-readable, so it goes to stderr in its entirety; see
+//! [`super::outcome::print_lint_diagnostics`].
+#![deny(clippy::print_stdout)]
+
 use std::path::Path;
 
 use harn_lint::LintSeverity;
@@ -93,26 +99,25 @@ impl CheckReport {
     }
 }
 
-/// Rendered per-file text output, kept separate by destination stream so a
-/// parallel driver can buffer whole-file output and replay it in input order
-/// without interleaving. `stdout` carries the `<path>: ok` line; `stderr`
-/// carries rendered diagnostics — matching what the serial CLI always did.
+/// Rendered per-file text output, buffered so a parallel driver can replay
+/// whole files in input order without interleaving.
+///
+/// One buffer, because there is one destination: see
+/// [`super::outcome::print_lint_diagnostics`] for the output-channel contract.
+/// This used to be two fields — the `<path>: ok` line on stdout, diagnostics on
+/// stderr — which made `harn check DIR 2>/dev/null` print `ok` for the clean
+/// files and drop every diagnostic (harn#6168).
 #[derive(Debug, Clone, Default)]
 pub(crate) struct CheckTextOutput {
-    pub stdout: String,
-    pub stderr: String,
+    pub rendered: String,
 }
 
 impl CheckTextOutput {
     pub(crate) fn print(&self) {
         use std::io::Write as _;
-        if !self.stderr.is_empty() {
-            eprint!("{}", self.stderr);
+        if !self.rendered.is_empty() {
+            eprint!("{}", self.rendered);
             let _ = std::io::stderr().flush();
-        }
-        if !self.stdout.is_empty() {
-            print!("{}", self.stdout);
-            let _ = std::io::stdout().flush();
         }
     }
 }
@@ -178,7 +183,7 @@ pub(crate) fn check_file_report_inner(
         Ok(output) => output,
         Err(error) => {
             if let Some(text) = text.as_mut() {
-                text.stderr
+                text.rendered
                     .push_str(&render_file_analysis_error_to_string(&path_str, &error));
             }
             return file_analysis_error_report(&path_str, error);
@@ -224,7 +229,7 @@ pub(crate) fn check_file_report_inner(
                 None,
                 Some(help.as_str()),
             );
-            text.stderr.push_str(&rendered);
+            text.rendered.push_str(&rendered);
         }
         diagnostics.push(CheckDiagnostic {
             source: "module",
@@ -248,7 +253,7 @@ pub(crate) fn check_file_report_inner(
         if let Some(text) = text.as_mut() {
             let rendered =
                 harn_parser::diagnostic::render_type_diagnostic(&source, &path_str, diag);
-            text.stderr.push_str(&rendered);
+            text.rendered.push_str(&rendered);
         }
         diagnostics.push(CheckDiagnostic {
             source: "type",
@@ -294,7 +299,7 @@ pub(crate) fn check_file_report_inner(
                     None,
                     None,
                 );
-                text.stderr.push_str(&rendered);
+                text.rendered.push_str(&rendered);
             }
             diagnostics.push(CheckDiagnostic {
                 source: "compile",
@@ -329,7 +334,7 @@ pub(crate) fn check_file_report_inner(
     if let Some(text) = text.as_mut() {
         let (lint_has_error, _, rendered) =
             render_lint_diagnostics(&path_str, &source, &lint_diagnostics);
-        text.stderr.push_str(&rendered);
+        text.rendered.push_str(&rendered);
         if lint_has_error {
             has_error = true;
         }
@@ -383,7 +388,7 @@ pub(crate) fn check_file_report_inner(
                     Some(category),
                     diag.help.as_deref(),
                 );
-                text.stderr.push_str(&rendered);
+                text.rendered.push_str(&rendered);
             }
             diagnostics.push(CheckDiagnostic {
                 source: category,
@@ -411,7 +416,7 @@ pub(crate) fn check_file_report_inner(
                     Some(&format!("invariant[{}]", diag.invariant)),
                     diag.help.as_deref(),
                 );
-                text.stderr.push_str(&rendered);
+                text.rendered.push_str(&rendered);
             }
             diagnostics.push(CheckDiagnostic {
                 source: "invariant",
@@ -426,7 +431,7 @@ pub(crate) fn check_file_report_inner(
 
     if diagnostic_count == 0 {
         if let Some(text) = text.as_mut() {
-            text.stdout.push_str(&format!("{path_str}: ok\n"));
+            text.rendered.push_str(&format!("{path_str}: ok\n"));
         }
     }
 

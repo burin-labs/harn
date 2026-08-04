@@ -1047,6 +1047,22 @@ files are recorded but do not create lint targets. Git failures, unsafe paths,
 source contents that differ from the evaluated target revision, unreadable
 sources, and missing or invalid warning/error spans fail closed.
 
+### Output streams
+
+`harn lint`, `harn check`, and `harn fmt` write every human-readable line to
+**stderr** — findings, the `no issues found` line, and the applied-fix and
+formatted-file lines alike. stdout carries machine-readable output only, which
+is the `--json` envelope and nothing else.
+
+The consequence worth knowing before you write a sweep: `2>/dev/null` silences
+these commands rather than trimming them, and `harn lint src/ > findings.txt`
+leaves the file empty. Redirect stderr, or use `--json`.
+
+```bash
+harn lint src/ 2> findings.txt
+harn lint --json src/ | jq '.data.files[].diagnostics'
+```
+
 `harn lint --json` emits the schema-v1 envelope documented in the
 [CLI `--json` contract](./cli-json-contract.md#harn-lint---json). Discover the
 complete inline schema with `harn --json-schemas --command lint`, and decode it

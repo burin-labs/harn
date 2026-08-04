@@ -226,13 +226,19 @@ pub(crate) async fn run_changed_lint(
     })
 }
 
+/// Render the changed-lines report for a human reader.
+///
+/// Denied per-function rather than per-module: this module's `--json` envelope
+/// on stdout is correct, and the text report must not share that stream. See
+/// [`super::outcome::print_lint_diagnostics`].
+#[deny(clippy::print_stdout)]
 fn render_changed_lint(outcome: &LintJsonCommandOutcome) {
     let Some(report) = outcome.envelope.data.as_ref() else {
         return;
     };
     for file in &report.files {
         if file.diagnostics.is_empty() {
-            println!("{}: no issues found on added lines", file.path);
+            eprintln!("{}: no issues found on added lines", file.path);
             continue;
         }
         let source = report

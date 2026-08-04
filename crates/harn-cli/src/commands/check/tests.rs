@@ -20,6 +20,7 @@ use super::lint_report::lint_file_report;
 use super::preflight::{is_preflight_allowed, PreflightDiagnostic};
 
 mod host_capability_discriminators;
+mod output_channel;
 mod prompt_lint;
 mod target_discovery;
 

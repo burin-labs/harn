@@ -45,7 +45,10 @@ use super::check_cmd::{CheckDiagnostic, CheckFileReport, CheckFileStatus, CheckS
 use super::driver::CheckedFile;
 
 /// Bump when the artifact layout or replay semantics change.
-const RESULT_CACHE_SCHEMA: u32 = 1;
+/// Bumped to 2 when the two rendered-text fields collapsed into one, since the
+/// entry no longer deserializes (harn#6168). A stale entry is a miss, not a
+/// failure — it is re-checked and rewritten.
+const RESULT_CACHE_SCHEMA: u32 = 2;
 
 /// Kill switch for just the check-result cache (the shared
 /// `HARN_BYTECODE_CACHE=0` toggle also disables it).
@@ -318,8 +321,7 @@ struct CachedCheckResult {
     schema: u32,
     status: CachedStatus,
     diagnostics: Vec<CachedDiagnostic>,
-    stdout_text: String,
-    stderr_text: String,
+    rendered_text: String,
     probes: Vec<Probe>,
 }
 
@@ -409,8 +411,7 @@ pub(super) fn load(
     };
     let mut text = super::check_cmd::CheckTextOutput::default();
     if want_text {
-        text.stdout = cached.stdout_text;
-        text.stderr = cached.stderr_text;
+        text.rendered = cached.rendered_text;
     }
     Some(CheckedFile {
         report: CheckFileReport {
@@ -449,8 +450,7 @@ pub(super) fn store(key: &[u8; 32], checked: &CheckedFile, probes: Vec<Probe>) {
                 help: diag.help.clone(),
             })
             .collect(),
-        stdout_text: checked.text.stdout.clone(),
-        stderr_text: checked.text.stderr.clone(),
+        rendered_text: checked.text.rendered.clone(),
         probes,
     };
     let path = cache_path(key);

@@ -1,3 +1,9 @@
+//! Lint/format command outcomes and the shared diagnostic renderer.
+//!
+//! See [`print_lint_diagnostics`] for the output-channel contract these
+//! surfaces share.
+#![deny(clippy::print_stdout)]
+
 use harn_lint::LintSeverity;
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -19,6 +25,25 @@ impl CommandOutcome {
 /// Render each diagnostic to stderr. Returns `(has_error, fixable_count)`,
 /// where `fixable_count` mirrors the `diag.fix.is_some()` tally that the JSON
 /// report uses so the CLI and JSON surfaces agree on "fixable".
+///
+/// # The output channel
+///
+/// Every human-readable line `harn lint`, `harn fmt`, and `harn check` produce
+/// goes to **stderr**, including the clean-file and applied-fix lines. stdout
+/// carries machine-readable output only — the `--json` envelope — so a caller
+/// can redirect either stream without silently losing the other.
+///
+/// Splitting the channel is a silent failure, not a cosmetic one. While the
+/// clean-file line was on stdout, `harn lint DIR 2>/dev/null` over a 28-file
+/// corpus printed a run of `no issues found` and exited 0 — warnings do not
+/// fail without `--strict` — while 114 findings went to the suppressed stream
+/// (harn#6168). A genuinely clean corpus produces byte-identical output, so
+/// nothing prompts you to doubt it. Sending everything to one stream makes a
+/// suppressed sweep silent instead, which reads as what it is.
+///
+/// Enforced rather than described: the modules that render this output carry
+/// `#![deny(clippy::print_stdout)]`, and the ones that also emit a JSON
+/// envelope carry it per-function.
 pub(super) fn print_lint_diagnostics(
     path: &str,
     source: &str,

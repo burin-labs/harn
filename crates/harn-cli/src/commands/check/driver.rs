@@ -20,6 +20,7 @@
 //! Worker count comes from [`std::thread::available_parallelism`], capped by
 //! the file count, with `HARN_CHECK_JOBS=<n>` as the explicit override
 //! (`HARN_CHECK_JOBS=1` restores the fully serial driver for bisection).
+#![deny(clippy::print_stdout)]
 
 use std::collections::{HashMap, HashSet};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -242,8 +243,7 @@ fn internal_failure(file: &Path, want_text: bool) -> CheckedFile {
     let message = "internal `harn check` failure while analyzing this file";
     let text = if want_text {
         CheckTextOutput {
-            stdout: String::new(),
-            stderr: format!("{path}: error: {message}\n"),
+            rendered: format!("{path}: error: {message}\n"),
         }
     } else {
         CheckTextOutput::default()
@@ -582,7 +582,7 @@ mod tests {
             )]
         );
         assert_eq!(
-            checked[1].text.stderr,
+            checked[1].text.rendered,
             "panic.harn: error: internal `harn check` failure while analyzing this file\n"
         );
         assert!(matches!(checked[1].report.status, CheckFileStatus::Error));
@@ -615,7 +615,7 @@ mod tests {
             ["zero.harn", "panic.harn", "two.harn", "three.harn"]
         );
         assert_eq!(diagnostic_facts(&checked[1]).len(), 1);
-        assert!(checked[1].text.stderr.is_empty());
+        assert!(checked[1].text.rendered.is_empty());
     }
 
     #[test]
