@@ -81,6 +81,8 @@ hr { width: 100%; border: 0; border-top: 1px solid var(--line); }
   const pending = new Map();
   let nextRequestId = 1;
   let currentDocument = null;
+  /** spec.id -> {node, tag} kept from the previous render so nodes survive it. */
+  let rendered = new Map();
   let eventChain = Promise.resolve();
   let portableState = PORTABLE?.state ?? null;
   let portableReady = null;
@@ -304,81 +306,161 @@ hr { width: 100%; border: 0; border-top: 1px solid var(--line); }
     return node;
   }
 
+  function elementTag(spec) {
+    if (spec.kind === 'column' || spec.kind === 'row') return 'section';
+    if (spec.kind === 'heading') {
+      const level = Number.isInteger(spec.level) && spec.level >= 1 && spec.level <= 6
+        ? spec.level : 2;
+      return 'h' + level;
+    }
+    if (spec.kind === 'text' || spec.kind === 'status') return 'p';
+    if (spec.kind === 'button') return 'button';
+    if (spec.kind === 'field' || spec.kind === 'text_area' || spec.kind === 'select') return 'label';
+    if (spec.kind === 'canvas') return 'canvas';
+    if (spec.kind === 'image') return 'img';
+    if (spec.kind === 'divider') return 'hr';
+    return null;
+  }
+
+  function elementClassName(spec) {
+    if (spec.kind === 'column' || spec.kind === 'row') return spec.kind + ' ' + (spec.variant || '');
+    if (spec.kind === 'status') return 'status ' + (spec.variant || '');
+    if (spec.kind === 'divider') return '';
+    return spec.variant || '';
+  }
+
+  function assign(node, property, value) {
+    if (node[property] !== value) node[property] = value;
+  }
+
+  /** Build the empty shell for one element. Content is applied by `update`. */
+  function build(spec, tag) {
+    const node = create(tag);
+    if (spec.kind === 'button') {
+      node.type = 'button';
+    } else if (spec.kind === 'field' || spec.kind === 'text_area' || spec.kind === 'select') {
+      node.append(create('span'));
+      const control = spec.kind === 'text_area' ? create('textarea')
+        : spec.kind === 'select' ? create('select')
+        : create('input');
+      if (spec.kind === 'field') control.type = 'text';
+      node.append(control);
+    } else if (spec.kind === 'canvas') {
+      connectCanvas(node);
+    }
+    // A field's caption and control belong to the element itself, not to the
+    // document tree. Recording them keeps child reconciliation from treating
+    // them as stale spec children and deleting them.
+    node.harnIntrinsic = [...node.childNodes];
+    return node;
+  }
+
+  /** Apply one spec to a node of the matching kind, touching only what differs. */
+  function update(node, spec) {
+    assign(node, 'className', elementClassName(spec));
+    node.dataset.uiId = spec.id;
+    node.classList.toggle('hidden', Boolean(spec.hidden));
+    if (spec.kind === 'heading') {
+      assign(node, 'textContent', spec.text || spec.label || '');
+    } else if (spec.kind === 'text' || spec.kind === 'status') {
+      assign(node, 'textContent', spec.text || '');
+    } else if (spec.kind === 'button') {
+      assign(node, 'textContent', spec.label || spec.text || spec.id);
+      assign(node, 'disabled', Boolean(spec.disabled));
+      node.onclick = () => sendEvent(uiEvent('click', spec.id));
+    } else if (spec.kind === 'field' || spec.kind === 'text_area' || spec.kind === 'select') {
+      const [caption, control] = node.children;
+      assign(caption, 'textContent', spec.label || spec.id);
+      if (spec.kind === 'text_area') assign(control, 'rows', spec.rows || 4);
+      if (spec.kind === 'select') syncOptions(control, spec.options || []);
+      assign(control, 'id', spec.id);
+      // Assigning an unchanged value would still move the caret to the end of
+      // the text, so an edit round-tripping through Harn would jump the cursor
+      // on every keystroke that reaches the reducer.
+      assign(control, 'value', spec.value || '');
+      assign(control, 'placeholder', spec.placeholder || '');
+      assign(control, 'disabled', Boolean(spec.disabled));
+      control.onchange = () => sendEvent(uiEvent('input', spec.id, { value: control.value }));
+    } else if (spec.kind === 'canvas') {
+      assign(node, 'width', spec.width);
+      assign(node, 'height', spec.height);
+      node.setAttribute('aria-label', spec.label || 'Drawing canvas');
+      // The stroke handlers read this rather than closing over one render's
+      // spec, so a redraw never has to rebind them mid-stroke.
+      node.harnSpec = spec;
+      paint(node, spec.strokes || []);
+    } else if (spec.kind === 'image') {
+      assign(node, 'src', spec.image_src || '');
+      assign(node, 'alt', spec.image_alt || spec.label || '');
+    }
+  }
+
+  function syncOptions(control, options) {
+    const matches = control.children.length === options.length
+      && options.every((option, index) => control.children[index].value === option.value
+        && control.children[index].textContent === option.label);
+    if (matches) return;
+    const selected = control.value;
+    control.replaceChildren(...options.map(option => {
+      const item = create('option');
+      item.value = option.value;
+      item.textContent = option.label;
+      return item;
+    }));
+    control.value = selected;
+  }
+
+  /**
+   * Move `desired` into `parent` in order, leaving every node that is already
+   * in place untouched.
+   *
+   * This is the load-bearing half of the redraw. `replaceChildren()` detached
+   * every node on every update, so an update landing between `mousedown` and
+   * `mouseup` — which is exactly when a field's `change` event fires, because
+   * pressing a button blurs the field — destroyed the button and the browser
+   * never synthesized the `click` (#6011).
+   */
+  function syncChildren(parent, desired) {
+    let cursor = parent.firstChild;
+    for (const node of desired) {
+      if (cursor === node) {
+        cursor = cursor.nextSibling;
+        continue;
+      }
+      parent.insertBefore(node, cursor);
+    }
+    while (cursor) {
+      const next = cursor.nextSibling;
+      parent.removeChild(cursor);
+      cursor = next;
+    }
+  }
+
   function render(nextDocument) {
     currentDocument = nextDocument;
     document.title = currentDocument.title + ' — Harn App';
-    root.replaceChildren();
     const nodes = new Map([['', root]]);
+    const children = new Map([[root, []]]);
+    const retained = new Map();
 
     for (const spec of currentDocument.elements) {
-      let node;
-      if (spec.kind === 'column' || spec.kind === 'row') {
-        node = create('section', spec.kind + ' ' + (spec.variant || ''));
-      } else if (spec.kind === 'heading') {
-        const level = Number.isInteger(spec.level) && spec.level >= 1 && spec.level <= 6
-          ? spec.level : 2;
-        node = create('h' + level, spec.variant);
-        node.textContent = spec.text || spec.label || '';
-      } else if (spec.kind === 'text' || spec.kind === 'status') {
-        node = create('p', spec.kind === 'status' ? 'status ' + (spec.variant || '') : spec.variant);
-        node.textContent = spec.text || '';
-      } else if (spec.kind === 'button') {
-        node = create('button', spec.variant);
-        node.type = 'button';
-        node.textContent = spec.label || spec.text || spec.id;
-        node.disabled = Boolean(spec.disabled);
-        node.onclick = () => sendEvent(uiEvent('click', spec.id));
-      } else if (spec.kind === 'field' || spec.kind === 'text_area' || spec.kind === 'select') {
-        const wrapper = create('label', spec.variant);
-        const caption = create('span');
-        caption.textContent = spec.label || spec.id;
-        wrapper.append(caption);
-        let control;
-        if (spec.kind === 'text_area') {
-          control = create('textarea');
-          control.rows = spec.rows || 4;
-        } else if (spec.kind === 'select') {
-          control = create('select');
-          for (const option of spec.options || []) {
-            const item = create('option');
-            item.value = option.value;
-            item.textContent = option.label;
-            control.append(item);
-          }
-        } else {
-          control = create('input');
-          control.type = 'text';
-        }
-        control.id = spec.id;
-        control.value = spec.value || '';
-        control.placeholder = spec.placeholder || '';
-        control.disabled = Boolean(spec.disabled);
-        control.onchange = () => sendEvent(uiEvent('input', spec.id, { value: control.value }));
-        wrapper.append(control);
-        node = wrapper;
-      } else if (spec.kind === 'canvas') {
-        node = create('canvas', spec.variant);
-        node.width = spec.width;
-        node.height = spec.height;
-        node.setAttribute('aria-label', spec.label || 'Drawing canvas');
-        paint(node, spec.strokes || []);
-        connectCanvas(node, spec);
-      } else if (spec.kind === 'image') {
-        node = create('img', spec.variant);
-        node.src = spec.image_src || '';
-        node.alt = spec.image_alt || spec.label || '';
-      } else if (spec.kind === 'divider') {
-        node = create('hr');
-      } else {
-        continue;
-      }
-
-      node.dataset.uiId = spec.id;
-      if (spec.hidden) node.classList.add('hidden');
-      const parentNode = nodes.get(spec.parent || '') || root;
-      parentNode.append(node);
+      const tag = elementTag(spec);
+      if (!tag) continue;
+      const previous = rendered.get(spec.id);
+      // A node is reusable only when it is still the same element. A spec that
+      // changes kind changes tag, and reusing across that would keep stale
+      // children and handlers.
+      const node = previous && previous.tag === tag ? previous.node : build(spec, tag);
+      update(node, spec);
+      retained.set(spec.id, { node, tag });
       nodes.set(spec.id, node);
+      children.set(node, [...(node.harnIntrinsic || [])]);
+      const parentNode = nodes.get(spec.parent || '') || root;
+      (children.get(parentNode) || children.get(root)).push(node);
     }
+
+    for (const [parent, desired] of children) syncChildren(parent, desired);
+    rendered = retained;
   }
 
   function paint(canvas, strokes) {
@@ -401,7 +483,14 @@ hr { width: 100%; border: 0; border-top: 1px solid var(--line); }
     }
   }
 
-  function connectCanvas(canvas, spec) {
+  /**
+   * Bind the stroke handlers once, for the life of the canvas node.
+   *
+   * The current spec is read from `canvas.harnSpec` on each event rather than
+   * captured here, so a redraw during a stroke cannot rebind these handlers and
+   * drop the in-progress `points`.
+   */
+  function connectCanvas(canvas) {
     let points = null;
     const pointFrom = pointerEvent => {
       const bounds = canvas.getBoundingClientRect();
@@ -417,18 +506,18 @@ hr { width: 100%; border: 0; border-top: 1px solid var(--line); }
     canvas.onpointermove = pointerEvent => {
       if (!points) return;
       if (points.length < MAX_STROKE_POINTS) points.push(pointFrom(pointerEvent));
-      paint(canvas, [...(spec.strokes || []), { points, color: '#486449', width: 7 }]);
+      paint(canvas, [...(canvas.harnSpec?.strokes || []), { points, color: '#486449', width: 7 }]);
     };
     canvas.onpointerup = () => {
       const finished = points;
       points = null;
       if (!finished?.length) return;
       if (finished.length === 1) finished.push(finished[0]);
-      sendEvent(uiEvent('canvas.stroke', spec.id, { points: finished }));
+      sendEvent(uiEvent('canvas.stroke', canvas.harnSpec.id, { points: finished }));
     };
     canvas.onpointercancel = () => {
       points = null;
-      paint(canvas, spec.strokes || []);
+      paint(canvas, canvas.harnSpec?.strokes || []);
     };
   }
 
