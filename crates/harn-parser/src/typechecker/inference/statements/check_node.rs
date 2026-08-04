@@ -910,6 +910,12 @@ impl TypeChecker {
                     return;
                 }
                 self.check_method_existence(object, method, scope, span);
+                // A namespace member is a free function reached through an
+                // alias. Check it against its exported signature instead of
+                // the method registry, which knows nothing about it (#6172).
+                if self.check_namespace_member_call(object, method, args, scope, span) {
+                    return;
+                }
                 self.check_method_args_with_expected(object, method, args, scope);
                 self.check_generic_method_bound(object, method, scope, span);
             }

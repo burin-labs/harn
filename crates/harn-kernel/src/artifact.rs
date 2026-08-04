@@ -510,6 +510,16 @@ fn typecheck_package_module(
                 harn_parser::NamespaceImportBinding {
                     module_path: import.path.clone(),
                     members: target.exports.keys().cloned().collect::<BTreeSet<_>>(),
+                    // Members stay gradual on the artifact path. Lowering a
+                    // signature needs the defining module's type declarations
+                    // to inline named types (see
+                    // `harn-modules::namespace_member_signatures`), and an
+                    // artifact carries resolved exports rather than that
+                    // declaration graph. Empty preserves the pre-#6172
+                    // behavior here instead of checking against a guess.
+                    member_types: std::collections::BTreeMap::new(),
+                    member_param_names: std::collections::BTreeMap::new(),
+                    member_required_params: std::collections::BTreeMap::new(),
                 },
             ));
             continue;

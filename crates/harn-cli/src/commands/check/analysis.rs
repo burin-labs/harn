@@ -45,6 +45,21 @@ pub(crate) fn typecheck_config(
                     // `./lib`) so diagnostics stay stable across machines.
                     module_path: info.raw_path,
                     members: info.member_names.into_iter().collect(),
+                    member_types: info
+                        .member_signatures
+                        .iter()
+                        .map(|(name, sig)| (name.clone(), sig.fn_type.clone()))
+                        .collect(),
+                    member_param_names: info
+                        .member_signatures
+                        .iter()
+                        .map(|(name, sig)| (name.clone(), sig.param_names.clone()))
+                        .collect(),
+                    member_required_params: info
+                        .member_signatures
+                        .into_iter()
+                        .map(|(name, sig)| (name, sig.required_params))
+                        .collect(),
                 },
             )
         })

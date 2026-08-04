@@ -594,6 +594,76 @@ impl TypeChecker {
             0
         }
     }
+    /// Check `alias.member(args)` against the exported signature the module
+    /// graph lowered for that member.
+    ///
+    /// Returns `true` once the receiver is a namespace alias with a known
+    /// signature, so the caller skips the method-registry path — a namespace
+    /// member is a free function reached through an alias, not a method on a
+    /// receiver, and the registry has nothing to say about it.
+    ///
+    /// Arity follows the same rule as every other user function: missing
+    /// required arguments are an error, surplus arguments are tolerated
+    /// (`CallKind::Function`, #3981). The check that catches a stale call site
+    /// after a signature change is therefore the *parameter type* check, not
+    /// an arity count.
+    pub(in crate::typechecker) fn check_namespace_member_call(
+        &mut self,
+        object: &SNode,
+        member: &str,
+        args: &[SNode],
+        scope: &mut TypeScope,
+        span: Span,
+    ) -> bool {
+        let Node::Identifier(alias) = &object.node else {
+            return false;
+        };
+        let Some(binding) = self.namespace_imports.get(alias) else {
+            return false;
+        };
+        let Some(TypeExpr::FnType { params, .. }) = binding.member_types.get(member).cloned()
+        else {
+            return false;
+        };
+        let declared = binding.member_param_names.get(member).cloned();
+        let names: Vec<String> = (0..params.len())
+            .map(|index| {
+                declared
+                    .as_ref()
+                    .and_then(|names| names.get(index).cloned())
+                    .unwrap_or_else(|| format!("arg{}", index + 1))
+            })
+            .collect();
+        let call_params: Vec<CallParam> = params
+            .iter()
+            .zip(&names)
+            .map(|(ty, name)| CallParam {
+                name,
+                ty: Some(Cow::Borrowed(ty)),
+                bind_generics: false,
+                check_type: true,
+                allow_optional_nil: false,
+            })
+            .collect();
+        let has_spread = args.iter().any(|arg| matches!(&arg.node, Node::Spread(_)));
+        let sig = CallCheckSignature {
+            name: member,
+            kind: CallKind::Function,
+            params: call_params,
+            required_params: binding
+                .member_required_params
+                .get(member)
+                .copied()
+                .unwrap_or(params.len()),
+            type_param_names: Vec::new(),
+            where_clauses: Vec::new(),
+            has_rest: false,
+            definition_span: None,
+        };
+        self.check_call_signature_arguments(sig, &[], args, has_spread, scope, span);
+        true
+    }
+
     pub(in crate::typechecker) fn check_value_call(
         &mut self,
         callee: &SNode,

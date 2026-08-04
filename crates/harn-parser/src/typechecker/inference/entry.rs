@@ -422,7 +422,16 @@ impl TypeChecker {
                 .members
                 .iter()
                 .map(|name| {
-                    ShapeField::synthetic(name.clone(), TypeExpr::Named("any".into()), false)
+                    // A member with a lowered signature becomes callable with
+                    // its real parameter types; anything else stays `any` so a
+                    // signature the producer could not lower faithfully is left
+                    // gradual rather than checked against a guess (#6172).
+                    let ty = binding
+                        .member_types
+                        .get(name)
+                        .cloned()
+                        .unwrap_or_else(|| TypeExpr::Named("any".into()));
+                    ShapeField::synthetic(name.clone(), ty, false)
                 })
                 .collect();
             scope.define_var(alias, Some(TypeExpr::Shape(fields)));
