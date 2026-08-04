@@ -286,6 +286,7 @@ impl Linter<'_> {
             return;
         }
         let Some(migration) = harn_vm::stdlib::harness_migration_for_builtin(name) else {
+            self.check_non_source_callable_builtin(name, span);
             return;
         };
         let capability = migration.capability;
@@ -334,6 +335,80 @@ impl Linter<'_> {
             severity: LintSeverity::Warning,
             suggestion: Some(suggestion),
             fix,
+        });
+    }
+
+    /// A call to a builtin the VM registers but whose declared exposure keeps
+    /// Harn source from naming it.
+    ///
+    /// The undefined-function rule cannot catch these: it seeds its known-name
+    /// set from every *registered* builtin, so a privileged wire or a runtime
+    /// internal reads as defined and the call draws no diagnostic at all —
+    /// even though the typechecker rejects it. That silence is worse than a
+    /// name error, because nothing points at the surface that replaced it.
+    /// `host_call` is the case that surfaced it (harn#6126): declared
+    /// `privileged_wire`, 254 call sites in one downstream repo, zero lint
+    /// findings. Names that *do* have a migration recipe never reach here —
+    /// the caller reports `HARN-LNT-071` and its repair instead.
+    fn check_non_source_callable_builtin(&mut self, name: &str, span: Span) {
+        use harn_builtin_meta::BuiltinExposure;
+
+        // Same carve-out as the undefined-function rule. A `__` prefix is the
+        // runtime's own spelling for a seam it calls itself — conformance
+        // drives `__host_fire_session_hook` directly on purpose — and
+        // `hostlib_` names are answered by the legacy ambient bridge rather
+        // than by the builtin registry. Neither is a name a script is expected
+        // to spell, so neither belongs in a "you cannot call this" diagnostic.
+        if name.starts_with("__") || name.starts_with("hostlib_") {
+            return;
+        }
+        let Some(exposure) = harn_vm::stdlib::builtin_exposure(name) else {
+            return;
+        };
+        if harn_vm::stdlib::exposure_is_source_nameable(exposure) {
+            return;
+        }
+        let (surface, route) = match exposure {
+            BuiltinExposure::PrivilegedWire => (
+                "a privileged embedder wire",
+                "call the declared `harness.<capability>.<operation>` method instead; an \
+                 operation with no declared contract goes through the callable root your host \
+                 registers with `register_callable_host_operation`",
+            ),
+            BuiltinExposure::RuntimeInternal => (
+                "a runtime implementation detail",
+                "call the public capability method that wraps it rather than the internal \
+                 primitive",
+            ),
+            BuiltinExposure::HarnessMethod { capability, method } => {
+                self.diagnostics.push(LintDiagnostic {
+                    code: Code::LintNonSourceCallableBuiltin,
+                    rule: "non-source-callable-builtin".into(),
+                    message: format!(
+                        "`{name}` is a Harness capability method, not a global function"
+                    ),
+                    span,
+                    severity: LintSeverity::Warning,
+                    suggestion: Some(format!(
+                        "call it as `harness.{}.{method}`",
+                        capability.field_name()
+                    )),
+                    fix: None,
+                });
+                return;
+            }
+            BuiltinExposure::PureGlobal
+            | BuiltinExposure::CapabilityFunction { .. }
+            | BuiltinExposure::Undeclared => return,
+        };
+        self.diagnostics.push(LintDiagnostic {
+            code: Code::LintNonSourceCallableBuiltin,
+            rule: "non-source-callable-builtin".into(),
+            message: format!("`{name}` is {surface}, so Harn source cannot call it"),
+            span,
+            severity: LintSeverity::Warning,
+            suggestion: Some(route.to_string()),
+            fix: None,
         });
     }
 }

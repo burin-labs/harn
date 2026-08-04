@@ -192,6 +192,16 @@ pipeline test_unknown_variant_ignores_snake_case_methods(harness: Harness, task)
 }
 
 @test
+pipeline test_unknown_variant_ignores_associated_consts(harness: Harness, task) {
+  // `Code::ALL` is a SCREAMING_SNAKE_CASE associated const, not a variant.
+  // Only the registry file is exempt from this scan, so any other file that
+  // legitimately reads `Code::ALL` used to be reported as unknown.
+  const known: list<string> = ["TypeMismatch"]
+  const text = "for code in Code::ALL { let _ = Code::TypeMismatch }"
+  assert_eq(check_unknown_variants_text("a.rs", text, known).count, 0)
+}
+
+@test
 pipeline test_format_str_list_python_repr(harness: Harness, task) {
   assert_eq(format_str_list(["Cap", "Typ"]), "['Cap', 'Typ']")
   assert_eq(format_str_list([]), "[]")

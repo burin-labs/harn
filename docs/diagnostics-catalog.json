@@ -59,7 +59,7 @@
     {
       "id": "LNT",
       "title": "Lint rules",
-      "count": 71
+      "count": 72
     },
     {
       "id": "FMT",
@@ -2441,6 +2441,15 @@
           "summary": "Replace the ambient runtime builtin with its typed `harness.*` method and thread authority through local callers"
         }
       ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-072",
+      "category": "LNT",
+      "summary": "call names a builtin whose declared exposure keeps Harn source from naming it",
+      "repairs": [],
       "related": [],
       "explanationPresent": true,
       "apiStability": "stable"

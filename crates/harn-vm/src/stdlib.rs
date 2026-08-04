@@ -688,6 +688,54 @@ pub fn stdlib_builtin_metadata() -> Vec<crate::vm::VmBuiltinMetadata> {
     stdlib_probe_vm().builtin_metadata()
 }
 
+/// Declared exposure of a registered builtin, or `None` when the VM registers
+/// no builtin by that name.
+///
+/// `harn_builtin_meta` calls itself "the semantic owner for which script
+/// surface may reach a builtin", and its vocabulary is explicit:
+/// `PrivilegedWire` is documented as "User modules cannot name or re-export
+/// it" and `RuntimeInternal` as "never source-visible". The typechecker
+/// enforces that. Nothing else read it — [`stdlib_builtin_names`] answers the
+/// different question of what the VM has *registered*, so a consumer that
+/// treats that set as the callable surface goes quiet on exactly the calls the
+/// typechecker will reject. `host_call` is the case that surfaced it: declared
+/// `privileged_wire`, rejected by `harn check`, and silent under `harn lint`
+/// across 254 call sites in one downstream repo (harn#6126).
+pub fn builtin_exposure(name: &str) -> Option<harn_builtin_meta::BuiltinExposure> {
+    use std::sync::OnceLock;
+    static BY_NAME: OnceLock<
+        std::collections::HashMap<String, harn_builtin_meta::BuiltinExposure>,
+    > = OnceLock::new();
+    BY_NAME
+        .get_or_init(|| {
+            stdlib_probe_vm()
+                .builtin_metadata()
+                .into_iter()
+                .map(|entry| (entry.name().to_string(), entry.contract().exposure))
+                .collect()
+        })
+        .get(name)
+        .copied()
+}
+
+/// Whether Harn source may write this builtin's bare name in a call.
+///
+/// A harness method is reached as `harness.<capability>.<method>` rather than
+/// as a global, so it is not bare-nameable either. `Undeclared` is a migration
+/// state rather than a promise, and answering `true` there keeps this
+/// predicate from inventing a restriction the contract has not made yet.
+pub fn exposure_is_source_nameable(exposure: harn_builtin_meta::BuiltinExposure) -> bool {
+    use harn_builtin_meta::BuiltinExposure;
+    match exposure {
+        BuiltinExposure::PureGlobal
+        | BuiltinExposure::CapabilityFunction { .. }
+        | BuiltinExposure::Undeclared => true,
+        BuiltinExposure::HarnessMethod { .. }
+        | BuiltinExposure::PrivilegedWire
+        | BuiltinExposure::RuntimeInternal => false,
+    }
+}
+
 /// Reset thread-local stdlib state. Call between test runs.
 ///
 /// Note: `long_running::reset_state()` is intentionally NOT called here
