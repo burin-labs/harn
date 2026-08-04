@@ -36,7 +36,7 @@ fn parse_diagnostic_code(value: &str) -> Result<DiagnosticCode, String> {
     // The catalog is large, so listing every code on a typo is noise. Name the
     // shape instead and point at the command that does enumerate them.
     value.parse::<DiagnosticCode>().map_err(|_| {
-        format!("unknown diagnostic code `{value}`; expected a code like `HARN-LNT-072` (see `harn explain --catalog`)")
+        format!("unknown diagnostic code `{value}`; expected a code like `HARN-LNT-073` (see `harn explain --catalog`)")
     })
 }
 
