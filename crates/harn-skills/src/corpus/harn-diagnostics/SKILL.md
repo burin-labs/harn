@@ -8,7 +8,7 @@ when_to_use: Use when working on typechecker diagnostics, lint diagnostics, harn
 # Harn diagnostics
 
 Use this skill when changing errors, warnings, explain output, repair metadata,
-or fix application behavior — or when you need to look up what a
+or fix application behavior. Use it also when you need to look up what a
 `HARN-<CAT>-<NNN>` code means.
 
 Pair it with [[harn-language]] for syntax and type contracts and [[harn-agent]] for autonomy gating.
@@ -16,9 +16,9 @@ Pair it with [[harn-language]] for syntax and type contracts and [[harn-agent]] 
 ## Code index (look up any HARN-* code)
 
 Every diagnostic `harn check`, `harn lint`, and `harn fmt` emit carries a stable
-`HARN-<CAT>-<NNN>` code. The code registry is the single source of truth
-(`crates/harn-parser/src/diagnostic_codes.rs` plus the per-code explanation in
-`crates/harn-parser/src/diagnostic_codes/explanations/<CODE>.md`); everything
+`HARN-<CAT>-<NNN>` code. The code registry is the single source of truth. It is
+`crates/harn-parser/src/diagnostic_codes.rs`, plus the per-code explanation in
+`crates/harn-parser/src/diagnostic_codes/explanations/<CODE>.md`. Everything
 below is generated from it, so never hand-maintain a parallel list.
 
 - **Look up one code:** `harn explain HARN-TYP-014` (human-readable) or

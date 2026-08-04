@@ -186,8 +186,9 @@ harn run examples/skill-packs/workflow-authoring/eval.harn -- \
   --provider ollama --model qwen3:4b
 ```
 
-The script feeds the case prompts to the model, extracts the `<bundle>` block,
-runs the validate → preview → run pipeline, and prints a JSON report with
+The script feeds the case prompts to the model and extracts the `<bundle>`
+block. It then runs the validate → preview → run pipeline and prints a JSON
+report with
 `{validation_passed, preview_passed, run_passed, structural_assertions, ...}`.
 
 `cases/*.golden_bundle` is the canonical expected bundle. The Rust regression
@@ -197,12 +198,14 @@ structural assertions hold. Add a case → CI catches drift.
 
 ## Workflow patch authoring
 
-When the user wants to **modify** an existing bundle (insert a verifier
-between two stages, add an approval gate, narrow a node's tool policy),
-emit a **workflow patch** instead of rewriting the bundle. Patches are
-auditable JSON: Harn applies them to a copy of the bundle, runs the
-validator, computes a structural diff, and rejects anything that widens
-the parent capability ceiling.
+When the user wants to **modify** an existing bundle, emit a **workflow
+patch** instead of rewriting it. Modifying covers inserting a verifier
+between two stages, adding an approval gate, or narrowing a node's tool
+policy.
+
+Patches are auditable JSON. Harn applies them to a copy of the bundle,
+runs the validator, and computes a structural diff. It rejects anything
+that widens the parent capability ceiling.
 
 ```bash
 harn workflow patch validate \
@@ -244,8 +247,8 @@ and validates against the canonical fixture.
 
 `harn workflow function-tools --json` lists the allowlisted Harn
 functions an agent may call from inside the patch-authoring loop. Every
-descriptor is read-only or pure-think with an ACP-aligned
-`ToolAnnotations` block: hosts can wire them straight into a model's
+descriptor is read-only or pure-think, with an ACP-aligned
+`ToolAnnotations` block. So hosts can wire them straight into a model's
 tool surface without auditing each one separately. The current
 allowlist:
 
@@ -260,9 +263,9 @@ posture is "not exposed."
 
 ## Nested invocation ceiling
 
-When a Harn script under an active execution policy launches another
-Harn invocation (`harn run`, `harn workflow run`, `harn supervisor
-fire/replay`, a Burin harness), the parent must scan the target and
+A Harn script under an active execution policy can launch another Harn
+invocation: `harn run`, `harn workflow run`, `harn supervisor
+fire/replay`, or a Burin harness. The parent must scan the target and
 reject anything that asks for more than its own ceiling.
 `harn workflow nested-ceiling --bundle <path> --parent <policy>` exposes
 the same scanner used internally so hosts can sanity-check before
