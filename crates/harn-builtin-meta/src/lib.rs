@@ -21,8 +21,8 @@ pub mod shapes;
 pub mod signatures;
 
 pub use contracts::{
-    BuiltinContract, BuiltinExposure, CapabilityId, EffectAccess, EffectKind, EffectSpec,
-    ResourceSelector,
+    wire_identifier_key, BuiltinContract, BuiltinExposure, CapabilityId, EffectAccess, EffectKind,
+    EffectSpec, ResourceSelector,
 };
 
 /// A complete, static description of one builtin: identifier, arity range,
@@ -411,6 +411,44 @@ mod tests {
         ShapeFieldDescriptor::new("name", TY_STRING),
         ShapeFieldDescriptor::optional("age", TY_INT),
     ];
+
+    #[test]
+    fn wire_identifier_keys_stay_unique_across_capabilities() {
+        // `from_host_namespace` resolves by normalized spelling, so two
+        // capabilities whose field names differ only by `_` or case would make
+        // every host-wire lookup ambiguous. Guard the vocabulary, not the
+        // lookup: the ambiguity would be introduced by adding a capability.
+        let mut seen = std::collections::HashMap::new();
+        for capability in CapabilityId::ALL {
+            let key = wire_identifier_key(capability.field_name());
+            if let Some(other) = seen.insert(key.clone(), capability.field_name()) {
+                panic!(
+                    "`{other}` and `{}` both normalize to `{key}`",
+                    capability.field_name()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn host_namespace_resolves_the_separatorless_spelling() {
+        assert_eq!(
+            CapabilityId::from_host_namespace("prmonitor"),
+            Some(CapabilityId::PrMonitor)
+        );
+        assert_eq!(
+            CapabilityId::from_host_namespace("PrMonitor"),
+            Some(CapabilityId::PrMonitor)
+        );
+        assert_eq!(
+            CapabilityId::from_host_namespace("pr_monitor"),
+            Some(CapabilityId::PrMonitor)
+        );
+        assert_eq!(CapabilityId::from_host_namespace("not_a_capability"), None);
+        // The exact parser stays exact: it reads the closed source vocabulary,
+        // where a spelling either is or is not the declared field name.
+        assert_eq!(CapabilityId::from_field_name("prmonitor"), None);
+    }
 
     #[test]
     fn ty_display_atomic_and_compound() {

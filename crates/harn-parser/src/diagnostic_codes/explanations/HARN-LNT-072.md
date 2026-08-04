@@ -37,14 +37,20 @@ host_call("ast.outline", {path: p})   // before
 harness.ast.outline(p)                // after
 ```
 
-Check `harn contracts builtins` for the declared method — the namespace in the
-`host_call` string is usually the capability name, and `pr_monitor`-style
-underscores are the only common spelling difference. An operation with no
-declared contract goes through the callable root your host installs with
-`register_callable_host_operation`, reached as `<root>.<operation>`.
+When the operation name is a string literal, the diagnostic resolves it for you
+and names the destination method — including across spelling differences, so
+`host_call("prmonitor.run_commands", ...)` reports `harness.pr_monitor.run_commands`.
+A computed operation name cannot be resolved, so those calls get the generic
+route; look the target up with `harn contracts builtins`.
 
-Argument shapes do not carry over. `host_call` took a params dict, while a typed
-method takes the parameters its signature declares.
+An operation that no capability declares is one your host provides. Reach it
+through the callable root installed with `register_callable_host_operation`,
+as `<root>.<operation>`.
+
+Argument shapes do not carry over, and the diagnostic deliberately does not
+guess them. `host_call` packed its arguments into one dict keyed by the host's
+names, while a typed method takes the parameters its own signature declares —
+a mapping that happens to compile is not necessarily the one you meant.
 
 If a script genuinely needs a privileged wire, it has to run as a privileged
 artifact; calling it from ordinary source will not work regardless of how the

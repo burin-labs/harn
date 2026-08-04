@@ -272,7 +272,7 @@ impl Linter<'_> {
 
     /// Catch every remaining migration recipe so new typed capabilities do
     /// not silently lose repair coverage.
-    pub(super) fn check_ambient_harness_method(&mut self, name: &str, _args: &[SNode], span: Span) {
+    pub(super) fn check_ambient_harness_method(&mut self, name: &str, args: &[SNode], span: Span) {
         if harness_clock_replacement(name).is_some()
             || harn_parser::builtin_signatures::is_language_intrinsic(name)
             || harness_stdio_replacement(name).is_some()
@@ -286,7 +286,7 @@ impl Linter<'_> {
             return;
         }
         let Some(migration) = harn_vm::stdlib::harness_migration_for_builtin(name) else {
-            self.check_non_source_callable_builtin(name, span);
+            self.check_non_source_callable_builtin(name, args, span);
             return;
         };
         let capability = migration.capability;
@@ -350,7 +350,7 @@ impl Linter<'_> {
     /// `privileged_wire`, 114 call sites in one downstream repo, zero lint
     /// findings. Names that *do* have a migration recipe never reach here —
     /// the caller reports `HARN-LNT-071` and its repair instead.
-    fn check_non_source_callable_builtin(&mut self, name: &str, span: Span) {
+    fn check_non_source_callable_builtin(&mut self, name: &str, args: &[SNode], span: Span) {
         use harn_builtin_meta::BuiltinExposure;
 
         // Same carve-out as the undefined-function rule. A `__` prefix is the
@@ -371,14 +371,13 @@ impl Linter<'_> {
         let (surface, route) = match exposure {
             BuiltinExposure::PrivilegedWire => (
                 "a privileged embedder wire",
-                "call the declared `harness.<capability>.<operation>` method instead; an \
-                 operation with no declared contract goes through the callable root your host \
-                 registers with `register_callable_host_operation`",
+                self.privileged_wire_route(args),
             ),
             BuiltinExposure::RuntimeInternal => (
                 "a runtime implementation detail",
                 "call the public capability method that wraps it rather than the internal \
-                 primitive",
+                 primitive"
+                    .to_string(),
             ),
             BuiltinExposure::HarnessMethod { capability, method } => {
                 self.diagnostics.push(LintDiagnostic {
@@ -407,8 +406,52 @@ impl Linter<'_> {
             message: format!("`{name}` is {surface}, so Harn source cannot call it"),
             span,
             severity: LintSeverity::Warning,
-            suggestion: Some(route.to_string()),
+            suggestion: Some(route),
             fix: None,
         });
+    }
+
+    /// Where a call to a privileged wire should go instead.
+    ///
+    /// A wire carries its destination as a *string argument*, so the call is
+    /// opaque to every name-keyed check in the toolchain — which is why the
+    /// generic route is all a name alone can justify. When the first argument
+    /// is a literal operation name, though, the declared contract can be read
+    /// back and the answer becomes specific: `host_call("ast.outline", ...)`
+    /// is `harness.ast.outline`. That is the difference between a downstream
+    /// repo knowing it must migrate and knowing where each site goes.
+    ///
+    /// The argument mapping stays unstated on purpose. A wire packs its
+    /// arguments into one dict whose keys are the host's, and the declared
+    /// method takes its own parameters; guessing that correspondence would
+    /// produce a call that compiles and means something else.
+    fn privileged_wire_route(&self, args: &[SNode]) -> String {
+        const GENERIC: &str = "call the declared `harness.<capability>.<operation>` method \
+                               instead; an operation with no declared contract goes through the \
+                               callable root your host registers with \
+                               `register_callable_host_operation`";
+
+        let Some(operation) = args.first().and_then(|arg| match &arg.node {
+            harn_parser::Node::StringLiteral(text) | harn_parser::Node::RawStringLiteral(text) => {
+                Some(text.as_str())
+            }
+            _ => None,
+        }) else {
+            return GENERIC.to_string();
+        };
+        let root = self.harness_binding_name().unwrap_or("harness");
+        match harn_vm::stdlib::harness_method_for_host_operation(operation) {
+            Some(target) => format!(
+                "`{operation}` is declared on the harness: call `{root}.{}` and pass its declared \
+                 parameters rather than the wire's argument dict",
+                target.path()
+            ),
+            None if operation.contains('.') => format!(
+                "no capability declares `{operation}`, so it is a host-provided operation: reach \
+                 it through the callable root your host registers with \
+                 `register_callable_host_operation`"
+            ),
+            None => GENERIC.to_string(),
+        }
     }
 }

@@ -346,6 +346,35 @@ impl CapabilityId {
             .copied()
             .find(|capability| capability.type_name() == name)
     }
+
+    /// Resolve the namespace half of a host-wire operation name such as
+    /// `"prmonitor.run_commands"` or `"code_index.search"`.
+    ///
+    /// Host wires predate the typed capability vocabulary and spell namespaces
+    /// without separators, so `"prmonitor"` and `"pr_monitor"` name the same
+    /// capability. [`Self::from_field_name`] stays exact because it parses the
+    /// closed source vocabulary, where a spelling either is or is not the
+    /// declared field name.
+    pub fn from_host_namespace(namespace: &str) -> Option<Self> {
+        let wanted = wire_identifier_key(namespace);
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|capability| wire_identifier_key(capability.field_name()) == wanted)
+    }
+}
+
+/// Normalized spelling used to match a host-wire name against a declared
+/// identifier: `_` removed and ASCII case folded.
+///
+/// One definition so the namespace half and the operation half of a wire name
+/// are matched by the same rule.
+pub fn wire_identifier_key(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| *character != '_')
+        .map(|character| character.to_ascii_lowercase())
+        .collect()
 }
 
 /// Closed effect family used for static ceilings and runtime receipts.

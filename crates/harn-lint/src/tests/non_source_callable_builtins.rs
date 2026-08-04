@@ -16,28 +16,94 @@ fn parse_and_lint(source: &str) -> Option<Vec<LintDiagnostic>> {
     Some(lint_with_source(&program, source))
 }
 
-#[test]
-fn privileged_wire_call_reports_and_names_the_replacement_route() {
-    let source = "fn main(harness: Harness) {\n  let out = host_call(\"ast.outline\", {path: \"a.rs\"})\n}\n";
+/// The `non-source-callable-builtin` suggestion for `source`, or a panic
+/// naming what came out instead.
+fn wire_route(source: &str) -> String {
     let diags = lint_source(source);
     assert_eq!(
         count_rule(&diags, "non-source-callable-builtin"),
         1,
-        "expected one non-source-callable lint for host_call, got: {diags:?}"
+        "expected exactly one non-source-callable lint, got: {diags:?}"
     );
     let diagnostic = diags
         .iter()
         .find(|d| d.rule == "non-source-callable-builtin")
-        .expect("host_call lint");
+        .expect("non-source-callable lint");
     assert!(
         diagnostic.message.contains("privileged embedder wire"),
         "message should name the exposure, got: {}",
         diagnostic.message
     );
-    let suggestion = diagnostic.suggestion.as_deref().unwrap_or_default();
+    diagnostic.suggestion.clone().unwrap_or_default()
+}
+
+#[test]
+fn privileged_wire_with_a_declared_operation_names_the_destination_method() {
+    // The point of the rule. A wire carries its destination as a string, so
+    // the call is opaque to every name-keyed check — but the literal can be
+    // read back through the declared contract, which turns "you cannot call
+    // this" into "call this instead".
+    let route = wire_route(
+        "fn main(harness: Harness) {\n  let out = host_call(\"ast.outline\", {path: \"a.rs\"})\n}\n",
+    );
     assert!(
-        suggestion.contains("register_callable_host_operation"),
-        "suggestion should name the host-side successor, got: {suggestion}"
+        route.contains("harness.ast.outline"),
+        "suggestion should name the declared method, got: {route}"
+    );
+}
+
+#[test]
+fn privileged_wire_route_normalizes_the_namespace_spelling() {
+    let route = wire_route(
+        "fn main(harness: Harness) {\n  let out = host_call(\"prmonitor.run_commands\", {})\n}\n",
+    );
+    assert!(
+        route.contains("harness.pr_monitor.run_commands"),
+        "suggestion should name the declared capability field, got: {route}"
+    );
+}
+
+#[test]
+fn privileged_wire_route_uses_the_scripts_own_harness_binding() {
+    // `callable_harness_param` recognizes `harness` and `_harness` only, so
+    // this is the whole range the route can vary over — but it does vary,
+    // rather than printing a fixed `harness.` prefix the script cannot use.
+    let route = wire_route(
+        "fn main(_harness: Harness) {\n  let out = host_call(\"ast.outline\", {path: \"a.rs\"})\n}\n",
+    );
+    assert!(
+        route.contains("_harness.ast.outline"),
+        "suggestion should use the binding the script declared, got: {route}"
+    );
+}
+
+#[test]
+fn undeclared_operation_points_at_the_host_registration_seam() {
+    // No capability owns this one, so the honest answer is the embedder's
+    // callable root rather than a guessed harness method.
+    let route = wire_route(
+        "fn main(harness: Harness) {\n  let out = host_call(\"acme.frobnicate\", {})\n}\n",
+    );
+    assert!(
+        route.contains("register_callable_host_operation"),
+        "suggestion should name the host-side successor, got: {route}"
+    );
+    assert!(
+        !route.contains("harness.acme"),
+        "suggestion must not invent a capability, got: {route}"
+    );
+}
+
+#[test]
+fn non_literal_operation_falls_back_to_the_generic_route() {
+    // Nothing to resolve when the destination is computed, so the rule must
+    // still fire and must not claim a destination it cannot see.
+    let route = wire_route(
+        "fn main(harness: Harness) {\n  let op = \"ast.outline\"\n  let out = host_call(op, {})\n}\n",
+    );
+    assert!(
+        route.contains("harness.<capability>.<operation>"),
+        "suggestion should stay generic, got: {route}"
     );
 }
 
