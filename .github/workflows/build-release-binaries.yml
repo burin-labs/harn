@@ -1438,43 +1438,6 @@ jobs:
           HARN_ENFORCE_CACHE_BUDGET: "1"
         run: ./scripts/report_ci_cache_budget.sh
 
-  surface_scheduled_result:
-    name: Surface scheduled build result
-    needs: [setup, build]
-    # Only the daily cron files issues. Tag, push, and dispatch runs have
-    # somebody watching them, and a release that breaches the size budget
-    # already fails the release itself.
-    #
-    # This is the only unattended run that builds the binary, so it is the only
-    # place `.rs`-only growth gets measured at all: the push trigger builds on
-    # `release_build_inputs`, which is a cache-rotation path list carrying no
-    # `**/*.rs` and no embedded assets. Before this job, a cron that caught a
-    # breach recorded it as one more red run in the Actions tab. See #6106.
-    if: always() && github.event_name == 'schedule' && github.repository == 'burin-labs/harn'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      issues: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Open or resolve the scheduled-failure tracking issue
-        uses: ./.github/actions/scheduled-failure-issue
-        with:
-          title: Daily release build is failing
-          # A failed `setup` skips `build`, which would otherwise report
-          # `skipped` and file nothing — and `setup` is exactly where the
-          # paths-filter shallow race used to land.
-          result: ${{ (needs.setup.result != 'success' && needs.setup.result) || needs.build.result }}
-          details: >-
-            The daily warm build did not pass. Check the
-            `x86_64-unknown-linux-gnu` leg first: it carries the binary-size
-            budget gate, and this run is the only unattended one that measures
-            it.
-          owner-file: .github/workflows/build-release-binaries.yml
-
   container:
     name: Publish container
     needs: [setup, release]
