@@ -21,9 +21,7 @@ fn capability_apply_does_not_shift_an_imported_call_with_an_untyped_leading_argu
         temp.path(),
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
     let updated = fs::read_to_string(entry).unwrap();
@@ -58,9 +56,7 @@ fn capability_apply_still_extends_an_established_capability_prefix() {
         temp.path(),
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
     let updated = fs::read_to_string(entry).unwrap();

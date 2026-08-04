@@ -38,9 +38,7 @@ fn capability_apply_keeps_the_arity_of_a_handler_referenced_by_value() {
         temp.path(),
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
 
@@ -103,9 +101,7 @@ fn capability_apply_keeps_the_arity_of_a_handler_registered_in_another_file() {
         temp.path(),
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
 
@@ -141,9 +137,7 @@ fn capability_apply_still_threads_a_callable_that_never_escapes() {
         temp.path(),
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
 

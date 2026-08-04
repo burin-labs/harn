@@ -37,33 +37,25 @@ fn stage_tools() {
 }
 
 @persona(name: "scoped_persona", stages: [{name: "research", allowed_tools: ["read"]}, {name: "edit_phase", allowed_tools: ["edit"]}])
-fn scoped_persona(tool_runtime: HarnessTools, ctx) {
-  const r = research_step(tool_runtime, ctx)
-  const e = edit_phase_step(tool_runtime, ctx)
+fn scoped_persona(tools: HarnessTools, ctx) {
+  const r = research_step(tools, ctx)
+  const e = edit_phase_step(tools, ctx)
   return {research: r, edit: e}
 }
 
 @step(name: "research")
-fn research_step(tool_runtime: HarnessTools, ctx) {
+fn research_step(tools: HarnessTools, ctx) {
   const registry = ctx.tools
-  const in_scope = agent_dispatch_tool_call(tool_runtime, {name: "read", arguments: {}}, registry)
-  const out_of_scope = agent_dispatch_tool_call(
-    tool_runtime,
-    {name: "edit", arguments: {}},
-    registry,
-  )
+  const in_scope = agent_dispatch_tool_call(tools, {name: "read", arguments: {}}, registry)
+  const out_of_scope = agent_dispatch_tool_call(tools, {name: "edit", arguments: {}}, registry)
   return {in_scope: in_scope, out_of_scope: out_of_scope}
 }
 
 @step(name: "edit_phase")
-fn edit_phase_step(tool_runtime: HarnessTools, ctx) {
+fn edit_phase_step(tools: HarnessTools, ctx) {
   const registry = ctx.tools
-  const in_scope = agent_dispatch_tool_call(tool_runtime, {name: "edit", arguments: {}}, registry)
-  const out_of_scope = agent_dispatch_tool_call(
-    tool_runtime,
-    {name: "read", arguments: {}},
-    registry,
-  )
+  const in_scope = agent_dispatch_tool_call(tools, {name: "edit", arguments: {}}, registry)
+  const out_of_scope = agent_dispatch_tool_call(tools, {name: "read", arguments: {}}, registry)
   return {in_scope: in_scope, out_of_scope: out_of_scope}
 }
 

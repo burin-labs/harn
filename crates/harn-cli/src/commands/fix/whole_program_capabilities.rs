@@ -159,11 +159,12 @@ pub(super) fn plan(
             module_graph,
         )
         .check_with_facts(&program, &source);
+        let boundaries = harn_lint::RuntimeBoundaries::collect(&program);
         let infos = collect_callable_infos(&program, &source, &exported, referenced_by_value);
         let imported_capability_signatures = imported_signatures(file, module_graph, &type_aliases);
         for info in infos {
             let Some((params, body, boundary, flow_predicate)) =
-                declaration_parts(&program, info.span)
+                declaration_parts(&program, &boundaries, info.span)
             else {
                 continue;
             };
@@ -652,23 +653,45 @@ pub(super) fn plan(
     Ok(planned)
 }
 
-fn declaration_parts(
-    program: &[SNode],
+fn declaration_parts<'a>(
+    program: &'a [SNode],
+    boundaries: &harn_lint::RuntimeBoundaries,
     span: Span,
-) -> Option<(&[TypedParam], &[SNode], bool, bool)> {
+) -> Option<(&'a [TypedParam], &'a [SNode], bool, bool)> {
     for node in program {
         let (attributes, inner) = harn_parser::peel_attributes(node);
         if inner.span.start != span.start || inner.span.end != span.end {
             continue;
         }
         let flow_predicate = harn_parser::is_flow_predicate_declaration(attributes, inner);
+        let attributed = harn_lint::root_harness_boundary_attribute(node);
         return match &inner.node {
             Node::FnDecl {
+                name,
+                params,
+                body,
+                is_pub,
+                ..
+            } => Some((
+                params,
+                body,
+                // `name == "main"` was the whole boundary test here, so a
+                // connector runtime export — whose root `Harness` first
+                // parameter the connector ABI pins — was attenuated like an
+                // ordinary helper and the repaired package failed to load
+                // (#6149). Ask the lint, which already owns this policy, so
+                // the fixer cannot narrow a signature the diagnostic exempts.
+                boundaries.contains(name, params, *is_pub, attributed),
+                flow_predicate,
+            )),
+            Node::ToolDecl {
                 name, params, body, ..
-            }
-            | Node::ToolDecl {
-                name, params, body, ..
-            } => Some((params, body, name == "main", flow_predicate)),
+            } => Some((
+                params,
+                body,
+                boundaries.contains(name, params, false, attributed),
+                flow_predicate,
+            )),
             Node::Pipeline { params, body, .. } => Some((params, body, true, flow_predicate)),
             _ => None,
         };

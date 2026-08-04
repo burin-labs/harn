@@ -46,7 +46,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`MOD`](#mod--modules-and-exports) | Modules and exports | 7 |
 | [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 8 |
 | [`SUS`](#sus--suspend--resume-lifecycle) | Suspend / resume lifecycle | 13 |
-| [`LNT`](#lnt--lint-rules) | Lint rules | 72 |
+| [`LNT`](#lnt--lint-rules) | Lint rules | 73 |
 | [`FMT`](#fmt--formatter) | Formatter | 3 |
 | [`IMP`](#imp--import-resolution) | Import resolution | 3 |
 | [`OWN`](#own--ownership-and-mutability) | Ownership and mutability | 4 |
@@ -323,6 +323,7 @@ Lints are not hard errors. The code compiles, but Harn flags the pattern as like
 | [`HARN-LNT-070`](#harn-lnt-070) | public API has too many same-typed positional parameters | — | — |
 | [`HARN-LNT-071`](#harn-lnt-071) | global builtin has moved to a Harness capability method | `bindings/thread-harness-method` | `scope-local` |
 | [`HARN-LNT-072`](#harn-lnt-072) | call names a builtin whose declared exposure keeps Harn source from naming it | — | — |
+| [`HARN-LNT-073`](#harn-lnt-073) | parameter carrying a narrow capability handle is not named for that capability | `bindings/name-capability-parameter` | `surface-changing` |
 
 ## FMT — Formatter
 
@@ -3741,8 +3742,10 @@ similar.
 the parameter, updates every use inside the helper, then narrows the argument at
 the call sites it can see (`harness` becomes `harness.fs`, or becomes
 `{fs: harness.fs, tools: harness.tools}`). It reuses the existing parameter
-name so the new binding cannot shadow anything else in scope; rename it yourself
-if a clearer name exists.
+name so the new binding cannot shadow anything else in scope, which is why a
+narrowed parameter can come out of this repair still called `harness`.
+[HARN-LNT-073](HARN-LNT-073.md) reports that and renames it, so running
+`harn fix` again finishes the job.
 
 #### When to keep root `Harness`
 
@@ -3878,6 +3881,71 @@ a mapping that happens to compile is not necessarily the one you meant.
 If a script genuinely needs a privileged wire, it has to run as a privileged
 artifact; calling it from ordinary source will not work regardless of how the
 call is spelled.
+
+### `HARN-LNT-073`
+
+**Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
+
+parameter carrying a narrow capability handle is not named for that capability
+
+- **Repair:** `bindings/name-capability-parameter` &nbsp;·&nbsp; **Safety:** `surface-changing`
+- Rename the capability parameter and its references after the capability it carries
+
+A parameter is typed as a narrow capability handle — `HarnessNet`, `HarnessFs`,
+`HarnessStdio`, and so on — but is named something else, most often `harness`.
+The type says the function holds one capability; the name says it holds root
+authority. Readers and call sites believe the name.
+
+```harn
+pub fn ack(harness: HarnessNet, url: string) {
+  return harness.http_post(url, {})
+}
+```
+
+Nothing here is unsound, but `harness.http_post(...)` reads like a root handle
+with a surprising method on it. The narrowing that
+[HARN-LNT-069](HARN-LNT-069.md) asks for is only legible once the name carries
+it too.
+
+#### How to fix
+
+Name the parameter after the capability's field on `Harness`, which is the same
+name a call site already uses to produce it:
+
+```harn
+pub fn ack(net: HarnessNet, url: string) {
+  return net.http_post(url, {})
+}
+
+fn main(harness: Harness) {
+  ack(harness.net, "https://example.invalid/ack")
+}
+```
+
+Harn arguments are positional, so a parameter rename moves no call site.
+`harn fix --apply --safety surface-changing` performs it, rewriting the
+parameter and every reference to it inside the function.
+
+This also finishes what [HARN-LNT-069](HARN-LNT-069.md) starts. That repair
+narrows the type but reuses the existing parameter name, so its output can
+still read `harness: HarnessNet`; this lint then renames it.
+
+#### When the lint stays quiet
+
+The rename must be provably safe from the function alone, so the lint reports
+nothing when:
+
+- the capability's name is already bound in the function — as another
+  parameter, or anywhere in the body — because renaming onto it would capture
+  that binding;
+- a nested function or closure rebinds either name, because its inner
+  references belong to a different binding;
+- the parameter is a rest parameter, or the type is root `Harness`, which is
+  correctly named `harness`.
+
+A dict key that happens to share the parameter's name is a record field, not a
+reference, so `{harness: harness}` becomes `{harness: net}` and the record's
+shape is unchanged.
 
 ### `HARN-FMT-001`
 

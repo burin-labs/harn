@@ -20,7 +20,7 @@ pub(super) fn apply_repairs_with_options(
         target,
         safety_ceiling,
         dry_run,
-        options,
+        &options,
         &mut original_files,
     );
     finish_with_rollback(result, dry_run, &original_files)
@@ -30,7 +30,7 @@ fn apply_repairs_with_options_inner(
     target: &Path,
     safety_ceiling: RepairSafety,
     dry_run: bool,
-    options: FixOptions,
+    options: &FixOptions,
     original_files: &mut BTreeMap<String, String>,
 ) -> Result<ApplyResult, String> {
     let mut applied = Vec::new();
@@ -156,7 +156,7 @@ pub(super) fn render_capability_migration_pass(
         let path_ref = Path::new(path);
         let candidate = (|| {
             let edited = edited_source(path_ref, &edits)?;
-            let candidate = format_capability_candidate(path_ref, &edited)?;
+            let candidate = format_capability_candidate(path_ref, &edited.edited)?;
             harn_parser::parse_source(&candidate)
                 .map_err(|errors| format!("invalid Harn syntax: {errors:?}"))?;
             Ok::<_, String>(candidate)
@@ -256,22 +256,45 @@ pub(super) fn apply_file_edits(path: &Path, edits: &[FixEditWire]) -> Result<(),
     if edits.is_empty() {
         return Ok(());
     }
-    let result = edited_source(path, edits)?;
+    let EditedSource { original, edited } = edited_source(path, edits)?;
     // A repair that writes source the parser rejects is never the right answer,
     // and the caller cannot tell the difference afterwards: `--apply` reported
     // "post-apply diagnostics: 0" over a file it had just made unparseable,
     // because a file that does not parse contributes no diagnostics to count.
     // Fail the pass instead, and name the edits so the bad span is visible
     // rather than something the reader has to reconstruct from the wreckage.
-    harn_parser::parse_source(&result).map_err(|errors| {
+    harn_parser::parse_source(&edited).map_err(|errors| {
         format!(
             "repair produced invalid Harn syntax for {}; no files from this pass were written: {errors:?}\napplied edits:\n{}",
             path.display(),
-            describe_edits(&result, edits)
+            describe_edits(&edited, edits)
         )
     })?;
+    let result = keep_canonical_formatting(path, &original, edited);
     std::fs::write(path, result)
         .map_err(|error| format!("failed to write {}: {error}", path.display()))
+}
+
+/// Format `edited` when — and only when — `original` was already in canonical
+/// form.
+///
+/// A repair changes line lengths, so a shortened name can leave a canonically
+/// formatted file failing `harn fmt --check`, which is how a rename landed a
+/// package in a state its own CI rejects. Formatting unconditionally is the
+/// wrong cure: it would reformat every untouched line of a project that does
+/// not use `harn fmt`, turning a three-line repair into a whole-file diff.
+///
+/// Conditioning on the file's existing state gives both: a formatted file stays
+/// formatted, and an unformatted one is left exactly as its author keeps it.
+/// A file that cannot be formatted is not an error here — the repair itself is
+/// still valid, and the parse check in the caller already ran.
+fn keep_canonical_formatting(path: &Path, original: &str, edited: String) -> String {
+    let was_canonical =
+        format_capability_candidate(path, original).is_ok_and(|formatted| formatted == original);
+    if !was_canonical {
+        return edited;
+    }
+    format_capability_candidate(path, &edited).unwrap_or(edited)
 }
 
 /// Render the edits of a rejected pass so the offending span is legible.
@@ -306,7 +329,7 @@ pub(super) fn apply_capability_file_edits(
         return Ok(());
     }
     let edited = edited_source(path, edits)?;
-    let candidate = format_capability_candidate(path, &edited)?;
+    let candidate = format_capability_candidate(path, &edited.edited)?;
     harn_parser::parse_source(&candidate).map_err(|error| {
         format!(
             "capability migration produced invalid syntax for {}: {error}",
@@ -343,9 +366,21 @@ fn format_capability_candidate(path: &Path, source: &str) -> Result<String, Stri
     })
 }
 
-fn edited_source(path: &Path, edits: &[FixEditWire]) -> Result<String, String> {
-    let mut result = std::fs::read_to_string(path)
+/// One file's source before and after a pass's edits.
+///
+/// Both halves are kept because a repair's validity is a property of the pair:
+/// whether the result may be reformatted depends on the state the author left
+/// the file in, and re-reading the original to answer that would race the write
+/// this pass is about to perform.
+struct EditedSource {
+    original: String,
+    edited: String,
+}
+
+fn edited_source(path: &Path, edits: &[FixEditWire]) -> Result<EditedSource, String> {
+    let original = std::fs::read_to_string(path)
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    let mut result = original.clone();
     let mut sorted = edits.to_vec();
     // Two edits can share a start when one inserts an argument where another
     // rewrites the expression that begins there. Applying the wider one first
@@ -377,7 +412,10 @@ fn edited_source(path: &Path, edits: &[FixEditWire]) -> Result<String, String> {
         }
         result.replace_range(edit.span.start..edit.span.end, &edit.replacement);
     }
-    Ok(result)
+    Ok(EditedSource {
+        original,
+        edited: result,
+    })
 }
 
 pub(super) fn validate_edit_composition(path: &Path, edits: &[FixEditWire]) -> Result<(), String> {

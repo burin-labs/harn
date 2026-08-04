@@ -100,9 +100,24 @@ struct AmbientCapabilityCall {
     args: Vec<Span>,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 struct FixOptions {
     capability_migrations_only: bool,
+    /// Diagnostic codes to plan and apply. Empty means every code, which is
+    /// the behavior every caller had before the selector existed.
+    codes: BTreeSet<Code>,
+}
+
+impl FixOptions {
+    /// The capability-migration pass, which every migration test drives.
+    /// A named constructor keeps a new option from touching each call site.
+    #[cfg(test)]
+    fn capability_migrations() -> Self {
+        Self {
+            capability_migrations_only: true,
+            ..Self::default()
+        }
+    }
 }
 
 struct AmbientRepairContext {
@@ -186,6 +201,7 @@ pub(crate) fn run(args: &FixArgs) -> Result<(), FixRunError> {
             args.dry_run,
             FixOptions {
                 capability_migrations_only: args.capability_migrations_only,
+                codes: args.codes.iter().copied().collect(),
             },
         )?;
         if args.json {
@@ -213,8 +229,9 @@ pub(crate) fn run(args: &FixArgs) -> Result<(), FixRunError> {
     let plan = build_plan_with_options(
         &args.path,
         args.safety,
-        FixOptions {
+        &FixOptions {
             capability_migrations_only: args.capability_migrations_only,
+            codes: args.codes.iter().copied().collect(),
         },
     )?;
     if args.json {
@@ -239,13 +256,13 @@ pub(crate) fn build_plan(
     target: &Path,
     safety_ceiling: Option<RepairSafety>,
 ) -> Result<RepairPlan, String> {
-    build_plan_with_options(target, safety_ceiling, FixOptions::default())
+    build_plan_with_options(target, safety_ceiling, &FixOptions::default())
 }
 
 fn build_plan_with_options(
     target: &Path,
     safety_ceiling: Option<RepairSafety>,
-    options: FixOptions,
+    options: &FixOptions,
 ) -> Result<RepairPlan, String> {
     if let Err(error) = package::validate_runtime_manifest_extensions(target) {
         return Err(format!("manifest extension validation failed: {error}"));
@@ -332,10 +349,7 @@ fn build_plan_with_options(
             if is_whole_program_superseded_repair(&candidate.repair) {
                 return false;
             }
-            // A binding that looked unused before the program plan may be the
-            // carrier used by its emitted call rewrites. Defer that cleanup to
-            // the next plan instead of renaming the binding in the same pass.
-            candidate.repair.id.as_str() != "bindings/rename-unused"
+            !defers_to_whole_program_pass(candidate.repair.id.as_str())
                 || !whole_program_files.contains(
                     &std::fs::canonicalize(&candidate.file)
                         .unwrap_or_else(|_| Path::new(&candidate.file).to_path_buf()),
@@ -349,6 +363,14 @@ fn build_plan_with_options(
         // names a conceptual repair but has no source edit is context for the
         // whole-program planner, not a repair that apply can perform.
         candidates.retain(|candidate| !candidate.edits.is_empty());
+    }
+
+    // Narrowing here rather than at apply keeps the plan and the applied set
+    // the same object: `--plan --code X` shows exactly what `--apply --code X`
+    // will do, and `diagnostic_index` stays aligned because diagnostics and
+    // repairs are both derived from `candidates` below.
+    if !options.codes.is_empty() {
+        candidates.retain(|candidate| options.codes.contains(&candidate.code));
     }
 
     let conflicts = detect_conflicts(&candidates);
@@ -413,7 +435,7 @@ fn collect_file_candidates(
     safety_ceiling: Option<RepairSafety>,
     cross_file_imports: &HashSet<String>,
     module_graph: &harn_modules::ModuleGraph,
-    options: FixOptions,
+    options: &FixOptions,
     out: &mut Vec<RepairCandidate>,
     referenced_by_value: &BTreeSet<String>,
 ) -> Result<(), SkippedFileWire> {
@@ -761,8 +783,38 @@ fn is_capability_migration_repair_id(id: &str) -> bool {
                 | "bindings/attenuate-harness"
                 | "bindings/attenuate-capability-argument"
                 | "bindings/attenuate-capability-bundle-argument"
+                // Attenuation reuses the parameter's existing name, so the
+                // migration's own output can leave a narrowed parameter still
+                // called `harness`. That is work this migration created, and
+                // the pass runs to a fixed point — if the rename were outside
+                // the set, every capability migration would end one repair
+                // short of clean and never converge.
+                | "bindings/name-capability-parameter"
                 | "imports/remove-retired-testing-helper"
         )
+}
+
+/// Whether a per-file binding repair must yield to the whole-program
+/// capability pass for a file that pass is already rewriting.
+///
+/// Both kinds of repair address a binding, and the whole-program pass is the
+/// authority on any binding whose *type* it is about to change. Letting them
+/// plan against the same declaration in one pass has no good outcome: the
+/// conflict detector marks both unclean, both are skipped, and the migration
+/// stalls one repair short of clean forever. Deferring re-plans the local
+/// repair on the next pass, against source whose types have settled — which is
+/// also when its own analysis is finally correct.
+fn defers_to_whole_program_pass(id: &str) -> bool {
+    matches!(
+        id,
+        // A binding that looked unused before the program plan may be the
+        // carrier used by its emitted call rewrites.
+        "bindings/rename-unused"
+            // The capability a parameter carries decides what it should be
+            // called, so naming it before the pass settles its type names it
+            // after a capability it is about to stop carrying.
+            | "bindings/name-capability-parameter"
+    )
 }
 
 fn is_whole_program_superseded_repair(repair: &Repair) -> bool {
@@ -1320,10 +1372,24 @@ fn repair_allowed(repair: &Repair, safety_ceiling: Option<RepairSafety>) -> bool
 }
 
 fn detect_conflicts(candidates: &[RepairCandidate]) -> Vec<Vec<usize>> {
+    // Candidates reach one plan from passes that spell a path differently —
+    // the per-file lint pass reports `./src/workflow.harn` where the
+    // whole-program capability pass reports an absolute path. Comparing raw
+    // spellings declares two edits to the same physical file to be in
+    // different files, so genuinely overlapping edits are both marked
+    // `applies_cleanly` and merged, and the collision only surfaces at write
+    // time as a hard failure. Resolve identity once per candidate, both to be
+    // correct and to keep this quadratic scan free of filesystem calls.
+    let keys = candidates
+        .iter()
+        .map(|candidate| apply::edit_group_key(&candidate.file))
+        .collect::<Vec<_>>();
     let mut conflicts = vec![Vec::new(); candidates.len()];
     for left in 0..candidates.len() {
         for right in (left + 1)..candidates.len() {
-            if candidates_overlap(&candidates[left], &candidates[right]) {
+            if keys[left] == keys[right]
+                && candidates_overlap(&candidates[left], &candidates[right])
+            {
                 conflicts[left].push(right);
                 conflicts[right].push(left);
             }
@@ -1332,10 +1398,9 @@ fn detect_conflicts(candidates: &[RepairCandidate]) -> Vec<Vec<usize>> {
     conflicts
 }
 
+/// Whether two candidates for the *same* file touch overlapping source.
+/// File identity is the caller's job — see [`detect_conflicts`].
 fn candidates_overlap(left: &RepairCandidate, right: &RepairCandidate) -> bool {
-    if left.file != right.file {
-        return false;
-    }
     left.edits.iter().any(|left_edit| {
         right
             .edits

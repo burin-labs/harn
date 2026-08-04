@@ -253,6 +253,9 @@ impl Code {
             Code::LintUnusedVariable
             | Code::LintUnusedPatternBinding
             | Code::LintUnusedParameter => Some(&REPAIR_BINDINGS_RENAME_UNUSED),
+            Code::LintCapabilityParameterName => {
+                Some(&REPAIR_BINDINGS_NAME_CAPABILITY_PARAMETER)
+            }
             Code::LintUnusedImport => Some(&REPAIR_IMPORTS_REMOVE_UNUSED),
             Code::LintUnusedFunction | Code::LintUnusedType => {
                 Some(&REPAIR_DECLARATIONS_REMOVE_UNUSED)
@@ -373,6 +376,12 @@ const REPAIR_BINDINGS_RENAME_UNUSED: RepairTemplate = RepairTemplate {
     id: "bindings/rename-unused",
     summary: "Use the `_` discard binding for an unused binding",
     safety: RepairSafety::BehaviorPreserving,
+};
+
+const REPAIR_BINDINGS_NAME_CAPABILITY_PARAMETER: RepairTemplate = RepairTemplate {
+    id: "bindings/name-capability-parameter",
+    summary: "Rename the capability parameter and its references after the capability it carries",
+    safety: RepairSafety::SurfaceChanging,
 };
 
 const REPAIR_BINDINGS_RENAME_SHADOW: RepairTemplate = RepairTemplate {
@@ -620,6 +629,7 @@ pub const REPAIR_REGISTRY: &[&RepairTemplate] = &[
     &REPAIR_BINDINGS_MAKE_MUTABLE,
     &REPAIR_BINDINGS_MAKE_IMMUTABLE,
     &REPAIR_BINDINGS_RENAME_UNUSED,
+    &REPAIR_BINDINGS_NAME_CAPABILITY_PARAMETER,
     &REPAIR_BINDINGS_RENAME_SHADOW,
     &REPAIR_BINDINGS_THREAD_HARNESS,
     &REPAIR_BINDINGS_THREAD_HARNESS_NEEDS_PARAM,

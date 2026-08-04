@@ -8,6 +8,121 @@
 use super::*;
 use std::fs;
 
+/// `--code` narrows the plan to one diagnostic, so a targeted migration does
+/// not drag in every other repair at the same safety class. Without it,
+/// applying one rename to a file also rewrote unrelated bindings.
+#[test]
+fn code_selector_narrows_the_plan_to_the_named_diagnostic() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("mixed.harn");
+    fs::write(
+        &script,
+        "fn helper() {\n  let unchanged = 1\n  println(\"hi\")\n  return unchanged\n}\n",
+    )
+    .unwrap();
+
+    let everything = build_plan_with_options(&script, None, &FixOptions::default()).unwrap();
+    let codes = everything
+        .repairs
+        .iter()
+        .map(|repair| repair.diagnostic_code.as_str())
+        .collect::<BTreeSet<_>>();
+    assert!(
+        codes.len() > 1,
+        "fixture must offer more than one code to narrow: {codes:?}"
+    );
+    let wanted = Code::LintMutableNeverReassigned;
+    assert!(codes.contains(wanted.as_str()), "{codes:?}");
+
+    let narrowed = build_plan_with_options(
+        &script,
+        None,
+        &FixOptions {
+            codes: BTreeSet::from([wanted]),
+            ..FixOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(!narrowed.repairs.is_empty());
+    assert!(
+        narrowed
+            .repairs
+            .iter()
+            .all(|repair| repair.diagnostic_code == wanted.as_str()),
+        "{:?}",
+        narrowed.repairs
+    );
+    // Repairs index into `diagnostics`, so both must be narrowed together or
+    // every reported repair points at the wrong diagnostic.
+    for repair in &narrowed.repairs {
+        assert_eq!(
+            narrowed.diagnostics[repair.diagnostic_index].code,
+            repair.diagnostic_code
+        );
+    }
+}
+
+/// A file `harn fmt` would rewrite must come back exactly as its author keeps
+/// it, apart from the repair. Formatting every edited file would turn a
+/// three-line repair into a whole-file diff for any project that does not run
+/// `harn fmt`.
+#[test]
+fn apply_leaves_an_unformatted_file_unformatted() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("loose.harn");
+    let original = "fn main(harness: Harness) {\n      const value    = 1\n}\n";
+    fs::write(&script, original).unwrap();
+    let start = original.find('1').unwrap();
+
+    apply_file_edits(
+        &script,
+        &[FixEditWire {
+            span: SpanWire::from(Span::with_offsets(start, start + 1, 2, 1)),
+            replacement: "2".to_string(),
+        }],
+    )
+    .unwrap();
+
+    assert_eq!(
+        fs::read_to_string(&script).unwrap(),
+        "fn main(harness: Harness) {\n      const value    = 2\n}\n",
+        "only the repaired span may differ"
+    );
+}
+
+/// The converse: a canonically formatted file must stay that way. A repair
+/// changes line lengths, so a shortening rename could otherwise leave a
+/// package failing the `harn fmt --check` its own CI runs.
+#[test]
+fn apply_keeps_a_formatted_file_formatted() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("canonical.harn");
+    let original = "fn main(harness: Harness) {\n  const value = 1\n}\n";
+    fs::write(&script, original).unwrap();
+    let start = original.find("const").unwrap();
+
+    // Replacing the statement with a longer one the formatter would re-wrap.
+    apply_file_edits(
+        &script,
+        &[FixEditWire {
+            span: SpanWire::from(Span::with_offsets(
+                start,
+                start + "const value = 1".len(),
+                2,
+                3,
+            )),
+            replacement: "const value    =    1".to_string(),
+        }],
+    )
+    .unwrap();
+
+    assert_eq!(
+        fs::read_to_string(&script).unwrap(),
+        original,
+        "a canonical file must come back canonical"
+    );
+}
+
 #[test]
 fn edit_group_key_collapses_relative_and_absolute_spellings() {
     let temp = tempfile::TempDir::new().unwrap();
