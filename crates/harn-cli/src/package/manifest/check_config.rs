@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
@@ -52,4 +53,39 @@ pub struct CheckConfig {
     /// is not in the default or loaded capability manifest.
     #[serde(default, alias = "preflight-allow")]
     pub preflight_allow: Vec<String>,
+}
+
+pub(crate) fn absolutize_check_config_paths(
+    mut config: CheckConfig,
+    manifest_dir: &Path,
+) -> CheckConfig {
+    if let Some(path) = config.host_capabilities_path.clone() {
+        let candidate = PathBuf::from(&path);
+        if !candidate.is_absolute() {
+            config.host_capabilities_path =
+                Some(manifest_dir.join(candidate).display().to_string());
+        }
+    }
+    if let Some(path) = config.bundle_root.clone() {
+        let candidate = PathBuf::from(&path);
+        if !candidate.is_absolute() {
+            config.bundle_root = Some(manifest_dir.join(candidate).display().to_string());
+        }
+    }
+    config
+}
+
+/// Load the `[check]` config from the nearest `harn.toml`.
+/// Walks up from the given file (or from cwd if no file is given),
+/// stopping at a `.git` boundary.
+pub fn load_check_config(harn_file: Option<&std::path::Path>) -> CheckConfig {
+    let anchor = harn_file
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    if let Some((manifest, dir)) =
+        crate::package::manifest_search::nearest_manifest_or_warn(&anchor)
+    {
+        return absolutize_check_config_paths(manifest.check, &dir);
+    }
+    CheckConfig::default()
 }
