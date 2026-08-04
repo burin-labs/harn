@@ -14,7 +14,8 @@ pub(crate) async fn dispatch_process_exec(
 }
 
 /// Dispatch the sole structured-git form that may cross the generic
-/// catastrophic command floor: `git push --force-with-lease=<ref>:<oid>`.
+/// catastrophic command floor, as recognized by
+/// [`is_reviewed_git_push_with_lease`].
 ///
 /// The caller is crate-private and this boundary validates its argv again, so
 /// a Harn script cannot relabel arbitrary `process.exec` input as reviewed.
@@ -126,26 +127,52 @@ fn restore_wrapped_spawn_error(value: VmValue) -> Result<VmValue, VmError> {
     Ok(value)
 }
 
+/// Recognize the one structured-git form that may cross the catastrophic
+/// command floor: `git push [--no-verify] --force-with-lease=<ref>:<oid>
+/// <remote> <refspec>`.
+///
+/// This is the single owner of that shape. The builtin uses it to choose the
+/// reviewed dispatch and the dispatch uses it to re-validate afterwards, so a
+/// command-policy pre-hook cannot rewrite an argv into something the selector
+/// would no longer have accepted.
+///
+/// `--no-verify` is the only optional flag, and it does not widen what the push
+/// may do to the remote: the lease still names the exact OID it is allowed to
+/// replace. A pre-push hook is the checkout's policy about the commits it is
+/// publishing, not the remote's policy about its refs. Ref plumbing needs both
+/// together — deleting a ref under a lease is the canonical case — so accepting
+/// only the flagless form sends exactly that operation to the generic floor,
+/// where it is denied as a bare force push.
+pub(crate) fn is_reviewed_git_push_with_lease(program: &str, args: &[String]) -> bool {
+    if program != "git" || args.first().map(String::as_str) != Some("push") {
+        return false;
+    }
+    let rest = match args.get(1) {
+        Some(flag) if flag == "--no-verify" => &args[2..],
+        _ => &args[1..],
+    };
+    let [lease, remote, refspec] = rest else {
+        return false;
+    };
+    lease
+        .strip_prefix("--force-with-lease=")
+        .and_then(|lease| lease.split_once(':'))
+        .is_some_and(|(ref_name, expected_oid)| {
+            !ref_name.is_empty()
+                && matches!(expected_oid.len(), 40 | 64)
+                && expected_oid.bytes().all(|byte| byte.is_ascii_hexdigit())
+        })
+        && !remote.starts_with('-')
+        && !refspec.starts_with('-')
+}
+
 fn validate_reviewed_git_push_with_lease(params: &crate::value::DictMap) -> Result<(), VmError> {
     let (program, args) = process_exec_argv(params)?;
-    let valid = program == "git"
-        && args.len() == 4
-        && args[0] == "push"
-        && args[1]
-            .strip_prefix("--force-with-lease=")
-            .and_then(|lease| lease.split_once(':'))
-            .is_some_and(|(ref_name, expected_oid)| {
-                !ref_name.is_empty()
-                    && matches!(expected_oid.len(), 40 | 64)
-                    && expected_oid.bytes().all(|byte| byte.is_ascii_hexdigit())
-            })
-        && !args[2].starts_with('-')
-        && !args[3].starts_with('-');
-    if valid {
+    if is_reviewed_git_push_with_lease(&program, &args) {
         Ok(())
     } else {
         Err(VmError::Runtime(
-            "reviewed git dispatch requires `git push --force-with-lease=<ref>:<oid> <remote> <refspec>`"
+            "reviewed git dispatch requires `git push [--no-verify] --force-with-lease=<ref>:<oid> <remote> <refspec>`"
                 .to_string(),
         ))
     }
@@ -157,7 +184,73 @@ mod tests {
 
     use crate::value::VmValue;
 
-    use super::validate_reviewed_git_push_with_lease;
+    use super::{is_reviewed_git_push_with_lease, validate_reviewed_git_push_with_lease};
+
+    const OID: &str = "0123456789abcdef0123456789abcdef01234567";
+
+    fn args(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|part| (*part).to_string()).collect()
+    }
+
+    /// Ref plumbing needs `--no-verify` and a lease together: deleting a ref
+    /// under a lease is the canonical case, and `std/git::git_push` emits both
+    /// flags for it. Rejecting that argv sent it to the generic command floor,
+    /// where it was denied as a bare force push — an error naming neither the
+    /// lease nor the hook.
+    #[test]
+    fn a_leased_ref_plumbing_push_may_also_skip_the_pre_push_hook() {
+        let lease = format!("--force-with-lease=refs/heads/attempt:{OID}");
+        assert!(is_reviewed_git_push_with_lease(
+            "git",
+            &args(&[
+                "push",
+                &lease,
+                "origin",
+                &format!("{OID}:refs/heads/archived")
+            ]),
+        ));
+        assert!(is_reviewed_git_push_with_lease(
+            "git",
+            &args(&[
+                "push",
+                "--no-verify",
+                &lease,
+                "origin",
+                &format!("{OID}:refs/heads/archived"),
+            ]),
+        ));
+    }
+
+    /// `--no-verify` is the only flag the reviewed form tolerates, and only
+    /// ahead of the lease. Anything else must fall back to the generic floor.
+    #[test]
+    fn no_other_flag_may_ride_along_with_the_reviewed_lease() {
+        let lease = format!("--force-with-lease=refs/heads/attempt:{OID}");
+        for extra in ["--force", "--mirror", "--delete", "-f"] {
+            assert!(
+                !is_reviewed_git_push_with_lease(
+                    "git",
+                    &args(&["push", extra, &lease, "origin", "HEAD:main"]),
+                ),
+                "{extra} must not be accepted before the lease"
+            );
+            assert!(
+                !is_reviewed_git_push_with_lease(
+                    "git",
+                    &args(&["push", &lease, extra, "origin", "HEAD:main"]),
+                ),
+                "{extra} must not be accepted after the lease"
+            );
+        }
+        assert!(!is_reviewed_git_push_with_lease(
+            "git",
+            &args(&["push", "--no-verify", "origin", "HEAD:main"]),
+        ));
+        assert!(!is_reviewed_git_push_with_lease(
+            "hub",
+            &args(&["push", &lease, "origin", "HEAD:main"]),
+        ));
+    }
 
     #[test]
     fn reviewed_git_dispatch_requires_an_exact_oid_lease() {
