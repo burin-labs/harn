@@ -110,11 +110,18 @@ fn graph_json_reports_modules_symbols_capabilities_and_edges() {
         .find(|module| module["path"] == "util.harn")
         .unwrap();
     assert_eq!(util["imports"], serde_json::json!(["types.harn"]));
+    // Two vocabularies, both deliberate. `llm.call` is the fine-grained
+    // capability-row name; `llm.model` is the coarse `Capability` class the
+    // typed cutover in #5814 started classifying `llm_call` under. `harn graph`
+    // reports the union, so a single `llm_call` yields both.
     assert_eq!(
         util["requires_capabilities"],
-        serde_json::json!(["llm.call"])
+        serde_json::json!(["llm.call", "llm.model"])
     );
-    assert_eq!(util["effects"], serde_json::json!(["llm.call"]));
+    assert_eq!(
+        util["effects"],
+        serde_json::json!(["llm.call", "llm.model"])
+    );
     assert_eq!(util["host_calls"], serde_json::json!(["llm_call"]));
 
     assert_eq!(
