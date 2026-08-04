@@ -5,9 +5,15 @@ Harn is a programming language and runtime for orchestrating AI agents.
 This file is the repository contract for Codex, Claude, and other coding
 agents. `CLAUDE.md` must remain a symlink to it. The durable design principles
 live in [Engineering principles](docs/src/dev/engineering-principles.md):
-ambitious outcomes behind boring seams, one owner with many projections,
-structure over prose, evidence matched to claims, canonical paths, controllable
-autonomy, cross-surface convergence, and operationally complete launches.
+
+- ambitious outcomes behind boring seams;
+- one owner with many projections;
+- structure over prose;
+- evidence matched to claims;
+- canonical paths;
+- controllable autonomy;
+- cross-surface convergence;
+- operationally complete launches.
 
 ## Ownership
 
@@ -75,9 +81,9 @@ autonomy, cross-surface convergence, and operationally complete launches.
 - Codex staging worktrees use `make setup-bootstrap`; run `make setup` or
   `make setup-rust` in the final task worktree.
 - Claude session startup delegates to the same setup path through
-  `scripts/claude-dev-setup-once.sh`. It blocks only on the `bootstrap`
-  profile and warms the compiling phases in the background, so an early build
-  can wait on that warm; `.claude/dev-setup/latest.log` records it.
+  `scripts/claude-dev-setup-once.sh`. It blocks only on the `bootstrap` profile,
+  and warms the compiling phases in the background. An early build can therefore
+  wait on that warm. `.claude/dev-setup/latest.log` records it.
 - Keep installed hooks on. Use `HARN_HOOKS_FULL_LOCAL=1` for build-backed local
   gates and `HARN_PREPUSH_FULL_TESTS=1` for the broader pre-push suite.
 - The shared Codex and Claude shell guard rejects raw Cargo build/test commands
