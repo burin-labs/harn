@@ -455,6 +455,7 @@ async fn play_stream(
     });
 
     Ok(LlmResult {
+        attempts: Default::default(),
         text_projection: None,
         served_fast: false,
         text,

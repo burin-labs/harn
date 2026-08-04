@@ -566,6 +566,7 @@ fn builtin_empty_retry_budget_excludes_mock_only() {
 
 fn empty_result() -> crate::llm::api::LlmResult {
     crate::llm::api::LlmResult {
+        attempts: Default::default(),
         text_projection: None,
         text: String::new(),
         tool_calls: Vec::new(),

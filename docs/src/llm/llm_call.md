@@ -145,6 +145,31 @@ is duplicated at the envelope's top level.
 | `cache_savings_usd` | float | Estimated prompt-cache savings versus full input-token price; negative when cache writes cost more than normal input |
 | `served_fast` | bool | `true` when the provider confirmed it served this request at the accelerated ("fast mode") tier; drives premium-tier billing |
 | `provider_telemetry` | dict | Raw provider-reported usage/telemetry, passed through when present |
+| `provider_attempts` | dict | How many provider requests this one logical call took, and why the extra ones happened (see below) |
+
+#### Provider attempts
+
+`llm_call` is one logical call, but the runtime may issue several provider
+requests to complete it: a rate-limited request is retried, so is one that
+returns nothing the loop can act on, so is a transport failure.
+`usage.provider_attempts` reports that:
+
+| Field | Meaning |
+|---|---|
+| `total` | Provider requests issued, including the one that succeeded |
+| `retries` | `total - 1` |
+| `rate_limited` | Requests rejected with a retryable rate-limit error |
+| `empty_completion` | Requests that returned nothing the loop could act on |
+| `other` | Retryable failures that were neither — transport errors, server faults, tool-format degrades |
+
+Retries are broken out by reason because they mean different things: rate
+limiting says the provider is saturated, an empty completion says the model
+produced nothing usable, and a transport retry says the link is flaky.
+
+This is distinct from any counter named for "calls". A run whose provider
+rejected 47 of 146 requests with retryable 429s still made 96 logical calls,
+and reporting only the latter hides the contention that explains why the run
+was slow and stopped early.
 
 #### Outcome
 

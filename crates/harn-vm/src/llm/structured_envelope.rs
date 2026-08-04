@@ -644,6 +644,7 @@ mod tests {
 
     fn priced_outcome(errors: Vec<&str>) -> SchemaLoopOutcome {
         let result = crate::llm::api::LlmResult {
+            attempts: Default::default(),
             text_projection: None,
             text: "{\"decision\":\"wait\"}".to_string(),
             tool_calls: Vec::new(),

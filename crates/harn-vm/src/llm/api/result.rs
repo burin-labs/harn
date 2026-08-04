@@ -130,6 +130,69 @@ pub(crate) struct LlmResult {
     /// response. Empty for mocks and providers that report nothing usable.
     #[serde(default, skip_serializing_if = "ProviderTelemetry::is_empty")]
     pub telemetry: ProviderTelemetry,
+    /// How many provider requests this one logical call actually took, and why
+    /// the extra ones happened. Stamped by the observed-call boundary, which is
+    /// the only place that runs the retry loop.
+    ///
+    /// Every adapter that builds a result leaves this at its default: from an
+    /// adapter's point of view it built exactly one request, and the boundary
+    /// stamps the real count over it on the way out. A defaulted value
+    /// therefore reads as "one clean request", which is also how a recording
+    /// made before this field existed deserializes.
+    #[serde(
+        default,
+        skip_serializing_if = "ProviderAttempts::is_single_clean_call"
+    )]
+    pub attempts: ProviderAttempts,
+}
+
+/// Provider-request accounting for one logical LLM call.
+///
+/// A run's usage envelope reports `llm_calls` and `llm_call_attempts`, both of
+/// which count *agent iterations*. In the run behind #5847, 47 of 146 provider
+/// requests were rejected with a retryable 429 and every one of those retries
+/// was invisible: the summary read 96 clean calls while the run was saturating
+/// its own tokens-per-minute ceiling and eventually stopped on `pace_cutoff`.
+/// Rate-limit pressure is a first-order explanation for a slow or truncated
+/// run, so it belongs in the summary rather than only in the raw event log.
+///
+/// Retries are broken out by reason because they mean different things: a
+/// rate-limit retry says the provider is saturated, an empty-completion retry
+/// says the model produced nothing usable, and a transport retry says the link
+/// is flaky. Collapsing them into one number would make all three look alike.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct ProviderAttempts {
+    /// Total provider requests issued for this call, including the one that
+    /// succeeded. Always at least 1 for a call that returned a result.
+    pub total: u32,
+    /// Requests rejected with a retryable rate-limit error before this one
+    /// succeeded.
+    pub rate_limited: u32,
+    /// Requests that returned a completion with nothing the loop could act on.
+    pub empty_completion: u32,
+    /// Retryable failures that were neither of the above — transport errors,
+    /// server faults, and tool-format degrades.
+    pub other: u32,
+}
+
+impl ProviderAttempts {
+    /// One request, no retries: the shape that carries no information.
+    ///
+    /// Used to keep the field out of the wire form for the overwhelming
+    /// majority of calls, so a persisted transcript does not grow by a
+    /// zero-valued object per call.
+    pub fn is_single_clean_call(&self) -> bool {
+        self == &Self {
+            total: 1,
+            ..Self::default()
+        } || self == &Self::default()
+    }
+
+    /// Requests beyond the first. Zero for a call that succeeded outright.
+    pub fn retries(&self) -> u32 {
+        self.total.saturating_sub(1)
+    }
 }
 
 impl LlmResult {
@@ -225,6 +288,37 @@ fn build_usage_dict(result: &LlmResult) -> crate::value::DictMap {
     usage.insert(
         crate::value::intern_key("cache_savings_usd"),
         VmValue::Float(cache_savings_usd),
+    );
+    // Provider-request accounting belongs in `usage` because `usage` is the
+    // single owner of ALL accounting for this call. Keeping it here means a
+    // consumer that already reads usage gets retry pressure without learning a
+    // second location, which is how #5847 stayed invisible: the counters a
+    // reader could reach all counted agent iterations.
+    let attempts = &result.attempts;
+    let mut attempts_dict = crate::value::DictMap::new();
+    attempts_dict.insert(
+        crate::value::intern_key("total"),
+        VmValue::Int(i64::from(attempts.total)),
+    );
+    attempts_dict.insert(
+        crate::value::intern_key("retries"),
+        VmValue::Int(i64::from(attempts.retries())),
+    );
+    attempts_dict.insert(
+        crate::value::intern_key("rate_limited"),
+        VmValue::Int(i64::from(attempts.rate_limited)),
+    );
+    attempts_dict.insert(
+        crate::value::intern_key("empty_completion"),
+        VmValue::Int(i64::from(attempts.empty_completion)),
+    );
+    attempts_dict.insert(
+        crate::value::intern_key("other"),
+        VmValue::Int(i64::from(attempts.other)),
+    );
+    usage.insert(
+        crate::value::intern_key("provider_attempts"),
+        VmValue::dict(attempts_dict),
     );
     usage.insert(
         crate::value::intern_key("served_fast"),
@@ -742,6 +836,7 @@ pub(super) fn mock_completion_response(prefix: &str, suffix: Option<&str>) -> Ll
         }
     );
     LlmResult {
+        attempts: Default::default(),
         text_projection: None,
         served_fast: false,
         text: text.clone(),
@@ -1286,5 +1381,116 @@ mod cache_supported_serde_tests {
             call.get("name").map(VmValue::display).as_deref(),
             Some("run")
         );
+    }
+}
+
+#[cfg(test)]
+mod provider_attempts_tests {
+    use super::*;
+
+    fn result_with(attempts: ProviderAttempts) -> LlmResult {
+        LlmResult {
+            attempts,
+            text: "ok".to_string(),
+            tool_calls: Vec::new(),
+            text_projection: None,
+            raw_tool_calls: Vec::new(),
+            input_tokens: 10,
+            output_tokens: 1,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            cache_supported: true,
+            model: "gpt-5.6-luna".to_string(),
+            provider: "openai".to_string(),
+            thinking: None,
+            thinking_summary: None,
+            stop_reason: None,
+            served_fast: false,
+            blocks: Vec::new(),
+            logprobs: Vec::new(),
+            telemetry: ProviderTelemetry::default(),
+        }
+    }
+
+    /// `usage` is documented as the single owner of all accounting for a call,
+    /// so retry pressure has to arrive there rather than in a second location a
+    /// consumer would have to learn about separately. #5847 stayed invisible
+    /// precisely because every counter a reader could reach counted agent
+    /// iterations.
+    #[test]
+    fn provider_attempts_ride_in_the_usage_block() {
+        let usage = build_usage_dict(&result_with(ProviderAttempts {
+            total: 4,
+            rate_limited: 2,
+            empty_completion: 1,
+            other: 0,
+        }));
+        let attempts = usage
+            .get("provider_attempts")
+            .expect("usage must carry provider attempts");
+        let VmValue::Dict(attempts) = attempts else {
+            panic!("provider_attempts must be a dict, got {attempts:?}");
+        };
+        assert_eq!(attempts.get("total").and_then(VmValue::as_int), Some(4));
+        assert_eq!(
+            attempts.get("retries").and_then(VmValue::as_int),
+            Some(3),
+            "three requests failed before the fourth succeeded"
+        );
+        assert_eq!(
+            attempts.get("rate_limited").and_then(VmValue::as_int),
+            Some(2)
+        );
+        assert_eq!(
+            attempts.get("empty_completion").and_then(VmValue::as_int),
+            Some(1)
+        );
+    }
+
+    /// The overwhelming majority of calls succeed first try. Serializing a
+    /// zero-valued object onto every one of them would grow a persisted
+    /// transcript for no information.
+    #[test]
+    fn a_clean_single_request_is_omitted_from_the_wire_form() {
+        let clean = ProviderAttempts {
+            total: 1,
+            ..ProviderAttempts::default()
+        };
+        assert!(clean.is_single_clean_call());
+        assert_eq!(clean.retries(), 0);
+
+        let json = serde_json::to_value(result_with(clean)).expect("serialize");
+        assert!(
+            json.get("attempts").is_none(),
+            "a clean call must not carry an attempts object: {json:?}"
+        );
+
+        // A call that retried is information, and must survive the round trip.
+        let retried = ProviderAttempts {
+            total: 2,
+            rate_limited: 1,
+            ..ProviderAttempts::default()
+        };
+        assert!(!retried.is_single_clean_call());
+        let json = serde_json::to_value(result_with(retried.clone())).expect("serialize");
+        assert_eq!(
+            json.pointer("/attempts/rate_limited")
+                .and_then(|v| v.as_u64()),
+            Some(1)
+        );
+        let round_tripped: LlmResult = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(round_tripped.attempts, retried);
+    }
+
+    /// A recording made before this field existed deserializes with no
+    /// attempts, which must read as "unknown" rather than crashing the load.
+    #[test]
+    fn a_recording_without_attempts_still_loads() {
+        let mut json =
+            serde_json::to_value(result_with(ProviderAttempts::default())).expect("serialize");
+        json.as_object_mut().expect("object").remove("attempts");
+        let loaded: LlmResult = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(loaded.attempts, ProviderAttempts::default());
+        assert_eq!(loaded.attempts.retries(), 0);
     }
 }

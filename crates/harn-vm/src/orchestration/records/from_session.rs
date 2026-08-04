@@ -312,6 +312,14 @@ struct SessionFold {
     providers: Vec<String>,
     cache_read_tokens: i64,
     cache_write_tokens: i64,
+    /// Provider requests across every call, and why the extra ones happened.
+    /// Distinct from `usage.call_count`, which counts logical calls: a run
+    /// whose provider rejected a third of its requests with a retryable 429
+    /// reported a clean call count and no contention signal at all (#5847).
+    provider_attempts: i64,
+    rate_limited_attempts: i64,
+    empty_completion_attempts: i64,
+    other_retry_attempts: i64,
     /// Cost accumulated as an exact decimal rather than by adding `f64`s.
     /// Summing 96 float costs from a real run produced
     /// `0.6060984600000002`; money is a base-10 quantity and a run report is
@@ -417,6 +425,21 @@ fn assemble(
     if !fold.providers.is_empty() {
         metadata.insert("providers".to_string(), json!(fold.providers));
     }
+    // Only reported when the run actually retried. A block of zeroes on every
+    // clean run would train a reader to skip the one place the contention
+    // signal appears.
+    if fold.provider_attempts > fold.usage.call_count {
+        metadata.insert(
+            "provider_attempts".to_string(),
+            json!({
+                "total": fold.provider_attempts,
+                "retries": fold.provider_attempts - fold.usage.call_count,
+                "rate_limited": fold.rate_limited_attempts,
+                "empty_completion": fold.empty_completion_attempts,
+                "other": fold.other_retry_attempts,
+            }),
+        );
+    }
     if let Some(terminal) = &fold.terminal {
         if let Some(stop_reason) = &terminal.stop_reason {
             metadata.insert("stop_reason".to_string(), json!(stop_reason));
@@ -504,6 +527,18 @@ impl SessionFold {
         }
         self.cache_read_tokens += facts::i64_at(payload, facts::CACHE_READ_TOKENS).unwrap_or(0);
         self.cache_write_tokens += facts::i64_at(payload, facts::CACHE_WRITE_TOKENS).unwrap_or(0);
+        // A call recorded before provider attempts existed has no entry. It
+        // still made at least one request, so counting 1 keeps the total a
+        // lower bound rather than under-reporting a mixed-age session.
+        self.provider_attempts += facts::i64_at(payload, facts::PROVIDER_ATTEMPTS_TOTAL)
+            .filter(|total| *total > 0)
+            .unwrap_or(1);
+        self.rate_limited_attempts +=
+            facts::i64_at(payload, facts::PROVIDER_ATTEMPTS_RATE_LIMITED).unwrap_or(0);
+        self.empty_completion_attempts +=
+            facts::i64_at(payload, facts::PROVIDER_ATTEMPTS_EMPTY).unwrap_or(0);
+        self.other_retry_attempts +=
+            facts::i64_at(payload, facts::PROVIDER_ATTEMPTS_OTHER).unwrap_or(0);
         if let Some(model) = facts::string_at(payload, facts::MODEL) {
             push_distinct(&mut self.models, model);
         }

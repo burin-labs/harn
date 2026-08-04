@@ -232,6 +232,7 @@ where
     }
 
     Ok(LlmResult {
+        attempts: Default::default(),
         text_projection: None,
         text,
         raw_tool_calls: Vec::new(),

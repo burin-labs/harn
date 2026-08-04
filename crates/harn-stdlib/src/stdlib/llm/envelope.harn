@@ -45,6 +45,25 @@ pub type LlmOutcome = {kind: LlmOutcomeKind, billed: bool}
  * cache accounting at all (native Ollama), so a local model is never scored as
  * a 100% cache miss.
  */
+/**
+ * Provider-request accounting for one logical call.
+ *
+ * `llm_call` is one call, but the runtime may issue several provider requests
+ * to complete it: rate-limited requests are retried, so are completions with
+ * nothing the loop can act on, so are transport failures. `total` counts the
+ * requests including the one that succeeded; the rest say why the extra ones
+ * happened, because rate limiting (provider saturated), an empty completion
+ * (model produced nothing usable), and a transport failure (flaky link) call
+ * for different responses.
+ */
+pub type LlmProviderAttempts = {
+  total: int,
+  retries: int,
+  rate_limited: int,
+  empty_completion: int,
+  other: int,
+}
+
 pub type LlmUsage = {
   input_tokens: int,
   output_tokens: int,
@@ -56,6 +75,12 @@ pub type LlmUsage = {
   cache_savings_usd: float,
   served_fast: bool,
   provider_telemetry?: dict,
+  /*
+   * Optional because a replayed recording captured before this field existed
+   * carries no attempts, which is "unknown" rather than "one clean request".
+   * Every live call emits it.
+   */
+  provider_attempts?: LlmProviderAttempts,
 }
 
 /**
