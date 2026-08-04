@@ -14,6 +14,7 @@ import {
   ensureVerifiedArchive,
   extractionCommand,
   fetchWithRetry,
+  main,
   normalizeVersion,
   parseChecksums,
   parseCliArgs,
@@ -716,4 +717,97 @@ test("CLI options preserve explicit directories and exact pin semantics", (conte
   assert.equal(resolved.cache_dir, path.join(root, "cache"));
   assert.equal(resolved.install_dir, path.join(root, "install"));
   assert.throws(() => parseCliArgs(["--version", TEST_VERSION, "latest"]));
+});
+
+/** Read a heredoc-form GitHub Actions output back into its lines. */
+function readMultilineOutput(filePath, name) {
+  const text = fs.readFileSync(filePath, "utf8");
+  const lines = text.split(/\r?\n/);
+  const opener = lines.findIndex((line) => line.startsWith(`${name}<<`));
+  assert.notEqual(opener, -1, `no ${name} output was written`);
+  const delimiter = lines[opener].slice(`${name}<<`.length);
+  const closer = lines.indexOf(delimiter, opener + 1);
+  assert.notEqual(closer, -1, `${name} output was never terminated`);
+  return lines.slice(opener + 1, closer);
+}
+
+// The cache key names one version and asset. The bootstrap cache *root*
+// accumulates every version and target a runner has ever bootstrapped, so
+// caching the root archives all of them under each narrow key -- 441 MB for
+// one entry on Harn Cloud, whose restore timed out after transferring 80 MB
+// while verifying and installing the exact archive directly took 7.2s.
+// Regression for #6065.
+test("the Actions cache path names one version and asset, not the bootstrap root", async (context) => {
+  const root = temporaryRoot(context);
+  const cacheDir = path.join(root, "cache");
+  const outputFile = path.join(root, "github-output");
+  fs.writeFileSync(outputFile, "");
+
+  // What a runner that has bootstrapped other versions and targets holds.
+  const otherAsset = assetForTarget("aarch64-apple-darwin");
+  const unrelated = [
+    path.join(cacheDir, "metadata", "9.9.9", "SHA256SUMS"),
+    path.join(cacheDir, "downloads", "9.9.9", otherAsset),
+    path.join(cacheDir, "downloads", TEST_VERSION, otherAsset),
+    path.join(cacheDir, "installs", "9.9.9", "aarch64-apple-darwin", "harn"),
+  ];
+  for (const stale of unrelated) {
+    fs.mkdirSync(path.dirname(stale), { recursive: true });
+    fs.writeFileSync(stale, "stale");
+  }
+
+  await main(
+    [
+      "resolve",
+      "--version",
+      TEST_VERSION,
+      "--target",
+      TEST_TARGET,
+      "--cache-dir",
+      cacheDir,
+      "--github-output",
+      outputFile,
+    ],
+    {},
+  );
+
+  const cachePath = readMultilineOutput(outputFile, "cache-path");
+  assert.deepEqual(cachePath, [
+    path.join(cacheDir, "metadata", TEST_VERSION, "SHA256SUMS"),
+    path.join(cacheDir, "downloads", TEST_VERSION, TEST_ASSET),
+  ]);
+
+  // `actions/cache` archives each listed path and everything under it, so
+  // "the entry contains X" is "X is at or under a listed path".
+  const contains = (candidate) =>
+    cachePath.some(
+      (entry) => candidate === entry || candidate.startsWith(entry + path.sep),
+    );
+  for (const stale of unrelated) {
+    assert.equal(
+      contains(stale),
+      false,
+      `a ${TEST_VERSION}/${TEST_TARGET} cache entry would archive ${stale}`,
+    );
+  }
+  assert.equal(contains(cacheDir), false, "the cache root is still archived");
+});
+
+// The paths the action caches have to be the paths bootstrap reads and
+// writes; two derivations of one layout drift into caching the wrong files.
+test("the cached paths are the ones bootstrap uses", (context) => {
+  const root = temporaryRoot(context);
+  const resolved = resolveBootstrap({
+    version: TEST_VERSION,
+    target: TEST_TARGET,
+    cacheDir: path.join(root, "cache"),
+  });
+  assert.equal(
+    resolved.metadata_path,
+    path.join(root, "cache", "metadata", TEST_VERSION, "SHA256SUMS"),
+  );
+  assert.equal(
+    resolved.archive_path,
+    path.join(root, "cache", "downloads", TEST_VERSION, TEST_ASSET),
+  );
 });
