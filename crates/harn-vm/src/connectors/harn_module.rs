@@ -329,8 +329,6 @@ impl HarnConnectorWorker {
         let run = crate::egress::bind_policy_context(move || run_worker_loop(module_path, rx));
         let join = std::thread::Builder::new()
             .name(format!("harn-connector-{}", provider_id.as_str()))
-            // The worker loop loads and executes a Harn connector module, so
-            // this thread drives the VM and needs its stack.
             .stack_size(crate::RUNTIME_STACK_SIZE)
             .spawn(run)
             .map_err(|error| ConnectorError::HarnRuntime(error.to_string()))?;

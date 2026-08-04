@@ -223,8 +223,6 @@ impl AcpWebSocketHub {
         let worker_name = worker_id;
         std::thread::Builder::new()
             .name(format!("harn-acp-ws-{worker_name}"))
-            // `run_acp_channel_server`'s future is `!Send` and drives the VM on
-            // whatever thread blocks on it — this one.
             .stack_size(crate::CLI_RUNTIME_STACK_SIZE)
             .spawn(move || {
                 let runtime = match tokio::runtime::Builder::new_current_thread()
