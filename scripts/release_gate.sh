@@ -271,6 +271,52 @@ release_gate_snapshot_prepare_aot_generator() {
   )"
 }
 
+# One immutable CLI for every prepare-time Harn tool, snapshotted before the
+# workspace version is rewritten.
+#
+# `prepare` runs several `.harn` metadata and projection tools while mutating
+# the workspace version and its generated metadata. Each mutation invalidates
+# Cargo fingerprints, so resolving the CLI through `cargo run` per tool
+# recompiled the runtime graph repeatedly inside one nominal shell step — the
+# top-level transcript showed a single multi-minute `prepare` and hid it.
+#
+# The semantics these tools need are the exact PRE-mutation candidate
+# semantics, so one binary built once is not a compromise; it is the correct
+# input. The candidate under test is still rebuilt from the post-mutation tree
+# and audited separately.
+#
+# Ambient `HARN_BIN` is deliberately NOT consulted: it may be a stale developer
+# build, and prepare has no way to prove its source identity. Only an explicit
+# `HARN_RELEASE_TOOLS_BIN` — a caller asserting exactly that — is honored.
+RELEASE_PREPARE_TOOLS_BIN=""
+# Set by `cmd_audit` to the binary this gate built and audited from this tree.
+RELEASE_GATE_AUDITED_HARN_BIN=""
+
+release_gate_snapshot_prepare_tools_cli() {
+  local destination_dir="$1"
+  local source_bin="${HARN_RELEASE_TOOLS_BIN:-}"
+  if [[ -n "$source_bin" ]]; then
+    harn_require_executable_bin "$source_bin" || return $?
+  elif [[ -n "$RELEASE_GATE_AUDITED_HARN_BIN" ]]; then
+    # `full` already built, snapshotted, and audited this exact tree. Reusing
+    # that binary is both cheaper than a second build and better provenance
+    # than one, so use it in place rather than copying it again.
+    harn_require_executable_bin "$RELEASE_GATE_AUDITED_HARN_BIN" || return $?
+    RELEASE_PREPARE_TOOLS_BIN="$RELEASE_GATE_AUDITED_HARN_BIN"
+    printf 'ok: %-15s (%s)\n' "release-tools" "$RELEASE_PREPARE_TOOLS_BIN"
+    return 0
+  else
+    release_gate_run_with_stale_out_dir_recovery \
+      "release tools CLI prebuild" \
+      cargo build -p harn-cli --bin harn --quiet
+    source_bin="$(harn_debug_named_binary_path harn)"
+  fi
+  RELEASE_PREPARE_TOOLS_BIN="$(
+    harn_snapshot_binary "$source_bin" "$destination_dir" harn-release-tools
+  )"
+  printf 'ok: %-15s (%s)\n' "release-tools" "$RELEASE_PREPARE_TOOLS_BIN"
+}
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -345,7 +391,12 @@ time_phase() {
 }
 
 harn_cmd() {
-  if [[ -n "${HARN_BIN:-}" ]]; then
+  # Prepare snapshots one exact-source CLI before mutating the workspace and
+  # routes every Harn tool through it, so a metadata rewrite cannot force
+  # another compilation of the shared runtime graph mid-step.
+  if [[ -n "${RELEASE_PREPARE_TOOLS_BIN:-}" ]]; then
+    "$RELEASE_PREPARE_TOOLS_BIN" "$@"
+  elif [[ -n "${HARN_BIN:-}" ]]; then
     "$HARN_BIN" "$@"
   else
     cargo run --quiet --bin harn -- "$@"
@@ -662,6 +713,11 @@ cmd_audit() {
   HARN_BIN="$stable_harn_bin"
   HARN_CONFORMANCE_HARN_BIN="$stable_harn_bin"
   export HARN_BIN HARN_CONFORMANCE_HARN_BIN
+  # This gate built and audited this exact binary from this exact tree, so a
+  # later `prepare` in the same run may use it for its Harn tools. Recorded
+  # under its own name rather than read back from `HARN_BIN`, which an ambient
+  # environment can also set and whose source identity prepare cannot check.
+  RELEASE_GATE_AUDITED_HARN_BIN="$stable_harn_bin"
   printf 'ok: %-15s (%s)\n' "harn-bin" "$HARN_BIN"
 
   # crates/harn-cli/generated/ is gitignored build input shared by rust-audit
@@ -966,14 +1022,22 @@ cmd_prepare() {
     # payload the released runtime rejects (see #6084).
     release_gate_snapshot_prepare_aot_generator "$stable_tool_dir"
     unset HARN_RELEASE_CLI_AOT_GEN_BIN
+    # Same reasoning, for every prepare-time `.harn` tool: snapshot one
+    # exact-source CLI while the tree still matches the audited candidate, so
+    # `release_metadata current/next/apply`, protocol-fixture syncing, and
+    # artifact dumping all run on one binary instead of recompiling the runtime
+    # graph after each metadata mutation.
+    release_gate_snapshot_prepare_tools_cli "$stable_tool_dir"
+    unset HARN_RELEASE_TOOLS_BIN
     current="$(current_version)"
     next="$(next_version "$bump")"
     bump_version "$next"
-    # The canonical release path supplies the CLI already audited before this
-    # metadata-only version rewrite. Direct/manual prepare may still resolve a
-    # binary through Cargo, so keep that fallback isolated from incremental and
-    # sccache state. `CARGO_BUILD_RUSTC_WRAPPER=` is required because Harn's
-    # checked-in `.cargo/config.toml` otherwise still applies sccache.
+    # The prepare-time tools now run on the snapshot above, so nothing here
+    # resolves a binary through Cargo. These stay set for any Cargo work the
+    # steps below still reach (`reconcile_cargo_lock`, `make gen-cli-aot`),
+    # keeping it isolated from incremental and sccache state.
+    # `CARGO_BUILD_RUSTC_WRAPPER=` is required because Harn's checked-in
+    # `.cargo/config.toml` otherwise still applies sccache.
     export CARGO_INCREMENTAL=0
     export RUSTC_WRAPPER=
     export CARGO_BUILD_RUSTC_WRAPPER=
