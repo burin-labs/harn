@@ -1,15 +1,23 @@
 //! Tests for the manifest-derived provider catalog.
 //!
 //! These share the process-wide provider catalog, so each one takes
-//! `lock_manifest_provider_schemas()` and resets the catalog around its
-//! assertions. They live apart from the rest of the trigger-collection tests
-//! for that reason as much as for file length.
+//! `lock_harn_state_async()`, which resets contributed providers on
+//! acquisition. Tests that register schemas without going through
+//! `collect_manifest_triggers` also take `lock_manifest_provider_schemas()`
+//! underneath it, because that is the lock production registration holds.
+//! Always in that order: `collect_manifest_triggers` takes the schema lock
+//! itself, so no test may hold it across a call that does.
+//!
+//! They live apart from the rest of the trigger-collection tests for that
+//! reason as much as for file length.
 
 use super::*;
 use crate::package::test_support::*;
+use crate::tests::common::harn_state_lock::lock_harn_state_async;
 
 #[tokio::test(flavor = "current_thread")]
 async fn collect_manifest_triggers_accepts_harn_provider_override() {
+    let _state_guard = lock_harn_state_async().await;
     let tmp = tempfile::tempdir().unwrap();
     let harn_file = write_trigger_project(
         tmp.path(),
@@ -54,8 +62,8 @@ handler = "worker://echo-queue"
 /// the whole catalog.
 #[tokio::test(flavor = "current_thread")]
 async fn loading_a_second_package_keeps_the_first_packages_providers() {
+    let _state_guard = lock_harn_state_async().await;
     let _provider_schema_guard = lock_manifest_provider_schemas().await;
-    harn_vm::reset_provider_catalog();
 
     let mut tmpdirs = Vec::new();
     for provider in ["echo-first", "echo-second"] {
@@ -93,14 +101,12 @@ connector = {{ harn = "./echo_connector.harn" }}
         harn_vm::provider_metadata("webhook").is_some(),
         "core providers survive package loads"
     );
-
-    harn_vm::reset_provider_catalog();
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn build_manifest_provider_catalog_keeps_dynamic_providers_scoped() {
+    let _state_guard = lock_harn_state_async().await;
     let _provider_schema_guard = lock_manifest_provider_schemas().await;
-    harn_vm::reset_provider_catalog();
 
     for provider in ["echo-a", "echo-b", "echo-c"] {
         let tmp = tempfile::tempdir().unwrap();
@@ -139,6 +145,70 @@ connector = {{ harn = "./echo_connector.harn" }}
             "building a package provider catalog must not mutate the global catalog"
         );
     }
+}
 
-    harn_vm::reset_provider_catalog();
+/// Register `provider` with `schema_name` the way a package load does, and
+/// report what the global catalog ends up holding for it.
+async fn register_provider_under_schema(provider: &str, schema_name: &str) -> String {
+    let tmp = tempfile::tempdir().unwrap();
+    let harn_file = write_trigger_project(
+        tmp.path(),
+        &format!(
+            r#"
+[[providers]]
+id = "{provider}"
+connector = {{ harn = "./echo_connector.harn" }}
+"#
+        ),
+        None,
+    );
+    fs::write(
+        tmp.path().join("echo_connector.harn"),
+        test_harn_connector_source_with_schema(provider, schema_name),
+    )
+    .unwrap();
+    let schemas = build_manifest_provider_schemas(&load_runtime_extensions(&harn_file))
+        .await
+        .expect("manifest provider schemas build");
+    register_manifest_provider_schemas(schemas).expect("providers register");
+    harn_vm::provider_metadata(provider)
+        .expect("provider metadata registered")
+        .schema_name
+}
+
+/// Regression for #6068: two lock holders that claim the same provider id
+/// for different payload schemas must not collide.
+///
+/// Re-registering an id under a *different* schema name is the one
+/// disagreement `ProviderCatalog::merge` refuses to settle by load order —
+/// it returns `DuplicateProvider`. In the suite that surfaced as whichever
+/// dependency-connector test the scheduler happened to run second, so the
+/// failure moved between runs.
+///
+/// This drives the two claims through one process on purpose. Under
+/// `cargo nextest` every test gets its own process, so a leak *between*
+/// two `#[test]` functions is invisible there and only the single-process
+/// `cargo test` fallback would catch it; a regression written that way
+/// would pass vacuously in the lane that gates merges. Sequential
+/// acquisitions of the one lock reproduce the same contention in either
+/// runner.
+///
+/// Deliberately does not take `lock_manifest_provider_schemas()`: the
+/// reset under test belongs to the state lock alone.
+#[tokio::test(flavor = "current_thread")]
+async fn the_state_lock_drops_providers_contributed_by_an_earlier_holder() {
+    {
+        let _state_guard = lock_harn_state_async().await;
+        assert_eq!(
+            register_provider_under_schema("contested-provider", "FirstEventPayload").await,
+            "FirstEventPayload"
+        );
+    }
+
+    let _state_guard = lock_harn_state_async().await;
+    assert_eq!(
+        register_provider_under_schema("contested-provider", "SecondEventPayload").await,
+        "SecondEventPayload",
+        "the second holder saw the first holder's contribution"
+    );
 }

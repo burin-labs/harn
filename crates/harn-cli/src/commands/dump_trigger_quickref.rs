@@ -419,30 +419,33 @@ mod tests {
     use super::*;
 
     use crate::package::lock_manifest_provider_schemas;
+    use crate::tests::common::harn_state_lock::{lock_harn_state_async, HarnStateGuard};
 
-    /// `collect_manifest_triggers` (in `package::extensions`) installs a
-    /// manifest-derived `ProviderCatalog` into the process-global
-    /// registry. Any test that reads the catalog has to take the same
-    /// `lock_manifest_provider_schemas()` lock those tests use, reset the
-    /// catalog while holding it, and reset again on drop. Otherwise the
-    /// regenerator picks up stray dynamic providers (like the `echo`
-    /// fixtures registered by package tests) and the snapshot diverges
-    /// from the committed file under workspace test ordering.
+    /// `collect_manifest_triggers` (in `package::extensions`) contributes a
+    /// manifest-derived `ProviderCatalog` to the process-global catalog.
+    /// Without a clean baseline the regenerator picks up stray dynamic
+    /// providers (like the `echo` fixtures registered by package tests) and
+    /// the snapshot diverges from the committed file under workspace test
+    /// ordering.
+    ///
+    /// The state lock supplies that baseline — it drops contributed
+    /// providers on acquisition. The schema lock underneath it is what
+    /// production registration holds, so taking it too keeps a package load
+    /// running in a sibling test from contributing between the reset and
+    /// `generate_file()`.
     struct CatalogTestScope {
-        _guard: tokio::sync::MutexGuard<'static, ()>,
+        _schema_guard: tokio::sync::MutexGuard<'static, ()>,
+        _state_guard: HarnStateGuard,
     }
 
     impl CatalogTestScope {
         async fn new() -> Self {
-            let guard = lock_manifest_provider_schemas().await;
-            harn_vm::reset_provider_catalog();
-            Self { _guard: guard }
-        }
-    }
-
-    impl Drop for CatalogTestScope {
-        fn drop(&mut self) {
-            harn_vm::reset_provider_catalog();
+            let state_guard = lock_harn_state_async().await;
+            let schema_guard = lock_manifest_provider_schemas().await;
+            Self {
+                _schema_guard: schema_guard,
+                _state_guard: state_guard,
+            }
         }
     }
 

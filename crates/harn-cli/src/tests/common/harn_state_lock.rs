@@ -39,6 +39,24 @@ fn clear_leaky_state_env() {
     }
 }
 
+/// Drop provider schemas contributed by earlier tests, leaving the
+/// builtin catalog.
+///
+/// The provider catalog is one `static RwLock<ProviderCatalog>` for the
+/// whole process, and loading a package *contributes* to it rather than
+/// declaring it — that is deliberate, because an orchestrator harness
+/// and a persona command sharing a process must not erase each other's
+/// providers. In a test binary the same property means every package a
+/// test loads stays registered for the rest of the run.
+///
+/// Two tests that use the same provider id for different payload
+/// schemas therefore collide, and which one fails depends on execution
+/// order. Resetting here, under the one lock, gives each test the
+/// builtin catalog and nothing else.
+fn reset_contributed_providers() {
+    harn_vm::reset_provider_catalog();
+}
+
 /// The `tokio::sync::Mutex` backing both the sync and async acquire
 /// paths. A `tokio` mutex (rather than `std::sync::Mutex`) lets async
 /// tests hold the guard across `.await` points without tripping
@@ -104,6 +122,7 @@ impl Drop for HarnStateGuard {
 fn finish_acquire(inner: MutexGuard<'static, ()>) -> HarnStateGuard {
     *HOLDER.lock().expect("harn-state holder") = Some(current_holder());
     clear_leaky_state_env();
+    reset_contributed_providers();
     HarnStateGuard { _inner: inner }
 }
 
@@ -128,12 +147,19 @@ fn finish_acquire(inner: MutexGuard<'static, ()>) -> HarnStateGuard {
 ///   this now guards only tests that set them deliberately.
 /// - The thread-local `ACTIVE_EVENT_LOG`, which is reused across
 ///   cargo test-thread handoffs.
-/// - The process-global `harn_vm` trigger registry mutated by
-///   `install_manifest_triggers` / `clear_trigger_registry`.
+/// - The process-global provider catalog contributed to by
+///   `harn_vm::register_provider_schemas`, which every package load
+///   goes through. The lock resets it on entry; see
+///   [`reset_contributed_providers`].
 ///
-/// Tests grabbing this lock should not assume the global state is clean
-/// on entry — always call `reset_active_event_log()` +
-/// `harn_vm::clear_trigger_registry()` as applicable.
+/// The `harn_vm` trigger registry mutated by `install_manifest_triggers`
+/// / `clear_trigger_registry` is *not* in that list. It is a
+/// `thread_local!`, so a test owns its own; `reset_thread_local_state()`
+/// clears it and needs no lock.
+///
+/// Tests grabbing this lock should not assume the rest of the global
+/// state is clean on entry — call `reset_active_event_log()` as
+/// applicable.
 pub fn lock_harn_state() -> HarnStateGuard {
     reject_reentrant_acquire();
     finish_acquire(state_mutex().blocking_lock())
