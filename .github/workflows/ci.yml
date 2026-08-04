@@ -31,41 +31,13 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
-  # Detect idle self-hosted Linux capacity via the org detector shared with
-  # burin-code/harn-cloud. Overflow guardrails: a busy or offline pool reports
-  # unavailable at probe time, so every consumer lane falls back to its hosted
-  # runner. The probe is a snapshot, not a reservation: simultaneous workflows
-  # can still race for the same runner and briefly queue. Fork PRs receive no
-  # secrets, so on a fork PR
-  # the probe reports false and the lanes can never route to self-hosted
-  # hardware (repo policy additionally requires approval for ALL outside-
-  # collaborator workflow runs). Kill switch: set the repo/org variable
-  # HARN_CI_DISABLE_SELFHOSTED_LINUX=true to pin every lane back to hosted, or
-  # the org-wide variable CI_SELFHOSTED_DISABLED, which the detector owns.
-  #
-  # Kept level with burin-code and harn-cloud, which both pin this SHA. harn does
-  # not consume the `capacity` output it adds, so this is content parity rather
-  # than a needed feature: a consumer running a revision the policy repo no
-  # longer publishes is a latent surprise even when today's behaviour is
-  # identical, and one SHA across every consumer is cheaper to reason about than
-  # a per-consumer feature matrix. The org's pin-drift check reports any
-  # consumer whose referenced file differs from what `main` publishes.
-  #
-  # Keep this pin at or after burin-labs/.github#22. Earlier revisions resolved
-  # the runner_groups input with jq `from_entries`, and `burin-labs` has two
-  # groups named `Default` - the org-level one holding all 9 Linux runners, and
-  # an empty enterprise-inherited one. `from_entries` keeps the LAST duplicate
-  # key, so the detector probed only the empty group and reported `linux=false`
-  # and `linux_big=false` on every run. Nothing failed: falling through to
-  # hosted is indistinguishable from a busy fleet.
-  # The probe is hard-required by ci-status: a probe hard-failure must fail
-  # the aggregate, because the lanes that `needs` it would all skip and their
-  # skips are otherwise tolerated.
-  runner-availability:
-    uses: burin-labs/.github/.github/workflows/runner-availability.yml@53839c5987b68953b4e60a79bf8ff05649a9e479
-    secrets:
-      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
-      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+  # Linux CI runs on GitHub-hosted runners. This repository is public, so
+  # hosted minutes are free, and routing to the org's residential self-hosted
+  # pool made local machine health a merge-throughput dependency for no gain.
+  # The 2026-08-02 merge-queue incident measured the real critical path as
+  # compilation plus conformance/audit work (~22 minutes), not runner
+  # admission: once queue admission widened, five speculative merge groups
+  # started on hosted runners within seconds (#6017).
 
   # Decide whether the heavy Linux Rust lanes (rust-checks, audit-scripts) need
   # to run at all.
@@ -347,24 +319,14 @@ jobs:
 
   package-audit:
     name: Package audit
-    needs: [changes, runner-availability]
+    needs: [changes]
     # Cargo package verification is a release/package correctness proof, not a
     # formatting proof. Keep it out of the always-on fmt lane so workflow,
     # docs, and prompt-only PRs do not pay a 9-minute cargo package/check tail.
     # It still runs for package-relevant PRs and unconditionally on merge_group
     # unless the speculative merge diff is a proven docs-only tail.
     if: needs.changes.outputs.package_audit == 'true'
-    # Self-hosted when an idle runner exists, else Blacksmith when enabled,
-    # else the free hosted runner. Merge groups always use elastic capacity:
-    # GitHub creates a burst of speculative groups, so their independent
-    # availability snapshots can all claim the same idle worker and then form
-    # a head-of-line-blocking queue behind it.
-    runs-on: >-
-      ${{ vars.HARN_CI_DISABLE_SELFHOSTED_LINUX != 'true'
-        && github.event_name != 'merge_group'
-        && needs.runner-availability.outputs.linux == 'true'
-        && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-stable"]')
-        || (vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2404') }}
+    runs-on: ubuntu-latest
     # Hang tripwire, not a perf budget (check-test-case-performance owns perf).
     # Hosted `ubuntu-latest` completes this lane in up to ~16m — the prior 20m
     # budget was calibrated for the faster paid runner and left ~4m of
@@ -376,40 +338,22 @@ jobs:
       # Supplying a warmed HARN_BIN selects the narrow release-gate path and
       # forfeits feature unification across the shared cold dependency graph.
       HARN_BIN: ""
-      SCCACHE_CACHE_SIZE: 40G
-      SCCACHE_SERVER_PORT: "4227"
-      # Which rung of the ladder above this job actually landed on.
+      # Which runner this lane landed on. One rung, so this is a constant.
       #
-      # `runner.environment` CANNOT answer that question on any lane that can
-      # reach Blacksmith. Blacksmith runners register as ordinary self-hosted
-      # runners, so `runner.environment` reports `self-hosted` on them exactly
-      # as it does on our own boxes: every `== 'self-hosted'` guard fires on
-      # the Blacksmith rung and every `!= 'self-hosted'` guard silently skips
-      # there. Observed on the burin-code Rust TUI lanes (burin-code#5423);
-      # latent here only because HARN_CI_DISABLE_BLACKSMITH_LINUX has been true
-      # since 2026-07-19, which pins the lower rung to `ubuntu-latest`.
-      #
-      # This mirrors the `runs-on` predicate above term for term. The two are a
-      # pair and must be edited together; scripts/check_runner_tier.py fails
-      # the build if they disagree or if `runner.environment` reappears here.
-      HARN_RUNNER_TIER: >-
-        ${{ (vars.HARN_CI_DISABLE_SELFHOSTED_LINUX != 'true'
-          && github.event_name != 'merge_group'
-          && needs.runner-availability.outputs.linux == 'true') && 'self-hosted'
-          || (vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'github-hosted' || 'blacksmith') }}
+      # Kept as an explicit value rather than read from `runner.environment`,
+      # which cannot answer the question: Blacksmith runners register as
+      # ordinary self-hosted runners, so `runner.environment` reports
+      # `self-hosted` on them exactly as it does on a residential box
+      # (burin-code#5423). `scripts/check_runner_tier.harn` fails the build if
+      # `runner.environment` reappears here.
+      HARN_RUNNER_TIER: github-hosted
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/rust-toolchain
-      - uses: ./.github/actions/sccache
-        # Hosted fallback uses the bounded coarse rust-cache below. The former
-        # per-object GHA backend used 5.35 GiB / 6,785 entries for a 31% warm
-        # hit rate, crowding the repository's shared 10 GiB cache pool.
-        if: env.HARN_RUNNER_TIER != 'github-hosted'
-        with:
-          cache-key: package-audit
-          sticky: ${{ env.HARN_RUNNER_TIER == 'blacksmith' }}
+      # Bounded coarse rust-cache. The former per-object sccache GHA backend
+      # used 5.35 GiB / 6,785 entries for a 31% warm hit rate, crowding the
+      # repository's shared 10 GiB cache pool.
       - uses: ./.github/actions/rust-cache
-        if: env.HARN_RUNNER_TIER == 'github-hosted'
         continue-on-error: true
         with:
           shared-key: package-audit
@@ -426,9 +370,6 @@ jobs:
         # The verifier builds Harn and its AOT generator in one Cargo invocation
         # so their shared feature graph compiles once, then runs both directly.
         run: ./scripts/verify_crate_packages.sh
-      - name: Summarize and stop sccache
-        if: always()
-        run: ./scripts/ci/finalize_sccache.sh
 
   lint-md:
     name: Markdown lint
@@ -439,38 +380,19 @@ jobs:
       - uses: DavidAnson/markdownlint-cli2-action@6bf21b07787794f89a243495939cd651942aeabe # v24.1.0
 
   # The compile-bearing Linux Rust lanes share one matrix job but must complete
-  # independently. A workspace-test infrastructure failure has a hosted
-  # fallback;
-  # canceling the lint sibling would discard its distinct required proof and
-  # make that fallback incapable of recovering the run. The workspace-test row
-  # normally executes the suite in its warm workspace. A repository-variable
-  # kill-switch can instead publish an exact-SHA nextest archive for the
-  # standalone hosted consumer.
+  # independently: canceling the lint sibling on a workspace-test failure would
+  # discard its distinct required proof. The workspace-test row normally
+  # executes the suite in its warm workspace. A repository-variable kill-switch
+  # can instead publish an exact-SHA nextest archive for the standalone
+  # consumer.
   rust-checks:
     name: ${{ matrix.name }}
-    needs: [changes, runner-availability]
+    needs: [changes]
     # Heavy Linux Rust lanes. Skipped on a docs/website/markdown-only PR; forced
     # on for merge_group and non-metadata pushes (see the `changes` job).
     # ci-status treats a skip here as PASS so branch protection isn't deadlocked.
     if: needs.changes.outputs.rust == 'true'
-    # Self-hosted when the leg's probe signal reports an idle runner carrying
-    # the leg's label tier, else Blacksmith when enabled, else the free hosted
-    # runner. The lint leg targets the general stable pool; the workspace-test leg
-    # targets only the big-labeled workers (one per box, hand-picked for cores
-    # and disk headroom) so a 60 GB build workspace can never starve the small
-    # lanes. Since co-location the workspace-test leg ships no bundle, so
-    # residential uplink no longer disqualifies it; if it fails on a box for
-    # any reason, rust-workspace-tests-fallback reruns it on a hosted runner. Merge
-    # groups use elastic capacity because their bursty speculative fan-out
-    # makes an idle-runner snapshot unsafe as a reservation.
-    runs-on: >-
-      ${{ vars.HARN_CI_DISABLE_SELFHOSTED_LINUX != 'true'
-        && github.event_name != 'merge_group'
-        && (matrix.selfhosted == 'stable' && needs.runner-availability.outputs.linux == 'true'
-          && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-stable"]')
-        || matrix.selfhosted == 'big' && needs.runner-availability.outputs.linux_big == 'true'
-          && fromJSON('["self-hosted", "Linux", "X64", "harn-ci-big"]'))
-        || (vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || matrix.runner) }}
+    runs-on: ubuntu-latest
     # Linux-only: emit line-tables-only debuginfo for dev builds. Trims link
     # time and disk on these link-bound lanes while keeping panic line numbers
     # for nextest backtraces. NOT applied to the Windows/macOS jobs — #2127/
@@ -478,8 +400,6 @@ jobs:
     # the macOS lane mirrors that decision.
     env:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
-      SCCACHE_CACHE_SIZE: 40G
-      SCCACHE_SERVER_PORT: "4227"
       # Link the Linux Rust lanes with mold. Warm lanes become link-bound once
       # the persistent local cache has hits, so mold lowers the remaining
       # wall-clock floor. GOTCHA: a job-level RUSTFLAGS env var
@@ -489,42 +409,26 @@ jobs:
       # link-arg appended. Linux-only: the windows/macos jobs never see this and
       # keep the workflow-level `-D warnings`.
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
-      # See the HARN_RUNNER_TIER comment on `package-audit`. This lane's ladder
-      # is matrix-driven, so the tier mirrors both self-hosted arms: the `lint`
-      # leg claims a `harn-ci-stable` worker and the `workspace-tests` leg a
-      # `harn-ci-big` one, and either falling through lands on the same
-      # Blacksmith / hosted rung as `runs-on`.
-      HARN_RUNNER_TIER: >-
-        ${{ (vars.HARN_CI_DISABLE_SELFHOSTED_LINUX != 'true'
-          && github.event_name != 'merge_group'
-          && (matrix.selfhosted == 'stable' && needs.runner-availability.outputs.linux == 'true'
-            || matrix.selfhosted == 'big' && needs.runner-availability.outputs.linux_big == 'true')) && 'self-hosted'
-          || (vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'github-hosted' || 'blacksmith') }}
+      # See the HARN_RUNNER_TIER comment on `package-audit`.
+      HARN_RUNNER_TIER: github-hosted
     strategy:
       fail-fast: false
       matrix:
         include:
           - kind: lint
             name: Rust lint
-            runner: blacksmith-4vcpu-ubuntu-2404
             cache_key: workspace-lint
             fetch_depth: 1
             rust_components: clippy
-            selfhosted: stable
           - kind: workspace-tests
             name: Rust workspace tests
-            runner: blacksmith-8vcpu-ubuntu-2404
             cache_key: workspace-tests
             fetch_depth: 1
             rust_components: ""
-            # Big-labeled workers only: the compile+suite leg wants cores and a
-            # persistent warm target directory, and the harn-ci-big label is
-            # granted to exactly one worker per box.
-            selfhosted: big
     outputs:
       # Success markers set only by the leg that ran them; the lint leg never
       # touches workspace_tests_ok and vice versa, so the matrix legs cannot clobber
-      # each other. rust-workspace-tests-fallback and ci-status key on these to tell
+      # each other. ci-status keys on these to tell
       # "the workspace-test leg itself succeeded" apart from "the job group failed
       # because of the sibling leg".
       lint_ok: ${{ steps.lint-ok.outputs.ok }}
@@ -533,43 +437,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: ${{ matrix.fetch_depth }}
-          # Keep the untracked target/ directory between runs on the big
-          # self-hosted workers: a warm persistent target dir turns the ~17 m
-          # cold workspace compile into an incremental rebuild, which is the
-          # entire point of routing this leg to the boxes. Hosted runners are
-          # ephemeral so cleaning there is a no-op either way; the box's
-          # cleanup cron sweeps targets older than 3 days.
-          clean: ${{ !(matrix.kind == 'workspace-tests' && env.HARN_RUNNER_TIER == 'self-hosted') }}
-      # Hosted-image SDK reclaim only: on a self-hosted box this would rm -rf
-      # system paths and docker-prune live local images. Self-hosted disk
-      # hygiene is owned by the box's cleanup cron instead. Blacksmith VMs are
-      # ephemeral vendor capacity, not our boxes, so they take the reclaim.
+      # Hosted-image SDK reclaim.
       - uses: ./.github/actions/free-disk-space
-        if: env.HARN_RUNNER_TIER != 'self-hosted'
-      # Observability for the persistent-workspace path: how much disk the
-      # worker has before the build starts. The cleanup cron owns reclamation;
-      # this is the signal that tells us when it is falling behind.
-      - name: Report self-hosted disk headroom
-        if: env.HARN_RUNNER_TIER == 'self-hosted'
-        run: |
-          {
-            echo "### Self-hosted disk headroom"
-            echo
-            echo '```'
-            df -h "$GITHUB_WORKSPACE" | tail -2
-            du -sh "$GITHUB_WORKSPACE/target" 2>/dev/null || echo "target/: absent (cold workspace)"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-      # The self-hosted checkout above keeps the untracked tree so `target/`
-      # stays warm. That also preserves `crates/harn-cli/generated/`, which is
-      # gitignored and left behind by whichever earlier run produced it. A
-      # payload from an older commit still parses, so harn-cli/build.rs embeds
-      # it and reports AOT as present — while missing bytecode for any CLI
-      # script added since. Drop it so this build either regenerates the
-      # payload deliberately or uses the source fallback.
-      - name: Drop stale generated CLI AOT payload
-        if: env.HARN_RUNNER_TIER == 'self-hosted'
-        run: rm -rf crates/harn-cli/generated
       # Install mold and steer rustc at it via RUSTFLAGS above. apt's `mold`
       # only drops the binary in PATH; it does NOT replace /usr/bin/ld, so the
       # stock linker stays intact and rustc opts in explicitly through the
@@ -587,13 +456,7 @@ jobs:
         if: matrix.rust_components != ''
         with:
           components: ${{ matrix.rust_components }}
-      - uses: ./.github/actions/sccache
-        if: env.HARN_RUNNER_TIER != 'github-hosted'
-        with:
-          cache-key: ${{ matrix.cache_key }}
-          sticky: ${{ env.HARN_RUNNER_TIER == 'blacksmith' }}
       - uses: ./.github/actions/rust-cache
-        if: env.HARN_RUNNER_TIER == 'github-hosted'
         continue-on-error: true
         with:
           # Both legs restore the workspace-test cache and only the workspace-test leg
@@ -628,13 +491,11 @@ jobs:
       - name: Build portable workspace test archive
         if: matrix.kind == 'workspace-tests' && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
         env:
-          # 4 rustc jobs bound peak memory on the 8-vCPU hosted runners; the
-          # big self-hosted workers have 24 cores and 61 GB, where 12 jobs is
-          # still comfortably memory-safe and halves the cold-compile floor.
-          # This MUST key on the tier, not `runner.environment`: the Blacksmith
-          # rung here is also 8 vCPU, and `runner.environment` reports
-          # `self-hosted` there, which would hand it the 24-core setting.
-          CARGO_BUILD_JOBS: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && '12' || '4' }}
+          # 4 rustc jobs bound peak memory on the 8-vCPU hosted runner. This
+          # was a tier-keyed expression while larger rungs existed; #6017 left
+          # one runner, so it is a constant. scripts/check_ci_cache_policy.harn
+          # owns the value.
+          CARGO_BUILD_JOBS: "4"
         run: >-
           ./scripts/ci/rust_artifact.sh build-tests
           "$RUNNER_TEMP/harn-workspace-tests.tar.zst"
@@ -649,7 +510,7 @@ jobs:
         id: release-audit-rust-test
         if: matrix.kind == 'workspace-tests' && vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'
         env:
-          CARGO_BUILD_JOBS: ${{ env.HARN_RUNNER_TIER == 'self-hosted' && '12' || '4' }}
+          CARGO_BUILD_JOBS: "4"
           HARN_LLM_CALLS_DISABLED: "1"
         run: >-
           scripts/ci/run_rust_test_lane.sh
@@ -668,8 +529,8 @@ jobs:
           if-no-files-found: error
           retention-days: 1
       # The portable CLI and security artifacts are owned by
-      # rust-check-inputs, so this
-      # compute-heavy lane never uploads from a residential self-hosted runner.
+      # rust-check-inputs, so this compute-heavy lane uploads only the one
+      # archive its kill-switch consumer needs.
       - name: Report workspace test archive upload
         if: matrix.kind == 'workspace-tests' && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
         run: |
@@ -681,14 +542,6 @@ jobs:
             echo "- Duration: ${duration}s"
             echo "- Compressed bytes: ${bytes}"
           } >> "$GITHUB_STEP_SUMMARY"
-      # sccache-action starts a long-lived `sccache --start-server` daemon that
-      # outlives every job step. GitHub's post-job "Cleaning up orphan
-      # processes" phase then terminates it, and on the ubuntu lanes that
-      # termination has intermittently surfaced as a non-zero JOB exit (exit 2)
-      # AFTER every gate already passed — a pure post-job flake (bit #3588,
-      # #3593). Shutting the server down gracefully here leaves no orphan for
-      # the cleanup phase to kill. `if: always()` so it runs even when a gate
-      # failed; `|| true` so teardown can never itself fail the job.
       # Success markers: reached only when every prior step of the leg
       # succeeded. See the job-level `outputs` comment.
       - name: Mark lint leg success
@@ -699,92 +552,20 @@ jobs:
         id: workspace-tests-ok
         if: matrix.kind == 'workspace-tests'
         run: echo "ok=true" >> "$GITHUB_OUTPUT"
-      - name: Summarize and stop sccache
-        if: always()
-        run: ./scripts/ci/finalize_sccache.sh
 
-  # Graceful spillover for the self-hosted workspace-test leg: if the leg did not
-  # reach its success marker — a box dying mid-run, a stuck queue, or any
-  # infra-shaped failure — this job reruns the identical build+suite on a
-  # hosted runner. A REAL test failure also lands here and fails a second
-  # time (~30 hosted minutes), which is the accepted price for never letting
-  # box health turn into a red build. Skipped whenever the workspace-test leg
-  # succeeded, wherever it ran.
-  rust-workspace-tests-fallback:
-    name: Rust workspace tests (hosted fallback)
-    needs: [changes, runner-availability, rust-checks]
-    if: >-
-      always()
-      && needs.changes.result == 'success'
-      && needs.changes.outputs.rust == 'true'
-      && needs.rust-checks.result != 'cancelled'
-      && needs.rust-checks.outputs.workspace_tests_ok != 'true'
-    runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || 'blacksmith-8vcpu-ubuntu-2404' }}
-    timeout-minutes: 60
-    env:
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
-      RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 1
-      - uses: ./.github/actions/free-disk-space
-      - name: Install mold linker
-        uses: ./.github/actions/apt-install
-        timeout-minutes: 5
-        with:
-          packages: mold
-          check-command: mold
-      - uses: ./.github/actions/rust-toolchain
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # v2.85.2
-        with:
-          tool: nextest@0.9.132
-      # Deliberately no sccache/rust-cache: this is a rare disaster-recovery
-      # lane where a cold ~20 m compile is acceptable and cache plumbing would
-      # only add failure modes.
-      - name: Build portable workspace test archive
-        if: vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
-        env:
-          CARGO_BUILD_JOBS: "4"
-        run: >-
-          ./scripts/ci/rust_artifact.sh build-tests
-          "$RUNNER_TEMP/harn-workspace-tests.tar.zst"
-          "$GITHUB_SHA"
-      - name: Run Rust workspace tests
-        if: vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'
-        env:
-          CARGO_BUILD_JOBS: "4"
-          HARN_LLM_CALLS_DISABLED: "1"
-        run: >-
-          scripts/ci/run_rust_test_lane.sh
-          cargo nextest run --locked --workspace --profile ci
-          -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'
-      - name: Upload workspace test archive
-        if: vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: harn-workspace-tests.tar.zst
-          path: ${{ runner.temp }}/harn-workspace-tests.tar.zst
-          archive: false
-          if-no-files-found: error
-          retention-days: 1
   # Build the portable Harn CLI and security tests once for the checks below.
-  # Keeping Actions artifact uploads off the residential self-hosted runners
-  # avoids transfer stalls, while one warm build graph feeds all checks in
-  # parallel with the workspace-test leg's full suite.
+  # One warm build graph feeds all checks in parallel with the workspace-test
+  # leg's full suite.
   rust-check-inputs:
     name: Build shared Rust check inputs
     needs: [changes]
     if: needs.changes.outputs.rust == 'true'
-    runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || 'blacksmith-4vcpu-ubuntu-2404' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
-      SCCACHE_CACHE_SIZE: 40G
-      SCCACHE_SERVER_PORT: "4227"
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
-      HARN_RUNNER_TIER: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'github-hosted' || 'blacksmith' }}
+      HARN_RUNNER_TIER: github-hosted
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -797,13 +578,7 @@ jobs:
           packages: mold
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
-      - uses: ./.github/actions/sccache
-        if: env.HARN_RUNNER_TIER != 'github-hosted'
-        with:
-          cache-key: workspace-cli
-          sticky: ${{ env.HARN_RUNNER_TIER == 'blacksmith' }}
       - uses: ./.github/actions/rust-cache
-        if: env.HARN_RUNNER_TIER == 'github-hosted'
         continue-on-error: true
         with:
           shared-key: workspace-tests
@@ -837,9 +612,6 @@ jobs:
           archive: false
           if-no-files-found: error
           retention-days: 1
-      - name: Summarize and stop sccache
-        if: always()
-        run: ./scripts/ci/finalize_sccache.sh
 
   # FALLBACK-ONLY consumer. By default the environment-neutral suite executes
   # inside the warm Rust workspace tests leg (see rust-checks), so this job skips and
@@ -851,24 +623,22 @@ jobs:
   # skip only passes while co-location is active.
   rust-test:
     name: Rust workspace tests (archive mode)
-    needs: [changes, rust-checks, rust-workspace-tests-fallback]
-    # `always()` so a workspace-test failure that the hosted fallback recovered
-    # does not auto-skip this consumer; the explicit proof condition
-    # then accepts the archive from whichever producer succeeded.
+    needs: [changes, rust-checks]
+    # `always()` so this consumer is not auto-skipped by a sibling's result;
+    # the explicit proof condition below decides whether it runs.
     if: >-
       always()
       && needs.changes.result == 'success'
       && needs.changes.outputs.rust == 'true'
       && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
-      && (needs.rust-checks.outputs.workspace_tests_ok == 'true'
-        || needs.rust-workspace-tests-fallback.result == 'success')
+      && needs.rust-checks.outputs.workspace_tests_ok == 'true'
     # Never self-hosted: this lane downloads the ~8.6 GB workspace test archive from
     # Actions ARTIFACT storage, which measured <4 MB/s to the residential boxes
     # (a routed attempt stalled past the 35 m timeout still mid-download) even
     # though the same boxes pull the GitHub release CDN at ~29 MB/s. Artifact
     # up/downloads pin this archive lane to hosted runners until the archive
     # itself shrinks or moves.
-    runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || 'blacksmith-8vcpu-ubuntu-2404' }}
+    runs-on: ubuntu-latest
     # Hang backstop, not a performance gate (the perf gate re-measures wall
     # time separately). Worst observed hosted-runner run is ~17m on a cold
     # cache; keep ~2x headroom so a slow runner day cancels nothing.
@@ -1086,10 +856,7 @@ jobs:
     # Keep this execution-only lane on elastic capacity. It gains no compiler
     # cache benefit from a persistent worker, and merge-queue bursts otherwise
     # leave it waiting behind compile-bearing jobs on the scarce stable pool.
-    runs-on: >-
-      ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true'
-        && 'ubuntu-latest'
-        || 'blacksmith-4vcpu-ubuntu-2404' }}
+    runs-on: ubuntu-latest
     # Hang backstop, not a performance budget. The post-warm integration sweep
     # plus structural checks reached the old 30m ceiling on a healthy hosted
     # runner while assertions were still progressing. Keep 1.5x headroom;
@@ -1796,12 +1563,10 @@ jobs:
     needs:
       [
         changes,
-        runner-availability,
         fmt,
         package-audit,
         lint-md,
         rust-checks,
-        rust-workspace-tests-fallback,
         rust-check-inputs,
         rust-test,
         rust-security,
@@ -1824,14 +1589,12 @@ jobs:
           MERGE_GROUP_PROVEN: ${{ needs.changes.outputs.merge_group_proven }}
           COLOCATED_TESTS_DISABLED: ${{ vars.HARN_CI_DISABLE_COLOCATED_TESTS }}
         run: |
-          # The runner probe is hard-required: if it hard-fails, every lane
-          # that `needs` it skips, and those skips are otherwise tolerated
-          # below — without this the aggregate would go green with zero Rust
-          # proof. The probe itself exits 0 on all detection failures (falling
-          # back to hosted runners), so a red probe means real infra breakage.
+          # Hard-required lanes: a hard failure here must fail the aggregate,
+          # because the lanes that `needs` them would all skip and skips are
+          # otherwise tolerated below — without this the aggregate could go
+          # green with zero Rust proof.
           declare -A results=(
             ["Detect changes"]="${{ needs.changes.result }}"
-            ["Runner availability probe"]="${{ needs['runner-availability'].result }}"
             ["Markdown lint"]="${{ needs['lint-md'].result }}"
             ["Windows CI routing"]="${{ needs['windows-plan'].result }}"
             ["macOS CI routing"]="${{ needs['macos-plan'].result }}"
@@ -1876,32 +1639,25 @@ jobs:
           rust_checks_result="${{ needs['rust-checks'].result }}"
           lint_ok="${{ needs['rust-checks'].outputs.lint_ok }}"
           workspace_tests_ok="${{ needs['rust-checks'].outputs.workspace_tests_ok }}"
-          workspace_tests_fallback_result="${{ needs['rust-workspace-tests-fallback'].result }}"
-          echo "Rust checks: $rust_checks_result (lint_ok=$lint_ok workspace_tests_ok=$workspace_tests_ok fallback=$workspace_tests_fallback_result)"
+          echo "Rust checks: $rust_checks_result (lint_ok=$lint_ok workspace_tests_ok=$workspace_tests_ok)"
 
-          # The workspace-test proof is satisfied by the leg itself OR its hosted
-          # fallback rerun; the lint proof has no fallback and must come from
-          # the leg. A failed rust-checks group is therefore tolerable only
-          # when the lint leg reached its marker and the fallback went green —
-          # the graceful-spillover path for a self-hosted box dying mid-run.
+          # Both proofs now come from the leg itself. The old tolerance existed
+          # only for the hosted-fallback rerun, which covered a residential box
+          # dying mid-run; on hosted runners a failed leg is a real failure and
+          # rerunning it would just fail again at double the cost (#6017).
           workspace_tests_proven=false
-          if [ "$workspace_tests_ok" = "true" ] || [ "$workspace_tests_fallback_result" = "success" ]; then
+          if [ "$workspace_tests_ok" = "true" ]; then
             workspace_tests_proven=true
           fi
           if [ "$rust_checks_result" != "success" ] && [ "$rust_checks_result" != "skipped" ]; then
-            if [ "$lint_ok" = "true" ] && [ "$workspace_tests_proven" = "true" ]; then
-              echo "::warning::Rust workspace tests recovered via hosted fallback; box health needs attention."
-            else
-              echo "::error::Rust checks failed."
-              exit 1
-            fi
+            echo "::error::Rust checks failed."
+            exit 1
           fi
 
           # With co-location active the environment-neutral suite proof lives
-          # INSIDE the Rust workspace tests leg (or its fallback), so a
-          # Rust-lane-relevant run must carry the workspace-test proof — a skip
-          # would silently drop the suite proof that rust-test no longer
-          # provides.
+          # INSIDE the Rust workspace tests leg, so a Rust-lane-relevant run
+          # must carry the workspace-test proof — a skip would silently drop
+          # the suite proof that rust-test no longer provides.
           if [ "$COLOCATED_TESTS_DISABLED" != "true" ] \
             && [ "${{ needs.changes.outputs.rust }}" = "true" ] \
             && [ "$workspace_tests_proven" != "true" ]; then

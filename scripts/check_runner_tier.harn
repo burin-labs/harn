@@ -144,6 +144,17 @@ fn runner_environment_errors(job_name: string, job) -> list<string> {
   return errors
 }
 
+/**
+ * Whether a declared `HARN_RUNNER_TIER` can produce `tier`.
+ *
+ * A job with a runner ladder declares an expression, where each reachable tier
+ * appears quoted. A job pinned to one runner declares that tier as a bare
+ * literal, and there is no ladder left to mirror.
+ */
+fn declares_tier(declared: string, tier: string) -> bool {
+  return declared == tier || contains(declared, "'${tier}'")
+}
+
 /** A job that reads the tier must declare exactly the tiers in its runner ladder. */
 fn tier_declaration_errors(job_name: string, job) -> list<string> {
   const declared = normalize_expression(job?.env?.[TIER_ENV] ?? "")
@@ -159,12 +170,12 @@ fn tier_declaration_errors(job_name: string, job) -> list<string> {
   let errors: list<string> = []
   const expected = runner_tiers(job)
   for tier in expected {
-    if !contains(declared, "'${tier}'") {
+    if !declares_tier(declared, tier) {
       errors = errors + ["ci.yml:${job_name} ${TIER_ENV} never resolves to '${tier}'"]
     }
   }
   for tier in TIERS {
-    if !expected.contains(tier) && contains(declared, "'${tier}'") {
+    if !expected.contains(tier) && declares_tier(declared, tier) {
       errors = errors
         + ["ci.yml:${job_name} ${TIER_ENV} resolves to impossible tier '${tier}'"]
     }
