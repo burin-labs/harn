@@ -20,6 +20,7 @@ pub(super) fn collect_callable_infos(
     source: &str,
     exported_names: &BTreeSet<String>,
 ) -> Vec<CallableInfo> {
+    let value_referenced = collect_value_referenced_names(program);
     let mut infos = Vec::new();
     for node in program {
         let inner = match &node.node {
@@ -64,7 +65,7 @@ pub(super) fn collect_callable_infos(
                     has_params: has_params || !params.is_empty(),
                     bound_names,
                     harness_binding: harness_param_name(params).map(str::to_string),
-                    can_add_harness_param: true,
+                    can_change_signature: !value_referenced.contains(name),
                     calls,
                     ambient_capability_calls,
                 });
@@ -99,7 +100,7 @@ pub(super) fn collect_callable_infos(
                     has_params: has_params || !params.is_empty(),
                     bound_names,
                     harness_binding: harness_param_name(params).map(str::to_string),
-                    can_add_harness_param: true,
+                    can_change_signature: !value_referenced.contains(name),
                     calls,
                     ambient_capability_calls,
                 });
@@ -108,6 +109,43 @@ pub(super) fn collect_callable_infos(
         }
     }
     infos
+}
+
+/// Names that appear somewhere in the program as a value rather than as the
+/// callee of a call.
+///
+/// A callable referenced as a value carries a function type at that site, so
+/// adding a parameter changes its type and breaks the reference — most often a
+/// typed parameter default (`resolver: ResolverFn = resolve_thing`), where the
+/// declared alias keeps the old arity. A call names its callee in a `String`
+/// field, so any bare `Identifier` matching a callable is a value reference.
+///
+/// A local binding that shadows a top-level callable produces a spurious hit.
+/// That direction is safe: it suppresses a repair rather than emitting one that
+/// does not compile.
+pub(super) fn collect_value_referenced_names(program: &[SNode]) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    let mut record = |node: &SNode| {
+        if let Node::Identifier(name) = &node.node {
+            names.insert(name.clone());
+        }
+    };
+    for node in program {
+        visit::walk_node(node, &mut record);
+        let inner = match &node.node {
+            Node::AttributedDecl { inner, .. } => inner.as_ref(),
+            _ => node,
+        };
+        // `walk_node` reaches fn/tool parameter defaults but not pipeline ones.
+        if let Node::Pipeline { params, .. } = &inner.node {
+            for param in params {
+                if let Some(default) = &param.default_value {
+                    visit::walk_node(default, &mut record);
+                }
+            }
+        }
+    }
+    names
 }
 
 fn callable_bound_names(params: &[TypedParam], body: &[SNode]) -> BTreeSet<String> {
@@ -257,11 +295,18 @@ pub(super) fn build_reverse_callers(infos: &[CallableInfo]) -> Vec<Vec<(usize, u
     reverse
 }
 
+/// The transitive set of callables that must accept a Harness, or `None` when
+/// any member cannot.
+///
+/// Threading is all-or-nothing: a partially threaded set leaves some caller
+/// unable to supply the argument, so a set containing one callable that cannot
+/// take the parameter means the whole repair is unavailable, not that the
+/// callable should be skipped.
 pub(super) fn propagate_harness_requirements(
     infos: &[CallableInfo],
     reverse_callers: &[Vec<(usize, usize)>],
     owner_idx: usize,
-) -> BTreeSet<usize> {
+) -> Option<BTreeSet<usize>> {
     let mut needed = BTreeSet::from([owner_idx]);
     let mut changed = true;
     while changed {
@@ -269,16 +314,16 @@ pub(super) fn propagate_harness_requirements(
         let snapshot = needed.iter().copied().collect::<Vec<_>>();
         for callee_idx in snapshot {
             for &(caller_idx, _) in &reverse_callers[callee_idx] {
-                if infos[caller_idx].harness_binding.is_none()
-                    && infos[caller_idx].can_add_harness_param
-                    && needed.insert(caller_idx)
-                {
+                if infos[caller_idx].harness_binding.is_none() && needed.insert(caller_idx) {
                     changed = true;
                 }
             }
         }
     }
-    needed
+    if needed.iter().any(|&idx| !infos[idx].can_change_signature) {
+        return None;
+    }
+    Some(needed)
 }
 
 pub(super) fn repair_for_ambient_capability_plan(

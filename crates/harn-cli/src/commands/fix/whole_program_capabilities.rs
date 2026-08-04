@@ -14,7 +14,9 @@ use harn_parser::{
 };
 
 use super::capability_migrations::ambient_capability_handle;
-use super::signature_threading::{add_call_argument_edit, collect_callable_infos};
+use super::signature_threading::{
+    add_call_argument_edit, collect_callable_infos, collect_value_referenced_names,
+};
 use super::{CallableInfo, RepairCandidate, RepairImpactWire, SignatureChangeWire};
 
 #[path = "whole_program_capabilities/edits.rs"]
@@ -129,6 +131,7 @@ pub(super) fn plan(
 ) -> Result<Vec<RepairCandidate>, String> {
     let mut program_files = Vec::new();
     let mut callables = Vec::new();
+    let mut program_value_references = BTreeSet::new();
     for file in files {
         let source = std::fs::read_to_string(file)
             .map_err(|error| format!("failed to read {}: {error}", file.display()))?;
@@ -158,6 +161,7 @@ pub(super) fn plan(
             module_graph,
         )
         .check_with_facts(&program, &source);
+        program_value_references.extend(collect_value_referenced_names(&program));
         let infos = collect_callable_infos(&program, &source, &exported);
         let imported_capability_signatures = imported_signatures(file, module_graph, &type_aliases);
         for info in infos {
@@ -256,6 +260,13 @@ pub(super) fn plan(
     if callables.is_empty() {
         return Ok(Vec::new());
     }
+    // An exported callable can only be named as a value from another module, so
+    // its declared function type is fixed by references this file cannot see.
+    for callable in &mut callables {
+        if callable.info.is_exported && program_value_references.contains(&callable.info.name) {
+            callable.info.can_change_signature = false;
+        }
+    }
 
     let diagnostics_by_file = diagnostic_index(diagnostics);
     seed_ambient_requirements(&program_files, &mut callables, &diagnostics_by_file);
@@ -326,6 +337,23 @@ pub(super) fn plan(
         .zip(&added_capabilities)
         .map(|(changed, added)| *changed || !added.is_empty())
         .collect::<Vec<_>>();
+    // A callable named as a value carries a declared function type at that site.
+    // Prepending a capability parameter changes its type, so the reference stops
+    // type-checking and the applied tree no longer compiles. Refusing here keeps
+    // the failure at the cause with a remedy, instead of a downstream arity
+    // mismatch in a file the migration never mentions.
+    if let Some(frozen) = callables
+        .iter()
+        .zip(&signature_changed)
+        .find(|(callable, changed)| **changed && !callable.info.can_change_signature)
+        .map(|(callable, _)| callable)
+    {
+        return Err(format!(
+            "`{}` is used as a value, so a declared function type fixes its parameter list and it cannot accept a capability parameter; give it the capability through an existing parameter, or widen the function type that describes it and rerun",
+            frozen.info.name
+        ));
+    }
+
     let has_missing_imported_capability_arguments = callables.iter().any(|callable| {
         let file = &program_files[callable.file_idx];
         callable.info.calls.iter().any(|call| {

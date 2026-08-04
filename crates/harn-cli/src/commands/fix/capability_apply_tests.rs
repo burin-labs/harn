@@ -1486,3 +1486,53 @@ fn capability_apply_projects_with_mocks_onto_with_scenario() {
         "legacy fixture field was not migrated:\n{updated}"
     );
 }
+
+#[test]
+fn capability_apply_leaves_a_value_referenced_callable_alone() {
+    // A callable named as the default of a typed function parameter has that
+    // alias's arity. Threading a capability parameter into it changes its type
+    // and the alias no longer matches, so the file stops compiling.
+    // Falsifier: without the value-reference guard, `resolve_default` gains a
+    // leading `harness` parameter and the apply emits HARN-TYP-007.
+    let (_, updated) = apply_single(
+        "type ResolverFn = fn(string) -> string\n\nfn resolve_default(path: string) -> string {\n  return path + cwd()\n}\n\nfn load(path: string, resolver: ResolverFn = resolve_default) -> string {\n  return resolver(path)\n}\n\nfn main(harness: Harness) {\n  load(\"manifest.json\")\n}\n",
+    );
+    assert_eq!(
+        callable_params(&updated, "resolve_default"),
+        vec![param("path", "string")],
+        "value-referenced callable was re-signed:\n{updated}"
+    );
+    assert_eq!(
+        callable_params(&updated, "load"),
+        vec![param("path", "string"), param("resolver", "ResolverFn")],
+        "a caller was threaded for a repair that cannot complete:\n{updated}"
+    );
+}
+
+#[test]
+fn capability_plan_refuses_to_narrow_a_callable_named_as_a_value() {
+    // The whole-program planner reaches callables the per-file ambient path
+    // never sees, so the same value-reference constraint has to hold here.
+    // Falsifier: without it the planner emits a `HarnessFs` parameter on
+    // `warm_binary` and the applied file fails to type-check against `WarmFn`.
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("main.harn");
+    fs::write(
+        &script,
+        "type WarmFn = fn(Harness, string) -> string\n\nfn warm_binary(harness: Harness, path: string) -> string {\n  return path + harness.fs.cwd()\n}\n\npub fn reconcile(harness: Harness, path: string, warm: WarmFn = warm_binary) -> string {\n  return warm(harness, path) + harness.env.get_or(\"MODE\", \"\")\n}\n",
+    )
+    .unwrap();
+    let files = vec![script.clone()];
+    let graph = commands::check::build_module_graph(&files);
+
+    let error = whole_program_capabilities::plan(&files, &graph, &[]).unwrap_err();
+
+    assert!(
+        error.contains("warm_binary") && error.contains("used as a value"),
+        "the refusal must name the callable and its cause: {error}"
+    );
+    assert!(
+        !fs::read_to_string(&script).unwrap().contains("HarnessFs"),
+        "planning must not have rewritten the source"
+    );
+}

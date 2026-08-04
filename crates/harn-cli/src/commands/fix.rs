@@ -80,7 +80,7 @@ struct CallableInfo {
     has_params: bool,
     bound_names: BTreeSet<String>,
     harness_binding: Option<String>,
-    can_add_harness_param: bool,
+    can_change_signature: bool,
     calls: Vec<CallSite>,
     ambient_capability_calls: Vec<AmbientCapabilityCall>,
 }
@@ -808,7 +808,7 @@ fn synthesize_ambient_capability_repair(
             RepairImpactWire::local_ambient("existing-harness-binding"),
         ));
     }
-    let needed = propagate_harness_requirements(&infos, &reverse_callers, owner_idx);
+    let needed = propagate_harness_requirements(&infos, &reverse_callers, owner_idx)?;
     let primary_call_start = owner
         .ambient_capability_calls
         .iter()
@@ -1012,7 +1012,7 @@ fn synthesize_missing_harness_repair(
         return None;
     }
     let reverse_callers = build_reverse_callers(&infos);
-    let needed = propagate_harness_requirements(&infos, &reverse_callers, owner_idx);
+    let needed = propagate_harness_requirements(&infos, &reverse_callers, owner_idx)?;
     let mut edits = Vec::new();
     for &idx in &needed {
         edits.push(add_harness_param_edit(source, &infos[idx])?);
@@ -1075,7 +1075,7 @@ fn synthesize_missing_root_argument_repair(
         ));
     }
     let reverse_callers = build_reverse_callers(&infos);
-    let needed = propagate_harness_requirements(&infos, &reverse_callers, owner_idx);
+    let needed = propagate_harness_requirements(&infos, &reverse_callers, owner_idx)?;
     let owner_binding = harness_param_name_for_insert(&infos[owner_idx])?;
     let mut edits = vec![insert_call_argument_before_span(
         source,
