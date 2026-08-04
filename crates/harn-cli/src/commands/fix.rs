@@ -1150,14 +1150,49 @@ fn dedupe_edits(edits: Vec<FixEdit>) -> Vec<FixEdit> {
 
 fn dedupe_wire_edits(edits: &[FixEditWire]) -> Vec<FixEditWire> {
     let mut seen = BTreeSet::new();
-    let mut out = Vec::new();
+    let mut out: Vec<FixEditWire> = Vec::new();
     for edit in edits {
         let key = (edit.span.start, edit.span.end, edit.replacement.clone());
         if seen.insert(key) {
             out.push(edit.clone());
         }
     }
-    out
+    collapse_subsumed_insertions(out)
+}
+
+/// Drop an insertion whose replacement another insertion at the same offset
+/// already contains as a prefix.
+///
+/// A call missing several capability carriers produces one repair per missing
+/// argument and one whole-program repair supplying all of them, so the same
+/// offset receives both `harness.env, ` and `harness.env, harness.fs, `. Those
+/// are the same carriers in the same parameter order, not two candidate fixes:
+/// the longer one satisfies every diagnostic the shorter one does. Treating
+/// them as ambiguous rejects the file, and because a rejected candidate aborts
+/// the whole pass, one multi-carrier callee blocks the migration of every other
+/// file with it.
+fn collapse_subsumed_insertions(edits: Vec<FixEditWire>) -> Vec<FixEditWire> {
+    let subsumed: BTreeSet<usize> = edits
+        .iter()
+        .enumerate()
+        .filter(|(_, edit)| edit.span.start == edit.span.end)
+        .filter(|(index, edit)| {
+            edits.iter().enumerate().any(|(other_index, other)| {
+                other_index != *index
+                    && other.span.start == other.span.end
+                    && other.span.start == edit.span.start
+                    && other.replacement.len() > edit.replacement.len()
+                    && other.replacement.starts_with(&edit.replacement)
+            })
+        })
+        .map(|(index, _)| index)
+        .collect();
+    edits
+        .into_iter()
+        .enumerate()
+        .filter(|(index, _)| !subsumed.contains(index))
+        .map(|(_, edit)| edit)
+        .collect()
 }
 
 fn replace_identifier_within_span_fix(

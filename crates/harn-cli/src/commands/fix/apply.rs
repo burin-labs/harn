@@ -323,7 +323,7 @@ fn edited_source(path: &Path, edits: &[FixEditWire]) -> Result<String, String> {
     Ok(result)
 }
 
-fn validate_edit_composition(path: &Path, edits: &[FixEditWire]) -> Result<(), String> {
+pub(super) fn validate_edit_composition(path: &Path, edits: &[FixEditWire]) -> Result<(), String> {
     for (index, edit) in edits.iter().enumerate() {
         for other in &edits[index + 1..] {
             let edit_inserts = edit.span.start == edit.span.end;
