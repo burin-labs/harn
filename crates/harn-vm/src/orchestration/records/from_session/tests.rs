@@ -440,7 +440,7 @@ async fn an_unknown_session_names_the_session_and_how_to_find_a_real_one() {
         "error must name the session that was not found: {message}"
     );
     assert!(
-        message.contains("harn sessions list"),
+        message.contains("harn session list"),
         "error must point at the surface that lists real sessions: {message}"
     );
 }
