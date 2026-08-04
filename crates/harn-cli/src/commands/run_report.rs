@@ -7,7 +7,8 @@ use std::path::PathBuf;
 use crate::cli::RunsReportArgs;
 
 pub(crate) async fn run(args: RunsReportArgs) -> i32 {
-    let request = request_for_run_record(PathBuf::from(args.path), args.events_db);
+    let path = crate::cli::resolve_run_path_or_exit(args.path.as_deref(), &args.source).await;
+    let request = request_for_run_record(PathBuf::from(path), args.events_db);
     match harn_vm::orchestration::build_run_report(request).await {
         Ok(report) => match serde_json::to_string_pretty(&report) {
             Ok(rendered) => {

@@ -1415,3 +1415,44 @@ fn test_parses_orchestrator_tenant_create_args() {
     assert_eq!(create.ingest_per_minute, Some(120));
     assert!(create.json);
 }
+
+#[test]
+fn parses_session_list_with_root_and_limit() {
+    let cli = Cli::parse_from([
+        "harn",
+        "session",
+        "list",
+        "--session-root",
+        "/tmp/workspace",
+        "--limit",
+        "10",
+        "--json",
+    ]);
+
+    let Command::Session(args) = cli.command.unwrap() else {
+        panic!("expected session command");
+    };
+    let SessionCommand::List(list) = args.command else {
+        panic!("expected session list");
+    };
+    assert_eq!(
+        list.session_root.as_deref(),
+        Some(std::path::Path::new("/tmp/workspace"))
+    );
+    assert_eq!(list.limit, 10);
+    assert!(list.json);
+
+    // Listing the current workspace is the common case and must need no flags.
+    let bare = Cli::parse_from(["harn", "session", "list"]);
+    let Command::Session(args) = bare.command.unwrap() else {
+        panic!("expected session command");
+    };
+    let SessionCommand::List(list) = args.command else {
+        panic!("expected session list");
+    };
+    assert_eq!(list.session_root, None);
+    assert!(
+        list.limit > 0,
+        "a bare list must have a usable default limit"
+    );
+}

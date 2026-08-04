@@ -270,6 +270,7 @@ pub enum LiveClientMode {
     Controller,
 }
 
+pub(crate) mod event_facts;
 mod host_injection;
 mod live_clients;
 mod metadata;

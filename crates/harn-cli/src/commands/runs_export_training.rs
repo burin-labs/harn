@@ -37,8 +37,11 @@ pub(crate) struct ExportTrainingReport {
 /// The renderer owns the exit code: it returns 1 for a refused projection and
 /// 0 for a successful one, so `report.ok` is not re-interpreted here.
 pub(crate) async fn run(args: &RunsExportTrainingArgs) -> i32 {
+    // Projecting a session writes a record, so it has to happen before the
+    // sync report builder, which only ever reads one.
+    let path = crate::cli::resolve_run_path_or_exit(args.path.as_deref(), &args.source).await;
     crate::commands::embedded_report::render_embedded_report(
-        &build_report(args),
+        &build_report(args, &path),
         EXPORT_PAYLOAD_ENV,
         EXPORT_PAYLOAD_PRETTY_ENV,
         EXPORT_SCRIPT,
@@ -48,13 +51,13 @@ pub(crate) async fn run(args: &RunsExportTrainingArgs) -> i32 {
     .await
 }
 
-fn build_report(args: &RunsExportTrainingArgs) -> ExportTrainingReport {
-    let run_record_path = match resolve_run_record_path(args) {
+fn build_report(args: &RunsExportTrainingArgs, path: &str) -> ExportTrainingReport {
+    let run_record_path = match resolve_run_record_path(args, path) {
         Ok(path) => path,
         Err(error) => {
             return ExportTrainingReport {
                 ok: false,
-                run_record_path: args.path.clone(),
+                run_record_path: path.to_string(),
                 output_path: None,
                 example: None,
                 error: Some(error),
@@ -100,8 +103,11 @@ fn build_report(args: &RunsExportTrainingArgs) -> ExportTrainingReport {
 /// exactly one record, or when `--run-id` names which record to read; anything
 /// else fails so the caller states their intent instead of inheriting a
 /// silent tie-break.
-fn resolve_run_record_path(args: &RunsExportTrainingArgs) -> Result<PathBuf, TrainingExampleError> {
-    let path = Path::new(&args.path);
+fn resolve_run_record_path(
+    args: &RunsExportTrainingArgs,
+    path: &str,
+) -> Result<PathBuf, TrainingExampleError> {
+    let path = Path::new(path);
     if path.is_file() {
         return Ok(path.to_path_buf());
     }

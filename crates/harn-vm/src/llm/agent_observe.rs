@@ -1051,6 +1051,7 @@ pub(crate) async fn observed_llm_call(
                 }
                 trace_llm_call(LlmTraceEntry {
                     model: result.model.clone(),
+                    provider: result.provider.clone(),
                     input_tokens: result.input_tokens,
                     output_tokens: result.output_tokens,
                     duration_ms,

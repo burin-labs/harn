@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{Args, Subcommand};
 
 #[derive(Debug, Args)]
@@ -8,6 +10,8 @@ pub(crate) struct SessionArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum SessionCommand {
+    /// List the agent sessions this workspace has persisted.
+    List(SessionListArgs),
     /// Export a persisted run record as a portable Harn session bundle.
     Export(SessionExportArgs),
     /// Export a suspended worker snapshot as a resumable checkpoint bundle.
@@ -18,6 +22,24 @@ pub(crate) enum SessionCommand {
     Validate(SessionValidateArgs),
     /// Print or check the generated session-bundle JSON Schema.
     Schema(SessionSchemaArgs),
+}
+
+/// Sessions are the input to `harn runs --from-session`, so they need a way to
+/// be discovered. Without this the session id can only be recovered by opening
+/// `.harn/session-store.sqlite` by hand, which leaves the reporting surface as
+/// unreachable as it was before it accepted sessions at all.
+#[derive(Debug, Args)]
+pub(crate) struct SessionListArgs {
+    /// Workspace root holding `.harn/session-store.sqlite`. Defaults to the
+    /// current directory.
+    #[arg(long, value_name = "PATH")]
+    pub session_root: Option<PathBuf>,
+    /// Show at most this many sessions, newest first.
+    #[arg(long, default_value_t = 50)]
+    pub limit: usize,
+    /// Emit the listing as JSON.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]

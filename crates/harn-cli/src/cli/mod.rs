@@ -58,6 +58,7 @@ mod quickstart;
 mod routes;
 mod rule;
 mod run;
+pub(crate) mod run_source;
 pub(crate) mod runs;
 mod sandbox;
 mod scan;
@@ -220,6 +221,7 @@ pub(crate) use quickstart::QuickstartArgs;
 pub(crate) use routes::RoutesArgs;
 pub(crate) use rule::{RuleArgs, RuleCommand, RuleTestArgs};
 pub(crate) use run::RunArgs;
+pub(crate) use run_source::resolve_run_path_or_exit;
 pub(crate) use runs::{
     run_runs_command, ReplayArgs, RunsArgs, RunsExportTrainingArgs, RunsReportArgs, RunsReviewArgs,
 };
@@ -231,7 +233,7 @@ pub(crate) use serve::{
 };
 pub(crate) use session::{
     SessionArgs, SessionCheckpointArgs, SessionCommand, SessionExportArgs, SessionImportArgs,
-    SessionSchemaArgs, SessionValidateArgs,
+    SessionListArgs, SessionSchemaArgs, SessionValidateArgs,
 };
 pub(crate) use skill::{
     SkillArgs, SkillCommand, SkillEndorseArgs, SkillKeyCommand, SkillKeyGenerateArgs,

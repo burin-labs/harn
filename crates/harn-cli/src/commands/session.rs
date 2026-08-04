@@ -5,19 +5,89 @@ use std::process;
 
 use crate::cli::{
     SessionArgs, SessionCheckpointArgs, SessionCommand, SessionExportArgs, SessionImportArgs,
-    SessionSchemaArgs, SessionValidateArgs,
+    SessionListArgs, SessionSchemaArgs, SessionValidateArgs,
 };
 
 const DEFAULT_SCHEMA_PATH: &str = "spec/schemas/session-bundle.v1.schema.json";
 
-pub(crate) fn run(args: SessionArgs) {
+pub(crate) async fn run(args: SessionArgs) {
     match args.command {
+        SessionCommand::List(list) => run_list(list).await,
         SessionCommand::Export(export) => run_export(export),
         SessionCommand::Checkpoint(checkpoint) => run_checkpoint(checkpoint),
         SessionCommand::Import(import) => run_import(import),
         SessionCommand::Validate(validate) => run_validate(validate),
         SessionCommand::Schema(schema) => run_schema(schema),
     }
+}
+
+async fn run_list(args: SessionListArgs) {
+    let explicit_root = args.session_root.is_some();
+    let root = args
+        .session_root
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let sessions = match harn_vm::orchestration::list_session_runs(&root, Some(args.limit)).await {
+        Ok(sessions) => sessions,
+        Err(error) => {
+            eprintln!("error: {error}");
+            process::exit(1);
+        }
+    };
+    if args.json {
+        match serde_json::to_string_pretty(&sessions) {
+            Ok(rendered) => println!("{rendered}"),
+            Err(error) => {
+                eprintln!("error: failed to render session list: {error}");
+                process::exit(1);
+            }
+        }
+        return;
+    }
+    if sessions.is_empty() {
+        // Distinguish "no store" from "empty store" by naming the path we
+        // looked in, so a wrong `--session-root` does not read as a workspace
+        // that has never run an agent.
+        println!(
+            "No persisted sessions under {}/.harn/session-store.sqlite",
+            root.display()
+        );
+        return;
+    }
+    println!(
+        "{:<38} {:<8} {:>8} {:>10} {:<20} TITLE",
+        "SESSION", "STATUS", "EVENTS", "COST_USD", "CREATED"
+    );
+    for session in &sessions {
+        // A session that recorded no usage at all is not a session that cost
+        // nothing — sessions persisted before the store carried usage columns
+        // read as all-zero. Printing `0.0000` for both would state a
+        // measurement we do not have, so absence gets its own glyph.
+        let cost = if session.cost_usd_micros == 0
+            && session.input_tokens == 0
+            && session.output_tokens == 0
+        {
+            "-".to_string()
+        } else {
+            format!("{:.4}", session.cost_usd_micros as f64 / 1_000_000.0)
+        };
+        println!(
+            "{:<38} {:<8} {:>8} {:>10} {:<20} {}",
+            session.session_id,
+            session.session_status,
+            session.event_count,
+            cost,
+            session.created_at,
+            session.title.as_deref().unwrap_or("-"),
+        );
+    }
+    println!(
+        "\nReport on one with: harn runs report --from-session <SESSION>{}",
+        if explicit_root {
+            " --session-root <PATH>"
+        } else {
+            ""
+        }
+    );
 }
 
 fn run_export(args: SessionExportArgs) {

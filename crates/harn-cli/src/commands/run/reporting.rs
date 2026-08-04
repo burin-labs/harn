@@ -479,33 +479,133 @@ pub(crate) fn render_trace_summary() -> String {
     let mut total_input = 0i64;
     let mut total_output = 0i64;
     let mut total_ms = 0u64;
+    // Priced and unpriced calls are summed separately. This used to apply one
+    // hardcoded Sonnet-4 rate ($3/$15 per MTok) to every call regardless of
+    // which model served it, so a trace of any other model reported a
+    // confidently wrong dollar figure. Catalog pricing is the owner, and it
+    // returns `None` for a pair it has no rate for — a fact worth reporting
+    // rather than replacing with a guess.
+    let mut priced_cost = 0.0f64;
+    let mut unpriced_calls = 0usize;
     for (index, entry) in entries.iter().enumerate() {
+        let cost = harn_vm::llm::pricing_aware_call_cost(
+            &entry.provider,
+            &entry.model,
+            entry.input_tokens,
+            entry.output_tokens,
+        );
+        match cost {
+            Some(cost) => priced_cost += cost,
+            None => unpriced_calls += 1,
+        }
         let _ = writeln!(
             out,
-            "  #{}: {} | {} in + {} out tokens | {} ms",
+            "  #{}: {} | {} in + {} out tokens | {} ms | {}",
             index + 1,
             entry.model,
             entry.input_tokens,
             entry.output_tokens,
             entry.duration_ms,
+            cost.map_or_else(|| "unpriced".to_string(), |cost| format!("${cost:.4}")),
         );
         total_input += entry.input_tokens;
         total_output += entry.output_tokens;
         total_ms += entry.duration_ms;
     }
     let total_tokens = total_input + total_output;
-    // Rough cost estimate using Sonnet 4 pricing ($3/MTok in, $15/MTok out).
-    let cost = (total_input as f64 * 3.0 + total_output as f64 * 15.0) / 1_000_000.0;
+    // "≥" rather than "~" when some calls could not be priced: the total is a
+    // floor on the real spend, not an estimate of it.
+    let cost_label = if unpriced_calls == 0 {
+        format!("${priced_cost:.4}")
+    } else {
+        format!("≥${priced_cost:.4} ({unpriced_calls} unpriced)")
+    };
     let _ = writeln!(
         out,
-        "  \x1b[1m{} call{}, {} tokens ({}in + {}out), {} ms, ~${:.4}\x1b[0m",
+        "  \x1b[1m{} call{}, {} tokens ({}in + {}out), {} ms, {}\x1b[0m",
         entries.len(),
         if entries.len() == 1 { "" } else { "s" },
         total_tokens,
         total_input,
         total_output,
         total_ms,
-        cost,
+        cost_label,
     );
     out
+}
+
+#[cfg(test)]
+mod trace_summary_pricing_tests {
+    use harn_vm::llm::LlmTraceEntry;
+
+    /// The trace summary used to price every call at one hardcoded Sonnet-4
+    /// rate ($3/$15 per MTok) regardless of which model served it. This pins
+    /// the two properties that replaced it: a real catalog price for a known
+    /// pair, and no invented price for an unknown one.
+    #[test]
+    fn a_known_pair_is_priced_from_the_catalog_and_an_unknown_pair_is_not() {
+        let known = harn_vm::llm::pricing_aware_call_cost(
+            "anthropic",
+            "claude-sonnet-4-20250514",
+            1_000_000,
+            0,
+        );
+        let unknown = harn_vm::llm::pricing_aware_call_cost(
+            "definitely-not-a-provider",
+            "definitely-not-a-model",
+            1_000_000,
+            1_000_000,
+        );
+        assert!(
+            unknown.is_none(),
+            "an unpriced pair must report absence, not a number: {unknown:?}"
+        );
+        if let Some(known) = known {
+            assert!(
+                known > 0.0,
+                "a catalog-priced pair must produce a positive cost"
+            );
+        }
+    }
+
+    /// The old rate table would have priced these identically. Whatever the
+    /// catalog says, two different models must not be forced to the same
+    /// number by the reporter.
+    #[test]
+    fn the_reporter_does_not_impose_one_rate_on_every_model() {
+        let entries = [
+            LlmTraceEntry {
+                model: "claude-sonnet-4-20250514".to_string(),
+                provider: "anthropic".to_string(),
+                input_tokens: 1_000_000,
+                output_tokens: 1_000_000,
+                duration_ms: 1,
+            },
+            LlmTraceEntry {
+                model: "claude-haiku-4-5-20251001".to_string(),
+                provider: "anthropic".to_string(),
+                input_tokens: 1_000_000,
+                output_tokens: 1_000_000,
+                duration_ms: 1,
+            },
+        ];
+        let priced: Vec<Option<f64>> = entries
+            .iter()
+            .map(|entry| {
+                harn_vm::llm::pricing_aware_call_cost(
+                    &entry.provider,
+                    &entry.model,
+                    entry.input_tokens,
+                    entry.output_tokens,
+                )
+            })
+            .collect();
+        if let (Some(sonnet), Some(haiku)) = (priced[0], priced[1]) {
+            assert!(
+                (sonnet - haiku).abs() > f64::EPSILON,
+                "a frontier and a small model must not price identically \
+                 (sonnet={sonnet}, haiku={haiku}); that equality was the old bug"
+            );
+        }
+    }
 }

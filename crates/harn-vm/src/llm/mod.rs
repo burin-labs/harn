@@ -16,6 +16,9 @@ mod agent_runtime;
 pub(crate) mod agent_session_host;
 mod agent_session_transcript;
 mod agent_terminal_class;
+/// The run-record projector maps a loop's terminal status onto a run status,
+/// and this is the owner of what those status strings mean.
+pub(crate) use agent_terminal_class::session_status_indicates_error;
 pub use agent_terminal_class::{agent_terminal_class, AgentTerminalClass};
 mod agent_tools;
 pub mod api;
@@ -217,6 +220,10 @@ pub use api::{
     OllamaRuntimeSettings, HARN_OLLAMA_KEEP_ALIVE_ENV, HARN_OLLAMA_NUM_CTX_ENV,
     OLLAMA_DEFAULT_KEEP_ALIVE, OLLAMA_DEFAULT_NUM_CTX, OLLAMA_HOST_ENV,
 };
+/// Catalog-backed per-call pricing, `None` when the (provider, model) pair has
+/// no rate. Exported so a CLI surface reports cost through the one owner of
+/// what a call costs instead of embedding its own rate table.
+pub use cost::pricing_aware_call_cost;
 pub use fake::{
     fake_llm_captured_calls, install_fake_llm_script, FakeLlmCall, FakeLlmError, FakeLlmEvent,
     FakeLlmGuard, FakeLlmScript, FakeLlmTurn, FakeStopReason,
@@ -849,6 +856,7 @@ async fn llm_completion_builtin(
     let result = vm_call_completion_full(&opts, &prefix, suffix.as_deref()).await?;
     trace_llm_call(LlmTraceEntry {
         model: result.model.clone(),
+        provider: result.provider.clone(),
         input_tokens: result.input_tokens,
         output_tokens: result.output_tokens,
         duration_ms: start.elapsed().as_millis() as u64,
