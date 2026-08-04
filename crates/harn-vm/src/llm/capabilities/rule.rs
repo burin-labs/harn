@@ -13,7 +13,7 @@ use serde::Deserialize;
 use super::model::{
     fill_opt, Capabilities, CapabilitiesFile, ComputerUseStyle, LiveEndpointFamily,
     ProviderDefaults, ReasoningHistoryWireField, ScreenshotScaling, SystemMessagePlacement,
-    WireDialect,
+    ToolModeParitySource, WireDialect,
 };
 use crate::llm::providers::anthropic::claude_generation;
 use crate::llm::providers::openai_compat::gpt_generation;
@@ -1119,6 +1119,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
 }
 
 fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilities {
+    let (parity_verdict, parity_source) = rule_tool_mode_parity(rule);
     let thinking_modes = rule_thinking_modes(rule);
     let thinking_block_style = rule_thinking_block_style(rule);
     let prompt_caching = rule.prompt_caching.unwrap_or(false);
@@ -1322,7 +1323,8 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
         recommended_endpoint: rule.recommended_endpoint.clone(),
         text_tool_wire_format_supported: rule.text_tool_wire_format_supported.unwrap_or(true),
         preferred_tool_format: Some(rule_preferred_tool_format(rule)),
-        tool_mode_parity: Some(rule_tool_mode_parity(rule)),
+        tool_mode_parity: Some(parity_verdict),
+        tool_mode_parity_source: Some(parity_source),
         tool_mode_parity_notes: rule.tool_mode_parity_notes.clone(),
         thinking_disable_directive: rule.thinking_disable_directive.clone(),
         auto_reasoning_overrides: rule.auto_reasoning_overrides.clone().unwrap_or_default(),
@@ -1354,18 +1356,25 @@ pub(super) fn rule_preferred_tool_format(rule: &ProviderRule) -> String {
     })
 }
 
-pub(super) fn rule_tool_mode_parity(rule: &ProviderRule) -> String {
-    rule.tool_mode_parity.clone().unwrap_or_else(|| {
-        match (
-            rule.native_tools.unwrap_or(false),
-            rule.text_tool_wire_format_supported.unwrap_or(true),
-        ) {
-            (true, true) => "unknown".to_string(),
-            (true, false) => "native_only".to_string(),
-            (false, true) => "text_only".to_string(),
-            (false, false) => "unsupported".to_string(),
-        }
-    })
+/// A route's tool-mode parity verdict together with where it came from.
+///
+/// The two travel as one value so a caller cannot read the verdict without
+/// also being handed its provenance. Keeping them in one slot is what let a
+/// derived fallback pass as an authored finding (#5885).
+pub(super) fn rule_tool_mode_parity(rule: &ProviderRule) -> (String, ToolModeParitySource) {
+    if let Some(declared) = rule.tool_mode_parity.clone() {
+        return (declared, ToolModeParitySource::Declared);
+    }
+    let derived = match (
+        rule.native_tools.unwrap_or(false),
+        rule.text_tool_wire_format_supported.unwrap_or(true),
+    ) {
+        (true, true) => "unknown",
+        (true, false) => "native_only",
+        (false, true) => "text_only",
+        (false, false) => "unsupported",
+    };
+    (derived.to_string(), ToolModeParitySource::Derived)
 }
 
 pub(super) fn rule_structured_output(rule: &ProviderRule) -> Option<String> {

@@ -54,6 +54,9 @@ pub struct ProviderCapabilityMatrixRow {
     pub text_tools: bool,
     pub preferred_tool_format: String,
     pub tool_mode_parity: String,
+    /// Whether `tool_mode_parity` was authored on a row or computed from
+    /// `native_tools` / `text_tool_wire_format_supported` (#5885).
+    pub tool_mode_parity_source: String,
     pub tools: bool,
     pub cache: bool,
     /// Serving-quality / precision trust verdict for this route. See
@@ -306,6 +309,7 @@ fn rule_to_matrix_row(
     rule: &ProviderRule,
     source: &str,
 ) -> ProviderCapabilityMatrixRow {
+    let (parity_verdict, parity_source) = rule_tool_mode_parity(rule);
     ProviderCapabilityMatrixRow {
         provider: provider.to_string(),
         model: rule.model_match.clone(),
@@ -332,7 +336,8 @@ fn rule_to_matrix_row(
         native_tools: rule.native_tools.unwrap_or(false),
         text_tools: rule.text_tool_wire_format_supported.unwrap_or(true),
         preferred_tool_format: rule_preferred_tool_format(rule),
-        tool_mode_parity: rule_tool_mode_parity(rule),
+        tool_mode_parity: parity_verdict,
+        tool_mode_parity_source: parity_source.as_str().to_string(),
         tools: rule.native_tools.unwrap_or(false)
             || rule.text_tool_wire_format_supported.unwrap_or(true),
         cache: rule.prompt_caching.unwrap_or(false),

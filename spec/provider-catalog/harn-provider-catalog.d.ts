@@ -143,6 +143,7 @@ export interface HarnCatalogModel {
     text: boolean
     preferred_format?: string
     parity?: string
+    parity_source?: 'declared' | 'derived'
     parity_notes?: string
     empirical_parity?: HarnToolEmpiricalParity
     tool_search: string[]

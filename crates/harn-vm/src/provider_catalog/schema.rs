@@ -275,6 +275,7 @@ pub fn schema_value() -> Value {
                     "preferred_format": {"type": "string"},
                     "parity": {"type": "string"},
                     "parity_notes": {"type": "string"},
+                    "parity_source": {"enum": ["declared", "derived"]},
                     "empirical_parity": {"$ref": "#/$defs/tool_empirical_parity"},
                     "tool_search": {"type": "array", "items": {"type": "string"}},
                     "max_tools": {"type": "integer", "minimum": 1}

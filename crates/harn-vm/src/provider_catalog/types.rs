@@ -222,6 +222,11 @@ pub struct ModelToolSupport {
     pub preferred_format: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parity: Option<String>,
+    /// `declared` when a capability row states `parity` outright, `derived`
+    /// when it was computed from `native`/`text`. Both are declarations; a
+    /// forced-format sweep is [`Self::empirical_parity`] instead (#5885).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parity_source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parity_notes: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

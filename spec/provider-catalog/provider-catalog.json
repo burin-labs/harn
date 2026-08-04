@@ -1553,6 +1553,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "tool_use",
@@ -1658,6 +1659,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "tool_use",
@@ -1763,6 +1765,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "tool_use",
@@ -1868,6 +1871,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "tool_use",
@@ -1973,6 +1977,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": [
           "bm25",
           "regex"
@@ -2101,6 +2106,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": [
           "bm25",
           "regex"
@@ -2210,6 +2216,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": [
           "bm25",
           "regex"
@@ -2323,6 +2330,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": [
           "bm25",
           "regex"
@@ -2436,6 +2444,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": [
           "bm25",
           "regex"
@@ -2545,6 +2554,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": [
           "bm25",
           "regex"
@@ -2660,6 +2670,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": [
           "bm25",
           "regex"
@@ -2812,6 +2823,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": [
           "bm25",
           "regex"
@@ -2972,6 +2984,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": [
           "bm25",
           "regex"
@@ -3123,6 +3136,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": [
           "bm25",
           "regex"
@@ -3236,6 +3250,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": [
           "bm25",
           "regex"
@@ -3350,6 +3365,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": [
           "bm25",
           "regex"
@@ -3465,6 +3481,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": [
           "bm25",
           "regex"
@@ -3590,6 +3607,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": [
           "bm25",
           "regex"
@@ -3728,6 +3746,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -3824,6 +3843,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -3909,6 +3929,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -3997,6 +4018,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -4094,6 +4116,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -4190,6 +4213,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -4289,6 +4313,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -4383,6 +4408,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -4461,6 +4487,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "2026-06-23 live Baseten probe: forced native/off emitted visible `<tool_call><arg_key>...` content with no provider-native tool_calls; Harn heredoc text tools emitted parseable `<tool_call>\\nadd({ ... })\\n</tool_call>`.",
         "tool_search": []
       },
@@ -4544,6 +4571,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "2026-06-23 live Baseten probe: forced native/off emitted visible `<tool_call><arg_key>...` content with no provider-native tool_calls; Harn heredoc text tools emitted parseable `<tool_call>\\nadd({ ... })\\n</tool_call>`.",
         "tool_search": []
       },
@@ -4641,6 +4669,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "2026-06-23 live Baseten probe: forced native/off emitted visible `<tool_call><arg_key>...` content with no provider-native tool_calls; Harn heredoc text tools emitted parseable `<tool_call>\\nadd({ ... })\\n</tool_call>`.",
         "tool_search": []
       },
@@ -4723,6 +4752,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "none",
@@ -4801,6 +4831,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "none",
@@ -4898,6 +4929,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -4973,6 +5005,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -5039,6 +5072,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -5132,6 +5166,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -5221,6 +5256,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -5300,6 +5336,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -5382,6 +5419,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -5462,6 +5500,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -5541,6 +5580,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -5618,6 +5658,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -5691,6 +5732,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -5763,6 +5805,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -5842,6 +5885,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -5917,6 +5961,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "2026-06-24 forced-format sweep (N=5): DeepInfra Qwen3.6-35B-A3B native bills empty completions (1/5) and fenced-JSON is flaky (2/5); heredoc text carried a backslash-heavy Zig body byte-clean 5/5.",
         "tool_search": []
       },
@@ -5999,6 +6044,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "2026-06-24 forced-format sweep (N=5): DeepInfra Qwen3.6-35B-A3B native bills empty completions (1/5) and fenced-JSON is flaky (2/5); heredoc text carried a backslash-heavy Zig body byte-clean 5/5.",
         "tool_search": []
       },
@@ -6086,6 +6132,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -6171,6 +6218,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -6265,6 +6313,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -6352,6 +6401,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -6440,6 +6490,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -6536,6 +6587,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "2026-06-24 Harn agent-loop (gpt-oss-120b, zig-feat, tool grounding present): DeepInfra native billed completion_tokens=86 with no dispatchable tool call or answer (Harmony reasoning-channel-only / upstream contract violation), repeated ~10x -> run unusable. Text/heredoc is the clean pay-per-token channel. See vLLM #22578/#44216, SGLang #8976/#10738, openai/harmony #68.",
         "tool_search": []
       },
@@ -6618,6 +6670,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -6694,6 +6747,7 @@
         "text": true,
         "preferred_format": "json",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted a malformed native call whose function name was the whole JSON payload; fenced JSON text-channel tools completed the loop.",
         "tool_search": []
       },
@@ -6779,6 +6833,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -6858,6 +6913,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -6938,6 +6994,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -7032,6 +7089,7 @@
         "text": true,
         "preferred_format": "json",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted XML `<tool_use>` text instead of provider-native tool_calls. JSON tools completed the loop when auto reasoning was disabled; text tools did not.",
         "tool_search": []
       },
@@ -7121,6 +7179,7 @@
         "text": true,
         "preferred_format": "json",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted XML `<tool_use>` text instead of provider-native tool_calls. JSON tools completed the loop when auto reasoning was disabled; text tools did not.",
         "tool_search": []
       },
@@ -7224,6 +7283,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "text_only",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "none",
@@ -7321,6 +7381,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -7414,6 +7475,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -7511,6 +7573,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -7606,6 +7669,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "interchangeable",
+        "parity_source": "declared",
         "parity_notes": "2026-07-18 credentialed probe (harn 0.10.23, direct Fireworks /v1, N=2): native carried the large backslash/quote/unicode string argument byte-exact on tool_choice auto and required (2/2); the Harn text-tool channel parsed byte-exact 2/2 (finish=stop, no reasoning over-run).",
         "tool_search": []
       },
@@ -7701,6 +7765,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -7849,6 +7914,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -7989,6 +8055,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -8145,6 +8212,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -8284,6 +8352,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -8438,6 +8507,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -8585,6 +8655,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -8670,6 +8741,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -8762,6 +8834,7 @@
         "text": false,
         "preferred_format": "none",
         "parity": "unsupported",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "none",
@@ -8839,6 +8912,7 @@
         "text": false,
         "preferred_format": "none",
         "parity": "unsupported",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "none",
@@ -8928,6 +9002,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -9034,6 +9109,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -9138,6 +9214,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -9232,6 +9309,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -9324,6 +9402,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -9421,6 +9500,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -9490,6 +9570,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "declared",
         "parity_notes": "Inception documents OpenAI-compatible tool use for Mercury 2; no Harn parity probe has run yet.",
         "tool_search": []
       },
@@ -9567,6 +9648,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "declared",
         "parity_notes": "Mercury Coder Small supports tool use on the OpenAI-compatible API; structured object generation was not documented as GA in the source pass.",
         "tool_search": []
       },
@@ -9633,6 +9715,7 @@
         "text": true,
         "preferred_format": "json",
         "parity": "text_only",
+        "parity_source": "declared",
         "parity_notes": "2026-07-19 #5162 CUDA receipt: freshly restarted ghcr.io/ggml-org/llama.cpp:server-cuda servers used --jinja, --reasoning-format deepseek, --chat-template-kwargs {\"enable_thinking\":false}, -np 1, -fa on, and q8_0 K/V cache. Six coding-agent fixtures were forced through native and JSON text formats with two replicates per format on Q4_K_XL (native 2/12, text 8/12; -ngl 999, -c 65536), Q5_K_XL (native 0/12, text 8/12; -ngl 999, -c 65536), and Q8_0 base (native 2/12, text 8/12; -ngl 35, -c 16384 because the 36.9 GB model does not fit this 32 GiB GPU). All rows reached high classifier confidence; see .harn-runs/coding-agent-bench/latest/tool_mode_parity_overlay.toml and the per-quant receipts. Native remained unreliable across the family, so keep JSON text tooling; server_parser = none.",
         "tool_search": []
       },
@@ -9724,6 +9807,7 @@
         "text": true,
         "preferred_format": "json",
         "parity": "text_only",
+        "parity_source": "declared",
         "parity_notes": "2026-07-19 #5162 CUDA receipt: freshly restarted ghcr.io/ggml-org/llama.cpp:server-cuda servers used --jinja, --reasoning-format deepseek, --chat-template-kwargs {\"enable_thinking\":false}, -np 1, -fa on, and q8_0 K/V cache. Six coding-agent fixtures were forced through native and JSON text formats with two replicates per format on Q4_K_XL (native 2/12, text 8/12; -ngl 999, -c 65536), Q5_K_XL (native 0/12, text 8/12; -ngl 999, -c 65536), and Q8_0 base (native 2/12, text 8/12; -ngl 35, -c 16384 because the 36.9 GB model does not fit this 32 GiB GPU). All rows reached high classifier confidence; see .harn-runs/coding-agent-bench/latest/tool_mode_parity_overlay.toml and the per-quant receipts. Native remained unreliable across the family, so keep JSON text tooling; server_parser = none.",
         "tool_search": []
       },
@@ -9791,6 +9875,7 @@
         "text": true,
         "preferred_format": "json",
         "parity": "text_only",
+        "parity_source": "declared",
         "parity_notes": "2026-07-19 #5162 CUDA receipt: freshly restarted ghcr.io/ggml-org/llama.cpp:server-cuda servers used --jinja, --reasoning-format deepseek, --chat-template-kwargs {\"enable_thinking\":false}, -np 1, -fa on, and q8_0 K/V cache. Six coding-agent fixtures were forced through native and JSON text formats with two replicates per format on Q4_K_XL (native 2/12, text 8/12; -ngl 999, -c 65536), Q5_K_XL (native 0/12, text 8/12; -ngl 999, -c 65536), and Q8_0 base (native 2/12, text 8/12; -ngl 35, -c 16384 because the 36.9 GB model does not fit this 32 GiB GPU). All rows reached high classifier confidence; see .harn-runs/coding-agent-bench/latest/tool_mode_parity_overlay.toml and the per-quant receipts. Native remained unreliable across the family, so keep JSON text tooling; server_parser = none.",
         "tool_search": []
       },
@@ -9860,6 +9945,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -9931,6 +10017,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -10000,6 +10087,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -10070,6 +10158,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -10140,6 +10229,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -10207,6 +10297,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "delimited",
@@ -10283,6 +10374,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "delimited",
@@ -10354,6 +10446,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "delimited",
@@ -10426,6 +10519,7 @@
         "text": true,
         "preferred_format": "json",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and prose claiming the tool had run; fenced JSON text-channel tools completed the loop.",
         "tool_search": []
       },
@@ -10503,6 +10597,7 @@
         "text": true,
         "preferred_format": "json",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and prose claiming the tool had run; fenced JSON text-channel tools completed the loop.",
         "tool_search": []
       },
@@ -10586,6 +10681,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "delimited",
@@ -10666,6 +10762,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "delimited",
@@ -10736,6 +10833,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -10823,6 +10921,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -10910,6 +11009,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -11005,6 +11105,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -11101,6 +11202,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -11208,6 +11310,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -11305,6 +11408,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -11375,6 +11479,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -11445,6 +11550,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -11525,6 +11631,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -11616,6 +11723,7 @@
         "text": true,
         "preferred_format": "json",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and claimed the tool was unavailable. Harn JSON tools completed the loop; text tools also pass after fixing text-mode history projection.",
         "tool_search": []
       },
@@ -11709,6 +11817,7 @@
         "text": true,
         "preferred_format": "json",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and claimed the tool was unavailable. Harn JSON tools completed the loop; text tools also pass after fixing text-mode history projection.",
         "tool_search": []
       },
@@ -11803,6 +11912,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "interchangeable",
+        "parity_source": "declared",
         "parity_notes": "2026-07-18 credentialed probe (harn 0.10.23, direct Moonshot /v1, tool_choice=auto, N=2): native carried the large backslash/quote/unicode string argument byte-exact 2/2, and the Harn text-tool channel parsed byte-exact 2/2 with no reasoning over-run. Forced tool_choice (required/specified) returns HTTP 400 'incompatible with thinking enabled' and is not an available mode.",
         "tool_search": []
       },
@@ -11894,6 +12004,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -11976,6 +12087,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -12058,6 +12170,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -12145,6 +12258,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "delimited",
@@ -12228,6 +12342,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "delimited",
@@ -12315,6 +12430,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -12389,6 +12505,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "interchangeable",
+        "parity_source": "declared",
         "parity_notes": "2026-06-20 Harn agent-loop smoke: NVIDIA NIM Nemotron 3 Nano completed both native and JSON tool loops with reasoning disabled. Earlier native false negatives were caused by Harn's parser treating terse final answers as billed no-ops; keep native preferred.",
         "tool_search": []
       },
@@ -12471,6 +12588,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -12553,6 +12671,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -12641,6 +12760,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -12728,6 +12848,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -12810,6 +12931,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -12886,6 +13008,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "interchangeable",
+        "parity_source": "declared",
         "tool_search": []
       },
       "structured_output": "native",
@@ -12960,6 +13083,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "GLM-5.x's native channel emits `<tool_call><arg_key>...` markup as content instead of OpenAI message.tool_calls — a weight-intrinsic behavior reproduced across every GLM-5 host probed (zai/Baseten live, Together + OpenRouter agent-loop smoke, DeepInfra, Fireworks glm-5p*). NVIDIA serves the same weights, so the same leak applies; pin the clean heredoc text channel for family parity. Flagged by the native_unreliable-family consistency gate.",
         "tool_search": []
       },
@@ -13039,6 +13163,7 @@
         "text": true,
         "preferred_format": "json",
         "parity": "text_only",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "format_kw",
@@ -13105,6 +13230,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "text_only",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "format_kw",
@@ -13169,6 +13295,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "text_only",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "format_kw",
@@ -13235,6 +13362,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "text_only",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "format_kw",
@@ -13303,6 +13431,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "text_only",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "format_kw",
@@ -13367,6 +13496,7 @@
         "text": false,
         "preferred_format": "native",
         "parity": "native_only",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "format_kw",
@@ -13429,6 +13559,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -13518,6 +13649,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -13609,6 +13741,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -13702,6 +13835,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -13795,6 +13929,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -13888,6 +14023,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -13988,6 +14124,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": [
           "hosted",
           "client"
@@ -14086,6 +14223,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": [
           "hosted",
           "client"
@@ -14200,6 +14338,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": [
           "hosted",
           "client"
@@ -14307,6 +14446,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": [
           "hosted",
           "client"
@@ -14406,6 +14546,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": [
           "hosted",
           "client"
@@ -14521,6 +14662,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": [
           "hosted",
           "client"
@@ -14689,6 +14831,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": [
           "hosted",
           "client"
@@ -14808,6 +14951,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": [
           "hosted",
           "client"
@@ -14996,6 +15140,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": [
           "hosted",
           "client"
@@ -15182,6 +15327,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": [
           "hosted",
           "client"
@@ -15361,6 +15507,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -15453,6 +15600,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -15546,6 +15694,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -15642,6 +15791,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -15740,6 +15890,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -15834,6 +15985,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -15897,6 +16049,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "tool_use",
@@ -15969,6 +16122,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "tool_use",
@@ -16039,6 +16193,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "tool_use",
@@ -16112,6 +16267,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "tool_use",
@@ -16183,6 +16339,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "tool_use",
@@ -16253,6 +16410,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "tool_use",
@@ -16331,6 +16489,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "tool_use",
@@ -16410,6 +16569,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -16485,6 +16645,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -16559,6 +16720,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "OpenRouter DeepSeek V3.2 advertises native tools, but coding-agent runs observed provider-native failures; default to Harn text tools and recover DSML markers.",
         "tool_search": []
       },
@@ -16640,6 +16802,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -16715,6 +16878,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -16792,6 +16956,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -16880,6 +17045,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -16970,6 +17136,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -17043,6 +17210,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -17115,6 +17283,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "interchangeable",
+        "parity_source": "declared",
         "parity_notes": "Live OpenRouter probe on 2026-06-12 returned a valid provider-native tool call for KAT-Coder-Pro V2.",
         "tool_search": []
       },
@@ -17193,6 +17362,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "delimited",
@@ -17261,6 +17431,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "delimited",
@@ -17329,6 +17500,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "delimited",
@@ -17400,6 +17572,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "delimited",
@@ -17489,6 +17662,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -17568,6 +17742,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -17659,6 +17834,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -17729,6 +17905,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -17820,6 +17997,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "2026-06-24 forced-format sweep (N=5): OpenRouter Kimi-K2.7-Code native dispatched 5/5 but double-escaped backslash bodies (1/5 fidelity); fenced-JSON emitted no parseable Harn call (0/5). Heredoc text carried the body byte-clean 5/5.",
         "tool_search": []
       },
@@ -17904,6 +18082,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -17979,6 +18158,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": [
           "hosted",
           "client"
@@ -18059,6 +18239,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": [
           "hosted",
           "client"
@@ -18137,6 +18318,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": [
           "hosted",
           "client"
@@ -18217,6 +18399,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": [
           "hosted",
           "client"
@@ -18297,6 +18480,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": [
           "hosted",
           "client"
@@ -18380,6 +18564,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -18468,6 +18653,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -18556,6 +18742,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -18642,6 +18829,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -18728,6 +18916,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -18814,6 +19003,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -18908,6 +19098,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "text_only",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -18985,6 +19176,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -19060,6 +19252,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "OpenRouter Qwen3-Coder Flash native tools exhausted the coding-agent fixture while text tools completed; default to Harn text tools for preset parity.",
         "tool_search": []
       },
@@ -19145,6 +19338,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "OpenRouter Qwen3-Coder Flash native tools exhausted the coding-agent fixture while text tools completed; default to Harn text tools for preset parity.",
         "tool_search": []
       },
@@ -19231,6 +19425,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -19306,6 +19501,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -19384,6 +19580,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -19460,6 +19657,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -19534,6 +19732,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -19610,6 +19809,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -19690,6 +19890,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -19774,6 +19975,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -19858,6 +20060,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "interchangeable",
+        "parity_source": "declared",
         "parity_notes": "Live OpenRouter probe on 2026-06-12 returned a valid provider-native tool call for Step 3.7 Flash with reasoning enabled.",
         "tool_search": []
       },
@@ -19933,6 +20136,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -20009,6 +20213,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop. OpenRouter reasoning-on text tools emitted malformed tool markup, so auto reasoning is off for agent/code/verify tasks.",
         "tool_search": []
       },
@@ -20085,6 +20290,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop. OpenRouter reasoning-on text tools emitted malformed tool markup, so auto reasoning is off for agent/code/verify tasks.",
         "tool_search": []
       },
@@ -20166,6 +20372,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop. OpenRouter reasoning-on text tools emitted malformed tool markup, so auto reasoning is off for agent/code/verify tasks.",
         "tool_search": []
       },
@@ -20244,6 +20451,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop. OpenRouter reasoning-on text tools emitted malformed tool markup, so auto reasoning is off for agent/code/verify tasks.",
         "tool_search": []
       },
@@ -20327,6 +20535,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "interchangeable",
+        "parity_source": "declared",
         "parity_notes": "2026-06-20 Harn agent-loop smoke: SambaNova DeepSeek-V3.2 completed both native and JSON tool loops with reasoning disabled. Earlier native false negatives were caused by Harn's parser treating terse final answers as billed no-ops; keep native preferred.",
         "tool_search": []
       },
@@ -20411,6 +20620,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -20498,6 +20708,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -20585,6 +20796,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -20667,6 +20879,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "2026-06-24 forced-format sweep (N=5): SambaNova MiniMax-M2.7 corrupted a backslash-heavy body on BOTH native (0/5) and fenced-JSON (0/5); heredoc text carried it byte-clean 5/5.",
         "tool_search": []
       },
@@ -20755,6 +20968,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -20843,6 +21057,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "2026-06-24 Harn agent-loop (gpt-oss-120b, zig-feat, tool grounding present): SambaNova native ended with a provider/tool-protocol failure (Harmony empty tool_calls / reasoning-channel-only class). Text/heredoc is the clean pay-per-token channel. See vLLM #22578/#44216, SGLang #8976/#10738, openai/harmony #68.",
         "tool_search": []
       },
@@ -20922,6 +21137,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "2026-06-24 forced-format sweep (N=5): Together MiniMax-M2.7 native 1/5 fidelity, fenced-JSON 2/5; heredoc text 4/5 (best on both dispatch and fidelity). Backslash-heavy bodies only round-trip on the escape-free text channel. Supersedes the 2026-06-20 json pin.",
         "tool_search": []
       },
@@ -21010,6 +21226,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "Family-on-host consistency pin: Together MiniMax-M2.7 native was 1/5 fidelity in the 2026-06-24 sweep; no M3-on-Together probe yet, so inherit text rather than an optimistic native pin.",
         "tool_search": []
       },
@@ -21096,6 +21313,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -21176,6 +21394,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -21268,6 +21487,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -21350,6 +21570,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -21433,6 +21654,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -21522,6 +21744,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -21607,6 +21830,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -21702,6 +21926,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -21787,6 +22012,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "declared",
         "parity_notes": "Together documents native tool calls for this serverless sample route; add live parity probes before broadening to all Together-hosted Llama variants.",
         "tool_search": []
       },
@@ -21867,6 +22093,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -21952,6 +22179,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -22046,6 +22274,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -22129,6 +22358,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -22209,6 +22439,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop.",
         "tool_search": []
       },
@@ -22295,6 +22526,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop.",
         "tool_search": []
       },
@@ -22389,6 +22621,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop.",
         "tool_search": []
       },
@@ -22487,6 +22720,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "tool_use",
@@ -22568,6 +22802,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -22655,6 +22890,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": [
           "hosted",
           "client"
@@ -22736,6 +22972,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "none",
@@ -22816,6 +23053,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -22914,6 +23152,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -23019,6 +23258,7 @@
         "text": true,
         "preferred_format": "native",
         "parity": "unknown",
+        "parity_source": "derived",
         "tool_search": []
       },
       "structured_output": "native",
@@ -23108,6 +23348,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "Family-consistency pin: GLM native channels emit `<tool_call>` markup as content (2026-06-23 Baseten GLM-5.2 probe); no zai-direct GLM-4.7 probe yet, so inherit the family verdict rather than an optimistic native pin.",
         "tool_search": []
       },
@@ -23180,6 +23421,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "Family-consistency pin: GLM native channels emit `<tool_call>` markup as content (2026-06-23 Baseten GLM-5.2 probe); no zai-direct GLM-4.7 probe yet, so inherit the family verdict rather than an optimistic native pin.",
         "tool_search": []
       },
@@ -23254,6 +23496,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "Family-consistency pin: GLM native channels emit `<tool_call>` markup as content (2026-06-23 Baseten GLM-5.2 probe); no zai-direct GLM-4.7 probe yet, so inherit the family verdict rather than an optimistic native pin.",
         "tool_search": []
       },
@@ -23326,6 +23569,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "Family-consistency pin: GLM native channels emit `<tool_call>` markup as content (2026-06-23 Baseten GLM-5.2 probe); no zai-direct GLM-4.7 probe yet, so inherit the family verdict rather than an optimistic native pin.",
         "tool_search": []
       },
@@ -23400,6 +23644,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "GLM-5.x native channel emits `<tool_call><arg_key>...` markup as content instead of OpenAI message.tool_calls (2026-06-23 live Baseten probe, see 39-baseten.toml); heredoc text tools parse cleanly. Same family pinned native_unreliable on Fireworks (glm-5p*) and DeepInfra (*glm-5*).",
         "tool_search": []
       },
@@ -23471,6 +23716,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "GLM-5.x native channel emits `<tool_call><arg_key>...` markup as content instead of OpenAI message.tool_calls (2026-06-23 live Baseten probe, see 39-baseten.toml); heredoc text tools parse cleanly. Same family pinned native_unreliable on Fireworks (glm-5p*) and DeepInfra (*glm-5*).",
         "tool_search": []
       },
@@ -23547,6 +23793,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "GLM-5.x native channel emits `<tool_call><arg_key>...` markup as content instead of OpenAI message.tool_calls (2026-06-23 live Baseten probe, see 39-baseten.toml); heredoc text tools parse cleanly. Same family pinned native_unreliable on Fireworks (glm-5p*) and DeepInfra (*glm-5*).",
         "tool_search": []
       },
@@ -23628,6 +23875,7 @@
         "text": true,
         "preferred_format": "text",
         "parity": "native_unreliable",
+        "parity_source": "declared",
         "parity_notes": "GLM-5.x native channel emits `<tool_call><arg_key>...` markup as content instead of OpenAI message.tool_calls (2026-06-23 live Baseten probe, see 39-baseten.toml); heredoc text tools parse cleanly. Same family pinned native_unreliable on Fireworks (glm-5p*) and DeepInfra (*glm-5*).",
         "tool_search": []
       },

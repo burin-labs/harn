@@ -31,6 +31,14 @@ pub(super) fn tool_mode_parity_value(caps: &Capabilities) -> VmValue {
         .unwrap_or(VmValue::Nil)
 }
 
+/// `declared` or `derived` for [`tool_mode_parity_value`]. A script that gates
+/// on the verdict can ask whether anyone actually stated it (#5885).
+pub(super) fn tool_mode_parity_source_value(caps: &Capabilities) -> VmValue {
+    caps.tool_mode_parity_source
+        .map(|source| VmValue::String(arcstr::ArcStr::from(source.as_str())))
+        .unwrap_or(VmValue::Nil)
+}
+
 pub(super) fn tool_mode_parity_notes_value(caps: &Capabilities) -> VmValue {
     caps.tool_mode_parity_notes
         .as_deref()
@@ -43,6 +51,10 @@ pub(super) fn tool_mode_parity_notes_value(caps: &Capabilities) -> VmValue {
 /// second provider-specific lookup for the parity notes.
 pub(super) fn insert_tool_mode_parity_fields(dict: &mut DictMap, caps: &Capabilities) {
     dict.insert(intern_key("tool_mode_parity"), tool_mode_parity_value(caps));
+    dict.insert(
+        intern_key("tool_mode_parity_source"),
+        tool_mode_parity_source_value(caps),
+    );
     dict.insert(
         intern_key("tool_mode_parity_notes"),
         tool_mode_parity_notes_value(caps),

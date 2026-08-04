@@ -496,6 +496,30 @@ impl ReasoningHistoryWireField {
     }
 }
 
+/// Where a route's `tool_mode_parity` verdict came from.
+///
+/// Both variants are declarations about a route, not measurements of one. A
+/// forced-format sweep is a different kind of evidence and has its own slot,
+/// `tool_support.empirical_parity`, carrying pass rates and a sample size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolModeParitySource {
+    /// A capability row states the verdict outright.
+    Declared,
+    /// No row stated one, so it was computed from `native_tools` and
+    /// `text_tool_wire_format_supported`. A consumer that needs evidence
+    /// should treat this as "not established" rather than as a finding.
+    Derived,
+}
+
+impl ToolModeParitySource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Declared => "declared",
+            Self::Derived => "derived",
+        }
+    }
+}
+
 /// Resolved capabilities for a `(provider, model)` pair. Unset rule
 /// fields resolve to `false` / empty / `None` so callers never have to
 /// unwrap an `Option<bool>` for what are really boolean gates.
@@ -615,6 +639,14 @@ pub struct Capabilities {
     pub text_tool_wire_format_supported: bool,
     pub preferred_tool_format: Option<String>,
     pub tool_mode_parity: Option<String>,
+    /// Where [`Self::tool_mode_parity`] came from.
+    ///
+    /// The verdict and its provenance used to share one slot, so a row a
+    /// human wrote a verdict for was indistinguishable from a row that got
+    /// the `unwrap_or_else` fallback (#5885). Both are *declarations* --
+    /// neither is a forced-format sweep, which lives in the catalog's
+    /// separate `tool_support.empirical_parity`.
+    pub tool_mode_parity_source: Option<ToolModeParitySource>,
     pub tool_mode_parity_notes: Option<String>,
     pub thinking_disable_directive: Option<String>,
     /// Per-task auto-policy reasoning-level overrides for this route.
@@ -738,6 +770,7 @@ impl Default for Capabilities {
             text_tool_wire_format_supported: true,
             preferred_tool_format: None,
             tool_mode_parity: None,
+            tool_mode_parity_source: None,
             tool_mode_parity_notes: None,
             thinking_disable_directive: None,
             auto_reasoning_overrides: BTreeMap::new(),

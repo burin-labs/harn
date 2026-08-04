@@ -394,6 +394,7 @@ public struct HarnModelToolSupport: Codable, Sendable, Equatable {
     public let text: Bool
     public let preferredFormat: String?
     public let parity: String?
+    public let paritySource: String?
     public let parityNotes: String?
     public let empiricalParity: HarnToolEmpiricalParity?
     public let toolSearch: [String]
@@ -404,6 +405,7 @@ public struct HarnModelToolSupport: Codable, Sendable, Equatable {
         case text
         case preferredFormat = "preferred_format"
         case parity
+        case paritySource = "parity_source"
         case parityNotes = "parity_notes"
         case empiricalParity = "empirical_parity"
         case toolSearch = "tool_search"
