@@ -9,6 +9,304 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.54
+
+### Added
+
+- `harn runs` can now report on a run that never wrote a run record. Every
+  subcommand — `report`, `review`, `view`, `inspect`, `export-training` — accepts
+  `--from-session <id>` and projects the record from the session Harn already
+  persisted, so a host that drives the agent loop directly gets the whole
+  reporting surface without emitting a record itself. The projection names what it
+  could not recover rather than presenting a partial record as a complete one.
+
+  `harn session list` shows the sessions a workspace has persisted, so the ids
+  `--from-session` takes can be discovered instead of read out of SQLite by hand.
+- `llm_call` now records how many provider requests one logical call actually
+  took and why the extra ones happened, under `usage.provider_attempts`. A run
+  whose provider rejects a third of its requests with retryable 429s previously
+  reported only its clean call count, so rate-limit pressure — a first-order
+  explanation for a slow or truncated run — was invisible outside the raw event
+  log. Retries are broken out as `rate_limited`, `empty_completion`, and `other`
+  because they mean different things, and a projected run record surfaces the
+  totals only when a run actually retried.
+- `harn lint` accepts `--trusted-host-dispatch`, matching `harn check`. A
+  privileged embedder — a host that serves `host_call` operations from its own
+  bridge — can now lint the scripts it serves without `HARN-LNT-072` reporting its
+  entire corpus as broken. Both surfaces read `[check] trusted_host_dispatch` from
+  `harn.toml`, so one operator declaration now governs `harn check` and
+  `harn lint` together instead of only the checker. Only the `privileged_wire`
+  finding is suppressed: the declaration says who may reach a wire, not that a
+  runtime internal became source-visible, and a capability method called as a
+  bare global still reports.
+- A scheduled `Main health` check now reports on main's commit status when a
+  watched nightly suite has failed three scheduled runs in a row. The scheduled
+  suites gate nothing, so a break in one of them was previously invisible until
+  someone opened the Actions tab; `Windows nightly` once ran twenty consecutive
+  failures. It files no issues and opens no PRs.
+- New lint `capability-parameter-name` (HARN-LNT-073) reports a parameter typed as
+  a narrow capability handle that is not named for the capability it carries —
+  most often `harness: HarnessNet`, which reads as the root handle at every call
+  site and hides the attenuation the narrow type performs.
+
+  It carries a machine-applicable rename, so
+  `harn fix --apply --safety surface-changing` rewrites the parameter and every
+  reference to it inside the function. Harn arguments are positional, so no call
+  site moves. The lint stays quiet whenever the rename is not provably safe from
+  the function alone: when the capability's name is already bound there, when a
+  nested callable rebinds either name, or on a rest parameter. A dict key that
+  shares the parameter's name is a record field, not a reference, and is left
+  alone.
+
+  This also completes the HARN-LNT-069 attenuation repair, which narrows a
+  parameter's type but reuses its existing name.
+- `harn fix` takes `--code <CODE>` (repeatable) to plan or apply only the repairs
+  for named diagnostics. A targeted migration no longer has to accept every other
+  repair that shares its safety class. The selector narrows the plan itself, so
+  `--plan --code X` shows exactly what `--apply --code X` writes.
+
+  `--apply` also preserves a file's formatting state. A repair changes line
+  lengths, so a shortening rename could leave a canonically formatted package
+  failing the `harn fmt --check` its own CI runs. An edited file that was already
+  canonical is now formatted again; one that was not is returned exactly as its
+  author keeps it, rather than arriving as a whole-file diff.
+- `std/git::git_push` accepts a trailing `options` dict, and `options.no_verify`
+  skips the checkout's pre-push hook. Ref plumbing — deleting a ref, or
+  republishing an OID the remote already holds — pushes nothing the remote has
+  not already accepted, so a pre-push hook written to validate a developer's own
+  commits has no subject there. Without a way to opt out, every such operation
+  inherited the state of whichever checkout it happened to run through: its
+  branch, its tracking configuration, its hooks. A ref-archival push run from a
+  branch with no upstream failed on the hook's `@{upstream}` lookup, in a message
+  that named nothing the operator had typed.
+
+### Changed
+
+- The release binary size budget is now measured from `main` every four hours
+  instead of only on release tags and the subset of pushes that touch a declared
+  release build input. A breach is now attributable to a few-hour window rather
+  than to whatever accumulated since the last release.
+
+### Fixed
+
+- `harn new package` and `harn new connector` now generate `docs/api.md` with
+  `harn package docs` instead of shipping a hand-written copy, so a freshly
+  scaffolded package passes `harn package verify` again.
+- `harn fix --capability-migrations-only` no longer rejects a call that is
+  missing several capability carriers. Such a call draws one repair per missing
+  argument plus a whole-program repair supplying all of them, so one offset
+  receives both an `env`-only prepend and an `env, fs` prepend. Those are the
+  same carriers in the same parameter order, and the shorter one is subsumed
+  rather than competing. Because a rejected candidate aborts the entire pass, a
+  single multi-carrier callee previously blocked the migration of every other
+  file in the tree.
+- Run records now explain what the model was offered and what each call cost. Six
+  event types that the embedded stdlib's `std/llm` handlers have always emitted —
+  `llm_call_log`, `llm_routing_decision`, `llm_fallback_attempt`,
+  `llm_shadow_diff`, `semantic_cache_hit`, and `semantic_cache_miss` — were
+  rejected at the host-event boundary as unsupported and silently dropped. They
+  are now typed events that reach the transcript, so per-call latency, route
+  choice, fallback depth, shadow divergence, and semantic-cache economics survive
+  into a persisted run. A drift check fails the build when the embedded stdlib
+  emits an event type the boundary does not register, so the two halves cannot
+  part again. The `harn.llm.served_context.v1` receipt also carries
+  `served_tool_names`, letting a persisted run answer "was this tool on the menu?"
+  without leaving the run.
+- `harn run --trace` reported a cost computed from one hardcoded Sonnet-4 rate
+  regardless of which model served the call, so a trace of any other model printed
+  a confidently wrong dollar figure. Cost now resolves through the catalog that
+  owns pricing, and calls whose (provider, model) pair has no catalog rate are
+  counted and disclosed rather than silently priced.
+- `harn lint` no longer stays silent on a call to a builtin Harn source cannot
+  name. Every builtin declares an exposure, and `privileged_wire` and
+  `runtime_internal` are documented as closed to scripts — but the linter seeded
+  its known-name set from every *registered* builtin regardless of exposure, so
+  those calls drew no diagnostic at all even though the typechecker rejects them.
+  `host_call` was the worst case: 114 call sites in one downstream repo, a bare
+  "not defined or imported" from `harn check`, and nothing from `harn lint` to
+  say what replaced it. Those calls now report `HARN-LNT-072` naming the exposure
+  and the surface that replaced it. When the wire's destination is a string
+  literal, the diagnostic reads it back through the declared contracts and names
+  the specific method — `host_call("prmonitor.run_commands", ...)` reports
+  `harness.pr_monitor.run_commands` — which resolves 83 of the 86 literal targets
+  in that repo. An operation no capability declares is reported as host-provided,
+  reached through the callable root an embedder installs with
+  `register_callable_host_operation`. Argument mapping is left unstated rather
+  than guessed: a wire packs one dict keyed by the host's names, and the declared
+  method takes its own parameters. Names that already
+  have a migration recipe keep reporting `HARN-LNT-071` and its `harn fix`
+  repair.
+- `host_lease_status` now defaults its `host` to the local machine, matching
+  `host_lease_acquire` and the `harn host lease` CLI. A script could previously
+  take a lane but had no way to name its own host to read that lane back, so the
+  inspection path was unusable for exactly the resource the write path makes easy
+  to claim. Both paths now share one resolver. An explicitly empty host remains an
+  error rather than a silent local read, since that is almost always an unset
+  variable reaching the call.
+- `harn fix --apply` no longer corrupts source when a run spans a directory.
+  Diagnostics reach the plan from two passes that spell the same file
+  differently — the per-file lint pass reports `./src/workflow.harn`, the
+  whole-program capability pass reports an absolute path — so one file was
+  grouped twice and each group re-read it from disk. The second group then
+  applied spans computed against source the first group had already rewritten,
+  inserting a parameter partway through an identifier. Edits are now grouped by
+  canonical path, so every edit for a file sorts and applies together.
+
+  `--apply` also parse-checks each candidate before writing it and names the
+  applied edits when one is rejected. This makes a corrupting pass fail loudly
+  rather than silently: the same run previously reported
+  `post-apply diagnostics: 0` over a file it had just made unparseable, because
+  a file that does not parse contributes no diagnostics to count.
+- `harn fix --apply` no longer narrows a function the runtime calls. The fixer
+  decided for itself which declarations the runtime supplies arguments to, and
+  its whole test for that was `name == "main"`, so a connector runtime export —
+  whose signature the connector ABI pins to the root `Harness` — was attenuated
+  like any ordinary helper and the package then failed
+  `harn package verify --strict`.
+
+  The linter already owned that policy. `harn_lint::RuntimeBoundaries` is now the
+  single owner of it, and both the `capability-attenuation` lint and the fixer
+  consume it, so `main`, `@job` declarations, flow predicates, trigger handlers,
+  `handler:` callbacks, and connector runtime exports keep their root handle
+  everywhere the question is asked.
+- `harn check` now names the typed harness path that replaced a removed global,
+  instead of guessing. The type checker read a hand-written table that was a
+  strict subset of the runtime's migration registry, and fell back to a
+  Levenshtein search when it missed — which answered `uuid_v5` for `uuid_v7`, a
+  name-based UUID for a time-ordered one, while `harn lint` one crate away
+  already knew the answer was `harness.random.uuid_v7`.
+
+  The table is now generated from the registry through
+  `make gen-harness-migrations`, with `make check-harness-migrations` guarding
+  the projection, so the two surfaces cannot answer the same question
+  differently. The fuzzy fallback still runs for genuine typos, but never
+  outranks a declared migration.
+- Cost surfaces now report what a run actually cost. Every USD figure already
+  resolved its rates from the provider catalog, but four surfaces recomputed the
+  arithmetic themselves and so missed pricing the catalog already knew about:
+
+  - `harn run` LLM trace summary, `harn explain-cost`, the tool-call eval report,
+  and the coding-agent live-verify report each priced from the base rate pair,
+  ignoring `input_token_bands`. Long-context calls on banded models —
+  `gemini-2.5-pro` and the GPT-5 family bill double for input and 1.5x for
+  output past their thresholds — were under-reported by up to half.
+  - The trace summary additionally could not see prompt-cache accounting or the
+  accelerated-serving tier, so its per-call breakdown could disagree with the
+  run's own total.
+
+  Per-call cost now has one owner. The runtime records the price it computed on
+  each trace entry, and the summary sums those rather than re-deriving them; the
+  remaining surfaces call the usage-aware pricing helper, which applies the
+  input-token band. An unpriced call is still reported as unpriced rather than
+  counted as free.
+
+  `harn run --emit-summary-json` gains `llm.unpriced_calls` (schema version 2).
+  Its `cost_usd` folds an unpriced call in as zero and could not distinguish a
+  free run from an unpriceable one; a non-zero count now marks the total as a
+  floor. The addition is additive — a reader that ignores the field sees exactly
+  the version 1 shape.
+- `harn --json-schemas` no longer advertises four commands that cannot be
+  invoked: `check provider-matrix`, `check connector-matrix`, `fix plan`, and
+  `fix apply` are flags, and are now listed as `check --provider-matrix`,
+  `check --connector-matrix`, `fix --plan`, and `fix --apply`.
+- Every Harn host now runs the VM on a thread sized for it. The `harn serve`
+  transports — A2A, MCP and the site adapter over HTTP, ACP over WebSocket, the
+  embedded ACP channel, and the in-process ACP client — spawned the VM's thread
+  without a stack size, so the VM ran on Rust's 2 MiB default while `harn run`
+  gave it 16 MiB; a deep enough script aborted the whole server process instead
+  of failing one request. The standalone `harn-lsp` and `harn-dap` binaries had
+  the same gap on their main thread.
+
+  The same gap existed well outside `harn serve`. `harn mcp serve` ran both its
+  request bridge and every tool task on the default stack; so did `harn dap`
+  (which spawns a fresh thread to escape the CLI's Tokio runtime, and therefore
+  inherits nothing from it), `harn counterfactual`'s plan runner, the
+  orchestrator and its ACP WebSocket worker, the portable benchmark workers, and
+  Harn-module connector workers.
+
+  The stack size now has a single owner, `harn_vm::RUNTIME_STACK_SIZE`, which
+  `harn_cli::CLI_RUNTIME_STACK_SIZE` re-exports; three call sites that had
+  duplicated the literal now use it. A workspace-wide check next to that
+  constant fails the build if a new thread builds a Tokio runtime to drive the
+  VM without asking for the stack — the per-crate version of that check could
+  only see one of the three crates the defect shipped in.
+- `harn check`, `harn lint`, and `harn fmt` now write every human-readable line to
+  stderr, including the `no issues found` / `<path>: ok` lines and the applied-fix
+  and formatted-file lines. stdout carries the `--json` envelope and nothing else.
+
+  Previously the channel was split — diagnostics on stderr, the clean line on
+  stdout — so `harn lint DIR 2>/dev/null` printed a run of `no issues found` over
+  a corpus with findings and exited 0, and `harn lint DIR > findings.txt` wrote a
+  file containing no findings. A clean corpus produced byte-identical output, so
+  nothing marked the answer as wrong. Suppressing stderr now silences these
+  commands instead.
+- `harn fix` no longer deletes a capability that is used only inside a `${...}`
+  string interpolation. The whole-program capability solver walked bodies with a
+  visitor that treats an interpolated string as a leaf — the lexer stores each
+  hole as unparsed source text, so its contents have no AST children — which made
+  `harness.random.uuid_v7()` inside `".tmp-${...}"` read as never-used. The
+  `bindings/attenuate-harness` repair then removed the capability from the
+  parameter type and from every call site while the interpolation still called it,
+  producing code that does not compile. Capability analysis now re-parses holes
+  and walks them, so an access inside `${...}` is treated exactly like the same
+  access outside it.
+- `harn check --trusted-host-dispatch` now silences `HARN-LNT-072` as well as the
+  `HARN-NAM-002` type error it already silenced. `harn check` runs the lint rules
+  too, but built their options from `LintOptions::default()`, so the trust
+  declaration never reached them and a privileged embedder's corpus still came
+  back warning-noisy under the flag that exists to admit it.
+
+  The four sites that build lint options now share one constructor, and the one
+  place `harn check` deliberately differs from `harn lint` — the project `[lint]`
+  block and the stdlib contract lints stay off there — is named rather than
+  implied, so a newly added option cannot be silently defaulted on one surface.
+- Bumping Harn no longer re-downloads every dependency. `harn install` decided
+  whether the materialized package generation still matched `harn.lock` by
+  comparing digests of the whole lockfile, including the `generator_version` and
+  `protocol_artifact_version` stamps that record which CLI last wrote it. A
+  release bump rewrites those two lines and nothing else, so a byte-for-byte
+  correct generation was discarded and every dependency re-materialized from its
+  source — which on a cold cache means a fresh clone of each one. The check now
+  asks the structural question instead: does the materialized tree hold exactly
+  this lock's packages, at exactly this lock's content hashes?
+- A fully pinned `harn.lock` no longer requires the network to install. Resolution
+  reads each dependency's manifest to discover transitive dependencies, and took
+  that read from the package cache — so every `harn install` populated the cache
+  for every git and archive dependency, which on a cold cache means fetching from
+  the source, and for a private git dependency means credentials. The package
+  generation already holds that content at the same `content_hash` the cache would
+  be verified against, so the manifest is now read from there and the source is
+  contacted only when the hash does not match: a changed pin, a new dependency, or
+  a missing generation.
+- The `subagent_pause`, `subagent_resume`, and `subagent_stop` tools now dispatch.
+  All three have failed since the typed-capability cutover, which gave each
+  handler a leading `HarnessAgent` parameter but left its registration untouched;
+  the tool runtime calls a registered handler with exactly one argument, so every
+  invocation ended in an arity error instead of reaching the tool.
+
+  The registered `handler` slot now carries a declared function type, so a handler
+  whose shape does not match the way the registry dispatches it is reported at the
+  registration site rather than at run time. This matters for any code that stores
+  a function in a registry: a direct call to a capability-prefixed function was
+  always a type error, but a reference stored as a value was compared against
+  nothing.
+
+  Builtin signatures can also describe an open record now — named fields plus a
+  `...dict` row tail. Previously a builtin that accepted an extensible options
+  dict had to declare it as a bare `dict` and give up field checking entirely,
+  because the only record type available was closed.
+- **Capability threading no longer breaks a callable whose value is used as a
+  first-class reference.** A registry entry like
+  `handler: web_search_handler` is dispatched as `handler(args)` through a
+  stored reference, so the callable's parameter list is observable at a call
+  site no static pass can see. Threading a leading capability into it moved
+  `args` into the capability slot at runtime, and `harn check` reported nothing
+  because the call goes through a value rather than a name. The escape is now
+  observed across the whole program — a handler defined in one module and
+  registered in another is the common shape — and such callables keep their
+  arity, leaving the site for a human to wrap as
+  `{ args -> handler(harness, args) }`.
+
 ## v0.10.53
 
 ### Breaking
