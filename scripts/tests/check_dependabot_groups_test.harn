@@ -1,19 +1,83 @@
 import "../check_dependabot_groups.harn"
 
-fn valid_groups() {
+fn group(
+  name: string,
+  patterns: list<string>,
+  exclude_patterns: list<string> = [],
+  update_types: list<string> = [],
+) -> DependabotGroup {
   return {
-    cranelift: {patterns: ["cranelift-*"]},
-    wasmtime: {patterns: ["wasmtime*"]},
-    opentelemetry: {patterns: ["opentelemetry*", "tracing-opentelemetry"]},
+    name: name,
+    patterns: patterns,
+    exclude_patterns: exclude_patterns,
+    update_types: update_types,
   }
+}
+
+const CRANELIFT: DependabotGroup = {
+  name: "cranelift",
+  patterns: ["cranelift-*"],
+  exclude_patterns: [],
+  update_types: [],
+}
+
+const WASMTIME: DependabotGroup = {
+  name: "wasmtime",
+  patterns: ["wasmtime*"],
+  exclude_patterns: [],
+  update_types: [],
+}
+
+const OPENTELEMETRY: DependabotGroup = {
+  name: "opentelemetry",
+  patterns: ["opentelemetry*", "tracing-opentelemetry"],
+  exclude_patterns: [],
+  update_types: [],
+}
+
+const FAMILY_PATTERNS: list<string> = [
+  "cranelift-*",
+  "wasmtime*",
+  "opentelemetry*",
+  "tracing-opentelemetry",
+]
+
+fn cargo_routine(
+  exclude_patterns: list<string> = FAMILY_PATTERNS,
+  update_types: list<string> = ["minor", "patch"],
+) -> DependabotGroup {
+  return group("cargo-routine", ["*"], exclude_patterns, update_types)
+}
+
+fn valid_cargo_groups() -> list<DependabotGroup> {
+  return [CRANELIFT, WASMTIME, OPENTELEMETRY, cargo_routine()]
+}
+
+fn cargo_update(groups: list<DependabotGroup>) -> EcosystemUpdate {
+  return {ecosystem: "cargo", groups: groups}
+}
+
+fn errors_of_kind(groups: list<DependabotGroup>, kind: GroupErrorKind) -> list<GroupError> {
+  return ecosystem_errors(cargo_update(groups)).filter({ error -> error.kind == kind }).to_list()
 }
 
 @test
 pipeline test_actual_dependabot_document(harness: Harness, task) {
-  const text = harness.fs.read_text("../../.github/dependabot.yml")
-  const groups = cargo_groups_from_text(text)
-  assert_eq(cargo_group_errors(groups), [])
-  assert_eq(matching_groups(groups, "serde"), [])
+  const updates = updates_from_text(harness.fs.read_text("../../.github/dependabot.yml"))
+  assert_eq(document_errors(updates), [])
+  assert_eq(updates.map({ update -> update.ecosystem }), ["cargo", "npm", "github-actions"])
+}
+
+/**
+ * The point of the change: an ordinary dependency lands in the catch-all
+ * instead of opening its own PR, and a family member does not.
+ */
+@test
+pipeline test_routine_dependency_joins_the_catch_all(harness: Harness, task) {
+  const groups = valid_cargo_groups()
+  assert_eq(matching_groups(groups, "serde"), ["cargo-routine"])
+  assert_eq(matching_groups(groups, "wasmtime-wasi"), ["wasmtime"])
+  assert_eq(matching_groups(groups, "tracing-opentelemetry"), ["opentelemetry"])
 }
 
 @test
@@ -24,17 +88,24 @@ pipeline test_wildcard_positions(harness: Harness, task) {
   assert_eq(dependabot_pattern_matches("wasm*-wasi", "wasmtime"), false)
 }
 
+/** Only an exclusion stops the catch-all from claiming everything. */
+@test
+pipeline test_catch_all_without_exclusions_swallows_a_family(harness: Harness, task) {
+  const groups = [CRANELIFT, WASMTIME, OPENTELEMETRY, cargo_routine([])]
+  assert_eq(matching_groups(groups, "wasmtime-wasi"), ["cargo-routine", "wasmtime"])
+}
+
 @test
 pipeline test_overlap_is_rejected(harness: Harness, task) {
-  const groups = valid_groups() + {wasi: {patterns: ["*-wasi"]}}
-  const errors = cargo_group_errors(groups)
+  const groups = valid_cargo_groups() + [group("wasi", ["*-wasi"])]
   assert_eq(
-    errors,
+    errors_of_kind(groups, "ambiguous"),
     [
       {
-        kind: "ambiguous_membership",
+        kind: "ambiguous",
+        ecosystem: "cargo",
         group: "wasmtime",
-        dependency: "wasmtime-wasi",
+        detail: "wasmtime-wasi",
         matches: ["wasi", "wasmtime"],
       },
     ],
@@ -43,20 +114,96 @@ pipeline test_overlap_is_rejected(harness: Harness, task) {
 
 @test
 pipeline test_missing_group_is_rejected(harness: Harness, task) {
-  const errors = cargo_group_errors({cranelift: valid_groups().cranelift})
+  const groups = [CRANELIFT, cargo_routine(["cranelift-*"])]
   assert_eq(
-    errors.filter({ error -> error.kind == "missing_group" }).map({ error -> error.group }),
+    errors_of_kind(groups, "missing_group").map({ error -> error.group }),
     ["opentelemetry", "wasmtime"],
   )
 }
 
+/** The inversion this issue asks for: no catch-all is now the defect. */
 @test
-pipeline test_cargo_catch_all_is_rejected(harness: Harness, task) {
-  const errors = cargo_group_errors(valid_groups() + {everything: {patterns: ["**"]}})
+pipeline test_missing_catch_all_is_rejected(harness: Harness, task) {
   assert_eq(
-    errors.filter({ error -> error.kind == "catch_all" }),
-    [{kind: "catch_all", group: "everything", dependency: "", matches: []}],
+    errors_of_kind([CRANELIFT, WASMTIME, OPENTELEMETRY], "no_catch_all"),
+    [{kind: "no_catch_all", ecosystem: "cargo", group: "", detail: "", matches: []}],
   )
+}
+
+@test
+pipeline test_second_catch_all_is_rejected(harness: Harness, task) {
+  const groups = valid_cargo_groups() + [group("everything", ["**"], [], ["minor", "patch"])]
+  assert_eq(
+    errors_of_kind(groups, "many_catch_all"),
+    [
+      {
+        kind: "many_catch_all",
+        ecosystem: "cargo",
+        group: "",
+        detail: "",
+        matches: ["cargo-routine", "everything"],
+      },
+    ],
+  )
+}
+
+/** A catch-all that also batched majors would defeat isolating them. */
+@test
+pipeline test_catch_all_may_not_batch_majors(harness: Harness, task) {
+  const groups = [
+    CRANELIFT,
+    WASMTIME,
+    OPENTELEMETRY,
+    cargo_routine(FAMILY_PATTERNS, ["minor", "patch", "major"]),
+  ]
+  assert_eq(
+    errors_of_kind(groups, "catch_all_types"),
+    [
+      {
+        kind: "catch_all_types",
+        ecosystem: "cargo",
+        group: "cargo-routine",
+        detail: "",
+        matches: ["major", "minor", "patch"],
+      },
+    ],
+  )
+}
+
+/**
+ * Adding a pattern to a family group without teaching the catch-all to skip it
+ * is the drift this gate exists to catch. The membership check alone would
+ * miss it until someone also listed the new crate in `FAMILIES`.
+ */
+@test
+pipeline test_catch_all_must_exclude_every_family_pattern(harness: Harness, task) {
+  const groups = [
+    CRANELIFT,
+    group("wasmtime", ["wasmtime*", "wasi-common"]),
+    OPENTELEMETRY,
+    cargo_routine(),
+  ]
+  assert_eq(
+    errors_of_kind(groups, "unexcluded"),
+    [
+      {
+        kind: "unexcluded",
+        ecosystem: "cargo",
+        group: "wasmtime",
+        detail: "wasi-common",
+        matches: [],
+      },
+    ],
+  )
+}
+
+@test
+pipeline test_every_ecosystem_carries_one_catch_all(harness: Harness, task) {
+  const updates = updates_from_text(harness.fs.read_text("../../.github/dependabot.yml"))
+  assert_eq(updates.count, 3)
+  for update in updates {
+    assert_eq(catch_all_group_names(update.groups).count, 1)
+  }
 }
 
 @test
@@ -66,7 +213,7 @@ pipeline test_yaml_boundary_rejects_malformed_groups(harness: Harness, task) {
   assert_eq(
     is_err(
       try {
-        cargo_groups_from_text(invalid)
+        updates_from_text(invalid)
       },
     ),
     true,

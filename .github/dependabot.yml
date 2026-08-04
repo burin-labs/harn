@@ -1,5 +1,19 @@
 version: 2
 
+# Grouping policy, enforced by `make check-dependabot-groups`:
+#
+#   - Families that must bump together (a wasmtime/cranelift or react/react-dom
+#     split does not build) get their own group, which takes every update type.
+#   - Each ecosystem ends with one catch-all group limited to minor and patch,
+#     so routine bumps arrive as one weekly review and rollback unit instead of
+#     a serial tail of PRs through the merge queue.
+#   - Majors match no group and stay one PR each.
+#
+# Dependabot assigns an update to the first matching group, so the catch-alls
+# below could rely on being declared last. They carry `exclude-patterns` for
+# every named family's patterns anyway: the checker reads the parsed document,
+# where key order is gone, and a rule it cannot verify is not a rule.
+
 updates:
   - package-ecosystem: "cargo"
     directories:
@@ -20,6 +34,17 @@ updates:
         patterns:
           - "opentelemetry*"
           - "tracing-opentelemetry"
+      cargo-routine:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "cranelift-*"
+          - "wasmtime*"
+          - "opentelemetry*"
+          - "tracing-opentelemetry"
+        update-types:
+          - "minor"
+          - "patch"
     cooldown:
       default-days: 7
 
@@ -39,10 +64,15 @@ updates:
         patterns:
           - "react"
           - "react-dom"
-      npm:
+      npm-routine:
         patterns:
           - "*"
-        group-by: "dependency-name"
+        exclude-patterns:
+          - "react"
+          - "react-dom"
+        update-types:
+          - "minor"
+          - "patch"
     cooldown:
       default-days: 7
 
@@ -56,6 +86,9 @@ updates:
     cooldown:
       default-days: 7
     groups:
-      actions:
+      actions-routine:
         patterns:
           - "*"
+        update-types:
+          - "minor"
+          - "patch"
