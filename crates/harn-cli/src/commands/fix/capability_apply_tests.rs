@@ -339,6 +339,42 @@ fn capability_apply_attenuates_root_to_a_typed_bundle_through_the_real_plan() {
     );
 }
 
+/// The apply pass runs to a fixpoint, and the two passes must agree about what
+/// counts as a use.
+///
+/// A three-capability bundle widens to the root on pass 1; pass 2 then asks the
+/// `HARN-LNT-056` attenuation rule whether that root can be narrowed again.
+/// When that rule could not see inside `"${...}"`, it answered with a set that
+/// omitted the interpolated capability, and the apply deleted a live handle:
+/// harn-cloud#1472 shipped `harness.random.uuid_v7()` whose `random` had been
+/// stripped from the signature and from every call site.
+///
+/// `post_apply_diagnostics_count` is the falsifier — the broken rewrite left
+/// one behind.
+#[test]
+fn capability_apply_keeps_a_capability_used_only_inside_interpolation() {
+    let (result, updated) = apply_single(
+        "fn with_temp_dir(harness: {fs: HarnessFs, process: HarnessProcess, random: HarnessRandom}, body) {\n  const dir = \".tmp-${harness.random.uuid_v7()}\"\n  harness.fs.mkdir(dir)\n  const outcome = body(dir)\n  harness.process.run({program: \"rm\", args: [\"-rf\", dir]})\n  return outcome\n}\n\nfn main(harness: Harness) {\n  with_temp_dir({fs: harness.fs, process: harness.process, random: harness.random}, { dir -> dir })\n}\n",
+    );
+    assert_eq!(result.post_apply_diagnostics_count, 0, "{result:#?}");
+    assert_eq!(
+        callable_params(&updated, "with_temp_dir"),
+        vec![
+            param("harness", "Harness"),
+            ParamContract {
+                name: "body".to_string(),
+                type_expr: None
+            },
+        ],
+        "three capabilities is the documented root-carrier shape, and none of \
+         them may be dropped on the way there: {updated}"
+    );
+    assert!(
+        updated.contains("harness.random.uuid_v7()"),
+        "the interpolated use must survive its own signature rewrite: {updated}"
+    );
+}
+
 #[test]
 fn capability_apply_inserts_multiple_leading_capabilities_one_pass_at_a_time() {
     let (result, updated) = apply_single(

@@ -150,8 +150,12 @@ pub fn runtime_supplies_arguments(outer: &SNode) -> bool {
 }
 
 /// Return every conservatively attenuable root parameter in a parsed module.
+///
+/// `source` must be the text `program` was parsed from. It is not a
+/// convenience: string-interpolation holes are unparsed source text on the
+/// AST, so proving a capability is unused requires re-parsing them.
 #[must_use]
-pub fn capability_attenuations(program: &[SNode]) -> Vec<CapabilityAttenuation> {
+pub fn capability_attenuations(source: &str, program: &[SNode]) -> Vec<CapabilityAttenuation> {
     let boundaries = RuntimeBoundaries::collect(program);
     let mut attenuations = Vec::new();
     for outer in program {
@@ -173,21 +177,25 @@ pub fn capability_attenuations(program: &[SNode]) -> Vec<CapabilityAttenuation> 
 
         if !boundaries.contains(name, params, *is_pub, attributed) {
             attenuations.extend(params.iter().filter_map(|parameter| {
-                capability_attenuation_for_parameter(params, body, parameter).map(|capabilities| {
-                    CapabilityAttenuation {
+                capability_attenuation_for_parameter(source, params, body, parameter).map(
+                    |capabilities| CapabilityAttenuation {
                         declaration_span: inner.span,
                         parameter_name: parameter.name.clone(),
                         capabilities,
-                    }
-                })
+                    },
+                )
             }));
         }
     }
     attenuations
 }
 
-pub(crate) fn check_api_design(program: &[SNode], diagnostics: &mut Vec<LintDiagnostic>) {
-    let attenuations = capability_attenuations(program);
+pub(crate) fn check_api_design(
+    source: &str,
+    program: &[SNode],
+    diagnostics: &mut Vec<LintDiagnostic>,
+) {
+    let attenuations = capability_attenuations(source, program);
     let module_names = module_level_names(program);
     let boundaries = RuntimeBoundaries::collect(program);
     for outer in program {
@@ -226,6 +234,7 @@ pub(crate) fn check_api_design(program: &[SNode], diagnostics: &mut Vec<LintDiag
 }
 
 fn capability_attenuation_for_parameter(
+    source: &str,
     params: &[TypedParam],
     body: &[SNode],
     parameter: &TypedParam,
@@ -270,7 +279,11 @@ fn capability_attenuation_for_parameter(
             visit::walk_node(default, &mut record_use);
         }
     }
-    visit::walk_program(body, &mut record_use);
+    // Interpolation-aware, and load-bearing. `"${harness.random.uuid_v7()}"`
+    // is a use; walking without the holes counts zero and the attenuation
+    // silently omits the capability. `harn fix` applies this set verbatim, so
+    // an undercount rewrites working code into code that does not compile.
+    visit::walk_program_interpolated(source, body, &mut record_use);
 
     // Suppress when the root escapes, is forwarded, or touches an unknown
     // member: local syntax no longer proves attenuation is safe.
@@ -566,8 +579,67 @@ mod tests {
         let tokens = Lexer::new(source).tokenize().expect("lex");
         let program = Parser::new(tokens).parse().expect("parse");
         let mut diagnostics = Vec::new();
-        check_api_design(&program, &mut diagnostics);
+        check_api_design(source, &program, &mut diagnostics);
         diagnostics
+    }
+
+    fn attenuated(source: &str) -> Vec<BTreeSet<CapabilityId>> {
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        capability_attenuations(source, &program)
+            .into_iter()
+            .map(|attenuation| attenuation.capabilities)
+            .collect()
+    }
+
+    /// A capability reached only through `${...}` is still reached.
+    ///
+    /// `harn fix` applies this set verbatim to the signature and every call
+    /// site, so omitting one deletes a live capability: harn-cloud#1472 shipped
+    /// `harness.random.uuid_v7()` with `random` stripped from its parameter
+    /// type, and the rewritten tests failed with `value of type nil has no
+    /// method uuid_v7`.
+    #[test]
+    fn a_capability_used_only_inside_interpolation_still_counts() {
+        assert_eq!(
+            attenuated(
+                "fn helper(harness: Harness, body) {\n  const dir = \".tmp-${harness.random.uuid_v7()}\"\n  harness.fs.mkdir(dir)\n  return body(dir)\n}\n"
+            ),
+            vec![BTreeSet::from([CapabilityId::Fs, CapabilityId::Random])],
+            "attenuating to `fs` alone would delete the only use of `random`"
+        );
+    }
+
+    /// The same program with the call moved out of the hole must attenuate
+    /// identically — otherwise the analysis is reporting on syntax position
+    /// rather than on use.
+    #[test]
+    fn interpolated_and_plain_uses_attenuate_the_same() {
+        let interpolated = attenuated(
+            "fn helper(harness: Harness) {\n  return \"${harness.clock.now_ms()}\" + harness.fs.cwd()\n}\n",
+        );
+        let plain = attenuated(
+            "fn helper(harness: Harness) {\n  return harness.clock.now_ms() + harness.fs.cwd()\n}\n",
+        );
+        assert_eq!(interpolated, plain);
+        assert_eq!(
+            plain,
+            vec![BTreeSet::from([CapabilityId::Clock, CapabilityId::Fs])]
+        );
+    }
+
+    /// An unknown member suppresses attenuation entirely. That guard has to see
+    /// through interpolation too, or a hole becomes a way to hide the escape
+    /// that makes narrowing unsafe.
+    #[test]
+    fn an_unknown_member_inside_interpolation_still_suppresses() {
+        assert!(
+            attenuated(
+                "fn helper(harness: Harness) {\n  return \"${harness.not_a_capability}\" + harness.fs.cwd()\n}\n"
+            )
+            .is_empty(),
+            "an unrecognized member is only safe to ignore if it does not exist"
+        );
     }
 
     /// Lint `source`, apply every `capability-parameter-name` fix, and return
