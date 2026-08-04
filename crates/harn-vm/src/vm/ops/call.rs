@@ -1039,13 +1039,8 @@ impl super::super::Vm {
             crate::stdlib::set_thread_source_dir(dir);
         }
 
-        let saved_source_dir = if let Some(ref dir) = closure.source_dir {
-            let prev = crate::stdlib::process::VM_SOURCE_DIR.with(|sd| sd.borrow().clone());
-            crate::stdlib::set_thread_source_dir(dir);
-            prev
-        } else {
-            None
-        };
+        let saved_source_dir =
+            crate::stdlib::process::enter_frame_source_dir(closure.source_dir.as_deref());
 
         call_env.push_scope();
         let debugger = self.debugger_attached();

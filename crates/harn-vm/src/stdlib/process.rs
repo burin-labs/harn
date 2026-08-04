@@ -96,6 +96,25 @@ pub(crate) fn swap_source_dir(next: Option<PathBuf>) -> Option<PathBuf> {
     VM_SOURCE_DIR.with(|current| std::mem::replace(&mut *current.borrow_mut(), next))
 }
 
+/// Anchor a synchronous call frame on the callee module's source dir, returning
+/// the caller's dir for that frame to reinstall when it pops.
+///
+/// `None` in means the callee has no module of its own and keeps the caller's
+/// anchor. `None` out means the frame has nothing to restore — either because
+/// of that, or because the caller had no anchor either.
+///
+/// This is the *synchronous* half of the source-dir discipline: the write and
+/// the restore both happen on one task, bracketed by one frame's lifetime. A
+/// body that runs as its own task cannot use it, because the frame pops on that
+/// task long after the caller resumed — see
+/// [`crate::orchestration::scope_spawned_source_dir`].
+pub(crate) fn enter_frame_source_dir(module_dir: Option<&std::path::Path>) -> Option<PathBuf> {
+    let dir = module_dir?;
+    let previous = VM_SOURCE_DIR.with(|sd| sd.borrow().clone());
+    crate::stdlib::set_thread_source_dir(dir);
+    previous
+}
+
 /// RAII guard that snapshots the thread-local VM source dir on creation and
 /// restores it on drop.
 ///

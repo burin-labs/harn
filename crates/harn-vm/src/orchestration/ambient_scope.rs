@@ -341,6 +341,81 @@ impl AmbientExecutionScope {
     }
 }
 
+pin_project! {
+    /// A future that runs `inner` with one ambient slot — the VM source dir —
+    /// swapped in around every poll.
+    ///
+    /// [`Scoped`] swaps every slot, which is what a fan-out worker needs: it
+    /// must not observe, or leak to, a sibling's capability context. A
+    /// generator or stream body is a weaker case. It is the same logical caller
+    /// running concurrently and reads capabilities live; the only ambient fact
+    /// it owns is where its own module sits.
+    ///
+    /// The distinction is worth a separate type because of poll frequency. A
+    /// fan-out worker is polled a handful of times, so a whole-scope swap is
+    /// free. A generator body is polled once per yielded value, and swapping
+    /// the full scope there measured +42% CPU on a 200k-yield loop.
+    ///
+    /// `scoped` holds the directory to install while `inner` runs. Between
+    /// polls it holds the polling thread's own directory — the swap invariant
+    /// seen from outside.
+    pub(crate) struct SourceDirScoped<F> {
+        #[pin]
+        inner: F,
+        scoped: Option<PathBuf>,
+        active: bool,
+    }
+}
+
+/// Put the polling thread's source dir back when `inner` returns or panics.
+/// Same role as [`RestoreGuard`], over the one slot.
+struct SourceDirRestore<'a> {
+    slot: &'a mut Option<PathBuf>,
+}
+
+impl Drop for SourceDirRestore<'_> {
+    fn drop(&mut self) {
+        *self.slot = swap_source_dir(self.slot.take());
+    }
+}
+
+impl<F: Future> Future for SourceDirScoped<F> {
+    type Output = F::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<F::Output> {
+        let this = self.project();
+        if !*this.active {
+            return this.inner.poll(cx);
+        }
+        *this.scoped = swap_source_dir(this.scoped.take());
+        let _restore = SourceDirRestore { slot: this.scoped };
+        this.inner.poll(cx)
+    }
+}
+
+/// Run a spawned VM body anchored on the module that defined it.
+///
+/// A generator or stream body resolves `render`, asset paths, and
+/// `source_dir()` against its defining module, not the module that called it.
+/// Writing the thread-local at spawn time and unwinding it when the body's
+/// frame pops cannot express that: the two happen on different tasks, so the
+/// creator resumes with the callee's directory still installed and the eventual
+/// restore lands on whichever task is running by then. Per-poll swapping is why
+/// `VM_SOURCE_DIR` is cataloged `Captured`.
+///
+/// `None` means the closure has no module of its own and keeps whatever the
+/// polling thread has, so the wrapper stays inert.
+pub(crate) fn scope_spawned_source_dir<F: Future>(
+    source_dir: Option<PathBuf>,
+    inner: F,
+) -> SourceDirScoped<F> {
+    SourceDirScoped {
+        inner,
+        active: source_dir.is_some(),
+        scoped: source_dir,
+    }
+}
+
 /// Run `inner` with an execution-owned run-event sink.
 pub(crate) fn scope_run_event_sink<F: Future>(
     sink: std::sync::Arc<dyn RunEventSink>,

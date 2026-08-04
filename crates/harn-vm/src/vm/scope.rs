@@ -223,13 +223,8 @@ impl Vm {
         // If this closure originated from an imported module, switch
         // the thread-local source dir so that render() and other
         // source-relative builtins resolve relative to the module.
-        let saved_source_dir = if let Some(ref dir) = closure.source_dir {
-            let prev = crate::stdlib::process::VM_SOURCE_DIR.with(|sd| sd.borrow().clone());
-            crate::stdlib::set_thread_source_dir(dir);
-            prev
-        } else {
-            None
-        };
+        let saved_source_dir =
+            crate::stdlib::process::enter_frame_source_dir(closure.source_dir.as_deref());
 
         // `closure_call_env_for_current_frame` still reads the caller's
         // `self.env`, so build the callee env first, then *move* the caller
@@ -412,38 +407,39 @@ impl Vm {
         Self::bind_param_slots(&mut local_slots, &closure.func, args, false);
 
         let chunk = Arc::clone(&closure.func.chunk);
-        let saved_source_dir = if let Some(ref dir) = closure.source_dir {
-            let prev = crate::stdlib::process::VM_SOURCE_DIR.with(|sd| sd.borrow().clone());
-            crate::stdlib::set_thread_source_dir(dir);
-            prev
-        } else {
-            None
-        };
         let module_functions = closure.module_functions();
         let module_state = closure.module_state();
         let argc = closure.func.callee_arg_count(args.len());
-        // Spawn the generator body as an async task.
+        // Spawn the generator body as an async task. It carries its own ambient
+        // scope, anchored on the module that defined the closure, instead of
+        // writing the creator's thread-local source dir and unwinding it when
+        // the body's frame pops — those happen on different tasks. See
+        // `scope_spawned_source_dir`.
         // The task will execute until return, sending yielded values through the channel.
+        let body_source_dir = closure.source_dir.clone();
         let tx_for_error = child.yield_sender.clone();
-        tokio::task::spawn_local(async move {
-            let result = child
-                .run_chunk_ref(
-                    chunk,
-                    argc,
-                    saved_source_dir,
-                    module_functions,
-                    module_state,
-                    Some(local_slots),
-                )
-                .await;
-            if let Err(error) = result {
-                if let Some(sender) = tx_for_error {
-                    let _ = sender.send(Err(error)).await;
+        tokio::task::spawn_local(crate::orchestration::scope_spawned_source_dir(
+            body_source_dir,
+            async move {
+                let result = child
+                    .run_chunk_ref(
+                        chunk,
+                        argc,
+                        None,
+                        module_functions,
+                        module_state,
+                        Some(local_slots),
+                    )
+                    .await;
+                if let Err(error) = result {
+                    if let Some(sender) = tx_for_error {
+                        let _ = sender.send(Err(error)).await;
+                    }
                 }
-            }
-            // When the generator body finishes (return or fall-through),
-            // the sender is dropped, signaling completion to the receiver.
-        });
+                // When the generator body finishes (return or fall-through),
+                // the sender is dropped, signaling completion to the receiver.
+            },
+        ));
 
         let receiver = Arc::new(tokio::sync::Mutex::new(rx));
         if closure.func.is_stream {
