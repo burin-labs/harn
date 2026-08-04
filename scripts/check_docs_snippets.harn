@@ -298,15 +298,18 @@ pipeline main(harness: Harness, task) {
     md_files = md_files + [rel_path(g)]
   }
   md_files = md_files.sorted()
-  /* The runtime sandbox only permits writes inside the workspace root, so
-   * the snippet scratch directory lives there (removed afterward) rather
-   * than under the system temp dir the bash version used. */
-  const mk = harness.process.run({program: "mktemp", args: ["-d", "harn-docs-snippets-XXXXXX"]})
-  if !mk.success {
-    harness.stdio.eprintln("error: could not create temp directory")
-    harness.runtime.exit(1)
-  }
-  const tmp_dir = mk.stdout.trim()
+  /* The runtime sandbox only permits writes inside the workspace, so the
+   * snippet scratch directory lives there rather than under the system temp
+   * dir the bash version used. `mkdtemp_in_workspace` puts it under the
+   * runtime-owned `.harn-tmp/`, which `.gitignore` already covers.
+   *
+   * `mktemp -d` in the repository root was the earlier spelling. It is
+   * removed on both success and failure by the defer below, but a SIGINT
+   * while a snippet waits on the Harn build lock skips that, and what it
+   * left behind was untracked state at the top of the working tree. The
+   * same interruption now leaves it somewhere `git status` and the
+   * repository scanners already ignore. */
+  const tmp_dir = harness.fs.mkdtemp_in_workspace("harn-docs-snippets-")
   defer {
     harness.process.run({program: "rm", args: ["-rf", tmp_dir]})
   }
