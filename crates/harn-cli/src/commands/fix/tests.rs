@@ -773,6 +773,37 @@ fn a_genuinely_ambiguous_insertion_pair_still_rejects() {
         .expect_err("competing carriers at one offset stay ambiguous");
 }
 
+/// A registry stores `handler: some_handler` and later calls `handler(args)`
+/// through that reference, so adding a capability parameter to the callable
+/// breaks the call — and leaves no static call site for the type checker to
+/// reject. The two programs below differ only in whether the callable's value
+/// escapes.
+#[test]
+fn a_callable_whose_value_escapes_keeps_its_signature() {
+    fn threads_harness(source: &str, name: &str) -> bool {
+        let temp = tempfile::TempDir::new().unwrap();
+        let script = temp.path().join(name);
+        fs::write(&script, source).unwrap();
+        build_plan(&script, Some(RepairSafety::SurfaceChanging))
+            .unwrap()
+            .repairs
+            .iter()
+            .any(|repair| repair.repair.id == "bindings/thread-harness-whole-program")
+    }
+
+    let escaping = "fn read_it(path: string) -> string {\n  return fs_read_text(path)\n}\n\nfn bindings() -> list {\n  return [{name: \"read\", handler: read_it}]\n}\n\npub fn dispatch(name: string, arg: string) -> string {\n  for binding in bindings() {\n    if binding?.name == name {\n      const handler = binding?.handler\n      return handler(arg)\n    }\n  }\n  return \"\"\n}\n";
+    let direct = "fn read_it(path: string) -> string {\n  return fs_read_text(path)\n}\n\npub fn dispatch(name: string, arg: string) -> string {\n  if name == \"read\" {\n    return read_it(arg)\n  }\n  return \"\"\n}\n";
+
+    assert!(
+        threads_harness(direct, "direct.harn"),
+        "a directly-called helper is still migrated"
+    );
+    assert!(
+        !threads_harness(escaping, "escaping.harn"),
+        "a helper whose value is stored in a registry must keep its signature"
+    );
+}
+
 #[test]
 fn plan_json_reports_cross_module_public_signature_impact() {
     let temp = tempfile::TempDir::new().unwrap();

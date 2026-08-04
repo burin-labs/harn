@@ -129,6 +129,7 @@ pub(super) fn plan(
 ) -> Result<Vec<RepairCandidate>, String> {
     let mut program_files = Vec::new();
     let mut callables = Vec::new();
+    let mut referenced_as_value: BTreeSet<String> = BTreeSet::new();
     for file in files {
         let source = std::fs::read_to_string(file)
             .map_err(|error| format!("failed to read {}: {error}", file.display()))?;
@@ -158,6 +159,7 @@ pub(super) fn plan(
             module_graph,
         )
         .check_with_facts(&program, &source);
+        collect_value_references(&program, &mut referenced_as_value);
         let infos = collect_callable_infos(&program, &source, &exported);
         let imported_capability_signatures = imported_signatures(file, module_graph, &type_aliases);
         for info in infos {
@@ -305,6 +307,19 @@ pub(super) fn plan(
         .iter()
         .enumerate()
         .map(|(idx, callable)| {
+            // A callable whose value escapes is invoked through that reference
+            // with its declared arity — a tool registry stores
+            // `handler: some_handler` and later calls `handler(args)`. Adding a
+            // capability parameter there breaks the call without leaving a
+            // static call site for the type checker to reject, so the callable
+            // keeps its signature and the unmet requirement stays visible as a
+            // diagnostic instead.
+            if referenced_as_value.contains(&callable.info.name) {
+                return callable
+                    .carrier
+                    .as_ref()
+                    .map(|carrier| carrier.kind.clone());
+            }
             desired_carrier(callable, &requirements[idx], root_requirements[idx])
         })
         .collect::<Vec<_>>();
@@ -1169,6 +1184,22 @@ fn added_split_capability_bindings(
         additions.insert(*capability, name);
     }
     additions
+}
+
+/// Names bound to a callable's *value* rather than called directly.
+///
+/// `FunctionCall` carries its callee as a bare name, so every surviving
+/// `Node::Identifier` in expression position is a reference to the value —
+/// `handler: find_references_handler` in a registry table, a dispatcher passed
+/// as an argument, a callback stored in a dict.
+fn collect_value_references(program: &[SNode], out: &mut BTreeSet<String>) {
+    for node in program {
+        visit::walk_node(node, &mut |child| {
+            if let Node::Identifier(name) = &child.node {
+                out.insert(name.clone());
+            }
+        });
+    }
 }
 
 fn split_carrier_becomes_root(
