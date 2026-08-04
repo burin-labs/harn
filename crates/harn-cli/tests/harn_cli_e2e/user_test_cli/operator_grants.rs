@@ -216,3 +216,84 @@ pipeline test_protected_push(harness: Harness, _task) {{
     );
     assert_success(&output, "parallel harn test with operator grant");
 }
+
+#[test]
+fn ref_plumbing_pushes_can_skip_the_checkouts_pre_push_hook() {
+    // A pre-push hook validates the commits a developer is publishing. Ref
+    // plumbing publishes an OID the remote already holds, or deletes a ref, so
+    // the hook has no subject and only contributes the checkout's branch and
+    // tracking state as a failure mode. Falsifier: without `no_verify` the
+    // same push through the same checkout is rejected by the hook.
+    let fixture = protected_push_fixture();
+    let hook = fixture.repo.join(".git/hooks/pre-push");
+    fs::create_dir_all(hook.parent().expect("hooks dir")).expect("create hooks dir");
+    fs::write(&hook, "#!/bin/sh\necho 'pre-push refused' >&2\nexit 1\n").expect("write hook");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).expect("chmod hook");
+    }
+    // A branch with no upstream is the normal state of a working checkout, and
+    // is exactly what a hook that consults `@{upstream}` trips over.
+    git(&fixture.repo, &["checkout", "-q", "-b", "no-upstream"]);
+
+    let script = fixture.root.path().join("archive_ref.harn");
+    fs::write(
+        &script,
+        format!(
+            r#"import {{ git_push }} from "std/git"
+
+pipeline main(harness: Harness, _task) {{
+  const hooked = git_push(
+    harness.process,
+    "origin",
+    "{oid}:refs/heads/hooked",
+    {repo},
+  )
+  assert(!hooked.success)
+  const plumbed = git_push(
+    harness.process,
+    "origin",
+    "{oid}:refs/heads/archived",
+    {repo},
+    nil,
+    {{no_verify: true}},
+  )
+  assert(plumbed.success)
+  harness.stdio.println("plumbing-ok")
+}}
+"#,
+            oid = fixture.expected_oid,
+            repo = harn_string(&fixture.repo),
+        ),
+    )
+    .expect("write script");
+
+    let output = run_harn(
+        &fixture,
+        &[
+            "run",
+            "--allow-process-network",
+            "--approve-risky",
+            "git.push",
+            script.to_str().unwrap(),
+        ],
+    );
+    assert_success(&output, "harn run with ref plumbing push");
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("plumbing-ok"),
+        "stdout:\n{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+
+    let remote = fixture.root.path().join("remote.git");
+    let refs = git(&remote, &["for-each-ref", "--format=%(refname)"]);
+    assert!(
+        refs.contains("refs/heads/archived"),
+        "the plumbing push must reach the remote: {refs}"
+    );
+    assert!(
+        !refs.contains("refs/heads/hooked"),
+        "the hooked push must not reach the remote: {refs}"
+    );
+}

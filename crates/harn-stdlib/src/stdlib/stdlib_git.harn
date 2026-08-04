@@ -575,6 +575,12 @@ pub fn git_rebase(process: HarnessProcess, base_ref: string, repo = ".") -> GitR
 /**
  * git_push pushes a refspec and returns a git receipt.
  *
+ * `options.no_verify` skips the checkout's pre-push hook. Use it for ref
+ * plumbing — deleting a ref, or republishing an OID the remote already holds —
+ * where nothing new reaches the remote for a hook to validate, and the hook
+ * would otherwise impose the repository's branch and tracking state on an
+ * operation that does not depend on either.
+ *
  * @effects: [process, network]
  * @errors: []
  */
@@ -584,12 +590,14 @@ pub fn git_push(
   refspec: string,
   repo = ".",
   lease = nil,
+  options: dict = {},
 ) -> GitPushReceipt {
   return process.git_push(
     repo,
     __git_ref_arg(remote, "remote"),
     __git_ref_arg(refspec, "refspec"),
     lease,
+    options,
   )
 }
 

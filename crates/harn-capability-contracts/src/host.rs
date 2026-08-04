@@ -535,7 +535,7 @@ capability_method!(
         "network.write@arg1",
         "fs.read@arg0"
     ],
-    "__cap_process_git_push(repo: string, remote: string, refspec: string, lease?: any) -> GitPushReceipt",
+    "__cap_process_git_push(repo: string, remote: string, refspec: string, lease?: any, options?: dict) -> GitPushReceipt",
     "Push a Git ref."
 );
 capability_method!(
