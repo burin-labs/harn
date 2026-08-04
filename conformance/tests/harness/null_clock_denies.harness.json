@@ -1,0 +1,6 @@
+{
+  "mode": "null",
+  "expect_deny_events": [
+    {"sub_handle": "clock", "method": "now_ms", "args": []}
+  ]
+}

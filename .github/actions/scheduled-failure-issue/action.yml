@@ -1,0 +1,97 @@
+name: Scheduled failure tracking issue
+description: >-
+  Open, update, and close one tracking issue that follows a scheduled job's
+  result, so a red cron run is something somebody is told about rather than
+  something somebody has to go looking for.
+
+inputs:
+  title:
+    description: >-
+      Issue title. This is the deduplication key, so it must be stable across
+      runs and unique per watched job.
+    required: true
+  result:
+    description: >-
+      Result of the watched job, normally `needs.<job>.result`. `success`
+      closes an open issue; `failure`, `cancelled`, and `timed_out` open or
+      update one; anything else (notably `skipped`) is a no-op.
+    required: true
+  details:
+    description: >-
+      Optional first line of the issue body, for naming what to look at. The
+      run URL is appended regardless.
+    required: false
+    default: ''
+  owner-file:
+    description: >-
+      Workflow path recorded in the issue footer so the reader can find what
+      files it.
+    required: true
+  labels:
+    description: Comma-separated labels applied when the issue is created.
+    required: false
+    default: ''
+  token:
+    description: "Token used for issue reads and writes. Needs `issues: write`."
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - name: Open or resolve the tracking issue
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        GH_REPO: ${{ github.repository }}
+        TITLE: ${{ inputs.title }}
+        RESULT: ${{ inputs.result }}
+        DETAILS: ${{ inputs.details }}
+        OWNER_FILE: ${{ inputs.owner-file }}
+        LABELS: ${{ inputs.labels }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        set -euo pipefail
+
+        # Match on the exact title rather than trusting search ranking: the
+        # search index is fuzzy and eventually consistent, so a near-miss would
+        # file a duplicate every night instead of updating one issue.
+        existing=$(gh issue list --repo "$GH_REPO" --state open \
+          --search "\"$TITLE\" in:title" --json number,title \
+          --jq "[.[] | select(.title == \"$TITLE\")][0].number // empty")
+
+        case "$RESULT" in
+          success)
+            if [ -n "$existing" ]; then
+              gh issue comment "$existing" --repo "$GH_REPO" \
+                --body "Green again: $RUN_URL — closing."
+              gh issue close "$existing" --repo "$GH_REPO"
+            fi
+            ;;
+          failure | cancelled | timed_out)
+            if [ -n "$existing" ]; then
+              gh issue comment "$existing" --repo "$GH_REPO" \
+                --body "Still failing (\`$RESULT\`): $RUN_URL"
+            else
+              # Built by concatenation rather than as one multi-line shell
+              # string: that string is written inside a YAML block scalar, so
+              # its indentation would land in the issue body verbatim.
+              body=""
+              if [ -n "$DETAILS" ]; then
+                body="$DETAILS"$'\n\n'
+              fi
+              body="${body}Scheduled run did not pass (\`$RESULT\`): $RUN_URL"$'\n\n'
+              body="${body}Opened, updated, and closed automatically by \`$OWNER_FILE\`;"
+              body="${body} stays open until a scheduled run is green."
+              if [ -n "$LABELS" ]; then
+                gh issue create --repo "$GH_REPO" --title "$TITLE" \
+                  --label "$LABELS" --body "$body"
+              else
+                gh issue create --repo "$GH_REPO" --title "$TITLE" --body "$body"
+              fi
+            fi
+            ;;
+          *)
+            echo "watched result is '$RESULT' — no tracking-issue action."
+            ;;
+        esac

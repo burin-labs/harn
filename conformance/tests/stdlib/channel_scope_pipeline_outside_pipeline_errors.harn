@@ -1,0 +1,13 @@
+/**
+ * CH-03 (#1874): emitting a `pipeline:`-scoped channel outside any pipeline
+ * context returns HARN-CHN-001. The `pipeline default()` body itself does
+ * not establish a pipeline runtime overlay (only orchestrator workflows do),
+ * so this is the conformance signal for the missing-context guard.
+ */
+pipeline default(harness: Harness) {
+  const pipeline_emit = try {
+    harness.channels.append("pipeline:stage.done", {n: 1}, {id: "outside-pipeline"})
+  }
+  harness.stdio.println(is_err(pipeline_emit))
+  harness.stdio.println(contains(to_string(unwrap_err(pipeline_emit)), "HARN-CHN-001"))
+}

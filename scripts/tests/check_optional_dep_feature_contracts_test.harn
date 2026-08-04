@@ -1,0 +1,41 @@
+import "../check_optional_dep_feature_contracts.harn"
+
+@test
+pipeline test_accepts_download_binaries_with_tls_rustls(harness: Harness, task) {
+  const text = """
+[dependencies]
+ort = { version = "2", default-features = false, features = ["download-binaries", "tls-rustls"] }
+"""
+  assert_eq(optional_dep_feature_contract_violations_from_text("ok/Cargo.toml", text), [])
+}
+
+@test
+pipeline test_accepts_download_binaries_when_defaults_remain_on(harness: Harness, task) {
+  const text = """
+[dependencies]
+ort = { version = "2", features = ["download-binaries"] }
+"""
+  assert_eq(optional_dep_feature_contract_violations_from_text("defaults/Cargo.toml", text), [])
+}
+
+@test
+pipeline test_rejects_download_binaries_without_tls(harness: Harness, task) {
+  const text = """
+[dependencies]
+ort = { version = "2", default-features = false, features = ["download-binaries"] }
+"""
+  const violations = optional_dep_feature_contract_violations_from_text("bad/Cargo.toml", text)
+  assert_eq(violations.count, 1)
+  assert(violations[0].contains("no TLS feature"))
+}
+
+@test
+pipeline test_rejects_multiple_tls_features(harness: Harness, task) {
+  const text = """
+[dependencies]
+ort = { version = "2", default-features = false, features = ["download-binaries", "tls-rustls", "tls-native"] }
+"""
+  const violations = optional_dep_feature_contract_violations_from_text("multi/Cargo.toml", text)
+  assert_eq(violations.count, 1)
+  assert(violations[0].contains("multiple TLS features"))
+}

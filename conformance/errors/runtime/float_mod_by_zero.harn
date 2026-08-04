@@ -1,0 +1,6 @@
+// Modulo by a zero divisor raises even for floats — unlike float division,
+// which yields NaN. Documents that `%` never produces NaN.
+pipeline default(harness: Harness) {
+  const d = 0.0
+  const _ = 5.0 % d
+}

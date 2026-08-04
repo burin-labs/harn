@@ -1,0 +1,4 @@
+pipeline default(harness: Harness) {
+  const user: {name: string, age: int} = {name: 42, age: 30}
+  harness.stdio.println(user)
+}

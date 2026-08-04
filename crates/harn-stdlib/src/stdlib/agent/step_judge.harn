@@ -1,0 +1,248 @@
+import { __judge_classify_verdict, __judge_run_checkpoint } from "std/agent/judge_internals"
+import { step_judge_system_prompt, step_judge_user_prompt } from "std/agent/prompts"
+import { agent_emit_event, agent_session_messages } from "std/agent/state"
+import { estimate_call_cost } from "std/llm/economics"
+
+fn __step_judge_schema() {
+  return {
+    type: "object",
+    properties: {
+      verdict: {
+        type: "string",
+        description:
+          "Use `pass` if the response advances the task acceptably, `revise` to request regeneration.",
+      },
+      reasoning: {type: "string"},
+      critique: {type: "string"},
+      confidence: {type: "number"},
+    },
+    required: ["verdict"],
+  }
+}
+
+fn __serialize_response(llm_result) {
+  const {text = "", tool_calls = []} = llm_result ?? {}
+  let parts = []
+  if text != "" {
+    parts = parts.appending("text: " + text)
+  }
+  if len(tool_calls) > 0 {
+    parts = parts.appending("tool_calls: " + json_stringify(tool_calls))
+  }
+  if len(parts) == 0 {
+    return "<empty response>"
+  }
+  return join(parts, "\n")
+}
+
+fn __payload(agent: HarnessAgent, session, llm_result, iteration) {
+  const messages = agent_session_messages(agent, session.session_id)
+  return {
+    session_id: session.session_id,
+    iteration: iteration,
+    task: session?.task ?? "",
+    transcript: json_stringify(messages),
+    latest_response: __serialize_response(llm_result),
+  }
+}
+
+fn __should_skip(judge_cfg, llm_result, attempts, stall_warning, remaining_iterations) {
+  const max_attempts = judge_cfg?.max_attempts ?? 3
+  if attempts >= max_attempts {
+    return {skip: true, reason: "max_attempts_reached"}
+  }
+  const skip_when_iterations_remaining = judge_cfg?.skip_when_iterations_remaining ?? 1
+  if remaining_iterations != nil && remaining_iterations <= skip_when_iterations_remaining {
+    return {skip: true, reason: "low_iteration_budget"}
+  }
+  const skip_empty = judge_cfg?.skip_when_empty ?? true
+  const text = llm_result?.text ?? ""
+  const tools = llm_result?.tool_calls ?? []
+  if skip_empty && text == "" && len(tools) == 0 {
+    return {skip: true, reason: "empty_response"}
+  }
+  const skip_stalled = judge_cfg?.skip_when_stalled ?? true
+  if skip_stalled && stall_warning != nil {
+    return {skip: true, reason: "stall_already_detected"}
+  }
+  return {skip: false}
+}
+
+fn __invoke(harness: Harness, judge_cfg, opts, payload) {
+  const system = step_judge_system_prompt(harness.fs, {rubric: judge_cfg?.rubric ?? "default"})
+  const user = step_judge_user_prompt(harness.fs, payload)
+  const schema = __step_judge_schema()
+  const ran = __judge_run_checkpoint(
+    harness,
+    judge_cfg,
+    opts,
+    payload,
+    "agent.step_judge",
+    system,
+    user,
+    schema,
+  )
+  const checkpoint = ran.checkpoint
+  const duration_ms = ran.duration_ms
+  if !checkpoint.ok {
+    const fail_open = judge_cfg?.fail_open_on_error ?? judge_cfg?.fail_open ?? true
+    if fail_open {
+      // Fail-open: the turn PROCEEDS (we deliberately do not block on the
+      // judge's own flakiness). But the swallow must be OBSERVABLE — a
+      // `verdict: "pass"` here means "the adversarial reviewer was
+      // UNAVAILABLE", not "the reviewer approved this turn". Carry a
+      // distinct `judge_error` flag and a `judge_unavailable` reason so
+      // telemetry (the emitted `step_judge_decision` event) can tell an
+      // inert review surface apart from a genuine pass.
+      return {
+        vetoed: false,
+        skipped: true,
+        judge_error: true,
+        reason: "judge_unavailable",
+        verdict: "pass",
+        critique: "",
+        reasoning: checkpoint.error,
+        confidence: 0,
+        judge_duration_ms: duration_ms,
+        typed_checkpoint: checkpoint,
+      }
+    }
+    return {
+      vetoed: true,
+      verdict: "revise",
+      critique: checkpoint.error,
+      reasoning: checkpoint.error,
+      confidence: 0,
+      judge_duration_ms: duration_ms,
+      typed_checkpoint: checkpoint,
+    }
+  }
+  const result = checkpoint.data
+  const {reasoning = "", critique = "", confidence = 1.0} = result ?? {}
+  const pass_verdicts = ["pass", "yes", "ok", "advance", "proceed", "approve"]
+  const feedback_default = judge_cfg?.feedback_fallback
+    ?? "The previous response should be revised."
+  const outcome = __judge_classify_verdict(
+    result?.verdict ?? "revise",
+    pass_verdicts,
+    [critique, reasoning],
+    feedback_default,
+  )
+  return outcome
+    + {
+    reasoning: reasoning,
+    critique: critique,
+    confidence: confidence,
+    judge_duration_ms: duration_ms,
+    typed_checkpoint: checkpoint,
+  }
+}
+
+fn __emit_decision(agent: HarnessAgent, session_id, iteration, on_veto, verdict) {
+  const {usage = {}, provider = "", model = ""} = verdict?.typed_checkpoint ?? {}
+  const cost_est = if provider != "" && model != "" {
+    estimate_call_cost(
+      {
+        provider: provider,
+        model: model,
+        input_tokens: usage?.input_tokens ?? 0,
+        output_tokens: usage?.output_tokens ?? 0,
+        cache_read_tokens: usage?.cache_read_tokens ?? 0,
+        cache_write_tokens: usage?.cache_write_tokens ?? 0,
+        calls: 1,
+      },
+    )
+  } else {
+    {cost_usd: 0}
+  }
+  agent_emit_event(
+    agent,
+    session_id,
+    "step_judge_decision",
+    {
+      iteration: iteration,
+      verdict: verdict?.verdict
+        ?? if verdict.vetoed {
+        "revise"
+      } else {
+        "pass"
+      },
+      reasoning: verdict?.reasoning ?? "",
+      critique: verdict?.critique ?? "",
+      confidence: verdict?.confidence ?? 1.0,
+      judge_duration_ms: verdict?.judge_duration_ms ?? 0,
+      on_veto: on_veto,
+      vetoed: verdict.vetoed,
+      skipped: verdict?.skipped ?? false,
+      reason: verdict?.reason,
+      judge_error: verdict?.judge_error ?? false,
+      input_tokens: usage?.input_tokens ?? 0,
+      output_tokens: usage?.output_tokens ?? 0,
+      cost_usd: cost_est?.cost_usd ?? 0,
+      provider: provider,
+      model: model,
+    },
+  )
+}
+
+/**
+ * agent_step_judge — per-turn critique hook. Sibling of
+ * `agent_verify_or_continue` but fires AFTER each assistant turn and
+ * BEFORE tool dispatch. Returns
+ * `{vetoed, verdict, critique, reasoning, confidence, judge_duration_ms, ...}`.
+ * The loop is responsible for acting on `vetoed`: inject feedback,
+ * optionally pop the trailing assistant turn (replace mode), and
+ * continue to next iteration. See `agent_loop` documentation for the
+ * `step_judge` opts shape.
+ *
+ * Skip-path returns `{vetoed: false, skipped: true, reason: ...}` so
+ * the caller can treat skip and pass uniformly. Reasons:
+ * `not_configured`, `max_attempts_reached`, `low_iteration_budget`,
+ * `empty_response`, `stall_already_detected`, `judge_unavailable` (when
+ * the judge model errored and `fail_open` swallowed it). The
+ * `judge_unavailable` skip ALSO carries `judge_error: true` so a
+ * fail-open swallow is distinguishable from a genuine pass in telemetry —
+ * the turn still proceeds, but the adversarial-review surface was inert.
+ * `skip_when_iterations_remaining` defaults to `1`, so a configured step
+ * judge does not veto a turn when no regeneration turn remains. Configured
+ * skip paths emit `step_judge_decision` with `skipped: true`.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_step_judge(
+  harness: Harness,
+  session,
+  llm_result,
+  opts,
+  iteration = 0,
+  stall_warning = nil,
+  attempts = 0,
+  remaining_iterations = nil,
+) {
+  const judge_cfg = opts?.step_judge
+  if judge_cfg == nil {
+    return {vetoed: false, skipped: true, reason: "not_configured"}
+  }
+  const on_veto = judge_cfg?.on_veto ?? "replace"
+  const skip = __should_skip(judge_cfg, llm_result, attempts, stall_warning, remaining_iterations)
+  if skip.skip {
+    const verdict = {
+      vetoed: false,
+      skipped: true,
+      reason: skip.reason,
+      verdict: "pass",
+      critique: "",
+      reasoning: "",
+      confidence: 1.0,
+      judge_duration_ms: 0,
+    }
+    __emit_decision(harness.agent, session.session_id, iteration, on_veto, verdict)
+    return verdict + {on_veto: on_veto, attempts: attempts}
+  }
+  const payload = __payload(harness.agent, session, llm_result, iteration)
+  const verdict = __invoke(harness, judge_cfg, opts, payload)
+  __emit_decision(harness.agent, session.session_id, iteration, on_veto, verdict)
+  return verdict + {on_veto: on_veto, attempts: attempts + 1}
+}

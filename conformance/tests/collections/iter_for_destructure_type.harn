@@ -1,0 +1,7 @@
+pipeline test(harness: Harness, task) {
+  // Positive: for (i, x) in iter(["a","b"]).enumerate() must type-check.
+  // i inferred as int, x as string — log arithmetic and concat prove it.
+  for (i, x) in iter(["a", "b"]).enumerate() {
+    harness.stdio.log("${i + 1}:${x}")
+  }
+}

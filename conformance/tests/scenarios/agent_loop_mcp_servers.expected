@@ -1,0 +1,7 @@
+remote__echo
+mirror__echo
+2
+echo
+hello from remote
+echo
+hello from mirror

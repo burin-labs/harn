@@ -1,0 +1,202 @@
+//! Selector resolution: turn an alias or provider/model selector into the
+//! complete `ResolvedModel` identity (provider, normalized id, tool format,
+//! tier, family, lineage).
+use std::collections::BTreeMap;
+
+use serde::Serialize;
+
+use super::*;
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ResolvedModel {
+    pub id: String,
+    pub provider: String,
+    pub alias: Option<String>,
+    pub tool_format: String,
+    pub tier: String,
+    pub family: String,
+    pub lineage: String,
+}
+
+/// Stable, secret-free model-route facts suitable for durable receipts.
+///
+/// The execution path may carry arbitrary route-overlay parameters. This
+/// contract exposes only Harn's validated generation-default schema so
+/// replay, eval, and audit consumers do not serialize private operator fields.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelExecutionContract {
+    pub selector: String,
+    pub resolved: ResolvedModel,
+    pub wire_model: String,
+    pub generation_defaults: BTreeMap<String, toml::Value>,
+}
+
+/// Resolve a model alias to (model_id, provider_name).
+pub fn resolve_model(alias: &str) -> (String, Option<String>) {
+    let config = effective_config();
+    if let Some(a) = config.aliases.get(alias) {
+        return (a.id.clone(), Some(a.provider.clone()));
+    }
+    (normalize_model_id_with_config(alias, &config), None)
+}
+
+/// Strip host/provider selector prefixes that identify transport, not the
+/// provider-native model id. This mirrors the host's existing normalization so
+/// `ollama:qwen3:30b` reaches Ollama as `qwen3:30b` instead of an invalid
+/// model named `ollama`. Cerebras follows the same convention but uses a
+/// slash separator (`cerebras/gpt-oss-120b`) because its own /v1/models
+/// endpoint returns bare names that overlap OpenAI's families.
+pub fn normalize_model_id(raw: &str) -> String {
+    normalize_model_id_with_config(raw, &effective_config())
+}
+
+fn normalize_model_id_with_config(raw: &str, config: &ProvidersConfig) -> String {
+    for prefix in PROVIDER_SELECTOR_PREFIXES {
+        if let Some(stripped) = raw.strip_prefix(prefix) {
+            return stripped.to_string();
+        }
+    }
+    if let Some((provider, model)) = raw.split_once(':') {
+        if !model.is_empty() && (provider == "mock" || config.providers.contains_key(provider)) {
+            return model.to_string();
+        }
+    }
+    raw.to_string()
+}
+
+const PROVIDER_SELECTOR_PREFIXES: &[&str] =
+    &["ollama:", "local:", "huggingface:", "hf:", "cerebras/"];
+
+/// Resolve an alias or selector into the complete catalog identity hosts need:
+/// provider inference, prefix-normalized model id, default tool format, and tier.
+pub fn resolve_model_info(selector: &str) -> ResolvedModel {
+    let config = effective_config();
+    if let Some(alias) = config.aliases.get(selector) {
+        let id = alias.id.clone();
+        let provider = alias.provider.clone();
+        let requested = alias
+            .tool_format
+            .clone()
+            .unwrap_or_else(|| default_tool_format_with_config(&config, &id, &provider));
+        let tool_format = guard_tool_format(&provider, &id, &requested, Some(selector));
+        return ResolvedModel {
+            tier: model_tier_with_config(&config, &id),
+            family: model_family_with_config(&config, &provider, &id),
+            lineage: model_lineage_with_config(&config, &provider, &id),
+            id,
+            provider,
+            alias: Some(selector.to_string()),
+            tool_format,
+        };
+    }
+
+    let id = normalize_model_id_with_config(selector, &config);
+    let inference = infer_provider_with_config(&config, selector);
+    let source = inference.source;
+    let provider = inference.provider;
+    let requested = default_tool_format_with_config(&config, &id, &provider);
+    let tool_format = guard_tool_format(&provider, &id, &requested, None);
+    let tier = model_tier_with_config(&config, &id);
+    let family = model_family_with_inference_source(&config, &provider, &id, source);
+    let lineage = model_lineage_with_inference_source(&config, &provider, &id, source);
+    ResolvedModel {
+        id,
+        provider,
+        alias: None,
+        tool_format,
+        tier,
+        family,
+        lineage,
+    }
+}
+
+/// Resolve a model selector into the stable, secret-free execution facts that
+/// hosts may persist and fingerprint.
+pub fn model_execution_contract(selector: &str) -> ModelExecutionContract {
+    let resolved = resolve_model_info(selector);
+    let wire_model = wire_model_id(&resolved.id);
+    let generation_defaults = generation_defaults_for_route(&resolved.provider, &resolved.id);
+    ModelExecutionContract {
+        selector: selector.to_string(),
+        resolved,
+        wire_model,
+        generation_defaults,
+    }
+}
+
+/// Run the requested `tool_format` through the capability registry's
+/// dialect-validity gate, returning the safe format to actually use. When the
+/// registry auto-corrects a known-broken combo (e.g. a `native` pin on a
+/// `native_unreliable` route that silently drops to unparsed DSML text), the
+/// correction is logged once at resolution time so a harness developer sees
+/// *why* their pinned format was not honored — never a silent vanishing.
+fn guard_tool_format(provider: &str, model: &str, requested: &str, alias: Option<&str>) -> String {
+    let decision = crate::llm::capabilities::validate_tool_format(provider, model, requested);
+    if let Some(reason) = &decision.correction {
+        tracing::warn!(
+            target: "harn::llm::tool_format",
+            alias = alias.unwrap_or(""),
+            "{reason}"
+        );
+    }
+    decision.effective
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_model_id, resolve_model_info};
+
+    #[test]
+    fn registered_provider_selector_normalizes_to_native_model_id() {
+        let model = resolve_model_info("openai:o3");
+        assert_eq!(model.provider, "openai");
+        assert_eq!(model.id, "o3");
+        assert_eq!(normalize_model_id("mock:o3"), "o3");
+        assert_eq!(
+            normalize_model_id("ollama:qwen3.2:latest"),
+            "qwen3.2:latest",
+            "only the first selector colon is transport syntax"
+        );
+    }
+
+    #[test]
+    fn grok_code_aliases_resolve_through_live_resolver() {
+        for selector in ["grok-code", "grok-code-fast", "grok-code-fast-1"] {
+            let model = resolve_model_info(selector);
+            assert_eq!(
+                (
+                    model.id.as_str(),
+                    model.provider.as_str(),
+                    model.alias.as_deref(),
+                    model.tool_format.as_str(),
+                ),
+                ("grok-build-0.1", "xai", Some(selector), "native"),
+                "selector: {selector}",
+            );
+        }
+    }
+
+    #[test]
+    fn huggingface_qwen3_coder_aliases_resolve_through_live_resolver() {
+        for selector in ["huggingface-qwen3-coder", "hf-qwen3-coder"] {
+            let model = resolve_model_info(selector);
+            assert_eq!(
+                (
+                    model.id.as_str(),
+                    model.provider.as_str(),
+                    model.alias.as_deref(),
+                    model.tool_format.as_str(),
+                    model.tier.as_str(),
+                ),
+                (
+                    "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+                    "huggingface",
+                    Some(selector),
+                    "native",
+                    "frontier",
+                ),
+                "selector: {selector}",
+            );
+        }
+    }
+}

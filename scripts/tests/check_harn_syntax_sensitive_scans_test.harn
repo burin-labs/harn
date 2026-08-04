@@ -1,0 +1,165 @@
+import { with_temp_dir } from "std/testing"
+import "../check_harn_syntax_sensitive_scans.harn"
+
+fn mkdirs(fs: HarnessFs, path: string) -> nil {
+  const parts = split(path_normalize(path), "/")
+  let current = if path.starts_with("/") {
+    "/"
+  } else {
+    ""
+  }
+  for part in parts {
+    if part == "" {
+      continue
+    }
+    current = if current == "" || current == "/" {
+      current + part
+    } else {
+      path_join(current, part)
+    }
+    if !fs.exists(current) {
+      fs.mkdir(current)
+    }
+  }
+  return nil
+}
+
+fn write_text(fs: HarnessFs, root: string, rel: string, text: string) -> nil {
+  const path = path_join(root, rel)
+  mkdirs(fs, dirname(path) ?? root)
+  fs.write_text(path, text)
+  return nil
+}
+
+@test
+pipeline test_line_detectors(harness: Harness, task) {
+  assert_eq(line_has_let_only_harn_binding_regex("const pattern = \"let\\\\s+foo\""), true)
+  assert_eq(
+    line_has_let_only_harn_binding_regex("const pattern = \"(?:const|let)\\\\s+foo\""),
+    false,
+  )
+  assert_eq(
+    line_has_let_only_harn_binding_regex("const pattern = \"(?:let|const)\\\\s+foo\""),
+    false,
+  )
+  const stale_registry = " * " + "var " + "reg = tool_registry()"
+  assert_eq(line_has_stale_var_tool_registry_example(stale_registry), true)
+  assert_eq(line_has_stale_var_tool_registry_example("let reg = tool_registry()"), false)
+  assert_eq(line_has_stale_var_tool_registry_example("var count = 0"), false)
+  const retired = "long" + "_running"
+  assert_eq(
+    line_has_retired_long_running_option("docs/example.md", "`" + retired + ": true`"),
+    true,
+  )
+  assert_eq(
+    line_has_retired_long_running_option(
+      "tests/rejection.rs",
+      "\"" + retired + "\" // retired-option-rejection",
+    ),
+    false,
+  )
+  assert_eq(
+    line_has_retired_long_running_option("changelog/archive/old.md", "`" + retired + ": true`"),
+    false,
+  )
+  assert_eq(
+    line_has_retired_long_running_option(
+      "src/internal.rs",
+      "crate::stdlib::" + retired + "::spawn_operation()",
+    ),
+    false,
+  )
+}
+
+@test
+pipeline test_scan_text_reports_all_issue_classes(harness: Harness, task) {
+  const retired = "long" + "_running"
+  const findings = harn_syntax_sensitive_scan_text(
+    "scripts/example.harn",
+    "const pattern = \"let\\\\s+_EVIDENCE_\"\n * "
+      + "var "
+      + "reg = tool_registry()\nconst opts = {"
+      + retired
+      + ": true}\n",
+  )
+  assert_eq(findings.count, 3)
+  assert_eq(findings[0].line, 1)
+  assert_eq(findings[0].kind, "let-only-harn-binding-regex")
+  assert_eq(findings[1].line, 2)
+  assert_eq(findings[1].kind, "stale-var-tool-registry-example")
+  assert_eq(findings[2].line, 3)
+  assert_eq(findings[2].kind, "retired-long-running-option")
+}
+
+@test
+pipeline test_candidate_text_requires_a_detector_literal(harness: Harness, task) {
+  assert_eq(text_has_syntax_sensitive_candidate("fn unrelated() { return nil }"), false)
+  assert_eq(text_has_syntax_sensitive_candidate("const pattern = \"let\\\\s+name\""), true)
+  assert_eq(text_has_syntax_sensitive_candidate("let registry = tool_registry()"), true)
+  assert_eq(text_has_syntax_sensitive_candidate("{\"long_running\": true}"), true)
+}
+
+@test
+pipeline test_temp_tree_skips_generated_and_reports_findings(harness: Harness, task) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      write_text(harness.fs, root, "scripts/bad.harn", "const pattern = \"let\\\\s+name\"\n")
+      write_text(
+        harness.fs,
+        root,
+        "docs/bad.md",
+        "```harn\n" + "var " + "reg = tool_registry()\n```\n",
+      )
+      write_text(harness.fs, root, "docs/good.md", "```harn\nlet reg = tool_registry()\n```\n")
+      const retired = "long" + "_running"
+      write_text(harness.fs, root, "schemas/bad.json", "{\"" + retired + "\":true}\n")
+      write_text(harness.fs, root, "docs/dist/generated.md", "var " + "reg = tool_registry()\n")
+      write_text(
+        harness.fs,
+        root,
+        ".harn-tmp/harn-docs-snippets-AbCd/35_concurrency_8.harn",
+        "var " + "reg = tool_registry()\n",
+      )
+      write_text(harness.fs, root, "target/generated.harn", "const pattern = \"let\\\\s+x\"\n")
+      const files = harn_syntax_sensitive_files(harness.fs, root)
+      assert_eq(files.contains("scripts/bad.harn"), true)
+      assert_eq(files.contains("docs/bad.md"), true)
+      assert_eq(files.contains("schemas/bad.json"), true)
+      assert_eq(files.contains("docs/dist/generated.md"), false)
+      assert_eq(files.contains(".harn-tmp/harn-docs-snippets-AbCd/35_concurrency_8.harn"), false)
+      assert_eq(files.contains("target/generated.harn"), false)
+      const report = check_harn_syntax_sensitive_scans(harness.fs, harness.process, root)
+      assert_eq(report.violation_count, 3)
+      assert_eq(
+        report.findings.map({ row -> row.path }).to_list().sorted(),
+        ["docs/bad.md", "schemas/bad.json", "scripts/bad.harn"],
+      )
+    },
+  )
+}
+
+@test
+pipeline test_git_fast_path_includes_untracked_source(harness: Harness, task) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const initialized = harness.process.run(
+        {program: "git", args: ["-C", root, "init", "--quiet"]},
+      )
+      assert_eq(initialized.exit_code, 0)
+      write_text(harness.fs, root, "tracked.harn", "const pattern = \"let\\\\s+tracked\"\n")
+      const staged = harness.process.run(
+        {program: "git", args: ["-C", root, "add", "tracked.harn"]},
+      )
+      assert_eq(staged.exit_code, 0)
+      write_text(harness.fs, root, "untracked.md", "var " + "reg = tool_registry()\n")
+      const report = check_harn_syntax_sensitive_scans(harness.fs, harness.process, root)
+      assert_eq(
+        report.findings.map({ row -> row.path }).to_list().sorted(),
+        ["tracked.harn", "untracked.md"],
+      )
+      assert_eq(report.violation_count, 2)
+    },
+  )
+}

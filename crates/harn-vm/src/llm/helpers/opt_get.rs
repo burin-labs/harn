@@ -1,0 +1,56 @@
+use crate::value::VmValue;
+
+pub(crate) fn opt_str(options: &Option<crate::value::DictMap>, key: &str) -> Option<String> {
+    match options.as_ref()?.get(key)? {
+        VmValue::Nil => None,
+        value => Some(value.display()),
+    }
+}
+
+pub(crate) fn opt_int(options: &Option<crate::value::DictMap>, key: &str) -> Option<i64> {
+    options.as_ref()?.get(key)?.as_int()
+}
+
+pub(crate) fn opt_float(options: &Option<crate::value::DictMap>, key: &str) -> Option<f64> {
+    options.as_ref()?.get(key).and_then(|v| match v {
+        VmValue::Float(f) => Some(*f),
+        VmValue::Int(i) => Some(*i as f64),
+        _ => None,
+    })
+}
+
+pub(crate) fn opt_bool(options: &Option<crate::value::DictMap>, key: &str) -> bool {
+    options
+        .as_ref()
+        .and_then(|o| o.get(key))
+        .map(|v| v.is_truthy())
+        .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::value::VmDictExt;
+
+    use crate::value::VmValue;
+
+    use super::opt_str;
+
+    #[test]
+    fn opt_str_treats_nil_as_unset() {
+        let mut options = crate::value::DictMap::new();
+        options.insert(crate::value::intern_key("path"), VmValue::Nil);
+
+        assert_eq!(opt_str(&Some(options), "path"), None);
+    }
+
+    #[test]
+    fn opt_str_preserves_string_values() {
+        let mut options = crate::value::DictMap::new();
+        options.put_str("path", "transcripts");
+
+        assert_eq!(
+            opt_str(&Some(options), "path"),
+            Some("transcripts".to_string())
+        );
+    }
+}

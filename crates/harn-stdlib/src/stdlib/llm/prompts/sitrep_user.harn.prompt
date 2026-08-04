@@ -1,0 +1,19 @@
+{{ if extra_instructions }}Additional instructions for this sitrep:
+{{ extra_instructions }}
+
+{{ end }}You are producing a SITREP (situation report) for the user about an in-progress agent conversation.
+
+Write exactly 3 short sentences, each on its own line, in this order:
+1. CURRENT STATE — what the agent is presently focused on or has just completed.
+2. WORK DONE — concrete outcomes so far (files touched, commands run, decisions made). Be specific. Past tense.
+3. NEXT ACTION — what the agent intends to do next, or what input is needed from the user to proceed.
+
+Hard rules:
+- Exactly 3 lines. No preamble, no "Sure!", no markdown, no bullet points, no numbering in the output.
+- Each line is one sentence, ≤ 35 words.
+- Never invent facts the transcript does not contain. If a piece is genuinely unknown, say "unclear" rather than guessing.
+- Treat tool calls / tool results / system reminders as authoritative when they conflict with prose.
+{{ if audience }}- Tone: {{ audience }}.{{ end }}
+
+Conversation:
+{{ formatted }}

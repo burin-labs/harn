@@ -1,0 +1,621 @@
+import { help_requested, parse, parser } from "std/cli/argparse"
+
+const MAX_LINES = 1500
+
+const BASELINE_DIR = "scripts/source-file-length-baseline"
+
+const BASELINE_SUFFIX = ".lines"
+
+const SKIP_DIR_NAMES = [
+  ".burin",
+  ".git",
+  ".harn",
+  ".harn-runs",
+  ".harn-toolchain-cache",
+  "node_modules",
+]
+
+const CARGO_TARGET_DIR_NAMES = [".target", "target"]
+
+const CARGO_TARGET_DIR_PREFIXES = [".target-"]
+
+const WORKTREE_CARGO_TARGET_DIR_PREFIX = "target-"
+
+const CARGO_TARGET_ARTIFACT_DIR_NAMES = ["debug", "release"]
+
+const GENERATED_SOURCE_PREFIXES = ["spec/protocol-artifacts/"]
+
+/** The only tree whose `.harn` sources the ratchet governs. */
+pub const STDLIB_SOURCE_DIR = "crates/harn-stdlib/src/stdlib"
+
+pub type SourceCount = {path: string, lines: int}
+
+pub type ValidBaselineCount = {kind: "valid", shard_path: string, source_path: string, lines: int}
+
+pub type InvalidBaselineCount = {
+  kind: "invalid",
+  shard_path: string,
+  source_path: string,
+  error: string,
+}
+
+pub type BaselineCount = ValidBaselineCount | InvalidBaselineCount
+
+pub type SourceLengthFindingKind = "malformed_baseline" \
+  | "orphan_baseline" \
+  | "invalid_baseline" \
+  | "obsolete_baseline" \
+  | "new_oversized_source" \
+  | "growth" \
+  | "stale_baseline" \
+  | "unscanned_source"
+
+pub type SourceLengthFinding = {
+  kind: SourceLengthFindingKind,
+  path: string,
+  actual?: int,
+  baseline?: int,
+  message: string,
+}
+
+pub type BaselineWriteEdit = {kind: "write", shard_path: string, source_path: string, lines: int}
+
+pub type BaselineDeleteEdit = {kind: "delete", shard_path: string, source_path: string}
+
+pub type BaselineEdit = BaselineWriteEdit | BaselineDeleteEdit
+
+pub type SourceLengthReport = {
+  root: string,
+  max_lines: int,
+  source_count: int,
+  baseline_count: int,
+  oversized_count: int,
+  findings: list<SourceLengthFinding>,
+}
+
+fn repo_root(fs: HarnessFs) -> string {
+  return path_normalize(path_join(fs.source_dir(), ".."))
+}
+
+/** Count logical lines, including a final line without a trailing newline. */
+pub fn logical_line_count(text: string) -> int {
+  if text == "" {
+    return 0
+  }
+  const parts = text.split("\n")
+  if text.ends_with("\n") {
+    return parts.count - 1
+  }
+  return parts.count
+}
+
+/** Map one repo-relative source path to its conflict-isolated baseline shard. */
+pub fn baseline_path_for(source_path: string) -> string {
+  return BASELINE_DIR + "/" + normalize_source_path(source_path) + BASELINE_SUFFIX
+}
+
+/** Canonicalize an inventory path independently of the host path separator. */
+pub fn normalize_source_path(path: string) -> string {
+  return replace(path_normalize(path), "\\", "/")
+}
+
+fn source_path_for_baseline(shard_path: string) -> string? {
+  const prefix = BASELINE_DIR + "/"
+  if !shard_path.starts_with(prefix) || !shard_path.ends_with(BASELINE_SUFFIX) {
+    return nil
+  }
+  const source_path = shard_path[len(prefix):len(shard_path) - len(BASELINE_SUFFIX)]
+  if source_path == "" {
+    return nil
+  }
+  return source_path
+}
+
+/** Identify generated Cargo target directories without hiding similarly named source trees. */
+fn standard_cargo_target_dir_name(name: string) -> bool {
+  if CARGO_TARGET_DIR_NAMES.contains(name) {
+    return true
+  }
+  for prefix in CARGO_TARGET_DIR_PREFIXES {
+    if name.starts_with(prefix) {
+      return true
+    }
+  }
+  return false
+}
+
+fn root_worktree_cargo_target_dir(
+  fs: HarnessFs,
+  root: string,
+  rel_dir: string,
+  name: string,
+) -> bool {
+  if rel_dir != "" || !name.starts_with(WORKTREE_CARGO_TARGET_DIR_PREFIX) {
+    return false
+  }
+  const dir = path_join(root, name)
+  for artifact_dir in CARGO_TARGET_ARTIFACT_DIR_NAMES {
+    if fs.exists(path_join(dir, artifact_dir)) {
+      return true
+    }
+  }
+  return false
+}
+
+fn skip_dir(fs: HarnessFs, root: string, rel_dir: string, name: string) -> bool {
+  return SKIP_DIR_NAMES.contains(name)
+    || standard_cargo_target_dir_name(name)
+    || root_worktree_cargo_target_dir(fs, root, rel_dir, name)
+}
+
+/**
+ * Recursively collect `suffix` files under `rel_dir`, skipping the directories
+ * this script owns rules for.
+ *
+ * Those rules are not the whole story: `walk_dir` refuses on its own to descend
+ * into `target`, `build`, `dist`, `node_modules`, `coverage`, `venv`, and
+ * `__pycache__`, so the inventory's real reach is narrower than the constants
+ * above suggest, and a source tree under one of those names would escape the
+ * ratchet with no diagnostic.
+ * `test_inventory_covers_every_tracked_in_scope_source` is what makes such a
+ * hole loud, by reconciling the inventory against git rather than a fixture.
+ */
+fn files_below(harness: Harness, root: string, rel_dir: string, suffix: string) -> list<string> {
+  const dir = if rel_dir == "" {
+    root
+  } else {
+    path_join(root, rel_dir)
+  }
+  if !harness.fs.exists(dir) {
+    return []
+  }
+  let paths: list<string> = []
+  const entries = harness.fs.walk(dir, {max_depth: 1, follow_symlinks: false}).filter(
+    { entry -> entry.depth == 1 },
+  )
+    .to_list()
+    .sorted_by({ entry -> entry.path })
+  for entry in entries {
+    const name = basename(entry.path)
+    if skip_dir(harness.fs, root, rel_dir, name) {
+      continue
+    }
+    const rel = normalize_source_path(
+      if rel_dir == "" {
+        name
+      } else {
+        path_join(rel_dir, name)
+      },
+    )
+    if entry.is_file && rel.ends_with(suffix) {
+      paths = paths.appending(rel)
+    } else if entry.is_dir {
+      for child in files_below(harness, root, rel, suffix) {
+        paths = paths.appending(child)
+      }
+    }
+  }
+  return paths
+}
+
+/** Whether `path` is a generated source the ratchet must not govern. */
+pub fn is_generated_source(path: string) -> bool {
+  for prefix in GENERATED_SOURCE_PREFIXES {
+    if path.starts_with(prefix) {
+      return true
+    }
+  }
+  return false
+}
+
+/** Inventory all repo Rust plus the canonical stdlib Harn source. */
+pub fn source_files(harness: Harness, root: string = "") -> list<string> {
+  const resolved_root = if root == "" {
+    repo_root(harness.fs)
+  } else {
+    path_normalize(root)
+  }
+  let paths = files_below(harness, resolved_root, "", ".rs").filter(
+    { path -> !is_generated_source(path) },
+  )
+    .to_list()
+  for path in files_below(harness, resolved_root, STDLIB_SOURCE_DIR, ".harn") {
+    paths = paths.appending(path)
+  }
+  return paths.sorted()
+}
+
+pub fn source_inventory(harness: Harness, root: string = "") -> list<SourceCount> {
+  const resolved_root = if root == "" {
+    repo_root(harness.fs)
+  } else {
+    path_normalize(root)
+  }
+  let sources: list<SourceCount> = []
+  for path in source_files(harness, resolved_root) {
+    sources = sources.appending(
+      {path: path, lines: logical_line_count(harness.fs.read_text(path_join(resolved_root, path)))},
+    )
+  }
+  return sources
+}
+
+/** Parse one exact decimal baseline shard without trusting coercion defaults. */
+pub fn parse_baseline(shard_path: string, text: string) -> BaselineCount {
+  const source_path = source_path_for_baseline(shard_path)
+  if source_path == nil {
+    return {
+      kind: "invalid",
+      shard_path: shard_path,
+      source_path: shard_path,
+      error: "baseline shard path must end with ${BASELINE_SUFFIX}",
+    }
+  }
+  const raw = text.trim()
+  const parsed = to_int(raw)
+  if raw == "" || parsed == nil || to_string(parsed) != raw || parsed <= 0 {
+    return {
+      kind: "invalid",
+      shard_path: shard_path,
+      source_path: source_path,
+      error: "baseline shard must contain one canonical positive integer",
+    }
+  }
+  return {kind: "valid", shard_path: shard_path, source_path: source_path, lines: parsed}
+}
+
+pub fn baseline_inventory(harness: Harness, root: string = "") -> list<BaselineCount> {
+  const resolved_root = if root == "" {
+    repo_root(harness.fs)
+  } else {
+    path_normalize(root)
+  }
+  let baselines: list<BaselineCount> = []
+  for shard_path in files_below(harness, resolved_root, BASELINE_DIR, BASELINE_SUFFIX) {
+    baselines = baselines.appending(
+      parse_baseline(shard_path, harness.fs.read_text(path_join(resolved_root, shard_path))),
+    )
+  }
+  return baselines
+}
+
+fn source_index(sources: list<SourceCount>) -> dict<string, SourceCount> {
+  let index: dict<string, SourceCount> = {}
+  for source in sources {
+    if index[source.path] == nil {
+      index[source.path] = source
+    }
+  }
+  return index
+}
+
+fn baseline_index(baselines: list<BaselineCount>) -> dict<string, BaselineCount> {
+  let index: dict<string, BaselineCount> = {}
+  for baseline in baselines {
+    if index[baseline.source_path] == nil {
+      index[baseline.source_path] = baseline
+    }
+  }
+  return index
+}
+
+/**
+ * Evaluate a complete inventory. Iterating the sorted union makes every
+ * diagnostic stable without depending on dictionary iteration order.
+ */
+pub fn evaluate_inventory(
+  sources: list<SourceCount>,
+  baselines: list<BaselineCount>,
+  max_lines: int = MAX_LINES,
+) -> list<SourceLengthFinding> {
+  const sources_by_path = source_index(sources)
+  const baselines_by_path = baseline_index(baselines)
+  let paths: dict<string, bool> = {}
+  for source in sources {
+    paths[source.path] = true
+  }
+  for baseline in baselines {
+    if baseline.source_path != "" {
+      paths[baseline.source_path] = true
+    }
+  }
+  let findings: list<SourceLengthFinding> = []
+  for path in paths.keys().sorted() {
+    const source = sources_by_path[path]
+    const baseline = baselines_by_path[path]
+    if baseline != nil && baseline.kind == "invalid" {
+      findings = findings.appending(
+        {kind: "malformed_baseline", path: path, actual: source?.lines, message: baseline.error},
+      )
+      continue
+    }
+    if source == nil {
+      findings = findings.appending(
+        {
+          kind: "orphan_baseline",
+          path: path,
+          baseline: baseline?.lines,
+          message: "baseline shard remains for a missing or renamed source",
+        },
+      )
+      continue
+    }
+    if baseline != nil && baseline.kind == "valid" && baseline.lines <= max_lines {
+      findings = findings.appending(
+        {
+          kind: "invalid_baseline",
+          path: path,
+          actual: source.lines,
+          baseline: baseline.lines,
+          message: "only files above ${max_lines} lines may have an existing baseline",
+        },
+      )
+      continue
+    }
+    if source.lines <= max_lines {
+      if baseline != nil {
+        findings = findings.appending(
+          {
+            kind: "obsolete_baseline",
+            path: path,
+            actual: source.lines,
+            baseline: baseline.lines,
+            message: "source is at or below the cap; delete its baseline shard",
+          },
+        )
+      }
+      continue
+    }
+    if baseline == nil {
+      findings = findings.appending(
+        {
+          kind: "new_oversized_source",
+          path: path,
+          actual: source.lines,
+          message: "new source exceeds the ${max_lines}-line cap",
+        },
+      )
+      continue
+    }
+    const recorded = baseline.lines
+    if source.lines > recorded {
+      findings = findings.appending(
+        {
+          kind: "growth",
+          path: path,
+          actual: source.lines,
+          baseline: recorded,
+          message: "existing source grew beyond its exact baseline",
+        },
+      )
+    } else if source.lines < recorded {
+      findings = findings.appending(
+        {
+          kind: "stale_baseline",
+          path: path,
+          actual: source.lines,
+          baseline: recorded,
+          message: "source shrank; tighten its baseline shard",
+        },
+      )
+    }
+  }
+  return findings
+}
+
+/** Plan exact edits that only tighten or remove existing baseline debt. */
+pub fn plan_baseline_update(
+  sources: list<SourceCount>,
+  baselines: list<BaselineCount>,
+  max_lines: int = MAX_LINES,
+) -> list<BaselineEdit> {
+  const sources_by_path = source_index(sources)
+  const baselines_by_path = baseline_index(baselines)
+  let edits: list<BaselineEdit> = []
+  for source in sources {
+    const baseline = baselines_by_path[source.path]
+    if source.lines > max_lines {
+      if baseline != nil && baseline.kind == "valid" && source.lines < baseline.lines {
+        edits = edits.appending(
+          {
+            kind: "write",
+            shard_path: baseline_path_for(source.path),
+            source_path: source.path,
+            lines: source.lines,
+          },
+        )
+      }
+    } else if baseline != nil {
+      edits = edits.appending(
+        {kind: "delete", shard_path: baseline.shard_path, source_path: source.path},
+      )
+    }
+  }
+  for baseline in baselines {
+    if sources_by_path[baseline.source_path] == nil {
+      edits = edits.appending(
+        {kind: "delete", shard_path: baseline.shard_path, source_path: baseline.source_path},
+      )
+    }
+  }
+  return edits.sorted_by({ edit -> edit.shard_path })
+}
+
+fn ensure_dir(harness: Harness, path: string) -> nil {
+  if path == "" || path == "." || harness.fs.exists(path) {
+    return nil
+  }
+  const parent = dirname(path) ?? ""
+  if parent != "" && parent != path {
+    ensure_dir(harness, parent)
+  }
+  harness.fs.mkdir(path)
+  return nil
+}
+
+pub fn apply_baseline_edits(harness: Harness, root: string, edits: list<BaselineEdit>) -> nil {
+  for edit in edits {
+    const full_path = path_join(root, edit.shard_path)
+    if edit.kind == "write" {
+      ensure_dir(harness, dirname(full_path) ?? root)
+      harness.fs.write_text(full_path, to_string(edit.lines) + "\n")
+    } else if harness.fs.exists(full_path) {
+      harness.fs.delete(full_path)
+    }
+  }
+  return nil
+}
+
+/** In-scope, present source paths git tracks under `root`, empty when git cannot answer. */
+fn git_tracked_sources(fs: HarnessFs, process: HarnessProcess, root: string) -> list<string> {
+  const res = process.run(
+    {program: "git", args: ["-C", root, "ls-files", "*.rs", STDLIB_SOURCE_DIR + "/*.harn"]},
+  )
+  if !res.success {
+    return []
+  }
+  let out: list<string> = []
+  for line in res.stdout.lines() {
+    const path = line.trim()
+    if path != "" && fs.exists(path_join(root, path)) {
+      out = out.appending(normalize_source_path(path))
+    }
+  }
+  return out
+}
+
+/**
+ * Tracked sources the inventory walk never returned.
+ *
+ * Every entry is a file whose length this ratchet has silently stopped
+ * governing. Fixture-based tests cannot detect that class at all — they can
+ * only assert about paths the walk already reaches — so the inventory is
+ * reconciled against git, the one authority on what source this repo has.
+ */
+pub fn unscanned_sources(scanned: list<string>, tracked: list<string>) -> list<string> {
+  let missing: list<string> = []
+  for path in tracked {
+    if is_generated_source(path) {
+      continue
+    }
+    if !scanned.contains(path) {
+      missing = missing.appending(path)
+    }
+  }
+  return missing.sorted()
+}
+
+pub fn check_source_file_lengths(harness: Harness, root: string = "") -> SourceLengthReport {
+  const resolved_root = if root == "" {
+    repo_root(harness.fs)
+  } else {
+    path_normalize(root)
+  }
+  const sources = source_inventory(harness, resolved_root)
+  const baselines = baseline_inventory(harness, resolved_root)
+  let findings = evaluate_inventory(sources, baselines)
+  // Reuses the inventory walk that just ran, so the reconciliation costs one
+  // `git ls-files`. Under a synthetic root nothing is tracked, so this is a
+  // no-op for fixture tests rather than something they have to opt out of.
+  for path in unscanned_sources(
+    sources.map({ source -> source.path }).to_list(),
+    git_tracked_sources(harness.fs, harness.process, resolved_root),
+  ) {
+    findings = findings.appending(
+      {
+        kind: "unscanned_source",
+        path: path,
+        message: "tracked source is unreachable by the inventory walk, so its length is ungoverned",
+      },
+    )
+  }
+  return {
+    root: resolved_root,
+    max_lines: MAX_LINES,
+    source_count: sources.count,
+    baseline_count: baselines.count,
+    oversized_count: sources.filter({ source -> source.lines > MAX_LINES }).count,
+    findings: findings,
+  }
+}
+
+fn render_report(report: SourceLengthReport) -> string {
+  if report.findings.count == 0 {
+    return "source file-length ratchet passed: ${report.source_count} source file(s), "
+      + "${report.oversized_count} exact existing file(s), ${report.max_lines}-line cap"
+  }
+  let lines = ["source file-length ratchet failed: ${report.findings.count} violation(s)", ""]
+  for finding in report.findings {
+    let detail = finding.path + ": " + finding.kind
+    if finding.actual != nil {
+      detail = detail + " actual=" + to_string(finding.actual)
+    }
+    if finding.baseline != nil {
+      detail = detail + " baseline=" + to_string(finding.baseline)
+    }
+    lines = lines + [detail + " — " + finding.message]
+  }
+  lines = lines
+    + [
+    "",
+    "Split oversized files. After a shrink, run `make update-source-file-length-baseline`.",
+    "New oversized files never automatically become existing entries; an intentional baseline increase must be reviewed directly.",
+  ]
+  return join(lines, "\n")
+}
+
+fn arg_spec() {
+  return parser(
+    {
+      name: "check_source_file_lengths",
+      args: [
+        {kind: "flag", name: "root", long: "--root", parse: "string", default: ""},
+        {kind: "switch", name: "json", long: "--json", default: false},
+        {kind: "switch", name: "update", long: "--update", default: false},
+      ],
+    },
+  )
+}
+
+fn main(harness: Harness) {
+  if help_requested(argv) {
+    harness.stdio.println(
+      "usage: harn run scripts/check_source_file_lengths.harn -- [--json] [--root PATH] [--update]",
+    )
+    return nil
+  }
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
+    harness.runtime.exit(2)
+  }
+  const parsed = unwrap(parsed_result).options
+  const resolved_root = if to_string(parsed?.root ?? "") == "" {
+    repo_root(harness.fs)
+  } else {
+    path_normalize(to_string(parsed.root))
+  }
+  if parsed?.update ?? false {
+    const edits = plan_baseline_update(
+      source_inventory(harness, resolved_root),
+      baseline_inventory(harness, resolved_root),
+    )
+    apply_baseline_edits(harness, resolved_root, edits)
+    harness.stdio.println("updated ${edits.count} source file-length baseline shard(s)")
+  }
+  const report = check_source_file_lengths(harness, resolved_root)
+  if parsed?.json ?? false {
+    harness.stdio.println(json_stringify_pretty(report))
+  } else {
+    const rendered = render_report(report)
+    if report.findings.count == 0 {
+      harness.stdio.println(rendered)
+    } else {
+      harness.stdio.eprintln(rendered)
+    }
+  }
+  if report.findings.count > 0 {
+    harness.runtime.exit(1)
+  }
+  return nil
+}

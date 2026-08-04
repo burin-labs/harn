@@ -1,0 +1,71 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+
+fn terminal_checkpoint(events: list) -> dict {
+  for event in events {
+    if event?.type == "typed_checkpoint" && event?.checkpoint?.schema == "harn.agent_terminal.v1" {
+      return event.checkpoint
+    }
+  }
+  return {}
+}
+
+fn run_case(harness: Harness, session_id: string, callback) -> dict {
+  return agent_capture_events(
+    harness.agent,
+    session_id,
+    fn() { return agent_loop(
+      harness,
+      "finish",
+      nil,
+      {
+        session_id: session_id,
+        provider: "mock",
+        llm_caller: { _call -> return {ok: true, value: {text: "finished"}} },
+        post_turn_callback: callback,
+      },
+    ) },
+  )
+}
+
+fn run_sentinel_case(harness: Harness, session_id: string) -> dict {
+  return agent_capture_events(
+    harness.agent,
+    session_id,
+    fn() { return agent_loop(
+      harness,
+      "finish",
+      nil,
+      {
+        session_id: session_id,
+        provider: "mock",
+        llm_caller: { _call -> return {ok: true, value: {text: "finished ##DONE##"}} },
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+      },
+    ) },
+  )
+}
+
+pipeline default(harness: Harness) {
+  const natural = run_case(harness, "terminal-natural-" + harness.random.uuid(), nil)
+  const natural_checkpoint = terminal_checkpoint(natural.events)
+  harness.stdio.println("natural=" + natural_checkpoint.terminal.kind)
+  harness.stdio.println("natural_owner=" + natural_checkpoint.terminal.owner)
+  harness.stdio.println("natural_reason=" + natural_checkpoint.terminal.reason)
+  harness.stdio.println("natural_status=" + natural_checkpoint.final_status)
+  const sentinel = run_sentinel_case(harness, "terminal-sentinel-" + harness.random.uuid())
+  const sentinel_checkpoint = terminal_checkpoint(sentinel.events)
+  harness.stdio.println("sentinel=" + sentinel_checkpoint.terminal.kind)
+  harness.stdio.println("sentinel_owner=" + sentinel_checkpoint.terminal.owner)
+  harness.stdio.println("sentinel_reason=" + sentinel_checkpoint.terminal.reason)
+  const policy = run_case(
+    harness,
+    "terminal-policy-" + harness.random.uuid(),
+    { _info -> return {stop: true, stop_reason: "fixture_policy_stop"} },
+  )
+  const policy_checkpoint = terminal_checkpoint(policy.events)
+  harness.stdio.println("policy=" + policy_checkpoint.terminal.kind)
+  harness.stdio.println("policy_owner=" + policy_checkpoint.terminal.owner)
+  harness.stdio.println("policy_reason=" + policy_checkpoint.terminal.reason)
+}

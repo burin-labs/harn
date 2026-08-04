@@ -1,0 +1,16 @@
+import { wait_for } from "std/monitors"
+
+pipeline test(harness: Harness, task) {
+  const result = wait_for(
+    harness.runtime,
+    {
+      wait_id: "conformance-monitor-timeout",
+      timeout: 0ms,
+      poll_interval: 5ms,
+      source: {label: "conformance-timeout", poll: { _ -> return {ready: false} }},
+      condition: { state -> state.ready },
+    },
+  )
+  harness.stdio.println(result.status == "timed_out")
+  harness.stdio.println(result.reason != nil)
+}

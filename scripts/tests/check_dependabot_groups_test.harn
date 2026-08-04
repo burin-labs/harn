@@ -1,0 +1,185 @@
+import "../check_dependabot_groups.harn"
+
+fn group(patterns: list<string>, excludes: list<string> = [], updates: list<string> = []) {
+  return {patterns: patterns, exclude_patterns: excludes, update_types: updates}
+}
+
+fn cargo_policy() {
+  return {
+    families: {
+      cranelift: ["cranelift-codegen"],
+      wasmtime: ["wasmtime", "wasmtime-wasi"],
+      opentelemetry: ["opentelemetry", "tracing-opentelemetry"],
+    },
+    catch_all_update_types: ["minor", "patch"],
+  }
+}
+
+/** The shape the policy describes: named families plus a bounded catch-all. */
+fn valid_groups() {
+  return {
+    cranelift: group(["cranelift-*"]),
+    wasmtime: group(["wasmtime*"]),
+    opentelemetry: group(["opentelemetry*", "tracing-opentelemetry"]),
+    "cargo-minor-patch": group(
+      ["*"],
+      ["cranelift-*", "wasmtime*", "opentelemetry*", "tracing-opentelemetry"],
+      ["minor", "patch"],
+    ),
+  }
+}
+
+@test
+pipeline test_actual_dependabot_document(harness: Harness, task) {
+  const text = harness.fs.read_text("../../.github/dependabot.yml")
+  const ecosystems = groups_from_text(text)
+  assert_eq(group_errors(ecosystems), [])
+  // A routine dependency lands in the batch rather than opening its own PR.
+  assert_eq(matching_groups(ecosystems.cargo, "serde"), ["cargo-minor-patch"])
+  assert_eq(matching_groups(ecosystems.npm, "vite"), ["npm-minor-patch"])
+  // A named family stays reviewable on its own.
+  assert_eq(matching_groups(ecosystems.cargo, "wasmtime-wasi"), ["wasmtime"])
+  assert_eq(matching_groups(ecosystems.npm, "react-dom"), ["react-runtime"])
+}
+
+@test
+pipeline test_wildcard_positions(harness: Harness, task) {
+  assert_eq(dependabot_pattern_matches("wasmtime*", "wasmtime-wasi"), true)
+  assert_eq(dependabot_pattern_matches("*-wasi", "wasmtime-wasi"), true)
+  assert_eq(dependabot_pattern_matches("wasm*-wasi", "wasmtime-wasi"), true)
+  assert_eq(dependabot_pattern_matches("wasm*-wasi", "wasmtime"), false)
+}
+
+@test
+pipeline test_overlap_is_rejected(harness: Harness, task) {
+  const groups = valid_groups() + {wasi: group(["*-wasi"])}
+  const errors = ecosystem_errors("cargo", groups, cargo_policy())
+  assert_eq(
+    errors.filter({ error -> error.kind == "ambiguous_membership" }),
+    [
+      {
+        kind: "ambiguous_membership",
+        ecosystem: "cargo",
+        group: "wasmtime",
+        dependency: "wasmtime-wasi",
+        matches: ["wasi", "wasmtime"],
+      },
+    ],
+  )
+}
+
+@test
+pipeline test_missing_group_is_rejected(harness: Harness, task) {
+  const errors = ecosystem_errors("cargo", {cranelift: valid_groups().cranelift}, cargo_policy())
+  assert_eq(
+    errors.filter({ error -> error.kind == "missing_group" }).map({ error -> error.group }),
+    ["opentelemetry", "wasmtime"],
+  )
+}
+
+/**
+ * The catch-all is the point of the grouping policy — without one, every
+ * routine minor/patch bump opens its own PR and walks the merge queue alone.
+ * Regression for #6015.
+ */
+@test
+pipeline test_a_missing_catch_all_is_rejected(harness: Harness, task) {
+  const all = valid_groups()
+  const groups = {
+    cranelift: all.cranelift,
+    wasmtime: all.wasmtime,
+    opentelemetry: all.opentelemetry,
+  }
+  const errors = ecosystem_errors("cargo", groups, cargo_policy())
+  assert_eq(
+    errors,
+    [{kind: "missing_catch_all", ecosystem: "cargo", group: "", dependency: "", matches: []}],
+  )
+}
+
+/**
+ * A catch-all that also swept majors would batch a breaking API change with
+ * routine bumps, so the batch could not be reviewed or reverted as one unit.
+ */
+@test
+pipeline test_a_catch_all_that_takes_majors_is_rejected(harness: Harness, task) {
+  const groups = valid_groups()
+    + {"cargo-minor-patch": group(["*"], [], ["major", "minor", "patch"])}
+  const errors = ecosystem_errors("cargo", groups, cargo_policy())
+  assert_eq(
+    errors.filter({ error -> error.kind == "catch_all_update_types" }).map(
+      { error -> error.matches },
+    ),
+    [["major", "minor", "patch"]],
+  )
+}
+
+/**
+ * Membership must not depend on which group happens to come first. GitHub
+ * resolves an overlap by file order, but `yaml_parse` sorts, so the checker
+ * cannot see file order — a catch-all that does not exclude the families is
+ * indistinguishable here from one that swallows them.
+ */
+@test
+pipeline test_a_catch_all_without_excludes_is_rejected(harness: Harness, task) {
+  const groups = valid_groups() + {"cargo-minor-patch": group(["*"], [], ["minor", "patch"])}
+  const errors = ecosystem_errors("cargo", groups, cargo_policy())
+  assert_eq(
+    errors.filter({ error -> error.kind == "ambiguous_membership" }).map(
+      { error -> error.dependency },
+    ),
+    ["cranelift-codegen", "opentelemetry", "tracing-opentelemetry", "wasmtime", "wasmtime-wasi"],
+  )
+}
+
+/** A new ecosystem must declare its policy rather than inherit silence. */
+@test
+pipeline test_an_undeclared_ecosystem_is_rejected(harness: Harness, task) {
+  const errors = group_errors({pip: {}}, {cargo: cargo_policy()})
+  assert_eq(
+    errors,
+    [{kind: "unknown_ecosystem", ecosystem: "pip", group: "", dependency: "", matches: []}],
+  )
+}
+
+/** Action majors are runner-baseline bumps, so that catch-all takes them too. */
+@test
+pipeline test_github_actions_groups_majors_too(harness: Harness, task) {
+  const policy = {families: {}, catch_all_update_types: []}
+  assert_eq(ecosystem_errors("github-actions", {actions: group(["*"])}, policy), [])
+  assert_eq(
+    ecosystem_errors("github-actions", {actions: group(["*"], [], ["minor"])}, policy).map(
+      { error -> error.kind },
+    ),
+    ["catch_all_update_types"],
+  )
+}
+
+@test
+pipeline test_yaml_boundary_rejects_malformed_groups(harness: Harness, task) {
+  const invalid =
+    "version: 2\nupdates:\n  - package-ecosystem: cargo\n    groups:\n      wasmtime:\n        patterns: wasmtime*\n"
+  assert_eq(
+    is_err(
+      try {
+        groups_from_text(invalid)
+      },
+    ),
+    true,
+  )
+}
+
+/** Two entries for one ecosystem make "the catch-all for cargo" ambiguous. */
+@test
+pipeline test_duplicate_ecosystem_entries_are_rejected(harness: Harness, task) {
+  const duplicated =
+    "version: 2\nupdates:\n  - package-ecosystem: cargo\n    groups:\n      a:\n        patterns:\n          - \"x\"\n  - package-ecosystem: cargo\n    groups:\n      b:\n        patterns:\n          - \"y\"\n"
+  assert_eq(
+    is_err(
+      try {
+        groups_from_text(duplicated)
+      },
+    ),
+    true,
+  )
+}

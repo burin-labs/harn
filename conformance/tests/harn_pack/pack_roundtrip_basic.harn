@@ -1,0 +1,51 @@
+import "../_common"
+
+pipeline default(harness: Harness) {
+  const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const harn_bin = harness.env.get_or(
+    "HARN_CONFORMANCE_HARN_BIN",
+    resolve_harn_bin(harness, repo_root),
+  )
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn_pack_basic_" + harness.random.uuid_v7(),
+  )
+  harness.fs.mkdir(root)
+  harness.fs.write_text(
+    path_join(root, "hello.harn"),
+    "fn main(harness: Harness) { harness.stdio.println(\"hi\") }\n",
+  )
+  const pack = harness.process.exec_at(
+    root,
+    harn_bin,
+    "pack",
+    "hello.harn",
+    "--unsigned",
+    "--out",
+    path_join(root, "hello.harnpack"),
+    "--json",
+  )
+  harness.stdio.println(pack.success)
+  const pack_data = json_parse(pack.stdout)
+  harness.stdio.println(pack_data.schemaVersion >= 1)
+  harness.stdio.println(pack_data.ok)
+  harness.stdio.println(starts_with(pack_data.data.bundle_hash, "blake3:"))
+  harness.stdio.println(pack_data.data.signature.present)
+  harness.stdio.println(harness.fs.exists(path_join(root, "hello.harnpack")))
+  const verify = harness.process.exec_at(
+    root,
+    harn_bin,
+    "pack",
+    "verify",
+    path_join(root, "hello.harnpack"),
+    "--allow-unsigned",
+    "--json",
+  )
+  harness.stdio.println(verify.success)
+  const verify_data = json_parse(verify.stdout)
+  harness.stdio.println(verify_data.ok)
+  harness.stdio.println(verify_data.data.bundle_hash == pack_data.data.bundle_hash)
+  harness.stdio.println(verify_data.data.signature_present)
+  harness.stdio.println(verify_data.data.signature_verified)
+  harness.stdio.println(verify_data.data.module_count)
+}

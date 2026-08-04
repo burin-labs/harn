@@ -1,0 +1,68 @@
+import "std/agent/workers"
+import { with_llm_script } from "std/testing"
+
+/**
+ * S-11 (#1847): a timeout-conditioned suspension with
+ * `on_timeout: "fail"` marks the worker as failed when the deadline
+ * elapses, rather than resuming the loop. The failure path records
+ * `latest_error` and emits a `WorkerFailed` lifecycle event; future
+ * resume attempts against the live handle are rejected.
+ *
+ * The timeout is fired deterministically via `mock_time` +
+ * `advance_time`.
+ */
+pipeline main(harness: Harness) {
+  const _ = harness.testing.clock_set(1700000100000)
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        tool_calls: [
+          {
+            id: "park_fail",
+            name: "agent_await_resumption",
+            arguments: {
+              reason: "fail on review timeout",
+              conditions: {
+                trigger: {kind: "review.approved", provider: "github"},
+                timeout: {duration_minutes: 5, on_timeout: "fail"},
+              },
+            },
+          },
+        ],
+      },
+    ],
+    { ->
+      const handle = sub_agent_run(
+        harness,
+        "Park until the review timeout fails the worker.",
+        {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
+      )
+      const suspended = wait_agent(harness.agent, handle)
+      harness.stdio.println("status=" + suspended.status)
+      harness.stdio.println(
+        "has_auto_trigger=" + to_string(suspended?.suspension?.auto_resume_trigger != nil),
+      )
+      const _ = harness.testing.clock_advance(6 * 60 * 1000)
+      harness.runtime.yield_now()
+      harness.runtime.yield_now()
+      harness.runtime.yield_now()
+      const failed = wait_agent(harness.agent, handle)
+      harness.stdio.println("post_timeout_status=" + failed.status)
+      harness.stdio.println("has_latest_error=" + to_string(failed?.error != nil))
+      harness.stdio.println(
+        "error_mentions_timeout="
+          + to_string(contains(failed?.error ?? "", "timeout")),
+      )
+      const resume_attempt = try {
+        resume_agent(harness.agent, handle)
+      }
+      harness.stdio.println("resume_failed=" + to_string(is_err(resume_attempt)))
+      const _ = harness.testing.clock_reset()
+    },
+  )
+}
+// Advance past the deadline so the spawned timeout task wakes and
+// marks the worker failed (no resume attempt).
+// A subsequent resume against the failed worker is rejected with
+// HARN-SUS-001 (worker is not suspended).

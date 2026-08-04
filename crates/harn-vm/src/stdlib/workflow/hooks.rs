@@ -1,0 +1,783 @@
+//! Tool, persona, and step hook registration builtins for workflow execution.
+
+use crate::value::VmDictExt;
+use std::sync::Arc;
+
+use crate::stdlib::macros::harn_builtin;
+use crate::value::{VmError, VmValue};
+
+pub(super) type PostHookFn =
+    Arc<dyn Fn(&str, &str) -> crate::orchestration::PostToolAction + Send + Sync>;
+
+/// Register low-level pre/post tool hooks for workflow execution.
+#[harn_builtin(
+    exposure = "harness.tools.register_hook",
+    effects = ["state.mutate@const=workflow-tool-hooks"],
+    sig = "register_tool_hook(config?: dict|nil) -> nil",
+    category = "workflow.host"
+)]
+pub(super) fn register_tool_hook_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let config = args
+        .first()
+        .and_then(|a| a.as_dict())
+        .cloned()
+        .unwrap_or_default();
+    let pattern = config
+        .get("pattern")
+        .map(|v| v.display())
+        .unwrap_or_else(|| "*".to_string());
+    let deny_reason = config.get("deny").map(|v| v.display());
+    let max_output = config
+        .get("max_output")
+        .map(|v| match v {
+            VmValue::Int(n) if *n >= 0 => Ok(*n as usize),
+            VmValue::Int(_) => Err(VmError::Runtime(
+                "register_tool_hook: max_output must be >= 0".to_string(),
+            )),
+            other => Err(VmError::Runtime(format!(
+                "register_tool_hook: max_output must be an int, got {}",
+                other.type_name()
+            ))),
+        })
+        .transpose()?;
+    let pre_handler = match config.get("pre") {
+        Some(VmValue::Closure(closure)) => Some(closure.clone()),
+        Some(VmValue::Nil) | None => None,
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "register_tool_hook: pre must be a closure, got {}",
+                other.type_name()
+            )));
+        }
+    };
+    let post_handler = match config.get("post") {
+        Some(VmValue::Closure(closure)) => Some(closure.clone()),
+        Some(VmValue::Nil) | None => None,
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "register_tool_hook: post must be a closure, got {}",
+                other.type_name()
+            )));
+        }
+    };
+
+    let pre: Option<crate::orchestration::PreToolHookFn> = deny_reason.map(|reason| {
+        Arc::new(move |_name: &str, _args: &serde_json::Value| {
+            crate::orchestration::PreToolAction::Deny(reason.clone())
+        }) as _
+    });
+
+    let post: Option<PostHookFn> = max_output.map(|max| {
+        Arc::new(move |_name: &str, result: &str| {
+            if result.len() > max {
+                let compacted = crate::orchestration::microcompact_tool_output_result(result, max);
+                if compacted.dropped_bytes > 0 {
+                    crate::orchestration::PostToolAction::Truncate {
+                        result: compacted.text,
+                        dropped_bytes: compacted.dropped_bytes,
+                    }
+                } else {
+                    crate::orchestration::PostToolAction::Modify(compacted.text)
+                }
+            } else {
+                crate::orchestration::PostToolAction::Pass
+            }
+        }) as _
+    });
+
+    crate::orchestration::register_tool_hook(crate::orchestration::ToolHook {
+        pattern: pattern.clone(),
+        pre,
+        post,
+    });
+    if let Some(handler) = pre_handler {
+        crate::orchestration::register_vm_hook(
+            crate::orchestration::HookEvent::PreToolUse,
+            pattern.clone(),
+            format!("tool_hook::{pattern}::pre"),
+            handler,
+        );
+    }
+    if let Some(handler) = post_handler {
+        crate::orchestration::register_vm_hook(
+            crate::orchestration::HookEvent::PostToolUse,
+            pattern.clone(),
+            format!("tool_hook::{pattern}::post"),
+            handler,
+        );
+    }
+    Ok(VmValue::Nil)
+}
+
+/// Clear registered low-level workflow tool hooks.
+#[harn_builtin(
+    exposure = "harness.tools.clear_hooks",
+    effects = ["state.mutate@const=workflow-tool-hooks"],
+    sig = "clear_tool_hooks() -> nil", category = "workflow.host"
+)]
+pub(super) fn clear_tool_hooks_builtin(
+    _args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    crate::orchestration::clear_tool_hooks();
+    Ok(VmValue::Nil)
+}
+
+pub(super) fn parse_persona_hook_event(
+    value: &VmValue,
+    builtin: &str,
+) -> Result<(crate::orchestration::HookEvent, Option<f64>), VmError> {
+    let raw = value.display();
+    let event = raw.trim();
+    if let Some(pct) = event
+        .strip_prefix("OnBudgetThreshold(")
+        .and_then(|rest| rest.strip_suffix(')'))
+    {
+        let pct = pct.trim().parse::<f64>().map_err(|_| {
+            VmError::Runtime(format!("{builtin}: invalid budget threshold `{pct}`"))
+        })?;
+        return Ok((
+            crate::orchestration::HookEvent::OnBudgetThreshold,
+            Some(pct),
+        ));
+    }
+    let event = match event {
+        "PreStep" => crate::orchestration::HookEvent::PreStep,
+        "PostStep" => crate::orchestration::HookEvent::PostStep,
+        "OnBudgetThreshold" => crate::orchestration::HookEvent::OnBudgetThreshold,
+        "OnApprovalRequested" => crate::orchestration::HookEvent::OnApprovalRequested,
+        "OnHandoffEmitted" => crate::orchestration::HookEvent::OnHandoffEmitted,
+        "OnPersonaPaused" => crate::orchestration::HookEvent::OnPersonaPaused,
+        "OnPersonaResumed" => crate::orchestration::HookEvent::OnPersonaResumed,
+        other => {
+            return Err(VmError::Runtime(format!(
+                "{builtin}: unknown persona hook event `{other}`"
+            )))
+        }
+    };
+    Ok((event, None))
+}
+
+pub(super) fn required_hook_closure(
+    args: &[VmValue],
+    index: usize,
+    builtin: &str,
+) -> Result<Arc<crate::value::VmClosure>, VmError> {
+    match args.get(index) {
+        Some(VmValue::Closure(closure)) => Ok(closure.clone()),
+        Some(other) => Err(VmError::Runtime(format!(
+            "{builtin}: handler must be a closure, got {}",
+            other.type_name()
+        ))),
+        None => Err(VmError::Runtime(format!("{builtin}: missing handler"))),
+    }
+}
+
+/// Register a persona lifecycle hook for matching persona names.
+#[harn_builtin(
+    exposure = "harness.agent.register_persona_hook",
+    effects = ["state.mutate@const=persona-hooks"],
+    sig = "register_persona_hook(persona_pattern: string, event: string, handler: closure) -> nil",
+    category = "workflow.host"
+)]
+pub(super) fn register_persona_hook_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let persona_pattern = args
+        .first()
+        .map(VmValue::display)
+        .unwrap_or_else(|| "*".to_string());
+    let (event, threshold_pct) = parse_persona_hook_event(
+        args.get(1)
+            .ok_or_else(|| VmError::Runtime("register_persona_hook: missing event".to_string()))?,
+        "register_persona_hook",
+    )?;
+    let handler = required_hook_closure(args, 2, "register_persona_hook")?;
+    crate::step_runtime::register_persona_hook(persona_pattern, event, threshold_pct, handler);
+    Ok(VmValue::Nil)
+}
+
+/// Register a persona step lifecycle hook for one named step.
+#[harn_builtin(
+    exposure = "harness.agent.register_step_hook",
+    effects = ["state.mutate@const=step-hooks"],
+    sig = "register_step_hook(persona_pattern: string, step_name: string, event: string, handler: closure) -> nil",
+    category = "workflow.host"
+)]
+pub(super) fn register_step_hook_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let persona_pattern = args
+        .first()
+        .map(VmValue::display)
+        .unwrap_or_else(|| "*".to_string());
+    let step_name = args
+        .get(1)
+        .map(VmValue::display)
+        .ok_or_else(|| VmError::Runtime("register_step_hook: missing step name".to_string()))?;
+    let (event, threshold_pct) = parse_persona_hook_event(
+        args.get(2)
+            .ok_or_else(|| VmError::Runtime("register_step_hook: missing event".to_string()))?,
+        "register_step_hook",
+    )?;
+    let handler = required_hook_closure(args, 3, "register_step_hook")?;
+    crate::step_runtime::register_step_hook(
+        persona_pattern,
+        step_name,
+        event,
+        threshold_pct,
+        handler,
+    );
+    Ok(VmValue::Nil)
+}
+
+/// Clear registered persona and step lifecycle hooks.
+#[harn_builtin(
+    exposure = "harness.agent.clear_persona_hooks",
+    effects = ["state.mutate@const=persona-hooks"],
+    sig = "clear_persona_hooks() -> nil", category = "workflow.host"
+)]
+pub(super) fn clear_persona_hooks_builtin(
+    _args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    crate::step_runtime::clear_persona_hooks();
+    Ok(VmValue::Nil)
+}
+
+/// Register a session-level lifecycle hook.
+///
+/// Runtime invocation uses the entrypoint ABI `(Harness, event)`. The root
+/// handle belongs at this orchestration boundary; callback helpers should
+/// attenuate it to the narrowest coherent nominal handle they require.
+#[harn_builtin(
+    exposure = "harness.agent.register_session_hook",
+    effects = ["state.mutate@const=session-hooks"],
+    sig = "register_session_hook(event: string, pattern_or_handler: string|closure, handler?: closure) -> nil",
+    category = "workflow.host"
+)]
+pub(super) fn register_session_hook_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let (event_arg, pattern, handler_arg) = match args.len() {
+        2 => (&args[0], "*".to_string(), &args[1]),
+        3 => (&args[0], args[1].display(), &args[2]),
+        n => {
+            return Err(VmError::Runtime(format!(
+                "register_session_hook expects 2 or 3 arguments (event, pattern?, handler); got {n}"
+            )));
+        }
+    };
+    let event_name = event_arg.display();
+    let event = crate::orchestration::HookEvent::parse_session_event(&event_name)
+        .map_err(|message| VmError::Runtime(format!("register_session_hook: {message}")))?;
+    let VmValue::Closure(closure) = handler_arg else {
+        return Err(VmError::Runtime(format!(
+            "register_session_hook: handler must be a closure, got {}",
+            handler_arg.type_name()
+        )));
+    };
+    let handler_name = format!("session_hook::{}", event.as_str());
+    crate::orchestration::register_vm_hook(event, pattern, handler_name, closure.clone());
+    Ok(VmValue::Nil)
+}
+
+/// Clear registered session-level lifecycle hooks.
+#[harn_builtin(
+    exposure = "harness.agent.clear_session_hooks",
+    effects = ["state.mutate@const=session-hooks"],
+    sig = "clear_session_hooks() -> nil", category = "workflow.host"
+)]
+pub(super) fn clear_session_hooks_builtin(
+    _args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    crate::orchestration::clear_session_hooks();
+    Ok(VmValue::Nil)
+}
+
+/// Register a checkpoint hook covering one or more agent-loop seams.
+/// Sugar over `register_session_hook("loop_checkpoint", pattern, handler)`:
+/// `kinds` is a list of seam names (e.g. `["iteration_start", "pre_tool_dispatch"]`)
+/// or the wildcard `"*"` / `nil` to subscribe to every seam. The handler
+/// receives the `LoopCheckpoint` payload `{session_id, iteration, kind,
+/// delivered, inbox_delivered, dispatch_skipped}`.
+/// Register a hook covering one or more agent-loop checkpoint seams.
+#[harn_builtin(
+    exposure = "harness.agent.register_checkpoint_hook",
+    effects = ["state.mutate@const=checkpoint-hooks"],
+    sig = "register_checkpoint_hook(kinds: string|list|nil, handler: closure) -> nil",
+    category = "workflow.host"
+)]
+pub(super) fn register_checkpoint_hook_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    if args.len() != 2 {
+        return Err(VmError::Runtime(format!(
+            "register_checkpoint_hook expects 2 arguments (kinds, handler); got {}",
+            args.len()
+        )));
+    }
+    let pattern = checkpoint_pattern_from_kinds(&args[0])?;
+    let VmValue::Closure(closure) = &args[1] else {
+        return Err(VmError::Runtime(format!(
+            "register_checkpoint_hook: handler must be a closure, got {}",
+            args[1].type_name()
+        )));
+    };
+    crate::orchestration::register_vm_hook(
+        crate::orchestration::HookEvent::LoopCheckpoint,
+        pattern,
+        "session_hook::LoopCheckpoint".to_string(),
+        closure.clone(),
+    );
+    Ok(VmValue::Nil)
+}
+
+/// Translate the `kinds` argument of `register_checkpoint_hook` into the
+/// pattern string consumed by `compile_event_pattern`. A single string is
+/// turned into `kind=="<name>"`; a list of strings into
+/// `kind=~"^(a|b|c)$"`. `nil`, an empty list, or `"*"` map to `"*"`.
+fn checkpoint_pattern_from_kinds(value: &VmValue) -> Result<String, VmError> {
+    match value {
+        VmValue::Nil => Ok("*".to_string()),
+        VmValue::String(name) => {
+            let trimmed = name.trim();
+            if trimmed.is_empty() || trimmed == "*" {
+                Ok("*".to_string())
+            } else {
+                validate_checkpoint_kind(trimmed)?;
+                Ok(format!("kind==\"{trimmed}\""))
+            }
+        }
+        VmValue::List(items) => {
+            if items.is_empty() {
+                return Ok("*".to_string());
+            }
+            let mut names = Vec::with_capacity(items.len());
+            for item in items.iter() {
+                let VmValue::String(name) = item else {
+                    return Err(VmError::Runtime(format!(
+                        "register_checkpoint_hook: kinds entries must be strings, got {}",
+                        item.type_name()
+                    )));
+                };
+                let trimmed = name.trim();
+                if trimmed.is_empty() {
+                    return Err(VmError::Runtime(
+                        "register_checkpoint_hook: kinds entries must be non-empty strings"
+                            .to_string(),
+                    ));
+                }
+                validate_checkpoint_kind(trimmed)?;
+                names.push(regex::escape(trimmed));
+            }
+            if names.len() == 1 {
+                Ok(format!("kind==\"{}\"", names[0]))
+            } else {
+                Ok(format!("kind=~\"^({})$\"", names.join("|")))
+            }
+        }
+        other => Err(VmError::Runtime(format!(
+            "register_checkpoint_hook: kinds must be a list, string, or nil; got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+const CHECKPOINT_KINDS: &[&str] = &[
+    "iteration_start",
+    "pre_tool_dispatch",
+    "post_tool_dispatch",
+    "iteration_end",
+    "pre_compact",
+    "post_compact",
+    "daemon_idle_pre",
+    "daemon_idle_post",
+    "loop_exit",
+];
+
+fn validate_checkpoint_kind(kind: &str) -> Result<(), VmError> {
+    if CHECKPOINT_KINDS.contains(&kind) {
+        Ok(())
+    } else {
+        Err(VmError::Runtime(format!(
+            "register_checkpoint_hook: unknown kind `{kind}` (expected one of: {})",
+            CHECKPOINT_KINDS.join(", ")
+        )))
+    }
+}
+
+fn reminder_provider_event_list(
+    value: Option<&VmValue>,
+    builtin: &str,
+) -> Result<Vec<crate::orchestration::HookEvent>, VmError> {
+    let Some(value) = value else {
+        return Err(VmError::Runtime(format!(
+            "{builtin}: missing subscribes_to"
+        )));
+    };
+    match value {
+        VmValue::String(event) => crate::orchestration::HookEvent::parse_provider_event(event)
+            .map(|event| vec![event])
+            .map_err(|message| VmError::Runtime(format!("{builtin}: {message}"))),
+        VmValue::List(events) => {
+            let mut out = Vec::new();
+            for event in events.iter() {
+                let name = match event {
+                    VmValue::String(name) if !name.trim().is_empty() => name.to_string(),
+                    other => {
+                        return Err(VmError::Runtime(format!(
+                            "{builtin}: subscribes_to entries must be non-empty strings, got {}",
+                            other.type_name()
+                        )));
+                    }
+                };
+                out.push(
+                    crate::orchestration::HookEvent::parse_provider_event(&name)
+                        .map_err(|message| VmError::Runtime(format!("{builtin}: {message}")))?,
+                );
+            }
+            if out.is_empty() {
+                return Err(VmError::Runtime(format!(
+                    "{builtin}: subscribes_to must not be empty"
+                )));
+            }
+            Ok(out)
+        }
+        other => Err(VmError::Runtime(format!(
+            "{builtin}: subscribes_to must be a string or list, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+/// Register a system-reminder provider closure for agent lifecycle events.
+#[harn_builtin(
+    exposure = "harness.agent.register_reminder_provider",
+    effects = ["state.mutate@const=reminder-providers"],
+    sig = "register_reminder_provider(config: dict) -> nil",
+    category = "workflow.host"
+)]
+pub(super) fn register_reminder_provider_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let config = args
+        .first()
+        .and_then(|arg| arg.as_dict())
+        .cloned()
+        .ok_or_else(|| {
+            VmError::Runtime("register_reminder_provider: config must be a dict".to_string())
+        })?;
+    let id = match config.get("id") {
+        Some(VmValue::String(id)) if !id.trim().is_empty() => id.to_string(),
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "register_reminder_provider: id must be a non-empty string, got {}",
+                other.type_name()
+            )))
+        }
+        None => {
+            return Err(VmError::Runtime(
+                "register_reminder_provider: missing id".to_string(),
+            ))
+        }
+    };
+    let subscribes_to = reminder_provider_event_list(
+        config
+            .get("subscribes_to")
+            .or_else(|| config.get("events"))
+            .or_else(|| config.get("event")),
+        "register_reminder_provider",
+    )?;
+    let evaluate = match config.get("evaluate") {
+        Some(VmValue::Closure(closure)) => closure.clone(),
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "register_reminder_provider: evaluate must be a closure, got {}",
+                other.type_name()
+            )))
+        }
+        None => {
+            return Err(VmError::Runtime(
+                "register_reminder_provider: missing evaluate".to_string(),
+            ))
+        }
+    };
+    crate::llm::reminder_providers::register_vm_provider(id, subscribes_to, evaluate);
+    Ok(VmValue::Nil)
+}
+
+/// Clear registered user-defined system-reminder providers.
+#[harn_builtin(
+    exposure = "harness.agent.clear_reminder_providers",
+    effects = ["state.mutate@const=reminder-providers"],
+    sig = "clear_reminder_providers() -> nil", category = "workflow.host"
+)]
+pub(super) fn clear_reminder_providers_builtin(
+    _args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    crate::llm::reminder_providers::clear_reminder_providers();
+    Ok(VmValue::Nil)
+}
+
+/// Register the callback `Vm::execute` invokes after the pipeline's
+/// declared steps complete (signature `fn(harness, return_value)`). Last-
+/// write-wins; the callback's return value replaces the pipeline's return
+/// value when the lifecycle runs.
+/// Register a callback invoked after the pipeline's declared steps complete.
+#[harn_builtin(
+    exposure = "harness.agent.pipeline_on_finish",
+    effects = ["state.mutate@const=pipeline-hooks"],
+    sig = "pipeline_on_finish(callback: closure) -> nil",
+    category = "workflow.host"
+)]
+pub(super) fn pipeline_on_finish_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let handler = required_hook_closure(args, 0, "pipeline_on_finish")?;
+    crate::orchestration::set_pipeline_on_finish(handler);
+    Ok(VmValue::Nil)
+}
+
+/// Return all `harness.emit_audit` entries recorded since the last drain
+/// and clear the log. Surfaces the lifecycle audit channel to Harn so
+/// conformance fixtures, replay oracles, and presets can introspect what
+/// drain/abandon/handoff_to recorded without depending on Rust internals.
+/// Return and clear every entry recorded via harness.emit_audit during this pipeline run.
+#[harn_builtin(
+    exposure = "harness.obs.pipeline_lifecycle_audit_log_take",
+    effects = ["observability.mutate@const=pipeline-lifecycle"],
+    sig = "pipeline_lifecycle_audit_log_take() -> list",
+    category = "workflow.host"
+)]
+pub(super) fn pipeline_lifecycle_audit_log_take_builtin(
+    _args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let entries = crate::orchestration::take_lifecycle_audit_log();
+    let json = serde_json::Value::Array(entries.iter().map(|e| e.to_json()).collect());
+    Ok(crate::stdlib::json_to_vm_value(&json))
+}
+
+/// Non-destructive variant: read entries without consuming them. Used by
+/// presets that want to peek without disturbing the replay log.
+/// Return every entry recorded via harness.emit_audit without clearing the log.
+#[harn_builtin(
+    exposure = "harness.obs.pipeline_lifecycle_audit_log_snapshot",
+    effects = ["observability.read@const=pipeline-lifecycle"],
+    sig = "pipeline_lifecycle_audit_log_snapshot() -> list",
+    category = "workflow.host"
+)]
+pub(super) fn pipeline_lifecycle_audit_log_snapshot_builtin(
+    _args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let entries = crate::orchestration::lifecycle_audit_log_snapshot();
+    let json = serde_json::Value::Array(entries.iter().map(|e| e.to_json()).collect());
+    Ok(crate::stdlib::json_to_vm_value(&json))
+}
+
+/// Report whether the settlement-agent drain loop (#1856 P-03) is
+/// currently active on this thread. Exposed as a Harn-facing builtin so
+/// conformance fixtures can verify the constrained-surface gate flips
+/// on while the loop runs and back off when it exits. Lifecycle hooks
+/// fired from within the loop (e.g. `OnDrainDecision`) observe this as
+/// true.
+/// Return true while the settlement-agent drain loop is running on this thread.
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "__host_settlement_agent_active() -> bool",
+    category = "workflow.host",
+    runtime_only = true
+)]
+pub(super) fn settlement_agent_active_builtin(
+    _args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    Ok(VmValue::Bool(
+        crate::orchestration::settlement_agent_active(),
+    ))
+}
+
+/// Fire a session-level lifecycle hook from Harn. Used by the
+/// Harn-driven agent loop (autocompact, file edits, etc.) to invoke
+/// hooks that are wired in Harn rather than from a Rust host primitive.
+///
+/// Returns a dict shaped like:
+///   { control: "allow" | "block" | "decision", reason?, decision? }
+/// Fire a session-level lifecycle hook and return its control flow.
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "__host_fire_session_hook(event: string, payload?: dict|nil) -> dict",
+    kind = "async",
+    category = "workflow.host",
+    runtime_only = true
+)]
+pub(super) async fn fire_session_hook_builtin(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let event_name = args
+        .first()
+        .map(VmValue::display)
+        .ok_or_else(|| VmError::Runtime("__host_fire_session_hook: missing event".to_string()))?;
+    let event = crate::orchestration::HookEvent::parse_session_event(&event_name)
+        .map_err(|message| VmError::Runtime(format!("__host_fire_session_hook: {message}")))?;
+    let payload_value = args.get(1).cloned().unwrap_or(VmValue::Nil);
+    let mut payload = crate::llm::vm_value_to_json(&payload_value);
+    if !payload.is_object() {
+        payload = serde_json::Value::Object(serde_json::Map::new());
+    }
+    if let serde_json::Value::Object(map) = &mut payload {
+        map.entry("event".to_string())
+            .or_insert_with(|| serde_json::Value::String(event.as_str().to_string()));
+    }
+
+    let control = crate::orchestration::run_lifecycle_hooks_with_control_with_ctx(
+        Some(&ctx),
+        event,
+        &payload,
+    )
+    .await?;
+    crate::run_events::emit(crate::run_events::RunEvent::Hook {
+        name: event_name.clone(),
+        phase: match &control {
+            crate::orchestration::HookControl::Allow => "allow".to_string(),
+            crate::orchestration::HookControl::Block { .. } => "block".to_string(),
+            crate::orchestration::HookControl::Decision { kind, .. } => format!("decision:{kind}"),
+            crate::orchestration::HookControl::Modify { .. } => "modify".to_string(),
+        },
+        payload: payload.clone(),
+    });
+    let mut out: crate::value::DictMap = crate::value::DictMap::new();
+    match control {
+        crate::orchestration::HookControl::Allow => {
+            out.put_str("control", "allow");
+        }
+        crate::orchestration::HookControl::Block { reason } => {
+            out.put_str("control", "block");
+            out.put_str("reason", reason);
+        }
+        crate::orchestration::HookControl::Decision { kind, reason } => {
+            out.put_str("control", "decision");
+            out.put_str("decision", kind);
+            if let Some(reason) = reason {
+                out.put_str("reason", reason);
+            }
+        }
+        crate::orchestration::HookControl::Modify { payload: modified } => {
+            out.put_str("control", "modify");
+            out.insert(
+                crate::value::intern_key("modify"),
+                crate::stdlib::json_to_vm_value(&modified),
+            );
+        }
+    }
+    Ok(VmValue::dict(out))
+}
+
+/// Synchronous emit-only entry point: explicitly notify the session
+/// that a file was edited. Records a `file_edited` advisory event on
+/// the active transcript so replay tooling can see it, and queues VM
+/// closure handlers for the next async-builtin boundary.
+/// Queue a `FileEdited` notification; hooks fire on the next agent-loop boundary.
+#[harn_builtin(
+    exposure = "harness.agent.notify_file_edited",
+    effects = ["host.write@arg0", "observability.write@arg0"],
+    sig = "notify_file_edited(path: string, metadata?: dict|nil) -> nil",
+    category = "workflow.host"
+)]
+pub(super) fn notify_file_edited_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let path = args
+        .first()
+        .map(VmValue::display)
+        .ok_or_else(|| VmError::Runtime("notify_file_edited: missing path".to_string()))?;
+    let metadata = args
+        .get(1)
+        .map(crate::llm::helpers::vm_value_to_json)
+        .unwrap_or(serde_json::Value::Null);
+    crate::orchestration::queue_file_edited(&path, metadata);
+    Ok(VmValue::Nil)
+}
+
+/// Drain the file-edit queue and fire `FileEdited` hooks for any
+/// notifications recorded since the last drain. Returns the list of
+/// drained paths so callers (the agent loop) can record them on the
+/// transcript or pass them to follow-up tools.
+/// Drain the FileEdited queue, fire matching hooks, return the drained paths.
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "__host_drain_file_edits(session_id?: string|nil) -> list",
+    kind = "async",
+    category = "workflow.host",
+    runtime_only = true
+)]
+pub(super) async fn drain_file_edits_builtin(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let session_id = args.first().map(VmValue::display).unwrap_or_default();
+    let drained = crate::orchestration::drain_file_edits();
+    let mut paths: Vec<VmValue> = Vec::with_capacity(drained.len());
+    for edit in drained {
+        let payload = serde_json::json!({
+            "event": crate::orchestration::HookEvent::FileEdited.as_str(),
+            "session": {"id": &session_id},
+            "path": edit.path,
+            "metadata": edit.metadata,
+        });
+        crate::orchestration::run_lifecycle_hooks_with_ctx(
+            Some(&ctx),
+            crate::orchestration::HookEvent::FileEdited,
+            &payload,
+        )
+        .await?;
+        paths.push(VmValue::String(arcstr::ArcStr::from(edit.path)));
+    }
+    Ok(VmValue::List(std::sync::Arc::new(paths)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dict(entries: &[(&str, VmValue)]) -> VmValue {
+        VmValue::dict(
+            entries
+                .iter()
+                .map(|(key, value)| (crate::value::intern_key(key), value.clone()))
+                .collect::<crate::value::DictMap>(),
+        )
+    }
+
+    #[test]
+    fn register_tool_hook_rejects_negative_max_output() {
+        let mut out = String::new();
+        let err = register_tool_hook_builtin(
+            &[dict(&[
+                ("pattern", VmValue::String(arcstr::ArcStr::from("*"))),
+                ("max_output", VmValue::Int(-1)),
+            ])],
+            &mut out,
+        )
+        .expect_err("negative max_output must fail");
+        assert!(err.to_string().contains("max_output"));
+    }
+}

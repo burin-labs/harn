@@ -1,0 +1,60 @@
+import { task_plan_compile, task_plan_validate } from "std/agent/task_plan"
+
+pipeline main(harness: Harness) {
+  const plan = {
+    schema_version: "1",
+    objective: "Add rate limiter around existing auth middleware",
+    entry: "discover",
+    nodes: {
+      discover: {
+        kind: "read_fact",
+        purpose: "Map auth middleware",
+        prompt: "List functions in middleware/auth/*",
+        tools: ["read", "grep"],
+      },
+      implement: {
+        kind: "agent_loop",
+        purpose: "Add rate limiter",
+        prompt: "Wire a token-bucket limiter around the auth middleware",
+        tools: ["read", "edit"],
+        effects: ["workspace_write"],
+        agent_loop: {max_iterations: 6, done_sentinel: "DONE"},
+      },
+      verify: {kind: "verify", verify: {command: "cargo test -p auth", expect_status: 0}},
+    },
+    edges: [{from: "discover", to: "implement"}, {from: "implement", to: "verify"}],
+    budgets: {
+      wall_clock_ms: 30000,
+      total_cost_usd: 0.25,
+      consecutive_failures: {max: 2, kinds: ["rate_limit"], paused_for_ms: 500},
+    },
+    capabilities: {tools: ["read", "edit", "grep"], side_effect_level: "workspace_write"},
+    verification: {primary: "verify"},
+    promotion_policy: {shadow_runs_required: 3, human_review_required: true},
+  }
+  const report = task_plan_validate(plan)
+  harness.stdio.println(report.valid)
+  harness.stdio.println(len(report.errors))
+  harness.stdio.println(report.graph_stats.node_count)
+  harness.stdio.println(report.graph_stats.reachable_count)
+  harness.stdio.println(report.budget_summary.max_nodes)
+  harness.stdio.println(report.budget_summary.wall_clock_ms)
+  const compiled = task_plan_compile(plan)
+  harness.stdio.println(compiled.ok)
+  harness.stdio.println(compiled.workflow.entry)
+  harness.stdio.println(compiled.workflow.nodes.implement.kind)
+  harness.stdio.println(compiled.workflow.nodes.implement.mode)
+  const loop_budget = compiled.workflow.nodes.implement.model_policy.iteration_budget
+  harness.stdio.println(loop_budget.wall_clock_ms)
+  harness.stdio.println(loop_budget.total_cost_usd > 0.0)
+  harness.stdio.println(loop_budget.consecutive_failures.max)
+  harness.stdio.println(loop_budget.consecutive_failures.kinds[0])
+  harness.stdio.println(loop_budget.consecutive_failures.paused_for_ms)
+  harness.stdio.println(compiled.workflow.nodes.verify.kind)
+  harness.stdio.println(compiled.workflow.nodes.verify.verify.command)
+  harness.stdio.println(compiled.workflow.nodes.implement.metadata.task_plan_kind)
+  harness.stdio.println(compiled.workflow.metadata.task_plan.objective)
+  harness.stdio.println(compiled.workflow.capability_policy.side_effect_level)
+  const wf_report = workflow_validate(compiled.workflow)
+  harness.stdio.println(wf_report.valid)
+}

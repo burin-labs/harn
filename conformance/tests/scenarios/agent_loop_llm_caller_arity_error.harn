@@ -1,0 +1,12 @@
+import { agent_loop } from "std/agent/loop"
+
+/**
+ * Passing a non-closure as `llm_caller` is rejected at option-normalization
+ * time with a friendly diagnostic from __validate_llm_caller.
+ */
+pipeline default(harness: Harness) {
+  const result = try {
+    agent_loop(harness, "hi", nil, {provider: "mock", llm_caller: 42})
+  }
+  harness.stdio.println(unwrap_err(result))
+}

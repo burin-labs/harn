@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "data": {
+    "files": [
+      {
+        "path": "src/utf8.harn",
+        "status": "warning",
+        "diagnostics": [
+          {
+            "source": "lint",
+            "severity": "warning",
+            "code": "HARN-LNT-001",
+            "message": "unused variable spans a UTF-8 emoji line",
+            "span": { "start": 11, "end": 24 },
+            "help": "prefix with `_` or remove"
+          }
+        ],
+        "fixable": 0,
+        "fixed": 0
+      }
+    ],
+    "summary": {
+      "ok": 0,
+      "warnings": 1,
+      "errors": 0,
+      "diagnostics": 1,
+      "fixable": 0,
+      "fixed": 0
+    }
+  },
+  "error": null,
+  "warnings": []
+}

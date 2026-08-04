@@ -1,0 +1,13 @@
+pipeline test(harness: Harness, task) {
+  const self_ref = {"$ref": "#"}
+  const from_json = try {
+    schema_from_json_schema(self_ref)
+  }
+  harness.stdio.println(is_err(from_json))
+  harness.stdio.println(contains(to_string(unwrap_err(from_json)), "cyclic schema reference"))
+  const checked = schema_check("ok", self_ref)
+  harness.stdio.println(is_err(checked))
+  harness.stdio.println(contains(unwrap_err(checked).message, "cyclic schema reference"))
+  const normal = {type: "dict", properties: {node: {type: "string"}}}
+  harness.stdio.println(schema_is({node: "ok"}, normal))
+}

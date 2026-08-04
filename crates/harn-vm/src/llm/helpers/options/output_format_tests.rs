@@ -1,0 +1,156 @@
+use super::output::*;
+use super::*;
+
+#[test]
+fn parses_explicit_json_schema_output() {
+    let mut spec = crate::value::DictMap::new();
+    spec.insert(
+        crate::value::intern_key("schema"),
+        VmValue::dict(crate::value::DictMap::from_iter([(
+            crate::value::intern_key("type"),
+            VmValue::String(arcstr::ArcStr::from("object")),
+        )])),
+    );
+    spec.insert(crate::value::intern_key("strict"), VmValue::Bool(false));
+    let options = crate::value::DictMap::from_iter([(
+        crate::value::intern_key("output"),
+        VmValue::dict(spec),
+    )]);
+
+    let parsed = parse_output_option(Some(&options)).expect("output");
+
+    assert_eq!(
+        parsed.format,
+        crate::llm::api::OutputFormat::JsonSchema {
+            schema: serde_json::json!({"type": "object"}),
+            strict: false,
+        }
+    );
+}
+
+#[test]
+fn normalizes_harn_schema_types_for_provider_output() {
+    let schema = crate::schema::json_to_vm_value(&serde_json::json!({
+        "type": "dict",
+        "properties": {
+            "items": {
+                "type": "list",
+                "items": {"type": "int"},
+                "x-provider-extension": {"mode": "strict"}
+            }
+        }
+    }));
+
+    let parsed = parse_schema_value(Some(&schema), "output")
+        .expect("valid Harn schema")
+        .expect("present schema");
+
+    assert_eq!(parsed["type"], "object");
+    assert_eq!(parsed["properties"]["items"]["type"], "array");
+    assert_eq!(parsed["properties"]["items"]["items"]["type"], "integer");
+    assert_eq!(
+        parsed["properties"]["items"]["x-provider-extension"]["mode"],
+        "strict"
+    );
+}
+
+#[test]
+fn normalizes_harn_schema_types_in_unions_and_type_arrays() {
+    // The completion-judge schema that regressed llama.cpp nests aliases in
+    // positions the two happy-path tests do not cover: `anyOf` branches, a
+    // union `type` array, and the `float`/`nil` scalar siblings. Pin them so a
+    // future normalizer refactor cannot silently reopen the strict-grammar 400.
+    let schema = crate::schema::json_to_vm_value(&serde_json::json!({
+        "type": "dict",
+        "properties": {
+            "verdict": {"anyOf": [{"type": "bool"}, {"type": "nil"}]},
+            "score": {"type": "float"},
+            "tags": {"type": ["list", "nil"]}
+        }
+    }));
+
+    let parsed = parse_schema_value(Some(&schema), "output")
+        .expect("valid Harn schema")
+        .expect("present schema");
+
+    assert_eq!(parsed["type"], "object");
+    assert_eq!(
+        parsed["properties"]["verdict"]["anyOf"][0]["type"],
+        "boolean"
+    );
+    assert_eq!(parsed["properties"]["verdict"]["anyOf"][1]["type"], "null");
+    assert_eq!(parsed["properties"]["score"]["type"], "number");
+    assert_eq!(
+        parsed["properties"]["tags"]["type"],
+        serde_json::json!(["array", "null"])
+    );
+}
+
+#[test]
+fn parser_does_not_revive_removed_output_synonyms() {
+    // W2 collapsed the `response_format` / `json_schema` / top-level `schema`
+    // spellings onto the single canonical `output` key. `parse_output_option`
+    // no longer reads the legacy keys, so a call carrying only them lowers to
+    // plain text output — guarding against an accidental synonym revival.
+    let schema = crate::value::DictMap::from_iter([(
+        crate::value::intern_key("type"),
+        VmValue::String(arcstr::ArcStr::from("object")),
+    )]);
+    let options = crate::value::DictMap::from_iter([
+        (
+            crate::value::intern_key("response_format"),
+            VmValue::String(arcstr::ArcStr::from("json")),
+        ),
+        (
+            crate::value::intern_key("json_schema"),
+            VmValue::dict(schema),
+        ),
+    ]);
+
+    let parsed = parse_output_option(Some(&options)).expect("output");
+
+    assert_eq!(parsed.format, crate::llm::api::OutputFormat::Text);
+}
+
+#[test]
+fn rejects_json_schema_when_capability_is_absent() {
+    crate::llm::capabilities::clear_user_overrides();
+    let err = validate_output_format_supported(
+        &crate::llm::api::OutputFormat::JsonSchema {
+            schema: serde_json::json!({"type": "object"}),
+            strict: true,
+        },
+        "custom-provider",
+        "custom-model",
+        &crate::llm::capabilities::lookup("custom-provider", "custom-model"),
+    )
+    .expect_err("unsupported structured output should fail");
+
+    assert!(err
+        .to_string()
+        .contains("option `output` is not supported by `custom-model`"));
+}
+
+#[test]
+fn accepts_json_schema_when_capability_declares_strategy() {
+    crate::llm::capabilities::set_user_overrides_toml(
+        r#"
+[[provider.custom-provider]]
+model_match = "*"
+structured_output = "format_kw"
+"#,
+    )
+    .expect("capability override");
+
+    validate_output_format_supported(
+        &crate::llm::api::OutputFormat::JsonSchema {
+            schema: serde_json::json!({"type": "object"}),
+            strict: true,
+        },
+        "custom-provider",
+        "custom-model",
+        &crate::llm::capabilities::lookup("custom-provider", "custom-model"),
+    )
+    .expect("supported structured output");
+    crate::llm::capabilities::clear_user_overrides();
+}

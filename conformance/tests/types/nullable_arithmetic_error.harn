@@ -1,0 +1,7 @@
+fn add_one(x: int?) -> int {
+  return x + 1
+}
+
+pipeline default(harness: Harness) {
+  harness.stdio.println(0)
+}

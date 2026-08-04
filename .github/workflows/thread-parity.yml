@@ -1,0 +1,64 @@
+name: Thread-count parity
+
+on:
+  schedule:
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  HARN_LLM_CALLS_DISABLED: "1"
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  thread-parity:
+    name: Full suite at ${{ matrix.threads }} threads
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      # Run all thread counts even if one fails so we see the full picture.
+      fail-fast: false
+      matrix:
+        threads: [1, 8, 16]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/rust-toolchain
+      - uses: ./.github/actions/sccache-install
+        # sccache is a build-cache optimization, not a build requirement. The
+        # upstream action sometimes fails on merge_group / restricted-token
+        # events with "Bad credentials" when api.github.com gates the release
+        # lookup; a cold build is a fine fallback, but the job shouldn't fail.
+        continue-on-error: true
+
+      - name: Configure Cargo to use sccache
+        if: env.SCCACHE_PATH != ''
+        run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
+
+      - uses: ./.github/actions/rust-cache
+        continue-on-error: true
+        with:
+          shared-key: workspace
+          cache-bin: false
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # v2.85.2
+        continue-on-error: true
+        with:
+          tool: nextest@0.9.132
+
+      # Through the shared lane wrapper so this suite runs with the same
+      # 16 MiB RUST_MIN_STACK as every other Rust test lane. Running raw
+      # `cargo nextest` left the default 2 MiB spawned-thread stack, which
+      # aborts VM-driving tests with SIGABRT regardless of thread count and
+      # reports a stack-size difference as a thread-count parity failure.
+      - name: Run full suite at ${{ matrix.threads }} threads
+        run: >-
+          scripts/ci/run_rust_test_lane.sh
+          cargo nextest run --workspace --test-threads=${{ matrix.threads }}
+        env:
+          NEXTEST_PROFILE: ci

@@ -1,0 +1,14 @@
+pipeline default(harness: Harness, task) {
+  fn step(value) {
+    return value + 1
+  }
+  let i = 0
+  let total = 0
+  while i < 100000 {
+    total = step(total)
+    i = i + 1
+  }
+  if total < 0 {
+    harness.stdio.log("unreachable")
+  }
+}

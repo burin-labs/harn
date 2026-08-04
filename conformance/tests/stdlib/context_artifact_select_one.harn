@@ -1,0 +1,63 @@
+import "std/context"
+
+fn mk(id, dir, fresh) {
+  return context_artifact(
+    {
+      id: id,
+      kind: "context_digest",
+      path: dir,
+      language: "rust",
+      role: "implementer",
+      freshness: fresh,
+      confidence: 0.8,
+      body: "body for ${id}",
+    },
+  )
+}
+
+pipeline default(harness: Harness) {
+  const deep = mk("deep", "src/parser", "fresh")
+  const shallow = mk("shallow", "src", "fresh")
+  // 1. depth/altitude tie-break: both are ancestors of src/parser/lexer and tie
+  // on role/language/freshness, so the deeper, more-specific scope wins.
+  const pick = context_artifact_select_one(
+    [shallow, deep],
+    {role: "implementer", language: "rust", dir: "src/parser/lexer"},
+  )
+  harness.stdio.println(pick.reason)
+  harness.stdio.println(pick.artifact.id)
+  // 2. exact scope beats a shallower ancestor.
+  const exact = context_artifact_select_one(
+    [shallow, deep],
+    {role: "implementer", language: "rust", dir: "src/parser"},
+  )
+  harness.stdio.println(exact.artifact.id)
+  // 3. ambiguity abstention: two artifacts identical on every signal -> abstain.
+  const a = mk("a", "src", "fresh")
+  const b = mk("b", "src", "fresh")
+  const amb = context_artifact_select_one(
+    [a, b],
+    {role: "implementer", language: "rust", dir: "src"},
+  )
+  harness.stdio.println(amb.reason)
+  harness.stdio.println(len(amb.candidates))
+  // 4. staleness suppression: a stale, more-specific artifact is suppressed in
+  // favor of a fresh, shallower one.
+  const staleDeep = mk("staleDeep", "src/parser", "stale")
+  const freshShallow = mk("freshShallow", "src", "fresh")
+  const sup = context_artifact_select_one(
+    [staleDeep, freshShallow],
+    {role: "implementer", language: "rust", dir: "src/parser/lexer"},
+  )
+  harness.stdio.println(sup.reason)
+  harness.stdio.println(sup.artifact.id)
+  // 5. all candidates stale -> staleness reason, inject nothing.
+  const allStale = context_artifact_select_one(
+    [staleDeep],
+    {role: "implementer", language: "rust", dir: "src/parser"},
+  )
+  harness.stdio.println(allStale.reason)
+  // 6. empty input -> no_context_artifacts.
+  const none = context_artifact_select_one([], {})
+  harness.stdio.println(none.reason)
+}

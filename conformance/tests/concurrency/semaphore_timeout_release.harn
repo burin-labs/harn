@@ -1,0 +1,9 @@
+pipeline test(harness: Harness, task) {
+  const held = harness.runtime.sync_semaphore_acquire("pool", 1, 1)
+  const timed_out = harness.runtime.sync_semaphore_acquire("pool", 1, 1, 0)
+  harness.stdio.println(timed_out == nil)
+  harness.stdio.println(harness.runtime.sync_release(held))
+  const reacquired = harness.runtime.sync_semaphore_acquire("pool", 1, 1, 0)
+  harness.stdio.println(reacquired != nil)
+  harness.runtime.sync_release(reacquired)
+}

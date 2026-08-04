@@ -1,0 +1,905 @@
+// std/fs - file-system convenience helpers built on the host fs primitives.
+import { pretty } from "std/json"
+import {
+  SchemaContract,
+  SchemaContractFailure,
+  SchemaIssue,
+  get_typed_result,
+  schema_contract_check,
+} from "std/schema"
+
+type WriteDataOptions = {pretty?: bool, trailing_newline?: bool, ensure_parent?: bool}
+
+pub type FileReplaceStatus = "created" | "replaced" | "no_op" | "stale"
+
+pub type FileReplaceDurability = "namespace" | "flush"
+
+pub type FileReplaceOptions = {
+  expected_sha256?: string,
+  create?: bool,
+  overwrite?: bool,
+  create_parents?: bool,
+  durability?: FileReplaceDurability,
+}
+
+pub type FileReplaceReceipt = {
+  status: FileReplaceStatus,
+  before_exists: bool,
+  before_sha256: string,
+  after_sha256: string,
+  expected_sha256?: string,
+  bytes_written: int,
+  durability: FileReplaceDurability,
+  file_synced: bool,
+  namespace_synced: bool,
+}
+
+pub type FsFailure = {
+  error: "io_error",
+  kind: "not_found" \
+    | "permission_denied" \
+    | "already_exists" \
+    | "storage_full" \
+    | "quota_exceeded" \
+    | "file_too_large" \
+    | "read_only_filesystem" \
+    | "not_a_directory" \
+    | "is_a_directory" \
+    | "directory_not_empty" \
+    | "crosses_devices" \
+    | "too_many_links" \
+    | "invalid_input" \
+    | "invalid_data" \
+    | "timed_out" \
+    | "interrupted" \
+    | "unexpected_eof" \
+    | "would_block" \
+    | "out_of_memory" \
+    | "resource_busy" \
+    | "executable_file_busy" \
+    | "sandbox_denied" \
+    | "other",
+  message: string,
+  category?: string,
+}
+
+pub type FileLinePageOptions = {offset?: int, line?: int, max_lines?: int, max_bytes?: int}
+
+pub type FileLine = {line: int, offset: int, text: string}
+
+pub type FileLinePage = {lines: list<FileLine>, next_offset: int, next_line: int, done: bool}
+
+pub type StructuredDataFormat = "json" | "yaml" | "toml"
+
+pub type StructuredReadFailureKind = "absent" | "unreadable" | "malformed" | "recursion_limit"
+
+pub type StructuredReadFailure = {
+  kind: StructuredReadFailureKind,
+  format: StructuredDataFormat,
+  path: string,
+  detail: string,
+  line?: int,
+  column?: int,
+}
+
+pub type SchemaValidationFailure = {
+  kind: "schema_invalid",
+  format: StructuredDataFormat,
+  path: string,
+  detail: string,
+  issues: list<SchemaIssue>,
+}
+
+pub type ContractValidationFailure = SchemaContractFailure \
+  & {format: StructuredDataFormat, path: string}
+
+pub type TypedReadFailure = StructuredReadFailure \
+  | SchemaValidationFailure \
+  | ContractValidationFailure
+
+pub type TypedReadResult<T> = Result<T, TypedReadFailure>
+
+/**
+ * Read one bounded page of complete UTF-8 lines.
+ *
+ * Resume with the returned `next_offset` and `next_line`. A line larger than
+ * `max_bytes` fails instead of returning partial text.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ */
+pub fn read_lines_page_result(
+  fs: HarnessFs,
+  path: string,
+  options: FileLinePageOptions = {},
+) -> Result<FileLinePage, FsFailure> {
+  const result: any = fs.read_lines_page_result(path, options ?? {})
+  return result
+}
+
+pub type EvidenceRoot = {id: string, path: string}
+
+pub type EvidencePattern = {id: string, text: string}
+
+pub type EvidenceHit = {path: string, line: int, column: int, text: string}
+
+pub type PatternEvidence = {id: string, count: int, truncated: bool, hits: list<EvidenceHit>}
+
+pub type RootEvidenceStatus = "complete" | "partial" | "truncated" | "failed" | "cancelled"
+
+pub type RootEvidence = {
+  id: string,
+  status: RootEvidenceStatus,
+  complete: bool,
+  truncated: bool,
+  files_scanned: int,
+  files_skipped: int,
+  match_count: int,
+  error_count: int,
+  error?: string,
+  patterns: list<PatternEvidence>,
+}
+
+pub type EvidenceSearchStatus = "complete" | "partial" | "truncated" | "failed" | "cancelled"
+
+pub type EvidenceReceipt = {
+  schema_version: "harn.fs.evidence.v1",
+  status: EvidenceSearchStatus,
+  complete: bool,
+  truncated: bool,
+  cancelled: bool,
+  root_count: int,
+  failed_root_count: int,
+  files_scanned: int,
+  match_count: int,
+  roots: list<RootEvidence>,
+}
+
+pub type EvidenceOptions = {
+  preset?: "default" | "source",
+  max_depth?: int,
+  max_filesize?: int,
+  follow_symlinks?: bool,
+  include_hidden?: bool,
+  ignore_policy?: "none" | "builtin" | "project",
+  case_insensitive?: bool,
+  include?: list<string>,
+  exclude?: list<string>,
+  max_matches?: int,
+  max_matches_per_root?: int,
+  threads?: int,
+}
+
+/** Match ASCII letters without regard to case. */
+pub type EvidenceSearchHandle = {
+  handle_id: string,
+  operation: string,
+  status: "running",
+  started_at: string,
+  ended_at: nil,
+  duration_ms: int,
+  command_or_op_descriptor: string,
+}
+
+/**
+ * Search each labeled root once for every labeled literal and return stable,
+ * path-relative evidence. Root failures settle independently, and match order
+ * does not depend on worker count.
+ *
+ * @effects: [fs.read]
+ * @errors: [invalid_argument]
+ */
+pub fn search_evidence(
+  fs: HarnessFs,
+  roots: list<EvidenceRoot>,
+  patterns: list<EvidencePattern>,
+  options: EvidenceOptions = {},
+) -> EvidenceReceipt {
+  return schema_expect(fs.find_evidence(roots, patterns, options), schema_of(EvidenceReceipt))
+}
+
+/**
+ * Start the same evidence search through the standard cancellable background
+ * operation lifecycle.
+ *
+ * @effects: [fs.read]
+ * @errors: [invalid_argument]
+ */
+pub fn search_evidence_background(
+  fs: HarnessFs,
+  roots: list<EvidenceRoot>,
+  patterns: list<EvidencePattern>,
+  options: EvidenceOptions = {},
+) -> EvidenceSearchHandle {
+  return schema_expect(
+    fs.find_evidence(roots, patterns, options + {background: true}),
+    schema_of(EvidenceSearchHandle),
+  )
+}
+
+fn __fs_norm(path) -> string {
+  return replace(path ?? "", "\\", "/")
+}
+
+fn __fs_parent(path) -> string {
+  return dirname(path ?? "")
+}
+
+fn __fs_with_newline(text, trailing_newline) {
+  if !(trailing_newline ?? true) || ends_with(text, "\n") {
+    return text
+  }
+  return text + "\n"
+}
+
+fn __fs_parse_structured(format: StructuredDataFormat, text: string) -> unknown {
+  if format == "json" {
+    return json_parse(text)
+  }
+  if format == "yaml" {
+    return yaml_parse(text)
+  }
+  return toml_parse(text)
+}
+
+fn __fs_structured_failure(
+  kind: StructuredReadFailureKind,
+  format: StructuredDataFormat,
+  path: string,
+  detail: string,
+  line: int? = nil,
+  column: int? = nil,
+) -> StructuredReadFailure {
+  let failure: StructuredReadFailure = {kind: kind, format: format, path: path, detail: detail}
+  if line != nil {
+    failure = failure + {line: line}
+  }
+  if column != nil {
+    failure = failure + {column: column}
+  }
+  return failure
+}
+
+fn __fs_read_structured_result(
+  fs: HarnessFs,
+  path: string,
+  format: StructuredDataFormat,
+) -> Result<unknown, StructuredReadFailure> {
+  const read = fs.read_text_result(path)
+  if !is_ok(read) {
+    const failure = unwrap_err(read)
+    const kind: StructuredReadFailureKind = if failure.kind == "not_found" {
+      "absent"
+    } else {
+      "unreadable"
+    }
+    return Err(__fs_structured_failure(kind, format, path, to_string(failure.message)))
+  }
+  const parsed = try {
+    __fs_parse_structured(format, unwrap(read))
+  }
+  if is_ok(parsed) {
+    return Ok(unwrap(parsed))
+  }
+  const failure = unwrap_err(parsed)
+  return Err(
+    __fs_structured_failure(
+      failure.kind,
+      format,
+      path,
+      failure.message,
+      failure.line,
+      failure.column,
+    ),
+  )
+}
+
+fn __fs_read_structured_typed_result<T>(
+  fs: HarnessFs,
+  path: string,
+  format: StructuredDataFormat,
+  schema: Schema<T>,
+  apply_defaults: bool,
+) -> TypedReadResult<T> {
+  const parsed = __fs_read_structured_result(fs, path, format)
+  if !is_ok(parsed) {
+    return Err(unwrap_err(parsed))
+  }
+  const validated = get_typed_result(unwrap(parsed), schema, apply_defaults)
+  if is_ok(validated) {
+    return Ok(unwrap(validated))
+  }
+  const failure = unwrap_err(validated)
+  return Err(
+    {
+      kind: "schema_invalid",
+      format: format,
+      path: path,
+      detail: failure.message,
+      issues: failure.issues,
+    },
+  )
+}
+
+fn __fs_read_structured_contract_result<T>(
+  fs: HarnessFs,
+  path: string,
+  format: StructuredDataFormat,
+  contract: SchemaContract<T>,
+) -> TypedReadResult<T> {
+  const parsed = __fs_read_structured_result(fs, path, format)
+  if !is_ok(parsed) {
+    return Err(unwrap_err(parsed))
+  }
+  const validated = schema_contract_check(unwrap(parsed), contract)
+  if is_ok(validated) {
+    return Ok(unwrap(validated))
+  }
+  const failure = unwrap_err(validated)
+  return Err(
+    {
+      kind: failure.kind,
+      format: format,
+      path: path,
+      detail: failure.detail,
+      issues: failure.issues,
+    },
+  )
+}
+
+fn __fs_require_result<T, E>(result: Result<T, E>) -> T {
+  if is_ok(result) {
+    return unwrap(result)
+  }
+  throw unwrap_err(result)
+}
+
+/**
+ * Create the parent directory for `path` when it is not `.` or empty.
+ *
+ * @effects: [fs.read, fs.write]
+ * @errors: []
+ */
+pub fn ensure_parent_dir(fs: HarnessFs, path: string) {
+  const parent = __fs_parent(path)
+  if parent != "" && parent != "." {
+    const status = fs.status(parent, "write")
+    if !(status?.exists ?? false) {
+      fs.mkdir(parent)
+    }
+  }
+}
+
+fn __fs_replace_result(result) -> Result<FileReplaceReceipt, FsFailure> {
+  if is_ok(result) {
+    return Ok(schema_expect(unwrap(result), schema_of(FileReplaceReceipt)))
+  }
+  return Err(schema_expect(unwrap_err(result), schema_of(FsFailure)))
+}
+
+/**
+ * Atomically replace a complete UTF-8 file when its observed digest still
+ * matches. A stale lease is a successful `stale` receipt and never mutates the
+ * destination.
+ *
+ * `namespace` durability prevents partial reads. Request `flush` when the
+ * caller also needs the operating system's best available storage flush; the
+ * receipt reports which flushes completed.
+ *
+ * @effects: [fs.write]
+ * @errors: [FsFailure]
+ */
+pub fn replace_text(
+  fs: HarnessFs,
+  path: string,
+  content: string,
+  options: FileReplaceOptions = {},
+) -> FileReplaceReceipt {
+  return __fs_require_result(replace_text_result(fs, path, content, options))
+}
+
+/**
+ * Result form of `replace_text`.
+ *
+ * @effects: [fs.write]
+ * @errors: []
+ */
+pub fn replace_text_result(
+  fs: HarnessFs,
+  path: string,
+  content: string,
+  options: FileReplaceOptions = {},
+) -> Result<FileReplaceReceipt, FsFailure> {
+  return __fs_replace_result(fs.replace_text_result(path, content, options))
+}
+
+/**
+ * Atomically replace a complete byte file when its observed digest still
+ * matches.
+ *
+ * @effects: [fs.write]
+ * @errors: [FsFailure]
+ */
+pub fn replace_bytes(
+  fs: HarnessFs,
+  path: string,
+  content: bytes,
+  options: FileReplaceOptions = {},
+) -> FileReplaceReceipt {
+  return __fs_require_result(replace_bytes_result(fs, path, content, options))
+}
+
+/**
+ * Result form of `replace_bytes`.
+ *
+ * @effects: [fs.write]
+ * @errors: []
+ */
+pub fn replace_bytes_result(
+  fs: HarnessFs,
+  path: string,
+  content: bytes,
+  options: FileReplaceOptions = {},
+) -> Result<FileReplaceReceipt, FsFailure> {
+  return __fs_replace_result(fs.replace_bytes_result(path, content, options))
+}
+
+/**
+ * Read and parse a required JSON file, throwing a typed `StructuredReadFailure`.
+ *
+ * @effects: [fs.read]
+ * @errors: [StructuredReadFailure]
+ */
+pub fn read_json(fs: HarnessFs, path: string) -> unknown {
+  return __fs_require_result(read_json_result(fs, path))
+}
+
+/**
+ * Read and parse JSON without erasing the owning failure stage.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ */
+pub fn read_json_result(fs: HarnessFs, path: string) -> Result<unknown, StructuredReadFailure> {
+  return __fs_read_structured_result(fs, path, "json")
+}
+
+/**
+ * Read, parse, and validate JSON with one closed Result contract.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ */
+pub fn read_json_typed_result<T>(
+  fs: HarnessFs,
+  path: string,
+  schema: Schema<T>,
+  apply_defaults: bool = false,
+) -> TypedReadResult<T> {
+  return __fs_read_structured_typed_result(fs, path, "json", schema, apply_defaults)
+}
+
+/**
+ * Read, parse, and validate required JSON, throwing the typed failure.
+ *
+ * @effects: [fs.read]
+ * @errors: [StructuredReadFailure, SchemaValidationFailure]
+ */
+pub fn read_json_typed<T>(
+  fs: HarnessFs,
+  path: string,
+  schema: Schema<T>,
+  apply_defaults: bool = false,
+) -> T {
+  return __fs_require_result(read_json_typed_result(fs, path, schema, apply_defaults))
+}
+
+/**
+ * Read, parse, and validate JSON with one structural-and-rule contract.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ */
+pub fn read_json_contract_result<T>(
+  fs: HarnessFs,
+  path: string,
+  contract: SchemaContract<T>,
+) -> TypedReadResult<T> {
+  return __fs_read_structured_contract_result(fs, path, "json", contract)
+}
+
+/**
+ * Read required contract-validated JSON, throwing its typed failure.
+ *
+ * @effects: [fs.read]
+ * @errors: [StructuredReadFailure, ContractValidationFailure]
+ */
+pub fn read_json_contract<T>(fs: HarnessFs, path: string, contract: SchemaContract<T>) -> T {
+  return __fs_require_result(read_json_contract_result(fs, path, contract))
+}
+
+/**
+ * Write a JSON file with optional pretty formatting and parent-dir creation.
+ *
+ * @effects: [fs.read, fs.write]
+ * @errors: []
+ */
+pub fn write_json(fs: HarnessFs, path: string, value, options: WriteDataOptions = {}) {
+  const opts = options ?? {}
+  if opts.ensure_parent ?? true {
+    ensure_parent_dir(fs, path)
+  }
+  const body = if opts.pretty ?? false {
+    pretty(value)
+  } else {
+    json_stringify(value)
+  }
+  fs.write_text(path, __fs_with_newline(body, opts.trailing_newline ?? true))
+}
+
+/**
+ * Read and parse a YAML file, returning `fallback` for missing or invalid files.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ */
+pub fn read_yaml(fs: HarnessFs, path: string, fallback = nil) {
+  const result = read_yaml_result(fs, path)
+  if is_ok(result) {
+    return unwrap(result)
+  }
+  return fallback
+}
+
+/**
+ * Read and parse YAML without erasing the owning failure stage.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ */
+pub fn read_yaml_result(fs: HarnessFs, path: string) -> Result<unknown, StructuredReadFailure> {
+  return __fs_read_structured_result(fs, path, "yaml")
+}
+
+/**
+ * Read, parse, and validate YAML with one closed Result contract.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ */
+pub fn read_yaml_typed_result<T>(
+  fs: HarnessFs,
+  path: string,
+  schema: Schema<T>,
+  apply_defaults: bool = false,
+) -> TypedReadResult<T> {
+  return __fs_read_structured_typed_result(fs, path, "yaml", schema, apply_defaults)
+}
+
+/**
+ * Read, parse, and validate required YAML, throwing the typed failure.
+ *
+ * @effects: [fs.read]
+ * @errors: [StructuredReadFailure, SchemaValidationFailure]
+ */
+pub fn read_yaml_typed<T>(
+  fs: HarnessFs,
+  path: string,
+  schema: Schema<T>,
+  apply_defaults: bool = false,
+) -> T {
+  return __fs_require_result(read_yaml_typed_result(fs, path, schema, apply_defaults))
+}
+
+/**
+ * Write a YAML file.
+ *
+ * @effects: [fs.read, fs.write]
+ * @errors: []
+ */
+pub fn write_yaml(fs: HarnessFs, path: string, value, options: WriteDataOptions = {}) {
+  const opts = options ?? {}
+  if opts.ensure_parent ?? true {
+    ensure_parent_dir(fs, path)
+  }
+  fs.write_text(path, __fs_with_newline(yaml_stringify(value), opts.trailing_newline ?? true))
+}
+
+/**
+ * Read and parse a TOML file, returning `fallback` for missing or invalid files.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ */
+pub fn read_toml(fs: HarnessFs, path: string, fallback = nil) {
+  const result = read_toml_result(fs, path)
+  if is_ok(result) {
+    return unwrap(result)
+  }
+  return fallback
+}
+
+/**
+ * Read and parse TOML without erasing the owning failure stage.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ */
+pub fn read_toml_result(fs: HarnessFs, path: string) -> Result<unknown, StructuredReadFailure> {
+  return __fs_read_structured_result(fs, path, "toml")
+}
+
+/**
+ * Read, parse, and validate TOML with one closed Result contract.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ */
+pub fn read_toml_typed_result<T>(
+  fs: HarnessFs,
+  path: string,
+  schema: Schema<T>,
+  apply_defaults: bool = false,
+) -> TypedReadResult<T> {
+  return __fs_read_structured_typed_result(fs, path, "toml", schema, apply_defaults)
+}
+
+/**
+ * Read, parse, and validate required TOML, throwing the typed failure.
+ *
+ * @effects: [fs.read]
+ * @errors: [StructuredReadFailure, SchemaValidationFailure]
+ */
+pub fn read_toml_typed<T>(
+  fs: HarnessFs,
+  path: string,
+  schema: Schema<T>,
+  apply_defaults: bool = false,
+) -> T {
+  return __fs_require_result(read_toml_typed_result(fs, path, schema, apply_defaults))
+}
+
+/**
+ * Write a TOML file.
+ *
+ * @effects: [fs.read, fs.write]
+ * @errors: []
+ */
+pub fn write_toml(fs: HarnessFs, path: string, value, options: WriteDataOptions = {}) {
+  const opts = options ?? {}
+  if opts.ensure_parent ?? true {
+    ensure_parent_dir(fs, path)
+  }
+  fs.write_text(path, __fs_with_newline(toml_stringify(value), opts.trailing_newline ?? true))
+}
+
+/**
+ * Write a list of lines as a text file.
+ *
+ * @effects: [fs.read, fs.write]
+ * @errors: []
+ */
+pub fn write_lines(
+  fs: HarnessFs,
+  path: string,
+  lines: list<string>,
+  options: WriteDataOptions = {},
+) {
+  const opts = options ?? {}
+  if opts.ensure_parent ?? true {
+    ensure_parent_dir(fs, path)
+  }
+  fs.write_text(path, __fs_with_newline(join(lines ?? [], "\n"), opts.trailing_newline ?? true))
+}
+
+/**
+ * Append one line to a text file.
+ *
+ * @effects: [fs.write]
+ * @errors: []
+ */
+pub fn append_line(fs: HarnessFs, path: string, line: string) {
+  const text = line ?? ""
+  fs.append(path, text + "\n")
+}
+
+/**
+ * Create a file if missing and update it to empty content only on first creation.
+ *
+ * @effects: [fs.read, fs.write]
+ * @errors: []
+ */
+pub fn touch(fs: HarnessFs, path: string) {
+  if !fs.exists(path) {
+    ensure_parent_dir(fs, path)
+    fs.write_text(path, "")
+  }
+}
+
+/**
+ * Return files matching `pattern` below `root`, using the host glob implementation.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ */
+pub fn find_files(fs: HarnessFs, root: string, pattern: string, options = {}) -> list<string> {
+  const matches = fs.glob(pattern, {base: root, background: options?.background ?? false})
+  if options?.relative ?? false {
+    return matches.map({ path -> relative_path(root, path) }).to_list()
+  }
+  return matches
+}
+
+/**
+ * Return `path` relative to `root` when it is inside that root.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn relative_path(root: string, path: string) -> string {
+  const base_raw = __fs_norm(root)
+  const target = __fs_norm(path)
+  const base = if ends_with(base_raw, "/") {
+    base_raw
+  } else {
+    base_raw + "/"
+  }
+  if starts_with(target, base) {
+    return substring(target, len(base))
+  }
+  return target
+}
+
+/**
+ * Return whether `path` exists and is a regular file.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ */
+pub fn is_file(fs: HarnessFs, path: string) -> bool {
+  const info = try {
+    fs.stat(path)
+  }
+  if !is_ok(info) {
+    return false
+  }
+  return unwrap(info)?.is_file ?? false
+}
+
+/**
+ * Return whether `path` exists and is a directory.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ */
+pub fn is_dir(fs: HarnessFs, path: string) -> bool {
+  const info = try {
+    fs.stat(path)
+  }
+  if !is_ok(info) {
+    return false
+  }
+  return unwrap(info)?.is_dir ?? false
+}
+
+/**
+ * Return a file size in bytes, or nil when the path cannot be statted.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ */
+pub fn file_size(fs: HarnessFs, path: string) {
+  const info = try {
+    fs.stat(path)
+  }
+  if is_ok(info) {
+    return unwrap(info)?.size
+  }
+  return nil
+}
+
+/**
+ * Workspace snapshots — thin pipeline-facing wrappers over the host
+ * `hostlib_fs_*` snapshot builtins (crates/harn-hostlib/src/fs_snapshot.rs).
+ * They capture the pre-image of explicit paths so a pipeline can checkpoint
+ * the workspace and roll it back between independent retry attempts — the
+ * substrate for a verify-gated best-of-N agent loop.
+ *
+ * Snapshots are session-scoped: the session id defaults to the active agent
+ * session (`harness.agent.current_id()`), so each conversation's snapshots
+ * stay isolated and are cleaned up when the host closes the session. Callers
+ * outside an agent session must pass an explicit `session_id`. This helper
+ * resolves and validates that session id.
+ *
+ * @effects: [host]
+ * @errors: []
+ */
+fn __fs_snapshot_session(agent: HarnessAgent, opts) -> string {
+  const session = opts?.session_id ?? agent.current_id()
+  if session == nil || session == "" {
+    throw "fs_snapshot: no active agent session; pass an explicit `session_id`"
+  }
+  return session
+}
+
+/**
+ * Capture a workspace snapshot of `paths`, returning `{snapshot_id,
+ * captured_paths, byte_count}`.
+ *
+ * `opts.session_id` defaults to the active agent session. `opts.snapshot_id`
+ * defaults to a fresh `snapshot-<uuid>` id so independent attempts never
+ * collide. `paths` are captured immediately; restoring later reinstates
+ * their pre-image (including deleting paths that were absent at capture).
+ *
+ * @effects: [host, fs]
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: let snap = fs_snapshot(harness.agent, ["src/lib.rs"]); fs_restore(harness.agent, snap.snapshot_id)
+ */
+pub fn fs_snapshot(
+  agent: HarnessAgent,
+  fs: HarnessFs,
+  random: HarnessRandom,
+  paths: list<string> = [],
+  opts = {},
+) -> dict {
+  const session = __fs_snapshot_session(agent, opts)
+  const scope = opts?.snapshot_id ?? ("snapshot-" + random.uuid_v7())
+  return fs.snapshot({session_id: session, scope_id: scope, paths: paths ?? [], root: opts?.root})
+}
+
+/**
+ * Restore a previously-captured snapshot, returning `{snapshot_id,
+ * restored_paths, skipped_paths_with_reasons}`. With an empty `paths` every
+ * captured path is restored; otherwise only the listed subset.
+ *
+ * @effects: [host, fs]
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: fs_restore(harness.agent, snap.snapshot_id)
+ */
+pub fn fs_restore(
+  agent: HarnessAgent,
+  fs: HarnessFs,
+  snapshot_id: string,
+  paths: list<string> = [],
+  opts = {},
+) -> dict {
+  const session = __fs_snapshot_session(agent, opts)
+  return fs.restore({session_id: session, snapshot_id: snapshot_id, paths: paths ?? []})
+}
+
+/**
+ * List the snapshots registered for the session, oldest first. Each entry is
+ * `{snapshot_id, scope_id, taken_at_ms, captured_paths, byte_count}`.
+ *
+ * @effects: [host]
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: for snap in fs_list_snapshots(harness.agent) { harness.stdio.println(snap.snapshot_id) }
+ */
+pub fn fs_list_snapshots(agent: HarnessAgent, fs: HarnessFs, opts = {}) -> list<dict> {
+  const session = __fs_snapshot_session(agent, opts)
+  const result = fs.list_snapshots({session_id: session})
+  return result?.snapshots ?? []
+}
+
+/**
+ * Drop a snapshot's in-memory and on-disk state, returning `{snapshot_id,
+ * dropped}`. Idempotent: dropping an unknown id reports `dropped: false`.
+ * The best-of-N loop calls this to release each attempt's checkpoint.
+ *
+ * @effects: [host, fs]
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: fs_drop_snapshot(harness.agent, snap.snapshot_id)
+ */
+pub fn fs_drop_snapshot(
+  agent: HarnessAgent,
+  fs: HarnessFs,
+  snapshot_id: string,
+  opts = {},
+) -> dict {
+  const session = __fs_snapshot_session(agent, opts)
+  return fs.drop_snapshot({session_id: session, snapshot_id: snapshot_id})
+}

@@ -1,0 +1,5 @@
+import { run } from "pub_import_typed_selective_facade_lib"
+
+pipeline default(harness: Harness) {
+  harness.stdio.println(run({owner: "selective", options: {token: "x"}}).owner)
+}

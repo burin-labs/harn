@@ -1,0 +1,56 @@
+// Conformance test for std/llm/handlers::with_timeout — injects
+// timeout_ms into call.opts so providers can cancel mid-flight,
+// converts overrun successes to a uniform timeout status, and honors
+// the unified clock (mockable in tests).
+import { with_timeout } from "std/llm/handlers"
+
+pipeline default(harness: Harness) {
+  // Fast call under the deadline passes through; timeout_ms is forwarded.
+  const seen_timeout = harness.runtime.atomic(0)
+  const fast = { call ->
+    if call.opts?.timeout_ms != nil {
+      let _ = harness.runtime.atomic_set(seen_timeout, to_int(call.opts.timeout_ms))
+    }
+    return {
+      ok: true,
+      value: {text: "fast", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0},
+    }
+  }
+  const _ = harness.testing.clock_set(0)
+  const fast_caller = with_timeout(harness, fast, {ms: 1000})
+  const fast_env = fast_caller(
+    {prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
+  )
+  harness.stdio.println(fast_env.ok)
+  harness.stdio.println(fast_env.value.text)
+  harness.stdio.println(harness.runtime.atomic_get(seen_timeout))
+  // Slow success that overran the deadline: relabel to timeout.
+  const slow = { _call ->
+    let _ = harness.testing.clock_advance(2000)
+    return {
+      ok: true,
+      value: {text: "late", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0},
+    }
+  }
+  const slow_caller = with_timeout(harness, slow, {ms: 500})
+  const slow_env = slow_caller(
+    {prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
+  )
+  harness.stdio.println(slow_env.ok)
+  harness.stdio.println(slow_env.status)
+  harness.stdio.println(slow_env.error.timeout_ms)
+  harness.stdio.println(slow_env.error.elapsed_ms >= 500)
+  // Slow failure with relabel_failures: false preserves the original status.
+  const slow_failure = { _call ->
+    let _ = harness.testing.clock_advance(2000)
+    return {ok: false, status: "rate_limited", error: "429"}
+  }
+  const preserve = with_timeout(harness, slow_failure, {ms: 500, relabel_failures: false})
+  const preserve_env = preserve(
+    {prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
+  )
+  harness.stdio.println(preserve_env.ok)
+  harness.stdio.println(preserve_env.status)
+  harness.stdio.println(preserve_env.elapsed_ms >= 500)
+  const _ = harness.testing.clock_reset()
+}

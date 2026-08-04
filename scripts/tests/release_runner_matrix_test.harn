@@ -1,0 +1,165 @@
+fn run_matrix(fs: HarnessFs, process: HarnessProcess, args) {
+  const root = dirname(dirname(fs.runtime_paths().asset_root))
+  return process.shell_at(root, "bash scripts/release_runner_matrix.sh " + args)
+}
+
+fn run_matrix_with_policy(
+  fs: HarnessFs,
+  process: HarnessProcess,
+  random: HarnessRandom,
+  policy,
+  args,
+) {
+  const root = dirname(dirname(fs.runtime_paths().asset_root))
+  const path = path_join(
+    fs.workspace_temp_dir(),
+    "release-runner-policy-" + random.uuid_v7() + ".json",
+  )
+  fs.write_text(path, json_stringify(policy))
+  return process.shell_at(
+    root,
+    "HARN_RELEASE_RUNNER_POLICY=" + path + " bash scripts/release_runner_matrix.sh " + args,
+  )
+}
+
+fn matrix(fs: HarnessFs, process: HarnessProcess, args) {
+  const result = run_matrix(fs, process, args)
+  if !result.success {
+    throw result.stderr
+  }
+  return json_parse(result.stdout)
+}
+
+fn runners(rows) {
+  return rows.map({ row -> row.target + "=" + row.runner })
+}
+
+fn cache_prefixes(rows) {
+  return rows.map({ row -> row.target + "=" + row.rust_cache_broad_restore_prefix })
+}
+
+fn codegen_units(rows) {
+  return rows.map({ row -> row.target + "=" + to_string(row.release_codegen_units) })
+}
+
+pipeline test_release_runner_policy_pins_every_mode(harness: Harness, task) {
+  const standard = [
+    "x86_64-apple-darwin=macos-15-intel",
+    "aarch64-apple-darwin=macos-latest",
+    "x86_64-unknown-linux-gnu=ubuntu-latest",
+    "aarch64-unknown-linux-gnu=ubuntu-24.04-arm",
+    "x86_64-pc-windows-msvc=windows-latest",
+  ]
+  assert_eq(runners(matrix(harness.fs, harness.process, "--mode warm")), standard)
+  assert_eq(runners(matrix(harness.fs, harness.process, "--mode primary")), standard)
+  assert_eq(runners(matrix(harness.fs, harness.process, "--mode recovery")), standard)
+  assert_eq(
+    codegen_units(matrix(harness.fs, harness.process, "--mode primary")),
+    [
+      "x86_64-apple-darwin=16",
+      "aarch64-apple-darwin=16",
+      "x86_64-unknown-linux-gnu=8",
+      "aarch64-unknown-linux-gnu=16",
+      "x86_64-pc-windows-msvc=16",
+    ],
+  )
+  assert_eq(
+    cache_prefixes(matrix(harness.fs, harness.process, "--mode primary")),
+    [
+      "x86_64-apple-darwin=v0-rust-release-x86_64-apple-darwin-Darwin-x64-",
+      "aarch64-apple-darwin=v0-rust-release-aarch64-apple-darwin-Darwin-arm64-",
+      "x86_64-unknown-linux-gnu=v0-rust-release-x86_64-unknown-linux-gnu-Linux-x64-",
+      "aarch64-unknown-linux-gnu=v0-rust-release-aarch64-unknown-linux-gnu-Linux-arm64-",
+      "x86_64-pc-windows-msvc=v0-rust-release-x86_64-pc-windows-msvc-Windows_NT-x64-",
+    ],
+  )
+}
+
+pipeline test_release_runner_policy_selects_targeted_fast_capacity(harness: Harness, task) {
+  assert_eq(
+    matrix(
+      harness.fs,
+      harness.process,
+      "--mode benchmark --profile fast --targets x86_64-apple-darwin",
+    ),
+    [
+      {
+        target: "x86_64-apple-darwin",
+        runner: "macos-15-large",
+        rust_cache_broad_restore_prefix: "v0-rust-release-x86_64-apple-darwin-Darwin-x64-",
+        release_codegen_units: 16,
+        use_sccache: "false",
+      },
+    ],
+  )
+  assert_eq(
+    runners(
+      matrix(
+        harness.fs,
+        harness.process,
+        "--mode recovery --profile fast --targets aarch64-apple-darwin",
+      ),
+    ),
+    ["aarch64-apple-darwin=macos-15-xlarge"],
+  )
+}
+
+pipeline test_release_runner_policy_rejects_unsafe_requests(harness: Harness, task) {
+  assert_eq(
+    run_matrix(harness.fs, harness.process, "--mode benchmark --profile policy").success,
+    false,
+  )
+  assert_eq(
+    run_matrix(harness.fs, harness.process, "--mode benchmark --profile fast").success,
+    false,
+  )
+  assert_eq(run_matrix(harness.fs, harness.process, "--mode warm --profile fast").success, false)
+  assert_eq(
+    run_matrix(harness.fs, harness.process, "--mode recovery --targets unknown-target").success,
+    false,
+  )
+  const root = dirname(dirname(harness.fs.runtime_paths().asset_root))
+  const policy = json_parse(
+    harness.fs.read_text(path_join(root, ".github", "release-runner-policy.json")),
+  )
+  assert_eq(
+    run_matrix_with_policy(
+      harness.fs,
+      harness.process,
+      harness.random,
+      {...policy, typo: true},
+      "--mode primary",
+    ).success,
+    false,
+  )
+  assert_eq(
+    run_matrix_with_policy(
+      harness.fs,
+      harness.process,
+      harness.random,
+      {
+        ...policy,
+        targets: [{...policy.targets[0], runners: {...policy.targets[0].runners, typo: "runner"}}],
+      },
+      "--mode primary",
+    ).success,
+    false,
+  )
+  assert_eq(
+    run_matrix_with_policy(
+      harness.fs,
+      harness.process,
+      harness.random,
+      {
+        ...policy,
+        targets: [{...policy.targets[0], release_codegen_units: 0}]
+          + policy.targets.slice(
+          1,
+          len(policy.targets),
+        ),
+      },
+      "--mode primary",
+    ).success,
+    false,
+  )
+}

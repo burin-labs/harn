@@ -1,0 +1,1149 @@
+use super::*;
+use crate::cli::TimeCommand;
+
+#[test]
+fn test_parses_app_run() {
+    let cli = Cli::parse_from([
+        "harn",
+        "app",
+        "run",
+        "logo.harn",
+        "--resource",
+        "ui://burin/logo",
+        "--bind",
+        "127.0.0.1:4321",
+        "--no-open",
+    ]);
+    let Command::App(args) = cli.command.unwrap() else {
+        panic!("expected app command");
+    };
+    let crate::cli::AppCommand::Run(args) = args.command;
+    assert_eq!(args.file, "logo.harn");
+    assert_eq!(args.resource.as_deref(), Some("ui://burin/logo"));
+    assert_eq!(args.bind.to_string(), "127.0.0.1:4321");
+    assert!(!args.open);
+}
+
+#[test]
+fn test_parses_agents_conformance_target_url() {
+    let cli = Cli::parse_from([
+        "harn",
+        "test",
+        "agents-conformance",
+        "--target",
+        "http://localhost:8080",
+        "--api-key",
+        "test-key",
+        "--category",
+        "core,streaming",
+        "--json",
+    ]);
+
+    let Command::Test(args) = cli.command.unwrap() else {
+        panic!("expected test command");
+    };
+    assert_eq!(args.target.as_deref(), Some("agents-conformance"));
+    assert_eq!(args.agents_target.as_deref(), Some("http://localhost:8080"));
+    assert_eq!(args.agents_api_key.as_deref(), Some("test-key"));
+    assert_eq!(args.agents_category, vec!["core,streaming"]);
+    assert!(args.json);
+}
+
+#[test]
+fn test_run_rejects_deny_allow_conflict() {
+    let err = Cli::try_parse_from([
+        "harn",
+        "run",
+        "--deny",
+        "read_file",
+        "--allow",
+        "exec",
+        "main.harn",
+    ])
+    .unwrap_err();
+
+    assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+}
+
+#[test]
+fn test_parses_explicit_risky_operation_grants() {
+    let cli = Cli::parse_from([
+        "harn",
+        "run",
+        "--approve-risky",
+        "git.push",
+        "--approve-risky",
+        "git.tag",
+        "main.harn",
+    ]);
+    let Command::Run(args) = cli.command.unwrap() else {
+        panic!("expected run command");
+    };
+    assert_eq!(args.approve_risky, vec!["git.push", "git.tag"]);
+
+    let cli = Cli::parse_from(["harn", "test", "--approve-risky", "git.push", "tests"]);
+    let Command::Test(args) = cli.command.unwrap() else {
+        panic!("expected test command");
+    };
+    assert_eq!(args.approve_risky, vec!["git.push"]);
+}
+
+#[test]
+fn test_parses_environment_policy_and_grants() {
+    use crate::commands::run::EnvironmentPolicyArg;
+    let cli = Cli::parse_from([
+        "harn",
+        "run",
+        "--environment-policy",
+        "granted",
+        "--grant",
+        "gh_token=secret://gh/token,expose=GH_TOKEN",
+        "--grant",
+        "fireworks=env:FIREWORKS_API_KEY",
+        "main.harn",
+    ]);
+    let Command::Run(args) = cli.command.unwrap() else {
+        panic!("expected run command");
+    };
+    assert_eq!(
+        args.sandbox.environment_policy,
+        Some(EnvironmentPolicyArg::Granted)
+    );
+    assert_eq!(
+        args.sandbox.grant,
+        vec![
+            "gh_token=secret://gh/token,expose=GH_TOKEN".to_string(),
+            "fireworks=env:FIREWORKS_API_KEY".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn test_environment_policy_is_independent_of_no_sandbox() {
+    let cli = Cli::parse_from([
+        "harn",
+        "run",
+        "--no-sandbox",
+        "--grant",
+        "t=env:X",
+        "main.harn",
+    ]);
+    let Command::Run(args) = cli.command.unwrap() else {
+        panic!("expected run command");
+    };
+    assert!(args.sandbox.no_sandbox);
+    assert_eq!(args.sandbox.grant, vec!["t=env:X"]);
+
+    let cli = Cli::parse_from([
+        "harn",
+        "run",
+        "--no-sandbox",
+        "--environment-policy",
+        "isolated",
+        "main.harn",
+    ]);
+    let Command::Run(args) = cli.command.unwrap() else {
+        panic!("expected run command");
+    };
+    assert!(args.sandbox.no_sandbox);
+    assert_eq!(
+        args.sandbox.environment_policy,
+        Some(crate::commands::run::EnvironmentPolicyArg::Isolated)
+    );
+}
+
+#[test]
+fn test_parses_dap_subcommand() {
+    let cli = Cli::parse_from(["harn", "dap"]);
+
+    let Command::Dap(_) = cli.command.unwrap() else {
+        panic!("expected dap command");
+    };
+}
+
+#[test]
+fn test_run_parses_sandbox_roots_and_rejects_no_sandbox_conflict() {
+    let cli = Cli::parse_from([
+        "harn",
+        "run",
+        "--write-root",
+        "../receipts",
+        "--read-only-root",
+        "../shared",
+        "--writable-root",
+        "/tmp/cache",
+        "--read-only-root",
+        "/tmp/assets",
+        "--sandbox-read-root",
+        "/opt/sdk",
+        "--sandbox-write-root",
+        "/tmp/tool-cache",
+        "--allow-process-network",
+        "main.harn",
+    ]);
+
+    let Command::Run(args) = cli.command.unwrap() else {
+        panic!("expected run command");
+    };
+    assert_eq!(
+        args.sandbox.write_root,
+        vec![PathBuf::from("../receipts"), PathBuf::from("/tmp/cache")]
+    );
+    assert_eq!(
+        args.sandbox.read_only_root,
+        vec![PathBuf::from("../shared"), PathBuf::from("/tmp/assets")]
+    );
+    assert_eq!(
+        args.sandbox.sandbox_read_root,
+        vec![PathBuf::from("/opt/sdk")]
+    );
+    assert_eq!(
+        args.sandbox.sandbox_write_root,
+        vec![PathBuf::from("/tmp/tool-cache")]
+    );
+    assert!(args.sandbox.allow_process_network);
+
+    let err = Cli::try_parse_from([
+        "harn",
+        "run",
+        "--no-sandbox",
+        "--write-root",
+        "../receipts",
+        "main.harn",
+    ])
+    .unwrap_err();
+    assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+
+    let err = Cli::try_parse_from([
+        "harn",
+        "run",
+        "--no-sandbox",
+        "--sandbox-write-root",
+        "../cache",
+        "main.harn",
+    ])
+    .unwrap_err();
+    assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+
+    let err = Cli::try_parse_from([
+        "harn",
+        "run",
+        "--no-sandbox",
+        "--allow-process-network",
+        "main.harn",
+    ])
+    .unwrap_err();
+    assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+
+    let err = Cli::try_parse_from([
+        "harn",
+        "run",
+        "--no-sandbox",
+        "--read-only-root",
+        "../shared",
+        "main.harn",
+    ])
+    .unwrap_err();
+    assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+}
+
+#[test]
+fn test_time_run_parses_sandbox_roots_and_rejects_no_sandbox_conflict() {
+    let cli = Cli::parse_from([
+        "harn",
+        "time",
+        "run",
+        "--write-root",
+        "../receipts",
+        "--read-only-root",
+        "../shared",
+        "--writable-root",
+        "/tmp/cache",
+        "--sandbox-read-root",
+        "/opt/sdk",
+        "--sandbox-write-root",
+        "/tmp/tool-cache",
+        "--allow-process-network",
+        "main.harn",
+    ]);
+
+    let Command::Time(args) = cli.command.unwrap() else {
+        panic!("expected time command");
+    };
+    let TimeCommand::Run(args) = args.command;
+    assert_eq!(
+        args.sandbox.write_root,
+        vec![PathBuf::from("../receipts"), PathBuf::from("/tmp/cache")]
+    );
+    assert_eq!(
+        args.sandbox.read_only_root,
+        vec![PathBuf::from("../shared")]
+    );
+    assert_eq!(
+        args.sandbox.sandbox_read_root,
+        vec![PathBuf::from("/opt/sdk")]
+    );
+    assert_eq!(
+        args.sandbox.sandbox_write_root,
+        vec![PathBuf::from("/tmp/tool-cache")]
+    );
+    assert!(args.sandbox.allow_process_network);
+
+    let err = Cli::try_parse_from([
+        "harn",
+        "time",
+        "run",
+        "--no-sandbox",
+        "--write-root",
+        "../receipts",
+        "main.harn",
+    ])
+    .unwrap_err();
+    assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+
+    let err = Cli::try_parse_from([
+        "harn",
+        "time",
+        "run",
+        "--no-sandbox",
+        "--allow-process-network",
+        "main.harn",
+    ])
+    .unwrap_err();
+    assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+}
+
+#[test]
+fn test_time_run_shares_the_run_confinement_surface() {
+    use crate::commands::run::EnvironmentPolicyArg;
+
+    // `harn run` and `harn time run` launch the same script under the same
+    // runtime, so a confinement flag accepted by one must be accepted by the
+    // other. This used to be two hand-maintained flag blocks and `harn time
+    // run` silently lacked the capability flags; both now flatten one
+    // `SandboxArgs`, and this pins that they stay in step.
+    let flags = [
+        "--environment-policy",
+        "granted",
+        "--grant",
+        "gh_token=secret://gh/token,expose=GH_TOKEN",
+        "--write-root",
+        "../receipts",
+        "--allow-process-network",
+    ];
+
+    let run = {
+        let mut argv = vec!["harn", "run"];
+        argv.extend(flags);
+        argv.push("main.harn");
+        let Command::Run(args) = Cli::parse_from(argv).command.unwrap() else {
+            panic!("expected run command");
+        };
+        args.sandbox
+    };
+    let timed = {
+        let mut argv = vec!["harn", "time", "run"];
+        argv.extend(flags);
+        argv.push("main.harn");
+        let Command::Time(args) = Cli::parse_from(argv).command.unwrap() else {
+            panic!("expected time command");
+        };
+        let TimeCommand::Run(args) = args.command;
+        args.sandbox
+    };
+
+    assert_eq!(
+        timed.environment_policy,
+        Some(EnvironmentPolicyArg::Granted)
+    );
+    assert_eq!(timed.environment_policy, run.environment_policy);
+    assert_eq!(timed.grant, run.grant);
+    assert_eq!(timed.write_root, run.write_root);
+    assert_eq!(timed.allow_process_network, run.allow_process_network);
+}
+
+#[test]
+fn test_parses_run_llm_mock_flags() {
+    let cli = Cli::parse_from(["harn", "run", "--llm-mock", "fixtures.jsonl", "main.harn"]);
+
+    let Command::Run(args) = cli.command.unwrap() else {
+        panic!("expected run command");
+    };
+    assert_eq!(args.llm_mock.as_deref(), Some("fixtures.jsonl"));
+    assert_eq!(args.llm_mock_record, None);
+
+    let cli = Cli::parse_from(["harn", "run", "--llm-mock-record", "out.jsonl", "main.harn"]);
+
+    let Command::Run(args) = cli.command.unwrap() else {
+        panic!("expected run command");
+    };
+    assert_eq!(args.llm_mock_record.as_deref(), Some("out.jsonl"));
+    assert_eq!(args.llm_mock, None);
+}
+
+#[test]
+fn test_test_bench_run_help_discloses_wasi_feature_gate() {
+    let mut command = Cli::command();
+    let help = command
+        .find_subcommand_mut("test-bench")
+        .and_then(|test_bench| test_bench.find_subcommand_mut("run"))
+        .expect("test-bench run subcommand exists")
+        .render_help()
+        .to_string();
+
+    for token in [
+        "--process-wasi",
+        "testbench-wasi",
+        "cargo install harn-cli --features testbench-wasi",
+    ] {
+        assert!(
+            help.contains(token),
+            "expected `{token}` in `harn test-bench run --help`, got:\n{help}"
+        );
+    }
+}
+
+#[test]
+fn test_parses_run_summary_flags() {
+    let cli = Cli::parse_from([
+        "harn",
+        "run",
+        "--emit-summary-json",
+        "--summary-file",
+        "summary.jsonl",
+        "main.harn",
+    ]);
+
+    let Command::Run(args) = cli.command.unwrap() else {
+        panic!("expected run command");
+    };
+    assert!(args.emit_summary_json);
+    assert_eq!(
+        args.summary_file.as_deref(),
+        Some(std::path::Path::new("summary.jsonl"))
+    );
+    assert_eq!(args.summary_fd, None);
+
+    let cli = Cli::parse_from([
+        "harn",
+        "run",
+        "--emit-summary-json",
+        "--summary-fd",
+        "3",
+        "main.harn",
+    ]);
+    let Command::Run(args) = cli.command.unwrap() else {
+        panic!("expected run command");
+    };
+    assert_eq!(args.summary_fd, Some(3));
+}
+
+#[test]
+fn test_parses_run_phase_and_rusage_flags() {
+    let cli = Cli::parse_from([
+        "harn",
+        "run",
+        "--emit-phase-json",
+        "--phase-file",
+        "phases.jsonl",
+        "--emit-rusage-json",
+        "--rusage-fd",
+        "4",
+        "main.harn",
+    ]);
+
+    let Command::Run(args) = cli.command.unwrap() else {
+        panic!("expected run command");
+    };
+    assert!(args.emit_phase_json);
+    assert_eq!(
+        args.phase_file.as_deref(),
+        Some(std::path::Path::new("phases.jsonl"))
+    );
+    assert_eq!(args.phase_fd, None);
+    assert!(args.emit_rusage_json);
+    assert_eq!(args.rusage_file, None);
+    assert_eq!(args.rusage_fd, Some(4));
+}
+
+#[test]
+fn test_parses_eval_tool_calls_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "eval",
+        "tool-calls",
+        "--dataset",
+        "conformance/tool-call-eval",
+        "--planner",
+        "provider=mock,model=mock",
+        "--binder",
+        "mock:mock-binder",
+        "--output",
+        ".harn-runs/tool-call-eval/latest",
+        "--max-cases",
+        "3",
+    ]);
+
+    let Command::Eval(args) = cli.command.unwrap() else {
+        panic!("expected eval command");
+    };
+    let Some(EvalCommand::ToolCalls(tool_calls)) = args.command else {
+        panic!("expected tool-calls command");
+    };
+    assert_eq!(
+        tool_calls.dataset,
+        PathBuf::from("conformance/tool-call-eval")
+    );
+    assert_eq!(
+        tool_calls.planner.as_deref(),
+        Some("provider=mock,model=mock")
+    );
+    assert_eq!(tool_calls.binder.as_deref(), Some("mock:mock-binder"));
+    assert_eq!(tool_calls.max_cases, Some(3));
+
+    let cli = Cli::parse_from([
+        "harn",
+        "eval",
+        "tool-calls",
+        "regression-check",
+        "--planner",
+        "mock:mock",
+        "--against",
+        "baseline.json",
+        "--max-drop-pp",
+        "1.5",
+    ]);
+    let Command::Eval(args) = cli.command.unwrap() else {
+        panic!("expected eval command");
+    };
+    let Some(EvalCommand::ToolCalls(tool_calls)) = args.command else {
+        panic!("expected tool-calls command");
+    };
+    let Some(EvalToolCallsCommand::RegressionCheck(regression)) = tool_calls.command else {
+        panic!("expected regression-check command");
+    };
+    assert_eq!(regression.planner.as_deref(), Some("mock:mock"));
+    assert_eq!(regression.against, PathBuf::from("baseline.json"));
+    assert_eq!(regression.max_drop_pp, 1.5);
+}
+
+#[test]
+fn test_parses_eval_context_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "eval",
+        "context",
+        "examples/evals/context-engineering-smoke.json",
+        "--output",
+        ".harn-runs/context-eval/smoke",
+        "--json",
+    ]);
+
+    let Command::Eval(args) = cli.command.unwrap() else {
+        panic!("expected eval command");
+    };
+    let Some(EvalCommand::Context(context)) = args.command else {
+        panic!("expected context command");
+    };
+    assert_eq!(
+        context.manifest,
+        PathBuf::from("examples/evals/context-engineering-smoke.json")
+    );
+    assert_eq!(
+        context.output,
+        Some(PathBuf::from(".harn-runs/context-eval/smoke"))
+    );
+    assert!(context.json);
+}
+
+#[test]
+fn test_parses_eval_skill_gate_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "eval",
+        "skill-gate",
+        "examples/evals/skill-gate/smoke/manifest.json",
+        "--output",
+        ".harn-runs/skill-gate/smoke",
+        "--json",
+    ]);
+
+    let Command::Eval(args) = cli.command.unwrap() else {
+        panic!("expected eval command");
+    };
+    let Some(EvalCommand::SkillGate(skill_gate)) = args.command else {
+        panic!("expected skill-gate command");
+    };
+    assert_eq!(
+        skill_gate.manifest,
+        PathBuf::from("examples/evals/skill-gate/smoke/manifest.json")
+    );
+    assert_eq!(
+        skill_gate.output,
+        Some(PathBuf::from(".harn-runs/skill-gate/smoke"))
+    );
+    assert!(skill_gate.json);
+}
+
+#[test]
+fn test_parses_eval_scope_triage_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "eval",
+        "scope_triage",
+        "--dataset",
+        "evals/scope_triage/dataset.json",
+        "--output",
+        ".harn-runs/scope-triage/smoke",
+        "--max-cases",
+        "5",
+        "--confidence-threshold",
+        "0.8",
+        "--live",
+        "--json",
+    ]);
+
+    let Command::Eval(args) = cli.command.unwrap() else {
+        panic!("expected eval command");
+    };
+    let Some(EvalCommand::ScopeTriage(scope)) = args.command else {
+        panic!("expected scope_triage command");
+    };
+    assert_eq!(
+        scope.dataset,
+        PathBuf::from("evals/scope_triage/dataset.json")
+    );
+    assert_eq!(
+        scope.output,
+        Some(PathBuf::from(".harn-runs/scope-triage/smoke"))
+    );
+    assert_eq!(scope.max_cases, Some(5));
+    assert_eq!(scope.confidence_threshold, 0.8);
+    assert!(scope.live);
+    assert!(scope.json);
+}
+
+#[test]
+fn test_parses_run_yes_flag() {
+    let cli = Cli::parse_from(["harn", "run", "--yes", "main.harn"]);
+
+    let Command::Run(args) = cli.command.unwrap() else {
+        panic!("expected run command");
+    };
+    assert!(args.yes);
+}
+
+#[test]
+fn test_parses_run_explain_cost_flag() {
+    let cli = Cli::parse_from(["harn", "run", "--explain-cost", "main.harn"]);
+
+    let Command::Run(args) = cli.command.unwrap() else {
+        panic!("expected run command");
+    };
+    assert!(args.explain_cost);
+    assert_eq!(args.file.as_deref(), Some("main.harn"));
+}
+
+#[test]
+fn test_parses_run_attestation_flags() {
+    let cli = Cli::parse_from([
+        "harn",
+        "run",
+        "--attest",
+        "--receipt-out",
+        "receipt.json",
+        "--attest-agent",
+        "agent-1",
+        "main.harn",
+    ]);
+
+    let Command::Run(args) = cli.command.unwrap() else {
+        panic!("expected run command");
+    };
+    assert!(args.attest);
+    assert_eq!(args.receipt_out.as_deref(), Some("receipt.json"));
+    assert_eq!(args.attest_agent.as_deref(), Some("agent-1"));
+}
+
+#[test]
+fn test_parses_verify_receipt() {
+    let cli = Cli::parse_from(["harn", "verify", "receipt.json", "--json"]);
+
+    let Command::Verify(args) = cli.command.unwrap() else {
+        panic!("expected verify command");
+    };
+    assert_eq!(args.receipt, "receipt.json");
+    assert!(args.json);
+}
+
+#[test]
+fn test_parses_pipeline_lab_template() {
+    let cli = Cli::parse_from([
+        "harn",
+        "new",
+        "pipeline-lab-demo",
+        "--template",
+        "pipeline-lab",
+    ]);
+
+    let Command::New(args) = cli.command.unwrap() else {
+        panic!("expected new command");
+    };
+    assert_eq!(args.template, Some(ProjectTemplate::PipelineLab));
+}
+
+#[test]
+fn test_parses_chat_template() {
+    let cli = Cli::parse_from(["harn", "new", "chat-demo", "--template", "chat"]);
+
+    let Command::New(args) = cli.command.unwrap() else {
+        panic!("expected new command");
+    };
+    assert_eq!(args.first.as_deref(), Some("chat-demo"));
+    assert_eq!(args.template, Some(ProjectTemplate::Chat));
+}
+
+#[test]
+fn test_parses_playground_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "playground",
+        "--host",
+        "examples/playground/host.harn",
+        "--script",
+        "examples/playground/echo.harn",
+        "--task",
+        "hi",
+        "--llm",
+        "ollama:qwen2.5-coder:latest",
+        "--yes",
+        "--watch",
+    ]);
+
+    let Command::Playground(args) = cli.command.unwrap() else {
+        panic!("expected playground command");
+    };
+    assert_eq!(args.host, "examples/playground/host.harn");
+    assert_eq!(args.script, "examples/playground/echo.harn");
+    assert_eq!(args.task.as_deref(), Some("hi"));
+    assert_eq!(args.llm.as_deref(), Some("ollama:qwen2.5-coder:latest"));
+    assert_eq!(args.llm_mock, None);
+    assert_eq!(args.llm_mock_record, None);
+    assert!(args.yes);
+    assert!(args.watch);
+}
+
+#[test]
+fn test_parses_try_command() {
+    let cli = Cli::parse_from([
+        "harn",
+        "try",
+        "hi",
+        "--max-iterations",
+        "7",
+        "--tool-format",
+        "text",
+        "--override-reason",
+        "compare native drift",
+    ]);
+
+    let Command::Try(args) = cli.command.unwrap() else {
+        panic!("expected try command");
+    };
+    assert_eq!(args.prompt, "hi");
+    assert_eq!(args.max_iterations, 7);
+    assert_eq!(args.tool_format.as_deref(), Some("text"));
+    assert_eq!(
+        args.override_reason.as_deref(),
+        Some("compare native drift")
+    );
+}
+
+#[test]
+fn test_parses_playground_llm_mock_flags() {
+    let cli = Cli::parse_from([
+        "harn",
+        "playground",
+        "--llm-mock",
+        "fixtures.jsonl",
+        "--host",
+        "host.harn",
+    ]);
+
+    let Command::Playground(args) = cli.command.unwrap() else {
+        panic!("expected playground command");
+    };
+    assert_eq!(args.llm_mock.as_deref(), Some("fixtures.jsonl"));
+    assert_eq!(args.llm_mock_record, None);
+
+    let cli = Cli::parse_from(["harn", "playground", "--llm-mock-record", "recorded.jsonl"]);
+
+    let Command::Playground(args) = cli.command.unwrap() else {
+        panic!("expected playground command");
+    };
+    assert_eq!(args.llm_mock, None);
+    assert_eq!(args.llm_mock_record.as_deref(), Some("recorded.jsonl"));
+}
+
+#[test]
+fn test_parses_bench_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "bench",
+        "main.harn",
+        "--iterations",
+        "25",
+        "--profile",
+        "--profile-json",
+        "bench.json",
+    ]);
+
+    let Command::Bench(args) = cli.command.unwrap() else {
+        panic!("expected bench command");
+    };
+    assert_eq!(args.file.as_deref(), Some("main.harn"));
+    assert_eq!(args.iterations, 25);
+    assert!(args.profile.text);
+    assert_eq!(
+        args.profile.json_path.as_deref(),
+        Some(std::path::Path::new("bench.json"))
+    );
+}
+
+#[test]
+fn test_parses_bench_replay_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "bench",
+        "replay",
+        "bench/replay/suite.json",
+        "--json",
+        "--output",
+        "replay-benchmark.json",
+        "--filter",
+        "permission",
+        "--adapter",
+        "opencode-jsonl",
+        "--external-first",
+        "first.jsonl",
+        "--external-second",
+        "second.jsonl",
+        "--external-name",
+        "opencode-permission",
+    ]);
+
+    let Command::Bench(args) = cli.command.unwrap() else {
+        panic!("expected bench command");
+    };
+    let Some(crate::cli::BenchCommand::Replay(replay)) = args.command else {
+        panic!("expected bench replay command");
+    };
+    assert_eq!(
+        replay.selection.as_deref(),
+        Some(std::path::Path::new("bench/replay/suite.json"))
+    );
+    assert!(replay.json);
+    assert_eq!(
+        replay.output.as_deref(),
+        Some(std::path::Path::new("replay-benchmark.json"))
+    );
+    assert_eq!(replay.filter.as_deref(), Some("permission"));
+    assert_eq!(replay.adapter.as_deref(), Some("opencode-jsonl"));
+    assert_eq!(
+        replay.external_first.as_deref(),
+        Some(std::path::Path::new("first.jsonl"))
+    );
+    assert_eq!(
+        replay.external_second.as_deref(),
+        Some(std::path::Path::new("second.jsonl"))
+    );
+    assert_eq!(replay.external_name, "opencode-permission");
+}
+
+#[test]
+fn test_parses_bench_portable_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "bench",
+        "portable",
+        "reducer.harn",
+        "--entry",
+        "reduce",
+        "--entry-kind",
+        "function",
+        "--input",
+        "event.json",
+        "--iterations",
+        "500",
+        "--threads",
+        "4",
+        "--compile-iterations",
+        "30",
+        "--json",
+        "--output",
+        "portable-benchmark.json",
+    ]);
+
+    let Command::Bench(args) = cli.command.unwrap() else {
+        panic!("expected bench command");
+    };
+    let Some(crate::cli::BenchCommand::Portable(portable)) = args.command else {
+        panic!("expected bench portable command");
+    };
+    assert_eq!(portable.source, std::path::Path::new("reducer.harn"));
+    assert_eq!(portable.entry, "reduce");
+    assert!(matches!(
+        portable.entry_kind,
+        crate::cli::PortableEntryKindArg::Function
+    ));
+    assert_eq!(portable.input, std::path::Path::new("event.json"));
+    assert_eq!(portable.iterations, 500);
+    assert_eq!(portable.threads, 4);
+    assert_eq!(portable.compile_iterations, 30);
+    assert!(portable.json);
+    assert_eq!(
+        portable.output.as_deref(),
+        Some(std::path::Path::new("portable-benchmark.json"))
+    );
+}
+
+#[test]
+fn test_parses_portable_compile_package_start_and_resume() {
+    let compile = Cli::parse_from([
+        "harn", "portable", "compile", "app.harn", "--entry", "reduce", "--output", "app.hbc",
+    ]);
+    let Command::Portable(args) = compile.command.unwrap() else {
+        panic!("expected portable command");
+    };
+    let crate::cli::PortableCommand::Compile(args) = args.command else {
+        panic!("expected portable compile command");
+    };
+    assert_eq!(args.source, std::path::Path::new("app.harn"));
+    assert_eq!(args.output, std::path::Path::new("app.hbc"));
+    assert_eq!(args.entry, "reduce");
+
+    let package = Cli::parse_from([
+        "harn",
+        "portable",
+        "package",
+        "app.harn",
+        "--output",
+        "app.package.json",
+        "--check",
+    ]);
+    let Command::Portable(args) = package.command.unwrap() else {
+        panic!("expected portable command");
+    };
+    let crate::cli::PortableCommand::Package(args) = args.command else {
+        panic!("expected portable package command");
+    };
+    assert_eq!(args.source, std::path::Path::new("app.harn"));
+    assert_eq!(args.output, std::path::Path::new("app.package.json"));
+    assert!(args.check);
+
+    let start = Cli::try_parse_from([
+        "harn",
+        "portable",
+        "start",
+        "app.hbc",
+        "--input",
+        "input.json",
+        "--snapshot-out",
+        "state.bin",
+    ]);
+    assert!(start.is_ok());
+
+    let resume = Cli::try_parse_from([
+        "harn",
+        "portable",
+        "resume",
+        "app.hbc",
+        "--snapshot",
+        "state.bin",
+        "--result",
+        "result.json",
+        "--grants",
+        "grants.json",
+        "--snapshot-out",
+        "next.bin",
+    ]);
+    assert!(resume.is_ok());
+}
+
+#[test]
+fn test_bench_portable_rejects_out_of_range_counts_during_parsing() {
+    for (flag, value) in [
+        ("--iterations", "0"),
+        ("--iterations", "1000001"),
+        ("--threads", "257"),
+        ("--compile-iterations", "100001"),
+    ] {
+        let error = Cli::try_parse_from([
+            "harn",
+            "bench",
+            "portable",
+            "reducer.harn",
+            "--input",
+            "event.json",
+            flag,
+            value,
+        ])
+        .unwrap_err();
+        assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
+    }
+}
+
+#[test]
+fn test_bench_portable_preserves_parent_profile_flag_for_explicit_rejection() {
+    let cli = Cli::parse_from([
+        "harn",
+        "bench",
+        "--profile",
+        "portable",
+        "reducer.harn",
+        "--input",
+        "event.json",
+    ]);
+    let Command::Bench(args) = cli.command.unwrap() else {
+        panic!("expected bench command");
+    };
+    assert!(matches!(
+        args.command,
+        Some(crate::cli::BenchCommand::Portable(_))
+    ));
+    assert!(args.profile.text);
+}
+
+#[test]
+fn test_profile_env_aliases_apply_to_supported_commands() {
+    let _env = crate::tests::common::harn_state_lock::lock_harn_state();
+    struct EnvRestore {
+        saved: [(&'static str, Option<String>); 3],
+    }
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            for (name, value) in self.saved.iter() {
+                match value {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+        }
+    }
+    let _restore = EnvRestore {
+        saved: [
+            ("HARN_PROFILE", std::env::var("HARN_PROFILE").ok()),
+            ("HARN_PROFILE_JSON", std::env::var("HARN_PROFILE_JSON").ok()),
+            ("HARN_TRACE", std::env::var("HARN_TRACE").ok()),
+        ],
+    };
+    std::env::set_var("HARN_PROFILE", "1");
+    std::env::set_var("HARN_PROFILE_JSON", "env-profile.json");
+    std::env::set_var("HARN_TRACE", "1");
+
+    let run = Cli::parse_from(["harn", "run", "main.harn"]);
+    let Command::Run(run_args) = run.command.unwrap() else {
+        panic!("expected run command");
+    };
+    assert!(run_args.trace);
+    assert!(run_args.profile.text);
+    assert_eq!(
+        run_args.profile.json_path.as_deref(),
+        Some(std::path::Path::new("env-profile.json"))
+    );
+
+    let bench = Cli::parse_from(["harn", "bench", "main.harn"]);
+    let Command::Bench(bench_args) = bench.command.unwrap() else {
+        panic!("expected bench command");
+    };
+    assert!(bench_args.profile.text);
+    assert_eq!(
+        bench_args.profile.json_path.as_deref(),
+        Some(std::path::Path::new("env-profile.json"))
+    );
+
+    let serve = Cli::parse_from(["harn", "serve", "acp", "agent.harn"]);
+    let Command::Serve(serve_args) = serve.command.unwrap() else {
+        panic!("expected serve command");
+    };
+    let crate::cli::ServeCommand::Acp(acp_args) = serve_args.command else {
+        panic!("expected serve acp");
+    };
+    assert!(acp_args.trace);
+    assert!(acp_args.profile.text);
+    assert_eq!(
+        acp_args.profile.json_path.as_deref(),
+        Some(std::path::Path::new("env-profile.json"))
+    );
+}
+
+#[test]
+fn test_parses_quickstart_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "quickstart",
+        "--non-interactive",
+        "--provider",
+        "ollama",
+        "--model",
+        "qwen2.5-coder:latest",
+    ]);
+
+    let Command::Quickstart(args) = cli.command.unwrap() else {
+        panic!("expected quickstart command");
+    };
+    assert!(args.non_interactive);
+    assert_eq!(args.provider.as_deref(), Some("ollama"));
+    assert_eq!(args.model.as_deref(), Some("qwen2.5-coder:latest"));
+}
+
+#[test]
+fn test_parses_demo_no_args_lists_scenarios() {
+    let cli = Cli::parse_from(["harn", "demo"]);
+    let Command::Demo(args) = cli.command.unwrap() else {
+        panic!("expected demo command");
+    };
+    assert_eq!(args.scenario, None);
+    assert!(!args.list);
+    assert!(!args.live);
+    assert!(!args.replay);
+    assert!(!args.json);
+}
+
+#[test]
+fn test_parses_demo_named_scenario_replay_default() {
+    let cli = Cli::parse_from(["harn", "demo", "merge-captain"]);
+    let Command::Demo(args) = cli.command.unwrap() else {
+        panic!("expected demo command");
+    };
+    assert_eq!(args.scenario.as_deref(), Some("merge-captain"));
+    assert!(!args.live);
+}
+
+#[test]
+fn test_parses_demo_live_and_json_flags() {
+    let cli = Cli::parse_from([
+        "harn",
+        "demo",
+        "provider-race",
+        "--live",
+        "--json",
+        "--no-record",
+    ]);
+    let Command::Demo(args) = cli.command.unwrap() else {
+        panic!("expected demo command");
+    };
+    assert_eq!(args.scenario.as_deref(), Some("provider-race"));
+    assert!(args.live);
+    assert!(args.json);
+    assert!(args.no_record);
+}
+
+#[test]
+fn test_parses_demo_live_and_replay_are_mutually_exclusive() {
+    let result = Cli::try_parse_from(["harn", "demo", "merge-captain", "--live", "--replay"]);
+    assert!(
+        result.is_err(),
+        "--live and --replay must be mutually exclusive"
+    );
+}

@@ -1,0 +1,28 @@
+pipeline main(harness: Harness) {
+  harness.agent.clear_session_hooks()
+  const session = harness.agent.open("hook-session-idle-emits-reminder")
+  harness.agent.reset(session)
+  harness.agent.register_session_hook(
+    "session_idle",
+    { _hook_harness, _event ->
+      return {
+        reminder: {
+          body: "idle hook reminder",
+          tags: ["session_idle"],
+          dedupe_key: "session-idle-hook",
+        },
+      }
+    },
+  )
+  // Fire the session_idle hook directly without relying on real timers.
+  __host_fire_session_hook(
+    "session_idle",
+    {session: {id: session}, iteration: 1, wake_interval_ms: 0},
+  )
+  const events = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
+  harness.stdio.println(len(events))
+  harness.stdio.println(events[0].reminder.body)
+  harness.stdio.println(events[0].reminder.tags[0])
+  harness.stdio.println(events[0].reminder.source)
+  harness.agent.clear_session_hooks()
+}

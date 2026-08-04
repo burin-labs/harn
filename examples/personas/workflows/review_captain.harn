@@ -1,0 +1,57 @@
+@persona(name: "review_captain")
+pub fn review_captain_persona(ctx) {
+  return build_review_receipt_step(ctx)
+}
+
+fn sample_review() {
+  return {
+    repo: "burin-labs/harn",
+    pr_number: 463,
+    changed_files: [
+      "examples/personas/harn.toml",
+      "examples/personas/workflows/merge_captain.harn",
+    ],
+    missing_tests: ["template smoke for oncall_captain"],
+    risky_paths: ["examples/personas/harn.toml"],
+  }
+}
+
+fn review_verdict(review) {
+  if len(review.missing_tests) > 0 || len(review.risky_paths) > 0 {
+    return "needs_follow_up"
+  }
+  return "low_risk"
+}
+
+@step(name: "build_review_receipt", receipt: audit, error_boundary: fail, budget: {max_tokens: 1000})
+fn build_review_receipt_step(review) {
+  const verdict = review_verdict(review)
+  const handoff = if verdict == "needs_follow_up" {
+    "merge_captain"
+  } else {
+    nil
+  }
+  return {
+    persona: "review_captain",
+    execution_mode: "dry_run",
+    approval_required: false,
+    repo: review.repo,
+    pr_number: review.pr_number,
+    summary: "structured review receipt for PR #${review.pr_number}",
+    focus: ["regressions", "missing tests", "risky diffs"],
+    receipt: {
+      kind: "review_receipt",
+      verdict: verdict,
+      missing_tests: review.missing_tests,
+      risky_paths: review.risky_paths,
+      changed_files: review.changed_files,
+    },
+    handoff: handoff,
+  }
+}
+
+pub pipeline run(harness: Harness, task) -> dict {
+  const result = build_review_receipt_step(sample_review())
+  harness.stdio.println(json_stringify(result))
+  return result
+}

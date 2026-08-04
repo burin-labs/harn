@@ -1,0 +1,753 @@
+//! In-memory backend. Single-process, no persistence — but matches
+//! the public [`SessionStore`] contract exactly so the rest of the
+//! primitive can be exercised end-to-end in tests without touching
+//! disk.
+
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
+
+use async_trait::async_trait;
+use uuid::Uuid;
+
+use super::event::{now_ms_and_rfc3339, AppendEvent, EventId, SessionEventKind, StoredEvent};
+use super::memory_helpers::{meta_for_create, validate_open};
+use super::redaction::{
+    prepare_append_event, prepare_stored_events_for_persistence, redact_stored_events,
+};
+use super::search::{
+    combined_score, lexical_score, ranks, redacted_search_document, snippet, SearchHit, SearchMode,
+    SearchQuery, SearchResponse,
+};
+use super::signing::{
+    chain_root_fold, chain_root_hash, chain_root_init, compute_record_hash, re_anchor_events,
+    verify_session_chain,
+};
+use super::store::{
+    CreateSession, EventPage, ForkResult, ImportResult, ImportSession, ListFilter, ListOrder,
+    ListSortKey, ReadRange, SessionId, SessionImporter, SessionMeta, SessionStatus, SessionStore,
+    Snapshot, SnapshotId, StoreError, StoreHooks, StoreResult, TruncateResult, VerifyReport,
+    MAX_READ_BATCH,
+};
+
+struct SessionRecord {
+    meta: SessionMeta,
+    events: Vec<StoredEvent>,
+    next_event_id: EventId,
+}
+
+impl SessionRecord {
+    fn fresh(meta: SessionMeta) -> Self {
+        Self {
+            meta,
+            events: Vec::new(),
+            next_event_id: 1,
+        }
+    }
+}
+
+#[derive(Default)]
+struct Inner {
+    sessions: BTreeMap<SessionId, SessionRecord>,
+    snapshots: BTreeMap<String, Snapshot>,
+    imports: BTreeMap<String, ImportResult>,
+}
+
+#[derive(Clone)]
+pub struct MemorySessionStore {
+    inner: Arc<Mutex<Inner>>,
+    hooks: Arc<StoreHooks>,
+}
+
+impl MemorySessionStore {
+    pub fn new() -> Self {
+        Self::with_hooks(StoreHooks::default())
+    }
+
+    pub fn with_hooks(hooks: StoreHooks) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(Inner::default())),
+            hooks: Arc::new(hooks),
+        }
+    }
+}
+
+impl Default for MemorySessionStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn lock(inner: &Arc<Mutex<Inner>>) -> std::sync::MutexGuard<'_, Inner> {
+    inner.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Core append logic against an already-locked session record. Both
+/// `append` and `close` call this while holding the single store lock, so
+/// `close` can read the chain state, append the receipt, and finalise it
+/// without releasing the guard in between (which previously let a
+/// concurrent append interleave and displace the receipt).
+fn append_locked(
+    record: &mut SessionRecord,
+    hooks: &StoreHooks,
+    mut event: AppendEvent,
+) -> StoreResult<StoredEvent> {
+    prepare_append_event(hooks, &mut event)?;
+    validate_open(&record.meta)?;
+    validate_parent(record, &event)?;
+    let (ts_ms, ts) = now_ms_and_rfc3339();
+    let event_id = record.next_event_id;
+    record.next_event_id = record.next_event_id.saturating_add(1);
+    let prev_hash = record.events.last().map(|tail| tail.record_hash.clone());
+    let mut stored = StoredEvent {
+        event_id,
+        session_id: record.meta.id.clone(),
+        tenant_id: record.meta.tenant_id.clone(),
+        parent_event_id: event.parent_event_id,
+        actor: event.actor,
+        kind: event.kind,
+        payload: event.payload,
+        tags: event.tags,
+        headers: event.headers,
+        ts_ms,
+        ts,
+        record_hash: String::new(),
+        prev_hash,
+        signed_by: None,
+    };
+    stored.record_hash = compute_record_hash(&stored);
+    if let Some(signer) = hooks.event_signer.as_ref() {
+        stored.signed_by = Some(signer.sign_event(&stored));
+    }
+    let prev_root = record
+        .meta
+        .chain_root_hash
+        .clone()
+        .unwrap_or_else(chain_root_init);
+    record.events.push(stored.clone());
+    record.meta.event_count = record.events.len();
+    record.meta.last_event_id = Some(event_id);
+    record.meta.updated_at_ms = ts_ms;
+    record.meta.updated_at = stored.ts.clone();
+    record.meta.chain_root_hash = Some(chain_root_fold(&prev_root, &stored.record_hash));
+    Ok(stored)
+}
+
+#[async_trait]
+impl SessionImporter for MemorySessionStore {
+    async fn import(&self, request: ImportSession) -> StoreResult<ImportResult> {
+        request.validate()?;
+        let mut guard = lock(&self.inner);
+        if let Some(existing) = guard.imports.get(&request.source_id) {
+            if existing.source_digest != request.source_digest {
+                return Err(StoreError::Conflict(format!(
+                    "import source '{}' changed digest",
+                    request.source_id
+                )));
+            }
+            let mut result = existing.clone();
+            result.imported = false;
+            return Ok(result);
+        }
+
+        let meta = meta_for_create(request.session);
+        if guard.sessions.contains_key(&meta.id) {
+            return Err(StoreError::AlreadyExists(meta.id));
+        }
+        let mut record = SessionRecord::fresh(meta.clone());
+        for event in request.events {
+            append_locked(&mut record, &self.hooks, event)?;
+        }
+        let result = ImportResult {
+            source_id: request.source_id.clone(),
+            source_digest: request.source_digest,
+            session_id: meta.id.clone(),
+            event_count: record.events.len(),
+            imported: true,
+        };
+        guard.sessions.insert(meta.id, record);
+        guard.imports.insert(request.source_id, result.clone());
+        Ok(result)
+    }
+}
+
+#[async_trait]
+impl SessionStore for MemorySessionStore {
+    fn hooks(&self) -> &StoreHooks {
+        &self.hooks
+    }
+
+    async fn create(&self, request: CreateSession) -> StoreResult<SessionMeta> {
+        let meta = meta_for_create(request);
+        let mut guard = lock(&self.inner);
+        if guard.sessions.contains_key(&meta.id) {
+            return Err(StoreError::AlreadyExists(meta.id));
+        }
+        guard
+            .sessions
+            .insert(meta.id.clone(), SessionRecord::fresh(meta.clone()));
+        Ok(meta)
+    }
+
+    async fn describe(&self, session_id: &str) -> StoreResult<SessionMeta> {
+        let guard = lock(&self.inner);
+        guard
+            .sessions
+            .get(session_id)
+            .map(|record| record.meta.clone())
+            .ok_or_else(|| StoreError::NotFound(session_id.to_string()))
+    }
+
+    async fn update(
+        &self,
+        session_id: &str,
+        request: crate::UpdateSession,
+    ) -> StoreResult<SessionMeta> {
+        let mut guard = lock(&self.inner);
+        let record = guard
+            .sessions
+            .get_mut(session_id)
+            .ok_or_else(|| StoreError::NotFound(session_id.to_string()))?;
+        let (title, title_pinned) = crate::memory_helpers::resolve_title_update(
+            record.meta.title.take(),
+            record.meta.title_pinned,
+            request.title,
+            request.title_pinned,
+        );
+        record.meta.title = title;
+        record.meta.title_pinned = title_pinned;
+        if let Some(value) = request.cwd {
+            record.meta.cwd = Some(value);
+        }
+        if let Some(value) = request.model {
+            record.meta.model = Some(value);
+        }
+        if let Some(value) = request.parent_session_id {
+            record.meta.parent_session_id = Some(value);
+        }
+        if let Some(value) = request.session_type {
+            record.meta.session_type = Some(value);
+        }
+        if let Some(value) = request.project_scope {
+            record.meta.project_scope = Some(value);
+        }
+        if let Some(value) = request.usage_input {
+            record.meta.usage_input = value;
+        }
+        if let Some(value) = request.usage_output {
+            record.meta.usage_output = value;
+        }
+        if let Some(value) = request.usage_cost_usd_micros {
+            record.meta.usage_cost_usd_micros = value;
+        }
+        let (updated_at_ms, updated_at) = crate::event::now_ms_and_rfc3339();
+        record.meta.updated_at_ms = updated_at_ms;
+        record.meta.updated_at = updated_at;
+        Ok(record.meta.clone())
+    }
+
+    async fn list(&self, filter: ListFilter) -> StoreResult<Vec<SessionMeta>> {
+        let guard = lock(&self.inner);
+        let limit = filter.limit.unwrap_or(MAX_READ_BATCH).min(MAX_READ_BATCH);
+        let mut out: Vec<SessionMeta> = guard
+            .sessions
+            .values()
+            .map(|record| record.meta.clone())
+            .filter(|meta| match_filter(meta, &filter))
+            .collect();
+        out.sort_by(|left, right| {
+            let timestamp_order = match filter.sort_by {
+                ListSortKey::CreatedAt => left.created_at_ms.cmp(&right.created_at_ms),
+                ListSortKey::UpdatedAt => left.updated_at_ms.cmp(&right.updated_at_ms),
+            };
+            let timestamp_order = match filter.order {
+                ListOrder::Ascending => timestamp_order,
+                ListOrder::Descending => timestamp_order.reverse(),
+            };
+            timestamp_order.then_with(|| left.id.cmp(&right.id))
+        });
+        if let Some(cursor) = filter.cursor.as_ref() {
+            let position = out.iter().position(|meta| meta.id == *cursor);
+            if let Some(start) = position {
+                out = out.into_iter().skip(start + 1).collect();
+            }
+        }
+        out.truncate(limit);
+        Ok(out)
+    }
+
+    async fn append(&self, session_id: &str, event: AppendEvent) -> StoreResult<StoredEvent> {
+        let mut guard = lock(&self.inner);
+        let record = guard
+            .sessions
+            .get_mut(session_id)
+            .ok_or_else(|| StoreError::NotFound(session_id.to_string()))?;
+        append_locked(record, &self.hooks, event)
+    }
+
+    async fn read(&self, session_id: &str, range: ReadRange) -> StoreResult<EventPage> {
+        let guard = lock(&self.inner);
+        let record = guard
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| StoreError::NotFound(session_id.to_string()))?;
+        let from = range.from_event_id.unwrap_or(1);
+        let to = range.to_event_id.unwrap_or(EventId::MAX);
+        let limit = range.limit.unwrap_or(MAX_READ_BATCH).min(MAX_READ_BATCH);
+        let mut events: Vec<StoredEvent> = record
+            .events
+            .iter()
+            .filter(|event| event.event_id >= from && event.event_id <= to)
+            .take(limit)
+            .cloned()
+            .collect();
+        let next_cursor = if events.len() == limit {
+            events.last().map(|tail| tail.event_id + 1)
+        } else {
+            None
+        };
+        // Defense in depth for data imported or written under an older policy.
+        redact_stored_events(&self.hooks, &mut events)?;
+        Ok(EventPage {
+            events,
+            next_cursor,
+        })
+    }
+
+    async fn fork(
+        &self,
+        session_id: &str,
+        at_event_id: EventId,
+        child_id: Option<SessionId>,
+    ) -> StoreResult<ForkResult> {
+        let mut guard = lock(&self.inner);
+        let parent = guard
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| StoreError::NotFound(session_id.to_string()))?;
+        if !parent
+            .events
+            .iter()
+            .any(|event| event.event_id == at_event_id)
+        {
+            return Err(StoreError::InvalidInput(format!(
+                "event {at_event_id} not found in session '{session_id}'"
+            )));
+        }
+        let new_id = child_id.unwrap_or_else(|| Uuid::now_v7().to_string());
+        if guard.sessions.contains_key(&new_id) {
+            return Err(StoreError::AlreadyExists(new_id));
+        }
+        let parent = guard.sessions.get(session_id).unwrap();
+        let (ms, text) = now_ms_and_rfc3339();
+        let mut child_meta = parent.meta.clone();
+        child_meta.id = new_id.clone();
+        child_meta.parent_session_id = Some(parent.meta.id.clone());
+        child_meta.created_at_ms = ms;
+        child_meta.created_at = text.clone();
+        child_meta.updated_at_ms = ms;
+        child_meta.updated_at = text;
+        child_meta.status = SessionStatus::Open;
+        child_meta.closed_at = None;
+        child_meta.closed_at_ms = None;
+        child_meta.soft_deleted_at_ms = None;
+        let mut parent_events: Vec<StoredEvent> = parent
+            .events
+            .iter()
+            .filter(|event| event.event_id <= at_event_id)
+            .cloned()
+            .collect();
+        prepare_stored_events_for_persistence(&self.hooks, &mut parent_events)?;
+        let copied_events = re_anchor_events(&parent_events, &new_id);
+        let copied_event_count = copied_events.len();
+        child_meta.event_count = copied_event_count;
+        child_meta.last_event_id = copied_events.last().map(|tail| tail.event_id);
+        child_meta.chain_root_hash = Some(chain_root_hash(&copied_events));
+        let next_event_id = copied_events
+            .last()
+            .map(|tail| tail.event_id + 1)
+            .unwrap_or(1);
+        let child_record = SessionRecord {
+            meta: child_meta,
+            events: copied_events,
+            next_event_id,
+        };
+        guard.sessions.insert(new_id.clone(), child_record);
+        Ok(ForkResult {
+            child_session_id: new_id,
+            forked_from_event_id: at_event_id,
+            copied_event_count,
+        })
+    }
+
+    async fn truncate(
+        &self,
+        session_id: &str,
+        at_event_id: EventId,
+    ) -> StoreResult<TruncateResult> {
+        let mut guard = lock(&self.inner);
+        let record = guard
+            .sessions
+            .get_mut(session_id)
+            .ok_or_else(|| StoreError::NotFound(session_id.to_string()))?;
+        if !record
+            .events
+            .iter()
+            .any(|event| event.event_id == at_event_id)
+        {
+            return Err(StoreError::InvalidInput(format!(
+                "event {at_event_id} not found in session '{session_id}'"
+            )));
+        }
+        let removed = record
+            .events
+            .iter()
+            .filter(|event| event.event_id > at_event_id)
+            .count();
+        record.events.retain(|event| event.event_id <= at_event_id);
+        record.next_event_id = at_event_id + 1;
+        record.meta.event_count = record.events.len();
+        record.meta.last_event_id = record.events.last().map(|tail| tail.event_id);
+        record.meta.chain_root_hash = Some(chain_root_hash(&record.events));
+        let (ms, text) = now_ms_and_rfc3339();
+        record.meta.updated_at_ms = ms;
+        record.meta.updated_at = text;
+        Ok(TruncateResult {
+            kept_event_count: record.events.len(),
+            removed_event_count: removed,
+            new_tip_event_id: record.events.last().map(|tail| tail.event_id),
+        })
+    }
+
+    async fn snapshot(&self, session_id: &str) -> StoreResult<Snapshot> {
+        let mut guard = lock(&self.inner);
+        let record = guard
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| StoreError::NotFound(session_id.to_string()))?;
+        let (ms, text) = now_ms_and_rfc3339();
+        let mut events = record.events.clone();
+        redact_stored_events(&self.hooks, &mut events)?;
+        let snapshot = Snapshot {
+            id: SnapshotId(format!("snap-{}", Uuid::now_v7())),
+            session: record.meta.clone(),
+            events,
+            captured_at_ms: ms,
+            captured_at: text,
+        };
+        guard
+            .snapshots
+            .insert(snapshot.id.0.clone(), snapshot.clone());
+        Ok(snapshot)
+    }
+
+    async fn replay(&self, snapshot_id: &SnapshotId) -> StoreResult<Snapshot> {
+        let guard = lock(&self.inner);
+        let mut snapshot = guard
+            .snapshots
+            .get(&snapshot_id.0)
+            .cloned()
+            .ok_or_else(|| StoreError::NotFound(snapshot_id.0.clone()))?;
+        redact_stored_events(&self.hooks, &mut snapshot.events)?;
+        Ok(snapshot)
+    }
+
+    async fn close(&self, session_id: &str) -> StoreResult<StoredEvent> {
+        // Hold the single store lock across read -> append receipt ->
+        // finalise so no concurrent append can interleave and move the
+        // tip off the receipt we just minted.
+        let mut guard = lock(&self.inner);
+        let record = guard
+            .sessions
+            .get_mut(session_id)
+            .ok_or_else(|| StoreError::NotFound(session_id.to_string()))?;
+        validate_open(&record.meta)?;
+        let record_root = record
+            .meta
+            .chain_root_hash
+            .clone()
+            .unwrap_or_else(|| chain_root_hash(&record.events));
+        let last_event_id = record.meta.last_event_id.unwrap_or(0);
+        let payload =
+            super::signing::canonical_receipt_payload(session_id, last_event_id, &record_root);
+        let mut append = AppendEvent::new(SessionEventKind::Receipt, payload);
+        append.actor = Some("session_store".into());
+        let mut stored = append_locked(record, &self.hooks, append)?;
+        // Intentionally replace the receipt's append-time per-event
+        // signature with a receipt-root signature: the receipt attests the
+        // chain root, so `verify()` checks it via `verify_receipt_root`
+        // against the pre-receipt root, not the event's own bytes.
+        if let Some(signer) = self
+            .hooks
+            .receipt_signer
+            .as_ref()
+            .or(self.hooks.event_signer.as_ref())
+        {
+            let signature = signer.sign_receipt(&record_root);
+            // Locate the receipt by its event id rather than `last_mut()`,
+            // so we can never sign a different event.
+            if let Some(receipt) = record
+                .events
+                .iter_mut()
+                .find(|event| event.event_id == stored.event_id)
+            {
+                receipt.signed_by = Some(signature.clone());
+            }
+            stored.signed_by = Some(signature);
+        }
+        let (ms, text) = now_ms_and_rfc3339();
+        record.meta.status = SessionStatus::Closed;
+        record.meta.closed_at_ms = Some(ms);
+        record.meta.closed_at = Some(text);
+        Ok(stored)
+    }
+
+    async fn soft_delete(&self, session_id: &str) -> StoreResult<SessionMeta> {
+        let mut guard = lock(&self.inner);
+        let record = guard
+            .sessions
+            .get_mut(session_id)
+            .ok_or_else(|| StoreError::NotFound(session_id.to_string()))?;
+        match record.meta.status {
+            SessionStatus::HardDeleted => return Err(StoreError::NotFound(session_id.to_string())),
+            SessionStatus::SoftDeleted => return Ok(record.meta.clone()),
+            _ => {}
+        }
+        let (ms, text) = now_ms_and_rfc3339();
+        record.meta.status = SessionStatus::SoftDeleted;
+        record.meta.soft_deleted_at_ms = Some(ms);
+        record.meta.updated_at_ms = ms;
+        record.meta.updated_at = text;
+        Ok(record.meta.clone())
+    }
+
+    async fn hard_delete(&self, session_id: &str) -> StoreResult<()> {
+        let mut guard = lock(&self.inner);
+        guard
+            .sessions
+            .remove(session_id)
+            .ok_or_else(|| StoreError::NotFound(session_id.to_string()))?;
+        Ok(())
+    }
+
+    async fn verify(&self, session_id: &str) -> StoreResult<VerifyReport> {
+        let guard = lock(&self.inner);
+        let record = guard
+            .sessions
+            .get(session_id)
+            .ok_or_else(|| StoreError::NotFound(session_id.to_string()))?;
+        let event_verifier = self
+            .hooks
+            .event_signer
+            .as_ref()
+            .map(|signer| signer.verifying_key());
+        let receipt_verifier = self
+            .hooks
+            .receipt_signer
+            .as_ref()
+            .or(self.hooks.event_signer.as_ref())
+            .map(|signer| signer.verifying_key());
+        Ok(verify_session_chain(
+            &record.meta,
+            &record.events,
+            event_verifier.as_ref(),
+            receipt_verifier.as_ref(),
+        ))
+    }
+
+    async fn search(&self, query: SearchQuery) -> StoreResult<SearchResponse> {
+        query.validate().map_err(StoreError::InvalidInput)?;
+        let embedder = self.hooks.embedder.clone();
+        let mut candidates = {
+            let guard = lock(&self.inner);
+            let mut candidates = Vec::new();
+            for record in guard.sessions.values() {
+                if !matches_search_filter(&record.meta, &query.filter) {
+                    continue;
+                }
+                for event in &record.events {
+                    candidates.push((record.meta.clone(), event.clone()));
+                }
+            }
+            candidates
+        };
+        let mut events = candidates
+            .iter()
+            .map(|(_, event)| event.clone())
+            .collect::<Vec<_>>();
+        redact_stored_events(&self.hooks, &mut events)?;
+        for ((_, candidate), redacted) in candidates.iter_mut().zip(events) {
+            *candidate = redacted;
+        }
+
+        let documents = candidates
+            .iter()
+            .map(|(meta, event)| {
+                redacted_search_document(self.hooks.redaction.as_ref(), meta, event)
+            })
+            .collect::<Vec<_>>();
+        let fts_scores = documents
+            .iter()
+            .map(|document| lexical_score(&query.query, document))
+            .collect::<Vec<_>>();
+        let semantic_available = embedder.is_semantic();
+        let semantic_scores = if semantic_available {
+            let query_vector = embedder.embed(&query.query);
+            embedder
+                .embed_batch(&documents)
+                .iter()
+                .map(|vector| super::search::cosine(&query_vector, vector).max(0.0))
+                .collect::<Vec<_>>()
+        } else {
+            vec![0.0; documents.len()]
+        };
+
+        let fts_ranks = ranks(&fts_scores);
+        let semantic_ranks = ranks(&semantic_scores);
+        let effective_mode = if semantic_available {
+            query.mode
+        } else {
+            SearchMode::Fts
+        };
+        let mut hits = candidates
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, (_, event))| {
+                let fts_rank = fts_ranks.get(&index).copied();
+                let semantic_rank = semantic_ranks.get(&index).copied();
+                let fts_score = (fts_scores[index] > 0.0).then_some(fts_scores[index]);
+                let semantic_score =
+                    (semantic_scores[index] > 0.0).then_some(semantic_scores[index]);
+                let included = match effective_mode {
+                    SearchMode::Fts => fts_rank.is_some(),
+                    SearchMode::Semantic => semantic_rank.is_some(),
+                    SearchMode::Hybrid => fts_rank.is_some() || semantic_rank.is_some(),
+                };
+                included.then(|| SearchHit {
+                    session_id: event.session_id.clone(),
+                    event_id: event.event_id,
+                    kind: event.kind.clone(),
+                    score: combined_score(
+                        effective_mode,
+                        fts_rank,
+                        semantic_rank,
+                        fts_score,
+                        semantic_score,
+                    ),
+                    fts_score,
+                    semantic_score,
+                    snippet: snippet(&documents[index], &query.query, 240),
+                    event,
+                })
+            })
+            .collect::<Vec<_>>();
+        hits.sort_by(|left, right| {
+            right
+                .score
+                .total_cmp(&left.score)
+                .then_with(|| left.session_id.cmp(&right.session_id))
+                .then_with(|| left.event_id.cmp(&right.event_id))
+        });
+        hits.truncate(query.limit());
+        let semantic_floor = !semantic_available;
+        Ok(SearchResponse {
+            requested_mode: query.mode,
+            effective_mode,
+            embedding_backend: embedder.name().to_string(),
+            semantic_floor,
+            fallback_reason: semantic_floor
+                .then(|| "semantic model unavailable; FTS-only fallback active".into()),
+            hits,
+        })
+    }
+}
+
+fn validate_parent(record: &SessionRecord, event: &AppendEvent) -> StoreResult<()> {
+    let Some(parent_event_id) = event.parent_event_id else {
+        return Ok(());
+    };
+    if record
+        .events
+        .iter()
+        .any(|stored| stored.event_id == parent_event_id)
+    {
+        Ok(())
+    } else {
+        Err(StoreError::InvalidInput(format!(
+            "parent_event_id {parent_event_id} not present in session"
+        )))
+    }
+}
+
+fn match_filter(meta: &SessionMeta, filter: &ListFilter) -> bool {
+    if let Some(tenant) = filter.tenant_id.as_ref() {
+        if meta.tenant_id.as_deref() != Some(tenant.as_str()) {
+            return false;
+        }
+    }
+    if let Some(persona) = filter.persona.as_ref() {
+        if meta.persona.as_deref() != Some(persona.as_str()) {
+            return false;
+        }
+    }
+    if let Some(status) = filter.status {
+        if meta.status != status {
+            return false;
+        }
+    }
+    if let Some(tag) = filter.tag.as_ref() {
+        if !meta.tags.iter().any(|value| value == tag) {
+            return false;
+        }
+    }
+    if let Some(parent_session_id) = filter.parent_session_id.as_ref() {
+        if meta.parent_session_id.as_ref() != Some(parent_session_id) {
+            return false;
+        }
+    }
+    if let Some(session_type) = filter.session_type {
+        if meta.session_type != Some(session_type) {
+            return false;
+        }
+    }
+    if let Some(project_scope) = filter.project_scope.as_ref() {
+        if meta.project_scope.as_ref() != Some(project_scope) {
+            return false;
+        }
+    }
+    if let Some(after) = filter.created_after_ms {
+        if meta.created_at_ms < after {
+            return false;
+        }
+    }
+    if let Some(before) = filter.created_before_ms {
+        if meta.created_at_ms > before {
+            return false;
+        }
+    }
+    true
+}
+
+fn matches_search_filter(meta: &SessionMeta, filter: &super::search::SearchFilter) -> bool {
+    if matches!(
+        meta.status,
+        SessionStatus::SoftDeleted | SessionStatus::HardDeleted
+    ) {
+        return false;
+    }
+    if let Some(tenant_id) = filter.tenant_id.as_ref() {
+        if meta.tenant_id.as_ref() != Some(tenant_id) {
+            return false;
+        }
+    }
+    if let Some(project_scope) = filter.project_scope.as_ref() {
+        if meta.project_scope.as_ref() != Some(project_scope) {
+            return false;
+        }
+    }
+    if let Some(session_id) = filter.session_id.as_ref() {
+        if &meta.id != session_id {
+            return false;
+        }
+    }
+    true
+}

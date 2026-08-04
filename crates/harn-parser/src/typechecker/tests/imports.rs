@@ -1,0 +1,470 @@
+use super::*;
+
+fn parse_program(source: &str) -> Vec<crate::SNode> {
+    let mut lexer = Lexer::new(source);
+    let tokens = lexer.tokenize().unwrap();
+    let mut parser = Parser::new(tokens);
+    parser.parse().unwrap()
+}
+
+#[test]
+fn imported_type_aliases_are_registered_into_scope() {
+    let imported = parse_program(
+        r#"
+type SignatureStatus = { state: "verified" } | { state: "failed", reason: string }
+
+type GitHubEventPayload = {
+  provider: "github",
+  action: string | nil,
+  raw: dict,
+}
+
+type SlackEventPayload = {
+  provider: "slack",
+  subtype: string | nil,
+  raw: dict,
+}
+
+type ProviderPayload = GitHubEventPayload | SlackEventPayload
+
+type TriggerEvent = {
+  provider_payload: ProviderPayload,
+  signature_status: SignatureStatus,
+}
+"#,
+    );
+    let program = parse_program(
+        r#"
+pipeline t(task) {
+  const event: TriggerEvent = {
+    provider_payload: {
+      provider: "github",
+      action: "opened",
+      raw: {},
+    },
+    signature_status: {
+      state: "failed",
+      reason: "bad signature",
+    },
+  }
+
+  const payload = event.provider_payload
+  if payload.provider == "github" {
+    const action: string | nil = payload.action
+  } else {
+    const subtype: string | nil = payload.subtype
+  }
+
+  const status = event.signature_status
+  if status.state == "failed" {
+    const reason: string = status.reason
+  }
+}
+"#,
+    );
+
+    let diagnostics = TypeChecker::new()
+        .with_imported_type_decls(imported)
+        .check(&program);
+    let errors: Vec<String> = diagnostics
+        .into_iter()
+        .filter(|diag| diag.severity == DiagnosticSeverity::Error)
+        .map(|diag| diag.message)
+        .collect();
+    assert!(errors.is_empty(), "got imported-type errors: {errors:?}");
+}
+
+#[test]
+fn imported_structs_allow_field_access() {
+    let imported = parse_program(
+        r"
+struct HeaderRecord {
+  name: string,
+  value: string,
+}
+",
+    );
+    let program = parse_program(
+        r"
+fn use_header(header: HeaderRecord) {
+  const value: string = header.value
+}
+
+pipeline t(task) {
+  return
+}
+",
+    );
+
+    let diagnostics = TypeChecker::new()
+        .with_imported_type_decls(imported)
+        .check(&program);
+    let errors: Vec<String> = diagnostics
+        .into_iter()
+        .filter(|diag| diag.severity == DiagnosticSeverity::Error)
+        .map(|diag| diag.message)
+        .collect();
+    assert!(errors.is_empty(), "got imported-struct errors: {errors:?}");
+}
+
+#[test]
+fn imported_callable_signatures_check_arguments() {
+    let imported = parse_program(
+        r"
+type PickOptions = {drop_nil?: bool}
+
+pub fn pick(options: PickOptions = {}) -> nil {
+  return nil
+}
+",
+    );
+    let program = parse_program(
+        r"
+pipeline t(task) {
+  pick({dropnil: true})
+}
+",
+    );
+
+    let diagnostics = TypeChecker::new()
+        .with_imported_type_decls(imported.clone())
+        .with_imported_callable_decls(imported)
+        .check(&program);
+    let errors: Vec<String> = diagnostics
+        .into_iter()
+        .filter(|diag| diag.severity == DiagnosticSeverity::Error)
+        .map(|diag| diag.message)
+        .collect();
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("argument 1 `options`: unknown field `dropnil`")),
+        "expected imported argument error, got: {errors:?}"
+    );
+}
+
+#[test]
+fn imported_named_record_parameter_accepts_structurally_exact_arguments() {
+    let imported = parse_program(
+        r#"
+pub type BranchRequest = {owner: string, repo: string, branch: string}
+
+pub fn view(request: BranchRequest) -> string {
+  return request.owner + "/" + request.repo + ":" + request.branch
+}
+"#,
+    );
+    let program = parse_program(
+        r#"
+pipeline t(task) {
+  view({owner: "octo", repo: "demo", branch: "main"})
+  const request = {owner: "octo", repo: "demo", branch: "next"}
+  view(request)
+}
+"#,
+    );
+
+    let diagnostics = TypeChecker::new()
+        .with_imported_type_decls(imported.clone())
+        .with_imported_callable_decls(imported)
+        .check(&program);
+    let errors = diagnostics
+        .into_iter()
+        .filter(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+        .map(|diagnostic| diagnostic.message)
+        .collect::<Vec<_>>();
+
+    assert!(errors.is_empty(), "got imported-record errors: {errors:?}");
+}
+
+#[test]
+fn legacy_imported_call_implicitly_supplies_only_the_leading_capability() {
+    let imported = parse_program(
+        r"
+pub fn render(env: HarnessEnv, fs: HarnessFs, path: string, vars: dict = {}) -> string {
+  return path
+}
+",
+    );
+    let program = parse_program(
+        r#"
+pipeline caller(task) {
+  return render("prompt.md", {name: "Burin"})
+}
+"#,
+    );
+
+    let strict = TypeChecker::new()
+        .with_imported_callable_decls(imported.clone())
+        .check(&program);
+    assert!(
+        strict.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("expected HarnessEnv, found string")),
+        "strict checking must reject the shifted legacy call: {strict:?}"
+    );
+
+    let compatibility = TypeChecker::new()
+        .with_legacy_ambient_capabilities()
+        .with_imported_callable_decls(imported)
+        .check(&program);
+    assert!(
+        compatibility.is_empty(),
+        "compatibility checking must align arguments after the capability: {compatibility:?}"
+    );
+}
+
+#[test]
+fn imported_pipeline_signatures_check_arguments() {
+    let imported = parse_program(
+        r"
+pub pipeline publish(version: string, dry_run: bool) -> bool {
+  return !dry_run
+}
+",
+    );
+    let program = parse_program(
+        r"
+pipeline caller(task) {
+  publish(42, false)
+}
+",
+    );
+
+    let diagnostics = TypeChecker::new()
+        .with_imported_callable_decls(imported)
+        .check(&program);
+    let errors: Vec<String> = diagnostics
+        .into_iter()
+        .filter(|diag| diag.severity == DiagnosticSeverity::Error)
+        .map(|diag| diag.message)
+        .collect();
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("expected string") && error.contains("found int")),
+        "expected imported pipeline argument error, got: {errors:?}"
+    );
+}
+
+/// The VM resolves bare variant patterns only against locally declared enums,
+/// so an imported bare variant must be rejected at check time rather than
+/// passing the checker and failing in the runtime.
+#[test]
+fn bare_imported_variant_pattern_requires_qualification() {
+    let imported = parse_program(r"pub enum Shape { Circle(radius: int) Square(width: int) }");
+    let program = parse_program(
+        r#"
+fn describe(s: Shape) -> string {
+  match s {
+    Circle(_r) -> { return "circle" }
+    Square(_w) -> { return "square" }
+  }
+}
+"#,
+    );
+
+    let diagnostics = TypeChecker::new()
+        .with_imported_type_decls(imported)
+        .check(&program);
+    let errors: Vec<String> = diagnostics
+        .into_iter()
+        .filter(|diag| diag.severity == DiagnosticSeverity::Error)
+        .map(|diag| diag.message)
+        .collect();
+    assert!(
+        errors.iter().any(
+            |error| error.contains("names a variant of imported enum `Shape`")
+                && error.contains("`Shape.Circle(...)`")
+        ),
+        "expected a qualification error for the imported bare variant, got: {errors:?}"
+    );
+}
+
+#[test]
+fn qualified_imported_variant_pattern_is_accepted() {
+    let imported = parse_program(r"pub enum Shape { Circle(radius: int) Square(width: int) }");
+    let program = parse_program(
+        r#"
+fn describe(s: Shape) -> string {
+  match s {
+    Shape.Circle(_r) -> { return "circle" }
+    Shape.Square(_w) -> { return "square" }
+  }
+}
+"#,
+    );
+
+    let diagnostics = TypeChecker::new()
+        .with_imported_type_decls(imported)
+        .check(&program);
+    let errors: Vec<String> = diagnostics
+        .into_iter()
+        .filter(|diag| diag.severity == DiagnosticSeverity::Error)
+        .map(|diag| diag.message)
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "qualified imported variant patterns are valid: {errors:?}"
+    );
+}
+
+/// A locally declared enum keeps the bare form: its variants are in the VM's
+/// compile-time catalog, so check and runtime agree.
+#[test]
+fn bare_local_variant_pattern_is_accepted_alongside_imports() {
+    let imported = parse_program(r"pub enum Other { Thing(id: int) }");
+    let program = parse_program(
+        r#"
+enum Shape { Circle(radius: int) Square(width: int) }
+
+fn describe(s: Shape) -> string {
+  match s {
+    Circle(_r) -> { return "circle" }
+    Square(_w) -> { return "square" }
+  }
+}
+"#,
+    );
+
+    let diagnostics = TypeChecker::new()
+        .with_imported_type_decls(imported)
+        .check(&program);
+    let errors: Vec<String> = diagnostics
+        .into_iter()
+        .filter(|diag| diag.severity == DiagnosticSeverity::Error)
+        .map(|diag| diag.message)
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "bare local variant patterns stay valid: {errors:?}"
+    );
+}
+
+/// A local enum shadowing an imported name is registered last, so its origin
+/// wins and the bare form stays legal.
+#[test]
+fn local_enum_shadowing_an_imported_one_allows_bare_patterns() {
+    let imported = parse_program(r"pub enum Shape { Circle(radius: int) }");
+    let program = parse_program(
+        r#"
+enum Shape { Circle(radius: int) }
+
+fn describe(s: Shape) -> string {
+  match s {
+    Circle(_r) -> { return "circle" }
+  }
+}
+"#,
+    );
+
+    let diagnostics = TypeChecker::new()
+        .with_imported_type_decls(imported)
+        .check(&program);
+    let errors: Vec<String> = diagnostics
+        .into_iter()
+        .filter(|diag| diag.severity == DiagnosticSeverity::Error)
+        .map(|diag| diag.message)
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "a local enum shadowing an import keeps bare patterns legal: {errors:?}"
+    );
+}
+
+#[test]
+fn namespace_import_rejects_unknown_members() {
+    use std::collections::BTreeSet;
+
+    use crate::NamespaceImportBinding;
+
+    let program = parse_program(
+        r"
+pipeline t(task) {
+  let value = lib.absent
+  lib.missing()
+}
+",
+    );
+    let mut members = BTreeSet::new();
+    members.insert("greet".into());
+    members.insert("other".into());
+    let diagnostics = TypeChecker::new()
+        .with_imported_names(std::iter::once("lib".into()).collect())
+        .with_namespace_imports([(
+            "lib".into(),
+            NamespaceImportBinding {
+                module_path: "./lib".into(),
+                members,
+            },
+        )])
+        .check(&program);
+    let errors: Vec<_> = diagnostics
+        .into_iter()
+        .filter(|diag| diag.severity == DiagnosticSeverity::Error)
+        .collect();
+    assert!(
+        errors.iter().any(|error| {
+            error.code == crate::typechecker::Code::UnknownField
+                && error
+                    .message
+                    .contains("module `./lib` has no exported member `absent`")
+        }),
+        "expected namespace property error, got: {errors:?}"
+    );
+    assert!(
+        errors.iter().any(|error| {
+            error.code == crate::typechecker::Code::UnknownMethod
+                && error
+                    .message
+                    .contains("module `./lib` has no exported member `missing`")
+        }),
+        "expected namespace method error, got: {errors:?}"
+    );
+    assert!(
+        errors.iter().any(|error| {
+            error.message.contains("did you mean")
+                || error
+                    .help
+                    .as_deref()
+                    .is_some_and(|help| help.contains("exported members"))
+        }),
+        "expected suggestion/help context, got: {errors:?}"
+    );
+}
+
+#[test]
+fn namespace_import_accepts_known_member_call() {
+    use std::collections::BTreeSet;
+
+    use crate::NamespaceImportBinding;
+
+    let program = parse_program(
+        r"
+pipeline t(task) {
+  lib.greet()
+}
+",
+    );
+    let mut members = BTreeSet::new();
+    members.insert("greet".into());
+    let diagnostics = TypeChecker::new()
+        .with_imported_names(std::iter::once("lib".into()).collect())
+        .with_namespace_imports([(
+            "lib".into(),
+            NamespaceImportBinding {
+                module_path: "./lib".into(),
+                members,
+            },
+        )])
+        .check(&program);
+    let errors: Vec<String> = diagnostics
+        .into_iter()
+        .filter(|diag| diag.severity == DiagnosticSeverity::Error)
+        .map(|diag| diag.message)
+        .collect();
+    assert!(
+        !errors.iter().any(|e| e.contains("no exported member")),
+        "known namespace member should not error: {errors:?}"
+    );
+}

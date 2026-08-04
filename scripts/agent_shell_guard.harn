@@ -1,0 +1,217 @@
+// Shared Codex and Claude PreToolUse guard for shell commands.
+//
+// Two failure modes this exists to stop:
+//
+//   1. Bare `cargo ...`. The Makefile targets set the environment and private
+//      build directory the current worktree needs. A raw `cargo` call silently
+//      skips that setup and can contend with another worktree's build output.
+//
+//   2. Piping a long build or test straight into a filter. `cargo test | grep
+//      -c ok` throws the run away: the moment you want a line the filter did
+//      not print, the only way to get it is to run the whole thing again.
+//      Commands over the slow-command threshold must land their full output in
+//      a file first, then be grepped from there.
+//
+// Contract: reads a Codex or Claude PreToolUse payload on stdin, prints a
+// permission decision on stdout. Exit status is always 0 — a crashed guard
+// must not look like a denial.
+// Commands whose full output is worth keeping. Grepping any of these through a
+// pipe without a redirect is what forces a rerun.
+const SLOW_COMMANDS = ["cargo", "make", "nextest", "swift", "pnpm", "npm", "xcodebuild"]
+
+// `cargo <verb>` calls that have a Makefile owner. Anything not listed here is
+// a one-off (`cargo tree`, `cargo add`) and passes through.
+const CARGO_VERB_TARGETS = {
+  bench: "make bench",
+  build: "make build",
+  check: "make check",
+  clippy: "make lint",
+  fmt: "make fmt",
+  nextest: "make test",
+  test: "make test",
+}
+
+pub type ShellGuardDecision = {allow: bool, reason: string}
+
+pub fn strip_shell_prefix(words: list<string>) -> list<string> {
+  // Skip shell wrappers and environment settings so the guard sees the real
+  // program name.
+  let rest = words
+  while len(rest) > 0 {
+    const head = rest[0] ?? ""
+    if ["env", "command", "exec"].contains(head) {
+      rest = rest.slice(1, len(rest))
+    } else if ["-u", "--unset"].contains(head) && len(rest) > 1 {
+      rest = rest.slice(2, len(rest))
+    } else if ["--", "-i", "--ignore-environment"].contains(head) {
+      rest = rest.slice(1, len(rest))
+    } else if head.contains("=") && !head.starts_with("-") {
+      rest = rest.slice(1, len(rest))
+    } else {
+      return rest
+    }
+  }
+  return rest
+}
+
+pub fn program_of(segment: string) -> string {
+  const words = segment.trim().split(" ").filter(fn(word: string) { return word != "" }).to_list()
+  const stripped = strip_shell_prefix(words)
+  if len(stripped) == 0 {
+    return ""
+  }
+  // Keep only the basename so `./target/release/harn` and `/usr/bin/make`
+  // classify the same as their bare names.
+  const parts = (stripped[0] ?? "").split("/")
+  return parts[len(parts) - 1] ?? ""
+}
+
+/** Split a compound command into independently classified stages. */
+pub fn segments_of(command: string) -> list<string> {
+  let normalized = command
+  for separator in ["&&", "||", ";", "\n"] {
+    normalized = normalized.replace(separator, "|")
+  }
+  return normalized.split("|").map(fn(part: string) { return part.trim() }).to_list()
+}
+
+fn command_groups(command: string) -> list<string> {
+  let normalized = command
+  for separator in ["&&", "||", ";", "\n"] {
+    normalized = normalized.replace(separator, "\n")
+  }
+  return normalized.split("\n").map(fn(part: string) { return part.trim() }).to_list()
+}
+
+pub fn cargo_violation(command: string) -> string {
+  for segment in segments_of(command) {
+    if program_of(segment) != "cargo" {
+      continue
+    }
+    const words = strip_shell_prefix(
+      segment.trim().split(" ").filter(fn(word: string) { return word != "" }).to_list(),
+    )
+    const verb_index = if (words[1] ?? "").starts_with("+") {
+      2
+    } else {
+      1
+    }
+    const verb = if len(words) > verb_index {
+      words[verb_index] ?? ""
+    } else {
+      ""
+    }
+    const target = CARGO_VERB_TARGETS[verb] ?? ""
+    if target == "" {
+      continue
+    }
+    return "`cargo " + verb + "` bypasses the repository Make target, including "
+      + "its worktree-local build directory and required environment. Run `"
+      + target
+      + "` instead. "
+      + "For a genuine one-off, set HARN_ALLOW_RAW_CARGO=1 in the command."
+  }
+  return ""
+}
+
+pub fn is_slow(segment: string) -> bool {
+  return SLOW_COMMANDS.contains(program_of(segment))
+}
+
+/**
+ * True when the command lands its output somewhere re-readable.
+ *
+ * `2>&1` and `>&2` duplicate a descriptor rather than opening a file, so they
+ * are stripped before looking for a redirect — otherwise `swift build 2>&1 |
+ * grep error` reads as "already captured" when nothing was captured at all.
+ * `&>file` survives the strip and still counts.
+ */
+pub fn writes_to_file(stage: string) -> bool {
+  let without_dups = stage
+  for dup in [">&1", ">&2", ">&"] {
+    without_dups = without_dups.replace(dup, "")
+  }
+  return without_dups.contains(">")
+}
+
+fn tee_writes_to_file(stage: string) -> bool {
+  if program_of(stage) != "tee" {
+    return false
+  }
+  const words = strip_shell_prefix(
+    stage.trim().split(" ").filter(fn(word: string) { return word != "" }).to_list(),
+  )
+  // Options change how tee writes; they are not destinations. Requiring one
+  // non-option argument keeps `tee -a | grep` from pretending it saved a log.
+  return words.slice(1, len(words)).any(fn(word: string) { return !word.starts_with("-") })
+}
+
+pub fn discarded_output_violation(command: string) -> string {
+  for group in command_groups(command) {
+    const stages = group.split("|").map(fn(part: string) { return part.trim() }).to_list()
+    if len(stages) < 2 {
+      continue
+    }
+    // Capture must happen before the first filter. Redirecting the filter's
+    // output preserves only the filtered lines, not the expensive command.
+    for index in range(0, len(stages) - 1) {
+      const stage = stages[index] ?? ""
+      const next = stages[index + 1] ?? ""
+      if is_slow(stage) && !writes_to_file(stage) && !tee_writes_to_file(next) {
+        return "`" + program_of(stage) + "` output is piped into a filter "
+          + "and then discarded, so recovering any other line costs a full rerun. "
+          + "Redirect first, then read the file:\n"
+          + "  <command> > .harn-runs/cmd.log 2>&1; echo \"exit=$?\"; grep ... .harn-runs/cmd.log\n"
+          + "Any stable path works; .harn-runs/ is already ignored."
+      }
+    }
+  }
+  return ""
+}
+
+pub fn decision(payload: string) -> ShellGuardDecision {
+  let parsed = nil
+  try {
+    parsed = json_parse(payload)
+  } catch (_) {
+    return {allow: true, reason: ""}
+  }
+  if type_of(parsed) != "dict" || to_string(parsed?.tool_name ?? "") != "Bash" {
+    return {allow: true, reason: ""}
+  }
+  const command = to_string(parsed?.tool_input?.command ?? "")
+  if command == "" || command.contains("HARN_ALLOW_RAW_CARGO=1") {
+    return {allow: true, reason: ""}
+  }
+  const cargo = cargo_violation(command)
+  if cargo != "" {
+    return {allow: false, reason: cargo}
+  }
+  const discarded = discarded_output_violation(command)
+  if discarded != "" {
+    return {allow: false, reason: discarded}
+  }
+  return {allow: true, reason: ""}
+}
+
+fn main(harness: Harness) {
+  // Both hook hosts send one compact JSON object. read_line has been a typed
+  // Harness capability since before the oldest release this adapter supports.
+  const input = harness.stdio.read_line({trim: false})
+  const verdict = decision(input.value ?? "")
+  if verdict.allow {
+    return nil
+  }
+  harness.stdio.println(
+    json_stringify(
+      {
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
+          permissionDecisionReason: verdict.reason,
+        },
+      },
+    ),
+  )
+  return nil
+}

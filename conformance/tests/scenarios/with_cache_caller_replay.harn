@@ -1,0 +1,84 @@
+/**
+ * Replay determinism for the with_cache caller-wrapper.
+ *
+ * `with_cache(default_llm_caller(harness), opts)` returns a caller closure that
+ * sits inline in `compose([...])` and short-circuits identical (prompt,
+ * system, opts) calls to a cached envelope. This test confirms:
+ *
+ *  - first call hits the underlying mock; second call hits the cache
+ *  - replayed value is byte-identical to the recorded value (json eq)
+ *  - cache_hit / cache_miss events appear on the agent event tape
+ *    in deterministic order with the right metric receipts
+ *  - tools-bearing calls bypass the cache (skip_when default)
+ */
+import { cache_clear, mem_cache } from "std/cache"
+import { default_llm_caller } from "std/llm/caller"
+import { with_cache } from "std/llm/handlers"
+import { with_llm_script } from "std/testing"
+
+pipeline default(harness: Harness) {
+  const store = mem_cache({namespace: "with-cache-caller-" + harness.random.uuid()})
+  cache_clear(harness.llm, {store: store})
+  const caller = with_cache(
+    harness,
+    default_llm_caller(harness.agent, harness.llm),
+    {store: store, ttl: "1h"},
+  )
+  const session_id = "with-cache-caller-session-" + harness.random.uuid()
+  const hits = harness.runtime.atomic(0)
+  const misses = harness.runtime.atomic(0)
+  const last_hit_tokens = harness.runtime.atomic(0)
+  harness.agent.subscribe(
+    session_id,
+    { ev ->
+      if ev?.type == "cache_hit" {
+        const _ = harness.runtime.atomic_add(hits, 1)
+        const _ = harness.runtime.atomic_set(
+          last_hit_tokens,
+          to_int(ev?.payload?.metrics?.tokens_saved ?? 0),
+        )
+      }
+      if ev?.type == "cache_miss" {
+        const _ = harness.runtime.atomic_add(misses, 1)
+      }
+    },
+  )
+  // The mock surfaces input_tokens/output_tokens at the top level; the
+  // LLM result wraps them into `usage` so the cache receipt reader sees
+  // the right `tokens_saved` figure on hits.
+  with_llm_script(
+    harness.llm,
+    [
+      {text: "answer", input_tokens: 11, output_tokens: 7, model: "m", provider: "p"},
+      {text: "fresh-if-uncached", model: "m", provider: "p"},
+    ],
+    { ->
+      const opts = {provider: "p", model: "m", stream: false}
+      const call_one = {
+        prompt: "hello",
+        system: "sys",
+        opts: opts,
+        turn: {iteration: 0, session_id: session_id, attempt: 1},
+      }
+      const first = caller(call_one)
+      const second = caller(call_one)
+      harness.stdio.println("first.ok=" + to_string(first.ok))
+      harness.stdio.println("second.ok=" + to_string(second.ok))
+      harness.stdio.println(
+        "byte_identical=" + to_string(json_stringify(first.value) == json_stringify(second.value)),
+      )
+      harness.stdio.println("mock_calls=" + to_string(len(harness.llm.mock_calls())))
+      const tool_call = call_one + {opts: opts + {tools: []}}
+      const _ = caller(tool_call)
+      harness.stdio.println(
+        "after_tool_call_mock_calls=" + to_string(len(harness.llm.mock_calls())),
+      )
+      harness.stdio.println("misses=" + to_string(harness.runtime.atomic_get(misses)))
+      harness.stdio.println("hits=" + to_string(harness.runtime.atomic_get(hits)))
+      harness.stdio.println(
+        "hit.tokens_saved=" + to_string(harness.runtime.atomic_get(last_hit_tokens)),
+      )
+    },
+  )
+}
+// Calls with tools opt out of the cache by default (skip_when).

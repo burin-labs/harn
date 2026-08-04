@@ -1,0 +1,16 @@
+# Stable Vertex AI Gemini route. The collision-free catalog id keeps the
+# direct Gemini API row distinct while `wire_model` carries the model id used
+# by Vertex's generateContent endpoint.
+[models."vertex/gemini-2.5-flash"]
+name = "Gemini 2.5 Flash (Vertex AI)"
+provider = "vertex"
+context_window = 1048576
+logical_model = "gemini-2.5-flash"
+equivalence_group = "gemini-2.5-flash"
+served_variant = "vertex"
+wire_model = "gemini-2.5-flash"
+capabilities = ["tools", "vision", "streaming", "thinking"]
+tier = "mid"
+open_weight = false
+strengths = ["speed", "long_context", "vision", "cheap", "tool_use", "agentic"]
+complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kimi"]

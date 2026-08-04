@@ -1,0 +1,120 @@
+import { lifecycle_audit_log_take } from "std/lifecycle"
+import {
+  tool_hooks_mode_deny_with_explanation,
+  tool_hooks_mode_passthrough_only_audit,
+  tool_hooks_mode_rewrite_with_audit,
+} from "std/tool_hooks"
+
+/**
+ * Tool-hook mode callbacks side effects (TH-03 #1896).
+ *
+ * Each `tool_hooks_mode_*` callback emits a lifecycle audit entry
+ * (and, for the rewrite mode, also queues a `tool_rewritten` system
+ * reminder). This fixture invokes each mode directly against a
+ * synthesized match record + `inner` echo executor and drains the
+ * lifecycle audit log between cases so the per-mode side effects can
+ * be asserted independently.
+ */
+pipeline default(harness: Harness) {
+  /* Clear any latent audit entries from earlier in the run so each
+   * mode's drain starts from a clean slate. */
+  lifecycle_audit_log_take(harness.obs)
+  const echo = { args -> return {ok: true, ran: args.command} }
+  /* Synthesize a rewrite-bearing match record matching the shape
+   * `tool_hooks_match` produces. Using an inline match avoids the
+   * full preset_run_command path so the side-effect plumbing is the
+   * subject under test. */
+  const rewrite_rule = {
+    rule_id: "rust.cargo.target_dir",
+    catalogue_id: "harn-canon/rust",
+    severity: "warning",
+    explanation: "use --target-dir to avoid lockfile thrash",
+    references: [],
+    rewrite: { command, _ctx -> command + " --target-dir target-shared" },
+  }
+  const rewrite_result = tool_hooks_mode_rewrite_with_audit(
+    harness.tools,
+    rewrite_rule,
+    {command: "cargo build --release"},
+    echo,
+  )
+  harness.stdio.println(rewrite_result.action)
+  harness.stdio.println(rewrite_result.command)
+  harness.stdio.println(rewrite_result.original_command)
+  harness.stdio.println(rewrite_result.result.ran)
+  const rewrite_audits = lifecycle_audit_log_take(harness.obs)
+  /* Expect two audit entries: tool_rewrite + tool_hooks.reminder_injected. */
+  harness.stdio.println(len(rewrite_audits))
+  harness.stdio.println(rewrite_audits[0].kind)
+  harness.stdio.println(rewrite_audits[0].payload.rule_id)
+  harness.stdio.println(rewrite_audits[0].payload.original_command)
+  harness.stdio.println(rewrite_audits[0].payload.command)
+  harness.stdio.println(rewrite_audits[1].kind)
+  harness.stdio.println(rewrite_audits[1].payload.tags[0])
+  harness.stdio.println(rewrite_audits[1].payload.ttl_turns)
+  harness.stdio.println(contains(rewrite_audits[1].payload.body, "rewritten"))
+  harness.stdio.println(contains(rewrite_audits[1].payload.body, "target-shared"))
+  const deny_rule = {
+    rule_id: "custom.git_push_force",
+    catalogue_id: "preset_run_command/custom",
+    severity: "error",
+    explanation: "Use --force-with-lease",
+    references: [],
+    rewrite: nil,
+  }
+  const deny_result = tool_hooks_mode_deny_with_explanation(
+    harness.tools,
+    deny_rule,
+    {command: "git push origin main --force"},
+    echo,
+  )
+  harness.stdio.println(deny_result.action)
+  harness.stdio.println(deny_result.rule_id)
+  /* Deny must not call `inner` — the echo executor's `ran` field
+   * should be absent from the result envelope. */
+  harness.stdio.println(deny_result?.result == nil)
+  const deny_audits = lifecycle_audit_log_take(harness.obs)
+  harness.stdio.println(len(deny_audits))
+  harness.stdio.println(deny_audits[0].kind)
+  harness.stdio.println(deny_audits[0].payload.rule_id)
+  harness.stdio.println(deny_audits[0].payload.command)
+  harness.stdio.println(deny_audits[0].payload.severity)
+  const warn_rule = {
+    rule_id: "python.find_versus_rg",
+    catalogue_id: "harn-canon/python",
+    severity: "info",
+    explanation: "rg --files is much faster",
+    references: [],
+    rewrite: nil,
+  }
+  const warn_result = tool_hooks_mode_passthrough_only_audit(
+    harness.tools,
+    warn_rule,
+    {command: "find . -name foo"},
+    echo,
+  )
+  harness.stdio.println(warn_result.action)
+  harness.stdio.println(warn_result.command)
+  harness.stdio.println(warn_result.result.ran)
+  const warn_audits = lifecycle_audit_log_take(harness.obs)
+  harness.stdio.println(len(warn_audits))
+  harness.stdio.println(warn_audits[0].kind)
+  harness.stdio.println(warn_audits[0].payload.rule_id)
+  harness.stdio.println(warn_audits[0].payload.severity)
+  /* Passthrough must not inject a reminder — only the warning audit
+   * entry should be present. */
+  harness.stdio.println(warn_audits[0].kind == "tool_rule_warning")
+  /* Rewrite mode without an `inner` returns the envelope alone but
+   * still records the audit + reminder side effects. The
+   * `rule.rewrite` callback is invoked so the envelope reflects the
+   * rewritten command. */
+  const preview = tool_hooks_mode_rewrite_with_audit(harness.tools, rewrite_rule, "cargo test", nil)
+  harness.stdio.println(preview.action)
+  harness.stdio.println(preview.command)
+  harness.stdio.println(preview.original_command)
+  harness.stdio.println(preview?.result == nil)
+  const preview_audits = lifecycle_audit_log_take(harness.obs)
+  harness.stdio.println(len(preview_audits))
+  harness.stdio.println(preview_audits[0].kind)
+  harness.stdio.println(preview_audits[1].kind)
+}

@@ -1,0 +1,975 @@
+// examples/task_plan/compare_strategies.harn
+//
+// Three-strategy planning comparison for the typed task-plan IR
+// (burin-labs/harn#2196). For each fixture task, run the same English
+// prompt through:
+//
+//   A) baseline  — single-shot prose plan (mirrors a tutorial-style
+//      `agent_loop`-only call, no structure asked for)
+//   B) burin_plan — `harn.plan.v1` JSON via `plan_from`
+//   C) typed_ir  — typed task-plan IR JSON via `task_plan_validate` +
+//      `task_plan_compile`
+//
+// Emits one JSONL record per (task, strategy, trial) with parse +
+// structural metrics, token counts, cost estimates, retry history, and
+// wall-clock latency. The records are deliberately judge-free: every
+// field is computed deterministically from the model output and the
+// validator state. The doc page derives recommendation from the
+// aggregated numbers, not from prose review.
+//
+// Usage:
+//   harn run examples/task_plan/compare_strategies.harn -- \
+//     --out=examples/task_plan/results/runs.jsonl
+//   harn run examples/task_plan/compare_strategies.harn -- \
+//     --model=devstral-small-2 --trials=2 --out=runs/comparison.jsonl
+//   harn run examples/task_plan/compare_strategies.harn -- \
+//     --model=devstral-small-2 \
+//     --max-tokens-baseline=1800 \
+//     --max-tokens-burin=2400 \
+//     --max-tokens-typed-ir=6000 \
+//     --structured-output \
+//     --retry-on-length \
+//     --retry-on-schema-error \
+//     --out=examples/task_plan/results/v2/runs_qwen35b_local.jsonl
+//
+// Default model is `devstral-small-2` (Ollama, ~$0 cost per call). Override
+// with --model=<alias> when re-running against a different provider; the
+// driver itself does not depend on the model choice.
+import { task_plan_compile, task_plan_schema, task_plan_validate } from "std/agent/task_plan"
+import { estimate_call_cost } from "std/llm/economics"
+import { plan_from } from "std/plan"
+
+const __DEFAULT_MODEL: string = "devstral-small-2"
+
+const __DEFAULT_TRIALS: int = 1
+
+// The three strategies do not have comparable output density. `typed_ir`
+// carries explicit capabilities, effects, graph edges, and verification
+// contracts, so a single global output cap creates false truncation failures.
+const __DEFAULT_MAX_TOKENS_BASELINE: int = 1800
+
+const __DEFAULT_MAX_TOKENS_BURIN: int = 2400
+
+const __DEFAULT_MAX_TOKENS_TYPED_IR: int = 6000
+
+const __OUTPUT_TEXT_TRUNCATE_CHARS: int = 4096
+
+const __TASKS = [
+  {
+    id: "01_rate_limiter",
+    label: "Rate limiter around auth middleware",
+    prompt:
+      "Add a token-bucket rate limiter (60 requests per minute per token) around the existing auth middleware at `src/auth/middleware.rs`. Excess traffic must respond with HTTP 429 and emit a `rate_limited` metric. Cover the burst window and steady-state regime in unit tests.",
+  },
+  {
+    id: "02_config_option",
+    label: "request_timeout_ms config option",
+    prompt:
+      "Add a `request_timeout_ms` configuration option to the service. Thread it through `config.toml`, `ServiceConfig`, and the request handlers, falling back to 30000ms when unset. Add unit tests that prove the override and the default both apply.",
+  },
+  {
+    id: "03_failing_test",
+    label: "Diagnose + fix one failing test",
+    prompt:
+      "The unit test `service::tests::handles_zero_balance` is failing. Walk through the smallest reproducible diagnosis path and ship the minimal fix. Decide whether the test or the SUT is wrong, and justify the call.",
+  },
+  {
+    id: "04_doc_rename",
+    label: "Doc rename of Client::execute -> Client::run",
+    prompt:
+      "We renamed the public API `Client::execute()` to `Client::run()` in v0.5. Update every `docs/`, `examples/`, and `README.md` reference. Preserve the surrounding prose tone. Confirm the snippets still compile via `scripts/check-docs-snippets.sh`.",
+  },
+  {
+    id: "05_cross_file_refactor",
+    label: "Extract format_amount helper across 3 crates",
+    prompt:
+      "Three crates duplicate a `format_amount(value: i64) -> String` helper. Extract it into a shared `format-utils` crate, replace the three call sites, and verify the workspace still passes `cargo test --workspace`.",
+  },
+]
+
+fn __parse_arg(args, prefix) {
+  for arg in args ?? [] {
+    if starts_with(arg, prefix) {
+      return substring(arg, len(prefix), len(arg))
+    }
+  }
+  return nil
+}
+
+fn __has_flag(args, name) {
+  for arg in args ?? [] {
+    if arg == name {
+      return true
+    }
+  }
+  return false
+}
+
+fn __parse_int_arg(args, prefix, fallback) {
+  const raw = __parse_arg(args, prefix)
+  if raw == nil || raw == "" {
+    return fallback
+  }
+  return to_int(raw)
+}
+
+fn __truncated_text(text, limit) {
+  if len(text) <= limit {
+    return text
+  }
+  return substring(text, 0, limit)
+}
+
+fn __baseline_system() {
+  return "You are an experienced software engineer. Reply with a concrete, actionable plan in prose. Mention specific files, edits, and the commands you would run to verify."
+}
+
+fn __baseline_prompt(task) {
+  return task.prompt
+}
+
+fn __burin_system() {
+  return "You are a planner. Return ONLY a single JSON object (no prose, no markdown fences). Conform to the harn.plan.v1 schema."
+}
+
+fn __burin_prompt(task) {
+  return "Return a JSON object with this shape:\n"
+    + "{\n"
+    + "  \"steps\":[{\"id\":\"s1\",\"content\":\"...\",\"status\":\"pending\"},...],\n"
+    + "  \"assumptions\":[\"...\"],\n"
+    + "  \"open_questions\":[\"...\"],\n"
+    + "  \"verification_commands\":[\"cargo test ...\"]\n"
+    + "}\n\nTask: "
+    + task.prompt
+}
+
+fn __typed_ir_system() {
+  return "You are a planner. Return ONLY a single JSON object — no prose, no markdown fences. The object must match the typed task-plan IR (std/agent/task_plan)."
+}
+
+fn __typed_ir_example() {
+  return "{\"schema_version\":\"1\",\"objective\":\"Add request timeout config\",\"entry\":\"discover\","
+    + "\"nodes\":{"
+    + "\"discover\":{\"kind\":\"read_fact\",\"purpose\":\"Audit current handlers\",\"prompt\":\"Read ServiceConfig and the handler call sites.\"},"
+    + "\"edit\":{\"kind\":\"agent_loop\",\"purpose\":\"Add the option and tests\",\"prompt\":\"Add request_timeout_ms with a 30s default and unit tests.\",\"effects\":[\"writes_files\"],\"agent_loop\":{\"max_iterations\":8,\"done_sentinel\":\"DONE\"}},"
+    + "\"verify\":{\"kind\":\"verify\",\"purpose\":\"Run tests\",\"verify\":{\"command\":\"cargo test\",\"expect_status\":0}}"
+    + "},"
+    + "\"edges\":[{\"from\":\"discover\",\"to\":\"edit\"},{\"from\":\"edit\",\"to\":\"verify\"}],"
+    + "\"capabilities\":{\"tools\":[\"read\",\"edit\",\"run\"],\"side_effect_level\":\"writes_files\"}}"
+}
+
+fn __typed_ir_prompt(task) {
+  return "Node kinds: read_fact, search, context_pack, agent_loop, sub_agent, workflow_map, verify, human_gate, deterministic_command, join, compact.\n"
+    + "Required fields: schema_version=\"1\", objective, entry (node id), nodes (dict keyed by id), edges, capabilities ({tools, side_effect_level}).\n"
+    + "Every write-capable node MUST declare effects (e.g. \"writes_files\"). agent_loop nodes need a prompt and an agent_loop block. verify nodes need a verify block with command + expect_status.\n"
+    + "Example: "
+    + __typed_ir_example()
+    + "\n\nTask: "
+    + task.prompt
+}
+
+fn __extract_json(text) {
+  const t = trim(text)
+  let start = -1
+  for i in range(0, len(t)) {
+    if substring(t, i, i + 1) == "{" {
+      start = i
+      break
+    }
+  }
+  if start < 0 {
+    return t
+  }
+  let depth = 0
+  let in_string = false
+  let escaped = false
+  for i in range(start, len(t)) {
+    const ch = substring(t, i, i + 1)
+    if escaped {
+      escaped = false
+      continue
+    }
+    if in_string {
+      if ch == "\\" {
+        escaped = true
+      } else if ch == "\"" {
+        in_string = false
+      }
+      continue
+    }
+    if ch == "\"" {
+      in_string = true
+    } else if ch == "{" {
+      depth = depth + 1
+    } else if ch == "}" {
+      depth = depth - 1
+      if depth == 0 {
+        return substring(t, start, i + 1)
+      }
+    }
+  }
+  return t
+}
+
+fn __try_json(text) {
+  try {
+    const value = json_parse(__extract_json(text))
+    return {ok: true, value: value, error: nil}
+  } catch (e) {
+    return {ok: false, value: nil, error: e.message}
+  }
+}
+
+fn __count_numbered_steps(text) {
+  let count = 0
+  for n in range(1, 21) {
+    const marker = to_string(n) + "."
+    if contains(text, marker + " ") {
+      count = count + 1
+    }
+  }
+  return count
+}
+
+fn __count_bullet_lines(text) {
+  const lines = split(text, "\n")
+  let count = 0
+  for line in lines {
+    const t = trim(line)
+    if starts_with(t, "- ") || starts_with(t, "* ") {
+      count = count + 1
+    }
+  }
+  return count
+}
+
+fn __mentions_any(text, needles) {
+  for n in needles {
+    if contains(text, n) {
+      return true
+    }
+  }
+  return false
+}
+
+fn __score_baseline(call) {
+  const text = call.text
+  const chars = len(text)
+  const numbered = __count_numbered_steps(text)
+  const bullets = __count_bullet_lines(text)
+  const step_count = if numbered > bullets {
+    numbered
+  } else {
+    bullets
+  }
+  const mentions_files = __mentions_any(
+    text,
+    [".rs", ".toml", ".md", ".harn", "src/", "tests/", "docs/", "examples/"],
+  )
+  const mentions_verify = __mentions_any(text, ["cargo test", "cargo check", "scripts/", "verify"])
+  const success = chars > 80 && (step_count > 0 || mentions_files)
+  return {
+    parse_ok: true,
+    parse_error: nil,
+    structured_steps: step_count,
+    mentions_files: mentions_files,
+    mentions_verify: mentions_verify,
+    has_verification_contract: false,
+    has_capability_policy: false,
+    deterministic_steps: 0,
+    total_nodes: 0,
+    nodes_by_kind: {},
+    validate_ok: false,
+    validate_errors: 0,
+    validate_warnings: 0,
+    compile_ok: false,
+    workflow_validate_ok: false,
+    success: success,
+    output_chars: chars,
+    validate_error_messages: [],
+  }
+}
+
+fn __plan_steps_len(plan) {
+  const steps = plan?.steps
+  if type_of(steps) == "list" {
+    return len(steps)
+  }
+  return 0
+}
+
+fn __score_burin(call) {
+  const text = call.text
+  const parsed = __try_json(text)
+  if !parsed.ok {
+    return {
+      parse_ok: false,
+      parse_error: parsed.error,
+      structured_steps: 0,
+      mentions_files: false,
+      mentions_verify: false,
+      has_verification_contract: false,
+      has_capability_policy: false,
+      deterministic_steps: 0,
+      total_nodes: 0,
+      nodes_by_kind: {},
+      validate_ok: false,
+      validate_errors: 0,
+      validate_warnings: 0,
+      compile_ok: false,
+      workflow_validate_ok: false,
+      success: false,
+      output_chars: len(text),
+      validate_error_messages: [parsed.error],
+    }
+  }
+  const raw = parsed.value
+  let artifact_error = nil
+  const artifact = try {
+    plan_from(raw)
+  } catch (e) {
+    artifact_error = to_string(e)
+    nil
+  }
+  const steps = __plan_steps_len(raw)
+  const verification = if type_of(raw?.verification_commands) == "list" {
+    len(raw.verification_commands)
+  } else {
+    0
+  }
+  const assumptions = if type_of(raw?.assumptions) == "list" {
+    len(raw.assumptions)
+  } else {
+    0
+  }
+  const has_verify = verification > 0
+  const success = artifact != nil && steps > 0
+  return {
+    parse_ok: true,
+    parse_error: nil,
+    structured_steps: steps,
+    mentions_files: false,
+    mentions_verify: has_verify,
+    has_verification_contract: has_verify,
+    has_capability_policy: false,
+    deterministic_steps: verification,
+    total_nodes: steps,
+    nodes_by_kind: {step: steps, verification: verification, assumption: assumptions},
+    validate_ok: artifact != nil,
+    validate_errors: if artifact == nil {
+      1
+    } else {
+      0
+    },
+    validate_warnings: 0,
+    compile_ok: artifact != nil,
+    workflow_validate_ok: false,
+    success: success,
+    output_chars: len(text),
+    validate_error_messages: if artifact_error == nil {
+      []
+    } else {
+      [artifact_error]
+    },
+  }
+}
+
+const __DETERMINISTIC_KINDS: list<string> = [
+  "read_fact",
+  "search",
+  "context_pack",
+  "verify",
+  "deterministic_command",
+  "join",
+  "compact",
+  "human_gate",
+]
+
+fn __collect_kind_counts(plan) {
+  let counts = {}
+  const nodes = plan?.nodes
+  if type_of(nodes) != "dict" {
+    return counts
+  }
+  for node_id in nodes.keys() {
+    const node = nodes[node_id]
+    const kind = node?.kind ?? "unknown"
+    const prior = counts[kind] ?? 0
+    counts[kind] = prior + 1
+  }
+  return counts
+}
+
+fn __has_verify_node(plan) {
+  const nodes = plan?.nodes
+  if type_of(nodes) != "dict" {
+    return false
+  }
+  for node_id in nodes.keys() {
+    if nodes[node_id]?.kind == "verify" {
+      return true
+    }
+  }
+  return false
+}
+
+fn __deterministic_count(counts) {
+  let total = 0
+  for kind in __DETERMINISTIC_KINDS {
+    total = total + (counts?.[kind] ?? 0)
+  }
+  return total
+}
+
+fn __sum_counts(counts) {
+  let total = 0
+  for k in counts.keys() {
+    total = total + counts[k]
+  }
+  return total
+}
+
+fn __score_typed(call) {
+  const text = call.text
+  const parsed = __try_json(text)
+  if !parsed.ok {
+    return {
+      parse_ok: false,
+      parse_error: parsed.error,
+      structured_steps: 0,
+      mentions_files: false,
+      mentions_verify: false,
+      has_verification_contract: false,
+      has_capability_policy: false,
+      deterministic_steps: 0,
+      total_nodes: 0,
+      nodes_by_kind: {},
+      validate_ok: false,
+      validate_errors: 0,
+      validate_warnings: 0,
+      compile_ok: false,
+      workflow_validate_ok: false,
+      success: false,
+      output_chars: len(text),
+      validate_error_messages: [parsed.error],
+    }
+  }
+  const plan = parsed.value
+  const report = task_plan_validate(plan)
+  const compiled = task_plan_compile(plan)
+  const wf_report = if compiled.ok {
+    workflow_validate(compiled.workflow)
+  } else {
+    {valid: false, errors: [], warnings: []}
+  }
+  const kinds = __collect_kind_counts(plan)
+  const total = __sum_counts(kinds)
+  const deterministic = __deterministic_count(kinds)
+  const has_verify = __has_verify_node(plan)
+  const has_caps = type_of(plan?.capabilities) == "dict"
+  const success = report.valid && compiled.ok && (wf_report?.valid ?? false)
+  return {
+    parse_ok: true,
+    parse_error: nil,
+    structured_steps: total,
+    mentions_files: false,
+    mentions_verify: has_verify,
+    has_verification_contract: has_verify,
+    has_capability_policy: has_caps,
+    deterministic_steps: deterministic,
+    total_nodes: total,
+    nodes_by_kind: kinds,
+    validate_ok: report.valid,
+    validate_errors: len(report.errors),
+    validate_warnings: len(report.warnings),
+    compile_ok: compiled.ok,
+    workflow_validate_ok: wf_report?.valid ?? false,
+    success: success,
+    output_chars: len(text),
+    validate_error_messages: __validation_messages(report, wf_report, compiled),
+  }
+}
+
+fn __validation_messages(report, wf_report, compiled) {
+  let messages = []
+  for error in report?.errors ?? [] {
+    messages = messages
+      + [
+      to_string(error?.code ?? "validate_error") + ": " + to_string(error?.message ?? error),
+    ]
+  }
+  if !compiled?.ok {
+    for error in compiled?.errors ?? [] {
+      messages = messages + ["compile_error: " + to_string(error)]
+    }
+  }
+  if !wf_report?.valid {
+    for error in wf_report?.errors ?? [] {
+      messages = messages + ["workflow_error: " + to_string(error)]
+    }
+  }
+  return messages
+}
+
+fn __burin_plan_schema() {
+  return {
+    type: "object",
+    required: ["steps"],
+    additionalProperties: true,
+    properties: {
+      steps: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["id", "content", "status"],
+          additionalProperties: true,
+          properties: {
+            id: {type: "string"},
+            content: {type: "string"},
+            status: {type: "string"},
+            priority: {},
+          },
+        },
+      },
+      assumptions: {type: "array", items: {type: "string"}},
+      open_questions: {type: "array", items: {type: "string"}},
+      verification_commands: {type: "array", items: {type: "string"}},
+    },
+  }
+}
+
+fn __schema_for_strategy(strategy) {
+  if strategy == "burin_plan" {
+    return __burin_plan_schema()
+  }
+  if strategy == "typed_ir" {
+    return schema_to_json_schema(task_plan_schema())
+  }
+  return nil
+}
+
+fn __model_capabilities(harness: Harness, model) {
+  const info = try {
+    harness.llm.model_info(model)
+  } catch (e) {
+    nil
+  }
+  if info?.capabilities != nil {
+    return info.capabilities
+  }
+  const resolved = try {
+    harness.llm.resolve_model(model)
+  } catch (e) {
+    nil
+  }
+  if resolved != nil {
+    return harness.llm.provider_capabilities(resolved.provider, resolved.id)
+  }
+  return {}
+}
+
+fn __structured_output_supported(caps) {
+  if caps?.json_schema != nil || caps?.structured_output != nil {
+    return true
+  }
+  const mode = caps?.structured_output_mode
+  return mode != nil && mode != "" && mode != "none"
+}
+
+fn __llm_options(model, max_tokens, schema, use_structured_output) {
+  let opts = {model: model, temperature: 0.0, max_tokens: max_tokens}
+  if use_structured_output && schema != nil {
+    opts = opts
+      + {output: {schema: schema, strict: true, validation: "warn"}, schema_retries: 0}
+  }
+  return opts
+}
+
+fn __call_model_once(
+  llm: HarnessLlm,
+  model,
+  prompt,
+  system,
+  max_tokens,
+  schema,
+  use_structured_output,
+) {
+  const opts = __llm_options(model, max_tokens, schema, use_structured_output)
+  let used_structured_output = use_structured_output
+  const resp = try {
+    llm.call(prompt, system, opts)
+  } catch (e) {
+    if use_structured_output {
+      used_structured_output = false
+      llm.call(prompt, system, __llm_options(model, max_tokens, nil, false))
+    } else {
+      throw e
+    }
+  }
+  const telemetry = resp?.usage?.provider_telemetry ?? {}
+  const text = resp.text ?? ""
+  const input_tokens = resp.usage?.input_tokens ?? 0
+  const output_tokens = resp.usage?.output_tokens ?? 0
+  const cost = estimate_call_cost(
+    {
+      provider: resp.provider ?? "unknown",
+      model: resp.model ?? model,
+      input_tokens: input_tokens,
+      output_tokens: output_tokens,
+    },
+  )
+  return {
+    text: text,
+    input_tokens: input_tokens,
+    output_tokens: output_tokens,
+    wall_ms: telemetry?.client_wall_ms ?? 0,
+    server_load_ms: telemetry?.server_load_ms ?? 0,
+    model: resp.model ?? model,
+    provider: resp.provider ?? "unknown",
+    finish_reason: resp?.stop_reason,
+    cost_usd: cost?.cost_usd,
+    input_cost_usd: cost?.breakdown?.input_usd,
+    output_cost_usd: cost?.breakdown?.output_usd,
+    pricing_known: cost?.pricing_known ?? false,
+    structured_output_used: used_structured_output,
+  }
+}
+
+fn __is_length_finish(reason) {
+  return reason == "length" || reason == "max_tokens" || reason == "MAX_TOKENS"
+}
+
+fn __merge_calls(first, second, text, retry_history) {
+  return first
+    + {
+    text: text,
+    input_tokens: first.input_tokens + second.input_tokens,
+    output_tokens: first.output_tokens + second.output_tokens,
+    wall_ms: first.wall_ms + second.wall_ms,
+    server_load_ms: first.server_load_ms + second.server_load_ms,
+    finish_reason: second.finish_reason ?? first.finish_reason,
+    cost_usd: if first.cost_usd == nil || second.cost_usd == nil {
+      nil
+    } else {
+      first.cost_usd + second.cost_usd
+    },
+    input_cost_usd: if first.input_cost_usd == nil || second.input_cost_usd == nil {
+      nil
+    } else {
+      first.input_cost_usd + second.input_cost_usd
+    },
+    output_cost_usd: if first.output_cost_usd == nil || second.output_cost_usd == nil {
+      nil
+    } else {
+      first.output_cost_usd + second.output_cost_usd
+    },
+    pricing_known: first.pricing_known && second.pricing_known,
+    retry_history: retry_history,
+  }
+}
+
+fn __maybe_continue_length(
+  llm: HarnessLlm,
+  call,
+  model,
+  prompt,
+  system,
+  max_tokens,
+  retry_on_length,
+) {
+  if !retry_on_length || !__is_length_finish(call.finish_reason) {
+    return call + {retry_history: call?.retry_history ?? []}
+  }
+  const continuation_prompt = "Original task:\n"
+    + prompt
+    + "\n\nThe previous response stopped because it reached the output budget. Previous response prefix:\n"
+    + call
+    .text
+    + "\n\nContinue exactly where you left off. Do not add preamble, markdown fences, or a fresh opening object."
+  const continuation = __call_model_once(
+    llm,
+    model,
+    continuation_prompt,
+    system,
+    max_tokens,
+    nil,
+    false,
+  )
+  return __merge_calls(
+    call,
+    continuation,
+    call.text + continuation.text,
+    (call?.retry_history ?? []) + ["length_continuation"],
+  )
+}
+
+fn __strategy_call(llm: HarnessLlm, strategy, task, model, max_tokens, opts) {
+  const schema = __schema_for_strategy(strategy)
+  const use_structured = opts.structured_output && strategy != "baseline"
+    && __structured_output_supported(
+    opts.capabilities,
+  )
+  let call = nil
+  if strategy == "baseline" {
+    call = __call_model_once(
+      llm,
+      model,
+      __baseline_prompt(task),
+      __baseline_system(),
+      max_tokens,
+      nil,
+      false,
+    )
+    return __maybe_continue_length(
+      llm,
+      call,
+      model,
+      __baseline_prompt(task),
+      __baseline_system(),
+      max_tokens,
+      opts.retry_on_length,
+    )
+  }
+  if strategy == "burin_plan" {
+    call = __call_model_once(
+      llm,
+      model,
+      __burin_prompt(task),
+      __burin_system(),
+      max_tokens,
+      schema,
+      use_structured,
+    )
+    return __maybe_continue_length(
+      llm,
+      call,
+      model,
+      __burin_prompt(task),
+      __burin_system(),
+      max_tokens,
+      opts.retry_on_length,
+    )
+  }
+  call = __call_model_once(
+    llm,
+    model,
+    __typed_ir_prompt(task),
+    __typed_ir_system(),
+    max_tokens,
+    schema,
+    use_structured,
+  )
+  return __maybe_continue_length(
+    llm,
+    call,
+    model,
+    __typed_ir_prompt(task),
+    __typed_ir_system(),
+    max_tokens,
+    opts.retry_on_length,
+  )
+}
+
+fn __strategy_score(strategy, call) {
+  if strategy == "baseline" {
+    return __score_baseline(call)
+  }
+  if strategy == "burin_plan" {
+    return __score_burin(call)
+  }
+  return __score_typed(call)
+}
+
+fn __needs_schema_repair(score) {
+  return !score.parse_ok || !score.validate_ok || !score.compile_ok || !score.workflow_validate_ok
+}
+
+fn __repair_prompt(strategy, task, call, score) {
+  let messages = score.validate_error_messages
+  if len(messages) == 0 && score.parse_error != nil {
+    messages = [score.parse_error]
+  }
+  if len(messages) == 0 {
+    messages = ["the response did not satisfy the " + strategy + " schema"]
+  }
+  return "Your previous response for this planning task failed validation.\n\nTask:\n"
+    + task.prompt
+    + "\n\nValidation errors:\n- "
+    + messages.join("\n- ")
+    + "\n\nPrevious response:\n"
+    + call.text
+    + "\n\nReply with the corrected JSON object only. No prose, no markdown fences."
+}
+
+fn __maybe_repair_schema(llm: HarnessLlm, strategy, task, model, max_tokens, opts, call, score) {
+  if strategy == "baseline" || !opts.retry_on_schema_error || !__needs_schema_repair(score) {
+    return {call: call, score: score}
+  }
+  const schema = __schema_for_strategy(strategy)
+  const use_structured = opts.structured_output && __structured_output_supported(opts.capabilities)
+  const system = if strategy == "burin_plan" {
+    __burin_system()
+  } else {
+    __typed_ir_system()
+  }
+  const repair = __call_model_once(
+    llm,
+    model,
+    __repair_prompt(strategy, task, call, score),
+    system,
+    max_tokens,
+    schema,
+    use_structured,
+  )
+  const repaired = __merge_calls(
+    call,
+    repair,
+    repair.text,
+    (call?.retry_history ?? []) + ["schema_repair"],
+  )
+  return {call: repaired, score: __strategy_score(strategy, repaired)}
+}
+
+fn __run_cell(llm: HarnessLlm, strategy, task, trial, model, max_tokens, opts) {
+  const initial_call = __strategy_call(llm, strategy, task, model, max_tokens, opts)
+  const initial_score = __strategy_score(strategy, initial_call)
+  const repaired = __maybe_repair_schema(
+    llm,
+    strategy,
+    task,
+    model,
+    max_tokens,
+    opts,
+    initial_call,
+    initial_score,
+  )
+  const call = repaired.call
+  const score = repaired.score
+  return {
+    task_id: task.id,
+    task_label: task.label,
+    strategy: strategy,
+    trial: trial,
+    model: call.model,
+    provider: call.provider,
+    input_tokens: call.input_tokens,
+    output_tokens: call.output_tokens,
+    input_cost_usd: call.input_cost_usd,
+    output_cost_usd: call.output_cost_usd,
+    cost_usd: call.cost_usd,
+    pricing_known: call.pricing_known,
+    wall_ms: call.wall_ms,
+    server_load_ms: call.server_load_ms,
+    finish_reason: call.finish_reason,
+    retry_history: call?.retry_history ?? [],
+    structured_output_used: call?.structured_output_used ?? false,
+    output_text_truncated: __truncated_text(call.text, __OUTPUT_TEXT_TRUNCATE_CHARS),
+    output_chars: score.output_chars,
+    parse_ok: score.parse_ok,
+    parse_error: score.parse_error,
+    success: score.success,
+    structured_steps: score.structured_steps,
+    deterministic_steps: score.deterministic_steps,
+    total_nodes: score.total_nodes,
+    nodes_by_kind: score.nodes_by_kind,
+    has_verification_contract: score.has_verification_contract,
+    has_capability_policy: score.has_capability_policy,
+    mentions_files: score.mentions_files,
+    mentions_verify: score.mentions_verify,
+    validate_ok: score.validate_ok,
+    validate_errors: score.validate_errors,
+    validate_error_messages: score.validate_error_messages,
+    validate_warnings: score.validate_warnings,
+    compile_ok: score.compile_ok,
+    workflow_validate_ok: score.workflow_validate_ok,
+  }
+}
+
+fn main(harness: Harness) -> int {
+  const model = __parse_arg(argv, "--model=") ?? __DEFAULT_MODEL
+  const trials_arg = __parse_arg(argv, "--trials=")
+  const trials = if trials_arg == nil {
+    __DEFAULT_TRIALS
+  } else {
+    to_int(trials_arg)
+  }
+  const global_max_tokens = __parse_arg(argv, "--max-tokens=")
+  const max_tokens = {
+    baseline: __parse_int_arg(
+      argv,
+      "--max-tokens-baseline=",
+      if global_max_tokens == nil {
+        __DEFAULT_MAX_TOKENS_BASELINE
+      } else {
+        to_int(global_max_tokens)
+      },
+    ),
+    burin_plan: __parse_int_arg(
+      argv,
+      "--max-tokens-burin=",
+      if global_max_tokens == nil {
+        __DEFAULT_MAX_TOKENS_BURIN
+      } else {
+        to_int(global_max_tokens)
+      },
+    ),
+    typed_ir: __parse_int_arg(
+      argv,
+      "--max-tokens-typed-ir=",
+      if global_max_tokens == nil {
+        __DEFAULT_MAX_TOKENS_TYPED_IR
+      } else {
+        to_int(global_max_tokens)
+      },
+    ),
+  }
+  const opts = {
+    structured_output: __has_flag(argv, "--structured-output"),
+    retry_on_length: __has_flag(argv, "--retry-on-length"),
+    retry_on_schema_error: __has_flag(argv, "--retry-on-schema-error"),
+    capabilities: __model_capabilities(harness, model),
+  }
+  const out_path = __parse_arg(argv, "--out=")
+  const strategies = ["baseline", "burin_plan", "typed_ir"]
+  let records = []
+  for task in __TASKS {
+    for strategy in strategies {
+      for trial in range(1, trials + 1) {
+        harness.stdio.println(
+          "[run ] " + task.id + " / " + strategy + " / trial " + to_string(trial),
+        )
+        const record = __run_cell(
+          harness.llm,
+          strategy,
+          task,
+          trial,
+          model,
+          max_tokens[strategy],
+          opts,
+        )
+        records = records + [record]
+        harness.stdio.println(
+          "[done] " + task.id + " / " + strategy + " / trial " + to_string(trial)
+            + " success="
+            + to_string(record.success)
+            + " out_tok="
+            + to_string(record.output_tokens)
+            + " wall_ms="
+            + to_string(record.wall_ms),
+        )
+      }
+    }
+  }
+  let lines = []
+  for record in records {
+    lines = lines + [json_stringify(record)]
+  }
+  const body = lines.join("\n") + "\n"
+  if out_path == nil || out_path == "" {
+    harness.stdio.print(body)
+  } else {
+    harness.fs.write_text(out_path, body)
+    harness.stdio.println("wrote " + to_string(len(records)) + " records to " + out_path)
+  }
+  return 0
+}

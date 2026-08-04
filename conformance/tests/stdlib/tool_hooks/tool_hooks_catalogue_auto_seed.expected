@@ -1,0 +1,5 @@
+rewrite rust.cargo.target_dir_conflict
+deny universal.git_push_force_main
+deny universal.rm_rf_root_adjacent
+true
+echo hello

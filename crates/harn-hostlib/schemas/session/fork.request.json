@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/session/fork.request.json",
+  "title": "session.fork request",
+  "type": "object",
+  "properties": {
+    "root": { "type": "string", "minLength": 1 },
+    "session_id": { "type": "string", "minLength": 1 },
+    "at_event_id": { "type": "integer", "minimum": 1 },
+    "child_session_id": { "type": ["string", "null"] }
+  },
+  "required": ["root", "session_id", "at_event_id"],
+  "additionalProperties": false
+}

@@ -1,0 +1,25 @@
+pipeline default(harness: Harness) {
+  const input = "b"
+  const label = match input {
+    "a" -> { "alpha" }
+    "b" -> { "bravo" }
+    _ -> { "other" }
+  }
+  harness.stdio.println(label)
+  const n = 7
+  const size = match n {
+    0 -> { "zero" }
+    x if x > 5 -> {
+      let prefix = "large"
+      prefix + ":" + to_string(x)
+    }
+    _ -> { "small" }
+  }
+  harness.stdio.println(size)
+  const pair = [10, 20]
+  const second = match pair {
+    [_, value] -> { value }
+    _ -> { 0 }
+  }
+  harness.stdio.println(second)
+}

@@ -1,0 +1,359 @@
+/**
+ * Effect-phased tool batches: one inference response may fan out independent
+ * calls inside its first structural effect phase, but later phases must return
+ * to inference before they can run.
+ */
+import {
+  agent_capture_events,
+  agent_event_report,
+  agent_tool_batch_disposition_event_schema,
+} from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { AgentLoopOptions } from "std/agent/options"
+import { with_llm_script } from "std/testing"
+
+fn reset_counts(runtime: HarnessRuntime, counters) {
+  runtime.atomic_set(counters.read, 0)
+  runtime.atomic_set(counters.edit, 0)
+  runtime.atomic_set(counters.delete, 0)
+  runtime.atomic_set(counters.search, 0)
+  runtime.atomic_set(counters.verify, 0)
+  runtime.atomic_set(counters.done, 0)
+}
+
+fn phase_tools(runtime: HarnessRuntime, counters) {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "read_state",
+    "Observe current state.",
+    {
+      handler: { _args ->
+        runtime.atomic_add(counters.read, 1)
+        return "observed"
+      },
+      parameters: {},
+      annotations: {kind: "read", side_effect_level: "read_only"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "edit_state",
+    "Apply one atomic edit operation.",
+    {
+      handler: { args ->
+        runtime.atomic_add(counters.edit, 1)
+        if args?.fail ?? false {
+          throw "mutation rejected"
+        }
+        return "edited " + to_string(len(args?.operations ?? [])) + " operation(s)"
+      },
+      parameters: {
+        path: {type: "string"},
+        operations: {type: "array"},
+        fail: {type: "boolean", required: false},
+      },
+      annotations: {
+        kind: "edit",
+        side_effect_level: "workspace_write",
+        arg_schema: {path_params: ["path"]},
+      },
+    },
+  )
+  tools = tool_define(
+    tools,
+    "delete_state",
+    "Delete one resource.",
+    {
+      handler: { _args ->
+        runtime.atomic_add(counters.delete, 1)
+        return "deleted"
+      },
+      parameters: {},
+      annotations: {kind: "delete", side_effect_level: "workspace_write"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "search_state",
+    "Observe the post-mutation state.",
+    {
+      handler: { _args ->
+        runtime.atomic_add(counters.search, 1)
+        return "searched"
+      },
+      parameters: {},
+      annotations: {kind: "search", side_effect_level: "read_only"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "verify_state",
+    "Verify the resulting state.",
+    {
+      handler: { _args ->
+        runtime.atomic_add(counters.verify, 1)
+        return "verified"
+      },
+      parameters: {},
+      annotations: {kind: "verify", side_effect_level: "process_exec"},
+    },
+  )
+  return tool_define(
+    tools,
+    "done",
+    "Certify terminal completion.",
+    {
+      handler: { _args ->
+        runtime.atomic_add(counters.done, 1)
+        return "done"
+      },
+      parameters: {},
+      annotations: {kind: "terminal", side_effect_level: "none"},
+    },
+  )
+}
+
+fn read_call(id = "read") {
+  return {id: id, name: "read_state", arguments: {}}
+}
+
+fn edit_call(fail = false, id = "edit") {
+  return {
+    id: id,
+    name: "edit_state",
+    arguments: {
+      path: "src/app.harn",
+      operations: [
+        {kind: "replace", old: "before", new: "after"},
+        {kind: "insert", after: "anchor", text: "tail"},
+      ],
+      fail: fail,
+    },
+  }
+}
+
+fn delete_call(id = "delete") {
+  return {id: id, name: "delete_state", arguments: {}}
+}
+
+fn search_call(id = "search") {
+  return {id: id, name: "search_state", arguments: {}}
+}
+
+fn verify_call(id = "verify") {
+  return {id: id, name: "verify_state", arguments: {}}
+}
+
+fn done_call(id = "done") {
+  return {id: id, name: "done", arguments: {}}
+}
+
+fn receipt_counts(events) {
+  let executed = 0
+  let deferred = 0
+  let skipped = 0
+  let reproposed = 0
+  let total = 0
+  for event in events {
+    if event?.type != "tool_batch_disposition" {
+      continue
+    }
+    const schema_report = agent_event_report(event, agent_tool_batch_disposition_event_schema())
+    require schema_report.ok,
+      "tool batch disposition events must satisfy their public schema: "
+      + json_stringify(
+      {event: event, report: schema_report},
+    )
+    total = total + 1
+    const receipt = event.receipt
+    if receipt.disposition == "executed" {
+      executed = executed + 1
+    } else if receipt.disposition == "deferred" {
+      deferred = deferred + 1
+    } else if receipt.disposition == "skipped_after_blocking_result" {
+      skipped = skipped + 1
+    }
+    if receipt.proposal_status == "re_proposed" {
+      reproposed = reproposed + 1
+    }
+    require receipt.planned_at_ms >= 0, "every call needs planning timing"
+    if receipt.disposition == "executed" {
+      require receipt.started_at_ms != nil, "executed calls need start timing"
+      require receipt.finished_at_ms != nil, "executed calls need finish timing"
+      require receipt.duration_ms >= 0, "executed calls need a nonnegative duration"
+    } else {
+      require receipt.started_at_ms == nil, "unlaunched calls must not claim a start time"
+      require receipt.finished_at_ms == nil, "unlaunched calls must not claim a finish time"
+      require receipt.duration_ms == nil, "unlaunched calls must not claim a duration"
+    }
+  }
+  return {
+    total: total,
+    executed: executed,
+    deferred: deferred,
+    skipped: skipped,
+    reproposed: reproposed,
+  }
+}
+
+fn run_phased(harness: Harness, counters) {
+  reset_counts(harness.runtime, counters)
+  const session = "effect-phases-" + harness.random.uuid()
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    { ->
+      return with_llm_script(
+        harness.llm,
+        [
+          {
+            text: "##DONE##",
+            tool_calls: [
+              read_call("read-1"),
+              edit_call(false, "edit-1"),
+              delete_call("delete-1"),
+              search_call("search-1"),
+              verify_call("verify-1"),
+              done_call("done-1"),
+            ],
+          },
+          {text: "##DONE##"},
+          {
+            tool_calls: [
+              edit_call(false, "edit-2"),
+              delete_call("delete-2"),
+              search_call("search-2"),
+              verify_call("verify-2"),
+              done_call("done-2"),
+            ],
+          },
+          {tool_calls: [search_call("search-3"), verify_call("verify-3"), done_call("done-3")]},
+          {tool_calls: [verify_call("verify-4"), done_call("done-4")]},
+          {tool_calls: [done_call("done-5")]},
+        ],
+        { ->
+          const opts: AgentLoopOptions = {
+            provider: "mock",
+            tools: phase_tools(harness.runtime, counters),
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 7,
+            max_concurrent_tools: 4,
+            stop_after_successful_tools: ["done"],
+            session_id: session,
+          }
+          return agent_loop(harness, "Observe, mutate, re-observe, verify, then finish.", nil, opts)
+        },
+      )
+    },
+  )
+  return {
+    result: captured.result,
+    events: captured.events,
+    receipts: receipt_counts(captured.events),
+  }
+}
+
+fn run_blocked_then_recovered(harness: Harness, counters) {
+  reset_counts(harness.runtime, counters)
+  const session = "effect-phases-blocked-" + harness.random.uuid()
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    { ->
+      return with_llm_script(
+        harness.llm,
+        [
+          {
+            tool_calls: [
+              edit_call(true, "blocked-edit-1"),
+              verify_call("blocked-verify-1"),
+              done_call("blocked-done-1"),
+            ],
+          },
+          {tool_calls: [verify_call("blocked-verify-2"), done_call("blocked-done-2")]},
+          {
+            tool_calls: [
+              edit_call(false, "recovery-edit-3"),
+              verify_call("recovery-verify-3"),
+              done_call("recovery-done-3"),
+            ],
+          },
+          {tool_calls: [verify_call("recovery-verify-4"), done_call("recovery-done-4")]},
+          {tool_calls: [done_call("recovery-done-5")]},
+        ],
+        { ->
+          const opts: AgentLoopOptions = {
+            provider: "mock",
+            tools: phase_tools(harness.runtime, counters),
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 7,
+            max_concurrent_tools: 4,
+            stop_after_successful_tools: ["done"],
+            session_id: session,
+          }
+          return agent_loop(
+            harness,
+            "Recover from a rejected mutation before verifying.",
+            nil,
+            opts,
+          )
+        },
+      )
+    },
+  )
+  return {
+    result: captured.result,
+    events: captured.events,
+    receipts: receipt_counts(captured.events),
+  }
+}
+
+pipeline main(harness: Harness) {
+  const counters = {
+    read: harness.runtime.atomic(0),
+    edit: harness.runtime.atomic(0),
+    delete: harness.runtime.atomic(0),
+    search: harness.runtime.atomic(0),
+    verify: harness.runtime.atomic(0),
+    done: harness.runtime.atomic(0),
+  }
+  const phased = run_phased(harness, counters)
+  require phased.result.status == "done", "the phased batch should reach terminal completion"
+  require harness.runtime.atomic_get(counters.read) == 1, "the observation call must execute once"
+  require harness.runtime.atomic_get(counters.edit) == 1,
+    "one atomic edit call must remain one mutation"
+  require harness.runtime.atomic_get(counters.delete) == 1, "the delete call must execute once"
+  require harness.runtime.atomic_get(counters.search) == 1, "post-mutation search must execute once"
+  require harness.runtime.atomic_get(counters.verify) == 1, "verification must execute once"
+  require harness.runtime.atomic_get(counters.done) == 1, "terminal completion must execute once"
+  require phased.receipts.total == 17, "every proposed call needs a disposition receipt"
+  require phased.receipts.executed == 6, "each logical call should execute exactly once"
+  require phased.receipts.deferred == 11, "later effect phases should be deferred"
+  require phased.receipts.skipped == 0, "the successful path should not skip calls"
+  require phased.receipts.reproposed == 11,
+    "every deferred call should be recognized on re-proposal"
+  harness.stdio.println("phased.status=" + phased.result.status)
+  harness.stdio.println("phased.executed=" + to_string(phased.receipts.executed))
+  harness.stdio.println("phased.deferred=" + to_string(phased.receipts.deferred))
+  harness.stdio.println("phased.reproposed=" + to_string(phased.receipts.reproposed))
+  const blocked = run_blocked_then_recovered(harness, counters)
+  require blocked.result.status == "done", "a fresh mutation should recover a blocked batch"
+  require harness.runtime.atomic_get(counters.edit) == 2,
+    "the rejected mutation and its recovery should both execute"
+  require harness.runtime.atomic_get(counters.verify) == 1,
+    "verification re-proposed behind a blocking mutation result must not launch"
+  require harness.runtime.atomic_get(counters.done) == 1,
+    "completion must wait for recovered verification"
+  require blocked.receipts.skipped == 2, "verify and done should be skipped behind the barrier"
+  harness.stdio.println("blocked.status=" + blocked.result.status)
+  harness.stdio.println("blocked.skipped=" + to_string(blocked.receipts.skipped))
+  harness.stdio.println(
+    "blocked.counters.verify=" + to_string(harness.runtime.atomic_get(counters.verify)),
+  )
+  harness.stdio.println(
+    "blocked.counters.done=" + to_string(harness.runtime.atomic_get(counters.done)),
+  )
+}

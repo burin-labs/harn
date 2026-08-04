@@ -1,0 +1,56 @@
+import "std/triggers"
+
+/**
+ * CH-06 (#1877): an idempotent re-emit (same explicit `id`) still emits
+ * a `transcript.channel.emit` event with `inserted=false` /
+ * `duplicate=true`. Trigger fan-out is suppressed on the duplicate
+ * (existing CH-01 contract), so no `transcript.channel.match` event
+ * follows the duplicate even though the first emit produces one. This
+ * gives auditors a visible trail of attempts without re-firing
+ * downstream handlers.
+ */
+fn handle_event(harness: Harness, event) {
+  // no-op — the test asserts on the transcript stream, not handler effects
+  const _ = event
+}
+
+pipeline default(harness: Harness) {
+  harness.obs.enable_tracing(true)
+  const stream = harness.obs.event_log_subscribe({topic: "transcript.channel.lifecycle"})
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(
+    harness.random.range(100000, 999999),
+  )
+  const _ = harness.runtime.trigger_register(
+    {
+      id: "channel-otel-idem-" + unique,
+      kind: "channel.emit",
+      provider: "channel",
+      autonomy_tier: "act_auto",
+      handler: handle_event,
+      when: nil,
+      retry: nil,
+      match: {events: ["channel:ch.otel.idem.input"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  const event_id = "fixed-event-id-" + unique
+  const _ = harness.channels.append("ch.otel.idem.input", {seq: 1}, {id: event_id})
+  const _ = harness.channels.append("ch.otel.idem.input", {seq: 1}, {id: event_id})
+  const first = stream.next().value
+  const second = stream.next().value
+  const third = stream.next().value
+  harness.stdio.println(first.kind)
+  harness.stdio.println(first.payload.inserted)
+  harness.stdio.println(first.payload.duplicate)
+  harness.stdio.println(second.kind)
+  harness.stdio.println(third.kind)
+  harness.stdio.println(third.payload.inserted)
+  harness.stdio.println(third.payload.duplicate)
+  harness.obs.enable_tracing(false)
+}

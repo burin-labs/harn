@@ -1,0 +1,81 @@
+// Transcript integrity across a model-initiated suspension: when the model
+// calls agent_await_resumption(harness.agent, with a parallel sibling call in the same
+// turn), the persisted assistant tool_use turn must be closed out with
+// placeholder tool_results BEFORE the worker suspends. Default resume keeps
+// the transcript, and Anthropic rejects any assistant tool_use with no
+// adjacent tool_result (HTTP 400 on the first post-resume LLM call).
+import { agent_session_messages } from "std/agent/state"
+import "std/agent/workers"
+import { with_llm_script } from "std/testing"
+
+pipeline main(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        tool_calls: [
+          {id: "park_1", name: "agent_await_resumption", arguments: {reason: "waiting on review"}},
+          {id: "side_1", name: "list_files", arguments: {path: "."}},
+        ],
+        input_tokens: 7,
+        output_tokens: 3,
+      },
+    ],
+    { ->
+      const session_id = "await-integrity-" + harness.random.uuid()
+      const handle = sub_agent_run(
+        harness,
+        "Park until a reviewer responds.",
+        {
+          provider: "mock",
+          background: true,
+          session_id: session_id,
+          tool_format: "native",
+          max_iterations: 3,
+        },
+      )
+      const suspended = wait_agent(harness.agent, handle)
+      harness.stdio.println(suspended?.status)
+      const messages = agent_session_messages(harness.agent, session_id)
+      let park_result = nil
+      let side_result = nil
+      let pending_ids = []
+      let closed_ids = []
+      for message in messages {
+        if (message?.role ?? "") == "assistant" {
+          for call in message?.tool_calls ?? [] {
+            pending_ids = pending_ids.appending(to_string(call?.id ?? ""))
+          }
+        }
+        if (message?.role ?? "") == "tool" {
+          const call_id = to_string(message?.tool_call_id ?? "")
+          closed_ids = closed_ids.appending(call_id)
+          const content = to_string(message?.content ?? "")
+          if contains(content, "was not dispatched: awaiting_resumption") {
+            park_result = message
+          }
+          if contains(content, "was not dispatched: skipped") {
+            side_result = message
+          }
+        }
+      }
+      harness.stdio.println(park_result != nil)
+      harness.stdio.println(
+        contains(to_string(park_result?.content ?? ""), "was not dispatched: awaiting_resumption"),
+      )
+      harness.stdio.println(contains(to_string(park_result?.content ?? ""), "waiting on review"))
+      harness.stdio.println(side_result != nil)
+      harness.stdio.println(
+        contains(to_string(side_result?.content ?? ""), "was not dispatched: skipped"),
+      )
+      let orphaned = 0
+      for id in pending_ids {
+        if !contains(closed_ids, id) {
+          orphaned = orphaned + 1
+        }
+      }
+      harness.stdio.println(len(pending_ids))
+      harness.stdio.println(orphaned)
+    },
+  )
+}

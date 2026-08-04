@@ -1,0 +1,483 @@
+# Extending the CLI in `.harn`
+
+How to add or port a `harn` subcommand without writing Rust. Most CLI
+work is a text/JSON transform, a catalog lookup, a directory walk, or a
+process spawn — once a port lands, the Rust handler shrinks to a
+~5-line dispatch shim and the actual behavior lives in an embedded
+`.harn` script.
+
+This is the cookbook side of the harn-cli self-host epic
+([harn#2293]). The reference docs for the primitives the scripts
+build on are [`std/cli/argparse`](./cli-argparse-reference.md),
+[`std/cli/render`](./cli-render-reference.md),
+[`std/cli/paths`](./cli-paths-reference.md), and the
+[`harn --json` contract](./cli-json-contract.md).
+
+## Architecture
+
+`harn-cli` keeps top-level clap parsing in Rust — that's how `harn` gets
+fast help text, completions, and subcommand dispatch. After parsing,
+ported subcommands hand control to an embedded `.harn` script via the
+**dispatch wedge** in [`crates/harn-cli/src/dispatch.rs`][dispatch].
+The wedge looks the script up in the `STDLIB_CLI_SCRIPTS` table in
+[`crates/harn-stdlib/src/lib.rs`][stdlib-table], writes the embedded
+source to a temp file, and runs it through the same `harn run` code
+path the user-facing CLI uses. Bytecode cache, harness install, skill
+loader, store/metadata/checkpoint builtins all come along for free.
+
+The script receives `argv: list<string>` (everything after the
+subcommand name, the same global `harn run -- a b c` exposes) and
+reads the `HARN_OUTPUT_JSON` env var to decide between human and JSON
+output. Build-time constants and other host-provided context travel
+through scoped env vars rather than new builtins, so the script's
+contract stays small. Ported handlers should cut over directly to the
+embedded `.harn` implementation. Keep Rust only for clap parsing and
+host data collection that scripts cannot perform yet, then test the
+new output contract directly.
+
+## Walkthrough — port a fictional `harn greet <name>`
+
+End-to-end port of a brand-new subcommand. Total diff is about 80 lines
+across six files. The canonical real-world reference is the
+**`harn version` port in [#2328][w1-pr]** (W1) — it's the smallest
+meaningful port in the tree.
+
+### 1. Clap args struct
+
+`crates/harn-cli/src/cli/greet.rs`:
+
+```rust
+use clap::Args;
+
+#[derive(Debug, Args)]
+pub(crate) struct GreetArgs {
+    /// Who to greet.
+    pub name: String,
+    /// Emit a `JsonEnvelope` with `{ greeting }` instead of plain text.
+    #[arg(long)]
+    pub json: bool,
+}
+```
+
+### 2. Wire into the `Command` enum
+
+`crates/harn-cli/src/cli/mod.rs`:
+
+```rust
+mod greet;
+// ...
+pub(crate) use greet::GreetArgs;
+// ...
+#[derive(Debug, Subcommand)]
+pub(crate) enum Command {
+    // ...
+    /// Greet someone by name.
+    Greet(GreetArgs),
+    // ...
+}
+```
+
+### 3. Dispatch shim
+
+`crates/harn-cli/src/commands/greet.rs`:
+
+```rust
+//! `harn greet` dispatch shim. Clap parsing stays in Rust; rendering
+//! and command behavior live in `stdlib/cli/greet.harn`.
+
+use crate::cli::GreetArgs;
+use crate::dispatch;
+use crate::env_guard::ScopedEnvVar;
+
+pub(crate) async fn run(args: GreetArgs) -> i32 {
+    let _name = ScopedEnvVar::set("HARN_GREET_NAME", &args.name);
+    let argv = if args.json {
+        vec!["--json".to_string()]
+    } else {
+        Vec::new()
+    };
+    dispatch::dispatch_to_embedded_script("greet", argv, args.json).await
+}
+```
+
+Match the subcommand in the top-level dispatch (`lib.rs`):
+
+```rust
+Command::Greet(args) => {
+    let exit = commands::greet::run(args).await;
+    if exit != 0 {
+        process::harness.runtime.exit(exit);
+    }
+}
+```
+
+### 4. The `.harn` script
+
+`crates/harn-stdlib/src/stdlib/cli/greet.harn`:
+
+```harn
+/**
+ * `harn greet` ported to .harn. The name comes in via HARN_GREET_NAME
+ * (set by the dispatch shim) so we don't have to re-parse it from argv.
+ * JSON mode is gated by HARN_OUTPUT_JSON, the dispatch wedge's
+ * standard signal.
+ */
+fn render_envelope(name: string) -> string {
+  const env = {
+    schemaVersion: 1,
+    ok: true,
+    data: {greeting: "hello " + name},
+    error: nil,
+    warnings: [],
+  }
+  return json_stringify_pretty(env)
+}
+
+fn main(harness: Harness) {
+  const name = harness.env.get_or("HARN_GREET_NAME", "world")
+  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  if json_mode {
+    harness.stdio.println(render_envelope(name))
+  } else {
+    harness.stdio.println("hello " + name)
+  }
+}
+```
+
+### 5. Register the script
+
+`crates/harn-stdlib/src/lib.rs`, in `STDLIB_CLI_SCRIPTS`:
+
+```rust
+StdlibCliScript {
+    name: "greet",
+    source: include_str!("stdlib/cli/greet.harn"),
+},
+```
+
+The `name` is the lookup key the dispatch wedge passes in step 3;
+nested paths like `"eval/prompt"` are fine too (they're collapsed to
+`eval-prompt-` in the temp file prefix so the OS doesn't care).
+
+### 6. Contract test
+
+`crates/harn-cli/tests/greet_dispatch.rs`, following the established
+`*_dispatch.rs` pattern: drive the command as a subprocess and assert
+the human and JSON output contracts directly.
+
+```rust
+#[test]
+fn greet_human_output_is_stable() {
+    let harn = run_subprocess(&["greet", "kenneth"], &[]);
+    assert_eq!(harn.exit_code, 0);
+    assert_eq!(harn.stdout, "hello kenneth\n");
+}
+
+#[test]
+fn greet_json_envelope_is_stable() {
+    let harn = run_subprocess(&["greet", "kenneth", "--json"], &[]);
+    let h: serde_json::Value = serde_json::from_str(&harn.stdout).unwrap();
+    assert_eq!(h["schemaVersion"], 1);
+    assert_eq!(h["ok"], true);
+    assert_eq!(h["data"]["greeting"], "hello kenneth");
+}
+```
+
+JSON envelopes should be asserted as parsed `serde_json::Value` so tests
+care about the contract instead of key ordering.
+
+### 7. Tighten the LOC budget
+
+`scripts/ported_handlers.toml` ([C1 #2314][c1-ratchet]) carries one
+`[[handler]]` block per ported subcommand with a `max_loc` budget.
+Append a fresh entry for the new shim:
+
+```toml
+[[handler]]
+path = "crates/harn-cli/src/commands/greet.rs"
+max_loc = 45   # current+5 slack
+```
+
+The next port to land in this file shrinks the budget to its new
+`current+5`. The ratchet itself is a pure-`.harn` script
+(`scripts/check_ported_handler_loc.harn`) wired into
+`make check-ported-handler-loc` in the required Harn conformance and audit lane.
+
+## Argparse cookbook
+
+Common patterns using [`std/cli/argparse`](./cli-argparse-reference.md).
+`parse` returns a native
+`Result<CliInvocation<dict>, CliParseFailure>`; successful values keep
+declared arguments in `.options` and tokens after `--` in `.rest`.
+
+### Positional + required
+
+```harn
+import { parser, parse } from "std/cli/argparse"
+
+const spec = parser({
+  name: "render",
+  args: [
+    {name: "template", kind: "positional", required: true,
+     help: "Path to the .harn.prompt template."},
+  ],
+})
+const result = parse(spec, argv)
+if is_err(result) {
+  harness.stdio.eprintln(unwrap_err(result).message)
+  harness.runtime.exit(2)
+}
+const invocation = unwrap(result)
+const template = invocation.options.template
+```
+
+Positionals are required by default — flip to `required: false` to opt
+out, or set `variadic: true` to greedily collect the rest into a list.
+
+### Repeated flag
+
+```harn
+{name: "model", kind: "flag", short: "-m", long: "--model",
+ multi: true, value_name: "ID",
+ help: "Model id; repeat for multi-model fanout."}
+```
+
+With `multi: true`, the parsed value is a `list<string>` (defaulting to
+`[]` when unspecified), so `-m claude-opus-4-7 -m gpt-5` yields
+`["claude-opus-4-7", "gpt-5"]`.
+
+### Primitive values and defaults
+
+Set `parse` on a value-taking flag or positional to decode at the parser
+boundary:
+
+```harn
+{name: "jobs", kind: "flag", long: "--jobs",
+ parse: "int", default: 1}
+{name: "threshold", kind: "flag", long: "--threshold",
+ parse: "float"}
+{name: "enabled", kind: "flag", long: "--enabled",
+ parse: "bool"}
+{name: "labels", kind: "flag", long: "--labels",
+ parse: "list", separator: ":", multi: true}
+```
+
+The supported decoders are `string` (the default), `int`, `float`,
+`bool`, and `list`. Defaults are already typed and are inserted unchanged:
+use `default: 1`, not `default: "1"`. Repeated list flags flatten all
+split values, so `--labels core:cli --labels docs:tests` produces
+`["core", "cli", "docs", "tests"]`.
+
+### Typed option bag
+
+Use `parse_typed<T>` to make the parser and schema one boundary. It parses
+argv primitives, validates `.options` against `Schema<T>`, and returns a
+typed invocation directly.
+
+```harn
+import { parse_typed, parser } from "std/cli/argparse"
+
+type RenderOptions = {template: string, jobs: int, json: bool}
+
+const spec = parser({
+  name: "render",
+  args: [
+    {name: "template", kind: "positional"},
+    {name: "jobs", kind: "flag", long: "--jobs", parse: "int", default: 1},
+    {name: "json", kind: "switch", long: "--json"},
+  ],
+})
+
+const result = parse_typed(spec, argv, schema_of(RenderOptions))
+if is_err(result) {
+  harness.stdio.eprintln(unwrap_err(result).message)
+  harness.runtime.exit(2)
+}
+const options: RenderOptions = unwrap(result).options
+```
+
+The optional fourth argument, `apply_defaults`, defaults to `false`. Pass
+`true` only when defaults declared in the schema should be applied.
+`ArgSpec.default`, switch `false`, and `multi` `[]` defaults are applied by
+argv parsing regardless of that setting.
+
+### `--` separator → `rest`
+
+When no flag value is pending, a bare `--` stops argument parsing and
+routes every later token into the successful invocation's `.rest`:
+
+```bash
+harn greet -- --not-a-flag "hello world"
+```
+
+`unwrap(result).rest` is `["--not-a-flag", "hello world"]`. Use this to forward
+verbatim argv to a child process or to a downstream script. Required
+argument checks still run after the terminator.
+
+### Failure handling
+
+Both parse functions use the same native `Result` and JSON-safe
+`CliParseFailure`. Let `render_help` produce the usage block and report the
+failure message:
+
+```harn
+import { parser, parse, render_help } from "std/cli/argparse"
+
+const result = parse(spec, argv)
+if is_err(result) {
+  const failure = unwrap_err(result)
+  harness.stdio.eprintln(render_help(spec))
+  harness.stdio.eprintln("error: " + failure.message)
+  harness.runtime.exit(2)
+}
+const invocation = unwrap(result)
+```
+
+`failure.stage` is `argv` for token syntax and primitive decoding, or
+`schema` for `parse_typed` mismatches. Argv failures use codes such as
+`unknown_flag`, `missing_required`, and `invalid_value`; schema failures
+use top-level code `schema_mismatch`, with field paths on their issues.
+Static declaration mistakes are different: `parser(spec)` throws while
+building the parser, including for invalid kinds or decoders, conflicting
+names or aliases, invalid positional/variadic combinations, and invalid
+list separators.
+
+See the [`std/cli/argparse` reference](./cli-argparse-reference.md) for
+the full surface, error catalog, and `--help` layout contract.
+
+## Output rendering
+
+JSON-mode and human-mode rendering split cleanly through
+[`std/cli/render`](./cli-render-reference.md):
+
+```harn
+import { envelope, write_envelope, json_mode } from "std/cli/render"
+import { ansi_bold } from "std/ansi"
+import { render_table } from "std/table"
+
+fn main(harness: Harness) {
+  const items = [{provider: "anthropic", model: "claude-opus-4-7"}]
+  if json_mode() {
+    write_envelope(envelope({
+      schema_version: 1,
+      api_stability: "stable",
+      payload: {items: items},
+    }))
+    return
+  }
+  harness.stdio.println(ansi_bold("Models", {}))
+  harness.stdio.println(render_table(items, {
+    headers: ["Provider", "Model"],
+  }))
+}
+```
+
+- **`std/ansi`** handles color and tty detection; `NO_COLOR` and
+  `HARN_COLOR` are honored automatically.
+- **`std/table`** renders aligned tables, markdown tables, and
+  key/value tables with column auto-width and per-cell truncation.
+- **`std/cli/render`** layers the `envelope()` / `write_envelope()`
+  helpers on top so JSON output stays snapshot-test friendly with a
+  pinned top-level key order (`schemaVersion`, `apiStability`,
+  optional `warnings`, then `payload`).
+
+`json_mode()` reads `HARN_OUTPUT_JSON` so the script doesn't need to
+re-parse its own `--json` flag — the dispatch wedge already saw the
+host's choice.
+
+See the [`std/cli/render` reference](./cli-render-reference.md) for the
+full envelope contract and the [`harn --json` contract](./cli-json-contract.md)
+for the agent-facing version-bump discipline.
+
+## Config, data, and cache paths
+
+CLI scripts that need app-specific directories should use
+[`std/cli/paths`](./cli-paths-reference.md):
+
+```harn
+import { xdg_cache_home, xdg_config_home, xdg_data_home } from "std/cli/paths"
+
+const config_dir = xdg_config_home("harn")
+const data_dir = xdg_data_home("harn")
+const cache_dir = xdg_cache_home("harn")
+```
+
+The helpers honor absolute XDG env vars first, ignore relative XDG env
+vars, use `~/Library/Application Support` and `~/Library/Caches` on
+macOS when XDG is unset, and fall back to the standard `$HOME/.config`,
+`$HOME/.local/share`, and `$HOME/.cache` roots elsewhere. They only
+resolve paths; call `harness.fs.mkdir(...)` if a script needs to create
+the directory.
+
+## Adding a host capability
+
+When a port discovers a gap in the `harness.*` namespace — something
+the Rust handler does that no `.harn` script can — the answer is a new
+builtin via the G4 pattern ([#2297][g4]). G4 landed a first round of
+free builtins (`term_width`, `term_height`, `mkdtemp`, `glob`,
+`llm_catalog`, `llm_provider_status`) that today live as top-level functions so the
+ports could move. Directory policy that can be expressed from env vars
+belongs in `std/cli/paths` instead of a host capability. Process execution
+has since moved to `harness.process.run`, `sha256_hex` is a
+compatibility alias for `harness.crypto.sha256`, and the LLM catalog helpers
+have moved to `harness.llm.catalog()` and `harness.llm.providers()`. Prefer
+the canonical `harness.X.Y` sub-handle when the script receives a `Harness`
+parameter; top-level helpers remain aliases for scripts that run outside that
+shape. Add new capabilities the same way:
+
+1. Register the builtin in `crates/harn-vm/src/stdlib/<area>.rs` with a
+   `#[harn_builtin]` annotation (see
+   [Adding a stdlib builtin](../../CONTRIBUTING.md#adding-a-stdlib-builtin))
+   and wire the matching `Harness` accessor.
+2. Drop a conformance fixture under `conformance/tests/host_<cap>_*`
+   pinning the contract.
+3. Document the capability under `docs/src/host-capabilities/` and
+   cross-link from the parent index.
+
+Keep the builtin small and orthogonal — single capability, single
+return shape, no implicit side-effects. If a port wants something that
+feels like an editorial decision (a specific output format, a UI
+choice), keep that in the `.harn` script and add the smallest possible
+primitive instead.
+
+## Performance budget
+
+Cold-start matters more than steady-state for the CLI. Every ported
+subcommand has to meet a wall-clock budget pinned in
+`bench/cli/budgets.toml` and gated by `make bench-cli-cold-start`. The
+gate runs each subcommand under a cold bytecode cache, samples a
+fixed number of invocations, and asserts the median stays under the
+budget.
+
+```bash
+make bench-cli-cold-start
+```
+
+Two ratchets work together to keep the port honest:
+
+- **`make bench-cli-cold-start`** ([G5][g5] / `bench/cli/budgets.toml`)
+  fails when a ported script's cold-start regresses. Bump the budget
+  only with a rationale comment — re-tuning the budget is the loudest
+  possible signal that a port got slower.
+- **`make check-ported-handler-loc`** ([C1 #2314][c1-ratchet] /
+  `scripts/ported_handlers.toml`) fails when a Rust handler grows back
+  past its committed line count. When a port advances and shrinks a
+  shim, drop the budget to the new `current+5` in the same PR. When a
+  new handler joins the ratcheted set, append a fresh `[[handler]]`
+  block with its current+5 budget — never retroactively tighten the
+  existing entries.
+
+The bytecode cache (`HARN_BYTECODE_CACHE`) amortizes parse + typecheck
+across invocations after the first one; the cold-start gate measures
+the worst case. If a port can't meet its budget, the usual fixes are
+trimming imports from the script (only pull in what `main` actually
+uses), avoiding redundant `json_stringify` round-trips, and pushing
+per-call allocation off the hot path.
+
+[harn#2293]: https://github.com/burin-labs/harn/issues/2293
+[dispatch]: https://github.com/burin-labs/harn/blob/main/crates/harn-cli/src/dispatch.rs
+[stdlib-table]: https://github.com/burin-labs/harn/blob/main/crates/harn-stdlib/src/lib.rs
+[w1-pr]: https://github.com/burin-labs/harn/pull/2328
+[c1-ratchet]: https://github.com/burin-labs/harn/issues/2314
+[g4]: https://github.com/burin-labs/harn/issues/2297
+[g5]: https://github.com/burin-labs/harn/issues/2298

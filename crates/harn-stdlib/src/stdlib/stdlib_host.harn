@@ -1,0 +1,34 @@
+/**
+ * host_tools.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn host_tools(tools: HarnessTools) {
+  return tools.list_registered()
+}
+
+/**
+ * host_tool_lookup.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn host_tool_lookup(tools: HarnessTools, name: string) {
+  for entry in tools.list_registered() {
+    if entry?.name == name {
+      return entry
+    }
+  }
+  return nil
+}
+
+/**
+ * host_tool_available.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn host_tool_available(tools: HarnessTools, name: string) -> bool {
+  return host_tool_lookup(tools, name) != nil
+}

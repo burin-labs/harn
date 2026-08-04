@@ -1,0 +1,4 @@
+pipeline test(harness: Harness, task) {
+  // mcp_serve should reject non-registry arguments
+  harness.tools.mcp_tools("not a registry")
+}

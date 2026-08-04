@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/branch_overlay.request.json",
+  "title": "code_index.branch_overlay request",
+  "description": "Activate, create, or clear the per-branch CDC overlay. The overlay layers a delta on top of the base symbol graph; switching branches reuses every untouched file, so the reported `reuse_fraction` measures how close to the ≥95% target a given branch is.",
+  "type": "object",
+  "properties": {
+    "branch": {
+      "type": "string",
+      "description": "Branch name. Required for `activate` and `create`."
+    },
+    "action": {
+      "type": "string",
+      "enum": ["activate", "create", "deactivate"],
+      "default": "activate",
+      "description": "`activate` switches to an existing overlay (creating an empty one if it doesn't exist); `create` materializes a fresh overlay; `deactivate` falls back to the base graph."
+    },
+    "activate": {
+      "type": "boolean",
+      "default": true,
+      "description": "When `action` is `create`, also activate the new overlay immediately."
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/branch_overlay.response.json",
+  "title": "code_index.branch_overlay response",
+  "type": "object",
+  "properties": {
+    "active": {
+      "type": ["string", "null"],
+      "description": "Currently active overlay name, or null when none."
+    },
+    "reuse_fraction": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Share of base files reused untouched by the active overlay (1.0 when no overlay is active)."
+    }
+  },
+  "required": ["active", "reuse_fraction"],
+  "additionalProperties": false
+}

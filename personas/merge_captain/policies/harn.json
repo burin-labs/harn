@@ -1,0 +1,44 @@
+{
+  "repo": "burin-labs/harn",
+  "default_branch": "main",
+  "merge_method": "squash",
+  "merge_queue_enabled": true,
+  "required_checks": [
+    "ci / rust",
+    "ci / portal",
+    "ci / conformance"
+  ],
+  "required_review_count": 1,
+  "blocking_labels": [
+    "do-not-merge",
+    "needs-revision",
+    "release-block"
+  ],
+  "ready_label": null,
+  "max_in_flight": 8,
+  "local_verification": [
+    {"name": "make-test", "command": "make test"},
+    {"name": "make-conformance", "command": "make conformance"}
+  ],
+  "downstream": [
+    {"repo": "example-org/example-app", "action": "fetch_harn_bump"}
+  ],
+  "bump_after_merge": null,
+  "autopilot_states": ["queued", "waiting_checks", "behind"],
+  "require_human_for": ["blocked", "local_repair"],
+  "repair_worker": {
+    "enabled": false,
+    "handles_kinds": ["ci_failure"],
+    "require_human_for": [
+      "semantic_repair",
+      "force_push",
+      "admin_merge",
+      "release_tag",
+      "branch_delete"
+    ],
+    "autopilot_action_kinds": [],
+    "model": "claude-sonnet-4-6",
+    "max_iterations": 24,
+    "profile": "tool_using"
+  }
+}

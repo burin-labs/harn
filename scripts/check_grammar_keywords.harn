@@ -1,0 +1,104 @@
+// Guard the spec grammar's keyword vocabulary against the lexer.
+//
+// The `## Grammar` section of the language spec (assembled into
+// `spec/HARN_SPEC.md`) writes keywords as single-quoted EBNF literals
+// (`'fn'`, `'where'`, ...). The lexer's declarative keyword vocabulary in
+// `crates/harn-lexer/src/token.rs` is the source of truth for reserved
+// words, and `make check-tree-sitter-keywords` already keeps the tree-sitter
+// grammar in sync with it. Nothing checked that the *spec grammar* stayed in
+// sync, so a keyword renamed or removed in the lexer could linger as a stale
+// EBNF literal in the spec.
+//
+// This check fails if the grammar uses a single-quoted alphabetic literal
+// that is neither a reserved keyword nor a known contextual keyword
+// (recognized only in a specific position, e.g. `where` in a generic bound or
+// `with` in an option block — these are intentionally not reserved). Adding a
+// genuinely new contextual keyword means adding it to CONTEXTUAL below.
+//
+// Usage:
+//   harn run scripts/check_grammar_keywords.harn     # drift check; exit 1 on drift
+import "./sync_tree_sitter_keywords.harn"
+
+const SPEC = "spec/HARN_SPEC.md"
+
+const TOKEN_RS = "crates/harn-lexer/src/token.rs"
+
+// Position-sensitive words used in the grammar but deliberately NOT reserved
+// (so user code may still use them as identifiers outside their special
+// position). Keep alphabetical.
+const CONTEXTUAL = [
+  "as",
+  "block",
+  "default",
+  "each",
+  "max_concurrent",
+  "out",
+  "settle",
+  "timeout",
+  "where",
+  "with",
+]
+
+/** Extract the body of the `## Grammar` section from the assembled spec. */
+pub fn grammar_section(spec_text: string) -> string? {
+  const m = regex_captures(r"\n## Grammar\n(.*?)\n## ", spec_text, "s")
+  if m.count == 0 {
+    return nil
+  }
+  return m[0].groups[0]
+}
+
+/** Every distinct single-quoted alphabetic literal in `text` (`'fn'`). */
+pub fn single_quoted_words(text: string) -> list<string> {
+  let out: list<string> = []
+  for m in regex_captures(r"'([a-z_]+)'", text) {
+    out = out + [m.groups[0]]
+  }
+  return dedup(out)
+}
+
+pipeline main(harness: Harness, task) {
+  if !harness.fs.exists(SPEC) {
+    harness.stdio.eprintln("error: missing ${SPEC}")
+    return 1
+  }
+  if !harness.fs.exists(TOKEN_RS) {
+    harness.stdio.eprintln("error: missing ${TOKEN_RS}")
+    return 1
+  }
+  const section = grammar_section(harness.fs.read_text(SPEC))
+  if section == nil {
+    harness.stdio.eprintln("error: could not find the `## Grammar` section in ${SPEC}")
+    return 1
+  }
+  const lexer = lexer_keywords(harness.fs.read_text(TOKEN_RS))
+  if lexer == nil {
+    harness.stdio.eprintln("error: could not find the lexer keyword vocabulary in ${TOKEN_RS}")
+    return 1
+  }
+  const known = lexer + CONTEXTUAL
+  const literals = single_quoted_words(section)
+  let drift: list<string> = []
+  for word in literals {
+    if !known.contains(word) {
+      drift = drift + [word]
+    }
+  }
+  if drift.count > 0 {
+    harness.stdio.eprintln(
+      "error: the spec grammar uses keyword literal(s) that are neither reserved keywords nor known contextual keywords:",
+    )
+    harness.stdio.eprintln("  - ${drift.sorted().join(", ")}")
+    harness.stdio.eprintln(
+      "hint: a keyword may have been renamed/removed in crates/harn-lexer/src/token.rs without updating the spec grammar.",
+    )
+    harness.stdio.eprintln(
+      "      if it is a new contextual keyword, add it to CONTEXTUAL in scripts/check_grammar_keywords.harn.",
+    )
+    return 1
+  }
+  harness.stdio.println(
+    "grammar keyword vocabulary OK (${literals.count} literals checked against the lexer)",
+  )
+  return 0
+}

@@ -1,0 +1,24 @@
+/**
+ * Code Review Agent Example
+ *
+ * Run with:
+ *   cargo run --bin harn -- run examples/code-reviewer.harn
+ *
+ * This is a compact review agent that reviews a pasted patch or a task
+ * description with optional context files.
+ */
+pipeline default(harness: Harness, task) {
+  harness.stdio.log("Starting code review agent")
+  const system = """
+You are a senior code reviewer.
+Review the change for correctness, security, maintainability, and tests.
+Return:
+- must-fix issues
+- suggestions
+- missing tests
+End with a short verdict.
+"""
+  const review = harness.llm.call(task, system, {temperature: 0.2, max_tokens: 1200})
+  eval_metric("review_chars", review.text.count)
+  harness.stdio.println(review.text)
+}

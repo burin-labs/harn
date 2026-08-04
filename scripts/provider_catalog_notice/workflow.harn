@@ -1,0 +1,702 @@
+import { LlmCallOptions } from "std/llm/options"
+import "./types.harn"
+
+pub fn provider_notice_checks() -> list<string> {
+  return [
+    "check-provider-catalog-drift",
+    "check-provider-catalog",
+    "check-provider-matrix",
+    "check-provider-support",
+    "check-docs-snippets",
+  ]
+}
+
+fn __nonempty(value) -> bool {
+  return type_of(value) == "string" && trim(value) != ""
+}
+
+fn __notice_id(harness: Harness, notice: dict) -> string {
+  return sha256(
+    json_stringify(
+      {
+        source_id: notice?.source_id,
+        retrieved_at: notice?.retrieved_at,
+        provider: notice?.provider,
+        text: notice?.text,
+        source_url: notice?.source_url,
+        provenance: notice?.provenance,
+      },
+    ),
+  )
+}
+
+pub fn validate_notice(harness: Harness, notice: dict) -> Result<ProviderNotice, string> {
+  if !__nonempty(notice?.source_id) {
+    return Err("notice.source_id is required")
+  }
+  if !__nonempty(notice?.retrieved_at) {
+    return Err("notice.retrieved_at is required")
+  }
+  if regex_match(
+    "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(Z|[+-][0-9]{2}:[0-9]{2})$",
+    notice.retrieved_at,
+  )
+    == nil {
+    return Err("notice.retrieved_at must be an RFC 3339 timestamp")
+  }
+  if !__nonempty(notice?.provider) {
+    return Err("notice.provider is required")
+  }
+  if !contains(["authenticated", "verified_link", "unverified", "failed"], notice?.provenance) {
+    return Err("notice.provenance is invalid")
+  }
+  if !__nonempty(notice?.text) && !__nonempty(notice?.source_url) {
+    return Err("notice requires text or an immutable source_url")
+  }
+  const trusted: ProviderNotice = {
+    source_id: notice.source_id,
+    retrieved_at: notice.retrieved_at,
+    provider: notice.provider,
+    text: notice?.text,
+    source_url: notice?.source_url,
+    provenance: notice.provenance,
+  }
+  return Ok(trusted)
+}
+
+fn __provider_rows(catalog: dict, provider: string) -> list {
+  let rows = []
+  for row in catalog?.providers ?? [] {
+    if row?.name == provider || row?.id == provider {
+      rows = rows + [row]
+    }
+  }
+  return rows
+}
+
+fn __model_rows(catalog: dict, provider: string, model_id: string) -> list {
+  let rows = []
+  for row in catalog?.models ?? [] {
+    if row?.provider == provider && row?.id == model_id {
+      rows = rows + [row]
+    }
+  }
+  return rows
+}
+
+fn __base_receipt(
+  harness: Harness,
+  notice: ProviderNotice,
+  disposition: NoticeDisposition,
+  reason: string,
+) -> NoticeValidationReceipt {
+  const schema_version: "harn.provider_catalog_notice.v1" = "harn.provider_catalog_notice.v1"
+  const unresolved_verification: list<string> = []
+  const checks: list<string> = []
+  const receipt = {
+    schema_version: schema_version,
+    notice_id: __notice_id(harness, notice),
+    source_id: notice.source_id,
+    retrieved_at: notice.retrieved_at,
+    provenance: notice.provenance,
+    provider: notice.provider,
+    model_id: nil,
+    change_kind: nil,
+    effective_date: nil,
+    disposition: disposition,
+    reason: reason,
+    evidence: nil,
+    source_url: notice.source_url,
+    source_path: nil,
+    unresolved_verification: unresolved_verification,
+    checks: checks,
+  }
+  return schema_expect(receipt, schema_of(NoticeValidationReceipt))
+}
+
+fn __candidate_common_error(notice: ProviderNotice, candidate: dict) -> string? {
+  if !contains(["price", "retirement", "endpoint", "capability"], candidate?.kind) {
+    return "candidate.kind must be price, retirement, endpoint, or capability"
+  }
+  if !__nonempty(candidate?.provider) || !__nonempty(candidate?.model_id) {
+    return "candidate provider and model_id are required"
+  }
+  if candidate.provider != notice.provider {
+    return "candidate provider conflicts with notice provider"
+  }
+  if !__nonempty(candidate?.effective_date) {
+    return "candidate effective_date is required"
+  }
+  if regex_match("^[0-9]{4}-[0-9]{2}-[0-9]{2}$", candidate.effective_date) == nil {
+    return "candidate effective_date must be YYYY-MM-DD"
+  }
+  if !__nonempty(candidate?.evidence) {
+    return "candidate supporting evidence is required"
+  }
+  return nil
+}
+
+fn __candidate_variant_error(candidate: dict) -> string? {
+  if candidate.kind == "price" {
+    if !contains(
+      ["input_per_mtok", "output_per_mtok", "cache_read_per_mtok", "cache_write_per_mtok"],
+      candidate?.field,
+    ) {
+      return "price candidate field is invalid"
+    }
+    if type_of(candidate?.new_value) != "float" && type_of(candidate?.new_value) != "int" {
+      return "price candidate new_value must be numeric"
+    }
+    return nil
+  }
+  if candidate.kind == "retirement" {
+    if type_of(candidate?.old_value) != "bool" || type_of(candidate?.new_value) != "bool" {
+      return "retirement old_value and new_value must be booleans"
+    }
+    return nil
+  }
+  if candidate.kind == "endpoint" {
+    if !contains(["base_url", "chat_endpoint", "completion_endpoint"], candidate?.field) {
+      return "endpoint candidate field is invalid"
+    }
+    if !__nonempty(candidate?.old_value) || !__nonempty(candidate?.new_value) {
+      return "endpoint old_value and new_value are required"
+    }
+    return nil
+  }
+  if !contains(
+    [
+      "native_tools",
+      "vision",
+      "prompt_caching",
+      "audio_supported",
+      "pdf_supported",
+      "files_api_supported",
+    ],
+    candidate?.capability,
+  ) {
+    return "capability candidate capability is invalid"
+  }
+  if type_of(candidate?.old_value) != "bool" || type_of(candidate?.new_value) != "bool" {
+    return "capability old_value and new_value must be booleans"
+  }
+  return nil
+}
+
+fn __current_value(candidate: dict, provider_row: dict, model_row: dict) {
+  if candidate.kind == "price" {
+    return model_row?.pricing?.[candidate.field]
+  }
+  if candidate.kind == "retirement" {
+    if model_row?.deprecation?.status != nil {
+      return model_row.deprecation.status != "active"
+    }
+    return model_row?.deprecated ?? false
+  }
+  if candidate.kind == "endpoint" {
+    return provider_row?.endpoint?.[candidate.field] ?? provider_row[candidate.field]
+  }
+  if candidate.capability == "native_tools" && model_row?.tool_support?.native != nil {
+    return model_row.tool_support.native
+  }
+  if candidate.capability == "prompt_caching" && model_row?.prompt_cache != nil {
+    return model_row.prompt_cache
+  }
+  const artifact_name = if candidate.capability == "vision" {
+    "image"
+  } else if candidate.capability == "audio_supported" {
+    "audio"
+  } else if candidate.capability == "pdf_supported" {
+    "pdf"
+  } else if candidate.capability == "files_api_supported" {
+    "files"
+  } else if candidate.capability == "native_tools" {
+    "tools"
+  } else {
+    candidate.capability
+  }
+  if model_row?.modalities?.input != nil && artifact_name != "files" {
+    return model_row.modalities.input.contains(artifact_name)
+  }
+  return (model_row?.capability_tags ?? model_row?.capabilities ?? []).contains(artifact_name)
+}
+
+fn __values_equal(left, right) -> bool {
+  if type_of(left) == "int" || type_of(left) == "float" {
+    if type_of(right) != "int" && type_of(right) != "float" {
+      return false
+    }
+    return to_float(left) == to_float(right)
+  }
+  return left == right
+}
+
+fn __patch_descriptor(candidate: dict) -> dict {
+  if candidate.kind == "price" {
+    return {
+      table_kind: "model",
+      field: "pricing." + candidate.field,
+      old_value: candidate.old_value,
+      new_value: candidate.new_value,
+    }
+  }
+  if candidate.kind == "retirement" {
+    return {
+      table_kind: "model",
+      field: "deprecated",
+      old_value: candidate.old_value,
+      new_value: candidate.new_value,
+      note: "Retires " + candidate.effective_date + " per " + candidate.evidence,
+      replacement: candidate?.replacement,
+    }
+  }
+  if candidate.kind == "endpoint" {
+    return {
+      table_kind: "provider",
+      field: candidate.field,
+      old_value: candidate.old_value,
+      new_value: candidate.new_value,
+    }
+  }
+  return {
+    table_kind: "model",
+    field: "capabilities." + candidate.capability,
+    old_value: candidate.old_value,
+    new_value: candidate.new_value,
+  }
+}
+
+pub fn plan_notice(
+  harness: Harness,
+  notice_raw: dict,
+  extraction: dict,
+  catalog: dict,
+) -> NoticePlan {
+  const validated = validate_notice(harness, notice_raw)
+  if is_err(validated) {
+    const fallback: ProviderNotice = {
+      source_id: to_string(notice_raw?.source_id ?? "malformed"),
+      retrieved_at: to_string(notice_raw?.retrieved_at ?? "unknown"),
+      provider: to_string(notice_raw?.provider ?? "unknown"),
+      text: to_string(notice_raw?.text ?? "malformed notice"),
+      provenance: "failed",
+    }
+    return {receipt: __base_receipt(harness, fallback, "rejected", unwrap_err(validated))}
+  }
+  const notice = unwrap(validated)
+  if notice.provenance == "failed" || notice.provenance == "unverified" {
+    return {
+      receipt: __base_receipt(harness, notice, "rejected", "notice provenance is not trusted"),
+    }
+  }
+  if extraction?.classification == "irrelevant" {
+    return {
+      receipt: __base_receipt(
+        harness,
+        notice,
+        "no_op",
+        extraction?.reason ?? "notice does not affect the provider catalog",
+      ),
+    }
+  }
+  if extraction?.classification != "candidate" || extraction?.candidate == nil {
+    return {receipt: __base_receipt(harness, notice, "rejected", "malformed extraction result")}
+  }
+  const candidate = extraction.candidate
+  const common_error = __candidate_common_error(notice, candidate)
+  const variant_error = if common_error == nil {
+    __candidate_variant_error(candidate)
+  } else {
+    nil
+  }
+  if common_error != nil || variant_error != nil {
+    return {
+      receipt: __base_receipt(
+        harness,
+        notice,
+        "rejected",
+        common_error ?? variant_error ?? "invalid candidate",
+      ),
+    }
+  }
+  const providers = __provider_rows(catalog, candidate.provider)
+  if len(providers) == 0 {
+    return {
+      receipt: __base_receipt(
+        harness,
+        notice,
+        "no_op",
+        "provider is not supported by the current catalog",
+      )
+        + {
+        model_id: candidate.model_id,
+        change_kind: candidate.kind,
+        effective_date: candidate.effective_date,
+        evidence: candidate.evidence,
+      },
+      candidate: candidate,
+    }
+  }
+  if len(providers) != 1 {
+    return {receipt: __base_receipt(harness, notice, "rejected", "provider identity is ambiguous")}
+  }
+  const models = __model_rows(catalog, candidate.provider, candidate.model_id)
+  if len(models) == 0 {
+    return {
+      receipt: __base_receipt(
+        harness,
+        notice,
+        "incomplete_add",
+        "new model on a supported provider requires verification before catalog insertion",
+      )
+        + {
+        model_id: candidate.model_id,
+        change_kind: candidate.kind,
+        effective_date: candidate.effective_date,
+        evidence: candidate.evidence,
+        unresolved_verification: [
+          "context window and canonical provider model id",
+          "complete pricing and capability row",
+          "provider capability-matrix behavior",
+          "replacement/default routing impact",
+        ],
+      },
+      candidate: candidate,
+    }
+  }
+  if len(models) != 1 {
+    return {receipt: __base_receipt(harness, notice, "rejected", "model identity is ambiguous")}
+  }
+  const current = __current_value(candidate, providers[0], models[0])
+  if !__values_equal(current, candidate.old_value) {
+    return {
+      receipt: __base_receipt(
+        harness,
+        notice,
+        "rejected",
+        "candidate old_value conflicts with the current catalog row",
+      )
+        + {
+        model_id: candidate.model_id,
+        change_kind: candidate.kind,
+        effective_date: candidate.effective_date,
+        evidence: candidate.evidence,
+      },
+      candidate: candidate,
+    }
+  }
+  if __values_equal(current, candidate.new_value) {
+    return {
+      receipt: __base_receipt(
+        harness,
+        notice,
+        "no_op",
+        "current catalog already contains the proposed value",
+      )
+        + {
+        model_id: candidate.model_id,
+        change_kind: candidate.kind,
+        effective_date: candidate.effective_date,
+        evidence: candidate.evidence,
+      },
+      candidate: candidate,
+    }
+  }
+  return {
+    receipt: __base_receipt(harness, notice, "patch", "validated against one current catalog row")
+      + {
+      model_id: candidate.model_id,
+      change_kind: candidate.kind,
+      effective_date: candidate.effective_date,
+      evidence: candidate.evidence,
+    },
+    candidate: candidate,
+    patch: __patch_descriptor(candidate),
+  }
+}
+
+fn __table_header(candidate: dict) -> string {
+  if candidate.kind == "endpoint" {
+    return "[providers." + candidate.provider + "]"
+  }
+  return "[models.\"" + candidate.model_id + "\"]"
+}
+
+fn __capability_bounds(lines: list<string>, candidate: dict) -> Result<dict, string> {
+  const provider_header = "[[provider." + candidate.provider + "]]"
+  const match_line = "model_match = " + json_stringify(candidate.model_id)
+  let matches: list<int> = []
+  let index = 0
+  for line in lines {
+    if trim(line) == match_line {
+      matches = matches + [index]
+    }
+    index = index + 1
+  }
+  if len(matches) == 0 {
+    return Err(
+      "capability changes require one exact model_match rule; wildcard ownership is ambiguous",
+    )
+  }
+  if len(matches) != 1 {
+    return Err("exact capability model_match rule is ambiguous")
+  }
+  const match_index = matches[0] ?? 0
+  let start = match_index
+  while start > 0 && trim(lines[start]) != provider_header {
+    start = start - 1
+  }
+  if trim(lines[start]) != provider_header {
+    return Err("exact capability rule is not owned by the candidate provider")
+  }
+  let end = match_index + 1
+  while end < len(lines) && !starts_with(trim(lines[end]), "[[provider.") {
+    end = end + 1
+  }
+  return Ok({start: start, end: end})
+}
+
+fn __replace_line(lines: list<string>, index: int, replacement: string) -> list<string> {
+  let out: list<string> = []
+  let cursor = 0
+  for line in lines {
+    out = out
+      + [
+      if cursor == index {
+        replacement
+      } else {
+        line
+      },
+    ]
+    cursor = cursor + 1
+  }
+  return out
+}
+
+fn __insert_lines(lines: list<string>, index: int, additions: list<string>) -> list<string> {
+  let out: list<string> = []
+  let cursor = 0
+  for line in lines {
+    if cursor == index {
+      out = out + additions
+    }
+    out = out + [line]
+    cursor = cursor + 1
+  }
+  if index == len(lines) {
+    out = out + additions
+  }
+  return out
+}
+
+fn __table_bounds(lines: list<string>, header: string) -> Result<dict, string> {
+  let matches: list<int> = []
+  let index = 0
+  for line in lines {
+    if trim(line) == header {
+      matches = matches + [index]
+    }
+    index = index + 1
+  }
+  if len(matches) == 0 {
+    return Err("owning source table was not found")
+  }
+  if len(matches) != 1 {
+    return Err("owning source table is ambiguous")
+  }
+  const start = matches[0] ?? 0
+  let end = len(lines)
+  let cursor = start + 1
+  while cursor < len(lines) {
+    if starts_with(trim(lines[cursor]), "[") {
+      end = cursor
+      break
+    }
+    cursor = cursor + 1
+  }
+  return Ok({start: start, end: end})
+}
+
+fn __find_field_line(lines: list<string>, bounds: dict, field: string) -> Result<int, string> {
+  let matches: list<int> = []
+  let index = bounds.start + 1
+  while index < bounds.end {
+    if starts_with(trim(lines[index]), field + " =") {
+      matches = matches + [index]
+    }
+    index = index + 1
+  }
+  if len(matches) == 0 {
+    return Err("field '" + field + "' was not found in the owning source table")
+  }
+  if len(matches) != 1 {
+    return Err("field '" + field + "' is ambiguous in the owning source table")
+  }
+  return Ok(matches[0] ?? 0)
+}
+
+fn __apply_price(
+  lines: list<string>,
+  bounds: dict,
+  candidate: dict,
+) -> Result<list<string>, string> {
+  const found = __find_field_line(lines, bounds, "pricing")
+  if is_err(found) {
+    return Err(unwrap_err(found))
+  }
+  const index = unwrap(found)
+  const pattern = candidate.field + r"\s*=\s*[0-9]+(?:\.[0-9]+)?"
+  const replacement = candidate.field + " = " + to_string(candidate.new_value)
+  const updated = regex_replace(pattern, replacement, lines[index])
+  if updated == lines[index] {
+    return Err("price field was not found in the owning pricing row")
+  }
+  return Ok(__replace_line(lines, index, updated))
+}
+
+fn __apply_endpoint(
+  lines: list<string>,
+  bounds: dict,
+  candidate: dict,
+) -> Result<list<string>, string> {
+  const found = __find_field_line(lines, bounds, candidate.field)
+  if is_err(found) {
+    return Err(unwrap_err(found))
+  }
+  const index = unwrap(found)
+  return Ok(
+    __replace_line(lines, index, candidate.field + " = " + json_stringify(candidate.new_value)),
+  )
+}
+
+fn __optional_field_line(lines: list<string>, bounds: dict, field: string) -> Result<int?, string> {
+  const found = __find_field_line(lines, bounds, field)
+  if is_ok(found) {
+    return Ok(unwrap(found))
+  }
+  if contains(unwrap_err(found), "ambiguous") {
+    return Err(unwrap_err(found))
+  }
+  return Ok(nil)
+}
+
+fn __apply_retirement(
+  lines: list<string>,
+  bounds: dict,
+  candidate: dict,
+) -> Result<list<string>, string> {
+  let updated = lines
+  let insertion = bounds.end
+  const deprecated = __optional_field_line(lines, bounds, "deprecated")
+  if is_err(deprecated) {
+    return Err(unwrap_err(deprecated))
+  }
+  if unwrap(deprecated) != nil {
+    updated = __replace_line(
+      updated,
+      unwrap(deprecated) ?? 0,
+      "deprecated = " + to_string(candidate.new_value),
+    )
+  } else {
+    updated = __insert_lines(updated, insertion, ["deprecated = " + to_string(candidate.new_value)])
+    insertion = insertion + 1
+  }
+  let note = "Retires " + candidate.effective_date + " per " + candidate.evidence + "."
+  if candidate?.replacement != nil && trim(candidate.replacement) != "" {
+    note = note + " Use " + candidate.replacement + "."
+  }
+  const existing_note = __optional_field_line(lines, bounds, "deprecation_note")
+  if is_err(existing_note) {
+    return Err(unwrap_err(existing_note))
+  }
+  if unwrap(existing_note) != nil {
+    updated = __replace_line(
+      updated,
+      unwrap(existing_note) ?? 0,
+      "deprecation_note = " + json_stringify(note),
+    )
+  } else {
+    updated = __insert_lines(updated, insertion, ["deprecation_note = " + json_stringify(note)])
+  }
+  return Ok(updated)
+}
+
+fn __apply_capability(
+  lines: list<string>,
+  bounds: dict,
+  candidate: dict,
+) -> Result<list<string>, string> {
+  const found = __optional_field_line(lines, bounds, candidate.capability)
+  if is_err(found) {
+    return Err(unwrap_err(found))
+  }
+  if unwrap(found) != nil {
+    return Ok(
+      __replace_line(
+        lines,
+        unwrap(found) ?? 0,
+        candidate.capability + " = " + to_string(candidate.new_value),
+      ),
+    )
+  }
+  if candidate.old_value {
+    return Err("true capability is missing from the exact owning rule")
+  }
+  return Ok(
+    __insert_lines(
+      lines,
+      bounds.end,
+      [candidate.capability + " = " + to_string(candidate.new_value)],
+    ),
+  )
+}
+
+/**
+ * Apply one already-validated candidate to the single owning TOML table.
+ * This function does no model work and refuses missing or duplicate tables.
+ */
+pub fn apply_candidate_to_source(source: string, candidate: dict) -> Result<string, string> {
+  const lines = source.split("\n")
+  const bounds_result = if candidate.kind == "capability" {
+    __capability_bounds(lines, candidate)
+  } else {
+    __table_bounds(lines, __table_header(candidate))
+  }
+  if is_err(bounds_result) {
+    return Err(unwrap_err(bounds_result))
+  }
+  const bounds = unwrap(bounds_result)
+  const outcome = if candidate.kind == "price" {
+    __apply_price(lines, bounds, candidate)
+  } else if candidate.kind == "retirement" {
+    __apply_retirement(lines, bounds, candidate)
+  } else if candidate.kind == "endpoint" {
+    __apply_endpoint(lines, bounds, candidate)
+  } else {
+    __apply_capability(lines, bounds, candidate)
+  }
+  if is_err(outcome) {
+    return Err(unwrap_err(outcome))
+  }
+  return Ok(unwrap(outcome).join("\n"))
+}
+
+pub fn extraction_prompt(notice: ProviderNotice) -> string {
+  return """
+Extract at most one provider-catalog change from this trusted notice.
+Return classification "irrelevant" when it does not explicitly change a model price,
+retirement, provider endpoint, or model capability. Never infer missing identifiers
+or values. Preserve a short supporting excerpt or immutable link as evidence.
+
+Neutral notice:
+${json_stringify_pretty(notice)}
+"""
+}
+
+pub fn extract_notice(llm: HarnessLlm, notice: ProviderNotice, options: dict) -> NoticeExtraction {
+  const resolved: LlmCallOptions = schema_expect(
+    options + {budget: options?.budget ?? {max_cost_usd: 0.1}, max_tokens: 1200},
+    schema_of(LlmCallOptions),
+  )
+  return llm.call_structured(extraction_prompt(notice), schema_of(NoticeExtraction), resolved)
+}

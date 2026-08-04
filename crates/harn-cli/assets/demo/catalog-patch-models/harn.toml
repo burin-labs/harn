@@ -1,0 +1,25 @@
+# Demo manifest for the `[patch.models]` field-wise catalog patch overlay.
+#
+# The `[llm]` section contributes one demo catalog row plus a field-wise
+# patch for it. The patch names exactly two fields (`stream_timeout` and
+# `pricing.output_per_mtok`); every other field of the row — name,
+# context window, input pricing — must stay at its baseline value. Before
+# `[patch.models]`, tweaking one field meant copying the whole row
+# verbatim, which silently froze the rest of its fields against future
+# catalog updates.
+
+[llm.models."demo/patch-target"]
+name = "Patch Target (demo)"
+provider = "demo"
+context_window = 200000
+stream_timeout = 300.0
+
+[llm.models."demo/patch-target".pricing]
+input_per_mtok = 3.0
+output_per_mtok = 15.0
+
+[llm.patch.models."demo/patch-target"]
+stream_timeout = 1200.0
+
+[llm.patch.models."demo/patch-target".pricing]
+output_per_mtok = 7.5

@@ -1,0 +1,296 @@
+import { llm_call_options } from "std/llm/options"
+
+fn __rerank_text(value) {
+  if type_of(value) == "string" {
+    return value
+  }
+  return json_stringify(value)
+}
+
+fn __rerank_records(candidates) {
+  let records = []
+  for (index, candidate) in iter(candidates).enumerate() {
+    records = records.appending({index: index, candidate: candidate})
+  }
+  return records
+}
+
+fn __rerank_initial_scores(candidates) {
+  let scores = []
+  for (index, candidate) in iter(candidates).enumerate() {
+    scores = scores.appending(
+      {
+        index: index,
+        candidate: candidate,
+        wins: 0,
+        losses: 0,
+        ties: 0,
+        comparisons: 0,
+        score: 0.0,
+        avg_confidence: 0.0,
+        confidence_sum: 0.0,
+      },
+    )
+  }
+  return scores
+}
+
+fn __rerank_clamp01(value, fallback = 1.0) {
+  const parsed = to_float(value)
+  if parsed == nil {
+    return fallback
+  }
+  if parsed < 0.0 {
+    return 0.0
+  }
+  if parsed > 1.0 {
+    return 1.0
+  }
+  return parsed
+}
+
+fn __rerank_note_score(scores, index, outcome, confidence) {
+  const current = scores[index]
+  let next_scores = scores
+  let wins = current.wins
+  let losses = current.losses
+  let ties = current.ties
+  if outcome == "win" {
+    wins = wins + 1
+  } else if outcome == "loss" {
+    losses = losses + 1
+  } else {
+    ties = ties + 1
+  }
+  const comparisons = wins + losses + ties
+  const prior_confidence_sum = current?.confidence_sum ?? 0.0
+  const confidence_sum = prior_confidence_sum + confidence
+  next_scores[index] = current
+    + {
+    wins: wins,
+    losses: losses,
+    ties: ties,
+    comparisons: comparisons,
+    score: (wins - losses) * 1.0,
+    avg_confidence: confidence_sum / (comparisons * 1.0),
+    confidence_sum: confidence_sum,
+  }
+  return next_scores
+}
+
+fn __rerank_note_decision(state, left, right, decision) {
+  const confidence = __rerank_clamp01(decision?.confidence, 1.0)
+  let scores = state.scores
+  const winner = decision.winner
+  if winner == "left" {
+    scores = __rerank_note_score(scores, left.index, "win", confidence)
+    scores = __rerank_note_score(scores, right.index, "loss", confidence)
+  } else if winner == "right" {
+    scores = __rerank_note_score(scores, left.index, "loss", confidence)
+    scores = __rerank_note_score(scores, right.index, "win", confidence)
+  } else {
+    scores = __rerank_note_score(scores, left.index, "tie", confidence)
+    scores = __rerank_note_score(scores, right.index, "tie", confidence)
+  }
+  const comparison = {
+    left_index: left.index,
+    right_index: right.index,
+    winner: winner,
+    confidence: confidence,
+    reasoning: decision?.reasoning ?? "",
+  }
+  return {scores: scores, comparisons: state.comparisons.appending(comparison)}
+}
+
+fn __rerank_winner_from_string(value) {
+  const normalized = lowercase(trim(value))
+  if contains(["a", "left", "first", "candidate_a", "candidate a", "1"], normalized) {
+    return "left"
+  }
+  if contains(["b", "right", "second", "candidate_b", "candidate b", "2"], normalized) {
+    return "right"
+  }
+  if contains(["tie", "equal", "neither", "none", "same"], normalized) {
+    return "tie"
+  }
+  throw "pairwise_rerank: judge winner must be left/right/tie, got " + value
+}
+
+fn __rerank_normalize_decision(value) {
+  if type_of(value) == "dict" {
+    const raw_winner = value?.winner ?? value?.preferred ?? value?.choice ?? value?.verdict
+    return {
+      winner: __rerank_normalize_decision(raw_winner).winner,
+      confidence: __rerank_clamp01(value?.confidence, 1.0),
+      reasoning: value?.reasoning ?? value?.rationale ?? "",
+    }
+  }
+  if type_of(value) == "bool" {
+    return {
+      winner: if value {
+        "left"
+      } else {
+        "right"
+      },
+      confidence: 1.0,
+      reasoning: "",
+    }
+  }
+  if type_of(value) == "int" || type_of(value) == "float" {
+    if value > 0 {
+      return {winner: "left", confidence: 1.0, reasoning: ""}
+    }
+    if value < 0 {
+      return {winner: "right", confidence: 1.0, reasoning: ""}
+    }
+    return {winner: "tie", confidence: 1.0, reasoning: ""}
+  }
+  if type_of(value) == "string" {
+    return {winner: __rerank_winner_from_string(value), confidence: 1.0, reasoning: ""}
+  }
+  throw "pairwise_rerank: judge must return a dict, string, bool, int, or float"
+}
+
+fn __rerank_prompt(fs: HarnessFs, left, right, opts) {
+  return fs.render_prompt(
+    "std/llm/prompts/pairwise_rerank_user.harn.prompt",
+    {
+      task: opts?.task ?? opts?.prompt ?? "",
+      criteria: opts?.criteria ?? opts?.rubric ?? "",
+      left: __rerank_text(left.candidate),
+      right: __rerank_text(right.candidate),
+    },
+  )
+}
+
+fn __rerank_schema() {
+  return {
+    type: "object",
+    properties: {
+      winner: {type: "string", description: "One of: A, B, tie."},
+      confidence: {type: "number", description: "Preference confidence from 0.0 to 1.0."},
+      reasoning: {type: "string"},
+    },
+    required: ["winner"],
+  }
+}
+
+fn __rerank_llm_options(opts) {
+  const base = llm_call_options(opts?.llm_options ?? opts ?? {})
+  return base
+    + {
+    max_tokens: base?.max_tokens ?? 128,
+    temperature: base?.temperature ?? 0.0,
+    stream: false,
+    system: base?.system ?? opts?.system
+      ?? "You are a pairwise reward model. Pick the candidate that better satisfies the task and return only schema-valid JSON.",
+  }
+}
+
+fn __rerank_compare(fs: HarnessFs, llm: HarnessLlm, left, right, opts) {
+  if opts?.compare != nil {
+    return __rerank_normalize_decision(
+      opts.compare(
+        left.candidate,
+        right.candidate,
+        {left_index: left.index, right_index: right.index, task: opts?.task},
+      ),
+    )
+  }
+  const result = llm.call_structured(
+    __rerank_prompt(fs, left, right, opts),
+    __rerank_schema(),
+    __rerank_llm_options(opts),
+  )
+  return __rerank_normalize_decision(result)
+}
+
+fn __rerank_merge(fs: HarnessFs, llm: HarnessLlm, left, right, opts, state) {
+  let out = []
+  let left_idx = 0
+  let right_idx = 0
+  let next_state = state
+  while left_idx < len(left) && right_idx < len(right) {
+    const decision = __rerank_compare(fs, llm, left[left_idx], right[right_idx], opts)
+    next_state = __rerank_note_decision(next_state, left[left_idx], right[right_idx], decision)
+    if decision.winner == "right" {
+      out = out.appending(right[right_idx])
+      right_idx = right_idx + 1
+    } else {
+      out = out.appending(left[left_idx])
+      left_idx = left_idx + 1
+    }
+  }
+  while left_idx < len(left) {
+    out = out.appending(left[left_idx])
+    left_idx = left_idx + 1
+  }
+  while right_idx < len(right) {
+    out = out.appending(right[right_idx])
+    right_idx = right_idx + 1
+  }
+  return {ranked: out, state: next_state}
+}
+
+fn __rerank_sort(harness: Harness, records, opts, state) {
+  if len(records) <= 1 {
+    return {ranked: records, state: state}
+  }
+  const mid = floor(len(records) / 2)
+  const left = __rerank_sort(harness, records.slice(0, mid), opts, state)
+  const right = __rerank_sort(harness, records.slice(mid, len(records)), opts, left.state)
+  return __rerank_merge(harness.fs, harness.llm, left.ranked, right.ranked, opts, right.state)
+}
+
+fn __rerank_strip_internal_score_fields(scores) {
+  let out = []
+  for score in scores {
+    out = out.appending(
+      {
+        index: score.index,
+        candidate: score.candidate,
+        wins: score.wins,
+        losses: score.losses,
+        ties: score.ties,
+        comparisons: score.comparisons,
+        score: score.score,
+        avg_confidence: score.avg_confidence,
+      },
+    )
+  }
+  return out
+}
+
+/**
+ * pairwise_rerank ranks candidates through O(n log n) pairwise comparisons.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn pairwise_rerank(harness: Harness, candidates, opts = nil) -> dict {
+  require type_of(candidates) == "list", "pairwise_rerank: candidates must be a list"
+  if len(candidates) == 0 {
+    return {ranked: [], scores: [], comparisons: []}
+  }
+  const initial_state = {scores: __rerank_initial_scores(candidates), comparisons: []}
+  const sorted = __rerank_sort(harness, __rerank_records(candidates), opts ?? {}, initial_state)
+  let ranked = []
+  for record in sorted.ranked {
+    ranked = ranked.appending(record.candidate)
+  }
+  return {
+    ranked: ranked,
+    scores: __rerank_strip_internal_score_fields(sorted.state.scores),
+    comparisons: sorted.state.comparisons,
+  }
+}
+
+/**
+ * self_certainty returns length-normalized confidence from token log probabilities.
+ *
+ * @effects: [llm.call]
+ * @errors: []
+ */
+pub fn self_certainty(llm: HarnessLlm, text, model_opts = nil) -> float {
+  return llm.self_certainty(text, model_opts ?? {})
+}

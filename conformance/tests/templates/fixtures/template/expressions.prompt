@@ -1,0 +1,3 @@
+{{if count > 10}}big{{elif count > 0}}some{{else}}none{{end}}
+{{if name == "alice" and active}}alice-active{{end}}
+{{if not active or role == "admin"}}has-access{{end}}

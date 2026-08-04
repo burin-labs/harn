@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/rules/fold.request.json",
+  "title": "rules.fold request",
+  "description": "Fold consecutive destructure-default statements in dry-run mode by default.",
+  "type": "object",
+  "properties": {
+    "source": { "type": "string" },
+    "language": { "type": "string" },
+    "path": { "type": "string" },
+    "paths": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "dry_run": { "type": "boolean", "default": true }
+  },
+  "additionalProperties": false
+}

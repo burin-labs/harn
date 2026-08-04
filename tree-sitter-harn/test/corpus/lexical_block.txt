@@ -1,0 +1,45 @@
+==================
+Explicit Lexical Block
+==================
+
+pipeline main(task) {
+  block {
+    let inner = 1
+    log(inner)
+  }
+  let block = {value: 2}
+  log(block.value)
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    (identifier)
+    (parameter_list
+      (typed_parameter
+        (identifier)))
+    (block
+      (block_statement
+        (block
+          (let_binding
+            (identifier)
+            (integer_literal))
+          (expression_statement
+            (call_expression
+              (identifier)
+              (argument_list
+                (identifier))))))
+      (let_binding
+        (identifier)
+        (dict_literal
+          (dict_entry
+            (identifier)
+            (integer_literal))))
+      (expression_statement
+        (call_expression
+          (identifier)
+          (argument_list
+            (property_access
+              (identifier)
+              (identifier))))))))

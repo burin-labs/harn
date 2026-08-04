@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/freshness.response.json",
+  "title": "code_index.freshness response",
+  "type": "object",
+  "properties": {
+    "path": { "type": "string" },
+    "known": {
+      "type": "boolean",
+      "description": "True when the file is in the index; false when never indexed."
+    },
+    "stale": {
+      "type": "boolean",
+      "description": "True when the disk hash differs from the indexed hash (or the file is missing)."
+    },
+    "indexed_hash": {
+      "type": ["string", "null"],
+      "description": "Hex-encoded FNV-1a hash of the indexed content, or null when not indexed."
+    },
+    "indexed_mtime_ms": {
+      "type": ["integer", "null"],
+      "description": "Mtime (ms since epoch) the index last observed."
+    },
+    "disk_hash": {
+      "type": ["string", "null"],
+      "description": "Hex-encoded hash of the current bytes on disk, or null when the file no longer exists."
+    },
+    "disk_mtime_ms": {
+      "type": ["integer", "null"],
+      "description": "Current mtime (ms since epoch), or 0 when the file is unreadable."
+    }
+  },
+  "required": [
+    "path",
+    "known",
+    "stale",
+    "indexed_hash",
+    "indexed_mtime_ms",
+    "disk_hash",
+    "disk_mtime_ms"
+  ],
+  "additionalProperties": false
+}

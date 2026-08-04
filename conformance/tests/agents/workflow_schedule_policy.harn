@@ -1,0 +1,34 @@
+import { workflow_join_readiness, workflow_next_edges } from "std/workflow/schedule"
+
+pipeline default(harness: Harness) {
+  const graph = {
+    edges: [
+      {from: "a", to: "join"},
+      {from: "b", to: "join"},
+      {from: "gate", to: "pass", branch: "true"},
+      {from: "gate", to: "fallback"},
+    ],
+  }
+  const wait_all = workflow_join_readiness(
+    {graph: graph, node_id: "join", node: {join_policy: {strategy: "all"}}, completed_nodes: ["a"]},
+  )
+  harness.stdio.println(wait_all.ready)
+  harness.stdio.println(wait_all.required)
+  harness.stdio.println(wait_all.completed_inputs)
+  const quorum = workflow_join_readiness(
+    {
+      graph: graph,
+      node_id: "join",
+      node: {join_policy: {strategy: "quorum", min_completed: 1}},
+      completed_nodes: ["a"],
+    },
+  )
+  harness.stdio.println(quorum.ready)
+  harness.stdio.println(quorum.required)
+  const exact = workflow_next_edges({graph: graph, current: "gate", branch: "true"})
+  harness.stdio.println(len(exact))
+  harness.stdio.println(exact[0].to)
+  const fallback = workflow_next_edges({graph: graph, current: "gate", branch: "false"})
+  harness.stdio.println(len(fallback))
+  harness.stdio.println(fallback[0].to)
+}

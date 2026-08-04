@@ -1,0 +1,12 @@
+pipeline default(harness: Harness) {
+  // `regex_replace` is an alias for `regex_replace`. Both
+  // replace every match and both support `$1`, `$2`, `${name}`
+  // backrefs from the `regex` crate.
+  const swapped = regex_replace("(\\w+)\\s(\\w+)", "$2 $1", "hello world")
+  harness.stdio.println(swapped)
+  const swapped_alias = regex_replace("(\\w+)\\s(\\w+)", "$2 $1", "hello world")
+  harness.stdio.println(swapped_alias)
+  // Named backrefs work as well.
+  const shouty = regex_replace("(?P<word>\\w+)", "<$word>", "one two three")
+  harness.stdio.println(shouty)
+}

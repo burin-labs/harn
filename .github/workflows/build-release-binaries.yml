@@ -1,0 +1,1783 @@
+name: Build release binaries
+
+# Triggers, in order of importance:
+#
+#   1. push tags v* — the real release path. Builds, signs, notarizes,
+#      packages, uploads artifacts, creates the GitHub release, and
+#      publishes the container image. Driven by release_harn.harn pushing
+#      the tag at the pinned commit (before the Release PR merges).
+#
+#   2. push main — warm-cache-only mode. Runs the same build matrix to
+#      populate the per-target Swatinem rust-cache on main so the next
+#      tag push can restore warm via restore-keys prefix matching.
+#      Skips sign/notarize/package/upload/release/container. Release PR
+#      merge commits are skipped here: their tag release is already running
+#      from the same source state, and an overlapping main warm cannot save
+#      a default-branch cache early enough to help that active tag run.
+#
+#      The setup job below short-circuits this mode unless the push changed a
+#      compile or build-topology input declared in
+#      .github/release-warm-cache-paths.yml. Post-build gates do not rotate a
+#      Rust cache and therefore do not trigger the matrix. The check lives in
+#      the setup job rather than as a `paths:` trigger filter because one
+#      `push:` trigger must continue to cover both branches and release tags.
+#
+#   3. schedule, daily — safety-net warm-up that refreshes the cache
+#      against GitHub's 7-day no-access eviction even during quiet
+#      stretches on main. Scheduled warms use their own concurrency group
+#      so a later no-op `main` push cannot cancel a full warm matrix and
+#      replace it with a skipped setup-only run.
+#
+#   4. workflow_dispatch — manual recovery of an existing tag, an explicit
+#      warm-cache-only run on `main`, or a non-publishing targeted benchmark
+#      used to measure an alternate runner before changing release policy.
+#
+# Cache architecture note. GitHub Actions caches are scoped per-ref: a
+# tag-push run (refs/tags/vX.Y.Z) can only restore caches saved on that
+# exact tag or on the default branch (main). It cannot reach caches
+# saved by another tag's run. So the warm-only events (2, 3, and explicit
+# warm-cache workflow_dispatch) own the save; tag-push and release
+# workflow_dispatch only restore. Swatinem's built-in restore key still
+# includes its Rust-environment hash, so a version/toolchain/workspace-key
+# rotation can miss otherwise compatible same-target caches. The local
+# ./.github/actions/rust-cache wrapper therefore runs a restore-only
+# same-target fallback first; Swatinem still owns the precise save key.
+# Cargo then does an incremental rebuild of just the deps whose fingerprints
+# actually changed instead of a 30-50 min cold compile per target.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  schedule:
+    # Daily warm at 05:17 UTC. Staggered from release-smoke's 09:17 cron
+    # so the two release-mode workflows don't contend for runners or for
+    # the per-repo cache budget at the same minute.
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to (re-)release, e.g. v0.7.31. Leave empty when warm_cache_only is true.'
+        required: false
+        type: string
+      warm_cache_only:
+        description: 'Build the release matrix on main only to refresh default-branch Rust caches.'
+        required: false
+        type: boolean
+        default: false
+      force_rebuild:
+        description: 'Rebuild/re-publish even when release assets and the versioned container image already exist.'
+        required: false
+        type: boolean
+        default: false
+      targets:
+        description: 'Optional comma/space-separated Rust target triples to rebuild/re-publish for tag recovery. Leave empty for missing-asset detection.'
+        required: false
+        type: string
+        default: ''
+      legacy_provenance_override:
+        description: 'Audited JSON binding exact SHA-256 values for unattested archives from an older release. Empty fails closed.'
+        required: false
+        type: string
+        default: ''
+      benchmark_only:
+        description: 'Build only the requested targets from the dispatched ref; never sign, package, upload, finalize a release, publish a container, or save caches.'
+        required: false
+        type: boolean
+        default: false
+      benchmark_source_ref:
+        description: 'Optional immutable source ref to build under current-main benchmark policy.'
+        required: false
+        type: string
+        default: ''
+      benchmark_source_sha:
+        description: 'Required exact 40-hex commit when benchmark_source_ref is set.'
+        required: false
+        type: string
+        default: ''
+      benchmark_cargo_bloat:
+        description: 'Also run the expensive cargo-bloat diagnostics for a benchmark_only dispatch. The hard byte/ELF size gate always runs.'
+        required: false
+        type: boolean
+        default: false
+      runner_profile:
+        description: 'Runner override for recovery/benchmark: policy, standard, or fast. Primary releases and warm builds always use policy.'
+        required: false
+        type: choice
+        options:
+          - policy
+          - standard
+          - fast
+        default: policy
+
+permissions:
+  actions: read
+  contents: read
+  packages: read
+
+concurrency:
+  group: build-release-binaries-${{ (github.event_name == 'workflow_dispatch' && inputs.benchmark_source_sha != '' && format('benchmark-{0}', inputs.benchmark_source_sha)) || (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only)) && 'warm-main' || (github.event_name == 'push' && github.ref_type == 'branch' && format('branch-{0}', github.run_id)) || inputs.tag || github.ref_name }}
+  # Tag-push runs must never be cancelled mid-build (the release waits on
+  # their artifacts), and neither should manual workflow_dispatch recovery
+  # runs. An immutable-source benchmark has a source-qualified lane so a new
+  # main push cannot cancel a queued or active release gate. Branch pushes get
+  # run-qualified workflow lanes because setup may resolve to a no-op; the build
+  # job below gives only real per-target warms a shared, preemptible lane. This
+  # preserves the latest-warm-wins optimization without letting a docs-only push
+  # destroy useful cache work. Scheduled and explicit manual full warms share
+  # `warm-main` and safely supersede an older full warm.
+  cancel-in-progress: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only) }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  setup:
+    name: Resolve release context
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.resolve.outputs.ref }}
+      is_release: ${{ steps.resolve.outputs.is_release }}
+      version: ${{ steps.resolve.outputs.version }}
+      major_minor: ${{ steps.resolve.outputs.major_minor }}
+      should_build_binaries: ${{ steps.resolve.outputs.should_build_binaries }}
+      should_finalize_release: ${{ steps.resolve.outputs.should_finalize_release }}
+      should_publish_container: ${{ steps.resolve.outputs.should_publish_container }}
+      make_latest: ${{ steps.resolve.outputs.make_latest }}
+      build_matrix: ${{ steps.resolve.outputs.build_matrix }}
+      build_mode: ${{ steps.resolve.outputs.build_mode }}
+      runner_profile: ${{ steps.resolve.outputs.runner_profile }}
+      binary_size_budget_bytes: ${{ steps.binary-size-policy.outputs.budget_bytes }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Resolve policy from the workflow revision, not the source tag. This
+          # keeps current recovery logic available for old releases. Build jobs
+          # independently check out the resolved source ref.
+          ref: ${{ github.sha }}
+          # Must stay 0. `ref:` above pins a detached sha, so `main` is absent
+          # and the paths-filter step below fetches it itself:
+          #
+          #   git fetch --depth=1 --no-tags origin <base-sha>  # rewrites .git/shallow
+          #   git fetch --depth=1 --no-tags origin main        # fatal
+          #
+          # Under `fetch-depth: 1` that second fetch died with `shallow file has
+          # changed since we read it` in 13 of this job's 19 failures across the
+          # last 60 failed runs — always the second fetch, never the first. (The
+          # other 6 were rejected dispatch inputs.) Unshallowing removes the
+          # race by removing `.git/shallow`, rather than retrying around it.
+          #
+          # scripts/check_ci_cache_policy.harn enforces this.
+          fetch-depth: 0
+
+      - name: Detect release build inputs
+        id: release-build-inputs
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+        with:
+          filters: .github/release-warm-cache-paths.yml
+
+      - name: Resolve release binary-size policy
+        id: binary-size-policy
+        shell: bash
+        env:
+          # Registry entries need an explicit workflow gate and report surface
+          # before they become enforced release targets.
+          BINARY_SIZE_TARGET: x86_64-unknown-linux-gnu
+        run: |
+          set -euo pipefail
+          if ! budget_bytes="$(
+            jq -er \
+              --arg target "$BINARY_SIZE_TARGET" \
+              -f .github/release-binary-size-policy.jq \
+              .github/release-binary-size-policy.json
+          )"; then
+            echo "::error::.github/release-binary-size-policy.json violates the closed release binary-size policy contract" >&2
+            exit 2
+          fi
+          echo "budget_bytes=$budget_bytes" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve release context
+        id: resolve
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_WARM_CACHE_ONLY: ${{ inputs.warm_cache_only && 'true' || 'false' }}
+          INPUT_TARGETS: ${{ inputs.targets }}
+          INPUT_LEGACY_PROVENANCE_OVERRIDE: ${{ inputs.legacy_provenance_override }}
+          INPUT_BENCHMARK_ONLY: ${{ inputs.benchmark_only && 'true' || 'false' }}
+          INPUT_BENCHMARK_SOURCE_REF: ${{ inputs.benchmark_source_ref }}
+          INPUT_BENCHMARK_SOURCE_SHA: ${{ inputs.benchmark_source_sha }}
+          INPUT_BENCHMARK_CARGO_BLOAT: ${{ inputs.benchmark_cargo_bloat && 'true' || 'false' }}
+          INPUT_RUNNER_PROFILE: ${{ inputs.runner_profile || 'policy' }}
+          FORCE_REBUILD: ${{ inputs.force_rebuild && 'true' || 'false' }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          RELEASE_BUILD_INPUTS_CHANGED: ${{ steps.release-build-inputs.outputs.release_build_inputs || 'false' }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          REF="${INPUT_TAG:-$REF_NAME}"
+          IS_RELEASE=false
+          SHOULD_BUILD_BINARIES=false
+          SHOULD_FINALIZE_RELEASE=false
+          SHOULD_PUBLISH_CONTAINER=false
+          MAKE_LATEST=false
+          BUILD_MODE=""
+          RUNNER_PROFILE="${INPUT_RUNNER_PROFILE:-policy}"
+          FULL_BUILD_MATRIX='[]'
+
+          active_release_binary_runs() {
+            local status
+            for status in queued in_progress; do
+              gh run list \
+                --repo "$GITHUB_REPOSITORY" \
+                --workflow build-release-binaries.yml \
+                --status "$status" \
+                --limit 50 \
+                --json databaseId,event,headBranch,url \
+                --jq '.[] |
+                  select((.databaseId | tostring) != env.GITHUB_RUN_ID) |
+                  select(
+                    (.event == "workflow_dispatch") or
+                    (.event == "push" and ((.headBranch // "") | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")))
+                  ) |
+                  "\(.databaseId)\t\(.event)\t\(.headBranch // "<unknown>")\t\(.url)"'
+            done
+          }
+
+          requested_targets_json() {
+            local raw="$1"
+            if [[ -z "$raw" ]]; then
+              echo '[]'
+              return 0
+            fi
+            printf '%s\n' "$raw" \
+              | tr ',[:space:]' '\n' \
+              | sed '/^$/d' \
+              | LC_ALL=C sort -u \
+              | jq -R . \
+              | jq -sc 'unique'
+          }
+
+          matrix_for_targets() {
+            local targets_json="$1"
+            jq -c --argjson targets "$targets_json" \
+              '[.[] | select(.target as $target | $targets | index($target))]' \
+              <<<"$FULL_BUILD_MATRIX"
+          }
+
+          validate_requested_targets() {
+            local targets_json="$1"
+            local known_json unknown
+            known_json="$(jq -c '[.targets[].target]' .github/release-runner-policy.json)"
+            unknown="$(jq -nr --argjson requested "$targets_json" --argjson known "$known_json" '$requested - $known | .[]')"
+            if [[ -n "$unknown" ]]; then
+              echo "::error::Unknown release target(s) in targets input:"
+              while IFS= read -r target; do
+                [[ -n "$target" ]] || continue
+                echo "::error::  $target"
+              done <<<"$unknown"
+              echo "::error::Known targets: $(jq -r '.targets[].target' .github/release-runner-policy.json | paste -sd ' ' -)"
+              exit 1
+            fi
+          }
+
+          resolve_runner_matrix() {
+            local mode="$1"
+            local profile="$2"
+            local targets="${3:-}"
+            scripts/release_runner_matrix.sh \
+              --mode "$mode" \
+              --profile "$profile" \
+              --targets "$targets"
+          }
+
+          release_container_tags_missing() {
+            local version="$1"
+            local major_minor="$2"
+            local anonymous_docker_config
+            anonymous_docker_config="${RUNNER_TEMP}/anonymous-docker-config"
+            rm -rf "$anonymous_docker_config"
+            mkdir -p "$anonymous_docker_config"
+            MISSING_PUBLIC_CONTAINER_TAGS=()
+            CONTAINER_TAGS=("$version")
+            if [[ "$MAKE_LATEST" == "true" ]]; then
+              CONTAINER_TAGS+=("$major_minor" latest)
+            fi
+            for TAG in "${CONTAINER_TAGS[@]}"; do
+              IMAGE="ghcr.io/burin-labs/harn:${TAG}"
+              if docker --config "$anonymous_docker_config" manifest inspect "$IMAGE" >/dev/null 2>&1; then
+                echo "::notice::Container image $IMAGE is already publicly pullable."
+              else
+                MISSING_PUBLIC_CONTAINER_TAGS+=("$TAG")
+              fi
+            done
+            (( ${#MISSING_PUBLIC_CONTAINER_TAGS[@]} > 0 ))
+          }
+
+          skip_warm_cache_if_release_active() {
+            local active_runs
+            active_runs="$(active_release_binary_runs || true)"
+            if [[ -z "$active_runs" ]]; then
+              return 1
+            fi
+
+            echo "::notice::Skipping warm-cache binary matrix because release binary workflow run(s) are already queued/in progress."
+            {
+              echo "### Warm-cache overlap guard"
+              echo
+              echo "Skipped this warm-cache binary matrix because release-mode build-release-binaries run(s) are already active."
+              echo
+              echo "| Run | Event | Ref | URL |"
+              echo "| --- | --- | --- | --- |"
+            } >> "$GITHUB_STEP_SUMMARY"
+            while IFS=$'\t' read -r run_id event head url; do
+              [[ -n "$run_id" ]] || continue
+              echo "::notice::  active release binary run $run_id ($event $head): $url"
+              echo "| $run_id | $event | $head | $url |" >> "$GITHUB_STEP_SUMMARY"
+            done <<<"$active_runs"
+            echo "::notice::A later push/scheduled warm can refresh the default-branch cache after the release lane clears."
+            return 0
+          }
+
+          BUILD_MATRIX="[]"
+          REQUESTED_TARGETS_JSON="$(requested_targets_json "$INPUT_TARGETS")"
+          REQUESTED_TARGET_COUNT="$(jq 'length' <<<"$REQUESTED_TARGETS_JSON")"
+          if (( REQUESTED_TARGET_COUNT > 0 )); then
+            validate_requested_targets "$REQUESTED_TARGETS_JSON"
+          fi
+          if [[ -n "$INPUT_LEGACY_PROVENANCE_OVERRIDE" ]] &&
+             [[ "$EVENT_NAME" != "workflow_dispatch" || -z "$INPUT_TAG" ||
+                "$INPUT_WARM_CACHE_ONLY" == "true" || "$INPUT_BENCHMARK_ONLY" == "true" ]]; then
+            echo "::error::legacy_provenance_override is only valid for an explicit workflow_dispatch release-tag recovery"
+            exit 1
+          fi
+          if [[ "$INPUT_BENCHMARK_CARGO_BLOAT" == "true" && "$INPUT_BENCHMARK_ONLY" != "true" ]]; then
+            echo "::error::benchmark_cargo_bloat requires benchmark_only=true"
+            exit 1
+          fi
+          if [[ -n "$INPUT_BENCHMARK_SOURCE_REF" || -n "$INPUT_BENCHMARK_SOURCE_SHA" ]] &&
+             [[ "$INPUT_BENCHMARK_ONLY" != "true" ]]; then
+            echo "::error::benchmark_source_ref and benchmark_source_sha require benchmark_only=true"
+            exit 1
+          fi
+          if [[ "$INPUT_BENCHMARK_ONLY" == "true" ]]; then
+            if [[ "$EVENT_NAME" != "workflow_dispatch" ]]; then
+              echo "::error::benchmark_only is only valid for workflow_dispatch"
+              exit 1
+            fi
+            if [[ "$INPUT_WARM_CACHE_ONLY" == "true" || -n "$INPUT_TAG" || "$FORCE_REBUILD" == "true" ]]; then
+              echo "::error::benchmark_only cannot be combined with warm_cache_only, tag, or force_rebuild"
+              exit 1
+            fi
+            if (( REQUESTED_TARGET_COUNT == 0 )); then
+              echo "::error::benchmark_only requires an explicit targets subset"
+              exit 1
+            fi
+            if [[ -n "$INPUT_BENCHMARK_SOURCE_REF" || -n "$INPUT_BENCHMARK_SOURCE_SHA" ]]; then
+              if [[ -z "$INPUT_BENCHMARK_SOURCE_REF" || -z "$INPUT_BENCHMARK_SOURCE_SHA" ]]; then
+                echo "::error::benchmark_source_ref and benchmark_source_sha must be provided together"
+                exit 1
+              fi
+              if [[ "$REF_TYPE" != "branch" || "$REF_NAME" != "main" ]]; then
+                echo "::error::an explicit benchmark source must be dispatched from main so current policy is authoritative (got ${REF_TYPE}/${REF_NAME})"
+                exit 1
+              fi
+              if [[ ! "$INPUT_BENCHMARK_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+                echo "::error::benchmark_source_sha must be an exact lowercase 40-hex commit"
+                exit 1
+              fi
+              REF="$INPUT_BENCHMARK_SOURCE_REF"
+              echo "::notice::Current policy will benchmark immutable source ${REF} at ${INPUT_BENCHMARK_SOURCE_SHA}."
+            fi
+            BUILD_MODE=benchmark
+            VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
+            BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" "$RUNNER_PROFILE" "$INPUT_TARGETS")"
+            SHOULD_BUILD_BINARIES=true
+            echo "::notice::Non-publishing benchmark from $REF using runner profile $RUNNER_PROFILE. No sign/notarize/package/upload/release/container/cache save. cargo-bloat opt-in: $INPUT_BENCHMARK_CARGO_BLOAT."
+          elif [[ "$INPUT_WARM_CACHE_ONLY" == "true" ]]; then
+            if [[ "$EVENT_NAME" != "workflow_dispatch" ]]; then
+              echo "::error::warm_cache_only is only valid for workflow_dispatch"
+              exit 1
+            fi
+            if [[ -n "$INPUT_TAG" ]]; then
+              echo "::error::warm_cache_only cannot be combined with a release tag"
+              exit 1
+            fi
+            if (( REQUESTED_TARGET_COUNT > 0 )); then
+              echo "::error::targets is only valid for release tag recovery, not warm_cache_only"
+              exit 1
+            fi
+            if [[ "$RUNNER_PROFILE" != "policy" ]]; then
+              echo "::error::warm_cache_only always uses policy runners; runner_profile must be policy"
+              exit 1
+            fi
+            if [[ "$REF_TYPE" != "branch" || "$REF_NAME" != "main" ]]; then
+              echo "::error::warm_cache_only must be dispatched on the main branch so tag releases can restore the saved default-branch cache (got ${REF_TYPE}/${REF_NAME})"
+              exit 1
+            fi
+            BUILD_MODE=warm
+            RUNNER_PROFILE=policy
+            FULL_BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" "$RUNNER_PROFILE")"
+            VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
+            if skip_warm_cache_if_release_active; then
+              echo "::notice::Warm-cache-only workflow_dispatch suppressed while release binaries are already building."
+            else
+              SHOULD_BUILD_BINARIES=true
+              BUILD_MATRIX="$FULL_BUILD_MATRIX"
+              echo "::notice::Warm-cache-only workflow_dispatch on main. Building release binaries to refresh default-branch Swatinem rust-cache entries. No sign/notarize/package/upload/release/container."
+            fi
+          elif [[ -n "$INPUT_TAG" || "$REF_TYPE" == "tag" ]]; then
+            IS_RELEASE=true
+            if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+              if [[ "$REF_TYPE" != "branch" || "$REF_NAME" != "main" ]]; then
+                echo "::error::Release recovery must be dispatched from the main branch so current policy is authoritative (got ${REF_TYPE}/${REF_NAME})"
+                exit 1
+              fi
+              BUILD_MODE=recovery
+            else
+              BUILD_MODE=primary
+              RUNNER_PROFILE=policy
+            fi
+            FULL_BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" "$RUNNER_PROFILE")"
+            if [[ ! "$REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::expected tag of form vX.Y.Z, got '$REF'"
+              exit 1
+            fi
+            if [[ "$EVENT_NAME" != "workflow_dispatch" ]] && (( REQUESTED_TARGET_COUNT > 0 )); then
+              echo "::error::targets is only valid on workflow_dispatch tag recovery"
+              exit 1
+            fi
+            if [[ "$FORCE_REBUILD" == "true" ]] && (( REQUESTED_TARGET_COUNT > 0 )); then
+              echo "::error::force_rebuild=true cannot be combined with targets; either rebuild every target or request an explicit target subset"
+              exit 1
+            fi
+            VERSION="${REF#v}"
+          elif [[ "$EVENT_NAME" == "schedule" ]]; then
+            # Cron-driven warm-cache run. Normally proceed — the whole point
+            # is to refresh the cache against GitHub's 7-day eviction — but
+            # do not contend with an active release binary build.
+            BUILD_MODE=warm
+            RUNNER_PROFILE=policy
+            FULL_BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" "$RUNNER_PROFILE")"
+            VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
+            if skip_warm_cache_if_release_active; then
+              echo "::notice::Warm-cache-only run (schedule) suppressed while release binaries are already building."
+            else
+              SHOULD_BUILD_BINARIES=true
+              BUILD_MATRIX="$FULL_BUILD_MATRIX"
+              echo "::notice::Warm-cache-only run (schedule). Building release binaries to populate the per-target Swatinem rust-cache on main. No sign/notarize/package/upload/release/container."
+            fi
+          elif [[ "$EVENT_NAME" == "push" && "$REF_NAME" == "main" ]]; then
+            BUILD_MODE=warm
+            RUNNER_PROFILE=policy
+            FULL_BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" "$RUNNER_PROFILE")"
+            VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
+            COMMIT_SUBJECT="$(git log -1 --pretty=%s)"
+            if [[ "$COMMIT_SUBJECT" =~ ^Release[[:space:]]v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+              echo "::notice::Push to main is a release merge commit ('$COMMIT_SUBJECT'). The tag release builds the same source state, and an overlapping warm-cache run cannot help that active release. Skipping build matrix; the daily schedule will refresh the main cache."
+            elif skip_warm_cache_if_release_active; then
+              echo "::notice::Push-to-main warm-cache run suppressed while release binaries are already building."
+            else
+              # The parsed path policy owns which changes rotate a build cache
+              # or alter release-build topology. For all other pushes the
+              # previous warm cache still keys cleanly and a rebuild adds no
+              # signal.
+              if [[ "$RELEASE_BUILD_INPUTS_CHANGED" == "true" ]]; then
+                SHOULD_BUILD_BINARIES=true
+                BUILD_MATRIX="$FULL_BUILD_MATRIX"
+                echo "::notice::Warm-cache-only run (push main). A release build input changed according to .github/release-warm-cache-paths.yml."
+                echo "::notice::Building release binaries to populate the per-target Swatinem rust-cache on main. No sign/notarize/package/upload/release/container."
+              else
+                echo "::notice::Push to main did not change a release build input declared in .github/release-warm-cache-paths.yml — existing warm cache still keys cleanly. Skipping build matrix."
+              fi
+            fi
+          elif [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "::error::workflow_dispatch requires tag=vX.Y.Z, warm_cache_only=true, or benchmark_only=true"
+            exit 1
+          else
+            VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
+          fi
+          MAJOR_MINOR="$(echo "$VERSION" | awk -F. '{print $1"."$2}')"
+
+          if [[ "$IS_RELEASE" == "true" ]]; then
+            LATEST_REPO_TAG="$(
+              git ls-remote --tags origin 'refs/tags/v*' \
+                | awk '{print $2}' \
+                | sed -E 's#^refs/tags/##; s/\^\{\}$//' \
+                | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+                | sort -Vu \
+                | tail -n1 || true
+            )"
+            if [[ -z "$LATEST_REPO_TAG" ]]; then
+              echo "::error::Could not resolve the repository's latest vX.Y.Z tag"
+              exit 1
+            fi
+            if [[ "$REF" == "$LATEST_REPO_TAG" ]]; then
+              MAKE_LATEST=true
+            else
+              echo "::notice::Recovering historical $REF; preserving GitHub /releases/latest and moving container tags at $LATEST_REPO_TAG."
+            fi
+            EXPECTED_ARCHIVES=(
+              "harn-aarch64-apple-darwin.tar.gz"
+              "harn-aarch64-unknown-linux-gnu.tar.gz"
+              "harn-x86_64-apple-darwin.tar.gz"
+              "harn-x86_64-pc-windows-msvc.zip"
+              "harn-x86_64-unknown-linux-gnu.tar.gz"
+            )
+            EXPECTED_METADATA=(
+              "SHA256SUMS"
+              "release-assets.json"
+            )
+            EXPECTED_ASSETS=("${EXPECTED_ARCHIVES[@]}" "${EXPECTED_METADATA[@]}")
+            target_for_archive() {
+              case "$1" in
+                harn-aarch64-apple-darwin.tar.gz) echo "aarch64-apple-darwin" ;;
+                harn-aarch64-unknown-linux-gnu.tar.gz) echo "aarch64-unknown-linux-gnu" ;;
+                harn-x86_64-apple-darwin.tar.gz) echo "x86_64-apple-darwin" ;;
+                harn-x86_64-pc-windows-msvc.zip) echo "x86_64-pc-windows-msvc" ;;
+                harn-x86_64-unknown-linux-gnu.tar.gz) echo "x86_64-unknown-linux-gnu" ;;
+                *) return 1 ;;
+              esac
+            }
+
+            if (( REQUESTED_TARGET_COUNT > 0 )); then
+              SHOULD_BUILD_BINARIES=true
+              SHOULD_FINALIZE_RELEASE=true
+              BUILD_MATRIX="$(matrix_for_targets "$REQUESTED_TARGETS_JSON")"
+              echo "::notice::Explicit release-recovery target subset requested for $REF: $(jq -r '.[]' <<<"$REQUESTED_TARGETS_JSON" | paste -sd ' ' -)"
+              echo "::notice::Selected build matrix: $BUILD_MATRIX"
+              if jq -e 'index("x86_64-unknown-linux-gnu") or index("aarch64-unknown-linux-gnu")' <<<"$REQUESTED_TARGETS_JSON" >/dev/null; then
+                if release_container_tags_missing "$VERSION" "$MAJOR_MINOR"; then
+                  SHOULD_PUBLISH_CONTAINER=true
+                  echo "::notice::Linux release target is being rebuilt and container tags are missing or private: ${MISSING_PUBLIC_CONTAINER_TAGS[*]}. Publishing container tags after release finalization."
+                else
+                  echo "::notice::Linux release target is being rebuilt, but all release container tags are already publicly pullable; skipping container publish."
+                fi
+              fi
+            elif [[ "$FORCE_REBUILD" == "true" ]]; then
+              SHOULD_BUILD_BINARIES=true
+              SHOULD_FINALIZE_RELEASE=true
+              SHOULD_PUBLISH_CONTAINER=true
+              BUILD_MATRIX="$FULL_BUILD_MATRIX"
+              echo "::notice::force_rebuild=true; rebuilding release binaries and re-publishing container tags for $REF."
+            else
+              MISSING_ASSETS=()
+              MISSING_ARCHIVE_TARGETS=()
+              RELEASE_PRERELEASE=false
+              if RELEASE_INFO="$(gh release view "$REF" --json assets,isPrerelease 2>/dev/null)"; then
+                RELEASE_ASSETS="$(jq -r '.assets[].name' <<<"$RELEASE_INFO")"
+                RELEASE_PRERELEASE="$(jq -r '.isPrerelease' <<<"$RELEASE_INFO")"
+                for ASSET in "${EXPECTED_ASSETS[@]}"; do
+                  if ! grep -Fxq "$ASSET" <<<"$RELEASE_ASSETS"; then
+                    MISSING_ASSETS+=("$ASSET")
+                  fi
+                done
+                for ARCHIVE in "${EXPECTED_ARCHIVES[@]}"; do
+                  if ! grep -Fxq "$ARCHIVE" <<<"$RELEASE_ASSETS"; then
+                    MISSING_ARCHIVE_TARGETS+=("$(target_for_archive "$ARCHIVE")")
+                  fi
+                done
+              else
+                MISSING_ASSETS=("${EXPECTED_ASSETS[@]}")
+                for ARCHIVE in "${EXPECTED_ARCHIVES[@]}"; do
+                  MISSING_ARCHIVE_TARGETS+=("$(target_for_archive "$ARCHIVE")")
+                done
+                RELEASE_PRERELEASE=true
+              fi
+
+              if (( ${#MISSING_ASSETS[@]} == 0 )); then
+                echo "::notice::All expected GitHub release assets already exist for $REF; skipping binary build matrix."
+              else
+                printf '::notice::Missing release assets for %s: %s\n' "$REF" "${MISSING_ASSETS[*]}"
+              fi
+              if (( ${#MISSING_ARCHIVE_TARGETS[@]} > 0 )); then
+                SHOULD_BUILD_BINARIES=true
+                TARGETS_JSON="$(printf '%s\n' "${MISSING_ARCHIVE_TARGETS[@]}" | jq -R . | jq -sc 'unique')"
+                BUILD_MATRIX="$(jq -c --argjson targets "$TARGETS_JSON" '[.[] | select(.target as $target | $targets | index($target))]' <<<"$FULL_BUILD_MATRIX")"
+                echo "::notice::Rebuilding only missing archive targets: ${MISSING_ARCHIVE_TARGETS[*]}"
+              fi
+              if (( ${#MISSING_ASSETS[@]} > 0 )) || [[ "$RELEASE_PRERELEASE" == "true" ]]; then
+                SHOULD_FINALIZE_RELEASE=true
+              fi
+              if (( ${#MISSING_ASSETS[@]} > 0 )) && (( ${#MISSING_ARCHIVE_TARGETS[@]} == 0 )); then
+                echo "::notice::Only release metadata is missing for $REF; skipping binary build matrix and regenerating release metadata from existing archives."
+              fi
+              if [[ "$RELEASE_PRERELEASE" == "true" ]] && (( ${#MISSING_ASSETS[@]} == 0 )); then
+                echo "::notice::Release $REF has all assets but is still marked prerelease; finalizing without rebuilding."
+              fi
+
+              if release_container_tags_missing "$VERSION" "$MAJOR_MINOR"; then
+                SHOULD_PUBLISH_CONTAINER=true
+                SHOULD_FINALIZE_RELEASE=true
+                echo "::notice::Release container tags are missing or private: ${MISSING_PUBLIC_CONTAINER_TAGS[*]}. Re-verifying release archives before publishing container tags."
+              else
+                echo "::notice::All release container tags are publicly pullable; skipping container publish."
+              fi
+            fi
+          fi
+
+          {
+            echo "ref=$REF"
+            echo "is_release=$IS_RELEASE"
+            echo "version=$VERSION"
+            echo "major_minor=$MAJOR_MINOR"
+            echo "should_build_binaries=$SHOULD_BUILD_BINARIES"
+            echo "should_finalize_release=$SHOULD_FINALIZE_RELEASE"
+            echo "should_publish_container=$SHOULD_PUBLISH_CONTAINER"
+            echo "make_latest=$MAKE_LATEST"
+            echo "build_mode=$BUILD_MODE"
+            echo "runner_profile=$RUNNER_PROFILE"
+            echo "build_matrix<<__JSON__"
+            echo "$BUILD_MATRIX"
+            echo "__JSON__"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### Release binary context"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Event | $EVENT_NAME |"
+            echo "| Ref | $REF |"
+            echo "| Version | $VERSION |"
+            echo "| Release mode | $IS_RELEASE |"
+            echo "| Build mode | $BUILD_MODE |"
+            echo "| Runner profile | $RUNNER_PROFILE |"
+            echo "| Build binaries | $SHOULD_BUILD_BINARIES |"
+            echo "| Finalize release | $SHOULD_FINALIZE_RELEASE |"
+            echo "| Publish container | $SHOULD_PUBLISH_CONTAINER |"
+            echo "| Move latest tags | $MAKE_LATEST |"
+            echo "| Requested targets | \`$REQUESTED_TARGETS_JSON\` |"
+            echo "| Build matrix | \`$BUILD_MATRIX\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Create the GitHub release up front as a PRERELEASE placeholder so each
+  # build leg can upload its own tarball the moment it finishes, instead of
+  # everything waiting on the slowest leg + a final aggregate job. A
+  # prerelease is publicly downloadable by tag but is NOT returned by
+  # /releases/latest, so install.sh / `harn upgrade` consumers that resolve
+  # "latest" keep seeing the previous version until the `release` job flips
+  # this to the canonical latest release (with checksums) once all legs land.
+  # Doing this in one job (not racing N build legs) keeps release creation
+  # single-writer.
+  prepare_release:
+    name: Ensure prerelease placeholder
+    needs: setup
+    # MUST match the `build` job's job-level `if` exactly. `build` needs this
+    # job; if the two conditions diverged, a skipped prepare_release would
+    # propagate a skip onto `build` and silently kill warm-cache builds.
+    if: needs.setup.outputs.should_build_binaries == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Create prerelease if absent
+        # Only real releases author a GitHub release; warm-cache events still
+        # run this job (to keep the `if` aligned with `build`) but no-op here.
+        if: needs.setup.outputs.is_release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ needs.setup.outputs.ref }}
+          VERSION: ${{ needs.setup.outputs.version }}
+        run: |
+          set -euo pipefail
+          if gh release view "$REF" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::notice::Release $REF already exists; leaving it in place for incremental uploads."
+          else
+            gh release create "$REF" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$VERSION" \
+              --prerelease \
+              --notes "Release $VERSION is building. Per-architecture archives are attached as each build finishes; SHA256SUMS, the asset manifest, and the canonical \"latest\" flag are set once every build completes."
+            echo "::notice::Created prerelease placeholder $REF for incremental per-arch uploads."
+          fi
+
+  # Generate the target-independent CLI AOT payload exactly once before the
+  # release or benchmark matrix. The generator needs the complete Rust
+  # workspace; each target build needs only the resulting package-local
+  # manifest and bytecode. Benchmark builds must match shipped release contents
+  # so their pre-tag size proof cannot undercount the payload. Warm-cache builds
+  # intentionally stay source-fallback-only.
+  prepare_cli_aot:
+    name: Prepare CLI AOT payload
+    needs: setup
+    # Match build's top-level condition so a warm-cache build is never skipped
+    # merely because this release/benchmark payload job had no work to do.
+    if: needs.setup.outputs.should_build_binaries == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.setup.outputs.is_release == 'true' || needs.setup.outputs.build_mode == 'benchmark'
+        with:
+          ref: ${{ needs.setup.outputs.ref }}
+
+      - name: Verify benchmark source revision
+        if: needs.setup.outputs.build_mode == 'benchmark' && inputs.benchmark_source_sha != ''
+        shell: bash
+        env:
+          EXPECTED_SOURCE_SHA: ${{ inputs.benchmark_source_sha }}
+        run: |
+          actual_source_sha="$(git rev-parse HEAD)"
+          if [[ "$actual_source_sha" != "$EXPECTED_SOURCE_SHA" ]]; then
+            echo "::error::benchmark source resolved to $actual_source_sha; expected $EXPECTED_SOURCE_SHA"
+            exit 1
+          fi
+
+      - uses: ./.github/actions/rust-toolchain
+        if: needs.setup.outputs.is_release == 'true' || needs.setup.outputs.build_mode == 'benchmark'
+
+      - name: Generate and verify target-independent CLI AOT payload
+        if: needs.setup.outputs.is_release == 'true' || needs.setup.outputs.build_mode == 'benchmark'
+        run: make gen-cli-aot && make check-cli-aot
+
+      - name: Upload CLI AOT payload for release and benchmark targets
+        if: needs.setup.outputs.is_release == 'true' || needs.setup.outputs.build_mode == 'benchmark'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: harn-cli-aot-payload
+          path: |
+            crates/harn-cli/generated/cli-bytecode-manifest.json
+            crates/harn-cli/generated/cli-bytecode/
+          if-no-files-found: error
+          compression-level: 0
+          # Machine handoff: the build jobs download this in the same run, and
+          # nothing reads it afterwards.
+          retention-days: 1
+
+  build:
+    name: Build ${{ matrix.target }}
+    # prepare_release is skipped on warm-cache-only events (is_release=false);
+    # `needs` on a skipped job is satisfied, so warm-cache runs still build.
+    needs: [setup, prepare_release, prepare_cli_aot]
+    if: needs.setup.outputs.should_build_binaries == 'true'
+    # Setup-only branch pushes never instantiate this matrix and therefore
+    # cannot enter or cancel these lanes. A newer real main-branch warm replaces
+    # only the same target from an older real warm. Releases, recoveries,
+    # benchmarks, schedules, and manual warms use run-qualified lanes; their
+    # workflow-level concurrency owns any allowed cancellation.
+    concurrency:
+      group: build-release-binaries-build-${{ (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.setup.outputs.build_mode == 'warm' && format('warm-{0}', matrix.target)) || format('{0}-{1}', github.run_id, matrix.target) }}
+      cancel-in-progress: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.setup.outputs.build_mode == 'warm' }}
+    # contents: write so each leg can upload its own archive to the release
+    # as soon as it finishes (incremental per-arch publish).
+    permissions:
+      actions: write
+      artifact-metadata: write
+      attestations: write
+      contents: write
+      id-token: write
+    # Runner labels are resolved from release-runner-policy.json in setup.
+    # Warm, primary, recovery, and explicit benchmark capacity are separate
+    # policy dimensions; build jobs consume the selected label directly.
+    runs-on: ${{ matrix.runner }}
+    # Avoid GitHub's multi-hour default timeout for release artifacts. Native
+    # macOS is the slowest surface; if it cannot finish inside this budget,
+    # fail loudly so the release queue does not burn hours silently.
+    timeout-minutes: 150
+    strategy:
+      # Release artifacts are uploaded incrementally per target. If one leg
+      # fails (for example a size-budget ratchet or platform-specific signer
+      # outage), keep the other legs running so the release is not left with
+      # avoidably missing archives.
+      fail-fast: false
+      matrix:
+        # release_codegen_units is target policy. Keep 16 where parallel
+        # codegen and lower peak linker memory prevent aarch64 OOMs; x86_64
+        # Linux uses 8 to recover binary-size headroom without serializing the
+        # link at cgu=1. Release-recovery dispatches a subset of this matrix
+        # when only one target archive is missing.
+        include: ${{ fromJSON(needs.setup.outputs.build_matrix) }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.setup.outputs.ref }}
+
+      - name: Attest checked-out source revision
+        shell: bash
+        run: echo "HARN_BUILD_REVISION=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Verify benchmark source revision
+        if: needs.setup.outputs.build_mode == 'benchmark' && inputs.benchmark_source_sha != ''
+        shell: bash
+        env:
+          EXPECTED_SOURCE_SHA: ${{ inputs.benchmark_source_sha }}
+        run: |
+          actual_source_sha="$(git rev-parse HEAD)"
+          if [[ "$actual_source_sha" != "$EXPECTED_SOURCE_SHA" ]]; then
+            echo "::error::benchmark source resolved to $actual_source_sha; expected $EXPECTED_SOURCE_SHA"
+            exit 1
+          fi
+
+      - name: Restore target-independent CLI AOT payload
+        if: needs.setup.outputs.is_release == 'true' || needs.setup.outputs.build_mode == 'benchmark'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: harn-cli-aot-payload
+          path: crates/harn-cli/generated
+
+      - uses: ./.github/actions/sccache-install
+        if: matrix.use_sccache == 'true'
+        # sccache is a build-cache optimization, not a build requirement. The
+        # upstream action sometimes fails on merge_group / restricted-token
+        # events with "Bad credentials" when api.github.com gates the release
+        # lookup; a cold build is a fine fallback, but the job shouldn't fail.
+        continue-on-error: true
+
+      # Skip sccache on Windows and macOS. Windows has repeatedly dropped the
+      # GHA cache connection during the long single-rustc-call harn-vm compile
+      # (`os error 10054`). On macOS, v0.8.58 recovery logs showed the server
+      # shutting down unexpectedly and final stats with 0 useful compile
+      # requests on arm64 and only 2 non-cacheable requests on x86_64. Local
+      # rustc + Swatinem/rust-cache still cover incremental warmth for repeat
+      # builds without the wrapper process churn.
+      - name: Configure Cargo to use sccache
+        if: matrix.use_sccache == 'true' && env.SCCACHE_PATH != ''
+        shell: bash
+        run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
+
+      # See the cache architecture note at the top of this workflow for why
+      # only warm-cache-only events save. Short version: tag-push runs can
+      # never restore another tag's cache, so a tag-push save just burns a
+      # cache slot. Letting only main-push + cron save (and tag-push +
+      # workflow_dispatch restore) keeps the per-repo 10 GB cache budget
+      # focused on the entries we can actually read back.
+      - uses: ./.github/actions/rust-cache
+        id: rust-cache
+        # Cache restore/save is a release latency optimization, not a release
+        # precondition. The Windows cache backend has had transient misses and
+        # auth/setup failures before the build step; fall back to a cold build
+        # instead of fail-fast cancelling every artifact leg.
+        continue-on-error: true
+        with:
+          shared-key: release-${{ matrix.target }}
+          broad-restore-prefix: ${{ matrix.rust_cache_broad_restore_prefix }}
+          cache-on-failure: true
+          cache-bin: false
+          prune-superseded-release-generations: true
+          save: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && github.ref == 'refs/heads/main') }}
+
+      - name: Summarize cache mode
+        shell: bash
+        env:
+          HARN_RELEASE_TARGET: ${{ matrix.target }}
+          HARN_RELEASE_RUNNER_LABEL: ${{ matrix.runner }}
+          HARN_RELEASE_SCCACHE_REQUESTED: ${{ matrix.use_sccache }}
+          HARN_RELEASE_RUST_CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit || '<unset>' }}
+          HARN_RELEASE_CACHE_SAVE_ENABLED: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.warm_cache_only && github.ref == 'refs/heads/main')) && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Release cache mode"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Target | $HARN_RELEASE_TARGET |"
+            echo "| Runner label | $HARN_RELEASE_RUNNER_LABEL |"
+            echo "| Event | $GITHUB_EVENT_NAME |"
+            echo "| Ref | $GITHUB_REF |"
+            echo "| Swatinem cache save enabled | $HARN_RELEASE_CACHE_SAVE_ENABLED |"
+            echo "| Swatinem cache hit | $HARN_RELEASE_RUST_CACHE_HIT |"
+            echo "| sccache requested | $HARN_RELEASE_SCCACHE_REQUESTED |"
+            echo "| sccache path | ${SCCACHE_PATH:-<unset>} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install cargo-bloat
+        # Installing is a prebuilt-binary download; what costs tens of minutes
+        # is cargo-bloat's relink/analysis tail, which the report step below
+        # gates. Install runs before the budget gate, so it cannot depend on
+        # that outcome — install unconditionally on the measured target so a
+        # budget failure can always produce its own attribution.
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        uses: taiki-e/install-action@41049aa56687c35e0afa74eed4f09cec4f9afabf # v2.85.2
+        with:
+          tool: cargo-bloat
+
+      - name: Install repo-pinned Rust toolchain and target
+        uses: ./.github/actions/rust-toolchain
+        with:
+          targets: ${{ matrix.target }}
+
+      # Cross gcc/linker is ONLY needed when building arm64 Linux on an x86
+      # host. The arm64 Linux leg now runs on a native arm64 runner, so this
+      # install + the CARGO_TARGET_*_LINKER env below are gated on runner.arch
+      # == X64 and stay dormant on the native path. Kept (rather than deleted)
+      # so the cross fallback still works if the arm runner pool is ever
+      # unavailable and the leg is pointed back at ubuntu-latest.
+      - name: Install Linux ARM64 cross linker (x86 host only)
+        if: matrix.target == 'aarch64-unknown-linux-gnu' && runner.arch == 'X64'
+        uses: ./.github/actions/apt-install
+        with:
+          packages: gcc-aarch64-linux-gnu
+          check-command: aarch64-linux-gnu-gcc
+
+      - name: Configure Linux ARM64 cross linker (x86 host only)
+        if: matrix.target == 'aarch64-unknown-linux-gnu' && runner.arch == 'X64'
+        run: echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+
+      - name: Build
+        timeout-minutes: 90
+        shell: bash
+        env:
+          # Scope the compile-time optimization tradeoff to release CI only.
+          CARGO_PROFILE_RELEASE_LTO: thin
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ matrix.release_codegen_units }}
+          # Strip symbols + debuginfo from the shipped binaries (~20 MB/binary
+          # on macOS arm64). Stripping happens at link time, before the macOS
+          # sign/notarize step, so signatures stay valid.
+          CARGO_PROFILE_RELEASE_STRIP: symbols
+          HARN_RELEASE_TARGET: ${{ matrix.target }}
+          HARN_RELEASE_REF: ${{ needs.setup.outputs.ref }}
+          HARN_RELEASE_VERSION: ${{ needs.setup.outputs.version }}
+          HARN_RELEASE_IS_RELEASE: ${{ needs.setup.outputs.is_release }}
+          HARN_RELEASE_RUNNER_LABEL: ${{ matrix.runner }}
+          HARN_RELEASE_RUST_CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit || '<unset>' }}
+          # Published and benchmarked binaries must contain the payload prepared
+          # once above. A missing/malformed payload fails the harn-cli build
+          # script instead of silently measuring or releasing a slower
+          # source-fallback binary.
+          HARN_REQUIRE_CLI_AOT: ${{ (needs.setup.outputs.is_release == 'true' || needs.setup.outputs.build_mode == 'benchmark') && '1' || '0' }}
+        run: |
+          set -euo pipefail
+          start=$SECONDS
+          # One binary. harn-lsp / harn-dap are linked into `harn` and reached
+          # via argv[0] dispatch; we ship them as symlinks/copies at package
+          # time. Building only `harn` runs the expensive final LTO link once
+          # per target instead of three times.
+          cargo build --release -p harn-cli --bin harn --target "$HARN_RELEASE_TARGET"
+          if [[ "$HARN_RELEASE_TARGET" == *unknown-linux-gnu ]]; then
+            cargo build --release -p harn-cli --bin harn-container-probe --target "$HARN_RELEASE_TARGET"
+          fi
+          duration=$((SECONDS - start))
+          {
+            echo "### Release binary build"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Target | $HARN_RELEASE_TARGET |"
+            echo "| Runner | ${RUNNER_OS}-${RUNNER_ARCH} |"
+            echo "| Runner label | $HARN_RELEASE_RUNNER_LABEL |"
+            echo "| Ref | $HARN_RELEASE_REF |"
+            echo "| Version | $HARN_RELEASE_VERSION |"
+            echo "| Release mode | $HARN_RELEASE_IS_RELEASE |"
+            echo "| Duration | ${duration}s |"
+            echo "| Rust wrapper | ${RUSTC_WRAPPER:-<none>} |"
+            echo "| Swatinem cache hit | $HARN_RELEASE_RUST_CACHE_HIT |"
+            echo "| Release LTO | ${CARGO_PROFILE_RELEASE_LTO:-<unset>} |"
+            echo "| Release codegen units | ${CARGO_PROFILE_RELEASE_CODEGEN_UNITS:-<unset>} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Summarize sccache stats
+        if: always() && matrix.use_sccache == 'true'
+        shell: bash
+        env:
+          HARN_RELEASE_TARGET: ${{ matrix.target }}
+          HARN_RELEASE_IS_RELEASE: ${{ needs.setup.outputs.is_release }}
+        run: |
+          set -euo pipefail
+          sccache_bin="${SCCACHE_PATH:-sccache}"
+          stats_file="$RUNNER_TEMP/sccache-${HARN_RELEASE_TARGET}.txt"
+          {
+            echo "### Release sccache stats"
+            echo
+            echo "Target: \`$HARN_RELEASE_TARGET\`"
+            echo
+            echo '```text'
+            if command -v "$sccache_bin" >/dev/null 2>&1; then
+              "$sccache_bin" --show-stats | tee "$stats_file" || true
+            else
+              echo "sccache binary not found: $sccache_bin"
+              : > "$stats_file"
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          compile_requests="$(awk '/^Compile requests[[:space:]]/ {print $NF; found=1} END {if (!found) print 0}' "$stats_file")"
+          cache_hits="$(awk '/^Cache hits[[:space:]]/ {print $NF; found=1; exit} END {if (!found) print 0}' "$stats_file")"
+          cache_misses="$(awk '/^Cache misses[[:space:]]/ {print $NF; found=1; exit} END {if (!found) print 0}' "$stats_file")"
+          cache_write_errors="$(awk '/^Cache write errors[[:space:]]/ {print $NF; found=1; exit} END {if (!found) print 0}' "$stats_file")"
+          hit_rate="0.00"
+          if (( compile_requests > 0 )); then
+            hit_rate="$(awk -v hits="$cache_hits" -v total="$compile_requests" 'BEGIN { printf "%.2f", (hits * 100.0) / total }')"
+          fi
+          {
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Compile requests | $compile_requests |"
+            echo "| Cache hits | $cache_hits |"
+            echo "| Cache misses | $cache_misses |"
+            echo "| Cache write errors | $cache_write_errors |"
+            echo "| Cache hit rate | ${hit_rate}% |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if (( compile_requests >= 100 )) && awk -v rate="$hit_rate" 'BEGIN { exit !(rate < 5.0) }'; then
+            echo "::warning title=Release sccache is effectively cold::${HARN_RELEASE_TARGET} had ${cache_hits}/${compile_requests} hits (${hit_rate}%). Release latency likely came from cold compile cache."
+          fi
+          if (( cache_write_errors > 0 )); then
+            echo "::warning title=Release sccache write errors::${HARN_RELEASE_TARGET} reported ${cache_write_errors} cache write error(s). Warm-cache recovery may remain slow until cache writes succeed."
+          fi
+
+      # Sign the single `harn` Mach-O binary with the Developer ID Application
+      # identity (hardened runtime + secure timestamp), then submit it to
+      # Apple's notary service. harn-lsp / harn-dap ship as symlinks to this
+      # binary, so notarizing `harn` covers them (Gatekeeper resolves the
+      # symlink and checks the real binary). Stapling isn't supported for raw
+      # Mach-O binaries — Gatekeeper does an online ticket lookup against
+      # Apple's CDN at first launch instead, silent once notarized.
+      - name: Apple sign + notarize (macOS)
+        if: runner.os == 'macOS' && needs.setup.outputs.is_release == 'true'
+        timeout-minutes: 45
+        env:
+          APPLE_DEVELOPER_ID_CERT_P12: ${{ secrets.APPLE_DEVELOPER_ID_CERT_P12 }}
+          APPLE_DEVELOPER_ID_CERT_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERT_PASSWORD }}
+          APPLE_KEYCHAIN_PASSWORD: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          start=$SECONDS
+          KEYCHAIN="$RUNNER_TEMP/sign.keychain-db"
+          CERT_FILE="$RUNNER_TEMP/cert.p12"
+          KEY_FILE="$RUNNER_TEMP/AuthKey.p8"
+          NOTARY_ZIP="$RUNNER_TEMP/notary.zip"
+
+          printf '%s' "$APPLE_DEVELOPER_ID_CERT_P12" | base64 --decode > "$CERT_FILE"
+          printf '%s' "$APPLE_API_KEY_P8" > "$KEY_FILE"
+
+          security create-keychain -p "$APPLE_KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$APPLE_KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$CERT_FILE" \
+            -P "$APPLE_DEVELOPER_ID_CERT_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$APPLE_KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          # Prepend the temp keychain to the user search list so codesign
+          # finds the imported identity. Preserve the existing entries.
+          # shellcheck disable=SC2046  # word splitting is intentional —
+          # each existing keychain path becomes its own `-s` argument.
+          security list-keychains -d user -s "$KEYCHAIN" \
+            $(security list-keychains -d user | tr -d '"')
+          rm -f "$CERT_FILE"
+
+          SIGN_ID="Developer ID Application: Burin Labs, LLC (${APPLE_TEAM_ID})"
+          bin="target/${TARGET}/release/harn"
+          echo "Signing $bin"
+          codesign --force --options runtime --timestamp \
+            --sign "$SIGN_ID" \
+            "$bin"
+          codesign --verify --strict --verbose=2 "$bin"
+
+          (cd "target/${TARGET}/release" && zip -j "$NOTARY_ZIP" harn)
+          notary_submit_with_retry() {
+            local attempt=1
+            local max_attempts=4
+            local delay=20
+
+            while [ "$attempt" -le "$max_attempts" ]; do
+              local log_file="$RUNNER_TEMP/notary-submit-${attempt}.log"
+              echo "Submitting to Apple notary (attempt ${attempt}/${max_attempts}; this typically takes 1-5 minutes)..."
+              set +e
+              xcrun notarytool submit "$NOTARY_ZIP" \
+                --key "$KEY_FILE" \
+                --key-id "$APPLE_API_KEY_ID" \
+                --issuer "$APPLE_API_ISSUER_ID" \
+                --wait \
+                --timeout 30m 2>&1 | tee "$log_file"
+              local status="${PIPESTATUS[0]}"
+              set -e
+
+              if [ "$status" -eq 0 ]; then
+                return 0
+              fi
+
+              if [ "$attempt" -eq "$max_attempts" ]; then
+                return "$status"
+              fi
+
+              if grep -Eiq 'NSURLErrorDomain|offline|timed out|connection|network|gateway|service unavailable|Current status: In Progress' "$log_file"; then
+                echo "Apple notary returned a transient polling/upload error; retrying in ${delay}s..."
+                sleep "$delay"
+                attempt=$((attempt + 1))
+                delay=$((delay * 2))
+                continue
+              fi
+
+              return "$status"
+            done
+          }
+
+          notary_submit_with_retry
+          rm -f "$KEY_FILE" "$NOTARY_ZIP"
+          duration=$((SECONDS - start))
+          {
+            echo "### macOS signing and notarization"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Target | $TARGET |"
+            echo "| Duration | ${duration}s |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Tear down macOS keychain
+        if: always() && runner.os == 'macOS' && needs.setup.outputs.is_release == 'true'
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/sign.keychain-db"
+          if [ -f "$KEYCHAIN" ]; then
+            security delete-keychain "$KEYCHAIN" || true
+          fi
+
+      - name: Package (unix)
+        if: runner.os != 'Windows' && needs.setup.outputs.is_release == 'true'
+        env:
+          HARN_RELEASE_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          start=$SECONDS
+          mkdir -p dist
+          cp "target/${HARN_RELEASE_TARGET}/release/harn" dist/harn
+          # harn-lsp / harn-dap are relative symlinks to the single `harn`
+          # binary (argv[0] dispatch). Editors that spawn `harn-lsp` /
+          # `harn-dap` by path keep working; the tarball carries one real
+          # binary instead of three. tar preserves symlinks; extraction
+          # recreates them pointing at the sibling `harn`.
+          ln -s harn dist/harn-lsp
+          ln -s harn dist/harn-dap
+          package_entries=(harn harn-dap harn-lsp)
+          if [[ "$HARN_RELEASE_TARGET" == *unknown-linux-gnu ]]; then
+            cp "target/${HARN_RELEASE_TARGET}/release/harn-container-probe" dist/harn-container-probe
+            package_entries+=(harn-container-probe)
+          fi
+          cd dist
+          tar czf "harn-${HARN_RELEASE_TARGET}.tar.gz" "${package_entries[@]}"
+          archive="harn-${HARN_RELEASE_TARGET}.tar.gz"
+          archive_bytes="$(wc -c < "$archive" | tr -d '[:space:]')"
+          duration=$((SECONDS - start))
+          {
+            echo "### Release package"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Target | $HARN_RELEASE_TARGET |"
+            echo "| Archive | $archive |"
+            echo "| Archive bytes | $archive_bytes |"
+            echo "| Duration | ${duration}s |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Package (windows)
+        if: runner.os == 'Windows' && needs.setup.outputs.is_release == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          start=$SECONDS
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/harn.exe dist/harn.exe
+          # Windows has no dependable unprivileged symlinks, so harn-lsp.exe /
+          # harn-dap.exe are copies of the single multi-call harn.exe (argv[0]
+          # dispatch still routes them). Editors that spawn them by name keep
+          # working; we still build only one binary, so the LTO-link win holds.
+          cp dist/harn.exe dist/harn-lsp.exe
+          cp dist/harn.exe dist/harn-dap.exe
+          cd dist
+          archive="harn-${{ matrix.target }}.zip"
+          7z a "$archive" harn.exe harn-dap.exe harn-lsp.exe
+          archive_bytes="$(wc -c < "$archive" | tr -d '[:space:]')"
+          duration=$((SECONDS - start))
+          {
+            echo "### Release package"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Target | ${{ matrix.target }} |"
+            echo "| Archive | $archive |"
+            echo "| Archive bytes | $archive_bytes |"
+            echo "| Duration | ${duration}s |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check binary size budget
+        id: binary_size_budget
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        shell: bash
+        env:
+          BINARY_SIZE_REPORT_DIR: dist/binary-size-${{ matrix.target }}
+          BINARY_SIZE_BUDGET_BYTES: ${{ needs.setup.outputs.binary_size_budget_bytes }}
+          HARN_RELEASE_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          harn_bin="target/${HARN_RELEASE_TARGET}/release/harn"
+          if [[ ! -f "$harn_bin" ]]; then
+            echo "::error::harn binary not found at $harn_bin"
+            exit 1
+          fi
+          if [[ ! "${BINARY_SIZE_BUDGET_BYTES}" =~ ^[0-9]+$ ]] || (( BINARY_SIZE_BUDGET_BYTES <= 0 )); then
+            echo "::error::BINARY_SIZE_BUDGET_BYTES must be a positive integer, got '${BINARY_SIZE_BUDGET_BYTES}'"
+            exit 2
+          fi
+          budget_bytes="$BINARY_SIZE_BUDGET_BYTES"
+          actual_bytes="$(wc -c < "$harn_bin" | tr -d '[:space:]')"
+          format_mib() {
+            awk -v bytes="$1" 'BEGIN { printf "%.2f", bytes / 1024 / 1024 }'
+          }
+          mkdir -p "$BINARY_SIZE_REPORT_DIR"
+          {
+            echo "harn binary size"
+            echo "================"
+            echo "binary: $harn_bin"
+            echo "target: $HARN_RELEASE_TARGET"
+            echo "bytes: $actual_bytes"
+            echo "mib: $(format_mib "$actual_bytes")"
+            echo "budget_bytes: $budget_bytes"
+            echo "budget_mib: $(format_mib "$budget_bytes")"
+            echo "cargo-bloat report: skipped"
+          } | tee "$BINARY_SIZE_REPORT_DIR/binary-size.txt"
+          size -A -d "$harn_bin" | tee "$BINARY_SIZE_REPORT_DIR/elf-sections.txt"
+          if (( actual_bytes > budget_bytes )); then
+            echo "::error::harn binary is $(format_mib "$actual_bytes") MiB, above budget $(format_mib "$budget_bytes") MiB"
+            exit 1
+          fi
+
+      # A failed byte gate is exactly when the attribution is needed, and the
+      # expensive build has already been paid for by the time it fires. Run the
+      # report for warm builds, for an opt-in benchmark, and unconditionally
+      # whenever the budget step failed.
+      - name: Generate cargo-bloat report
+        if: always() && matrix.target == 'x86_64-unknown-linux-gnu' && (needs.setup.outputs.build_mode == 'warm' || (needs.setup.outputs.build_mode == 'benchmark' && inputs.benchmark_cargo_bloat) || steps.binary_size_budget.outcome == 'failure')
+        shell: bash
+        continue-on-error: true
+        env:
+          BINARY_SIZE_REPORT_DIR: dist/binary-size-${{ matrix.target }}
+          HARN_RELEASE_TARGET: ${{ matrix.target }}
+        run: |
+          # The build writes to ./target regardless of the ambient
+          # CARGO_TARGET_DIR this workflow exports, and the budget step above
+          # reads it from there. Name the same path explicitly: resolving it
+          # through CARGO_TARGET_DIR looked in the toolchain cache, failed with
+          # `harn binary not found`, and — under `set -e` plus
+          # `continue-on-error` — silently skipped `cargo bloat` entirely, so a
+          # blocked release shipped no attribution at all.
+          harn_bin="./target/${HARN_RELEASE_TARGET}/release/harn"
+          "$harn_bin" run scripts/check_binary_size.harn -- \
+            --no-build --target "$HARN_RELEASE_TARGET" --bin "$harn_bin"
+          cargo bloat --release -p harn-cli --bin harn --target "$HARN_RELEASE_TARGET" --filter deserialize -n 100 \
+            | tee "$BINARY_SIZE_REPORT_DIR/cargo-bloat-deserialize.txt"
+
+      - name: Upload binary-size report
+        if: always() && matrix.target == 'x86_64-unknown-linux-gnu'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        # The size report is diagnostic. The budget check above is the hard
+        # gate; do not let transient Actions artifact-store failures block a
+        # release artifact that otherwise built and packaged successfully.
+        continue-on-error: true
+        with:
+          name: harn-binary-size-${{ matrix.target }}
+          path: dist/binary-size-${{ matrix.target }}
+          if-no-files-found: ignore
+          # Human-read diagnostic, never downloaded by a job. Declared rather
+          # than inherited so a future org-default change cannot silently
+          # shorten the window someone compares size reports across.
+          retention-days: 30
+
+      - name: Describe release archive provenance
+        id: release-provenance
+        if: needs.setup.outputs.is_release == 'true'
+        shell: bash
+        env:
+          BUILD_POLICY_REF: ${{ github.workflow_ref }}
+          BUILD_POLICY_REVISION: ${{ github.workflow_sha }}
+          RELEASE_REF: ${{ needs.setup.outputs.ref }}
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          archives=(dist/harn-*.tar.gz dist/harn-*.zip)
+          if (( ${#archives[@]} != 1 )); then
+            echo "::error::Expected exactly one packaged archive for $RELEASE_TARGET, found ${#archives[@]}."
+            exit 1
+          fi
+          archive="${archives[0]}"
+          archive_name="$(basename "$archive")"
+          archive_sha256="$(sha256sum "$archive" | awk '{print $1}')"
+          source_commit="$(git rev-parse HEAD)"
+          if [[ "$source_commit" != "$HARN_BUILD_REVISION" ]]; then
+            echo "::error::Checked-out source moved from $HARN_BUILD_REVISION to $source_commit before attestation."
+            exit 1
+          fi
+          jq -n \
+            --arg schema "harn.release_archive_provenance.v1" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg tag "$RELEASE_REF" \
+            --arg sourceCommit "$source_commit" \
+            --arg target "$RELEASE_TARGET" \
+            --arg archive "$archive_name" \
+            --arg sha256 "$archive_sha256" \
+            --arg policyWorkflow ".github/workflows/build-release-binaries.yml" \
+            --arg policyRef "$BUILD_POLICY_REF" \
+            --arg policyRevision "$BUILD_POLICY_REVISION" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg runAttempt "$GITHUB_RUN_ATTEMPT" \
+            --arg job "$GITHUB_JOB" \
+            --arg runUrl "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            '{
+              schemaVersion: $schema,
+              repository: $repository,
+              tag: $tag,
+              sourceCommit: $sourceCommit,
+              target: $target,
+              archive: $archive,
+              sha256: $sha256,
+              buildPolicy: {
+                workflow: $policyWorkflow,
+                ref: $policyRef,
+                revision: $policyRevision
+              },
+              workflow: {
+                runId: $runId,
+                runAttempt: $runAttempt,
+                job: $job,
+                url: $runUrl
+              }
+            }' > "$RUNNER_TEMP/release-archive-provenance.json"
+          {
+            echo "archive=$archive"
+            echo "predicate=$RUNNER_TEMP/release-archive-provenance.json"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Attest release archive provenance
+        if: needs.setup.outputs.is_release == 'true'
+        # Recovery runs load current policy from main but build an older tag.
+        # A custom predicate records that checked-out source; the verifier also
+        # pins the signer workflow and certificate-backed policy revision.
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
+        with:
+          subject-path: ${{ steps.release-provenance.outputs.archive }}
+          predicate-type: https://harnlang.com/attestations/release-archive/v1
+          predicate-path: ${{ steps.release-provenance.outputs.predicate }}
+
+      - name: Upload artifact (unix)
+        if: needs.setup.outputs.is_release == 'true' && runner.os != 'Windows'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        # The GitHub Release upload below is the authoritative shipping path.
+        # Keep this secondary run artifact best-effort so a transient
+        # artifact-store outage cannot fail a signed/notarized/packageable leg
+        # before it publishes the official archive.
+        continue-on-error: true
+        with:
+          name: harn-${{ matrix.target }}
+          path: dist/harn-${{ matrix.target }}.tar.gz
+          compression-level: 0
+          # One day, because this copy is duplication by design: the Release
+          # asset above is authoritative and permanent, and no
+          # `download-artifact` in this repository reads across runs (none pass
+          # `run-id`). The org default is 30 days, which held ~5 GB/week of
+          # release binaries in billable artifact storage for nothing.
+          retention-days: 1
+
+      - name: Upload artifact (windows)
+        if: needs.setup.outputs.is_release == 'true' && runner.os == 'Windows'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        # The GitHub Release upload below is the authoritative shipping path.
+        # Keep this secondary run artifact best-effort so a transient
+        # artifact-store outage cannot fail a signed/packageable leg before it
+        # publishes the official archive.
+        continue-on-error: true
+        with:
+          name: harn-${{ matrix.target }}
+          path: dist/harn-${{ matrix.target }}.zip
+          compression-level: 0
+          # Same reasoning as the unix leg above: secondary to the authoritative
+          # Release asset, never read across runs.
+          retention-days: 1
+
+      # Publish THIS target's archive to the prerelease the moment it is built,
+      # so consumers that only need one architecture can fetch it without
+      # waiting for the slowest leg or the final aggregate job. --clobber makes
+      # it idempotent across release-recovery re-runs. SHA256SUMS / the asset
+      # manifest / the canonical "latest" flag are still added by the `release`
+      # job once every leg has landed.
+      - name: Publish archive to release (incremental)
+        if: needs.setup.outputs.is_release == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ needs.setup.outputs.ref }}
+        run: |
+          set -euo pipefail
+          start=$SECONDS
+          shopt -s nullglob
+          archives=(dist/harn-*.tar.gz dist/harn-*.zip)
+          if [ ${#archives[@]} -eq 0 ]; then
+            echo "::error::No archive found in dist/ to upload for ${{ matrix.target }}."
+            exit 1
+          fi
+          archive="${archives[0]}"
+          echo "Uploading $archive to release $REF"
+          gh release upload "$REF" "$archive" --repo "$GITHUB_REPOSITORY" --clobber
+          archive_bytes="$(wc -c < "$archive" | tr -d '[:space:]')"
+          duration=$((SECONDS - start))
+          {
+            echo "### Release archive upload"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Target | ${{ matrix.target }} |"
+            echo "| Archive | $archive |"
+            echo "| Archive bytes | $archive_bytes |"
+            echo "| Duration | ${duration}s |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  cache_budget:
+    name: Report cache budget
+    needs: [setup, build]
+    # A superseded warm has cancelled build legs and must not prune the last
+    # complete generation while its successor is still populating targets.
+    # Ordinary partial failures still report/enforce the budget: successful
+    # legs saved useful generations and each failed family retains its prior one.
+    if: always() && needs.setup.outputs.build_mode == 'warm' && needs.setup.outputs.should_build_binaries == 'true' && needs.build.result != 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Report repository cache inventory
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HARN_PRUNE_SUPERSEDED_RELEASE_CACHES: "1"
+          HARN_ENFORCE_CACHE_BUDGET: "1"
+        run: ./scripts/report_ci_cache_budget.sh
+
+  container:
+    name: Publish container
+    needs: [setup, release]
+    if: >-
+      always() &&
+      needs.setup.outputs.should_publish_container == 'true' &&
+      (needs.release.result == 'success' ||
+        (needs.release.result == 'skipped' && needs.setup.outputs.should_build_binaries == 'false'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.setup.outputs.ref }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Download Linux release archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ needs.setup.outputs.ref }}
+        run: |
+          set -euo pipefail
+
+          assets_dir="${RUNNER_TEMP}/harn-release-assets"
+          rm -rf "$assets_dir" release-container
+          mkdir -p "$assets_dir" release-container/amd64 release-container/arm64
+
+          gh release download "$REF" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern harn-x86_64-unknown-linux-gnu.tar.gz \
+            --pattern harn-aarch64-unknown-linux-gnu.tar.gz \
+            --dir "$assets_dir"
+
+          cp "$assets_dir/harn-x86_64-unknown-linux-gnu.tar.gz" release-container/amd64/harn.tar.gz
+          cp "$assets_dir/harn-aarch64-unknown-linux-gnu.tar.gz" release-container/arm64/harn.tar.gz
+
+          for arch in amd64 arm64; do
+            archive="release-container/${arch}/harn.tar.gz"
+            archive_list="${assets_dir}/${arch}.lst"
+            tar tzf "$archive" > "$archive_list"
+            for binary in harn harn-container-probe; do
+              if ! grep -Fxq "$binary" "$archive_list"; then
+                echo "::error::${archive} is missing ${binary}; container image must be assembled from release artifacts, not a Docker source rebuild."
+                exit 1
+              fi
+            done
+          done
+
+      - name: Log in to GHCR
+        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/burin-labs/harn
+          # Use raw tags computed from the resolved version so the
+          # workflow can publish for an explicit input.tag (recovery
+          # path) just as well as for an auto-fired tag push. The
+          # semver type=match,pattern=... approach only works when the
+          # workflow itself was triggered by a tag push, which the
+          # recovery / re-release path isn't.
+          tags: |
+            type=raw,value=${{ needs.setup.outputs.version }}
+            type=raw,value=${{ needs.setup.outputs.major_minor }},enable=${{ needs.setup.outputs.make_latest == 'true' }}
+            type=raw,value=latest,enable=${{ needs.setup.outputs.make_latest == 'true' }}
+
+      - name: Build and push container image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: ./Dockerfile.release
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,mode=max' || '' }}
+
+      - name: Verify public container tags
+        env:
+          MAKE_LATEST: ${{ needs.setup.outputs.make_latest }}
+          VERSION: ${{ needs.setup.outputs.version }}
+          MAJOR_MINOR: ${{ needs.setup.outputs.major_minor }}
+        run: |
+          set -euo pipefail
+
+          anonymous_config="${RUNNER_TEMP}/anonymous-docker-config"
+          rm -rf "$anonymous_config"
+          mkdir -p "$anonymous_config"
+
+          tags=("$VERSION")
+          if [[ "$MAKE_LATEST" == "true" ]]; then
+            tags+=("$MAJOR_MINOR" latest)
+          fi
+          for tag in "${tags[@]}"; do
+            image="ghcr.io/burin-labs/harn:${tag}"
+            if ! docker --config "$anonymous_config" manifest inspect "$image" >/dev/null; then
+              {
+                printf '::error title=Container image is not publicly pullable::'
+                printf 'Anonymous manifest lookup failed for %s. ' "$image"
+                printf 'GHCR packages default to private on first publish; '
+                printf 'set the burin-labs/harn package visibility to public, '
+                printf 'then rerun this workflow.\n'
+              }
+              exit 1
+            fi
+            echo "Verified anonymous pull metadata for ${image}"
+          done
+
+  release:
+    name: Create GitHub release
+    needs: [setup, prepare_release, prepare_cli_aot, build]
+    # is_release gates out warm-cache-only events (push to main, schedule):
+    # they run the build matrix to populate the cache but must not author a
+    # GitHub release. should_finalize_release lets metadata-only recovery
+    # regenerate checksums/manifests from existing release archives without
+    # paying for a no-op binary matrix.
+    if: >-
+      always() &&
+      needs.setup.outputs.is_release == 'true' &&
+      needs.setup.outputs.should_finalize_release == 'true' &&
+      (needs.prepare_release.result == 'success' || needs.prepare_release.result == 'skipped') &&
+      (needs.prepare_cli_aot.result == 'success' || needs.prepare_cli_aot.result == 'skipped') &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped')
+    runs-on: ubuntu-latest
+    permissions:
+      attestations: read
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Preserve current release provenance policy
+        run: cp scripts/verify_release_archive_provenance.sh "$RUNNER_TEMP/verify_release_archive_provenance.sh"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.setup.outputs.ref }}
+
+      - name: Download release archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ needs.setup.outputs.ref }}
+        run: |
+          set -euo pipefail
+          start=$SECONDS
+          expected=(
+            harn-aarch64-apple-darwin.tar.gz
+            harn-aarch64-unknown-linux-gnu.tar.gz
+            harn-x86_64-apple-darwin.tar.gz
+            harn-x86_64-pc-windows-msvc.zip
+            harn-x86_64-unknown-linux-gnu.tar.gz
+          )
+          mkdir -p artifacts
+          for attempt in $(seq 1 12); do
+            rm -f artifacts/*
+            gh release download "$REF" \
+              --repo "$GITHUB_REPOSITORY" \
+              --pattern 'harn-*.tar.gz' \
+              --pattern 'harn-*.zip' \
+              --dir artifacts || true
+            missing=()
+            for file in "${expected[@]}"; do
+              if [ ! -f "artifacts/$file" ]; then
+                missing+=("$file")
+              fi
+            done
+            if (( ${#missing[@]} == 0 )); then
+              break
+            fi
+            if (( attempt == 12 )); then
+              printf '::error::Missing release archives after %s attempts: %s\n' "$attempt" "${missing[*]}"
+              find artifacts -maxdepth 1 -type f -print | sort
+              exit 1
+            fi
+            printf '::notice::Release archive(s) not visible yet for %s: %s; retrying download (%s/12).\n' "$REF" "${missing[*]}" "$attempt"
+            sleep 10
+          done
+          duration=$((SECONDS - start))
+          {
+            echo "### Release archive download"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Ref | $REF |"
+            echo "| Archive count | ${#expected[@]} |"
+            echo "| Duration | ${duration}s |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify release archive provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LEGACY_PROVENANCE_OVERRIDE: ${{ inputs.legacy_provenance_override }}
+          REF: ${{ needs.setup.outputs.ref }}
+        run: |
+          set -euo pipefail
+          args=(
+            --artifacts-dir artifacts
+            --tag "$REF"
+            --repo "$GITHUB_REPOSITORY"
+          )
+          if [[ -n "$LEGACY_PROVENANCE_OVERRIDE" ]]; then
+            args+=(--legacy-override "$LEGACY_PROVENANCE_OVERRIDE")
+          fi
+          bash "$RUNNER_TEMP/verify_release_archive_provenance.sh" "${args[@]}"
+
+      - name: Render release notes from changelog
+        # This job has no Rust toolchain (it only assembles artifacts), so
+        # run the Harn renderer with the just-built linux-x64 release binary
+        # rather than compiling from source. The tarball packs `harn` at its
+        # root; ubuntu-latest is x86_64.
+        run: |
+          set -euo pipefail
+          start=$SECONDS
+          tar xzf artifacts/harn-x86_64-unknown-linux-gnu.tar.gz harn
+          ./harn run scripts/render_release_notes.harn -- \
+            --version "${{ needs.setup.outputs.version }}" \
+            --output release-notes.md
+          rm -f harn
+          duration=$((SECONDS - start))
+          {
+            echo "### Release notes render"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Version | ${{ needs.setup.outputs.version }} |"
+            echo "| Duration | ${duration}s |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Generate SHA256SUMS
+        # install.sh and `harn upgrade` fetch this manifest to verify the
+        # tarball/zip before extracting. The body is the standard
+        # coreutils format (`<sha256>  <filename>`), one entry per
+        # release asset.
+        working-directory: artifacts
+        run: |
+          set -euo pipefail
+          start=$SECONDS
+          expected=(
+            harn-aarch64-apple-darwin.tar.gz
+            harn-aarch64-unknown-linux-gnu.tar.gz
+            harn-x86_64-apple-darwin.tar.gz
+            harn-x86_64-pc-windows-msvc.zip
+            harn-x86_64-unknown-linux-gnu.tar.gz
+          )
+          missing=()
+          for file in "${expected[@]}"; do
+            if [ ! -f "$file" ]; then
+              missing+=("$file")
+            fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            printf '::error::Missing release artifacts: %s\n' "${missing[*]}"
+            find . -maxdepth 1 -type f -print | sort
+            exit 1
+          fi
+          files=("${expected[@]}")
+          sha256sum "${files[@]}" | LC_ALL=C sort -k 2 > SHA256SUMS
+          cat SHA256SUMS
+          duration=$((SECONDS - start))
+          {
+            echo "### Release checksum generation"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Archive count | ${#files[@]} |"
+            echo "| Duration | ${duration}s |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Generate release-assets.json
+        # Per-target download manifest consumed by downstream packagers
+        # (burin-code's fetch-harn.sh, the @burin/cli npm postinstall,
+        # Scoop). See docs/src/dev/release-assets-manifest.md for the
+        # schema and consumer contract.
+        run: |
+          set -euo pipefail
+          start=$SECONDS
+          tar xzf artifacts/harn-x86_64-unknown-linux-gnu.tar.gz harn
+          ./harn run scripts/build_release_assets_manifest.harn -- \
+            --artifacts-dir artifacts \
+            --tag "${{ needs.setup.outputs.ref }}" \
+            --output artifacts/release-assets.json
+          rm -f harn
+          cat artifacts/release-assets.json
+          duration=$((SECONDS - start))
+          {
+            echo "### Release asset manifest"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Ref | ${{ needs.setup.outputs.ref }} |"
+            echo "| Duration | ${duration}s |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Finalize GitHub release
+        # Every leg has landed. Attach SHA256SUMS + the asset manifest, write
+        # the real notes, and clear the prerelease placeholder created by
+        # prepare_release. Only the highest repository semver tag may move
+        # /releases/latest (and thus install.sh / `harn upgrade`); historical
+        # recovery preserves that pointer. The per-arch archives were already
+        # uploaded incrementally by each build leg; re-listing them here is a
+        # harmless idempotent overwrite that also covers any retried upload.
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          tag_name: ${{ needs.setup.outputs.ref }}
+          body_path: release-notes.md
+          prerelease: false
+          make_latest: ${{ needs.setup.outputs.make_latest }}
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.zip
+            artifacts/SHA256SUMS
+            artifacts/release-assets.json

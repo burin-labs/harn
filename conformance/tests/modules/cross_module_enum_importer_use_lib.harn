@@ -1,0 +1,10 @@
+/**
+ * Library half of the importer-side cross-module enum regression (harn#5203).
+ * Defines an enum but NO constructor function: the importing module both
+ * constructs and matches this enum's variants itself. That isolates the
+ * importer-side path from harn#5062 (construction inside an imported function).
+ */
+pub enum ImportedColor {
+  Red(int)
+  Blue(int)
+}

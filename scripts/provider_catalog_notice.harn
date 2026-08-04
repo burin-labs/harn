@@ -1,0 +1,399 @@
+import { help_requested, parse, parser, render_help } from "std/cli/argparse"
+import "./provider_catalog_notice/workflow.harn"
+
+fn arg_spec() {
+  return parser(
+    {
+      name: "provider-catalog-notice",
+      about: "Turn one trusted provider notice into a deterministic catalog patch or proposal.",
+      args: [
+        {
+          kind: "flag",
+          name: "notice",
+          long: "--notice",
+          parse: "string",
+          required: true,
+          help: "Neutral ProviderNotice JSON file.",
+        },
+        {
+          kind: "flag",
+          name: "extraction",
+          long: "--extraction",
+          parse: "string",
+          help: "Replay a NoticeExtraction JSON file instead of calling a model.",
+        },
+        {
+          kind: "flag",
+          name: "provider",
+          long: "--provider",
+          parse: "string",
+          default: "openai",
+          help: "Extraction provider when --extraction is omitted.",
+        },
+        {
+          kind: "flag",
+          name: "model",
+          long: "--model",
+          parse: "string",
+          default: "logical:cheap",
+          help: "Extraction model when --extraction is omitted.",
+        },
+        {
+          kind: "flag",
+          name: "repo_root",
+          long: "--repo-root",
+          parse: "string",
+          default: ".",
+          help: "Dedicated clean Harn worktree the workflow may mutate.",
+        },
+        {
+          kind: "flag",
+          name: "output_dir",
+          long: "--output-dir",
+          parse: "string",
+          default: ".harn/provider-catalog-notices",
+          help: "Local receipt directory.",
+        },
+        {
+          kind: "flag",
+          name: "harn_bin",
+          long: "--harn-bin",
+          parse: "string",
+          default: "harn",
+          help: "Harn executable used for catalog generation.",
+        },
+        {
+          kind: "switch",
+          name: "apply",
+          long: "--apply",
+          help: "Apply a validated patch or materialize an incomplete proposal.",
+        },
+        {
+          kind: "switch",
+          name: "open_pr",
+          long: "--open-pr",
+          help: "Push the deterministic branch and open a draft PR; implies --apply.",
+        },
+      ],
+      examples: [
+        "harn run scripts/provider_catalog_notice.harn -- --notice notice.json --extraction extraction.json",
+        "harn run scripts/provider_catalog_notice.harn -- --notice notice.json --apply --open-pr",
+      ],
+    },
+  )
+}
+
+fn __run(process: HarnessProcess, cmd: string, args: list<string>, cwd: string) -> dict {
+  return process.run({program: cmd, args: args, cwd: cwd})
+}
+
+fn __require_success(result: dict, label: string) {
+  if result.exit_code != 0 {
+    throw label + " failed: " + trim(result.stdout ?? "") + "\n" + trim(result.stderr ?? "")
+  }
+}
+
+fn __read_json(fs: HarnessFs, path: string) -> dict {
+  return json_parse(fs.read_text(path))
+}
+
+fn __from_root(root: string, path: string) -> string {
+  if starts_with(path, "/") {
+    return path
+  }
+  return path_join(root, path)
+}
+
+fn __relative_to_root(root: string, path: string) -> string {
+  const prefix = root + "/"
+  if starts_with(path, prefix) {
+    return path.substring(len(prefix), len(path))
+  }
+  return path
+}
+
+fn __ensure_output_dir(fs: HarnessFs, root: string, relative: string) -> string {
+  const path = path_join(root, relative)
+  if !fs.exists(path) {
+    fs.mkdir(path, true)
+  }
+  return path
+}
+
+fn __resolve_source(process: HarnessProcess, root: string, candidate: dict) -> string {
+  const source_dir = if candidate.kind == "endpoint" {
+    "crates/harn-vm/src/llm/catalog_sources/10-providers"
+  } else if candidate.kind == "capability" {
+    "crates/harn-vm/src/llm/capability_sources"
+  } else {
+    "crates/harn-vm/src/llm/catalog_sources/60-models"
+  }
+  const header = if candidate.kind == "endpoint" {
+    "[providers." + candidate.provider + "]"
+  } else if candidate.kind == "capability" {
+    "model_match = " + json_stringify(candidate.model_id)
+  } else {
+    "[models.\"" + candidate.model_id + "\"]"
+  }
+  const result = __run(process, "rg", ["-l", "-F", header, path_join(root, source_dir)], root)
+  if result.exit_code != 0 && result.exit_code != 1 {
+    __require_success(result, "catalog source lookup")
+  }
+  let matches: list<string> = []
+  for line in (result.stdout ?? "").split("\n") {
+    if trim(line) != "" {
+      matches = matches + [trim(line)]
+    }
+  }
+  if len(matches) != 1 {
+    throw "catalog source identity must resolve to exactly one file; found "
+      + to_string(len(matches))
+  }
+  return matches[0] ?? ""
+}
+
+fn __assert_clean_worktree(process: HarnessProcess, root: string) {
+  const top = __run(process, "git", ["rev-parse", "--show-toplevel"], root)
+  __require_success(top, "git worktree discovery")
+  if trim(top.stdout ?? "") != trim(root) {
+    throw "--repo-root must name the dedicated worktree root"
+  }
+  const status = __run(process, "git", ["status", "--porcelain"], root)
+  __require_success(status, "git status")
+  if trim(status.stdout ?? "") != "" {
+    throw "catalog notice application requires a clean dedicated worktree"
+  }
+}
+
+fn __existing_pr(process: HarnessProcess, root: string, branch: string) -> string {
+  const result = __run(
+    process,
+    "gh",
+    ["pr", "list", "--head", branch, "--state", "all", "--json", "url", "--jq", ".[0].url // \"\""],
+    root,
+  )
+  __require_success(result, "draft PR lookup")
+  return trim(result.stdout ?? "")
+}
+
+fn __switch_notice_branch(process: HarnessProcess, root: string, branch: string) {
+  const current = __run(process, "git", ["branch", "--show-current"], root)
+  __require_success(current, "current branch lookup")
+  if trim(current.stdout ?? "") == branch {
+    return
+  }
+  const exists = __run(
+    process,
+    "git",
+    ["show-ref", "--verify", "--quiet", "refs/heads/" + branch],
+    root,
+  )
+  const args = if exists.exit_code == 0 {
+    ["switch", branch]
+  } else {
+    ["switch", "-c", branch]
+  }
+  __require_success(__run(process, "git", args, root), "notice branch switch")
+}
+
+fn __run_checks(process: HarnessProcess, root: string) -> list<string> {
+  let passed: list<string> = []
+  for check in provider_notice_checks() {
+    const result = __run(process, "make", [check], root)
+    __require_success(result, check)
+    passed = passed + [check]
+  }
+  return passed
+}
+
+fn __proposal_markdown(notice: dict, receipt: dict, candidate: dict) -> string {
+  return """# Incomplete provider catalog proposal
+
+This proposal was produced from a trusted provider notice. It intentionally
+does not add a model row until the missing facts below are verified.
+
+## Source
+
+- Source id: `${notice.source_id}`
+- Retrieved: `${notice.retrieved_at}`
+- Provider: `${notice.provider}`
+- Provenance: `${notice.provenance}`
+- Source URL: ${notice?.source_url ?? "not supplied"}
+
+## Extracted candidate
+
+```json
+${json_stringify_pretty(candidate)}
+```
+
+## Unresolved verification
+
+${receipt.unresolved_verification.map({ item -> "- " + item }).join("\n")}
+"""
+}
+
+fn __pr_body(notice: dict, receipt: dict, diff: string) -> string {
+  return """Automated draft from a trusted provider notice. This pull request is
+review-only and the workflow never enables auto-merge.
+
+## Source evidence
+
+- Source id: `${notice.source_id}`
+- Retrieved: `${notice.retrieved_at}`
+- Provenance: `${notice.provenance}`
+- Source: ${notice?.source_url ?? receipt?.evidence ?? "embedded in receipt"}
+
+## Validation receipt
+
+```json
+${json_stringify_pretty(receipt)}
+```
+
+## Exact data diff
+
+```diff
+${diff}
+```
+
+Closes #4392
+"""
+}
+
+fn __open_draft_pr(
+  fs: HarnessFs,
+  process: HarnessProcess,
+  root: string,
+  branch: string,
+  notice: dict,
+  receipt: dict,
+  output_dir: string,
+) -> string {
+  __require_success(__run(process, "git", ["add", "-A"], root), "git add")
+  const diff_result = __run(process, "git", ["diff", "--cached", "--"], root)
+  __require_success(diff_result, "staged diff")
+  if trim(diff_result.stdout ?? "") == "" {
+    throw "refusing to open a draft PR without an exact data diff"
+  }
+  const title = "chore(catalog): apply provider notice " + notice.source_id
+  __require_success(__run(process, "git", ["commit", "-m", title], root), "git commit")
+  __require_success(__run(process, "git", ["push", "-u", "origin", branch], root), "git push")
+  const body_path = path_join(output_dir, "pr-body.md")
+  fs.write_text(body_path, __pr_body(notice, receipt, diff_result.stdout ?? ""))
+  const created = __run(
+    process,
+    "gh",
+    ["pr", "create", "--draft", "--title", title, "--body-file", body_path],
+    root,
+  )
+  __require_success(created, "draft PR creation")
+  return trim(created.stdout ?? "")
+}
+
+pipeline main(harness: Harness, task) {
+  const spec = arg_spec()
+  if help_requested(argv) {
+    harness.stdio.println(render_help(spec))
+    return 0
+  }
+  const parsed = parse(spec, argv)
+  if is_err(parsed) {
+    harness.stdio.eprintln(unwrap_err(parsed).message)
+    return 2
+  }
+  const options = unwrap(parsed).options
+  const root_result = __run(
+    harness.process,
+    "git",
+    ["rev-parse", "--show-toplevel"],
+    options.repo_root,
+  )
+  __require_success(root_result, "repository root lookup")
+  const root = trim(root_result.stdout ?? "")
+  const notice_loaded = __read_json(harness.fs, __from_root(root, options.notice))
+  const notice_raw = notice_loaded?.notice ?? notice_loaded
+  const validated = validate_notice(harness, notice_raw)
+  const extraction_value = if options?.extraction != nil {
+    const loaded = __read_json(harness.fs, __from_root(root, options.extraction))
+    loaded?.extraction ?? loaded
+  } else if is_ok(validated) {
+    extract_notice(
+      harness.llm,
+      unwrap(validated),
+      {provider: options.provider, model: options.model, budget: {max_cost_usd: 0.1}},
+    )
+  } else {
+    {classification: "candidate"}
+  }
+  const extraction: dict = json_parse(json_stringify(extraction_value))
+  const catalog = __read_json(
+    harness.fs,
+    path_join(root, "spec/provider-catalog/provider-catalog.json"),
+  )
+  let plan = plan_notice(harness, notice_raw, extraction, catalog)
+  const output_dir = __ensure_output_dir(harness.fs, root, options.output_dir)
+  const receipt_path = path_join(output_dir, plan.receipt.notice_id + ".json")
+  harness.fs.write_text(receipt_path, json_stringify_pretty(plan.receipt) + "\n")
+  harness.stdio.println(
+    "provider notice " + plan.receipt.notice_id + ": " + plan.receipt.disposition,
+  )
+  if plan.receipt.disposition == "rejected" {
+    harness.stdio.eprintln(plan.receipt.reason)
+    return 1
+  }
+  if plan.receipt.disposition == "no_op" || (!options.apply && !options.open_pr) {
+    return 0
+  }
+  __assert_clean_worktree(harness.process, root)
+  const branch = "provider-notice/" + plan.receipt.notice_id.substring(0, 12)
+  if options.open_pr {
+    const existing = __existing_pr(harness.process, root, branch)
+    if existing != "" {
+      harness.stdio.println("existing draft PR: " + existing)
+      return 0
+    }
+    __switch_notice_branch(harness.process, root, branch)
+  }
+  if plan.receipt.disposition == "patch" {
+    const source_path = __resolve_source(harness.process, root, plan.candidate)
+    const patched = apply_candidate_to_source(harness.fs.read_text(source_path), plan.candidate)
+    if is_err(patched) {
+      harness.stdio.eprintln(unwrap_err(patched))
+      return 1
+    }
+    harness.fs.write_text(source_path, unwrap(patched))
+    plan.receipt = plan.receipt + {source_path: __relative_to_root(root, source_path)}
+  } else if plan.receipt.disposition == "incomplete_add" {
+    const proposals = path_join(root, "provider-catalog-proposals")
+    if !harness.fs.exists(proposals) {
+      harness.fs.mkdir(proposals, true)
+    }
+    const proposal_path = path_join(proposals, plan.receipt.notice_id + ".md")
+    harness.fs.write_text(
+      proposal_path,
+      __proposal_markdown(notice_raw, plan.receipt, plan.candidate),
+    )
+    plan.receipt = plan.receipt + {source_path: __relative_to_root(root, proposal_path)}
+  }
+  const generated = __run(
+    harness.process,
+    options.harn_bin,
+    ["provider", "catalog", "generate"],
+    root,
+  )
+  __require_success(generated, "provider catalog generation")
+  plan.receipt = plan.receipt + {checks: __run_checks(harness.process, root)}
+  harness.fs.write_text(receipt_path, json_stringify_pretty(plan.receipt) + "\n")
+  if options.open_pr {
+    const url = __open_draft_pr(
+      harness.fs,
+      harness.process,
+      root,
+      branch,
+      notice_raw,
+      plan.receipt,
+      output_dir,
+    )
+    harness.stdio.println("opened draft PR: " + url)
+  }
+  return 0
+}

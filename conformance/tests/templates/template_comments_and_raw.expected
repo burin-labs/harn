@@ -1,0 +1,4 @@
+BeforeAfter
+Raw: {{ not_a_directive }} {{if x}}...
+After raw.
+

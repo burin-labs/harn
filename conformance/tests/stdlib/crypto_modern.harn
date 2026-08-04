@@ -1,0 +1,19 @@
+pipeline test(harness: Harness, task) {
+  // Deterministic hashes from the empty string
+  harness.stdio.log(sha3_256(""))
+  harness.stdio.log(sha3_512(""))
+  harness.stdio.log(blake3(""))
+  harness.stdio.log(blake3("hello"))
+  // Ed25519 sign+verify roundtrip
+  const kp = harness.random.ed25519_keypair()
+  const sig = ed25519_sign(kp["private"], "hello world")
+  harness.stdio.log(ed25519_verify(kp["public"], "hello world", sig))
+  harness.stdio.log(ed25519_verify(kp["public"], "tampered", sig))
+  // X25519 shared-secret agreement: each side computes the same secret
+  const alice = harness.random.x25519_keypair()
+  const bob = harness.random.x25519_keypair()
+  const alice_view = x25519_agree(alice["private"], bob["public"])
+  const bob_view = x25519_agree(bob["private"], alice["public"])
+  harness.stdio.log(alice_view == bob_view)
+  harness.stdio.log(len(alice_view))
+}

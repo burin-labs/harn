@@ -1,0 +1,80 @@
+/*
+ * std/trust - TrustGraph query and policy helpers.
+ *
+ * Import with: `import "std/trust"`.
+ */
+import "std/triggers"
+
+type TrustGraphRecord = {
+  actor_id: string,
+  action: string,
+  approver: string?,
+  outcome: TrustOutcome,
+  evidence_refs: list<dict>,
+  trace_id: string,
+  timestamp: string,
+  autonomy_tier_at_time: AutonomyTier,
+}
+
+type TrustGraphQueryFilters = {
+  actor: string?,
+  actor_id: string?,
+  agent: string?,
+  action: string?,
+  outcome: TrustOutcome?,
+  since: string?,
+  until: string?,
+  autonomy_tier_at_time: AutonomyTier?,
+  tier: AutonomyTier?,
+  limit: int?,
+}
+
+/**
+ * query returns TrustGraphRecord rows from the runtime trust graph.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn query(runtime: HarnessRuntime, filters = {}) -> list<TrustGraphRecord> {
+  return runtime.trust_query_alias(filters)
+}
+
+/**
+ * record appends a TrustGraph decision and returns its stable TrustEntryId.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn record(runtime: HarnessRuntime, decision) -> TrustEntryId {
+  return runtime.trust_record_alias(decision)
+}
+
+/**
+ * score returns aggregate trust counters and derived capability policy.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn score(runtime: HarnessRuntime, actor_id: string, action: string? = nil) -> TrustScore {
+  return runtime.trust_score(actor_id, action)
+}
+
+/**
+ * policy_for returns the capability policy derived from trust history.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn policy_for(runtime: HarnessRuntime, actor_id: string) -> CapabilityPolicy {
+  return runtime.trust_policy_for(actor_id)
+}
+
+/**
+ * verify_chain verifies the underlying OpenTrustGraph hash chain.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn verify_chain(runtime: HarnessRuntime) -> TrustChainReport {
+  return runtime.trust_verify_chain()
+}

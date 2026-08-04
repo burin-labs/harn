@@ -1,0 +1,103 @@
+{
+  "name": "mcp.tools_resources_prompts.lists",
+  "protocol": "mcp",
+  "schema": "schemas/mcp-2026-07-28.schema.json",
+  "expect": "valid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "method": "tools/list",
+      "params": {
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientInfo": {
+            "name": "harn-conformance",
+            "version": "0.10.54"
+          },
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "tools": [
+          {
+            "name": "echo",
+            "description": "Echo input",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string"
+                }
+              }
+            },
+            "annotations": {
+              "readOnlyHint": true
+            }
+          }
+        ],
+        "resultType": "complete"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "result": {
+        "resources": [
+          {
+            "uri": "harn://resource/readme",
+            "name": "README",
+            "mimeType": "text/markdown"
+          }
+        ],
+        "resultType": "complete"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 4,
+      "result": {
+        "resourceTemplates": [
+          {
+            "uriTemplate": "harn://resource/{name}",
+            "name": "named-resource",
+            "mimeType": "text/plain"
+          }
+        ],
+        "resultType": "complete"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 5,
+      "result": {
+        "prompts": [
+          {
+            "name": "review",
+            "description": "Review a change",
+            "arguments": [
+              {
+                "name": "diff",
+                "required": true
+              }
+            ]
+          }
+        ],
+        "resultType": "complete"
+      }
+    }
+  ],
+  "matrix": {
+    "version": "2026-07-28",
+    "family": "tools_resources_prompts",
+    "case": "success",
+    "source": {
+      "kind": "hand_authored",
+      "description": "Protocol matrix fixture maintained from the pinned Harn adapter profile and upstream protocol semantics."
+    }
+  }
+}

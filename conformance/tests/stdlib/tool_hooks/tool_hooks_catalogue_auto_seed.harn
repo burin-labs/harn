@@ -1,0 +1,33 @@
+import { preset_run_command, tool_hooks_mode_deny_with_explanation } from "std/tool_hooks"
+
+/**
+ * Auto-seed wiring (TH-04 #1897). When `preset_run_command(harness, config)` is
+ * called without an explicit `registry`, the seed catalogues for each
+ * opt-in stack are registered automatically, and the universal
+ * catalogue is always registered so cross-cutting denies (force-push
+ * to main, `rm -rf /`) fire regardless of stack opt-in.
+ */
+fn run(stdio: HarnessStdio, wrapper, cmd) {
+  const result = wrapper({command: cmd})
+  const rid = result?.rule_id ?? ""
+  stdio.println(result.action + " " + rid)
+}
+
+pipeline default(harness: Harness) {
+  /* No registry override — auto-seed picks up rust + universal. */
+  const inner = { args -> return {ok: true, ran: args.command} }
+  const rust_wrapper = preset_run_command(harness, {stacks: ["rust"], inner: inner})
+  /* Rust rule fires (rewrite). */
+  run(harness.stdio, rust_wrapper, "cargo build --release")
+  /* Universal deny fires even though we only opted into rust. */
+  const deny_wrapper = preset_run_command(
+    harness,
+    {stacks: ["rust"], mode: tool_hooks_mode_deny_with_explanation, inner: inner},
+  )
+  run(harness.stdio, deny_wrapper, "git push --force origin main")
+  run(harness.stdio, deny_wrapper, "rm -rf /")
+  /* Sibling-of-deny command passes through unscathed. */
+  const pt = rust_wrapper({command: "echo hello"})
+  harness.stdio.println(pt.ok)
+  harness.stdio.println(pt.ran)
+}

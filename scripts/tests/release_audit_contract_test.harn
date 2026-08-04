@@ -1,0 +1,281 @@
+import { omit } from "std/json"
+import {
+  release_audit_contract_parse,
+  release_audit_receipt_plan,
+  release_audit_source_plan,
+} from "../release_audit_contract"
+
+const SHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+const OTHER_SHA = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+const BINARY_SHA = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+
+fn contract() {
+  return {
+    schema_version: "harn.release_audit_contract.v1",
+    lanes: [
+      {name: "source-audit", runner: "run_source_audit", proof: "merge_group"},
+      {name: "release-metadata", runner: "run_release_metadata", proof: "residual"},
+    ],
+    merge_group_jobs: [
+      {
+        name: "Source audit",
+        job_id: "source-audit",
+        matrix_kind: "",
+        proofs: ["source-audit"],
+        steps: [{id: "source-audit", condition: "", run: "make source-audit", required_env: {}}],
+      },
+    ],
+  }
+}
+
+fn platform(kind: string, id: int, job_id: int, duration_ms: int) {
+  const workflow = ".github/workflows/" + kind + "-nightly.yml"
+  const job_name = if kind == "windows" {
+    "Workspace nextest (windows-latest)"
+  } else {
+    "Workspace nextest (macos-latest)"
+  }
+  const run_url = "https://github.com/burin-labs/harn/actions/runs/${id}"
+  return {
+    platform: kind,
+    acquisition: {
+      action: "dispatch_new",
+      selection_reason: "no_reusable_exact_run",
+      reused: false,
+      cancellations: [],
+    },
+    workflow_path: workflow,
+    required_job: job_name,
+    run: {
+      repo: "burin-labs/harn",
+      id: id,
+      workflow_path: workflow,
+      run_attempt: 1,
+      event: "workflow_dispatch",
+      status: "completed",
+      conclusion: "success",
+      head_sha: SHA,
+      url: run_url,
+    },
+    jobs: {
+      repo: "burin-labs/harn",
+      run_id: id,
+      total_count: 1,
+      jobs: [
+        {
+          id: job_id,
+          run_id: id,
+          name: job_name,
+          status: "completed",
+          conclusion: "success",
+          url: run_url + "/job/${job_id}",
+        },
+      ],
+      page: 1,
+      per_page: 100,
+    },
+    started_at_ms: 100,
+    completed_at_ms: 100 + duration_ms,
+    duration_ms: duration_ms,
+  }
+}
+
+fn receipt() {
+  return {
+    schema_version: "harn.release_audit_receipt.v2",
+    proof_kind: "hosted_platform",
+    source: {repo: "burin-labs/harn", branch: "main", sha: SHA, remote_sha_after: SHA},
+    platforms: [platform("windows", 123, 456, 900), platform("macos", 124, 457, 700)],
+    local_source: {
+      head_sha: SHA,
+      status: "success",
+      lane_names: ["source-audit"],
+      started_at_ms: 100,
+      completed_at_ms: 600,
+      duration_ms: 500,
+    },
+    join: {started_at_ms: 100, completed_at_ms: 1000, duration_ms: 900, critical_path: "windows"},
+    warm: {
+      head_sha: SHA,
+      command: "cargo build -p harn-cli --bin harn --locked",
+      binary_sha256: BINARY_SHA,
+      status: "success",
+    },
+  }
+}
+
+pipeline test_release_audit_contract_and_hosted_receipt(harness: Harness, task) {
+  const cfg = release_audit_contract_parse(contract())
+  assert(cfg != nil)
+  const source = release_audit_source_plan(cfg, SHA)
+  assert_eq(source.reason, "source_only")
+  assert_eq(source.proof_kind, "local_source")
+  assert_eq(source.lane_names, ["source-audit"])
+  const accepted = release_audit_receipt_plan(cfg, receipt(), SHA, BINARY_SHA)
+  assert_eq(accepted.ok, true)
+  assert_eq(accepted.receipt_reused, true)
+  assert_eq(accepted.proof_kind, "hosted_platform")
+  assert_eq(accepted.lane_names, ["release-metadata"])
+  const advanced_base = release_audit_receipt_plan(
+    cfg,
+    {...receipt(), source: {...receipt().source, remote_sha_after: OTHER_SHA}},
+    SHA,
+    BINARY_SHA,
+  )
+  assert_eq(advanced_base.receipt_reused, true)
+  assert_eq(advanced_base.proof_kind, "hosted_platform")
+  assert_eq(
+    release_audit_receipt_plan(
+      cfg,
+      {...receipt(), source: {...receipt().source, sha: OTHER_SHA}},
+      SHA,
+      BINARY_SHA,
+    ).reason,
+    "head_sha_mismatch",
+  )
+  assert_eq(
+    release_audit_receipt_plan(
+      cfg,
+      {
+        ...receipt(),
+        platforms: [platform("windows", 123, 456, 900), platform("windows", 123, 456, 900)],
+      },
+      SHA,
+      BINARY_SHA,
+    ).reason,
+    "platform_proofs_mismatch",
+  )
+  assert_eq(
+    release_audit_receipt_plan(
+      cfg,
+      {
+        ...receipt(),
+        platforms: [
+          {
+            ...platform("windows", 123, 456, 900),
+            run: {...platform("windows", 123, 456, 900).run, conclusion: "failure"},
+          },
+          platform("macos", 124, 457, 700),
+        ],
+      },
+      SHA,
+      BINARY_SHA,
+    ).reason,
+    "invalid_receipt",
+  )
+  assert_eq(
+    release_audit_receipt_plan(
+      cfg,
+      {
+        ...receipt(),
+        platforms: [
+          {
+            ...platform("windows", 123, 456, 900),
+            workflow_path: ".github/workflows/macos-nightly.yml",
+          },
+          platform("macos", 124, 457, 700),
+        ],
+      },
+      SHA,
+      BINARY_SHA,
+    ).reason,
+    "platform_identity_mismatch",
+  )
+  assert_eq(
+    release_audit_receipt_plan(
+      cfg,
+      {...receipt(), join: {...receipt().join, critical_path: "macos"}},
+      SHA,
+      BINARY_SHA,
+    ).reason,
+    "join_timing_mismatch",
+  )
+  assert_eq(
+    release_audit_receipt_plan(cfg, {...receipt(), extra: true}, SHA, BINARY_SHA).reason,
+    "invalid_receipt",
+  )
+  // The certifier records how it obtained each run. A reused run is only as
+  // strong as its exact-SHA match, so the decision is proof and is validated
+  // rather than merely tolerated: the receipt carried `acquisition` for two
+  // releases while the closed schema rejected every one of them.
+  const reused_platform = {
+    ...platform("windows", 123, 456, 900),
+    acquisition: {
+      action: "reuse_success",
+      selection_reason: "successful_exact_run",
+      reused: true,
+      cancellations: [
+        {repo: "burin-labs/harn", run_id: 77, accepted: true, state: "cancel_requested"},
+      ],
+    },
+  }
+  assert_eq(
+    release_audit_receipt_plan(
+      cfg,
+      {...receipt(), platforms: [reused_platform, platform("macos", 124, 457, 700)]},
+      SHA,
+      BINARY_SHA,
+    ).reason,
+    "receipt_accepted",
+  )
+  for bad_acquisition in [
+    {
+      action: "not_a_real_action",
+      selection_reason: "successful_exact_run",
+      reused: true,
+      cancellations: [],
+    },
+    {
+      action: "reuse_success",
+      selection_reason: "not_a_real_reason",
+      reused: true,
+      cancellations: [],
+    },
+    {
+      action: "reuse_success",
+      selection_reason: "successful_exact_run",
+      reused: true,
+      cancellations: [],
+      unexpected: 1,
+    },
+    {
+      action: "reuse_success",
+      selection_reason: "successful_exact_run",
+      reused: true,
+      cancellations: [{malformed: true}],
+    },
+  ] {
+    assert_eq(
+      release_audit_receipt_plan(
+        cfg,
+        {
+          ...receipt(),
+          platforms: [
+            {...platform("windows", 123, 456, 900), acquisition: bad_acquisition},
+            platform("macos", 124, 457, 700),
+          ],
+        },
+        SHA,
+        BINARY_SHA,
+      ).reason,
+      "invalid_receipt",
+    )
+  }
+  assert_eq(
+    release_audit_receipt_plan(
+      cfg,
+      {
+        ...receipt(),
+        platforms: [
+          omit(platform("windows", 123, 456, 900), ["acquisition"]),
+          platform("macos", 124, 457, 700),
+        ],
+      },
+      SHA,
+      BINARY_SHA,
+    ).reason,
+    "invalid_receipt",
+  )
+}

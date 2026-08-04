@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/host_conditions/sample.request.json",
+  "title": "host_conditions.sample request",
+  "description": "Versioned, read-only ambient host-condition sample request.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "description": "Host-conditions request schema version."
+    }
+  },
+  "required": ["schema_version"],
+  "additionalProperties": false
+}

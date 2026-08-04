@@ -1,0 +1,5132 @@
+# Harn quick reference (LLM-friendly)
+
+**Canonical URL:** <https://harnlang.com/docs/llm/harn-quickref.html>
+
+This file is a one-pass reference optimized for LLM consumption and
+grep. It covers the syntax, stdlib highlights, concurrency, and the
+LLM / agent_loop surface an agent typically needs to write scripts.
+You can fetch the hosted quick reference in any agent context that supports
+HTTP fetches (Claude with `WebFetch`, Cursor's `@web`, Aider, etc.)
+using the canonical URL above.
+
+The human-facing companion lives at `docs/src/scripting-cheatsheet.md`.
+Keep the two in lockstep when syntax changes.
+
+For trigger manifests, connector contract v1, and the provider catalog, also
+load `docs/llm/harn-triggers-quickref.md`.
+
+## `--json` cheatsheet (agent-driven Harn)
+
+Every machine-readable mode returns a versioned envelope:
+`{ "schemaVersion": N, "ok": bool, "data": ..., "error": ..., "warnings": [] }`.
+Stdout is one parseable JSON document (or one NDJSON event per line);
+logs and progress always go to stderr.
+
+- Discover supported commands and their current schema versions:
+  `harn --json-schemas` (filter with `--command <name>`).
+- Per-command shape reference: `docs/src/cli-json-contract.md`.
+- Decode `harn lint --json` through `std/cli/envelope` (`decode_lint_json`);
+  `harn --json-schemas --command lint` publishes the complete `schemaJson`.
+  Diagnostic spans are UTF-8 half-open byte offsets `[start, end)`.
+- Common pairs an agent will use:
+  - `harn version --json` — build metadata (`name`, `version`, `description`, optional build-attested `source_revision`).
+  - `harn upgrade --check --json` — resolve target release without downloading.
+  - `harn lint --json <path>` — structured lint diagnostics + summary; pair with
+    `harn lint --fix <path>` (no `--json`) to apply the recommended edits.
+  - `harn replay --json <run.json>` — per-stage replay summary + fixture verdict.
+  - `harn check --json <path>` / `harn fmt --json <path>` — type-check and format
+    reports with the same `CheckDiagnostic` shape.
+  - `harn run --json script.harn` — NDJSON event stream (one envelope per line).
+  - `harn doctor --json` — capability matrix for host / targets / providers.
+  - `harn models batch manifest --json` — grouped offline batch manifest with stable request ids.
+  - `harn models batch prepare --json` — provider-native batch request files and prepare receipt.
+  - `harn models batch submit --dry-run --json` — validate prepared jobs and write a submission receipt.
+  - `harn models batch status --dry-run --json` — validate/poll submitted jobs and write a status receipt.
+  - `harn models batch download --dry-run --json` — validate/download completed result files.
+  - `harn models batch execute init|advance|inspect|cancel --json` — own a resumable, hash-bound batch lifecycle.
+  - `harn models batch rejoin --json` — normalize provider rows and emit a typed consumable/quarantine receipt.
+
+## Files and execution
+
+- File extension: `.harn`.
+- Entry points:
+  - Script entrypoint: `fn main(harness: Harness) { ... }`.
+  - Pipeline entrypoint: `pipeline default(harness: Harness) { ... }` (pipeline mode —
+    `compile_top_level_declarations` runs first, then the pipeline
+    body).
+  - Bare script with top-level statements for tiny one-off files.
+- Run: `harn run script.harn`.
+- Inline: `harn run -e 'harness.stdio.log("hi")'`. The snippet is wrapped in
+  `pipeline main(harness: Harness) { ... }`; leading `import "..."` /
+  `import { x } from "..."` / `import * as ns from "..."` /
+  `pub import { x } from "..."` lines are
+  hoisted out of the wrapper. The temp file lives in the current
+  directory so relative imports (`import "./lib"`) and `harn.toml`
+  discovery resolve against your project, e.g.
+  `harn run -e $'import "./lib"\nharness.stdio.log(answer())'`. Imports must come
+  first — interleaved imports are not lifted.
+- Shebang: a `#!/usr/bin/env harn` line at byte offset 0 of a `.harn`
+  file is skipped by the lexer, so executables on PATH can `chmod +x`
+  scripts and run them directly.
+- CLI arguments: `harn run script.harn -- a b c` exposes
+  `argv: list<string>` as a global (`argv == ["a", "b", "c"]`).
+- Exit code: any of three paths sets the process exit code.
+  - `harness.runtime.exit(code)` terminates immediately with that code.
+  - `pipeline main(harness: Harness)` (or any pipeline used as the entry) — the value
+    flowing out of the body sets the exit code:
+    - `return n: int` → exits `n` (clamped 0..=255).
+    - `return Err(msg)` → writes `msg` to stderr, exits 1.
+    - `return Ok(_)` / no explicit return → exits 0.
+  - Uncaught errors exit with 1 and a rendered diagnostic.
+
+### Effect authority
+
+Effects flow from the harness capability object; imports are pure.
+Importing a module binds code and types but never grants authority. Pass the
+narrowest nominal sub-handle a helper needs:
+
+```harn
+fn load_config(fs: HarnessFs, path: string) -> string {
+  return fs.read_text(path)
+}
+
+fn main(harness: Harness) {
+  harness.stdio.println(load_config(harness.fs, "harn.toml"))
+}
+```
+
+Pure builtins remain ordinary globals. Effectful runtime operations are
+methods on the closed `Harness*` types; their typed contracts are the shared
+source for checking, policy, receipts, and reference generation. Test fixtures
+are scoped to one harness through `harness.testing`, including
+`respond`/`calls`, HTTP and transport mocks, and the virtual clock.
+
+Globals that returned one host value now read a field off a snapshot:
+`platform()` and `arch()` are `harness.system.platform().os` and `.arch`;
+`username()`, `hostname()`, and `pid()` come from `harness.system.identity()`;
+path globals live on `harness.fs`. `harn fix` rewrites these calls, including
+calls inside `${...}` interpolation, and adds the parameter to callers that
+need to supply the handle.
+
+Keep root `Harness` at entrypoints and at boundaries that genuinely coordinate
+several capabilities. Elsewhere pass the narrowest handle the function needs.
+`capability-attenuation` warns when a helper takes root but uses only one
+sub-handle, and suggests a named record when it uses exactly two. The
+surface-changing fixer updates the signatures and call sites it can prove are
+safe. Harness values are runtime authority: never serialize, store, or
+checkpoint them. For public APIs with four or more easy-to-swap parameters of
+the same type, `homogeneous-positional-api` recommends one named record.
+
+Optional host protocols use the same typed surface, for example
+`harness.workspace.search(request)`, `harness.lsp.diagnostics(request)`, and
+`harness.pr_monitor.gh_snapshot(request)`. A host manifest says which of these
+optional methods that host implements. It cannot add methods a script could
+call.
+
+## Merge captain eval loop
+
+Use `harn merge-captain run` when iterating on the Merge Captain persona from a
+single command. It resolves a backend, streams canonical agent JSONL, persists a
+receipt, runs the Merge Captain oracle, and exits non-zero on unsafe action
+attempts or any oracle error.
+
+```bash
+# Mock playground smoke path. Streams JSONL to stdout and writes a receipt under
+# .harn-runs/merge-captain/<run-id>/receipt.json.
+harn merge-captain run --backend mock examples/merge_captain/playground_3repos --once
+
+# Keep stdout for the machine-readable summary and put the transcript/receipt in
+# explicit files.
+harn merge-captain run --backend mock examples/merge_captain/playground_3repos \
+  --once \
+  --model-route value/gemma \
+  --timeout-tier smoke \
+  --transcript-out .harn-runs/mc/event_log.jsonl \
+  --receipt-out .harn-runs/mc/receipt.json
+
+# Replay a deterministic transcript fixture through the same receipt + oracle
+# path.
+harn merge-captain run --backend replay \
+  examples/personas/merge_captain/transcripts/green_pr.jsonl \
+  --once --no-stdout
+
+# Run the in-process fake GitHub/fake git golden-transition suite.
+cargo test -p harn-cli --test merge_captain_cli issue_1012
+```
+
+Backends:
+
+| Backend | Argument | Use |
+|---|---|---|
+| `mock` | playground directory or scenario manifest | Local fake-backend scenario loop. |
+| `replay` | transcript JSONL file or event-log directory | Deterministic replay/audit without backend I/O. |
+| `live` | none | Production connector runtime selector; fails closed when the connector runtime is unavailable. |
+
+Flags:
+
+| Flag | Use |
+|---|---|
+| `--once` / `--watch` | One sweep or finite watch mode (`--max-sweeps`, `--watch-backoff-ms`). |
+| `--model-route ROUTE` | Pin the model/profile route in the receipt. |
+| `--timeout-tier TIER` | Pin the timeout/budget tier in the receipt. |
+| `--transcript-out PATH` | Write JSONL transcript to a file instead of stdout. |
+| `--receipt-out PATH` | Write receipt JSON to an explicit path. |
+| `--summary-out PATH` | Write run summary JSON to a file. |
+
+Use `harn merge-captain ladder <manifest>` to run the same backend fixture
+across a matrix of model routes and timeout tiers. The report records the first
+route/tier that completed correctly, every degraded or looping tier, and paths
+to each tier's JSONL transcript, receipt, and summary.
+
+```bash
+harn merge-captain ladder personas/merge_captain/harn.eval.toml \
+  --report-out .harn-runs/merge-captain-ladder/report.json \
+  --format json
+```
+
+The same ladder manifests can live inside eval packs, so `harn eval
+personas/merge_captain/harn.eval.toml` and `harn test package --evals` use the
+same runner and JSON artifact contract as host TUI/CLI surfaces.
+
+Use `harn merge-captain iterate <manifest>` when an agent needs the brute-force
+outer loop: scenarios × variants, where variants include model route, timeout
+tier, Harn package revision, and prompt-asset revision metadata. The command
+copies replay fixtures or materializes mock playgrounds into one iteration
+directory, writes every run's JSONL transcript, receipt, and summary, then emits
+`summary.json` plus a Markdown ranking table sorted by transcript-drift score
+and cost.
+
+```bash
+harn merge-captain iterate examples/personas/merge_captain/iterations/smoke.toml \
+  --report-out .harn-runs/merge-captain-iterations/latest.json \
+  --markdown-out .harn-runs/merge-captain-iterations/latest.md
+
+harn merge-captain iterate --diff \
+  examples/personas/merge_captain/iterations/diff/baseline-summary.json \
+  examples/personas/merge_captain/iterations/diff/candidate-summary.json
+```
+
+Iteration manifests are intentionally small:
+
+```toml
+version = 1
+id = "merge-captain-local-loop"
+base_dir = "."
+artifact-root = ".harn-runs/merge-captain-iterations/local-loop"
+
+[budget]
+max-runs = 12
+max-wallclock-ms = 30000
+max-cost-usd = 0.01
+
+[[scenarios]]
+id = "single-green"
+[scenarios.backend]
+kind = "mock"
+path = "examples/merge_captain/scenarios/single_green.json"
+
+[[variants]]
+id = "value-route-balanced"
+model-route = "local/qwen-value"
+timeout-tier = "balanced"
+package-revision = "harn-package@workspace"
+prompt-asset-revision = "merge-captain/prompts@v2"
+max-tool-calls = 8
+max-model-calls = 1
+```
+
+### Mock-repos playground (#1020)
+
+`harn merge-captain mock` materializes a real on-disk sandbox — temp
+git repos plus a fake GitHub HTTP server — so you can iterate on the
+captain against real `git` codepaths without touching live
+infrastructure. This is the recommended local iteration loop.
+
+```bash
+# 1. Create a playground from a built-in scenario. Default scenario is
+#    `three_repo_basic`. List built-ins with `mock scenarios`.
+harn merge-captain mock init ./pg --scenario three_repo_basic
+
+# 2. Sweep the captain against it. The driver detects the on-disk
+#    playground and synthesizes a canonical JSONL transcript reflecting
+#    the live state.
+harn merge-captain run --backend mock ./pg --once
+
+# 3. Advance the scenario between sweeps — flip a check, advance base,
+#    force-push as the author, merge a PR, etc. Steps come from the
+#    scenario manifest; `--action <json>` is the one-off escape hatch.
+harn merge-captain mock step ./pg --name gamma_force_push_fix
+harn merge-captain mock step ./pg --action \
+  '{"kind":"set_check","repo":"alpha","pr_number":101,"name":"ci","status":"completed","conclusion":"success"}'
+
+# 4. Boot the fake GitHub HTTP server pointing at the playground state.
+#    Real HTTP clients (e.g. harn-github-connector) talk to this; the
+#    captain still uses real `git` against bare remotes under
+#    ./pg/remotes/<repo>.git.
+harn merge-captain mock serve ./pg --bind 127.0.0.1:0 --print-addr
+
+# 5. Snapshot or tear down.
+harn merge-captain mock status ./pg --json
+harn merge-captain mock cleanup ./pg
+```
+
+Subcommands:
+
+| Subcommand | Purpose |
+|---|---|
+| `mock init <dir>` | Materialize bare+working git repos + `state.json` from a scenario. `--scenario` (built-in) or `--manifest <path>` (custom JSON/YAML). `--force` cleans up first. |
+| `mock step <dir>` | Apply a manifest-defined `--name <step>` or one-off `--action <json>`. Mutates `state.json` (and the bare remote when the action is `merge_pull_request`, `force_push_author`, or `advance_base`). |
+| `mock status <dir>` | Print the current PR/check/history state. `--json` for machine output. |
+| `mock serve <dir>` | Boot the fake GitHub HTTP server. Endpoints: `pulls`, `pulls/.../merge`, `pulls/.../files`, `commits/.../check-runs`, `actions/runs/.../logs`, `merge_queue/queues/...`, `issues`, `issues/.../comments`, `issues/.../labels`. |
+| `mock cleanup <dir>` | Remove the playground. Idempotent and refuses to delete arbitrary directories without the playground marker. |
+| `mock scenarios` | List built-in scenarios. |
+
+Scenario manifests live at `examples/merge_captain/scenarios/*.json`
+and follow the `merge_captain_playground_scenario` schema documented
+in `crates/harn-vm/src/orchestration/playground/manifest.rs`.
+
+## stdin / stdout / stderr / TTY
+
+- Stdio capability calls route through `Harness`: use
+  `harness.stdio.print(s)` / `harness.stdio.println(s)` for stdout,
+  `harness.stdio.eprint(s)` / `harness.stdio.eprintln(s)` for stderr,
+  and `harness.stdio.read_line()` / `harness.stdio.prompt(msg?)` for
+  interactive input.
+- Terminal capability calls also route through `Harness`: use
+  `harness.term.width()` / `harness.term.height()` for dimensions and
+  `harness.term.read_password(prompt?)` for no-echo password input.
+- `harness.stdio.read_stdin()` slurps the rest of stdin to a `string` and returns `nil`
+  at EOF.
+- `harness.stdio.is_stdin_tty()`, `harness.stdio.is_stdout_tty()`, `harness.stdio.is_stderr_tty()` — `bool`,
+  uses `std::io::IsTerminal`. Use these to decide between rich
+  interactive UI and pipe-friendly output.
+- `std/io` exposes structured interactive helpers: `is_tty(fd?)`,
+  `harness.stdio.read_line({prompt?, timeout_ms?, trim?, echo?, raw?})`,
+  `read_password(prompt?, timeout_ms?)`, and `write_stderr(text)`.
+  Structured reads return `{ok, value?, status?, error?}` with statuses
+  `ok`, `eof`, `timeout`, `interrupt`, or `error`.
+- `harness.term.set_color_mode("auto"|"always"|"never")` controls whether
+  `color`/`bold`/`dim` emit ANSI. Auto honors `NO_COLOR` and
+  `FORCE_COLOR` env vars and only emits when stdout is a TTY.
+
+In tests: `harness.testing.stdin_set(text)` / `harness.testing.stdin_reset()`,
+`harness.testing.tty_set(stream, bool)` / `harness.testing.tty_reset()`,
+`harness.testing.capture_stderr_start()` /
+`harness.testing.capture_stderr_take()`.
+
+For long terminal artifacts, import `std/tui`:
+
+```harn
+import { page, rule, terminal_width, clear } from "std/tui"
+
+const result = page({title: "Audit", body: markdown, format: "markdown"})
+```
+
+`page(...)` uses `$PAGER` when stdout is a TTY, adds `-R -F -X` for `less`,
+falls back to full print output when stdout is not interactive or the pager is
+missing, and returns `{ok, paged, error?}`.
+
+For interactive pickers, the same module exports
+`select_from(items, opts?)` so harness scripts stop hand-rolling
+`fzf` / `gum choose` detection. It returns `{ok, value, status}`,
+auto-detects fzf then gum then falls back to a numbered `read_line`
+menu, and honors `mock_stdin` under `prefer_external: "none"`.
+
+## Command helpers (`std/command`)
+
+Use `std/command` for script-side harness commands. It runs through the same
+host command substrate as model-facing tools, but returns deterministic Harn
+records for retries, artifacts, tails, classification, and recovery hints.
+Use `harness.process.run({program, args?, cwd?, env?, stdin?, timeout_ms?})`
+when you only need one synchronous subprocess capture record:
+`{exit_code, stdout, stderr, duration_ms, success, timed_out}`.
+
+```harn,ignore
+import { command_cancel, command_json, command_json_step, command_run, command_try, command_wait_for_output } from "std/command"
+
+const server = command_run(harness.tools, ["my-server", "--port", "8080"], {background: true})
+defer { command_cancel(server, {wait_result_ms: 5000}) }
+const ready = command_wait_for_output(harness.tools, server, "listening on 8080", {timeout_ms: 10000})
+if !ready.matched {
+  throw "server readiness failed: " + ready.status
+}
+
+const repo = command_json(harness.agent, harness.tools, harness.clock, ["gh", "api", "repos/burin-labs/harn"], {
+  capture: {max_inline_bytes: 65536},
+})
+
+const step = command_json_step(harness.agent, harness.tools, harness.clock, "repo metadata", ["gh", "api", "repos/burin-labs/harn"], {
+  retry: {max_attempts: 2, delay_ms: 0},
+})
+
+const fallback = command_try(harness.agent, harness.tools, harness.clock,
+  [
+    {source: "connector", run: fn() { return repos_get("burin-labs", "harn") }},
+    {source: "cli", run: fn() { return command_json(harness.agent, harness.tools, harness.clock, ["gh", "api", "repos/burin-labs/harn"]) }},
+  ],
+  {normalize: { value, source -> return {source: source, name: value.name} }},
+)
+```
+
+`command_run` throws a structured process-spawn I/O error when the OS cannot
+start the program. Check `error.kind == "not_found"` for an optional executable;
+do not treat other kinds, policy errors, timeouts, or nonzero exit results as
+absence.
+
+- `shell_command_from_argv(argv)` renders argv as safe shell text and unwraps
+  `["bash", "-lc", "cmd"]`-style shell wrappers to the script payload.
+- `shell_command_from_value(value)` accepts string, argv-list, or dict-shaped
+  provider command values with `argv`, `command`, or `cmd` fields.
+- `command_json(harness.agent, harness.tools, harness.clock, spec, opts?)` parses stdout as JSON, returns `nil` for empty
+  output only with `allow_empty: true`, and supports `result: "record"` for
+  `{ok:false,error,step}` instead of throwing. Command results and structured
+  errors carry the canonical effective `cwd`, including when it was inherited.
+- `command_json_step(harness.agent, harness.tools, harness.clock, name, spec, opts?)` preserves `command_step` retry,
+  classify, recovery, artifact, and attempt fields, then adds `json` or
+  `parse_error`.
+- `command_try(harness.agent, harness.tools, harness.clock, attempts, opts?)` is
+  only for ordered equivalent probes. It adds `fallback_index`,
+  `fallback_total`, and per-attempt summaries; it is not a retry system or
+  provider framework.
+- `command_wait_for_output(harness.tools, handle, pattern, opts?)` parks on background output,
+  exit, or timeout without polling. Use `source: "stdout" | "stderr" |
+  "combined"`, `regex: true`, and `from_offset` when needed. A match reports
+  byte offsets and leaves teardown to `command_cancel`.
+
+## Time, sleep, monotonic clock
+
+- `harness.clock.now_ms()` — wall-clock millis since UNIX_EPOCH (`int`).
+- `harness.clock.monotonic_ms()` — monotonic millis since process start (`int`).
+- `harness.clock.sleep_ms(d)` / `harness.clock.sleep_ms(n)` — async sleep. **Mock-aware**: under
+  `mock_time`, both advance the mocked clock instantly instead of
+  blocking — so tests of retry/backoff/timeout logic stay
+  deterministic and fast. The same mock is observed by `now_ms`,
+  `monotonic_ms`, `timestamp`, `elapsed`, the trigger dispatcher, and
+  the cron scheduler.
+- `yield_now()` — cooperative scheduling primitive. Lets sibling
+  `parallel each` / spawned tasks make progress without advancing time.
+  Useful inside `harness.testing.clock_set(...)` blocks where you want one more poll
+  cycle but no clock movement.
+- `harness.testing.clock_set(ms)` / `harness.testing.clock_advance(ms)` / `harness.testing.clock_reset()` — install,
+  advance, and tear down the mock. The clock stack nests, so a Rust
+  test harness can install an outer mock and a Harn pipeline can layer
+  its own on top.
+
+## Strings
+
+```harn
+const plain = "hello\n"
+const interp = "Hello, ${name}!"
+const multi = """
+This is a triple-quoted multiline string.
+It keeps line breaks verbatim and is the preferred way to declare
+long system prompts in source code.
+"""
+const raw = r"C:\path\does\no\escapes"
+```
+
+Heredoc-style `<<TAG ... TAG` is **only** valid inside LLM tool-call
+argument JSON. In source code, use `"""..."""`.
+
+## Slicing
+
+End-exclusive slicing works on strings and lists:
+
+```harn
+const s = "hello world"
+harness.stdio.log(s[0:5])        // "hello"
+harness.stdio.log(s[6:11])       // "world"
+
+const xs = [1, 2, 3, 4, 5]
+harness.stdio.log(xs[1:4])       // [2, 3, 4]
+```
+
+`substring(s, start, end)` also exists — the second argument is an
+exclusive **end** index, matching `s[start:end]` slicing, `.substring`,
+and `list.slice`. `end` defaults to the string length.
+
+### Scanning large text (cursor loops)
+
+A `string` is UTF-8, so every random char access — `s[i]`, `s[a:b]`,
+`s.count`, `substring(s, a, b)` — is **O(n)** in the string length. A
+per-character cursor loop built from those is therefore O(n²) and stalls
+on multi-kilobyte source files (a real parser/lint script will feel it).
+
+For source scanners, materialize the string **once** into a list of
+single-character strings with `chars(...)`, then index the list — list
+access is O(1) and `chars(...)` interns ASCII characters so the
+materialization does not allocate per character:
+
+```harn
+const cs = chars(src)       // one linear pass; ASCII chars are interned
+const n = cs.count          // O(1) on a list
+let i = 0
+let braces = 0
+while i < n {
+  if cs[i] == "{" { braces = braces + 1 }   // O(1) list index
+  i = i + 1
+}
+```
+
+`src.chars()` (method form) is identical. Use `s.lines()` / `split(s, sep)`
+when line- or token-oriented scanning suffices, and reach for `regex_*`
+(see [Regex](#regex)) for pattern matching rather than hand-rolled cursors.
+
+## Control flow: `if` is an expression
+
+`if` / `else` produces a value. Bind it directly into `let`, pass it
+to functions, or `return` it:
+
+```harn
+const body = if len(content) > 2400 {
+  head_slice + "..." + tail_slice
+} else {
+  content
+}
+
+const grade = if score >= 90 { "A" } else if score >= 80 { "B" } else { "C" }
+```
+
+## Iteration
+
+Harn loops are `for x in <iterable>`. Reach for destructuring and
+stdlib helpers instead of integer-indexed loops — they read better and
+avoid off-by-one bugs.
+
+```harn
+for x in items { ... }
+
+// enumerate: yields a list of {index, value} dicts.
+for {index, value} in items.enumerate() {
+  harness.stdio.log("${index}: ${value}")
+}
+
+// zip: yields [a, b] pairs — destructure with list pattern.
+for [a, b] in xs.zip(ys) { ... }
+
+// dict iteration: entries() yields [{key, value}, ...].
+for {key, value} in my_dict.entries() { ... }
+
+// Ranges:
+const first_5 = range(5)         // [0, 1, 2, 3, 4] — half-open, Python-style
+const middle  = range(3, 7)      // [3, 4, 5, 6]
+const inc     = 1 to 5            // [1, 2, 3, 4, 5] — inclusive default
+const exc     = 1 to 5 exclusive  // [1, 2, 3, 4]    — half-open
+```
+
+Note: `for` heads accept three destructuring shapes, each matching what the
+iterable yields — mixing them fails loudly (no more silent `nil` bindings):
+
+- `for (a, b) in ...` — a **pair** pattern, for iterables that yield `Pair`
+  values: `iter(x).enumerate()`, `iter(x).zip(...)`, `dict.iter()`.
+- `for [a, b] in ...` — a **list** pattern, for `list.zip(other)` (yields
+  `[a, b]` lists).
+- `for {index, value} in ...` — a **dict** pattern, for `list.enumerate()` /
+  `entries()` (yield `{index, value}` / `{key, value}` dicts).
+
+## Streams
+
+- Declare stream producers with `gen fn name(...) -> Stream<T> { ... }`.
+- Emit one value with `emit expr`; `emit` is valid only inside `gen fn`.
+- Consume with `for item in stream`, `.next()` (`{value, done}`), or `.iter()`.
+- `Stream<T>` is distinct from `Generator<T>`; existing `yield` behavior is unchanged.
+- Throws inside a stream propagate when the consumer pulls the next item.
+
+```harn
+gen fn numbers() -> Stream<int> {
+  emit 1
+  emit 2
+}
+
+for n in numbers() { harness.stdio.log(n) }
+```
+
+`stream.*` works with any iterable source: lists, ranges, channels,
+generators, and lazy `iter(...)` values. Operators are single-pass and lazy
+unless the name is a sink such as `collect`, `fold`, or `first`.
+
+```harn
+// LLM token feed -> tap to log, then keep a bounded transcript.
+const chunks = stream.collect(
+  stream.tap(harness.llm.stream_call("Summarize logs", nil, {provider: "mock"}), { chunk -> harness.stdio.log(chunk.visible_delta) }),
+  {max: 200}
+)
+
+// Parallel or channel results -> take the first three.
+const first_three = stream.collect(stream.take(results_channel, 3), {max: 3})
+
+// Agent events -> filter by topic.
+const tool_events = stream.collect(
+  stream.filter(agent_events, { ev -> ev?.topic == "tool_call" }),
+  {max: 100}
+)
+
+// Two streams -> race; the first source to emit wins.
+const winner = stream.first(stream.race(primary_stream, fallback_stream))
+
+// Combine streams and fold to a result.
+const total = stream.fold(
+  stream.merge(worker_a, worker_b, worker_c),
+  0,
+  { acc, item -> acc + item.cost }
+)
+```
+
+Common operators:
+
+| Operator | Use |
+|---|---|
+| `stream.map(s, f)` / `stream.filter(s, pred)` / `stream.tap(s, f)` | Per-item transform, selection, side effects. |
+| `stream.scan(s, seed, f)` / `stream.fold(s, seed, f)` | Running accumulator vs final accumulator. |
+| `stream.collect(s, {max: N})` | Materialize with an explicit cap; exceeding it throws loudly. |
+| `stream.take(s, n)` / `stream.take_until(s, pred)` / `stream.first(s)` | Bounded consumption and head lookup. |
+| `stream.merge(...)` / `stream.interleave(...)` / `stream.zip(a, b)` / `stream.race(...)` / `stream.broadcast(s, n)` | Combine or fan out streams. |
+| `stream.throttle(s, per_sec)` / `stream.debounce(s, window_ms)` | Basic emission pacing and burst coalescing. |
+
+`harness.llm.stream_call(prompt, system?, options?)` returns
+`Stream<{delta, visible_delta, partial, role, stop_reason}>` (typed as
+`LlmStreamChunk` from `std/llm/envelope`). It accepts the
+same options as `llm_call`; the `stream` option is still only the provider
+transport toggle. Use `visible_delta` for UI rendering because it hides open
+internal `<think>` blocks. Breaking out of consumption drops the stream and
+cancels the background request.
+
+For app-facing chat UIs with private model scratchpads, use
+`std/agent/stream` instead of hand-rolled pending-buffer logic:
+
+```harn,ignore
+import {agent_stream_call} from "std/agent/stream"
+
+const result = agent_stream_call(prompt, system, {
+  provider: "openai",
+  model: "gpt-5-mini",
+  private: {open_tag: "<secret>", close_tag: "</secret>"},
+  on_delta: { delta, _event, _state -> harness.stdio.print(delta) },
+})
+```
+
+`agent_private_stream_delta` holds back split private tags such as
+`"<sec" + "ret>"`, `agent_private_stream_finish` emits a terminal envelope,
+and `agent_stream_call` always returns either `status: "done"` or
+`status: "stream_interrupt"` so host loops do not hang without a completion
+event.
+
+## Module scope
+
+Mark declarations `pub` to export them from a module: `pub fn`,
+`pub pipeline`, `pub tool`, `pub skill`, `pub struct`, `pub enum`,
+`pub type`, and `pub import` (re-export). A `pub type` alias can be
+imported alongside the functions that use it —
+`import { SmartTarget, pick } from "./targets"` — and used in
+annotations or as an `llm_call_structured` schema type; non-`pub`
+type aliases stay module-private and error on import.
+
+Top-level `let` / `var` and `fn` declarations are visible inside
+functions defined in the same file:
+
+```harn
+const GRADER_SYSTEM = """
+You are a strict grader...
+"""
+
+pub fn grade_file(path) {
+  // GRADER_SYSTEM is in scope here.
+  return harness.llm.call("...", GRADER_SYSTEM, { ... })
+}
+```
+
+Top-level mutable `let` bindings are shared across functions: a mutation
+in one function is visible to the others. For state mutated from
+`parallel`/`spawn` bodies, prefer atomics (`atomic(0)`, `atomic_add`,
+`atomic_get`) or a channel — concurrent branches share one cell and a
+plain read-modify-write races (see HARN-LNT-064).
+
+## Attributes (`@name(...)`)
+
+Declarative metadata on a top-level decl. Stack any number; each line
+attaches to the **next** declaration. Args are literals only (no expr
+evaluation).
+
+```harn
+@deprecated(since: "0.8", use: "compute_v2")
+@test
+pub fn compute(x: int) -> int { return x + 1 }
+```
+
+| Attr | Effect |
+|---|---|
+| `@deprecated(since: "X", use: "Y")` | Type-check warning at every call site (both args optional). |
+| `@test` | Marks a `pipeline` as a test. `harn test` discovers it alongside the legacy `test_*` naming convention. |
+| `@serial(group: "name")` | Test-scheduler hint: tests sharing the group are run serially under `--parallel`. Bare `@serial` shares a default group. |
+| `@heavy(threads: N)` | Test-scheduler hint: the test reserves `N` worker permits under `--parallel` so it never oversubscribes the pool. |
+| `@job("name")` | Marks a `pub fn` as a trigger-dispatched job. `harn run --as-job file.harn --job name --request req.json` runs it once; `harn serve worker file.harn` runs schedules and queue consumers. |
+| `@schedule("cron", "UTC")` | Job modifier: activates the job from `harn serve worker` through the cron connector. |
+| `@queue("name")` | Job modifier: makes `harn serve worker` consume durable jobs from the named worker queue. |
+| `@retry(max: N, backoff: "svix" \| "linear" \| "exponential")` | Job modifier: maps to dispatcher retry/DLQ policy. `@job(..., retry: {...})` remains accepted for generated trigger-style metadata. |
+| `@complexity(allow)` | Suppresses the `cyclomatic-complexity` lint warning on this fn. |
+| `@invariant("fs.writes", "src/**")` | Checked only by `harn check --invariants`. Current built-ins: `fs.writes`, `budget.remaining`, `approval.reachability`. `harn explain --invariant <name> <handler> <file>` prints the violating CFG path. |
+| `@acp_tool(name: "X", kind: "edit", side_effect_level: "mutation", ...)` | Compiles to `tool_define(...)` with the fn as the handler and the named args (minus `name`) lifted into `annotations`. `name` defaults to the fn name. |
+| `@acp_skill(name: "X", when_to_use: "...", invocation: "explicit", ...)` | Compiles to `skill_define(...)` with the fn bound as the skill's `on_activate` hook. Named args (minus `name`) become skill-metadata fields. `name` defaults to the fn name. |
+
+Unknown attribute names produce a type-checker warning (typo guard)
+but don't break compilation. Attached to any non-decl statement is a
+parse error.
+
+## Typing: `any` vs `unknown` vs no annotation
+
+Harn is gradually typed. Three levels of "I don't know the type yet":
+
+| Annotation | Accepts any value in | Flows out to concrete types | Use when |
+|---|---|---|---|
+| *(omitted)* | yes | yes | Internal, unstable code you haven't typed yet. |
+| `unknown` | yes | **no** — must narrow first | Untrusted boundaries: LLM responses, parsed JSON, dynamic dicts. |
+| `any` | yes | yes (escape hatch) | Last resort. Prefer `unknown` unless you have a specific reason to defeat checking. |
+
+Narrow `unknown` with `type_of(x) == "T"` or `schema_is(x, Shape)`:
+
+```harn
+fn handle(v: unknown) -> string {
+  if type_of(v) == "string" { return "str:${v.upper()}" }  // v: string here
+  if schema_is(v, MyShape) { return "shape:${v.name}" }    // v: MyShape here
+  return "other"
+}
+```
+
+`never` is the bottom type — expressions like `throw`, `return`,
+`unreachable()`, and blocks that always exit infer to `never`. It's a
+subtype of every type.
+
+### Discriminated unions & distribution
+
+Three discriminated-union surface forms, all check identically once
+you've written them — pick whichever reads best at the call site.
+
+**Pure literal unions.** No discriminant, no shape: just enumerate
+the literal values. `match` covers them like an enum.
+
+```harn,ignore
+type Verdict = "pass" | "fail" | "unclear"
+
+fn classify(v: Verdict) -> string {
+  match v {
+    "pass" -> { return "ok" }
+    "fail" -> { return "no" }
+    "unclear" -> { return "?" }
+  }
+}
+```
+
+**Tagged shape unions.** Two or more dict shapes joined by `|`. The
+checker auto-detects the discriminant: a field that is non-optional
+in every variant, has a literal type, and takes a distinct literal
+value per variant. The field can be named anything — `kind`, `type`,
+`op`, whatever fits the domain — there is no privileged spelling.
+
+```harn,ignore
+type Msg =
+  {kind: "ping", ttl: int} |
+  {kind: "pong", latency_ms: int}
+
+fn handle(m: Msg) -> string {
+  match m.kind {                             // narrows m per arm
+    "ping" -> { return "ttl=" + to_string(m.ttl) }
+    "pong" -> { return to_string(m.latency_ms) + "ms" }
+  }
+}
+
+// Same narrowing works on `if`:
+if m.kind == "ping" { /* m: {kind: "ping", ttl: int} */ }
+else                { /* m: {kind: "pong", latency_ms: int} */ }
+```
+
+**Legacy `enum`.** Nominal variants with optional payload fields,
+matched on `.variant`.
+
+```harn,ignore
+enum Action { Create, Edit, Delete }
+match a.variant { "Create" -> { … } "Edit" -> { … } "Delete" -> { … } }
+```
+
+**`match` must be exhaustive.** Missing a variant is a hard error.
+Add the missing arm or end with `_ -> { … }`. `if/elif/else` chains
+stay intentionally partial; opt into exhaustiveness by ending the
+chain with `unreachable("…")`.
+
+**Or-patterns (`pat1 | pat2 -> body`)** let a single arm body cover
+two or more alternatives, and each alternative counts toward
+exhaustiveness. Inside the arm, the matched variable is narrowed to
+the *union* of the alternatives' matches — on a tagged shape union
+this is a sub-union, not a single variant:
+
+```harn,ignore
+match m.kind {
+  "ping" | "pong" -> { /* m is {kind:"ping",…} | {kind:"pong",…} */ }
+  "close"         -> { /* m is the close variant */ }
+}
+```
+
+Or-pattern alternatives are restricted to literals (string, int,
+float, bool, nil) and the wildcard `_`. Guards (`… if cond ->`) work
+on or-pattern arms too.
+
+**Generic aliases distribute over closed unions.** When you write
+`Container<A | B>`, the checker expands it to
+`Container<A> | Container<B>` so each instantiation fixes the type
+parameter independently. This is what makes the TypeScript pain
+around `(t: "create" | "edit") => void` not bite in Harn:
+
+```harn,ignore
+type Action = "create" | "edit"
+type ActionContainer<T> = {action: T, process_action: fn(T) -> nil}
+
+fn process_create(a: "create") { … }
+fn process_edit(a: "edit")     { … }
+
+const containers: list<ActionContainer<Action>> = [
+  {action: "create", process_action: process_create},
+  {action: "edit",   process_action: process_edit},
+]
+```
+
+`ActionContainer<Action>` is `ActionContainer<"create"> |
+ActionContainer<"edit">`, so the literal-tagged elements fit one
+specific branch each — no contravariance grief.
+
+### Intersection types (`A & B`)
+
+`A & B` requires the value to satisfy *every* component, not just
+one. The intersection of two shape types behaves like a dict that
+has every field from each component, so both fields are accessible:
+
+```harn,ignore
+type BaseCtx = {request_id: string}
+type AuthCtx = {user_id: string}
+
+fn use_ctx(ctx: BaseCtx & AuthCtx) -> string {
+  return ctx.request_id + "/" + ctx.user_id
+}
+```
+
+`&` binds tighter than `|`, so `A & B | C` parses as `(A & B) | C`.
+Inline shapes work too: `fn f(env: {region: string} & {tier: string})`.
+Lowering: at runtime an intersection annotation becomes a JSON-Schema
+`allOf` guard, so missing a field from any component triggers the
+parameter-runtime check just like a single-shape mismatch.
+
+### Variance (`in T` / `out T`)
+
+User-declared generics default to **invariant**. Mark a type
+parameter `out T` for covariance (T appears only in output position)
+or `in T` for contravariance (T appears only in input position):
+
+```harn,ignore
+type Reader<out T> = fn() -> T
+interface Sink<in T> { fn accept(v: T) -> int }
+fn map<in A, out B>(value: A) -> B { ... }
+```
+
+Built-ins: `iter<T>` and value-semantic `list<T>` are covariant;
+`dict<K, V>` is invariant in `K` and covariant in `V`;
+`tuple<T0, T1, ...>` is covariant at each fixed position; `Result<T, E>` is
+covariant in both. Function types are
+**contravariant in parameters**, covariant in return — `fn(float)`
+stands in for `fn(int)`, never the reverse. The numeric widening
+`int <: float` is suppressed in invariant positions.
+
+### Fixed-arity tuples
+
+`tuple(a, b)` infers `tuple<A, B>`. A bracket literal remains a list by
+default, but a `tuple<...>` annotation or parameter contextually checks each
+position:
+
+```harn
+const row = tuple("retries", 3)
+const name: string = row[0]
+const same: tuple<string, int> = ["retries", 3]
+```
+
+Constant positive or negative indexes select an exact position; a constant
+out-of-bounds index is `HARN-TYP-027`. A dynamic index returns the positional
+union plus `nil`, while iteration returns the union without `nil`. Tuples widen
+to compatible lists; arity-changing operations also return lists. Lists never
+narrow to tuples.
+
+## Results and errors
+
+`try { ... }` returns a `Result.Ok(value)` on success or
+`Result.Err(value)` on thrown error. Unwrap with:
+
+- `unwrap(r) -> T` — returns `T`, panics if `Err`.
+- `unwrap_err(r) -> string` — returns the error message, panics if
+  `Ok`.
+- `r?.field` — optional chaining that returns `nil` on `Err`.
+- `match r { Ok(v) -> { … } Err(e) -> { … } }` — bare variant
+  patterns; the `Result.` qualifier is optional when the variant name
+  is unambiguous, and payloads bind with the instantiated types
+  (`Result<int, string>` binds `v: int`, `e: string`).
+
+```harn
+const r = try { harness.llm.call("hi", nil, opts) }
+const text = r?.text ?? "no response"
+```
+
+`try { body } catch (e) { handler }` is also an expression: its value is
+the body tail on success or the handler tail on a caught throw. A typed
+catch that doesn't match the thrown type rethrows past the expression. A
+trailing `finally { ... }` runs once for effect only.
+
+```harn
+const parsed = try { json_parse(raw) } catch (e) { default_config() }
+```
+
+Optional chaining works for properties, methods, and subscripts:
+`obj?.field`, `obj?.method(args)`, and `obj?.["content-type"]` all
+return `nil` when the receiver is `nil`; otherwise they perform the same
+access as `.`, method call, or `[]`.
+
+`??` binds tighter than comparisons/logical operators and looser than
+multiplication. Read `classified == maybe_flag ?? false` as
+`classified == (maybe_flag ?? false)`. `harn fmt` inserts those clarifying
+parentheses automatically.
+
+`try* EXPR` (prefix) evaluates `EXPR` and rethrows any throw so an
+enclosing `try { ... } catch (e) { ... }` sees it. Use it instead of
+the verbose `try { foo() } / guard is_ok else / unwrap` boilerplate:
+
+```harn
+fn fetch(prompt) {
+  // Without try*: try { harness.llm.call(prompt) } / guard is_ok / unwrap
+  const response = try* harness.llm.call(prompt)
+  return parse(response)
+}
+
+const outcome = try {
+  fetch(user_prompt)
+} catch (e: ApiError) {
+  fallback(e)
+}
+```
+
+`try*` requires an enclosing function (`fn`, `tool`, or `pipeline`) so
+the rethrow has somewhere to live; it's a compile error at the module
+top level. It's distinct from postfix `?`: `?` early-returns
+`Result.Err(...)` from a `Result`-returning function, while `try*`
+rethrows a thrown value into an enclosing catch.
+
+## JSON querying
+
+Use `json_pointer(value, ptr)` for RFC 6901 paths such as
+`/users/0/email`; escaping is `~0` for `~` and `~1` for `/`. Missing
+paths return `nil`. `json_pointer_set(value, ptr, new)` and
+`json_pointer_delete(value, ptr)` return modified copies.
+
+Use `jq(value, expr)` for a jq-like stream query; it always returns a
+list. Use `jq_first(value, expr)` when you expect one value or `nil`.
+Supported v1 forms include `.`, `.foo.bar`, `.[2]`, `.[2:5]`,
+`.[]`, `.["quoted key"]`, pipes, commas, `length`, `keys`,
+`values`, `type`, `map(...)`, `select(...)`, boolean comparisons,
+object construction, and recursive descent `..`.
+
+```harn
+const api = json_parse(response.body)
+const first_email = json_pointer(api, "/users/0/email")
+const active = jq(api, ".users[] | select(.active == true) | .email")
+const summary = jq_first(api, "{ count: .users | length, next: .meta.next }")
+```
+
+For JSONL files that may be large, import `std/jsonl` and use
+`read_jsonl_page_result` or `read_jsonl_contract_page_result`. Each page is
+bounded by physical records and bytes, returns an exact `{offset, line}` cursor,
+and never returns a partial line. Contract pages preserve `malformed`,
+`schema_invalid`, `rule_failed`, and `rule_error` per-record issues with the raw
+line and its location. Use `fold_jsonl_file` when the whole file need not reside
+in memory; `read_jsonl` remains the list-materializing compatibility helper.
+
+For schema-first code, `schema_report(value, schema, apply_defaults?)` returns
+`{ok, message, errors, issues, value?}` without throwing. Import `std/schema`
+for builder/composition helpers such as `schema_object(...)`,
+`schema_closed_object(...)`, `schema_strict_object(...)`,
+`get_typed_report(...)`, and `get_typed_value(...)`. Prefer closed/strict
+objects for option bags, receipts, structured LLM outputs, and host contracts
+that should reject unknown keys.
+
+Import `std/slug` for human-readable non-secret identifiers:
+`random_slug({segments: 3})`, `slug_from(value, {salt: "ci"})`, and
+`slugify("Agent 007 / Fast Verify")`.
+
+## Concurrency
+
+```harn
+// Spawn a background task.
+const h = spawn { long_work() }
+const value = await(h)
+
+// parallel each: concurrent map. Fail-fast: the first branch error
+// cancels in-flight siblings and propagates.
+const results = parallel each paths { p -> process(p) }
+
+// parallel settle: like `each` but collects per-item Ok/Err and never
+// cancels — use it when every branch must run regardless of failures.
+const outcome = parallel settle paths { p -> grade(p) }
+harness.stdio.log(outcome.succeeded)  // count
+harness.stdio.log(outcome.failed)
+for r in outcome.results {
+  // r is Result.Ok(...) or Result.Err(...)
+}
+
+// parallel N: fan-out with an index. Fail-fast like `parallel each`.
+const indices = parallel 8 { i -> fetch(i) }
+
+// Cap in-flight work to avoid overwhelming downstream services.
+const results = parallel settle paths with { max_concurrent: 4 } { p ->
+  harness.llm.call(p, nil, opts)
+}
+```
+
+`std/abort` adds the third form: run everything and collect every outcome
+like `parallel settle`, but let a branch that reaches a doomed verdict stop
+the siblings that have not started. Use it when branches poll or wait and a
+sibling's failure makes the rest pointless. It is COOPERATIVE — a branch
+blocked inside one long call is not interrupted; the abort lands at the next
+checkpoint the branch itself checks.
+
+```harn,ignore
+import { abort_requested, decisive_error, request_abort, settle_with_abort } from "std/abort"
+
+const outcome = settle_with_abort(lanes, { lane, token ->
+  if abort_requested(token) {           // your own safe checkpoint
+    return Err({code: "stopped_waiting", message: "sibling already failed"})
+  }
+  if doomed(lane) {
+    let _ = request_abort(token, {code: "lane_failed", message: "${lane} red"})
+    return Err({code: "terminal", message: "${lane} red"})
+  }
+  return proof(lane)
+}, {max_concurrent: 3})
+
+// outcome.results is one Result per item in source order (std/settled applies).
+// A branch fails when it throws OR returns Result.Err — plain `parallel settle`
+// would record a returned Err as Ok(Err(..)) and count it a success.
+harness.stdio.log(outcome.aborted, outcome.abandoned, outcome.reason?.code)
+harness.stdio.log(decisive_error(outcome))  // first non-abandoned failure: the real cause
+```
+
+`max_failures: N` trips the token automatically after N failures;
+`abort_on: fn(err, i) -> AbortReason?` chooses which failures are decisive
+(return `nil` to keep going). With neither, it behaves exactly like
+`parallel settle`.
+
+`max_concurrent: 0` (or no `with` clause) means unlimited. See also
+`retry <count> { }` (count mandatory; returns nil when all attempts fail —
+no `catch` clause), channels, `select`, and `deadline` in
+`docs/src/concurrency.md`.
+
+For quotas shared across Harn processes, use
+`durable_rate_limit_acquire(options)`. It writes a SQLite reservation log under
+`.harn/rate-limits.sqlite` by default, supports atomic multi-bucket admission,
+and returns `{ok, timed_out, waited_ms, retry_after_ms, buckets}`:
+
+```harn
+const admitted = durable_rate_limit_acquire({
+  buckets: [
+    {key: "provider:cerebras:rpm", limit: 5, units: 1, window_ms: 60s},
+    {
+      key: "model:cerebras:gpt-oss-120b:tpm",
+      limit: 30000,
+      units: 12000,
+      window_ms: 60s,
+    },
+  ],
+  timeout_ms: 2m,
+})
+
+guard admitted.ok else { throw "quota admission timed out" }
+```
+
+Channel waits are guarded: if every active task is blocked on sends/receives
+that cannot match another task, the runtime raises `HARN-ORC-012` instead of
+hanging. Use `deadline { ... }`, `select timeout`, or `channel_select(...,
+timeout_ms)` when a channel wait is intentionally bounded by time.
+
+## Iteration & lazy iterators
+
+Eager collection methods (`list.map`, `list.filter`, `list.flat_map`,
+`dict.map_values`, `dict.filter`, set/string equivalents, `.reduce`,
+`.find`, `.any`, `.all`, etc.) still return eager collections. Nothing
+about those has changed — use them when you just want a list/dict back.
+
+Lazy iteration is opt-in via `.iter()`:
+
+```harn
+const xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+const first_three_doubled_evens = xs
+  .iter()
+  .filter({ x -> x % 2 == 0 })
+  .map({ x -> x * 2 })
+  .take(3)
+  .to_list()
+// [4, 8, 12]
+```
+
+`.iter()` lifts a list/dict/set/string/generator/channel into
+`Iter<T>` — a lazy, single-pass, fused iterator. Combinators chain by
+returning a new `Iter`. Sinks drain the iter and return an eager value.
+
+### Lazy combinators (`Iter<T> -> Iter<...>`)
+
+`.map(f)`, `.filter(p)`, `.flat_map(f)`, `.take(n)`, `.skip(n)`,
+`.take_while(p)`, `.skip_while(p)`, `.zip(other)`, `.enumerate()`,
+`.chain(other)`, `.chunks(n)`, `.windows(n)`, `.iter()` (no-op on an
+iter). `iter(x)` is also available as a free builtin.
+
+### Sinks (drain, return eager value)
+
+`.to_list()`, `.to_set()`, `.to_dict()` (requires `Pair` items),
+`.count()`, `.sum()`, `.min()`, `.max()`, `.reduce(init, f)`,
+`.first()`, `.last()`, `.any(p)`, `.all(p)`, `.find(p)`,
+`.for_each(f)`.
+
+### Dict iteration and `Pair`
+
+`.iter()` on a dict yields `Pair(key, value)` values — **not**
+`{key, value}` dicts. Access with `.first` / `.second`, or destructure
+in a for-loop:
+
+```harn
+for (k, v) in {a: 1, b: 2}.iter() {
+  harness.stdio.log("${k}: ${v}")
+}
+```
+
+A direct `for entry in some_dict` still yields `{key, value}` dicts
+(back-compat). A `pair(a, b)` builtin exists for constructing pairs
+explicitly; `.zip` and `.enumerate` also emit pairs.
+
+### Semantics
+
+- **Lazy**: nothing runs until a sink (or for-loop) pulls values.
+- **Single-pass, fused**: once exhausted, stays exhausted. Call
+  `.iter()` again on the source to restart.
+- **Snapshot**: the iter `Rc`-clones the backing collection, so
+  mutating the source after `.iter()` doesn't affect the iter.
+- **String iteration**: yields chars (Unicode scalar values), not
+  graphemes.
+- **Printing**: `harness.stdio.log(it)` renders `<iter>` or `<iter (exhausted)>`
+  without draining.
+
+### Ranges and iters
+
+`Range` (from `a to b` / `range(n)`) is its own value type with O(1)
+`.len() / .first() / .last() / .contains(x)` and `r[k]` subscript —
+no materialization. Calling any lazy combinator on a Range
+(`.map / .filter / .flat_map / .take / .skip / .take_while /
+.skip_while / .zip / .enumerate / .chain / .chunks / .windows`)
+returns a lazy `iter`. Sinks (`.to_list / .sum / .reduce / ...`)
+drain through the iter. In short: Range handles integer ranges
+with O(1) ops; Iter handles arbitrary lazy sequences. Chaining
+`(1 to 10_000_000).map(...).take(5).to_list()` finishes instantly
+because only 5 elements flow through the pipeline.
+
+## Regex
+
+```harn
+const matches  = regex_match("[0-9]+", "abc 42 def 7")   // ["42", "7"] or nil
+const swapped  = regex_replace("(\\w+)\\s(\\w+)", "$2 $1", "hello world")
+//           -> "world hello"
+const captures = regex_captures("(?P<day>[A-Z][a-z]+)", "Mon Tue")
+const words    = regex_split("a, b, c", ",\\s*")
+const ci       = regex_match("hello", "HeLLo", "i")
+const fixed_ci = regex_replace("hello", "hi", "HeLLo", "i")
+const body     = regex_captures("(?is)<body\\b[^>]*>(.*?)</body>", html)
+const body2    = regex_captures("<body\\b[^>]*>(.*?)</body>", html, "is")
+```
+
+`regex_replace` replaces every match and supports `$1`, `$2`,
+`${name}` backrefs plus the same optional
+`i`/`m`/`s`/`x` flags as `regex_match`. Inline regex flags such as
+`(?is)` use the same semantics as the trailing flags argument. Each
+`regex_captures` result has `match`, positional `groups` excluding the
+full match, character offsets `start`/`end`, 1-based `line`, and any
+named capture groups as top-level keys.
+
+## Encoding, bytes, and compression
+
+Use byte helpers when content may not be UTF-8:
+
+```harn
+const bytes = bytes_from_string("hello")
+const text = bytes_to_string(bytes)
+const hex = bytes_to_hex(bytes)
+const same = bytes_from_hex(hex)
+```
+
+Compression is in-memory and returns `bytes`. Encoders accept `bytes`
+or `string`; decoders always return `bytes`.
+
+```harn
+const gz = gzip_encode("hello", 6)       // level 0..9, default 6
+const zst = zstd_encode(bytes, 3)        // zstd level, default 3
+const br = brotli_encode("hello", 11)    // quality 0..11, default 11
+
+const hello = bytes_to_string(gzip_decode(gz))
+
+const tar = tar_create([
+  {path: "README.md", content: "# Hi\n", mode: 420},
+])
+const tar_entries = tar_extract(tar)     // [{path, content: bytes, mode}]
+
+const zip = zip_create([{path: "a.txt", content: "alpha"}])
+const zip_entries = zip_extract(zip)     // [{path, content: bytes}]
+```
+
+## Scripting helpers
+
+```harn
+const rng = rng_seed(42)
+const roll = harness.random.range(rng, 1, 6)
+const shuffled = harness.random.shuffle(rng, [1, 2, 3, 4])
+const grouped = group_by(["a", "bb", "c"], { s -> len(s) })
+const parts = partition([1, 2, 3, 4], { x -> x % 2 == 0 })
+const padded = str_pad("é", 3, ".", "both")
+const graphemes = unicode_graphemes("éx")
+const parsed = uuid_parse(harness.random.uuid_v7())
+```
+
+### Postgres query helpers
+
+For Harn data-access modules, prefer `std/postgres/query` when direct
+`pg_query` calls become hard to review. It is not an ORM: SQL stays visible and
+dynamic values still go through Postgres bind parameters.
+
+```harn,ignore
+import "std/postgres"
+import { ident, many, named_sql, run, sql, uuid_text, nullable_timestamptz_json } from "std/postgres/query"
+
+fn list_receipts_query(tenant_id: string, limit: int) {
+  return named_sql(
+    "list_receipts",
+    "many",
+    """
+SELECT {id}, payload, {finished_at}
+FROM {table}
+WHERE tenant_id = {tenant_id}::uuid
+ORDER BY {created_at} DESC
+LIMIT {limit}
+""",
+    {
+      id: uuid_text("id"),
+      finished_at: nullable_timestamptz_json("finished_at"),
+      table: ident("receipts"),
+      tenant_id: tenant_id,
+      created_at: ident("created_at"),
+      limit: limit,
+    },
+    {read_only: true},
+  )
+}
+
+const rows = run(db, list_receipts_query(tenant_id, 50))
+const direct = many(db, sql("SELECT id::text AS id FROM receipts LIMIT {limit}", {limit: 10}))
+```
+
+Helpers: `one(handle, query)`, `many(handle, query)`, `exec(handle, query)`,
+`run(handle, named_query)`, `sql(template, values?, options?)`,
+`named_sql(name, mode, template, values?, options?)`,
+`named(name, mode, sql, params?)`, `ident(name)`, `ident_path(parts)`,
+`unsafe_sql(fragment)`, `uuid_text(name)`, `timestamptz_json(name)`,
+`nullable_timestamptz_json(name)`, `columns(parts)`, and `select_clause(parts)`.
+The projection helpers (`uuid_text`, `timestamptz_json`,
+`nullable_timestamptz_json`, `columns`, `select_clause`) return trusted
+`PgSqlFragment`s, so they drop into `{name}` placeholders without
+`unsafe_sql(...)`. `uuid_text`/`timestamptz_json`/`nullable_timestamptz_json`
+accept table-qualified names (`timestamptz_json("vaults.created_at")`); the
+alias is the trailing segment. In `sql(...)`, ordinary `{name}` placeholders become `$n`
+params and repeated placeholders reuse the first parameter index. Use `{{` and
+`}}` for literal braces. SQL structure is never inferred from strings; use
+`ident(...)` / `ident_path(...)` for identifiers and reserve `unsafe_sql(...)`
+for source-controlled fragments no typed helper covers.
+
+## LLM surface
+
+```harn
+const response = harness.llm.call(prompt, system, options)
+harness.stdio.log(response.text)           // the public answer (after tool/protocol projection)
+harness.stdio.log(response.raw_text)       // pre-projection source (protocol tags intact)
+harness.stdio.log(response.visible_text)   // sanitized human-visible output
+harness.stdio.log(response.canonical_text) // canonical replay form of a tagged response
+harness.stdio.log(response.usage.input_tokens)
+harness.stdio.log(response.usage.output_tokens)
+harness.stdio.log(response.outcome.kind)   // "complete" | "tool_use" | "truncated" | "refused" | "paused" | "empty"
+harness.stdio.log(response.logprobs)       // present when requested and returned
+```
+
+All call accounting lives under `usage` and the typed `outcome`
+classifies what the call produced — branch on `outcome`, never on the
+provider-native `stop_reason`. The full contract is `LlmResponse` from
+`std/llm/envelope`.
+
+### `llm_call` options
+
+Typed shape: `LlmCallOptions` from `std/llm/options`. Prefer an annotated
+binding or `llm_options({...})`. One runtime registry validates direct calls,
+streams, and agent-loop dispatch; unknown and removed keys are errors.
+
+| Concern | Canonical options |
+|---|---|
+| Route | `provider`, `model`, `model_role`, `model_tier`, `api_mode`, `route_policy`, `fallback_chain`, `routing`, `equivalent_failover`, `models`, `ladder` |
+| Conversation | `system`, `messages`, `session_id`, `call_role`, `mock_scope`, `context_profile`, `capabilities`, `prefill`, `previous_response_id` |
+| Generation | `max_tokens`, `temperature`, `top_p`, `top_k`, `logprobs`, `top_logprobs`, `stop`, `stop_at_tool_call`, `seed`, `frequency_penalty`, `presence_penalty` |
+| Output | `output`, `schema_retries`, `schema_retry_nudge`, `retries`, `schema_recover`, `repair` |
+| Reasoning | `thinking`, `effort`, `reasoning_policy`, `reasoning_scale`, `reasoning_task`, `interleaved_thinking`, `anthropic_beta_features` |
+| Modalities | `vision`, `audio`, `pdf`, `video` |
+| Tools | `tools`, `provider_tools`, `tool_choice`, `tool_search`, `tool_format` |
+| Transport | `cache`, `prompt_cache_ttl`, `budget`, `timeout_ms`, `idle_timeout_ms`, `stream`, `speed` |
+| OpenAI Responses | `store`, `background`, `truncation`, `compact`, `include`, `max_tool_calls` |
+| Extension | `provider_options`, `metadata`, `reminders`, `structural_experiment` |
+
+The `output` forms are:
+
+```harn
+{output: "text"}                                      // default
+{output: "json"}                                      // parse JSON
+{output: Verdict}                                     // validate Schema<Verdict>
+{output: {schema: Verdict, strict: true, validation: "error", stream_abort: true}}
+```
+
+`system` is a string, an ordered fragment list, or an exclusive replacement
+root. Fragments use `{content, title?, position?: "before"|"after", enabled?}`;
+build them with `system_before`, `system_after`, and `with_system_fragments`
+from `std/llm/prompts`. `{mode: "replace", content: string}` makes `content`
+the entire system channel: no positional system text, fragment, context
+profile, tool guidance, provider thinking directive, or conversation-level
+`system`/`developer` message is added. Tools and ordinary conversation history
+remain available.
+
+Provider-specific request fields live only below
+`provider_options: {<provider>: {...}}`. Use `effort` for reasoning intent,
+`speed: "fast"` for accelerated serving, and millisecond integers in
+`timeout_ms` / `idle_timeout_ms`.
+
+See the [complete option reference](../src/llm/llm_call.md#options-dict) and
+the [0.10 migration table](../src/migrations/v0.10.md#llm-call-options).
+
+Provider auto-resolution precedence:
+
+1. Explicit `provider` option other than `"auto"` wins.
+2. `model_role` fills missing provider/model/routing options from
+   `[model_roles.<role>]` or role env overrides.
+3. `provider: "auto"` with a `model` infers from the model selector.
+4. If `provider` is omitted, `HARN_LLM_PROVIDER` wins when set; otherwise a `model` infers the provider.
+5. Unknown model IDs fall back to `HARN_DEFAULT_PROVIDER`, then the
+   configured default provider (`anthropic` in the built-in catalog),
+   and emit a warning.
+
+### OpenAI Responses mode
+
+Use `api_mode: "responses"` with `provider: "openai"` when a call needs
+OpenAI-native hosted tools, remote MCP, previous-response chaining,
+background mode, or provider-side truncation/compaction:
+
+```harn
+const r = harness.llm.call(prompt, sys, {
+  provider: "openai",
+  model: "gpt-5.4",
+  api_mode: "responses",
+  output: {schema: schema, strict: true, validation: "error"},
+  provider_tools: [
+    {type: "web_search"},
+    {type: "mcp", server_label: "docs", server_url: "https://mcp.example.com", require_approval: "always"},
+  ],
+  truncation: "auto",
+})
+```
+
+Use Harn `tools`/MCP when Harn must execute, approve, and audit each call.
+Use `provider_tools` only when OpenAI should execute the hosted tool. Those
+calls appear as `provider_tool_call` blocks with provider-native IDs and
+`executor: "provider_native"`; Harn records metadata but does not locally
+mediate each remote call.
+Set `compact: true` for a standalone compaction pass. Harn records returned
+opaque `compaction` items as private blocks rather than implicitly rewriting the
+Harn transcript.
+
+| Model selector | Provider | Model sent to provider |
+|---|---|---|
+| `local:<model>` | `ollama` | `<model>` |
+| `ollama:<model>` | `ollama` | `<model>` |
+| `<org>/<model>` (one slash) | `openrouter` | unchanged |
+| `claude-*` | `anthropic` | unchanged |
+| `gpt-*`, `o1*`, `o3*`, `o4*` | `openai` | unchanged |
+| `gemini-*` | `gemini` | unchanged |
+| `<model>:<tag>` | `ollama` | unchanged |
+| anything else | `HARN_DEFAULT_PROVIDER` / configured default | unchanged |
+
+Native Gemini routes use Google's `generateContent` wire format directly:
+tool schemas become `functionDeclarations`, model tool requests are
+`functionCall` parts, tool observations are `functionResponse` parts, and
+JSON schemas lower to Gemini's JSON response controls. Vertex AI also serves
+Gemini models through `generateContent`, but keeps Google Cloud project /
+location and OAuth/service-account authentication. OpenAI-compatible Gemini
+routes such as OpenRouter remain OpenAI-wire routes and use OpenAI-style
+`tools`, `tool_calls`, and structured-output parameters.
+
+Google serves the Gemini models over two synchronous endpoints, and the
+`live_endpoint_family` capability says which one a route dispatches to:
+`gemini_generate_content` (the default, described above) or
+`gemini_interactions` (`POST /v1beta/interactions`, GA June 2026). The
+Interactions family models a turn as typed steps (`user_input`, `thought`,
+`model_output`, `function_call`, `function_result`) and adds provider-side
+conversation state via `previous_response_id`, streaming, and `background`.
+Harn sends `store: false` unless you ask for state, `thinking` maps onto the
+`minimal`/`low`/`medium`/`high` ladder rather than a token budget, and
+`frequency_penalty` / `presence_penalty` have no Interactions field. Gemini
+Batch is unaffected: it stays `generateContent`-shaped whichever live family a
+route uses. Opt in per project:
+
+```toml
+[[capabilities.provider.gemini]]
+model_match = "gemini-3.5*"
+extends = true          # one-field overlay; without it the row REPLACES the shipped one
+live_endpoint_family = "gemini_interactions"
+```
+
+Not every model is served by both endpoints; confirm with
+`harness.llm.provider_capabilities(provider, model).live_endpoint_family`, which honors
+project overrides.
+
+See [Providers](../src/llm/providers.md#gemini-interactions-api) for the full
+contract.
+
+### Mid-conversation system & developer messages
+
+A conversation `messages` array (or a transcript built with `add_user` /
+`add_assistant` / `add_system`, or `add_message(convo, "developer", ...)`) may
+carry a `system`- or `developer`-role message **anywhere**, not just at the
+front — an operator instruction delivered mid-conversation (a mode switch, a
+runtime-fetched constraint, injected state). Harn makes that portable: at the request boundary
+it rewrites the interleaved directive to the exact form the target route
+accepts, driven by the `system_message_placement` capability. You write the same
+script for every provider; you never hit a provider-specific placement 400 or a
+silently-repositioned directive.
+
+```harn
+let convo = add_user(transcript_from_messages([]), "My name is Ada.")
+convo = add_assistant(convo, "Nice to meet you, Ada.")
+convo = add_system(convo, "For the rest of this conversation, reply only in French.")
+convo = add_user(convo, "What is my name?")
+
+// Same script on every route:
+harness.llm.call("", nil, {provider: "anthropic", model: "claude-opus-4-8", messages: transcript_messages(convo)})
+harness.llm.call("", nil, {provider: "anthropic", model: "claude-haiku-4-5", messages: transcript_messages(convo)})
+harness.llm.call("", nil, {provider: "openai",    model: "gpt-5.4",          messages: transcript_messages(convo)})
+```
+
+Per-route behavior (capability-driven, not hardcoded):
+
+| Placement | Routes | Interleaved directive becomes |
+|---|---|---|
+| `inline` | OpenAI Chat/Responses, Ollama | Carried verbatim at its position (these APIs accept `system`/`developer` anywhere). |
+| `native_directive` | Claude Opus 4.8 | A validly-placed message rides natively as `role: "system"`; consecutive directives merge into one message while retaining ordered content blocks and cache metadata. Anything with an invalid neighbor folds instead. `developer` collapses to `system`. |
+| `fold` | Gemini, Bedrock, older/other Claude | No positional system channel, so the directive folds into the adjacent user turn as a `<system-reminder>` block — its position and operator intent survive instead of being hoisted into the global system prompt or 400ing. |
+
+A **leading** run of `system`/`developer` messages is always the system prompt
+and merges into the top-level `system` field on every route. Only *interleaved*
+directives are governed by `system_message_placement` — unset derives from the
+wire dialect (OpenAI/Ollama → `inline`, else `fold`), so the safe default never
+400s. The normalization runs at the wire boundary only; the persisted transcript
+keeps the original roles.
+
+### Reranking and self-certainty
+
+```harn
+import { pairwise_rerank, self_certainty } from "std/llm/rerank"
+
+const ranked = pairwise_rerank(candidates, {
+  task: "Pick the most relevant search result.",
+  criteria: "Prefer primary sources with direct evidence.",
+  provider: "mock",
+})
+
+const confidence = self_certainty(
+  "ignored",
+  {logprobs: [{token: "answer", logprob: -0.1}]},
+)
+```
+
+`pairwise_rerank` returns `{ranked, scores, comparisons}` using `O(n log n)`
+pairwise judge calls, or a deterministic `compare(left, right, ctx)` callback
+when supplied. `self_certainty` scores supplied/result `logprobs`, or makes an
+extra repeat-exactly model call with `logprobs: true`; live support depends on
+the provider returning OpenAI-compatible or legacy completion logprob records.
+
+### Tool executor declarations
+
+Every `tool_define(...)` registration declares **how the tool is
+dispatched**. The runtime uses this to decide where the call runs and
+to tag ACP `tool_call_update.executor` events so clients can render
+"via host bridge" / "via mcp:linear" badges.
+
+| `executor` value | Required companion field | Where it dispatches |
+|---|---|---|
+| `"harn"` *(or `"harn_builtin"` alias)* | `handler` (a closure) | In-VM via the registered handler. The VM stdlib short-circuits `read_file` / `list_directory` even without a handler. |
+| `"host_bridge"` | `host_capability: "cap.op"` | Through the host shell's `builtin_call` bridge (Swift IDE bridge, BurinApp, BurinCLI). `harn check` validates the binding against the host capability manifest when one is configured. |
+| `"mcp_server"` | `mcp_server: "<server_name>"` | Through the configured MCP server. Tools sourced from `mcp_list_tools` carry the `_mcp_server` annotation and don't need the explicit declaration. |
+| `"provider_native"` | *(none)* | Provider-side (e.g. OpenAI Responses API server tools). The runtime never dispatches these locally — the model returns the already-executed result inline. |
+
+```harn
+// Harn handler (default when `handler` is present and `executor` is
+// omitted — back-compat path).
+registry = tool_define(registry, "look", "Read files", {
+  parameters: {path: "string"},
+  handler: { args -> harness.fs.read_text(args.path) },
+})
+
+// Host-bridge tool — handler-less by design.
+registry = tool_define(registry, "ask_user", "Ask the user", {
+  parameters: {prompt: "string"},
+  executor: "host_bridge",
+  host_capability: "interaction.ask",
+})
+
+// MCP-served tool with explicit server binding.
+registry = tool_define(registry, "github_search", "Search issues", {
+  parameters: {query: "string"},
+  executor: "mcp_server",
+  mcp_server: "github",
+})
+
+// Provider-native — runtime never dispatches.
+registry = tool_define(registry, "tool_search", "...", {
+  parameters: {query: "string"},
+  executor: "provider_native",
+})
+```
+
+Harn handlers normally return the text shown to the model. When a producer also
+needs to expose typed facts to middleware or lifecycle consumers, return
+`agent_tool_handler_result(text, data)` from `std/agent/tool_lifecycle`. The
+dispatcher preserves the full `{schema, text, data}` record on `result` and
+projects the complete `data` map onto the flat dispatch result, the terminal
+`tool_call_update`, and the stored session tool-result message. ACP exposes the
+same map at `_meta.harn.data`. `rendered_result` and the model-visible
+observation contain only `text`. Ordinary unmarked dict returns retain their
+existing display rendering and do not gain promoted `data`.
+
+`tool_define` rejects invalid combinations at definition time, and
+`agent_loop` refuses to start if the registry contains a tool with no
+executable backend. The historical `[builtin_call] unhandled: <name>`
+runtime failure is replaced by a clear error pointing at the offending
+tool.
+
+### Tool loading & search
+
+Mark tools that the model rarely needs with `defer_loading: true` and
+opt the call into progressive disclosure with `tool_search: "bm25"`:
+
+```harn
+let registry = tool_registry()
+registry = tool_define(registry, "look", "Read files", {
+  parameters: {path: {type: "string"}},
+  handler: { args -> harness.fs.read_text(args.path) },
+})
+registry = tool_define(registry, "deploy", "Deploy to production", {
+  parameters: {env: {type: "string"}},
+  defer_loading: true,                 // schema held back until searched
+  handler: { args -> harness.process.shell("deploy " + args.env) },
+})
+
+const r = harness.llm.call(prompt, sys, {
+  provider: "anthropic",
+  model: "claude-opus-4-7",
+  tools: registry,
+  tool_search: "bm25",                 // or "regex" / "hybrid"
+})
+```
+
+Provider support matrix for `tool_search`:
+
+| Provider | Native | Client fallback |
+|---|---|---|
+| Anthropic — Opus/Sonnet 4.0+, Haiku 4.5+ | ✓ (`bm25`, `regex`) | ✓ |
+| Anthropic — pre-4.0 / other Claude | ✗ | ✓ |
+| OpenAI — GPT 5.4+ (Responses API, hosted) | ✓ (`tool_search`) | ✓ |
+| OpenAI — pre-5.4 (`gpt-4o`, `gpt-4.1`, older) | ✗ | ✓ |
+| OpenRouter, Together, Groq, DeepSeek, Fireworks, HuggingFace, local vLLM | ✓ when model matches `gpt-5.4+` upstream | ✓ |
+| Gemini, Ollama, others | ✗ | ✓ |
+
+Semantics:
+
+- `defer_loading: true` on an individual tool keeps its schema out of
+  the model's context until a tool-search call surfaces it. On
+  capable Anthropic models the schema goes into the API prefix but not
+  the model's context, so prompt caching stays warm. On OpenAI GPT
+  5.4+ the wrapper-level flag rides alongside the `{"type":
+  "tool_search"}` meta-tool in the tools array.
+- `tool_search: "bm25"` prepends the server-side
+  `tool_search_tool_bm25_20251119` meta-tool on capable Anthropic
+  models, or `{"type": "tool_search", "mode": "hosted"}` on GPT 5.4+
+  via the Responses API. On any other provider, Harn falls back to a
+  client-executed equivalent: a synthetic `__harn_tool_search` tool
+  whose handler runs BM25/regex/hybrid or a custom Harn scorer, then
+  promotes the matching deferred tools into subsequent turns' schema
+  list.
+- `tool_search: "regex"` uses the Python-regex variant
+  (`tool_search_tool_regex_20251119`) on Anthropic, or an
+  in-VM case-insensitive Rust-regex search on everything else.
+- `tool_search: {mode: "native"}` refuses to silently downgrade —
+  errors if the provider isn't natively capable.
+- `tool_search: {mode: "client"}` forces the client-executed path
+  even on providers with native support (useful for debuggability on
+  GPT 5.4+, where the hosted path hides search deltas in the usage
+  accounting).
+- `tool_search: {strategy: "bm25" | "regex" | "hybrid" | scorer}`
+  (client mode only) picks the implementation. A scorer can be a Harn
+  closure or `{handler: closure, name?: string}` and may call embeddings,
+  host-backed tools, MCP tools, or project-specific indexes.
+- `tool_search: {budget_tokens: N}` caps the total token footprint
+  of client-mode promoted tool schemas; oldest-first eviction when
+  exceeded.
+- `tool_search: {name: "find_tool"}` renames the synthetic search
+  tool (default `__harn_tool_search`).
+- `tool_search: {include_stub_listing: true}` appends a short list
+  of deferred tool names to the contract prompt.
+- `namespace: "ops"` on a `tool_define(...)` call groups deferred
+  tools for OpenAI's `tool_search` meta-tool. The distinct set of
+  namespaces is collected into the meta-tool's `namespaces` field;
+  Anthropic ignores the label (harmless passthrough).
+- Escape hatch for proxied OpenAI-compat endpoints whose model ID
+  Harn cannot parse: pass `{<provider_name>:
+  {force_native_tool_search: true}}` on the call options. Asserts
+  the endpoint forwards `tool_search` + `defer_loading` unchanged and
+  opts into the hosted path regardless of model detection.
+- Pre-flight: at least one user tool must be non-deferred, matching
+  Anthropic's 400 on all-deferred tool lists.
+- Transcript events: `tool_search_query` and `tool_search_result`
+  blocks appear in the run record so replay / eval can see which tools
+  got promoted and when. Client-mode events carry a
+  `metadata.mode: "client"` tag so replayers can distinguish the two
+  paths; otherwise the shapes are identical. OpenAI hosted mode emits
+  the same block shapes from the wire `tool_search_call` and
+  `tool_search_output` entries in the response.
+
+### Provider capabilities (data-driven matrix)
+
+The per-provider / per-model capability surface lives in a shipped
+TOML table (`crates/harn-vm/src/llm/capabilities.toml`), overridable
+per-project via `[[capabilities.provider.<name>]]` in `harn.toml`:
+
+```toml
+# harn.toml
+[[capabilities.provider.my-proxy]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+tool_mode_parity = "unknown"
+tool_search = ["hosted"]
+thinking_modes = ["effort"]
+```
+
+Query the effective matrix at runtime:
+
+```harn
+const caps = harness.llm.provider_capabilities("anthropic", "claude-opus-4-7")
+// {
+//   provider: "anthropic", model: "claude-opus-4-7",
+//   native_tools: true, text_tool_wire_format_supported: true,
+//   preferred_tool_format: "native", tool_mode_parity: "unknown",
+//   tools: true, defer_loading: true,
+//   tool_search: ["bm25", "regex"], max_tools: 10000,
+//   prompt_caching: true, thinking: true,
+//   thinking_modes: ["adaptive"],
+//   requires_completion_tokens: false,
+//   reasoning_effort_supported: false,
+//   interleaved_thinking_supported: true,
+//   message_wire_format: "anthropic",
+//   native_tool_wire_format: "anthropic",
+//   prefers_xml_scaffolding: true,
+//   structured_output_mode: "xml_tagged",
+//   supports_assistant_prefill: false,
+//   prefers_xml_tools: true,
+//   thinking_block_style: "thinking_blocks",
+// }
+
+// `caps.tools` matches Harn's own tool gate: true when the route can call
+// tools via either the native API wire shape or Harn's text wire format.
+// Inspect `native_tools` or `text_tool_wire_format_supported` directly when
+// you need to distinguish. Presets use `preferred_tool_format` when it is
+// present, so known native/text divergences stay data-driven.
+// `agent_loop` also uses this field for `tool_format: "auto"`; if a concrete
+// provider/model pair has no recommendation, it falls back to text tools and
+// emits a `capability_gap` warning event.
+// An explicit `tool_format` that disagrees with `preferred_tool_format` or
+// chooses the catalog-marked unreliable side emits a `tool_format_override`
+// transcript event. Pass `tool_format_override_reason` when you intentionally
+// force `native_unreliable` or `text_unreliable` routes.
+
+if "bm25" in caps.tool_search {
+  // opt into progressive disclosure
+}
+```
+
+Additional helpers:
+
+- `harness.llm.provider_capabilities_install(toml_src)` — install overrides from
+  a TOML string (same layout as the shipped table). Useful for
+  scripts that detect a proxied endpoint at runtime without editing
+  `harn.toml`.
+- `harness.llm.provider_capabilities_clear()` — revert to the shipped defaults.
+
+Rule schema (per `[[provider.<name>]]` entry). Shared defaults can also be
+set under `[provider_defaults.<name>]`:
+
+| Field | Type | Purpose |
+|---|---|---|
+| `model_match` | glob string | Required. Matched against lowercased model ID. |
+| `version_min` | `[major, minor]` | Optional lower bound; parsed via Claude / GPT version extractors. |
+| `native_tools` | bool | Native tool-call wire shape supported. |
+| `text_tool_wire_format_supported` | bool | Harn text-tool contract supported. |
+| `preferred_tool_format` | string | Default preset tool mode: `native` or `text`. |
+| `tool_mode_parity` | string | Native/text interchangeability status: `interchangeable`, `unknown`, `native_unreliable`, `text_unreliable`, `native_only`, `text_only`, or `unsupported`. |
+| `tool_mode_parity_notes` | string | Optional explanation for known non-interchangeable routes. |
+| `message_wire_format` | string | Shared request/response message format: `openai`, `anthropic`, `gemini`, or `ollama`. |
+| `live_endpoint_family` | string | Which synchronous endpoint a route dispatches to when its dialect serves more than one: `gemini_generate_content` (default) or `gemini_interactions`. Absent for dialects with a single live endpoint. Independent of `batch_wire_format` — Gemini Batch stays `generateContent`-shaped either way. |
+| `native_tool_wire_format` | string | Native tool definition shape for shared helpers: `openai` or `anthropic`. Gemini/Vertex adapters emit Google `functionDeclarations` from canonical tool definitions. |
+| `defer_loading` | bool | Provider honors `defer_loading: true` on tool defs. |
+| `tool_search` | `[string]` | Native variants (`["bm25", "regex"]` or `["hosted", "client"]`). Empty = no native support. |
+| `responses_api` | bool | Harn native OpenAI Responses path is available for this route. |
+| `hosted_tools` | `[string]` | Provider-hosted tool kinds Harn can pass through. |
+| `remote_mcp`, `conversation_state`, `compaction`, `background_mode` | bool | OpenAI Responses remote MCP, previous-response state, provider compaction, and background-mode controls. |
+| `tool_approval_policy` | string | Approval policy story for provider-executed tools, for example `provider_or_harn`. |
+| `max_tools` | int | Cap on tool count (used by `harn lint`). |
+| `prompt_caching` | bool | Provider-side prompt caching is available. |
+| `cache_breakpoint_style` | string | Request marker strategy when caching is explicit: `none`, `top_level`, or `last_block`. |
+| `prefers_xml_scaffolding` | bool | Prompt sections prefer XML tags such as `<task>` / `<examples>`. |
+| `prefers_markdown_scaffolding` | bool | Prompt sections prefer Markdown headings such as `## Task`. |
+| `structured_output_mode` | string | Preferred logical output shape: `native_json`, `delimited`, `xml_tagged`, or `none`. |
+| `supports_assistant_prefill` | bool | Assistant-role prefill turns are accepted. |
+| `prefers_role_developer` | bool | Durable instructions should use OpenAI's `developer` role. |
+| `prefers_xml_tools` | bool | Text-rendered tool specs should use XML wrappers. |
+| `thinking_block_style` | string | Preferred thinking representation: `none`, `thinking_blocks`, `reasoning_summary`, or `inline`. |
+| `thinking_modes` | `[string]` | Supported script-facing modes: `enabled`, `adaptive`, `effort`. |
+| `reasoning_wire_format` | string | Non-standard OpenAI-compatible reasoning shape: `openrouter` or `enabled`. |
+| `requires_completion_tokens` | bool | Use OpenAI `max_completion_tokens` instead of `max_tokens`. |
+| `reasoning_effort_supported` | bool | Provider/model accepts OpenAI `reasoning_effort`. |
+| `interleaved_thinking_supported` | bool | `thinking: true` can request Anthropic's interleaved-thinking beta header. |
+| `anthropic_beta_features` | `[string]` | Anthropic beta feature names always requested for this route. |
+| `image_url_input_supported` | bool | Image content may use remote URLs. Set false for base64-only routes. |
+| `file_upload_wire_format` | string | Upload API family used by `files.upload`: `anthropic` or `gemini`. |
+| `seed_supported`, `top_k_supported`, `frequency_penalty_supported`, `presence_penalty_supported` | bool | Generation option support flags. |
+| `thinking_disable_directive` | string | In-prompt directive (e.g. `"/no_think"` for Qwen3) auto-prepended to system when `thinking: false`. Idempotent. |
+
+First match wins within a provider's rule list. `[provider_family]`
+declares siblings that inherit a canonical family's rules
+(OpenRouter → `openai`, etc.).
+
+### Skills (bundled tool + prompt + MCP metadata)
+
+Use `skill NAME { ... }` to declare a named skill: metadata, a tool
+registry reference, MCP server names, a system-prompt fragment, and
+optional lifecycle hooks that run on activate/deactivate. Each body
+entry is `<field_name> <expression>` — unreserved identifiers, regular
+expressions as values. The decl lowers to `skill_define(skill_registry(), NAME, { ... })`
+and binds the result to `NAME`.
+
+```harn
+pub skill deploy {
+  description "Deploy the application to production"
+  when_to_use "User says deploy/ship/release"
+  invocation "explicit"           // "auto" | "explicit" | "both"
+  paths ["infra/**", "Dockerfile"]
+  allowed_tools ["bash", "git"]
+  model "claude-opus-4-7"
+  effort "high"
+  prompt "Follow the deployment runbook."
+
+  on_activate fn() { harness.stdio.log("deploy activated") }
+  on_deactivate fn() { harness.stdio.log("deploy deactivated") }
+}
+```
+
+Registry ops: `skill_registry()`, `skill_define(reg, name, config)`,
+`skill_list(reg)`, `skill_find(reg, name)`, `skill_count(reg)`,
+`skill_select(reg, names)`, `skill_remove(reg, name)`,
+`skill_describe(reg)`. `skill_list` strips closure hooks for
+serialization; `skill_find` returns the full entry.
+
+Known-key validation in `skill_define`: `description`, `when_to_use`,
+`prompt`, `invocation`, `model`, `effort` must be strings; `paths`,
+`allowed_tools`, `mcp` must be lists. Unknown keys pass through.
+
+### Common patterns
+
+Structured output with automatic retry — prefer
+`harness.llm.call_structured(prompt, schema, options?)`, which returns the
+validated data directly (no `.data` unwrap) and forces the schema
+defaults (`output: {schema, strict: true, validation: "error"}` and
+`schema_retries: 3`). Throws on exhausted retries or transport
+failure:
+
+```harn
+const schema = {
+  type: "object",
+  required: ["verdict"],
+  properties: {
+    verdict: {type: "string"},
+    improvement: {type: "string"},
+  },
+}
+const verdict = harness.llm.call_structured(prompt, schema, {
+  provider: "auto",
+  model: "local-gemma4-e4b",
+  system: "You are a strict grader.",
+})
+harness.stdio.log(verdict.verdict)
+```
+
+Non-throwing variant `harness.llm.call_structured_safe(prompt, schema,
+options?)` returns `{ok, data, error}` (same envelope as
+`llm_call_safe`, but with the validated `.data` pre-unwrapped):
+
+```harn
+const r = harness.llm.call_structured_safe(prompt, schema, {provider: "auto"})
+if !r.ok {
+  harness.stdio.log("structured call failed:", r.error.category, r.error.message)
+  return nil
+}
+harness.stdio.log(r.data.verdict)
+```
+
+Diagnostic envelope `harness.llm.call_structured_result(prompt, schema,
+options?)` returns the full failure-mode breakdown
+production agent pipelines need — `{ok, data, raw_text, error,
+error_category, attempts, repaired, extracted_json, usage, model,
+provider}`. Never throws; dispatch on `ok` / `error_category`:
+
+```harn
+const r = harness.llm.call_structured_result(prompt, schema, {
+  provider: "auto",
+  schema_retries: 2,
+  // Optional repair pass — runs only when the main call's JSON is
+  // malformed or schema-invalid. Skipped on transport failures.
+  repair: {
+    enabled: true,
+    model: "cheapest_over_quality(low)",
+    max_tokens: 600,
+  },
+})
+if r.ok {
+  harness.stdio.log(r.data.verdict)
+} else {
+  // error_category ∈ "transport" | "missing_json" | "schema_validation"
+  // | "repair_failed" — plus retryable transport categories
+  // ("rate_limit", "timeout", ...) when the underlying call failed.
+  harness.stdio.log("grade failed:", r.error_category, "raw:", r.raw_text)
+}
+```
+
+`r.attempts` counts model calls (1 = no retries used; ≥2 = one or
+more schema retries were spent). `r.repaired: true` means the repair
+pass succeeded. `r.extracted_json: true` flags responses where
+JSON had to be lifted from prose / markdown fences.
+
+Options: everything `llm_call` accepts flows through, plus
+`retries` as an alias for `schema_retries`. Provider options,
+`system`, `provider`, `model`, `max_tokens`, etc. are all passed
+through unchanged. The `repair` block is recognized only by
+`llm_call_structured_result`.
+
+After-the-fact recovery—`harness.llm.recover_schema(text, schema, opts?)`
+turns malformed output that's already in your hand into a validated
+payload. Three deterministic stages followed by an optional one-shot
+LLM repair, returning the same `{ok, data, raw_text, error,
+error_category, attempts, stage, repaired}` envelope shape:
+
+| Stage | When | Notes |
+|---|---|---|
+| `parsed` | Raw text is valid JSON that schema-validates. | Cheapest path; always tried first. |
+| `extracted` | JSON is wrapped in markdown fences or surrounded by prose. | Uses the same balanced-brace lifter as `json_extract`. |
+| `regex` | Model produced YAML-ish / unquoted `key: value` lines. | Only top-level scalar fields (string/int/number/boolean) are recovered — nested objects fall through. |
+| `llm_repair` | Earlier stages failed and `repair` is enabled (default). | Single shot, `schema_retries: 0`. Set `{repair: false}` for fully deterministic recovery. `llm_repair` is the reported stage name, not an option key. |
+
+```harn
+const raw = harness.llm.call(prompt, sys, {provider: "auto"}).text
+const r = harness.llm.recover_schema(raw, schema)
+if r.ok {
+  process(r.data)                  // narrowed-shape dict
+} else {
+  harness.stdio.log("recovery failed:", r.stage, r.error_category, r.error)
+}
+```
+
+Use it as a drop-in replacement for hand-rolled `normalize_*()`
+chains downstream of `harness.llm.call(...)` / Ollama prose responses, or
+when you want a deterministic local recovery pass before paying for
+a structured re-call. The `repair` block accepts the same
+overrides as `llm_call_structured_result`'s `repair`:
+
+```harn
+const r = harness.llm.recover_schema(raw, schema, {
+  apply_defaults: true,            // schema defaults during validation
+  repair: {
+    enabled: true,
+    model: "cheapest_over_quality(low)",
+    max_tokens: 600,
+  },
+})
+```
+
+Stages report via `r.stage` ∈ `"parsed" | "extracted" | "regex" |
+"llm_repair" | "failed"`; `r.attempts` counts how many stages ran
+(1 = clean parse, 4 = ran every stage including the LLM repair).
+On failure, `r.error_category` is `"schema_validation"` (no stage
+recovered) or `"repair_failed"` / `"transport"` (LLM repair was
+attempted and failed).
+
+If you need the raw response (token counts, transcript, thinking
+trace) alongside the parsed data, call `llm_call` directly:
+
+```harn
+const r = harness.llm.call(prompt, sys, {
+  provider: "auto",
+  model: "local-gemma4-e4b",
+  output: {schema: schema, strict: true, validation: "error"},
+  schema_retries: 2,
+})
+harness.stdio.log(r.data.verdict)
+harness.stdio.log(r.usage.input_tokens)
+```
+
+Schema-as-type (a `type` alias drives both the schema and the
+narrowing guard — lowered to the canonical JSON-Schema dict at compile
+time; literal-string/int unions emit as `{type, enum}`). With
+`llm_call_structured` the return narrows to `T` directly:
+
+```harn
+type GraderOut = {
+  verdict: "pass" | "fail" | "unclear",
+  summary: string,
+}
+
+const out: GraderOut = harness.llm.call_structured(prompt, GraderOut, {
+  provider: "auto",
+  system: sys,
+})
+harness.stdio.log(out.verdict)     // narrowed to GraderOut
+```
+
+Reusable generic wrapper (narrows via the `Schema<T>` generic
+param):
+
+```harn
+fn grade<T>(prompt: string, schema: Schema<T>) -> T {
+  return harness.llm.call_structured(prompt, schema, {provider: "auto"})
+}
+
+const out: GraderOut = grade("Grade this", schema_of(GraderOut))
+harness.stdio.log(out.verdict)
+```
+
+Use `SchemaContract<T>` for cross-field invariants after structural validation.
+Each named `ValidationRule<T>` returns `list<ValidationIssue>`; an empty list
+passes. Capture typed context in the rule closure instead of passing an open
+dictionary. `schema_contract_check(value, contract)` never throws and returns
+`schema_invalid`, `rule_failed`, or `rule_error`. `std/fs` and
+`std/run_artifacts` preserve those failures in typed `Result` readers. Bind a
+stable artifact name and contract once with `artifact_descriptor`; reuse that
+descriptor for reads and writes. Descriptor writes validate the complete
+contract before conditional replacement.
+
+Batch grading at bounded concurrency:
+
+```harn
+const outcome = parallel settle paths with { max_concurrent: 4 } { path ->
+  harness.llm.call(harness.fs.read_text(path), GRADER_SYSTEM, {
+    provider: "auto",
+    model: "local-gemma4-e4b",
+    output: {schema: grader_schema, strict: true, validation: "error"},
+    schema_retries: 2,
+  })
+}
+```
+
+### `assemble_context`
+
+`assemble_context(options)` packs a list of artifacts into a
+token-budgeted slice of chunks for the next prompt. Complements
+`transcript_auto_compact` (which shrinks the ongoing conversation).
+
+```harn
+const packed = assemble_context({
+  artifacts: [skill_a, skill_b, fetched_docs],
+  budget_tokens: 8000,
+  dedup: "chunked",                 // none | chunked | semantic
+  strategy: "relevance",            // recency | relevance | round_robin
+  query: user_prompt,               // scored by default keyword-overlap ranker
+  microcompact_threshold: 2000,     // artifacts over this get chunked
+})
+// packed = {chunks, included, dropped, reasons, total_tokens, budget_tokens, …}
+```
+
+Chunk ids are content-addressed (`{artifact_id}#{sha256(text)[..16]}`)
+so the same input produces the same ids across runs — safe to diff in
+replay. `reasons` names the strategy and inclusion verdict per chunk;
+`dropped` surfaces exclusions (`"duplicate"`, `"budget_exceeded"`,
+`"no_text"`). For a custom relevance ranker, pass
+`ranker_callback: { query, chunks -> chunks.map({ c -> score }) }`;
+the default ranker uses keyword overlap against `query`. Workflow
+nodes may set `context_assembler: {...}` to route the stage's selected
+artifacts through this builtin before the prompt is rendered.
+
+### Compaction policies
+
+Compaction entrypoints accept a typed host/user instruction lane through
+`policy`, `compaction_policy`, `compaction_request`, or the direct fields
+`instructions`, `mode`, `scope`, `preserve`, `drop`,
+`extend_default_instructions`, and `author`.
+
+```harn
+import {compact_preserving_test_failures} from "std/agent/autocompact"
+
+// Returns { messages, archived, summary }. Use `archived` (the engine's true
+// archived-message count) to tell whether compaction happened -- never infer
+// it from a length delta, since archiving one message and inserting one
+// summary leaves the length unchanged.
+const result = transcript_auto_compact(messages, {
+  keep_last: 1,
+  token_threshold: 1,
+  policy: compact_preserving_test_failures({author: "host"})
+})
+const compacted = result.messages
+```
+
+Omitting `extend_default_instructions` or setting it to `true` appends the
+instructions to Harn's default summary guidance; `false` replaces it.
+Host-only instructions are kept in
+`compaction` event metadata (`instruction_mode`, `instruction_source`,
+`compaction_policy`) and are not copied into the next model-visible summary
+unless `scope` is `"model_visible"`, `"summary"`, or `"transcript"`.
+
+Helper policies in `std/agent/autocompact`:
+`compaction_policy(...)`, `compact_for_bug_fix_resumption(...)`,
+`compact_preserving_test_failures(...)`, and
+`compact_retaining_current_plan(...)`.
+
+### Transcript projection
+
+`transcript_project(transcript, opts?)` derives a model-visible prefix without
+mutating raw transcript history. `agent_loop(harness, ..., {transcript_projection: ...})`
+applies the same projection before each provider turn and records a
+`transcript.projection` event. Built-in policies: `raw`,
+`clean_tool_repair`, `squash_failed_calls`, `summary_prefix`,
+`reachability_gc`, and `custom`.
+
+`reachability_gc` reclaims stale tool-result bodies only in the projected
+prompt. It keeps tool-call metadata and emits `redacted_indices`,
+`reclaimed_tokens`, `roots_consulted`, and `redaction_pointers`; raw
+transcript/audit content stays available by pointer. Useful options:
+`root_window`, `min_chars`, `roots`, `active_plan`, `scratchpad`,
+`pending_tool_args`, `unresolved_findings`, `write_barrier_refs`, and
+`require_write_barrier`. In `agent_loop`, enabling both `scratchpad` and a
+reachability-GC projection automatically supplies the current scratchpad as a
+root plus a scratchpad-version write barrier for that turn.
+
+## Governed Code Mode session state
+
+Code Mode snippets are isolated by default. Grant bounded JSON state through
+the normal binding manifest when snippets in one session and tool window must
+exchange values:
+
+```harn
+const manifest = composition_binding_manifest(tools, {
+  state: {max_value_bytes: 16384, max_total_bytes: 65536, max_keys: 64},
+})
+const saved = composition_execute(
+  "state.put(\"draft\", {ready: true})\nreturn state.list()",
+  manifest,
+  {session_id: session_id},
+)
+const loaded = composition_execute(
+  "return state.get(\"draft\")",
+  manifest,
+  {session_id: session_id},
+)
+```
+
+The injected API is `state.get`, `state.put`, `state.list`, and
+`state.delete`. The scope is `(session_id, manifest hash)`, using the current
+agent session when `session_id` is omitted, and is removed at session end.
+Values must be JSON; limits fail closed with typed
+`composition_state_error` records. Every operation is a composition child
+call, so reports, events, crystallization, and replay retain the ordered state
+transitions.
+
+## Read-only stance (experimental)
+
+`agent_loop(harness, {read_only_stance: {...}})` arms a least-privilege tool window
+for tasks classified as read-only (research/investigation): only tools whose
+annotations declare them read-only (`kind` read/search/think/fetch, or
+`side_effect_level` none/read_only — unannotated tools count as mutating)
+plus an auto-registered escape hatch (default `request_write_access`) reach
+the model. The escape hatch verifies consent agentically: its `consent_check`
+(default: a structured `llm_call` over the session's recent user messages)
+grants only when the user expressed or clearly implied consent to modify the
+workspace; a grant disarms the stance next turn, a denial tells the model to
+ask the user. Every transition emits a `stance_transition` event
+(`phase`: armed / write_access_granted / write_access_denied / disarmed).
+
+```harn,ignore
+import { AgentLoopOptions } from "std/agent/options"
+
+const stance_opts: AgentLoopOptions = {
+  tools: tools,
+  read_only_stance: {
+    enabled: true,
+    armed: intent.should_use_read_only_agent,  // host classifier decides
+    // classifier: fn(message) -> {read_only, confidence},  // or infer here
+    // consent_check: fn(justification, session_id) -> {verdict, reason},
+    hard_keep: ["ask_user"],
+  },
+}
+agent_loop(harness, task, nil, stance_opts)
+```
+
+Ships default-OFF. This is the Harn mechanism for the tool-surface
+program's task-intent mount: the window derives from intent, and elevation
+is justified, consent-verified, and traced.
+
+## Reminders
+
+System reminders are typed `system_reminder` transcript events for nudging a
+running agent without pretending the nudge is user input and without adding it
+to durable messages. They support `ttl_turns`, `dedupe_key`,
+`preserve_on_compact`, `propagate`, and an explicit `authority` tier:
+`contract`, `corrective`, or `advisory`. Full reference:
+`docs/src/system-reminders.md`.
+
+`transcript.inject_reminder(transcript, options)` appends a pending
+reminder and returns `{transcript, reminder_id, deduped_count}`. The
+input transcript is unchanged.
+
+```harn
+const injected = transcript.inject_reminder(transcript(), {
+  body: "Approaching context window cap.",
+  tags: ["token_pressure"],
+  dedupe_key: "token_pressure",
+  ttl_turns: 3,
+  preserve_on_compact: true,
+  propagate: "session",
+  authority: "advisory",
+})
+const t = injected.transcript
+```
+
+`body` is required and must be non-empty. Optional `tags`, `dedupe_key`,
+`ttl_turns`, `preserve_on_compact`, `propagate`, `authority`, and legacy
+`role_hint` fields are validated; unknown option keys fail fast. Omitted
+`authority` defaults to `contract`. New and replayed reminders dedupe uniformly:
+an explicit `dedupe_key` wins, otherwise normalized body text is the key. When
+duplicates disagree, the highest authority survives (`contract` > `corrective`
+> `advisory`), then the newest reminder. Deduplication emits
+`transcript.reminder.deduped` on `transcript.reminder.lifecycle` when an EventLog
+is active.
+
+`transcript.clear_reminders(transcript, selector)` removes pending
+reminders and returns `{transcript, removed_count}`. Select by `id`,
+`tag`, or `dedupe_key`; when multiple selectors are present, all must
+match.
+
+```harn
+const cleared = transcript.clear_reminders(t, {tag: "token_pressure"})
+harness.stdio.log(cleared.removed_count)
+```
+
+`agent_loop(harness, ...)` enables canonical reminder providers by default; bare
+`harness.llm.call(...)` does not. Providers are:
+
+- `token_pressure` on `on_budget_threshold` at about 70/85/95% context
+  use (`ttl_turns: 2`, critical threshold preserves across compaction).
+- `idle_nudge` on `session_idle` after `idle_seconds` (default 60).
+- `tool_output_truncated` on `post_tool_use` when tool output was
+  compacted/truncated before the model saw it.
+- `post_compact_recap` on `post_compact` with the latest recap.
+- `resume_continuity` on `worker_resumed`, visible only to the first
+  resumed turn. It names the suspend turn, reason, resume cause, and
+  optional resume input; when `continue_transcript: false`, it also
+  carries the pre-suspend digest.
+- `project_facts` on `session_start` and `on_budget_threshold`
+  (`ttl_turns: 1`). Recalls typed `harn.fact.v1` records from the active
+  project namespace, filters by `min_confidence` (default 0.5) and
+  optional `kind_filter`, and renders the top `max_facts` (default 5)
+  as a `<system-reminder>` block so a fresh session boots with
+  project context already in scope.
+- `workspace_anchor` on `session_start` and `on_budget_threshold`
+  (`ttl_turns: 1`) when the session has an active workspace anchor.
+- `grounded_review` on `post_tool_use`, `post_step`,
+  and `post_agent_turn` (`ttl_turns: 2`). It only injects advisory
+  review context from concrete verifier/runtime evidence: explicit tool
+  errors, non-accepted routing verifier signals, parse errors,
+  undefined-name diagnostics, error-severity diagnostics, or failure
+  lines from known verification commands. Warnings and style nits stay
+  quiet unless `include_warnings: true`.
+- `idle_nudge`, `tool_output_truncated`, `resume_continuity`, and
+  `grounded_review` use `propagate: "none"`; `post_compact_recap`,
+  `project_facts`, and `workspace_anchor` use `propagate: "session"`.
+
+Opt out per loop:
+
+```harn
+import { AgentLoopOptions } from "std/agent/options"
+
+const reminder_opts: AgentLoopOptions = {
+  reminders: {providers: ["-token_pressure", "-idle_nudge"]},
+}
+agent_loop(harness, task, system, reminder_opts)
+```
+
+Configure providers under `reminders.config`, e.g.
+`{reminders: {config: {token_pressure: {context_window: 128000},
+idle_nudge: {idle_seconds: 120}}}}`. Register Harn-defined providers
+with `register_reminder_provider({id, subscribes_to, evaluate})`; the
+closure receives `{event, session, session_id, payload, options,
+config}` and returns a reminder effect, bare spec, effect list, or `nil`.
+
+Hooks can return `{reminder: {...}, then?: ...}`, a bare reminder spec,
+or a session-hook effect list. Hosts inject ambient context with the
+bridge `session/remind` notification; `session/inject` remains user-role
+input.
+
+Rendering is provider-neutral. Every route receives exactly one trailing user
+message containing a `<context-directives>` envelope. Its directives are
+ordered by authority (`contract`, `corrective`, `advisory`) and then lifecycle
+order; internal tags, dedupe keys, and runtime signatures are not rendered.
+The system prompt remains byte-stable as reminders change. Persisted
+`role_hint` values remain accepted for replay compatibility but do not control
+placement or voice.
+
+Sub-agent handoffs carry a filtered `reminder_propagation` list.
+`propagate: "all"` reaches descendants, `"session"` reaches direct
+children only, and `"none"` stays local. Compaction decrements finite
+TTLs, drops expired reminders, dedupes by `dedupe_key`, preserves only
+`preserve_on_compact: true`, and passes surviving reminders to custom
+compactors. Gotcha: `preserve_on_compact: false` with no finite
+`ttl_turns` can live forever during normal turns but vanish on
+compaction; `HARN-RMD-004` flags that shape.
+
+## External-agent delegation
+
+Import with
+`import { external_agent_delegate, external_agent_approve } from "std/external_agent"`.
+
+Use `external_agent_delegate(target, task, options?)` for open A2A external
+agents that advertise the `harn.external_agent.v1` capability contract. Options
+must include a hard `budget` cap such as `{max_usd: 0.25}` or
+`{max_tokens: 20000}`; the stdlib wrapper generates an idempotency key when one
+is not supplied.
+
+The first call normally returns `status: "checkpoint_required"` with a remote
+plan and expected scope. After host approval, pass that envelope to
+`external_agent_approve(envelope, options?)`; it preserves the idempotency key
+and dispatches at most once. Missing checkpoint support is refused unless
+`checkpoint.allow_local_fallback: true` supplies an explicit local plan, and
+over-budget results return a reviewable `status: "budget_exceeded"` envelope.
+
+## Agent runtime
+
+### `agent_turn`
+
+`agent_turn(prompt, options?)` is the high-level wrapper for the common
+"complete this request" shape. It builds on `agent_loop`, moves
+`options.system` into the system prompt, adds generic progress guidance,
+defaults to loop-until-done completion, and requires the completion judge.
+Native-tool turns complete naturally when the model returns final text
+with no tool calls; text/no-tool turns use the normal sentinel path.
+Pass `judge: {...}` or `done_judge: {...}` to customize the judge; omit
+both to use the default judge.
+
+The result is the normal `agent_loop` dict plus:
+
+- `iterations` — compact per-turn summaries from live loop events.
+- `judge_decisions` — structured completion judge decisions with
+  `iteration`, `verdict`, `reasoning`, `next_step`, and
+  `judge_duration_ms`, plus optional `trigger`.
+
+```harn
+const result = agent_turn("Review this patch and fix obvious issues.", {
+  system: "Be direct and keep changes narrowly scoped.",
+  provider: "openai",
+  model: "gpt-5-mini",
+})
+harness.stdio.log(result.visible_text)
+harness.stdio.log(result.judge_decisions[0].verdict)
+```
+
+### `agent_loop`
+
+`agent_loop(harness, prompt, system?, options?)` runs a multi-turn loop with
+tool dispatch. Build the options through the typed `AgentLoopOptions`
+alias from `std/agent/options` (`let opts: AgentLoopOptions = {...}`)
+or an `agent_preset(...)` / `agent_options(...)` constructor — this is
+the documented path, and the `unnormalized-options` lint flags inline
+dict literals that bypass it (they still execute). Native-tool loops complete naturally when the model
+returns final assistant text with no tool calls. Tagged text-tool stages
+use `<done>##DONE##</done>`, and no-tool sentinel loops use bare
+`##DONE##`. Set `done_sentinel` to a non-empty string to require a
+sentinel, or `nil` for no sentinel. Native-tool loop-until-done loops default
+to `nil`; text/no-tool loop-until-done loops default to `"##DONE##"`.
+
+Returns a namespaced dict: top-level `status`, `text`, `visible_text`
+(last iteration's prose with tool calls stripped), `task_ledger`,
+`transcript`, `daemon_state`, `daemon_snapshot_path`, `trace`, and
+`deferred_user_messages`; LLM execution metrics nested under `llm`
+(`iterations`, `duration_ms`, `input_tokens`, `output_tokens`); tool
+invocation data nested under `tools` (`calls`, `successful`, `rejected`,
+`mode`). Failed tool dispatches are fed back to the next model turn as
+error observations and appear under `tools.rejected`. The
+resilience surface is the `llm_caller:` seam (see "Composable LLM
+callers"); the pre-0.10 `llm_retries` / `llm_backoff_ms` options were
+removed and the `deprecated_llm_options` lint hard-errors on them. Plus its
+own `profile`, `tool_retries`, `max_iterations`, `max_nudges`, and
+`native_tool_fallback`
+(`"allow"`, `"allow_once"`, or `"reject"` for native-tool stages that
+receive text-mode `<tool_call>` fallback output). `thinking`,
+`interleaved_thinking`, and `anthropic_beta_features` apply to every
+model turn; `reminders` controls canonical reminder providers (`false`
+disables all, `providers: ["-id"]` opts out by id, `config` carries
+provider-specific knobs). For Claude Opus 4.6/4.7, `thinking: true` is
+enough to enable the interleaved-thinking beta header for the whole loop.
+
+When using `agent_preset(kind, options)`, preset pack rows fill only absent
+keys. Model routing is grouped: any explicit route at top level or under
+`llm_options` (`provider`, `model`, `models`, `ladder`, `routing`, or related
+policy keys) suppresses the entire built-in route. Preset ladders use canonical
+model-step records with a provider on each rung. A caller's direct `provider`
+plus `model` remains a direct route and is not mixed with `models`.
+
+Profiles preload common loop budgets and retry counts. Explicit keys
+override the profile:
+
+| Profile | `max_iterations` | `max_nudges` | `tool_retries` | `schema_retries` |
+|---|---:|---:|---:|---:|
+| `tool_using` (default) | 50 | 8 | 0 | 0 |
+| `researcher` | 30 | 4 | 0 | 0 |
+| `verifier` | 5 | 0 | 0 | 3 |
+| `completer` | 1 | 0 | 0 | 0 |
+
+Use `iteration_budget: {mode, initial, max, extend_by}` when a loop should
+start with a small cap and extend only while making progress. `max_iterations`
+is equivalent to a fixed budget; if both are present, `iteration_budget.max`
+wins. Explicit `max_iterations`, `initial`, `max`, and adaptive `extend_by`
+values must be positive integers, and `initial <= max`. Workflow stage
+`model_policy` accepts the same `iteration_budget` shape and passes it through
+to the per-stage `agent_loop`.
+
+`step_judge: {...}` runs a structured per-turn critique after an assistant
+turn and before tool dispatch. It can veto with `on_veto: "replace"` to remove
+the assistant turn before regeneration, or `"retain"` to leave it in the
+transcript. `skip_when_iterations_remaining` defaults to `1`, so single-turn
+or final-turn loops skip the judge instead of spending their last turn on a
+veto that cannot be regenerated. Skip decisions emit `step_judge_decision`
+with `skipped: true` and a stable `reason` such as `"low_iteration_budget"`.
+
+Pass `stop_after_successful_tools: ["name", ...]` to terminate the loop
+the moment any of those tools is dispatched successfully. Same shape as
+Vercel AI SDK's `stopWhen: hasToolCall(name)` and OpenAI Agents SDK's
+`StopAtTools([name])`. Use this for "terminal" tools (e.g.
+`exit_plan_mode`, `submit_answer`, `ask_user`) that mark the end of an
+agent step:
+
+```harn
+import { AgentLoopOptions } from "std/agent/options"
+
+const stop_opts: AgentLoopOptions = {
+  tools: registry,
+  stop_after_successful_tools: ["ask_question", "exit_plan_mode"],
+}
+agent_loop(harness, task, sys, stop_opts)
+```
+
+The check fires after each iteration's tool dispatch, so any other
+tool calls in the same iteration still run; only subsequent
+iterations are skipped. The loop exits with `status = "done"` and
+the tool name appears in `tools.successful`.
+
+### Progress narration
+
+Use `agent_progress({message?, entries?, replace?, metadata?})` from inside an
+agent session when a meaningful sub-step completes or the visible plan changes.
+The payload must include a non-empty `message` or `entries`; `replace` defaults
+to `true`.
+
+```harn
+agent_progress({
+  message: "Finished API inventory; checking auth paths next.",
+  entries: [
+    {content: "Inventory public API routes", status: "completed", priority: "high"},
+    {content: "Trace auth middleware", status: "in_progress"},
+  ],
+})
+```
+
+`entries` are task-list items with `content`, `status`, and optional
+`priority`. ACP clients receive entries as canonical `session/update`
+`plan` payloads. A2A clients receive non-terminal `TaskStatusUpdateEvent`
+updates with `status.state = "working"`. Message-only reports surface as Harn
+progress narration for clients that do not render plans.
+
+For model-facing loops, set `progress_tool: true` or pass a dict to customize
+the tool name, description, or system-prompt nudge. Call it after observable
+progress, not on a timer.
+
+`std/agent/progress` also exports schema-first helpers for harnesses and hosts
+that need to validate progress data at a boundary: use
+`agent_progress_payload_schema()`, `agent_progress_event_schema()`, and
+`agent_progress_tool_config_schema()` with `std/schema`, or the paired
+`*_report` / `*_value` helpers. `agent_progress_tool_config_normalize(config?)`
+validates config dictionaries and applies the default tool name and description.
+
+`agent_input_guardrail(classifier?, options?)` from `std/agent/guardrails`
+builds the input-side bookend to `agent_completion_gate`. Spread the returned
+bundle into `agent_loop` options to run a cheap classifier before the first main
+model turn. A tripwire emits `input_guardrail_verdict`, records a zero-token
+assistant explanation, and returns `status: "input_guardrail"` with
+`stop_reason: "input_guardrail_tripwire"`.
+
+```harn
+import { agent_input_guardrail } from "std/agent/guardrails"
+
+agent_loop(harness, task, system, base_opts + agent_input_guardrail(
+  { payload -> return cheap_policy_classifier(payload.user_message) },
+  {confidence_threshold: 0.8},
+))
+```
+
+Use `agent_input_guardrail_check(task, classifier?, options?)` when a script
+wants an explicit `{tripwire, reason, label, confidence}` preflight verdict
+instead of composing with `agent_loop`.
+
+Pass `done_judge: true` or `done_judge: {...}` to run a structured
+completion judge after a native-tool loop naturally completes or after
+the model emits `##DONE##` in a sentinel loop.
+The judge returns `verdict: "done" | "continue"` plus optional
+`reasoning` and `next_step`. A veto injects feedback and the loop
+continues until the judge accepts, `done_judge.max_invocations` is reached, or
+`max_verify_attempts` is exhausted.
+Each judge call emits a `JudgeDecision` agent event with optional `trigger`.
+Use
+`verify_completion_judge` instead when every natural stop should be
+judged.
+
+Set top-level `done_judge.max_invocations` (alias `max_feedback`) to a positive
+integer to cap repeated vetoes. Once reached, the loop stops with
+`status: "verify_capped"` and `stop_reason: "done_judge_cap_reached"`; the
+result carries structured `done_judge` counters. Set it to `0` to disable the
+terminal cap.
+
+Use `done_judge.cadence` when completion checks should be signal-gated
+instead of firing on every completion candidate:
+
+```harn
+import { AgentLoopOptions } from "std/agent/options"
+
+const cadence_opts: AgentLoopOptions = {
+  loop_until_done: true,
+  done_judge: {
+    cadence: {
+      every: 5,                         // judge turns 5, 10, 15, ...
+      when: "always",                   // or "stalled" / { state -> bool }
+      max_invocations: 3,
+      min_iterations_before_first: 2,
+    },
+  },
+}
+agent_loop(harness, task, system, cadence_opts)
+```
+
+With `when: "stalled"`, stall diagnostics run the judge when
+`agent_loop_stall_warning` fires. `done` stops the loop with
+`stalled_done_judge`; `continue` keeps the normal stall feedback fallback. The
+judge event includes `trigger: "stalled"`.
+
+Omitting `cadence` preserves the default behavior: every completion
+candidate is judged. `when: "stalled"` is quiet during healthy turns and
+is reserved for stall diagnostics; pair it with stall-aware loop policy
+instead of fixed "are you done?" prompting.
+
+Fixed-cadence completion prompts are not recommended: Huang et al.'s
+[AutoGPT/agent benchmark study](https://arxiv.org/abs/2310.01798) found that
+periodic "are you done?" checks can distort behavior. Prefer explicit progress
+signals and `done_judge.cadence.when: "stalled"` when the loop is actually
+showing stall symptoms.
+
+Pass `permissions` to scope one agent below the ambient `policy` ceiling:
+
+```harn
+import { AgentLoopOptions } from "std/agent/options"
+import { path_scope } from "std/tools"
+
+const scoped_opts: AgentLoopOptions = {
+  permissions: {
+    allow: {read_note: path_scope(), write_note: path_scope({mount_modes: ["extend"]})},
+    deny: ["dangerous_*"],
+    on_escalation: { request -> {grant: "once", approver: "operator"} },
+  },
+}
+agent_loop(harness, task, system, scoped_opts)
+```
+
+`allow` and `deny` accept tool-name globs, argument pattern lists, or VM
+predicates. `std/tools.path_scope(...)` checks path-like args (`path`,
+`destination`, `source`, `file` by default) against the active session
+`workspace_anchor`; use `mount_modes: ["extend"]` when a mutating tool should
+only accept writable mounted roots. Deny rules win. Escalation callbacks receive
+a `PermissionRequest` dict and return `false`, `true`, `{grant: "once"}`, or
+`{grant: "session"}`. Child agents still intersect with the parent capability
+policy; escalation cannot widen a parent ceiling.
+
+### Agent lifecycle: pause, resume, stop, self-park
+
+`spawn_agent`, `wait_agent`, `resume_agent`, `suspend_agent`, `agent_stop`, and
+`list_agents` from `std/agent/workers` are the script-level lifecycle
+surface for delegated work. Layered on top, `agent_loop(harness, ...)` exposes a
+model-facing **lifecycle tool** so the agent can park itself between turns
+and so a parent loop can pause/resume/stop children. Full reference:
+`docs/src/agent-lifecycle.md`.
+
+Four model-facing tools:
+
+| Tool | Use |
+|---|---|
+| `agent_await_resumption(reason, conditions?)` | The current worker self-parks. Registered automatically by `agent_loop(harness, ...)`. |
+| `subagent_pause(handle, reason)` | Parent loop pauses a running child after its current turn settles. Opt-in via `subagents: true`. |
+| `subagent_resume(handle, input?, continue_transcript? = true)` | Parent loop resumes a suspended child. Opt-in via `subagents: true`. |
+| `subagent_stop(handle, graceful? = true, reason?)` | Parent loop stops a child. Graceful mode returns a recursive typed handoff summary; `graceful: false` hard-cancels. Opt-in via `subagents: true`. |
+
+When the model calls `agent_await_resumption(...)` inside an `agent_loop`
+running as a worker, the call is intercepted *before* normal tool dispatch:
+the loop validates `conditions` with `parse_resume_conditions(...)`,
+persists a snapshot, emits `WorkerSuspended`, and returns
+`{status: "suspended", handle, reason, initiator: "self", conditions,
+iterations_completed}` to the parent. Lifecycle calls emit
+`tool_call_audit` telemetry with `initiator` (one of `"self"`, `"parent"`,
+`"operator"`, `"triggered"`) and the supplied `reason`.
+
+Top-level loops use the same shape: a root `agent_loop(harness, ...)` that parks
+returns `status: "suspended"` with `handle.snapshot_path`, and the CLI
+cold-restores it with `harn run --resume <snapshot_path>`.
+
+```harn,ignore
+// Self-park mid-loop until a review approval lands or 30 minutes pass.
+import { agent_await_resumption } from "std/agent/workers"
+
+const result = agent_loop(harness, "Wait for the maintainer's review.", nil, {
+  provider: "openai",
+  model: "gpt-5",
+  tool_format: "native",
+})
+
+if result.status == "suspended" {
+  harness.stdio.log(result.reason)               // model-supplied
+  harness.stdio.log(result.handle.snapshot_path) // resumable snapshot on disk
+}
+```
+
+```harn,ignore
+// Parent-driven pause/resume of a background child.
+const handle = sub_agent_run("Draft the changelog.", {
+  background: true,
+  provider: "openai",
+})
+suspend_agent(handle, "operator pulled context")
+// ... other work ...
+resume_agent(handle, "Pick up where you left off.")
+const final = wait_agent(handle)
+```
+
+```harn,ignore
+// Conditioned self-park: trigger + timeout.
+agent_await_resumption("waiting on review", {
+  trigger: {
+    kind: "review.approved",
+    provider: "github",
+    match: {events: ["review.approved"]},
+  },
+  timeout: {duration_minutes: 30, on_timeout: "resume_with_summary"},
+})
+```
+
+Resume responsibility is named by an optional `resume_by` callback (third
+arg to `agent_await_resumption`). The four presets in `std/agent/resume_by`
+are `ResumeBy.parent_llm`, `ResumeBy.local_runtime`, `ResumeBy.cloud_harness`,
+and `ResumeBy.pipeline_drain`. They compose with
+`std/lifecycle/combinators::first_available`. `default_resume_by(...)`
+picks one based on whether `conditions` were supplied and whether a cloud
+session is bound:
+
+- `conditions == nil` → `ResumeBy.parent_llm`
+- `conditions != nil`, no cloud session → `ResumeBy.local_runtime`
+- `conditions != nil`, cloud session → `first_handled([cloud_harness, local_runtime])`
+
+Transcript continuity: `resume_agent(...)` defaults to
+`continue_transcript: true` — the resumed worker keeps its full transcript
+and the runtime injects a single-shot `system_reminder` with
+`dedupe_key: "resume_continuity"` summarizing the gap. Pass
+`continue_transcript: false` to restart from the prior summary plus new
+input only.
+
+Daemon idle is a degenerate case: `agent_loop(harness, ..., {daemon: true})` and
+the `daemon_*` stdlib wrappers (see `docs/src/llm/agent_loop.md#daemon-stdlib-wrappers`)
+internally call `agent_await_resumption(...)` when no wake source is
+queued. The snapshot carries daemon-specific fields
+(`pending_event_count`, `wake_interval_ms`, `watch_paths`) alongside the
+standard suspend metadata, so `daemon_resume(path)` cold-restores the
+loop identically.
+
+Common gotchas:
+
+- **Suspend is cooperative**, not preemptive. The flag is honored at the
+  next turn boundary — not mid-tool-call, not mid-LLM-request. Cap
+  long-running tools with `tool_call_timeout`.
+- **Conditions are optional.** A bare `agent_await_resumption("waiting")`
+  parks the worker open; only the parent agent, an operator, or
+  `resume_agent(...)` can wake it.
+- **Snapshots survive process restart.** Both the snapshot file and any
+  registered trigger conditions are durable. `harn run --resume <path>`
+  rehydrates the worker in a fresh process.
+- **Double-resume is detected** (`HARN-SUS-006`); the second caller can
+  retry against the now-running handle.
+- **Closing a suspended worker is terminal** — a later `resume_agent`
+  raises `HARN-SUS-010`.
+- **Graceful stop hands work back.** `agent_stop(handle, {graceful: true})`
+  returns `{status: "stopped", handoff, children, handoffs, worker}`. Use
+  hard cancel (`graceful: false` or `close_agent`) when no takeover summary is
+  needed.
+
+Diagnostic codes for the suspend/resume namespace are `HARN-SUS-001..010`
+— see `docs/src/agent-lifecycle.md#diagnostic-codes` for the full table.
+
+### Durable agent channels
+
+Use `harness.channels.append(name, payload, options?)` for cross-run facts that should land
+in the active event log. Bare names default to tenant scope:
+`harness.channels.append("pr.merged", payload)` resolves to
+`tenant:<current-or-default-tenant>:pr.merged`. Prefixes select a scope:
+`session:foo`, `pipeline:foo`, `tenant:foo`, `tenant:<tenant_id>:foo`, or
+`org:<org_id>:foo`; org scope currently fails with `HARN-CHN-002` until org
+grants exist. Distinct `tenant_id`, `session_id`, or `pipeline_id` values
+resolve to distinct topics, so cross-scope readers see an empty view. The
+resolver also returns `HARN-CHN-001` for `pipeline:` outside a pipeline,
+`HARN-CHN-003` for malformed names, and `HARN-CHN-004` when an explicit
+`options.session_id` or `options.pipeline_id` conflicts with the active
+context.
+
+```harn
+const receipt = harness.channels.append("session:worker.ready", {worker: "lint"}, {
+  id: "worker-ready-lint",
+  ttl: 10m,
+})
+harness.stdio.log(receipt.event_id)
+harness.stdio.log(receipt.emitted_at.signature.starts_with("sha256:"))
+```
+
+Each stored event includes `id`, fully resolved `name`, `payload`,
+`emitted_at` (signed), `emitted_by`, available `pipeline_id`, `session_id`, or
+`tenant_id`, and `ttl_ms` when `options.ttl` is provided. Reusing the same
+`options.id` on the same resolved channel is idempotent and returns the
+original `event_id`. Use `harness.channels.events(name, options?)` for tests and local
+inspection.
+
+Use `harness.channels.subscribe(name, options?)` for live readers that need the same
+scope resolution as `harness.channels.append(...)`. This matters for session channels:
+`harness.channels.subscribe("worker.ready", {scope: "session", session_id: "sess-1"})`
+observes the in-process session channel log, while raw `event_log.subscribe(...)`
+only sees the active EventLog backend.
+Use `harness.channels.consumer_cursor(...)` and `harness.channels.ack(...)` for durable consumers
+that need a high-water cursor without deleting shared channel events.
+
+### Coordination ledger (`std/coordination`)
+
+Use `std/coordination` when agents need a durable, replayable coordination
+room instead of a host-local mailbox or assistant-visible prose protocol. The
+module wraps `harness.channels.append(...)`, `harness.channels.events(...)`, `event_log.subscribe`,
+`harness.channels.subscribe(...)`, and `std/memory` with a stable
+`harn.coordination.message.v1` envelope.
+
+```harn
+import {
+  coord_ack,
+  coord_inbox,
+  coord_post,
+  coord_read,
+  coord_remember,
+  coord_send,
+  coord_subscribe,
+} from "std/coordination"
+
+const receipt = coord_post(
+  "session",
+  "release",
+  {kind: "claim", subject: "release ownership", body: "Codex-2 owns v0.8.167"},
+  {id: "release-claim", session_id: "agent-session-1"},
+)
+const messages = coord_read("session", "release", {session_id: "agent-session-1"})
+const newer = coord_read("session", "release", {
+  session_id: "agent-session-1",
+  since_seq: receipt.message.seq,
+})
+const stream = coord_subscribe("session", "release", {session_id: "agent-session-1"})
+const memory_receipt = coord_remember(receipt, {namespace: "coordination/release"})
+const request = coord_send("workspace", "release", "build-agent", {
+  kind: "request",
+  subject: "verify release",
+  body: "Please audit the new patch release.",
+})
+const inbox = coord_inbox("workspace", "release", {consumer_id: "build-agent"})
+coord_ack("workspace", "release", "build-agent", inbox.next_cursor)
+```
+
+Scopes are `session`, `pipeline`, `tenant`, `workspace`, and `task`.
+`workspace` stores under the active tenant namespace and includes
+`workspace_id` in the channel name. `task` stores on the current session channel
+and includes `task_id` in the channel name. Message kinds are `status`, `claim`,
+`handoff`, `blocker`, `decision`, `request`, and `fact`. `coord_send` and
+`coord_reply` add addressing and thread metadata; `coord_inbox` scans addressed
+messages without acknowledging; `coord_ack` advances the consumer cursor after
+processing. `coord_post` only writes the ledger; `coord_remember` is explicit
+opt-in when a coordination message should become recallable memory.
+
+Every normalized coordination message has runtime-owned `ts` (the signed UTC
+channel append time) and `seq` (the monotonic per-room channel cursor).
+`coord_read` accepts exclusive `since_seq` and `since_ts` cursors. Never supply
+`ts`, `created_at`, or `seq` to a write; imported source timestamps belong in
+message data such as `data.claimed_ts`. Existing rows are projected from their
+channel event metadata without a history migration.
+
+Subscribe to channel emits with a `channel.emit` trigger (provider
+`channel`). `match.events` accepts `"channel:<name>"` selectors:
+
+```harn,ignore
+import { trigger_register } from "std/triggers"
+
+trigger_register({
+  id: "release-on-pr-merge",
+  kind: "channel.emit",
+  provider: "channel",
+  match: {events: ["channel:pr.merged"]},
+  handler: { harness, event -> kick_release(event.provider_payload.payload) },
+})
+```
+
+Add `batch: {count, window, key?, expire_action?}` to fire after N
+matching emits (Inngest-shape fire-after-N — no other major durable-
+execution platform owns this primitive). `key` is a dotted JSON path
+that partitions counters; `expire_action` is `"fire_partial"` (default)
+or `"discard"`. On dispatch `event.batch` holds the constituent events;
+the buffer is per-process thread-local, capped at 1024 events per
+partition, and replay reconstructs the batch from the recorded
+`constituent_event_ids`.
+
+```harn,ignore
+trigger_register({
+  id: "release-on-3-merges",
+  kind: "channel.emit",
+  provider: "channel",
+  match: {events: ["channel:pr.merged"]},
+  batch: {count: 3, window: "1h", key: "repo"},
+  handler: { harness, event -> cut_release(event.batch) },
+})
+```
+
+Pair `batch` with `ReminderInject({target, body, tags?, ttl_turns?,
+dedupe_key?})` to land a periodic reminder on a running session
+without spawning or resuming it. `target` is `"current"`, `"parent"`,
+a literal session id, or a closure; `body` is a `.harn.prompt`
+template against `{{ event }}`, `{{ match }}`, and `{{ batch }}`.
+Missing targets drop gracefully with a `triggers.reminder_inject.audit`
+audit entry. See `docs/src/agent-channels.md` for the full surface
+and `docs/src/cookbooks/channels.md` for runnable recipes.
+
+Pick the right primitive:
+
+| Goal | Use |
+|---|---|
+| Hand off to one specific agent | Handoffs (`handoff(...)`, `@handoff`) |
+| Wait for an external event (GitHub, Slack, cron) | Provider trigger |
+| Park one agent until a specific event with a declared resume condition | Suspend/resume (`agent_await_resumption(reason, conditions)`) |
+| Emit a typed event to many subscribers | **Channels** (`harness.channels.append(...)`) |
+| Periodic reminder into a running loop | **Channels + `batch` + `ReminderInject`** |
+
+Diagnostic codes: `HARN-CHN-001` (`pipeline:` outside a pipeline),
+`HARN-CHN-002` (cross-tenant emit / disabled `org:`), `HARN-CHN-003`
+(malformed name), `HARN-CHN-004` (scope ambiguous —
+`options.session_id`/`pipeline_id` conflicts with active context),
+`HARN-CHN-005` (malformed `batch` config). Replay-oracle codes are
+`HARN-REP-CHN-001..003` — see `docs/src/observability/replay-benchmarks.md`.
+
+Channel guardrails (`channel_guardrail_register(config)` and
+`std/channel_guardrails` presets) run before the durable journal
+append. Each guardrail returns `allow` / `warn` / `block`; worst
+verdict wins; blocked emits never persist but the block decision does
+on `lifecycle.channel.audit`. Built-ins ship `prompt_injection_scanner`
+and `llm_risk_classifier`; `register_guardrail` accepts any custom
+closure.
+
+Pass `autonomy_budget` to cap how many autonomous decisions an agent can
+make per UTC hour / UTC day. The check fires at loop entry, before any
+LLM/MCP work — scripts can't bypass it. When the cap is exhausted,
+`agent_loop` returns `status: "approval_required"` with a HITL approval
+request id, emits an `autonomy.budget_exceeded` lifecycle event, and
+appends an `autonomy.tier_transition` trust-graph record from `act_auto`
+to `act_with_approval`:
+
+```harn
+import { AgentLoopOptions } from "std/agent/options"
+
+const budgeted_opts: AgentLoopOptions = {
+  autonomy_budget: {per_hour: 10, per_day: 100, key: "captain.persona", reviewer: "oncall"},
+}
+agent_loop(harness, task, system, budgeted_opts)
+```
+
+`key` defaults to the loop's `session_id`; pick a stable identity (e.g.
+persona name) when each call mints a fresh session. `reviewer` defaults
+to `"operator"`. Setting both `per_hour` and `per_day` to `nil` disables
+the budget. See `docs/src/triggers/budgets.md` for the matching
+trigger-side cap and audit trail shape.
+
+### `post_turn_callback` (judge / reflection pattern)
+
+Every `agent_loop` turn fires the optional `post_turn_callback` closure
+*after* tool dispatch and before the next LLM call. It is the canonical
+hook for judges, reflection passes, and graders — no second
+`agent_loop`-flavored builtin required.
+
+The closure receives one dict argument with these keys (stable wire
+shape; new keys are additive):
+
+```harn
+{
+  session_id: string,                // live agent_session id (use this with agent_session_*)
+  iteration: int,                    // 0-based turn index
+  has_tool_calls: bool,
+  dispatch: list | dict | nil,
+  tool_count: int,                   // calls dispatched this turn
+  tool_results: list<dict>,          // structured per-call results
+  successful_tool_names: list<string>,
+  rejected_tool_names: list<string>,
+  session_successful_tools: list<string>,
+  session_rejected_tools: list<string>,
+  text: string,
+  visible_text: string,
+}
+```
+
+The return value drives the loop. Accepted shapes:
+
+- `nil` / `""` — no-op, loop continues
+- `string s` — inject as runtime feedback for the next turn
+- `bool b` — set the stop flag
+- dict with any combination of:
+  - `message: string` — same as the bare-string shape
+  - `stop: bool` — terminate the loop after this turn
+  - `next_options: dict` — merge into the next loop iteration's options
+  - `llm_options: dict` — merge into the next LLM call's `llm_options`
+
+Because `session_id` is exposed, the closure can call any
+`agent_session_*` builtin against the live transcript. The minimal
+"every-N-turns judge" pattern:
+
+```harn
+const judge = { info ->
+  if info.iteration % 3 != 0 { return nil }       // skip 2/3 turns
+  const snapshot = harness.agent.snapshot(info.session_id)
+  const verdict = harness.llm.call("...grade this transcript...", {
+    provider: "openai", model: "gpt-5-mini",      // cheaper reflection model
+    messages: [{role: "user", content: json_encode(snapshot)}],
+    schema: {approved: "bool", feedback: "string"},
+  })
+  if !verdict.approved {
+    return {message: "judge: " + verdict.feedback}
+  }
+  if verdict.approved && info.iteration > 5 { return {stop: true} }
+  nil
+}
+
+agent_loop(harness, task, system, {tools: registry, post_turn_callback: judge})
+```
+
+Hooks can also shape the next model turn. For example, once the required tool
+evidence exists, ask the provider to stop calling tools and synthesize:
+
+```harn
+const finalize_after_evidence = { info ->
+  if info?.session_successful_tools?.contains("read_file") {
+    return {
+      message: "Use the gathered evidence and produce the final answer now.",
+      llm_options: {tool_choice: "none"},
+    }
+  }
+  nil
+}
+```
+
+Other strategies compose from existing primitives — no new runtime
+mechanics required:
+
+- **Terminal-only review** — gate the body on `info.iteration ==
+  expected_max - 1`, or check `info.session_successful_tools` for a
+  terminal tool name. Skip the early turns and judge once at the end.
+- **Branch-and-replay** — call `harness.agent.fork_at(info.session_id,
+  k)` to checkpoint at a known-good turn, then return `{stop: true}`
+  to halt the live loop. The enclosing pipeline rebuilds with the
+  branch (see snippet below). The runtime intentionally does *not*
+  swap the live loop's session mid-run — that would race with
+  in-flight tool dispatches.
+
+  ```harn
+  const s = harness.agent.open()
+  const main = agent_loop(harness, task, sys, {session_id: s, tools: registry,
+    post_turn_callback: { info ->
+      if judge_says_redo_from(info) {
+        const branch = harness.agent.fork_at(info.session_id, judged_k)
+        harness.agent.inject(branch, {role: "system",
+          content: "Redo from turn ${judged_k} with: ${redirection}"})
+        // Stash the branch id so the caller can pick it up.
+        save_branch_id(branch)
+        return {stop: true}
+      }
+      nil
+    },
+  })
+  if main.status == "stopped" {
+    agent_loop(harness, task, sys, {session_id: load_branch_id(), tools: registry})
+  }
+  ```
+
+- **Fork-and-race** — fork at the start (or any turn) and race two
+  variants. Reuse the existing concurrency primitives — no race
+  scaffolding lives in `agent_loop`:
+
+  ```harn
+  const base = harness.agent.open()
+  const branch = harness.agent.fork(base)
+  harness.agent.inject(branch, {role: "system",
+    content: "Try the brute-force approach."})
+
+  const outcomes = parallel settle [base, branch]
+    with { max_concurrent: 2 } { sess ->
+      agent_loop(harness, task, sys, {
+        session_id: sess, tools: registry, max_iterations: 10,
+      })
+    }
+  const winner = pick_first_done(outcomes.results)
+  ```
+
+  Use `parallel settle` (vs. `parallel each`) so a failure on one
+  branch doesn't cancel the other. `max_concurrent: 2` keeps both
+  branches running concurrently without unbounded fan-out if you
+  generalize the list.
+
+The closure runs in a child VM (separate `output` buffer) and its
+return is parsed by `interpret_post_turn_callback_verdict`. Any
+captured `harness.stdio.log()` output flows back to the parent VM unchanged. The
+callback is awaited synchronously per turn, so it can be a heavy LLM call
+without races. Keep broad review strategies in
+`post_turn_callback` when the policy needs custom timing, branching, or
+multiple competing judges; use `done_judge` for the built-in
+sentinel-only completion gate.
+
+### Resume conditions
+
+Self-parking agents use a shared `ResumeConditions` shape for
+`agent_await_resumption(reason, conditions?)` and `spawn_agent({options: {resume_when:
+...}})`. Call `parse_resume_conditions(conditions?)` or
+`agent_await_resumption(reason, conditions?)` from
+`std/agent/workers` when you need to validate or normalize the shape
+without spawning a worker.
+
+```harn
+import { parse_resume_conditions, spawn_agent } from "std/agent/workers"
+
+const resume_when = parse_resume_conditions({
+  trigger: {
+    kind: "review.approved",
+    provider: "github",
+    match: {events: ["review.approved"]},
+  },
+  timeout: {duration_minutes: 30, on_timeout: "resume_with_summary"},
+  on_event: "operator.resume",
+})
+
+const worker_node = {
+  kind: "subagent",
+  mode: "llm",
+  model_policy: {provider: "mock"},
+  output_contract: {output_kinds: ["summary"]},
+}
+
+spawn_agent({
+  task: "wait for review",
+  node: worker_node,
+  options: {resume_when: resume_when},
+})
+```
+
+`trigger` reuses the trigger spec parser from `std/triggers` rather
+than defining a second trigger DSL. `timeout.duration_minutes` must be a
+positive integer, `timeout.on_timeout` defaults to
+`"resume_with_summary"` and may be `"fail"` or `"resume_with_input"`,
+and `on_event` must be a non-empty EventLog topic. Invalid fields raise
+`HARN-SUS-002` with the failing field path.
+
+### Sessions (persistent conversations)
+
+Pass `session_id` to `agent_loop` to resume a multi-turn conversation:
+prior messages are loaded as a prefix before the call runs, and the
+final transcript is persisted back under the same id on exit. Calls
+without a `session_id` (or with an empty string) mint an anonymous id
+and never touch the store — the one-shot call shape is preserved.
+
+```harn
+const s = harness.agent.open()                       // mint UUIDv7
+harness.agent.inject(s, {role: "user", content: "hi"})
+const a = agent_loop(harness, "continue", nil, {session_id: s, provider: "mock"})
+const b = agent_loop(harness, "remember me?", nil, {session_id: s, provider: "mock"})
+const branch = harness.agent.fork(s)                 // counterfactual
+const replay = harness.agent.fork_at(s, 1)           // branch from a rebuilt prefix
+harness.agent.close(branch)
+harness.agent.close(replay)
+```
+
+Lifecycle builtins (all hard-error on unknown ids except `exists`, `open`,
+`snapshot`, `ancestry`):
+
+- `harness.agent.open(id?, opts?)` / `_close(id)` / `_exists(id)`. `opts` may
+  include `workspace_anchor` and `workspace_policy: {default_mount_mode}`.
+- `harness.agent.current_id()` returns the innermost active session id or `nil`.
+- `harness.agent.actor_chain(id?)` returns the RFC 8693 `{sub, act}` actor
+  chain for `id`, or for the current active session when `id` is omitted.
+- `harness.agent.workspace_anchor(id)` / `_set_workspace_anchor(id, anchor)`
+  read and replace the typed anchor.
+- `harness.agent.workspace_policy(id)` / `_set_workspace_policy(id, policy)`
+  read and update the default mount mode used when mounted roots omit
+  `mount_mode`.
+- `harness.agent.add_root(id, root, opts?)` / `_remove_root(id, root)` mount or
+  unmount additional roots. `opts.mount_mode` defaults from the session
+  workspace policy.
+- `harness.agent.list_roots(id)` returns `{primary, additional}` for the
+  current mounted roots.
+- `harness.agent.reanchor(id, new_anchor, opts?)` atomically swaps the primary
+  anchor mid-run. `opts.carry_transcript` (default true) keeps the transcript;
+  `false` forks into a fresh empty session. `opts.compact: true` runs
+  compaction before the swap (requires `carry_transcript: true`). Emits an
+  `AnchorChanged` transcript event and `AgentEvent::AnchorChanged`.
+- `sub_agent_run` accepts an `anchor` option. The runtime rejects a child
+  anchor that escapes the parent's anchor + mounted roots.
+- `register_path_scope_guard(opts?)` / `clear_path_scope_guard()` install a
+  singleton PreToolUse hook that denies (or emits a `<scope-alert>` reminder
+  for) tool calls whose path args escape the session anchor.
+- `harness.agent.reset(id)` / `_fork(src, dst?)` / `_fork_at(src, keep_first, dst?)` / `_trim(id, keep_last)`
+- `harness.agent.inject(id, {role, content, …})` — missing `role` errors.
+- `harness.agent.seed_from_jsonl(path, opts?)` creates a new session from a
+  replayable `llm_transcript.jsonl` sidecar. Useful opts:
+  `truncate_to_last`, `drop_tool_calls`, `rename_session`, `validate`,
+  `provider`, `model`, `source_agent`, `source_session_id`, `source_kind`,
+  `source_label`, `source_provenance`, `recommend_compaction`.
+- `harness.agent.compact(id, opts)` — supports LLM/truncate/observation-mask/custom
+  compaction, accepts the same compaction policy fields as
+  `transcript_auto_compact`, and errors on unknown option keys.
+- `harness.agent.length(id)` / `_snapshot(id)` / `_ancestry(id)` for read-only inspection.
+- `cancel_in_flight_tool_call(session_id, call_id, opts?)` — abort one
+  in-flight tool call without closing the session. `opts.reason` is
+  surfaced to the model, `opts.inject_reminder` (default `true`) queues
+  a system reminder so the model knows it was stopped, and
+  `opts.timeout_ms` (default `5000`) bounds how long to wait for the
+  dispatch to unwind. Returns
+  `{status, call_id, tool, reason}` where status is `"cancelled"`,
+  `"already_cancelled"`, `"not_found"`, or `"timeout"`. The cancelled
+  call returns to the loop as `status: "cancelled"` so the model can
+  distinguish "the host stopped me" from "the tool errored". The same
+  surface is exposed over ACP as `session/cancel_tool_call`.
+
+Session snapshots include `metadata.transcript_budget` after hard retention
+budget pressure. `last_action` records whether Harn rejected, trimmed, or
+compacted the transcript, along with before/after message and event counts.
+
+### Daemon wrappers
+
+Use the daemon stdlib wrappers when you want a first-class handle around
+`agent_loop(harness, ..., {daemon: true})`:
+
+- `daemon_spawn(config)` starts a persistent daemon and returns `{id, status, persist_path, ...}`.
+- `daemon_trigger(handle, event)` appends a durable FIFO trigger event.
+- `daemon_snapshot(handle)` returns the persisted daemon snapshot plus queue
+  fields such as `pending_event_count`, `queued_event_count`,
+  `inflight_event`, and `event_queue_capacity`.
+- `daemon_stop(handle)` preserves state and re-queues any in-flight trigger.
+- `daemon_resume(path)` resumes from the daemon state directory.
+
+`daemon_spawn` accepts daemon-loop options like `wake_interval_ms`,
+`watch_paths`, and `idle_watchdog_attempts`, plus
+`event_queue_capacity` (default `1024`).
+
+### Bridge-only builtins (IDE host integration)
+
+These builtins are only meaningful when a Harn script runs inside a host
+with a `HostCallBridge` attached. Outside a bridge
+session they raise an error — don't call them from `harn run` in a
+plain terminal.
+
+- `harness.tools.list_registered()` returns `list<{name, description, schema}>` —
+  every tool the attached host has registered. Call once per script;
+  cache the result.
+- `harness.tools.invoke(name, args)` invokes a host tool with a dict of
+  arguments. Returns an opaque value — narrow it yourself before
+  field access (strict types mode treats this as an untyped boundary).
+
+### Filesystem extras
+
+- Import `replace_text[_result]` or `replace_bytes[_result]` from `std/fs` when
+  publishing complete state under an observed SHA-256 lease. Receipts are
+  `created`, `replaced`, `no_op`, or `stale`; stale never mutates the file.
+- `harness.fs.replace_text[_result]` and `replace_bytes[_result]` are the
+  capability-aware primitives. Options make create, overwrite, parent
+  creation, and `namespace`/`flush` durability explicit. Symlink destinations
+  fail closed.
+- `harness.fs.glob(pattern, base?)` → list of matching paths. Pattern is matched
+  against forward-slash paths relative to `base` (defaults to script
+  source dir); `**` glob is supported.
+- `harness.fs.glob(pattern, base?)` is the capability-aware form and returns
+  the same matches as `harness.fs.glob(...)`.
+- `harness.fs.workspace_temp_dir()` returns the sandbox-visible workspace
+  scratch directory, creating it lazily.
+- `harness.fs.mkdtemp_in_workspace(prefix?)` creates a unique directory under
+  that workspace scratch root. Prefer it for intermediate files used by
+  sandboxed workflows.
+- `harness.fs.mkdtemp(prefix?)` creates a uniquely named directory under the
+  host temp dir. Use it only for host-temp work that does not need to be
+  sandbox-visible; callers own cleanup with `harness.fs.delete(path)`.
+- `harness.fs.walk(root, opts?)` → list of `{path, is_dir, is_file, depth}`.
+  `opts.max_depth: int` and `opts.follow_symlinks: bool` are honored.
+- `harness.fs.rename(src, dst)` — `rename` with cross-filesystem copy+delete
+  fallback.
+- `harness.fs.read_lines(path)` → list of lines (no trailing newline). Handles
+  CRLF correctly.
+- Direct runs can keep sandboxing on while writing outside the project with
+  `harn run --write-root <path> script.harn`; the path is added to
+  `workspace_roots`. Use `--read-only-root <path>` for additive read scope.
+- Use `--sandbox-write-root <path>` or `--sandbox-read-root <path>` when only
+  spawned subprocesses need the extra path; Harn filesystem builtins stay
+  scoped to the workspace roots.
+
+### Document helpers
+
+Import with `import { pdf_bytes, write_pdf, extract_text, pdf_capabilities } from "std/document"`.
+
+- `pdf_bytes(source, options?)` renders text, HTML, or Markdown to PDF bytes
+  using Harn's dependency-free `builtin_text_pdf` renderer. Options include
+  `source_format`, `title`, `page_width_pt`, `page_height_pt`, `margin_pt`,
+  `font_size_pt`, `line_height_pt`, and `max_line_chars`.
+- `write_pdf(path, source, options?)` writes those bytes through
+  `harness.fs.write_bytes`, so normal sandbox `workspace_roots` apply.
+- `extract_text(source, {source_format?})` normalizes text-like document input.
+  With `source_format: "pdf"`, it accepts PDF bytes and extracts embedded text
+  with the portable `builtin_pdf_text` extractor. Malformed, encrypted, and
+  image-only PDFs throw a structured `document_extract_error`; image-only
+  failures set `ocr_candidate: true` so callers can choose an explicit OCR
+  fallback.
+- `pdf_capabilities()` reports available renderers and extractors, including
+  supported formats, resource limits, external dependencies, and whether OCR
+  is available. The built-in renderer is portable and text-layout oriented,
+  not browser-grade CSS.
+
+### Diff helpers
+
+`std/diff` exposes `diff_lines`, `unified_diff`, `colorize_diff`,
+`diff_summary`, `render_diff_stat`, `structural_diff`, and
+`changeset_summary`.
+`structural_diff(ast, path_a, path_b, language_or_options?)` parses both files
+with the hostlib tree-sitter registry and returns changed syntax-node spans
+for human review. It is not patch-applicable. On unsupported languages,
+parse errors, or `max_bytes` / `max_nodes` / `max_graph_edges` limits, it
+returns `result: "fallback"`, `mode: "line"`, and a `line_diff` payload.
+`changeset_summary(ast, files)` accepts the narrow `HarnessAst` handle plus
+`{path, before?, after?}` file images and
+returns `harn.review_changeset.v1`: structural versus reshaped-only files,
+named symbol changes, and name-matched candidate `CALLS` relations explicitly
+labeled as heuristic. Unsupported inputs remain visible as degraded entries.
+
+### CSV
+
+```harn
+csv_parse("name,age\nalice,30\n", {headers: true})
+// → [{name: "alice", age: "30"}]
+
+csv_stringify([{name: "alice", age: 30}], {headers: true})
+// → "age,name\n30,alice\n"
+```
+
+Options: `headers: bool` (default false), `delimiter: ","` as one
+ASCII character. Without headers, `csv_parse` returns list-of-lists;
+with headers, list of dicts (keys are sorted on stringify for
+determinism).
+
+### URL parsing
+
+```harn
+url_parse("https://api.example.com:8080/v1/items?q=hi#frag")
+// → {scheme: "https", host: "api.example.com", port: 8080,
+//     path: "/v1/items", query: "q=hi", fragment: "frag", ...}
+
+url_build({scheme: "https", host: "example.com", path: "/api",
+           query: "x=1&y=2"})
+// → "https://example.com/api?x=1&y=2"
+
+query_parse("?key=alpha&key=beta")
+// → [{key: "key", value: "alpha"}, {key: "key", value: "beta"}]
+
+query_stringify([{key: "name", value: "ali ce"}])
+// → "name=ali+ce"
+```
+
+### Modern crypto
+
+- Hashes: `sha3_256`, `sha3_512`, `blake3` (in addition to existing
+  SHA-2 family + MD5).
+- Harness-scoped content addressing: `harness.crypto.sha256(value) ->
+  string` accepts strings or bytes and returns lowercase SHA-256 hex.
+  `sha256_hex(value)` remains as a compatibility alias.
+- Ed25519 signatures: `ed25519_keypair() -> {private, public}` (hex),
+  `ed25519_sign(priv, msg) -> string` (hex sig),
+  `ed25519_verify(pub, msg, sig) -> bool`.
+- X25519 key agreement: `x25519_keypair() -> {private, public}`,
+  `x25519_agree(priv, peer_pub) -> string` (hex shared secret).
+- JWT verification: `jwt_verify(alg, token, key)` (HS256 / RS256 /
+  ES256). Pairs with the existing `jwt_sign`.
+
+### Date/time builtins
+
+- `harness.clock.now() -> {year, month, day, hour, minute, second, weekday, timestamp, iso8601}`.
+- `harness.clock.date_iso() -> string` returns current UTC as RFC 3339.
+- `date_parse(str) -> int | float` parses RFC 3339 / ISO 8601 first, then falls back to
+  legacy digit extraction for malformed date-ish strings.
+- `date_format(ts, fmt?, tz?) -> string` supports chrono/strftime codes including `%A`,
+  `%B`, `%Z`, `%z`, `%:z`, `%f`, `%3f`, and `%s`; negative pre-epoch timestamps work.
+- `date_in_zone(ts, "America/Los_Angeles") -> dict` and `date_to_zone(ts, tz) -> string`
+  convert through IANA timezone names.
+- `date_from_components({year, month, day, hour?, minute?, second?}, tz?) -> int | float`.
+- Durations: `duration_ms/seconds/minutes/hours/days(n) -> duration`,
+  `date_add(ts, d)`, `date_diff(a, b) -> duration`,
+  `duration_to_seconds(d)`, `duration_to_human(d)`.
+- `weekday_name(ts, tz?)` and `month_name(ts, tz?)` return localized English names.
+
+### HTTP builtins
+
+- `http_get/post/put/patch/delete/request` return
+  `{status, headers, body, ok}` for outbound HTTP calls.
+- `harness.net.download(url, dst_path, options?)` streams a response body to disk and
+  returns `{bytes_written, status, headers, ok}`.
+- `http_stream_open/read/info/close` expose pull-based response streaming;
+  `http_stream_read` returns `bytes` chunks and then `nil` at EOF.
+- Common options: `timeout_ms` (alias `timeout`), `total_timeout_ms`,
+  `connect_timeout_ms`, `read_timeout_ms`, `retry: {max, backoff_ms}`,
+  legacy `retries` / `backoff`, `retry_on`, `retry_methods`, `headers`,
+  `auth`, `follow_redirects`, `max_redirects`, `proxy`,
+  `proxy_auth: {user, pass}`, `decompress`, and
+  `tls: {ca_bundle_path?, client_cert_path?, client_key_path?, client_identity_path?, pinned_sha256?}`.
+- `http_post/put/patch` accept either `(url, body, options?)` or `(url, options)`
+  when the request is driven entirely by options such as `multipart`.
+- `multipart` accepts a list of part dicts with `name` plus one of `value`,
+  `value_base64`, or `path`, along with optional `filename` and `content_type`.
+- Default retries cover `408`, `429`, `500`, `502`, `503`, and `504` for
+  idempotent methods only. `Retry-After` is honored on `429` / `503`.
+- `http_mock(method, url_pattern, response)` can script multiple responses
+  with `{responses: [...]}` and `http_mock_calls()` records each attempt.
+
+### `std/web` grounding helpers
+
+Import with `import { web_fetch, web_search, verify_imports, web_grounding_tools } from "std/web"`.
+
+- `web_fetch(url, options?)` wraps the HTTP stack with source provenance,
+  conditional fetch support, and `{ok, status, body, headers, source_url,
+  final_url, fetched_at, cache_status}` envelopes.
+- `web_search(query, options?)` normalizes curated `index` / `results`,
+  configured JSON `api`, `provider_results`, or `HARN_WEB_SEARCH_URL` search
+  backends into ranked results with per-result provenance. Result envelopes
+  expose only public backend metadata, not configured API headers or bodies.
+- `verify_imports(paths, options?)` checks Python, JavaScript/TypeScript,
+  Rust, and Harn imports against nearby manifests, `installed_packages`, and
+  registry evidence with optional `symbols`, `trust_score`, and package age
+  metadata. Treat `package_not_found` and `symbol_not_found` as blockers;
+  `low_trust_package`, `fresh_package`, and `symbol_unverified` are warnings.
+- `web_grounding_tools(registry?, options?)` registers read-only
+  `web_search` and `verify_imports` tools plus capability-gated model guidance
+  for unfamiliar packages, APIs, or post-edit import verification.
+
+### Connector HTTP policy
+
+Import `std/connectors/http` for provider API calls:
+
+```harn
+import { connector_http_json } from "std/connectors/http"
+
+const response = connector_http_json(harness.clock, harness.net, "POST", url, {
+  headers: {Authorization: "Bearer " + token, Accept: "application/json"},
+  body: json_stringify(payload),
+  idempotency_key: "create:" + payload.id,
+  retry: {max_attempts: 3, base_ms: 250, cap_ms: 30000},
+  provider: "example",
+  operation: "create_item",
+})
+```
+
+`connector_http_request` returns a non-throwing envelope. Success:
+`{ok: true, status, headers, body, retry_after_ms?}`. Failure:
+`{ok: false, status?, retryable, retry_after_ms?, error}` where
+`error.category` is stable for branching. `connector_http_json` adds `json` on
+valid JSON and returns `error.category == "invalid_json"` on parse failure.
+`POST`/`PATCH` retries require an existing or supplied `Idempotency-Key`, unless
+`retry_unsafe: true` is explicit. `connector_http_header` and
+`connector_http_rate_limit` cover case-insensitive header lookup plus
+`Retry-After`, `RateLimit-*`, and `X-RateLimit-*` extraction.
+
+For narrow AWS connector calls, use `aws_sigv4_headers(spec)` to sign one
+request with explicit credentials, then pass `signed.headers` into
+`harness.net.request(...)`. This is not an AWS SDK: there is no credential
+chain, paginator, service client, or live AWS test requirement. `timestamp` is
+required for deterministic signing, and temporary credentials use
+`session_token` / `X-Amz-Security-Token`.
+
+```harn
+const body = "{\"TableName\":\"Items\"}"
+const url = "https://dynamodb.us-east-1.amazonaws.com/"
+http_mock("POST", url, {status: 200, body: "{\"ok\":true}", headers: {}})
+const signed = aws_sigv4_headers({
+  method: "POST",
+  url: url,
+  service: "dynamodb",
+  region: "us-east-1",
+  body: body,
+  access_key_id: access_key_id,
+  secret_access_key: secret_access_key,
+  session_token: session_token,
+  headers: {"Content-Type": "application/x-amz-json-1.0"},
+  timestamp: "20260429T120000Z",
+})
+const response = harness.net.request("POST", url, {body: body, headers: signed.headers})
+```
+
+### Human-in-the-loop primitives
+
+`ask_user`, `request_approval`, `dual_control`, and `escalate_to` are
+**reserved keywords** — first-class typed expression syntax. The names
+cannot be shadowed; envelopes are signed by the VM; quorum requires
+distinct principals; replay is deterministic. Shared type aliases live
+in `std/hitl`.
+
+Each primitive accepts named arguments (preferred) or the legacy
+positional form. Both lower to the same VM-enforced runtime.
+
+```harn,ignore
+const answer  = harness.interaction.ask_user(prompt: "choose A or B", schema: schema_of(Choice))
+const record  = harness.interaction.request_approval(action: "merge_pr", args: {pr: 123}, quorum: 2,
+                               reviewers: ["alice", "bob", "carol"])
+const result  = harness.interaction.dual_control(n: 2, m: 3, action: destructive_step,
+                           approvers: ["alice", "bob", "carol"])
+const handle  = harness.interaction.escalate_to(role: "oncall", reason: "deploy failed")
+```
+
+- `ask_user<T>(prompt, schema?, timeout?, default?) -> T`
+- `harness.interaction.request_approval(action, args?, detail?, quorum?, reviewers?, deadline?,
+  principal?, evidence_refs?, undo_metadata?, capabilities_requested?)
+  -> {approved, reviewers, approved_at, reason, signatures}`
+- `dual_control<T>(n, m, action: fn() -> T, approvers?) -> T`
+- `harness.interaction.escalate_to(role, reason)
+  -> {request_id, role, reason, trace_id, status, accepted_at, reviewer}`
+- `hitl_pending({since?, until?, kinds?, agent?, limit?} | nil)
+  -> list<{request_id, request_kind, agent, prompt, trace_id, timestamp, approvers, metadata}>`
+
+Operational semantics:
+
+- Approval deadlines default to 24 hours.
+- Timeouts append `hitl.timeout` and either return the supplied default or
+  throw `HumanTimeoutError`.
+- Denials throw `ApprovalDeniedError`.
+- Replay reads recorded HITL responses from the event log instead of asking
+  a live host again.
+
+Host contract:
+
+- Notification: `harn.hitl.requested`
+- Resolution method: `harn.hitl.respond`
+
+### Trigger stdlib
+
+Use the trigger stdlib wrappers when a script needs to inspect or manually
+exercise the live trigger registry:
+
+- `trigger_list()` returns `list<TriggerBinding>`.
+- `trigger_register(config)` hot-installs a dynamic trigger and returns a
+  `TriggerHandle`. `config.retry` accepts `{max, backoff}` with
+  `backoff: "svix" | "immediate"`. `config.when_budget` accepts
+  `{max_cost_usd, tokens_max, timeout}` when `config.when` calls `harness.llm.call(...)`.
+- `trigger_fire(handle, event)` injects a synthetic `TriggerEvent` and returns a
+  `DispatchHandle`.
+- `trigger_replay(event_id)` fetches an event from `triggers.events` and
+  re-dispatches it through the trigger dispatcher, preserving
+  `replay_of_event_id`.
+- `trigger_inspect_dlq()` returns `list<DlqEntry>` with retry history.
+- `trigger_inspect_lifecycle(kind?)` returns lifecycle records including
+  `predicate.evaluated`, `predicate.budget_exceeded`, and
+  `predicate.daily_budget_exceeded`.
+
+Shared types live in `std/triggers`: `TriggerConfig`, `TriggerBinding`,
+`TriggerHandle`, `DispatchHandle`, `DlqEntry`, and `TriggerEvent`.
+
+Trust-graph helpers also live in `std/triggers`:
+
+- `harness.runtime.handler_context()` returns the active trigger dispatch
+  context or `nil`.
+- `trust_record(agent, action, approver, outcome, tier)` appends a manual
+  trust record.
+- `trust_query(filters)` queries historical trust records, including
+  `limit` and `grouped_by_trace`.
+- `TriggerConfig.autonomy_tier` and manifest `[[triggers]].autonomy_tier`
+  accept `shadow | suggest | act_with_approval | act_auto`.
+- `harn trust query`, `harn trust promote`, and `harn trust demote` expose the
+  same substrate from the CLI.
+
+Current caveats:
+
+- LLM-gated predicates are fail-closed. Single-evaluation budget overruns,
+  daily budget exhaustion, provider failures, and circuit-breaker-open states
+  all short-circuit the handler to `false`.
+- Example:
+
+```harn
+import "std/triggers"
+
+fn about_outages(event: TriggerEvent) -> bool {
+  const result = harness.llm.call(
+    "Is this message about outages? " + event.kind,
+    nil,
+    {provider: "mock", model: "gpt-4o-mini"},
+  )
+  return contains(result.text.lower(), "yes")
+}
+
+const handle = trigger_register({
+  id: "slack-outage-gate",
+  kind: "slack.message",
+  provider: "slack",
+  handler: fn(harness: Harness, event) { return event.kind },
+  when: about_outages,
+  when_budget: {max_cost_usd: 0.001, tokens_max: 500, timeout: "5s"},
+  retry: nil,
+  match: {events: ["slack.message"]},
+  events: nil,
+  dedupe_key: nil,
+  filter: nil,
+  budget: {daily_cost_usd: 1.0, max_concurrent: nil},
+  manifest_path: nil,
+  package_name: nil,
+})
+```
+
+- `trigger_fire` / `trigger_replay` now reuse the dispatcher for local
+  handlers, retries, and DLQ transitions. `a2a://...` returns either
+  an inline remote result or a pending task handle, while `worker://...`
+  returns an enqueue receipt for the durable worker queue job.
+- `trigger_replay` is not the full deterministic T-14 replay engine yet:
+  it replays the recorded trigger event through today’s dispatcher/runtime
+  state rather than a sandboxed drift-detecting environment.
+
+### Triage inbox stdlib
+
+Use `std/triage` to turn Slack, Notion, GitHub, or generic connector payloads
+into host-renderable inbox cards while retaining raw provider payloads for
+audit:
+
+```harn
+import { triage_start_my_day } from "std/triage"
+
+const connector_events = []
+const feed = triage_start_my_day(connector_events, {emit: true})
+for event in feed.events {
+  harness.stdio.log(event.summary)
+}
+```
+
+- `triage_normalize(input, options?)` returns `harn.triage_event.v1` with
+  `source_url`, normalized actors, card copy, action intents, privacy flags,
+  a stable `dedupe_key`, and separate `raw_payload`.
+- `triage_dedupe_key(provider, source_kind, source_url, source_id?)` hashes
+  source provenance, not transport delivery ids.
+- `triage_dedupe_events(events)` keeps first-seen order while dropping
+  duplicate triage keys.
+- `triage_emit(input, options?)` validates the envelope and appends
+  `kind = "triage_event"` to `triage.inbox.events` by default.
+- Non-navigation action intents must set `requires_approval: true`; hosts own
+  write execution for dismiss, snooze, and convert-to-task actions.
+
+### Interactive app stdlib
+
+Use `std/ui` for new interactive apps whose behavior stays in Harn:
+
+```harn
+import * as ui from "std/ui"
+
+const resource = ui.app_resource(
+  "ui://example/decision-card",
+  "Decision Card",
+  "decision.handle_event",
+)
+
+fn handle_event(raw) {
+  const event = ui.event(raw.event)
+  // Change Harn-owned state from the checked event.
+  return ui.update(ui.document("Decision Card", revision, elements))
+}
+```
+
+- `ui.document` checks element IDs, parent order, heading levels, and canvas
+  sizes before a browser sees the document.
+- `ui.event` checks browser input and canvas coordinates once at the Harn
+  boundary.
+- `ui.update` returns the next document plus `send_event`, `capture_canvas`, or
+  `download` actions for the shared renderer.
+- `ui.tool_metadata` and `ui.mcp_resource` return the exact records needed by
+  `tool_define` and `harness.tools.mcp_resource`.
+- `ui.test.run` drives an event handler and follows scheduled events in process
+  without sleeping.
+
+See `examples/apps/decision-card.harn` for a small form and
+`examples/apps/logo-studio.harn` for drawing, model jobs, restart recovery, and
+writing result files.
+
+### MCP Apps UI resource stdlib
+
+Use `std/ui_resource` to package interactive widgets as `ui://` resources for
+MCP Apps hosts while keeping text/structured fallbacks first-class:
+
+```harn
+import { ui_resource, ui_select_for_host, ui_structured_fallback, ui_tool_result } from "std/ui_resource"
+
+const resource = ui_resource(
+  "ui://harn-dashboard/kpis@v1",
+  "Weekly KPIs",
+  weekly_kpi_html,
+  {permissions: ["tools/call"], capabilities: ["tools/call", "context/read"]},
+)
+const result = ui_tool_result(resource, {structured_fallback: ui_structured_fallback({signups: 42, churn: 3})})
+const rendered = ui_select_for_host(result, host_capabilities)
+```
+
+- `ui_resource(uri, name, html, options?: UiResourceOptions)` produces
+  `UiResource` (`harn.ui_resource.v1`)
+  with `mime_type: "text/html;profile=mcp-app"`, a content hash, CSP/sandbox
+  policy, and an embedded `std/artifact/web` validation summary.
+  `allow_host_bridge: true` is the default so `parent.postMessage` to the
+  host counts as an expected MCP Apps bridge call rather than a finding.
+- `ui_tool_meta(resource, options?: UiToolMetaOptions)` returns a `_meta.ui`
+  block;
+  `ui_tool_meta_to_mcp(meta)` serializes it into the MCP `resourceUri` /
+  `visibility` / `initialView` shape MCP Apps hosts read from `tools/list`.
+- `ui_tool_result(resource, options?: UiToolResultOptions)` wraps the resource
+  with a mandatory text fallback (default: `web_artifact_text_fallback` of the
+  HTML) and an optional `UiStructuredFallback`. Wrap raw fallback data with
+  `ui_structured_fallback(data, options?: UiStructuredFallbackOptions)`.
+  Invalid resources are stripped automatically unless the caller passes
+  `allow_invalid_resource: true`.
+- `ui_select_for_host(result, capabilities?)` picks `ui_resource`,
+  `structured_fallback`, or `text_fallback` from the same record based on host
+  capability advertisements. `ui_host_capabilities` accepts the current MCP
+  extension entry, older `client_capabilities.apps` shapes, OpenAI Apps SDK
+  `ui.apps`, or bare `{apps: true}` records through `UiHostCapabilityInput`.
+- `ui_tool_call_envelope(name, params?, options?)` and
+  `ui_context_update_envelope(key, value, options?)` build the JSON-RPC
+  envelopes a sandboxed iframe sends through `window.parent.postMessage`.
+- `ui_resource_csp_header(csp)` and `ui_resource_sandbox_attr(csp)` project
+  the resource's CSP into header and sandbox attribute strings hosts can
+  apply directly.
+- `ui_tool_result_validate(result)` enforces schema versions, the text
+  fallback contract, and refuses to ship a resource whose HTML failed
+  validation.
+
+Examples: `examples/ui_resource/dashboard-widget.harn`,
+`examples/ui_resource/review-form.harn`.
+
+### Profile bulletins stdlib
+
+Use `std/personas/bulletins` when an agent learns a durable fact about a
+person, project, team, or task. Bulletins are proposals — they never silently
+enter durable context, and hosts emit separate decision events so the review
+trail is replayable:
+
+```harn
+import { bulletin_propose, bulletin_emit, bulletin_accept, bulletin_render_for_prompt } from "std/personas/bulletins"
+
+const bulletin = bulletin_propose(
+  {
+    scope: "user",
+    scope_key: "kenneth@example.com",
+    subject: "kenneth",
+    persona: "burin_home",
+    assertion: "prefers concise responses without trailing summaries",
+    confidence: 0.92,
+    source: {agent: "burin_home_curator"},
+    evidence: [{kind: "user_msg", ref: "msg-42"}],
+    privacy: {sync: "local_only"},
+  },
+)
+const _proposal = bulletin_emit(bulletin)
+const _accepted = bulletin_accept(bulletin, {decided_by: "user"})
+```
+
+- `bulletin_propose(input, options?)` returns `harn.profile_bulletin.v1` with
+  `id`, `scope`, `scope_key`, `subject`, `assertion`, `status` (always
+  `proposed` by default), `confidence` in `[0, 1]`, structured `evidence`,
+  `source`, `privacy`, `proposed_at`, optional `expires_at` and `review_after`,
+  and optional `supersedes` list.
+- `bulletin_emit(input, options?)` always writes status `proposed` to
+  `personas.bulletins.proposed`, even when the input has a different status.
+- `bulletin_accept` / `bulletin_reject` / `bulletin_expire` /
+  `bulletin_supersede` build and emit a typed
+  `harn.profile_bulletin_decision.v1` envelope on
+  `personas.bulletins.decisions`. `bulletin_supersede` requires at least one
+  prior bulletin id.
+- `bulletin_active(bulletins, now?)` returns only `accepted` bulletins still
+  within their TTL; `bulletin_render_for_prompt(bulletins, options?)` renders
+  prompt-ready text that visibly separates accepted facts from proposals
+  pending review. Pass `{include_proposed: false}` to drop proposals.
+- `bulletin_accept(b, {embed: true, memory_root?, embed_model_hint?})` also
+  writes the accepted bulletin into the scope-partitioned memory namespace
+  (`bulletin_memory_namespace(b)` — `personas/bulletins/<scope>/<scope_key>`)
+  with eager embedding, so persona prompts can `memory_recall` past
+  decisions semantically.
+
+### Durable memory (`std/memory`)
+
+```harn
+import { memory_open, memory_store, memory_recall, memory_summarize, memory_forget } from "std/memory"
+
+// Optional: configure the namespace once. Defaults to deterministic BM25.
+harness.memory.open("workspace/acme", {backend: "hybrid", embed_dim: 1024, embed_model_hint: "voyage-2"})
+
+harness.memory.store("workspace/acme", "alice-profile", {text: "prefers Rust"}, ["profile"])
+const hits = harness.memory.recall("workspace/acme", "rust", 5, {mode: "semantic"})
+const summary = harness.memory.summarize("workspace/acme", {limit: 10})
+harness.memory.forget("workspace/acme", {tag: "stale"})
+```
+
+- Append-only event log at `.harn/memory/<namespace>/events.jsonl`. Pass
+  `{root: "path"}` in options to override.
+- `memory_open` writes a config event (latest wins) — backends: `"bm25"`
+  (default), `"vector"`, `"hybrid"`. Hybrid weights default to `0.5 / 0.5`
+  and are tunable via `bm25_weight` / `cosine_weight`.
+- `memory_recall` accepts `options.mode` (`lexical` / `semantic` / `hybrid`)
+  to override the namespace default for one query. Returned records carry a
+  `score` field.
+- Vector and hybrid recall call the typed host capability
+  `memory.embed({text, model_hint})` and cache the result on disk at
+  `.harn/memory/<namespace>/vectors/<sanitized_model_hint>/<sha256(text)>.json`.
+  Replays with the same event log and cache are deterministic without the
+  host being attached.
+- In tests, register the embedder on the exact harness:
+  `harness.testing.respond("memory", "embed",
+  {vector: [...], dim: N, model: "..."}, {text, model_hint})`.
+  The optional matcher selects per-record vectors, and
+  `harness.testing.calls()` proves which fixture fired.
+
+### Durable steps (`step.run`)
+
+`step.run(key, input?, handler, options?)` memoizes a completed handler result
+in the active EventLog. On replay, the script runs from the top but matching
+steps return the persisted result without invoking the handler:
+
+```harn,ignore
+const loaded = step.run("load-user", {user_id: id}, { input ->
+  return load_user(input.user_id)
+}, {namespace: "signup-" + id})
+```
+
+- Match key: `(namespace, key, occurrence_number, deterministic_inputs_hash)`.
+- Pass `options.namespace` for production workflows; the source path default is
+  mainly for local scripts.
+- Replaying the same key/occurrence with a different input hash throws a
+  deterministic input mismatch.
+- `step.inspect(namespace_or_options?)` returns completed records for audit.
+- Inputs and results are persisted under `step.run.<sanitized namespace>` in the
+  active EventLog, so avoid secrets unless the EventLog storage is allowed to
+  hold them.
+
+Workflow stages pick up a session id from `model_policy.session_id`;
+two stages sharing an id share their conversation automatically. The
+pre-0.7 `transcript_policy` dict (with `mode: "reset" | "fork"`) was
+removed — call the lifecycle verbs explicitly.
+
+### Lifecycle hooks
+
+Three concentric surfaces:
+
+- `register_tool_hook({pattern, deny?, max_output?, pre?, post?})` — tool-level
+  `PreToolUse` / `PostToolUse`. `pre` and `post` are closures that
+  receive `{event, tool, result?}` payloads; `pre` can return `{deny}`
+  or `{args}`, and `post` can return a string, `{result}`, or
+  `{result, truncated: true, dropped_bytes: N}`. Use the typed truncation
+  shape whenever source bytes were dropped so later hooks and runtime
+  observers retain exact loss metadata even if another hook appends text.
+- `register_persona_hook(persona_pattern, event, handler)` — persona
+  `PreStep` / `PostStep` / `OnApprovalRequested` / `OnHandoffEmitted` /
+  `OnPersonaPaused` / `OnPersonaResumed` / `OnBudgetThreshold(pct)`.
+- `register_session_hook(event, handler)` — whole-session lifecycle:
+  `session_start`, `session_end`, `user_prompt_submit`, `pre_compact`,
+  `post_compact`, `post_turn`, `permission_asked`, `permission_replied`,
+  `file_edited`, `session_error`, `session_idle`, `pre_finish`,
+  `post_finish`, `on_unsettled_detected`, plus the agent-lifecycle
+  events `pre_suspend`, `post_suspend`, `pre_resume`, `post_resume`,
+  `pre_drain`, `post_drain`, `on_drain_decision` (harn#1859). Veto
+  with `{block: true, reason}`; short-circuit a permission with
+  `{decision: "allow"|"deny"|"ask", reason}`. Lifecycle-gate events
+  also accept `{modify: payload}` to rewrite the dispatched event
+  (`pre_suspend` rewrites the reason, `pre_resume` amends the resume
+  input, `pre_drain` amends the drain spec, `on_drain_decision`
+  rewrites the tool call, `on_unsettled_detected` amends the unsettled
+  snapshot). `pre_finish` rejects `{block: true}` and surfaces a
+  runtime error pointing at `OnFinish.block_until_settled`; use that
+  preset to delay finish until unsettled work clears. The full
+  per-event return semantics:
+
+  | Event                  | Allow | Deny / Block                            | Modify                  | Reminder    |
+  |------------------------|-------|-----------------------------------------|-------------------------|-------------|
+  | `pre_suspend`          | yes   | cancel suspend, worker keeps running    | rewrite reason          | inject only |
+  | `post_suspend`         | yes   | n/a                                     | n/a                     | inject only |
+  | `pre_resume`           | yes   | stay suspended                          | amend resume input      | inject only |
+  | `post_resume`          | yes   | n/a                                     | n/a                     | inject only |
+  | `pre_drain`            | yes   | skip drain                              | amend drain spec        | inject only |
+  | `post_drain`           | yes   | n/a                                     | n/a                     | inject only |
+  | `on_drain_decision`    | yes   | block tool call                         | rewrite tool call       | inject only |
+  | `on_unsettled_detected`| yes   | block finish until settled              | amend unsettled payload | inject only |
+  | `pre_finish`           | yes   | INVALID — use `OnFinish.block_until_settled` | n/a                | inject only |
+  | `post_finish`          | yes   | n/a (advisory)                          | n/a                     | inject only |
+
+  Tape captures every invocation under `hook_call` / `hook_returned` /
+  `hook_vetoed`.
+- Any tool, persona, step, or session hook can also emit a typed reminder
+  for the active session transcript. Return `{reminder: {body, tags?,
+  dedupe_key?, ttl_turns?, preserve_on_compact?, propagate?, authority?,
+  role_hint?},
+  then?}` to combine the reminder with an existing action, return a bare
+  reminder spec such as `{body: "Refresh context", tags: ["context"]}`,
+  or return a session-hook effect list like `[{reminder: {...}}]`.
+- `register_reminder_provider({id, subscribes_to, evaluate})` registers a
+  Harn-defined provider for `post_tool_use`, `on_budget_threshold`,
+  `post_compact`, or `session_idle`; `clear_reminder_providers()` clears
+  user-defined providers.
+- `pipeline_on_finish(callback)` — register a `fn(harness, return_value)`
+  callback that runs between `pre_finish` and `post_finish` on the main
+  VM (its stdout reaches the host capture buffer). The callback's
+  return value replaces the pipeline's return value, so a custom
+  `on_finish` can wrap, redact, or audit the result. Four canonical
+  presets ship in `std/lifecycle`:
+  - `on_finish_abandon(harness, return_value)` — reproduces today's
+    no-callback behavior; emits `pipeline_abandoned_unsettled` when
+    work is left behind.
+  - `on_finish_drain(harness, return_value)` — recommended default;
+    emits `pipeline_finalized` when nothing is deferred, otherwise
+    delegates to `harness.spawn_settlement_agent` (settlement-agent
+    loop tracked under harn#1856).
+  - `on_finish_block_until_settled(timeout, fallback?)` — factory that
+    waits until everything settles or the timeout elapses, then
+    delegates to `fallback` (default `on_finish_drain`).
+  - `on_finish_handoff_to(target_pipeline, options?)` — factory that
+    packages unsettled state into an envelope and hands it to
+    `target_pipeline` via `harness.handoff_to`.
+
+  Presets are pure functions / pure factories; they compose freely. See
+  `docs/src/stdlib/lifecycle.md` for an example chain.
+- `std/lifecycle/combinators` exports six pure factories that wrap any
+  `(harness, return_value) -> return_value`-shaped callback (hook
+  handler, `resume_by`, `on_finish`, ...):
+  - `compose(callbacks)` — invoke each callback sequentially, threading
+    each return value into the next callback's `return_value`; returns
+    the last entry's value.
+  - `first_available(callbacks)` — invoke in order; return the first
+    non-nil result. Skips remaining callbacks after the first non-nil.
+  - `with_telemetry(callback, span_name?)` — wrap with a `SpanKind::FnCall`
+    OTel span and paired `{span_name}_started` / `_completed` /
+    `_errored` audit entries.
+  - `with_timeout(callback, ms)` — soft, clock-aware deadline; on
+    overrun returns `{__timed_out: true, timeout_ms, elapsed_ms,
+    return_value}` and emits a `lifecycle_callback_timed_out` audit.
+  - `if_unsettled(callback)` — only invoke when
+    `harness.unsettled_state()` is non-empty; one snapshot per call.
+  - `when(predicate, callback)` — only invoke when
+    `predicate(harness, return_value)` is truthy; otherwise pass the
+    inbound value through unchanged.
+- `std/observability` exports `obs()`, a unified facade for user-space
+  spans, logs, metrics, and structured events. Configure once with
+  `import { obs } from "observability"` then
+  `obs().configure({backend: obs().Backend.auto})`, use
+  `obs().span("name", attrs, { -> ... })` for scoped auto-close, or
+  `start_span` / `log_in_span` / `end_span` for imperative flows.
+  Backends include OTel, Splunk HEC, Honeycomb, pretty stderr,
+  `compose([...])`, and env-driven `auto`.
+- `std/timing` is the scoped-duration primitive that replaces hand-rolled
+  `let started = harness.clock.now_ms(); work(); let dur =
+  harness.clock.now_ms() - started`. Use `timed("op", attrs, { -> work()
+  })` for callback-scoped auto-close (returns `{result, timing}` with
+  `timing.duration_ms` from the monotonic clock and
+  `timing.started_at_ms` / `timing.ended_at_ms` from the wall clock for
+  external correlation). Use `start_timing` / `timing_event` /
+  `end_timing` for flows that cross callbacks, branches, or async-ish
+  lifecycle boundaries. Duplicate `end_timing` is idempotent. Timing
+  spans are emitted under `SpanKind::UserTiming` (`kind: "user_timing"`),
+  so `trace_spans()` and `harn run --profile-json` surface them as their
+  own bucket without colliding with LLM/tool spans.
+- `std/lifecycle/on_budget` exports three named callback strategies for
+  the `OnBudgetThreshold` event. Each takes `(harness, budget_state)`
+  and composes with the combinators above:
+  - `terminate(harness, budget_state)` — emits a `budget_exceeded`
+    audit, then throws `{category: "budget_exceeded", kind: "terminal",
+    reason: "on_budget_terminate", strategy: "terminate", budget_state,
+    message}` so the surrounding agent loop / pipeline unwinds.
+  - `graceful_exit(harness, budget_state)` — emits a
+    `budget_graceful_exit` audit; returns a deterministic envelope
+    `{status: "budget_exhausted", strategy: "graceful_exit", reason:
+    "on_budget_graceful_exit", budget_state, message}` instead of
+    throwing.
+  - `warn_and_continue(harness, budget_state)` — emits a
+    `budget_warn_and_continue` audit, injects a 1-turn
+    `budget_warning` system_reminder via `tool_hooks_inject_reminder`,
+    and returns the original `budget_state` unchanged (passthrough for
+    combinator chains).
+  - `OnBudget()` returns the namespace dict so callers can use
+    dotted access (`OnBudget.terminate`, etc.) after a single import.
+- `harness.unsettled_state()` returns a stable dict with
+  `suspended_subagents`, `queued_triggers`, `partial_handoffs`,
+  `in_flight_llm_calls`, and `pool_pending_tasks` lists.
+  `harness.is_empty(state?)`, `harness.counts(state?)`, and
+  `harness.summary(state?)` summarize that shape; `std/lifecycle` exports
+  equivalent `unsettled_state(harness)`, `is_empty(state)`,
+  `counts(state)`, and `summary(state)` helpers. Suspended subagents,
+  partial handoffs, in-flight LLM calls, and pool pending tasks are
+  populated from live VM registries, while queued triggers are
+  reconstructed from the active trigger inbox and worker-queue event-log
+  records.
+- Lifecycle action methods exist on the root harness for drain callbacks:
+  `resume_subagent`, `cancel_subagent`, `handoff_to`, `acknowledge_trigger`,
+  `defer_trigger`, `acknowledge_handoff`, `wait_for_any_settlement`,
+  `emit_audit`, `finalize`, `spawn_settlement_agent`, and
+  `current_pipeline_id`. `resume_subagent` and `cancel_subagent` delegate
+  to host worker primitives; trigger acknowledgements use existing
+  dispatcher cancel requests or worker-queue ack records; handoff
+  acknowledgement removes the partial envelope; `emit_audit`,
+  `handoff_to`, and `finalize` record into the per-pipeline-run lifecycle
+  registries. `spawn_settlement_agent` remains the P-03 handoff point and
+  returns a typed `{status: "unsupported", method, reason}` receipt until
+  harn#1856 lands.
+- `pipeline_lifecycle_audit_log_take()` and
+  `pipeline_lifecycle_audit_log_snapshot()` drain or peek at the
+  per-pipeline-run audit log that `harness.emit_audit` writes. Each
+  entry is `{seq, kind, payload, pipeline_id}`. `std/lifecycle`
+  re-exports them as `lifecycle_audit_log_take` /
+  `lifecycle_audit_log_snapshot`.
+
+### Pipeline lifecycle: drain, on_finish, composable handlers
+
+Every lifecycle boundary in a Harn pipeline is a callback. Presets in
+`std/lifecycle` cover the common dispositions; combinators in
+`std/lifecycle/combinators` compose them; the harness exposes a single
+read-side surface (`unsettled_state`) and a dozen write-side actions
+for custom drain logic. Full prose: `docs/src/pipeline-lifecycle.md`.
+Cookbook recipes: `docs/src/cookbooks/lifecycle.md`. Per-preset stdlib
+reference: `docs/src/stdlib/lifecycle.md`.
+
+`pipeline_on_finish(callback)` registers a `fn(harness, return_value)`
+that runs between `pre_finish` and `post_finish` on the main VM. The
+return value replaces the pipeline's return value. Registration is
+last-write-wins and one-shot per run — a stale registration cannot
+leak.
+
+`OnFinish.*` presets (`std/lifecycle`):
+
+| Preset | Behavior |
+|---|---|
+| `on_finish_abandon` | Today's default. Emits `pipeline_abandoned_unsettled` when work survives. |
+| `on_finish_drain` | Recommended. Walks unsettled buckets via `harness.spawn_settlement_agent` in canonical order with per-item `drain_decision` audits. |
+| `on_finish_block_until_settled(timeout, fallback?)` | Polls `harness.wait_for_any_settlement` until drained or timeout, then delegates to `fallback` (default `on_finish_drain`). |
+| `on_finish_handoff_to(target_pipeline, options?)` | Packages unsettled state into a typed envelope and hands it to `target_pipeline` via `harness.handoff_to`. |
+
+```harn,ignore
+import { on_finish_drain, on_finish_handoff_to, on_finish_block_until_settled } from "std/lifecycle"
+
+pipeline_on_finish(on_finish_drain)
+pipeline_on_finish(on_finish_handoff_to("nightly-drain"))
+pipeline_on_finish(on_finish_block_until_settled(30s, on_finish_drain))
+```
+
+`Combinator.*` factories (`std/lifecycle/combinators`) wrap any
+`(harness, return_value) -> return_value` callback (presets, hook
+handlers, `resume_by`, custom drain). All six are pure factories:
+
+| Combinator | Behavior |
+|---|---|
+| `compose([cb, ...])` | Sequential; threads each return value into the next. |
+| `first_available([cb, ...])` | Returns the first non-nil result. |
+| `with_telemetry(cb, span_name?)` | OTel `SpanKind::FnCall` + paired `{span_name}_started` / `_completed` / `_errored` audits. |
+| `with_timeout(cb, ms)` | Soft deadline; on overrun returns `{__timed_out, timeout_ms, elapsed_ms, return_value}` and emits `lifecycle_callback_timed_out`. |
+| `if_unsettled(cb)` | Only when `harness.unsettled_state()` is non-empty (one snapshot per call). |
+| `when(predicate, cb)` | Only when `predicate(harness, return_value)` is truthy. |
+
+```harn,ignore
+import { on_finish_drain } from "std/lifecycle"
+import { compose, if_unsettled, with_telemetry, with_timeout } from "std/lifecycle/combinators"
+
+pipeline_on_finish(
+  if_unsettled(with_telemetry(with_timeout(on_finish_drain, 30000), "drain")),
+)
+```
+
+The drain step is the per-item disposition loop behind
+`on_finish_drain`. The settlement-agent walks buckets in the
+documented order — suspended subagents → queued triggers → partial
+handoffs → in-flight LLM calls → pool pending — applying a default
+disposition (cancel / acknowledge / defer) per item and firing
+`OnDrainDecision` for each. The constrained drain tool surface is
+exposed when `__host_settlement_agent_active()` returns true. The
+loop is bounded by a per-call budget (default 5, hard-cap 20); on
+exhaustion a `drain_unsettled_remaining` audit captures the
+remainder. `harness.acknowledge_trigger` and `acknowledge_handoff`
+reject out-of-order calls with `HARN-DRN-001`.
+
+`OnBudget.*` strategies (`std/lifecycle/on_budget`) for the
+`OnBudgetThreshold` event, all `(harness, budget_state) -> result`:
+
+| Strategy | Behavior |
+|---|---|
+| `OnBudget.terminate` | Emits `budget_exceeded`; throws structured terminal error. |
+| `OnBudget.graceful_exit` | Emits `budget_graceful_exit`; returns deterministic exit envelope (no throw). |
+| `OnBudget.warn_and_continue` | Emits `budget_warn_and_continue`; injects a 1-turn `budget_warning` reminder; passes `budget_state` through. |
+
+Hook-event table for lifecycle gates (`register_session_hook`):
+
+| Event | Allow | Deny / Block | Modify | Reminder |
+|---|---|---|---|---|
+| `pre_finish` | yes | INVALID — use `OnFinish.block_until_settled` | n/a | inject only |
+| `post_finish` | yes | n/a (advisory) | n/a | inject only |
+| `on_unsettled_detected` | yes | block finish until settled | amend unsettled payload | inject only |
+| `pre_suspend` | yes | cancel suspend | rewrite reason | inject only |
+| `post_suspend` | yes | n/a | n/a | inject only |
+| `pre_resume` | yes | stay suspended | amend resume input | inject only |
+| `post_resume` | yes | n/a | n/a | inject only |
+| `pre_drain` | yes | skip drain | amend drain spec | inject only |
+| `post_drain` | yes | n/a | n/a | inject only |
+| `on_drain_decision` | yes | block tool call | rewrite tool call | inject only |
+
+Common patterns:
+
+```harn,ignore
+// Hand unsettled to a nightly settlement pipeline.
+import { on_finish_handoff_to } from "std/lifecycle"
+pipeline_on_finish(on_finish_handoff_to("nightly-settle"))
+
+// Drain with custom audit per disposition.
+import { on_finish_drain } from "std/lifecycle"
+register_session_hook("on_drain_decision", { event ->
+  external_audit_push(event)
+  return nil
+})
+pipeline_on_finish(on_finish_drain)
+
+// Abort cleanly on unsettled state (no silent loss).
+import { on_finish_block_until_settled } from "std/lifecycle"
+pipeline_on_finish(
+  on_finish_block_until_settled(60s, { harness, rv ->
+    harness.emit_audit("aborted_with_unsettled", {state: harness.unsettled_state()})
+    throw {category: "unsettled_at_finish", reason: "timeout"}
+  }),
+)
+```
+
+Cross-ref: the suspend/resume primitive that drives
+`suspended_subagents` is the agent-lifecycle entry above (harn#1836).
+
+### Agent pools
+
+`std/lifecycle/pool` provides named, concurrency-bounded worker pools.
+One named pool, one shared concurrency budget across every submitter.
+Use a pool when many independent call sites need to share a cap; use
+`parallel each ... with { max_concurrent: N }` when one call site
+needs a local cap.
+
+```harn
+import { Backpressure, fair_round_robin, pool_create, pool_wait } from "std/lifecycle/pool"
+
+const backpressure = Backpressure()
+const pool = pool_create(harness.agent, {
+  name: "reviews",
+  max_concurrent: 2,
+  queue: fair_round_robin("tenant_id"),
+  backpressure: backpressure.queue(100, "fail_submitter"),
+})
+
+const handle = pool.submit({ -> agent_loop(harness, "review", "You are a reviewer.") }, {
+  tenant_id: "acme",
+  priority: 10,
+  idempotency_key: "review-pr-1984",
+})
+const result = pool_wait(harness.agent, handle)
+```
+
+Pick-the-right-primitive:
+
+| Need | Use |
+|---|---|
+| Bound concurrency at one call site | `parallel each ... with { max_concurrent }` |
+| Bound concurrency across many call sites in one VM session | Pool, `scope: "session"` (default) |
+| Bound across pipeline runs that survive restart | Pool, `scope: "pipeline"` (state in `.harn/pools/`) |
+| Bound across tenants/orgs | Pool, `scope: "tenant"` / `"org"` (host-managed by the embedding runtime) |
+| Route trigger events through a shared budget | `SpawnToPool` handler (see below) |
+
+Queue strategies (factories from `std/lifecycle/pool`):
+
+| Factory | Behavior |
+|---|---|
+| `fifo()` | Oldest queued first. |
+| `priority()` | Highest submit `priority` first, FIFO tiebreak. Default. |
+| `lifo()` | Newest queued first. |
+| `fair_round_robin(key = "key")` | Partition by `options.<key>` on submit; round-robin across distinct partitions. Missing field shares a default partition. |
+
+Backpressure descriptors are `backpressure.queue(max_depth, on_full)`,
+`backpressure.fail_fast`, and `backpressure.ring_buffer(capacity)`.
+`on_full` accepts `block_submitter`, `drop_oldest`, `drop_newest`, or
+`fail_submitter`. Drop policies return rejected task handles
+(`status: "rejected"`, `rejection_reason`, `rejection_policy`) and
+emit `pool_drop` audits on `lifecycle.pool.audit`; fail paths raise
+`HARN-POL-001` (`fail_submitter`) or `HARN-POL-002` (`fail_fast`).
+
+Submit options:
+
+| Option | Notes |
+|---|---|
+| `priority` | int; higher dequeues sooner under `priority()`. |
+| `key` | string; generic fairness key for `fair_round_robin("key")`. |
+| custom key (e.g. `tenant_id`) | When using `fair_round_robin("tenant_id")`, pass the partition under that name. |
+| `idempotency_key` | Two submits with the same `(pool_id, key)` return the *same* task handle. Pipeline-scope pools persist the index so resubmit after restart short-circuits. |
+
+`pool.submit` returns a task handle (`_type: "pool_task"`) with `id`,
+`pool`, `pool_id`, `status`, `submitted_at`, `key`, `priority`, and
+(when terminal) `result` / `error` / `rejection_reason`.
+`pool_wait(harness.agent, handle)` (or a list of handles) blocks until terminal and
+returns the final snapshot. `wait_agent(handle)` from
+`std/agent/workers` recognises pool task handles transparently.
+
+Inspection: `pool.size()`, `pool.snapshot()` (full dict with
+`active`, `queued`, `completed`, `failed`, `rejected`,
+`blocked_submitters`, `total`, selected `queue` / `backpressure`,
+per-task list, original `config`), `pool_get(harness.agent, name_or_id)`,
+`pool_list(harness.agent)`. Pipeline-scope pools also reload in-flight tasks past
+`stale_after_ms` as re-enqueued attempts; `pool_simulate_restart(harness.agent)`
+drops the in-process registry for conformance tests.
+
+Route trigger events through a pool with the `SpawnToPool` handler
+variant from `std/triggers` (one trigger, one drain rate):
+
+```harn,ignore
+import { trigger_register, SpawnToPool } from "std/triggers"
+
+trigger_register({
+  id: "webhook-router",
+  kind: "channel.emit",
+  provider: "channel",
+  match: {events: ["channel:webhook.received"]},
+  handler: SpawnToPool({
+    pool: "webhook-work",
+    key_from: "provider_payload.payload.source",
+    priority_from: "provider_payload.payload.urgency",
+    task_factory: { event -> { -> handle_webhook(event) } },
+  }),
+})
+```
+
+`key_from` / `priority_from` are dotted JSON paths into the trigger
+event. Missing paths fall back to the default partition and `0`
+priority. The dispatcher records the resulting pool task id on the
+match receipt so replay verifies the same event mapped to the same
+task across runs.
+
+Full prose: `docs/src/agent-pools.md`. Cookbook recipes (webhook
+rate-limit, GPU pool, cross-customer fairness, burst absorber):
+`docs/src/cookbooks/pools.md`. Stdlib API reference:
+`docs/src/stdlib/lifecycle-pool.md`.
+
+```harn
+register_session_hook("user_prompt_submit", { event ->
+  if to_string(event?.prompt ?? "").contains("secret") {
+    return {block: true, reason: "policy violation"}
+  }
+  return nil
+})
+register_session_hook("file_edited", { event ->
+  harness.stdio.log("edit: " + to_string(event?.path ?? ""))
+  return nil
+})
+```
+
+Successful standard filesystem mutations queue automatically;
+hooks fire at the next agent-loop turn boundary. Call
+`notify_file_edited(path, metadata?)` to explicitly emit one.
+For background context refresh/librarian jobs, import
+`std/context/maintenance` and return `context_maintenance_queue_receipt(...)`
+from the hook instead of doing slow work inline.
+
+## Stdlib LLM helpers (`std/llm/*`)
+
+Nine opinionated modules wrap common LLM patterns:
+
+- `std/llm/handlers` — composable middleware: `default_llm_caller`,
+  `with_retry`, `with_fallback`, `with_shadow`, `with_prompt_rewrite`,
+  `with_logging`, `with_budget`, `with_cache`, `with_circuit_breaker`,
+  `with_repair`, `with_coerce`, `with_timeout`, `with_routing`,
+  `compose([...])`.
+- `std/llm/tool_middleware` — composable middleware around tool execution
+  (parallel to handlers, but for tools): `default_tool_caller`,
+  `compose_tool_callers([...])`, `tools_use_middleware` (schema
+  decorator), `tool_inject_param`, plus the bundled library
+  (`with_required_reason`, `with_audit_log`, `with_consent`,
+  `with_dry_run`, `with_redaction`, `with_idempotency`,
+  `with_rate_limit`, `with_telemetry`, `with_summary`,
+  `with_handoff_artifact`, `with_timeout`).
+- `std/llm/tool_binder` — experimental natural-language tool binder
+  middleware (`with_natural_language_executor`). OFF by default; opt in
+  via `compose_tool_callers`. Hands the planner-emitted intent + tool
+  JSON Schema to a latency-budgeted binder LLM (Cerebras GPT-OSS-120B is
+  the primary accuracy substrate) and replaces `tool_args` with the
+  binder's structured output. Default `timeout_ms` is `500`; overruns
+  drop the hop and pass through unchanged with
+  `audit.binder.status = "timeout"`. Default `max_tokens` is `1024` so
+  reasoning binders have room to emit structured JSON after their
+  reasoning preamble. See the parent epic
+  [#1696](https://github.com/burin-labs/harn/issues/1696) for the
+  experimental contract.
+- `std/llm/ensemble` — multi-call quality strategies: `best_of_n`,
+  `self_consistency`, `parallel_judge`, `debate`. Cites Wang 2022
+  (arxiv:2203.11171) and Du 2023 (arxiv:2305.14325).
+- `std/llm/refine` — `refine_prompt`, `refine_caller`. One-shot
+  meta-prompt rewrite with a `DIFF:` summary trailer.
+- `std/llm/budget` — `estimate_text_tokens`, `context_window_for`,
+  `recommend_max_output_tokens`, `budget_summary`, `fits_in_context`.
+- `std/llm/economics` — `pricing_for(provider?, model)`,
+  `estimate_call_cost`, `estimate_session_cost`, `compare_model_costs`,
+  `cache_break_even`, `volume_cost`, `format_usd`. Unknown pricing
+  surfaces as `pricing_known: false` / `cost_usd: nil` rather than $0.
+  Cached-read usage with no published `cache_read_per_mtok` tier is also
+  unpriceable (`unpriced_reason: "cache_read_rate_unknown"`); it is never
+  silently billed at the full input rate. Only providers explicitly configured
+  to $0 (ollama, local, llamacpp, mlx, vllm, tgi) report cost=$0 with
+  pricing_known=true.
+- `std/llm/defaults` — `pack_for(opts)` and convenience wrappers
+  (`pack_chat`, `pack_agent`, `pack_refine`, `pack_judge`,
+  `pack_summarize`, `pack_code`, `pack_json`). Calibrated for
+  Anthropic Sonnet/Opus/Haiku 4.x, OpenAI GPT-5/5.5/5.6/4o/4.1, Gemini
+  2.5 Pro/Flash, Ollama Qwen3/Llama 3.x.
+- `std/llm/safe` — `safe_call`, `safe_field`, `dict_get_ci`,
+  `with_case_insensitive_keys`, `structured_envelope_or_default`,
+  `judge_payload`, `verdict_normalize`, `schema_retry_nudge_for`.
+- `std/llm/prompts` — `system_prelude`, `tool_use_prelude`,
+  `structured_output_preface`.
+- `std/llm/catalog` — `model_info(selector)`, `execution_contract(selector)`,
+  `resolved_options(opts)`, `has_capability(model, cap)`,
+  `family_of(model_id)`, `lineage_of(model_id)`,
+  `complementary_reviewer(opts)`. `execution_contract` is the secret-free
+  durable receipt for an effective model route; it omits arbitrary operator
+  overlays. Harn-side names avoid shadowing the same-named builtins.
+
+Full reference: [`docs/src/stdlib/llm-handlers.md`](https://harnlang.com/stdlib/llm-handlers.html).
+
+## Resilient LLM patterns
+
+`llm_call` throws on transport / schema / budget failures. The thrown
+value is a dict with the same fields `llm_call_safe` exposes under
+`r.error`, so scripts can dispatch on a canonical LLM error taxonomy
+without string-sniffing:
+
+```harn
+try {
+  const r = harness.llm.call(user_prompt, nil, opts)
+} catch (e) {
+  // e is {kind, reason, category, message, status?, retry_after_ms?, provider, model}
+  if e.kind == "transient" && e.reason == "rate_limit" {
+    harness.clock.sleep_ms(e.retry_after_ms ?? 1000)
+    continue
+  }
+  throw e
+}
+```
+
+Three helpers flatten the common recovery boilerplate:
+
+```harn
+// Non-throwing envelope: the ok/response/error shape eliminates the
+// try/guard/unwrap/?.data boilerplate at every callsite.
+const r = harness.llm.call_safe(user_prompt, nil, opts)
+if !r.ok {
+  harness.stdio.log("llm_call failed:", r.error.category, r.error.message)
+  return nil
+}
+const data = r.response.data
+
+// When the call is a JSON-against-schema extraction, prefer
+// `llm_call_structured` / `*_safe` instead: `.data` is
+// pre-unwrapped and the schema-validated-JSON options are forced
+// by default (no repeated `output: {schema, validation: "error"}`
+// or `schema_retries` boilerplate at each callsite).
+const verdict = harness.llm.call_structured(user_prompt, schema, {provider: "auto"})
+// ...or non-throwing:
+const r = harness.llm.call_structured_safe(user_prompt, schema, {provider: "auto"})
+if !r.ok { harness.stdio.log("structured call failed:", r.error.category); return nil }
+const data = r.data
+
+// Scoped permit acquisition + backoff for flaky providers. Retries on
+// rate_limit / overloaded / transient_network / timeout categories with
+// exponential backoff (capped at 30s). Composes with
+// HARN_RATE_LIMIT_<PROVIDER>_RPM/_TPM and provider/model catalog
+// `rate_limits` fields.
+const r = harness.llm.with_rate_limit("openai", fn() {
+  harness.llm.call(user_prompt, nil, {provider: "openai"})
+}, {max_retries: 5, backoff_ms: 500})
+```
+
+`error.category` (both on the thrown dict and on
+`r.error.category`) remains for compatibility and is one of the
+canonical `ErrorCategory` strings:
+`"rate_limit"`, `"timeout"`, `"overloaded"`, `"server_error"`,
+`"transient_network"`, `"schema_validation"`, `"auth"`, `"not_found"`,
+`"circuit_open"`, `"tool_error"`, `"tool_rejected"`, `"cancelled"`,
+`"generic"`. `retry_after_ms` is set when the provider surfaced a
+`Retry-After` hint (or `llm_mock` was told to); otherwise omitted.
+
+LLM provider failures also include `error.kind` and `error.reason`.
+`kind` is `"transient"` or `"terminal"`. Transient reasons are
+`"rate_limit"`, `"server_error"`, `"network_error"`, and `"timeout"`;
+terminal reasons are `"auth_failure"`, `"context_overflow"`,
+`"content_policy"`, `"invalid_request"`, `"invalid_response"`,
+`"model_unavailable"`, and `"unknown"`. `invalid_response` identifies a
+deterministic provider decode or grammar-format failure. `llm_call` and
+`agent_loop` spend their retry budget only when `kind == "transient"`.
+
+Pair with `harness.llm.mock_enqueue({error: {category, message, retry_after_ms?}})` or
+the provider-envelope form
+`harness.llm.mock_enqueue({error: {status, kind, reason?, message?, retry_after_ms?}})`
+to write deterministic tests for either helper's error path:
+
+```harn
+harness.llm.mock_enqueue({error: {category: "rate_limit", message: "429", retry_after_ms: 2500}})
+try {
+  harness.llm.call("hi", nil, {provider: "mock"})
+} catch (e) {
+  assert(e.kind == "transient")
+  assert(e.reason == "rate_limit")
+  assert(e.category == "rate_limit")
+  assert(e.retry_after_ms == 2500)
+}
+
+harness.llm.mock_enqueue({error: {category: "rate_limit", message: "429"}})
+const r = harness.llm.call_safe("hi", nil, {provider: "mock"})
+assert(!r.ok)
+assert(r.error.category == "rate_limit")
+
+harness.llm.mock_enqueue({error: {status: 503, kind: "transient", reason: "upstream_unavailable"}})
+const recovered = harness.llm.call_safe("hi", nil, {provider: "mock"})
+assert(!recovered.ok)
+assert(recovered.error.status == 503)
+assert(recovered.error.kind == "transient")
+assert(recovered.error.reason == "upstream_unavailable")
+```
+
+## Composable LLM callers
+
+`agent_loop` accepts `llm_caller:` — a closure that owns the per-turn
+`harness.llm.call(...)` invocation. Wrap with middleware from
+`std/llm/handlers` to compose retry / fallback / shadow / logging /
+budget behavior without forking the loop:
+
+```harn,ignore
+import { AgentLoopOptions } from "std/agent/options"
+import {default_llm_caller} from "std/llm/caller"
+import {with_retry, with_fallback, compose} from "std/llm/handlers"
+
+const caller = compose([
+  with_retry({max_attempts: 4, backoff: "exponential"}),
+  with_fallback,    // pseudo: with_fallback expects a list of callers
+])(default_llm_caller())
+
+const resilient_opts: AgentLoopOptions = {loop_until_done: true, llm_caller: caller}
+agent_loop(harness, task, system, resilient_opts)
+```
+
+The caller signature is `fn(call) -> {ok, value | status, error?}`
+where `call = {prompt, system, opts, turn: {iteration, session_id, attempt}}`.
+
+**Off-by-one in retry semantics:** the removed `llm_retries: 3`
+historically meant 4 total attempts; `with_retry`'s `max_attempts: N`
+means N total attempts. To migrate `llm_retries: K`, pass
+`max_attempts: K + 1`.
+
+For role/env model resolution, use `agent_model_options` from
+`std/agent/options` (the pre-0.10 `std/agent/stack` bundle was removed):
+
+```harn,ignore
+import {agent_model_options} from "std/agent/options"
+
+const route = agent_model_options({
+  role: "planner",
+  defaults: {provider: "anthropic", model: "claude-sonnet-5", task: "agent"},
+})
+const caller = with_retry(default_llm_caller(), {max_attempts: 3})
+agent_loop(harness, task, system, route.options + {loop_until_done: true, llm_caller: caller})
+```
+
+`agent_model_options` resolves explicit options, role env overrides such as
+`HARN_AGENT_PLANNER_MODEL`, shared `HARN_AGENT_*` / `HARN_LLM_*` settings, and
+defaults; it then applies model-aware packs and strips unsupported
+provider-specific knobs before the request reaches the wire.
+
+**Persona-shaped chain (cost moat substrate):** the canonical compose
+for a durable persona is cheap-by-default with frontier escalation,
+deterministic budget enforcement, and receipt-grade structured logs.
+`with_routing` is a **base** caller (it picks cheap vs. frontier);
+budget and logging compose over it.
+
+```harn,ignore
+const router = with_routing({
+  default: cheap,                                // fast inexpensive model
+  routes: [{name: "frontier",
+            when: { call -> call?.opts?.escalate ?? false },
+            caller: strong}],                    // longer retries + fallback
+})
+const persona_caller = compose([
+  with_logging({sink: receipts_sink}),
+  with_budget({max_total_tokens: 250000, max_calls: 200}),
+])(router)
+```
+
+Full reference: [`docs/src/stdlib/llm-handlers.md`](https://harnlang.com/stdlib/llm-handlers.html).
+
+## First-class routing policy
+
+`routing_policy({...})` builds a reusable handle that drives a chain of
+providers with failover, latency-aware racing, and per-call / session
+budget caps. Pipe it through `harness.llm.call(... routing: policy ...)` to
+replace ad-hoc `with_routing` + `with_retry` + `with_fallback`
+compositions with a single typed primitive.
+
+```harn,ignore
+const policy = routing_policy({
+  chain: [
+    {provider: "anthropic", model: "claude-opus-4-20250514"},
+    {provider: "openai",    model: "gpt-4o"},
+    {provider: "ollama",    model: "llama4:70b"},      // local fallback
+  ],
+  failover: {
+    on_status: [429, 500, 502, 503, 504],
+    on_timeout_ms: 30_000,
+    on_error_kinds: ["rate_limit", "schema_validation"],
+    max_attempts: 3,
+  },
+  latency: {
+    target_p95_ms: 8000,
+    race_after_ms: 5000,                              // race backup after 5s
+  },
+  budget: {
+    per_call_usd: 0.50,                               // hard ceiling per call
+    session_usd: 5.00,                                // session-wide cap
+    on_exceed: "abort",                               // or "skip" | "warn"
+  },
+  observe: {emit_event: "billing.routing_decision"},  // optional dispatch label
+  escalate_on: [                                      // optional verifier chain
+    {kind: "typecheck"},                              // parse the candidate as Harn
+    {kind: "lint", forbidden_patterns: ["TODO", "unwrap\\("], on_fail: "refine"},
+    {kind: "test_run", command: ["cargo", "test", "--quiet"], timeout_secs: 60},
+  ],
+  max_refines_per_link: 1,                            // optional, default 1
+})
+
+const result = harness.llm.call("Summarize this PR.", nil, {routing: policy})
+// result.routing = {policy, attempts: [{provider, model, status, duration_ms, cost_usd, error?, verifier_outcome?, verifier_signals?}], selected, session_cost_usd}
+```
+
+Semantics:
+
+- **Failover**: each link is tried in order; an attempt advances when
+  the error matches `on_status` (HTTP code), `on_error_kinds`
+  (category short-name — `rate_limit`, `timeout`, `transient_network`,
+  `server_error`, `schema_validation`, `auth`, `overloaded`,
+  `tool_error`, `tool_rejected`, `egress_blocked`, `cancelled`,
+  `not_found`, `circuit_open`, `budget_exceeded`, `generic`), or the
+  built-in transient defaults (429 / 5xx, rate-limit, overloaded,
+  timeout, transient_network, server_error). Non-failover errors stop
+  the chain immediately.
+- **Racing**: when `race_after_ms` is set and a second link is
+  available, the executor kicks off the next link in parallel after
+  that delay; the loser is cancelled and recorded with
+  `status: "race_lost"`.
+- **Budgets**: `per_call_usd` and `session_usd` reuse the catalog
+  pricing in `std/llm/economics`. `on_exceed: "abort"` throws the
+  standard budget-exceeded error, `"skip"` advances to the next chain
+  link, `"warn"` emits an event and proceeds.
+- **Verifier escalation** (`escalate_on`): each verifier inspects the
+  successful candidate's text. The first non-`accept` signal drives
+  the next decision — `refine` re-runs the **same** link with a
+  tightened prompt (up to `max_refines_per_link` retries; nudge text
+  includes the verifier's reason), `escalate` advances to the next
+  link. If the verifier rejects the last link and no frontier remains,
+  the rejected candidate is returned anyway with
+  `verifier_outcome: "escalate"` on the trace — verifiers gate routing
+  decisions, not correctness. Each `escalate_on` entry is a dict with
+  `kind: "typecheck" | "lint" | "test_run"` plus kind-specific
+  options:
+  - `typecheck`: parses the candidate as Harn (extracting ```harn /
+    ``` fenced blocks by default via `extract_fenced: true`); parse
+    or type errors trigger `on_fail` (default `escalate`).
+  - `lint`: regex-based pattern check with
+    `forbidden_patterns: [...]`, `required_patterns: [...]`, and
+    `max_line_length: N`; any rule violation triggers `on_fail`
+    (default `refine`).
+  - `test_run`: spawns `command: [...]` with the candidate text on
+    stdin (toggle with `pass_via_stdin: false`); non-zero exit
+    triggers `on_fail` (default `escalate`). `timeout_secs` defaults
+    to 30. **Authority lives in the script that builds the policy** —
+    `test_run` shells out under the calling process's permissions.
+- **Tape events**: `<dispatch>.decision`, `<dispatch>.attempt`,
+  `<dispatch>.race_started`, `<dispatch>.race_won`,
+  `<dispatch>.race_lost`, `<dispatch>.budget_exceeded`,
+  `<dispatch>.verifier_signal`, `<dispatch>.exhausted` (default
+  `dispatch = llm.routing`; override via `observe.emit_event`).
+- **Replay**: the routing decision rides on the result envelope's
+  `routing_decision` block, so transcripts and replay re-attribute each
+  attempt to the same chain link without re-resolving.
+
+The policy is a reusable handle: build it once, pass it to many
+`llm_call` invocations.
+
+## Model ladders (`models:` / `ladder:`)
+
+When you just want a **cheap-first, escalate-on-failure** ladder without
+hand-building a `routing_policy`, pass `models:` (or `ladder:`) directly to
+`llm_call`. A ladder is sugar that lowers onto the same routing chain, so it
+inherits the exact failover classifier, the `result.routing` trace block, and
+the schema-retry composition described above.
+
+```harn,ignore
+// Inline ladder: ordered steps, cheapest first.
+const result = harness.llm.call("Summarize this PR.", nil, {
+  models: [
+    "haiku",                                          // string sugar for {model: "haiku"}
+    {model: "sonnet", label: "mid"},
+    {model: "opus", provider: "anthropic", label: "frontier",
+     options: {max_tokens: 4096}},                    // per-step generation overrides
+  ],
+})
+
+// Named ladder resolved from the catalog ([model_ladders.<name>]).
+const result = harness.llm.call("Summarize this PR.", nil, {ladder: "frugal"})
+```
+
+Each step is `{model, provider?, options?, label?}`; a bare string is sugar for
+`{model: "..."}` (a `"provider:model"` string sets both when the prefix is a
+registered provider). `provider` is inferred from the model id (or the call's
+base provider) when omitted, and model aliases resolve normally. Per-step
+`options` accept the scalar generation/transport knobs `temperature`,
+`max_tokens`, `top_p`, `top_k`, `seed`, `frequency_penalty`,
+`presence_penalty`, `timeout_ms`, and `speed`; structural options (tools,
+output, thinking) belong on the base call and an unsupported per-step key is
+rejected up front.
+
+Composition rules:
+
+- **Advance only on transport-class failures.** The ladder moves to the next
+  step exactly when the routing failover classifier fires
+  (connection/timeout/429/5xx/throttled-empty/`circuit_open`). It never
+  advances on a schema-validation failure (that is the model's answer, not a
+  transport fault) or a 4xx policy error (`auth`, content policy) — those stop
+  the ladder and surface the error.
+- **One attempt per rung by default.** The ladder itself does a single attempt
+  per step. Wrap the whole call with `with_retry` (the caller-seam middleware)
+  if you want per-attempt transport retries around the entire ladder pass.
+- **Schema retries re-ask the same rung.** With an `output` schema or
+  `llm_call_structured*`, a schema failure re-asks the SAME step's model via
+  the existing `schema_retries` mechanism — it does not escalate the ladder.
+- **`models:` + `ladder:`, `models:`/`ladder:` + explicit `model:`/`provider:`,
+  and `models:`/`ladder:` + an explicit `routing:` policy are all errors** — the
+  ladder already declares every rung, so any second model-selection surface is
+  ambiguous.
+- **Observability.** Each step advance emits an `llm_models_advance` trace
+  event (`agent_trace()`) with `{from_index, from_model, to_model, category}`,
+  and the winning rung is surfaced on the existing `result.routing` block
+  (`policy`, `attempts[]`, `selected`).
+
+`ladder:` names a catalog ladder declared under `[model_ladders.<name>]` (for
+example the built-in `frugal` haiku → sonnet → opus escalation), keeping the
+step list data-driven and shared across surfaces instead of hand-rolled at each
+call site.
+
+## Composable tool middleware
+
+`agent_loop` also accepts `tool_caller:` — the parallel seam for tool
+**execution**. While `llm_caller` wraps the model call, `tool_caller`
+wraps every tool dispatch. Combined with the `tools_use_middleware`
+**schema-time** decorator, you get two composable seams that let you:
+
+- force every tool call to provide a `reason` (or any other extra arg)
+  that the harness reasons about, not the tool — and surface that reason
+  as a user-facing chip ("Searched codebase to find rate limiter")
+- add audit logs / consent prompts / dry-run preview / redaction /
+  rate-limit / telemetry to all tool calls without touching individual
+  tool definitions
+
+```harn,ignore
+import { AgentLoopOptions } from "std/agent/options"
+import {
+  with_required_reason, with_audit_log, with_consent,
+  compose_tool_callers, tools_use_middleware,
+} from "std/llm/tool_middleware"
+
+const mw = with_required_reason({schema_required: false})
+const registry = tools_use_middleware(my_registry, mw.schema_transform)
+
+const caller = compose_tool_callers([
+  with_audit_log({sink: "both", redact: ["token", "content"]}),
+  with_consent({ call -> ask_human(call) }),
+  mw.caller,
+])
+
+const audited_opts: AgentLoopOptions = {tools: registry, tool_caller: caller}
+agent_loop(harness, task, system, audited_opts)
+```
+
+`with_audit_log` emits typed `ToolCallReceipt` records with rationale,
+status, timing, model/provider, and hashes instead of raw args/results.
+Use `sink: "local"` for `.harn/receipts/<session_id>.jsonl`,
+`sink: "cloud"` for host bridge mirroring, or `sink: "both"` for both
+paths.
+
+The caller signature is `fn(call, next) -> result_dict` where
+`call = {tool_name, tool_args, call_id, declared_executor, schema, description, turn}`
+and `next(call)` runs the default dispatch (with any envelope mutations
+the layer applied — typically `tool_args` rewrites). Short-circuit by
+returning a result dict without calling `next`. `call.turn.tool_call_index`
+is the call's position in the turn's emitted batch — useful when middleware
+fans out (`max_concurrent_tools > 1`) and needs to reorder completions
+back to source order.
+
+For multi-tool turns, set `max_concurrent_tools: N` on `agent_loop` to
+fan out dispatch across siblings inside one independent effect phase (capped at
+N). Tool annotations classify calls as observation, mutation,
+process/verification, terminal, or provider-native. A response that crosses a
+local effect boundary executes only its maximal first-phase prefix and returns
+typed deferred results for the suffix, forcing the next inference to observe
+the prefix results before re-proposing later calls. Each proposal emits a
+`tool_batch_disposition` event with phase, disposition, re-proposal, and
+monotonic timing fields. Middleware-backed
+dispatch uses `parallel settle`; the host-batch path uses the same cap.
+Each middleware sibling invokes its own caller chain in a fresh scope,
+so `audit.layers` histories don't cross-talk. Results inject in source
+order regardless of completion order so text tool-call parsers keep
+working. `with_audit_log` receipts carry an `emit_order` field equal
+to `turn.tool_call_index` so consumers can re-sort to source order
+if they store events in completion order. Set `prefetch_next_turn:
+true` to let the next planner call begin after tool results are in the
+transcript while local/custom audit receipt sinks finish in the
+background; the loop drains those flushes before returning.
+
+Middleware-attached metadata rides on `result.audit` (free-form dict
+aligned with A2A `metadata` / ACP `kind` / OpenAI `summary_text` / OTel
+`gen_ai.tool.description` conventions). Each call also emits a
+`tool_call_audit` AgentEvent so live ACP/A2A consumers can render
+chips alongside the standard `tool_call_update` stream.
+
+Full reference: [`docs/src/stdlib/tool-middleware.md`](https://harnlang.com/stdlib/tool-middleware.html).
+
+### Catalogue-driven `run_command` hooks
+
+`tool_rule`, `catalogue`, and `tool_hooks_registry` (TH-01) declare a
+versionable corpus of "command faux-pas" rules — rewrite-able shell
+mistakes (`find . -name`, `cargo build` without `--target-dir`,
+`git push --force`, etc.) that any agent's `run_command` handler can
+filter through. `preset_run_command(...)` (TH-02) is the shipped
+wrapper that turns a registry into a tool handler.
+
+```harn
+import { preset_run_command, tool_hooks_mode_rewrite_with_audit } from "std/tool_hooks"
+
+const rust_cat = catalogue({
+  id: "harn-canon/rust",
+  stack: "rust",
+  rules: [
+    tool_rule({
+      id: "rust.cargo.target_dir",
+      pattern: "^cargo (build|test)\\b",
+      applies_to: ["rust"],
+      severity: "warning",
+      explanation: "use --target-dir to avoid lockfile thrash",
+      rewrite: { command, _context -> command + " --target-dir target-shared" },
+    }),
+  ],
+})
+const registry = tool_hooks_register(tool_hooks_registry(), rust_cat)
+
+const run_command = preset_run_command({
+  stacks: ["rust"],
+  registry: registry,
+  custom_rules: [],                                 // matched before the registry
+  mode: tool_hooks_mode_rewrite_with_audit,         // default
+  inner: { args -> harness.process.shell(args.command) }, // underlying executor
+})
+agent_loop(harness, message, tools: {tools: [{name: "run_command", handler: run_command}]})
+```
+
+- `stacks` opts catalogues in via `tool_hooks_filter` (catalogues with
+  no `stack` field are universal; per-rule `applies_to` filters further).
+- `custom_rules` are matched before the registry so harness authors can
+  unconditionally override registered behavior.
+- Three shipped modes cover the epic's v1 contract:
+  `tool_hooks_mode_rewrite_with_audit` (rewrite + run inner),
+  `tool_hooks_mode_deny_with_explanation` (refuse to dispatch), and
+  `tool_hooks_mode_passthrough_only_audit` (run inner unchanged, tag
+  the result). All three return the same envelope shape so audit
+  consumers can render them uniformly: `{action, command,
+  original_command, rule_id, catalogue_id, severity, explanation,
+  references, result?}`.
+- Side effects (TH-03 #1896): each shipped mode records a
+  `tool_rewrite` / `tool_denied` / `tool_rule_warning` lifecycle audit
+  entry observable via `lifecycle_audit_log_take()`. The rewrite mode
+  also queues a one-turn `tool_rewritten` system reminder via
+  `tool_hooks_inject_reminder(...)` so the next agent turn sees the
+  corrected command shape. When no agent session is active (headless
+  pipelines, unit tests) the reminder still produces a
+  `tool_hooks.reminder_injected` audit entry so conformance can verify
+  the side effect either way. The underlying primitives
+  `tool_hooks_emit_audit(kind, payload)` and
+  `tool_hooks_inject_reminder({tags, body, ttl_turns, ...})` are
+  exported for custom mode callbacks that want the same
+  audit/reminder plumbing.
+- Omit `inner` to get decision envelopes without execution — useful
+  for previewing rewrites or testing rule coverage. The audit +
+  reminder side effects still fire in preview mode.
+- Catalogue auto-seed (TH-04 #1897): omit `registry` and the wrapper
+  builds one from `stacks` via `tool_hooks_seed_registry(stacks)`. The
+  universal catalogue (`git push --force main`, `rm -rf` against `/`,
+  `~`, `..`, `$HOME`, `*`) is always included; per-stack catalogues
+  ship for `rust`, `python`, `typescript` (aliased `ts`), `swift`,
+  `sql`, and `harn`. Unknown stacks are silently skipped so callers
+  opting into a future name don't break.
+- Optional LLM classifier (TH-05 #1898): pass
+  `llm_classifier: {model, threshold?, meta_prompt?, provider?, cache?, llm_options?}`
+  to consult a small model on any command that didn't hit a
+  deterministic rule. Verdicts at or above `threshold` (default 0.8)
+  dispatch via the mode the verdict implies (`rewrite` →
+  `tool_hooks_mode_rewrite_with_audit`, `deny` →
+  `tool_hooks_mode_deny_with_explanation`); lower confidence or `allow`
+  falls through to `inner` so the loop stays usable when the model is
+  unsure. Every call emits a `tool_hook_classifier_verdict` audit
+  (kind, confidence, scope, cache hit/miss, action) regardless of
+  outcome. Cache TTL accepts `cache.ttl_ms` (preferred for tests) or
+  `cache.ttl_seconds`. The classifier sends the raw command + meta
+  prompt to the model, so redact secrets the same way `run_command`
+  already requires; transport errors degrade gracefully to passthrough.
+
+Full reference: [`docs/src/tool-hooks.md`](https://harnlang.com/tool-hooks.html).
+Recipes per stack: [`docs/src/cookbooks/tool-hooks.md`](https://harnlang.com/cookbooks/tool-hooks.html).
+Contributing rules: [`docs/src/contributing/preset-hooks.md`](https://harnlang.com/contributing/preset-hooks.html).
+
+## Cancellation
+
+`llm_call` and `agent_loop` cooperate with the VM's cancellation token,
+which the host raises on Ctrl-C, `cancel(task)` inside a Harn program,
+or an ACP `session/cancel` request:
+
+- **Mid-`llm_call`**: the in-flight HTTP request is dropped
+  (best-effort) and the call returns a thrown
+  `VmError::Thrown(cancelled)` that bubbles out of the enclosing
+  pipeline. Non-throwing callers can use `llm_call_safe` to catch it
+  as `{ok: false, error.category: "cancelled"}`.
+- **Mid-tool-call inside `agent_loop`**: the tool's async handler sees
+  the same cancellation token; async builtins that opted in
+  (`llm_call`, `http_*`, `sleep`, …) short-circuit immediately. The
+  loop finalizes the transcript with the partial turn and exits with
+  `status: "cancelled"`.
+- **Between turns in `agent_loop`**: the next iteration never starts;
+  the loop returns with its current iteration count, the accumulated
+  transcript, and `status: "cancelled"`. Persistent sessions remain
+  usable — re-invoke `agent_loop` with the same `session_id` to
+  resume.
+
+`done_sentinel`, `max_iterations`, and `token_budget` each produce
+their own non-cancellation statuses; the cancellation path is
+specifically for external interruption.
+
+## Rate limiting
+
+Per-provider and per-model rate limiting is built in:
+
+- Set `rate_limits = { rpm = 600, tpm = 1000000 }` in the provider
+  or model entry in `providers.toml` / `harn.toml`.
+- Or `HARN_RATE_LIMIT_<PROVIDER>=600` env var (e.g.
+  `HARN_RATE_LIMIT_TOGETHER=600`, `HARN_RATE_LIMIT_LOCAL=60`) for
+  legacy provider RPM. Env overrides config.
+- Or richer env overrides such as `HARN_RATE_LIMIT_MYPROVIDER_RPM=1000`
+  and `HARN_RATE_LIMIT_MYPROVIDER_TPM=1000000`.
+- Or `harness.llm.rate_limit("provider", {rpm: 600, tpm: 1000000})` at runtime.
+- Wrap individual call sites in
+  `harness.llm.with_rate_limit(provider, fn, opts?)`
+  to acquire a permit and auto-retry retryable failures.
+
+RPM/TPM shape sustained throughput; route `concurrency` and
+`max_concurrent` cap simultaneous in-flight work. RPM/TPM buckets are
+durable across Harn processes by default, using SQLite under Harn's runtime
+state root. Set `HARN_LLM_RATE_LIMIT_STATE_PATH` only to force an explicit
+shared path for an eval fleet, and set `HARN_LLM_RATE_LIMIT_DURABLE=0` only
+for constrained tests or embeddings. Use throughput and concurrency limits
+together when batching LLM calls at scale.
+
+## Cache (`std/cache`)
+
+Content-addressed cache with three backends and a composable wrapper:
+
+```harn
+import { mem_cache, fs_cache, sqlite_cache, with_cache } from "std/cache"
+
+const store = sqlite_cache(state_path("evals.sqlite"), {ttl: "1h"})
+const answer = with_cache("key", { -> heavy_work() }, {store: store})
+```
+
+- `mem_cache(opts?)` — thread-local LRU. Does not survive `harn run`.
+- `fs_cache(path, opts?)` — one JSON file per key under `<path>/<namespace>/`.
+- `sqlite_cache(path, opts?)` — single sqlite file; many namespaces share it.
+
+Common options: `namespace`, `ttl` (string like `"10m"`) or `ttl_seconds`,
+`max_entries` (LRU bound). TTL honors the unified clock.
+
+`with_cache` is also a composable middleware in `std/llm/handlers` — drop
+it into `compose([...])` to deduplicate identical `(prompt, system, opts)`
+LLM calls. Tool-bearing calls bypass the cache by default.
+
+On a cache hit with `options.session_id` set, both the caller-wrapper
+and direct-call forms emit `cache_hit` + receipts (`model_calls_avoided`,
+`tokens_saved`, `latency_saved_ms`) on the agent event tape. The persona
+value ledger and crystallization receipts read these back.
+
+Full reference: [`docs/src/stdlib/cache.md`](https://harnlang.com/stdlib/cache.html).
+
+## Per-harness net policy (`std/net_policy`)
+
+Attach an allowlist/denylist to one harness so its `harness.net.*`
+calls (added by E4.4 / #1769) get gated against your rules. Returns a
+new `Harness` value bound to the policy — the source handle stays
+unrestricted, so policies are scoped by where you rebind, not by
+mutating shared state. Tracked through harn#1913 / epic #1765.
+
+```harn,ignore
+import { create, domain, domain_wildcard, cidr, host } from "std/net_policy"
+
+const policy = create({
+  allow: [
+    domain("github.com"),
+    domain_wildcard("*.github.com"),
+    cidr("10.0.0.0/8"),
+    host("api.anthropic.com", [443]),
+  ],
+  deny: [domain_wildcard("*.competitor.com")],
+  default: "deny",                                    // or "allow"
+  on_violation: "error",                              // or "audit_only", "quarantine",
+                                                      // or a fn(req) returning one of those
+})
+const restricted = harness.with_net_policy(policy)
+restricted.net.get("https://github.com/foo")          // allowed
+restricted.net.get("https://example.test/blocked")    // throws NetPolicyViolation
+restricted.is_quarantined()                           // sticky after a quarantine deny
+```
+
+- Rule precedence: `deny` rules fire first, then `allow`, then the
+  `default`. A typed `NetPolicyViolation` (`{type, category, host,
+  port, reason, outcome, matched_rule}`) is thrown for `error` /
+  `quarantine` outcomes; `audit_only` still records the audit and
+  lets the request through.
+- `on_violation` callbacks receive a `{method, url, host, port,
+  reason, matched_rule}` envelope and must return one of `"error"`,
+  `"audit_only"`, `"quarantine"` (returning a closure is rejected).
+- Every evaluation — including the `HARN_NET_POLICY_BYPASS=1`
+  short-circuit — emits a `harness.net.policy.audit` event so the
+  trust graph keeps an evidence trail.
+- The matcher is mock-aware: in mock mode the policy runs ahead of
+  the canned-response lookup, so conformance fixtures exercise the
+  same matcher path as production without touching the network.
+
+## Authentication (OAuth)
+
+Harn ships a full OAuth stack: provider catalogue, five interchangeable
+storage backends, an authorization-code client with PKCE + transparent
+refresh, RFC 8628 device flow, RFC 7591 dynamic registration, and a
+token-redaction catalog. The five modules under `std/oauth/*` compose
+freely — pick a provider, pick a storage, then pick a grant.
+
+```harn,ignore
+import { providers } from "std/oauth/providers"             // github, slack, linear, notion,
+                                                            // google, microsoft, atlassian,
+                                                            // discord, gitlab, bitbucket,
+                                                            // github_enterprise, custom
+import { memory } from "std/oauth/storage"                  // memory, file, harn_cloud_*,
+                                                            // custom
+import { client, request, token, token_exchange } from "std/oauth/client"
+                                                            // RFC 6749 + 7636 + 8693 + 9700
+import { delegated_claims, token_type } from "std/oauth/token_exchange"
+import { device_flow } from "std/oauth/device_flow"         // RFC 8628 (CI / headless)
+import { register_pattern } from "std/oauth/redaction"      // HARN-OAU-001 catalog
+```
+
+Full reference + per-provider cookbook: [`docs/src/oauth.md`](https://harnlang.com/oauth.html).
+
+## OAuth client (`std/oauth/client`)
+
+RFC 6749 authorization-code + RFC 7636 PKCE S256 + RFC 9700
+transparent refresh. Build on top of `std/oauth/providers` and
+`std/oauth/storage`; the client knows nothing about which storage
+backend it's holding.
+
+```harn
+import { providers } from "std/oauth/providers"
+import { memory } from "std/oauth/storage"
+import { client, exchange_code, request, start_authorization, token, token_exchange } from "std/oauth/client"
+
+const cli = client(
+  providers().github,
+  {
+    client_id: harness.env.get("GH_CLIENT_ID"),
+    client_secret: harness.env.get("GH_CLIENT_SECRET"),
+    scopes: ["read:user", "user:email"],
+    redirect_uri: "http://127.0.0.1:8765/callback",
+    storage: memory(),
+  },
+)
+
+// One-shot authorization-code dance (host drives the browser):
+const pkce = start_authorization(cli)            // pkce.url, pkce.state, pkce.code_verifier
+const token_set = exchange_code(cli, pkce, code, state)
+
+// Subsequent calls auto-refresh past 75% TTL:
+const access = token(cli)                        // -> string, valid access token
+
+// Or let the client own HTTP, with 1x retry on 401:
+const response = request(cli, "GET", "https://api.github.com/user")
+```
+
+- **PKCE always enforced.** `start_authorization` generates a fresh
+  64-byte CSPRNG verifier (base64url-no-pad → ~86 chars) and a SHA-256
+  S256 challenge. `code_challenge_method=S256` is hardcoded.
+- **State always enforced.** `exchange_code` raises on `state`
+  mismatch before issuing the token request.
+- **Refresh transparency.** `token(cli)` re-reads storage every call
+  and refreshes if the stored TokenSet is past 75% TTL or already
+  expired. `request(cli, ...)` additionally retries once on 401
+  (forces a refresh between attempts).
+- **Audit log.** Every successful refresh / exchange emits
+  `oauth.client.audit` with `token_refreshed` / `token_exchanged`. The
+  payload carries presence flags + expiry timestamps; it never
+  includes the new access or refresh token.
+- **Token exchange.** `token_exchange(cli, opts)` performs RFC 8693:
+  `subject_token` and `subject_token_type` are required; `actor_token`
+  with `actor_token_type` selects delegation, and actor absence selects
+  impersonation. Provider support is data-gated by
+  `std/oauth/token_exchange` capability rows; custom providers opt in
+  with a `token_exchange` row.
+- **Concurrency.** Storage is the source of truth. Refreshes run under
+  `storage.with_refresh_lock(...)`; waiters re-read inside that lock
+  and reuse another worker's rotated access/refresh token instead of
+  spending a second refresh grant.
+- **Storage key.** Defaults to `provider.id`; pass `storage_key` to
+  fan out multiple installations of the same provider.
+
+Full reference: conformance fixtures at
+`conformance/tests/stdlib/oauth/oauth_client_*.harn`.
+
+## OAuth token exchange (`std/oauth/token_exchange`)
+
+RFC 8693 constants, overlayable capability rows, and nested `act`
+claim helpers.
+
+```harn,ignore
+import { token_exchange } from "std/oauth/client"
+import { delegated_claims, token_type } from "std/oauth/token_exchange"
+
+const delegated = token_exchange(cli, {
+  subject_token: human_token,
+  subject_token_type: token_type("access_token"),
+  actor_token: agent_jwt,
+  actor_token_type: token_type("jwt"),
+  requested_token_type: token_type("access_token"),
+  audience: "hr-service",
+  scope: ["employee:read"],
+})
+
+const claims = delegated_claims(
+  {sub: "user@example.com"},
+  [{sub: "https://service16.example.com"}, {sub: "https://service77.example.com"}],
+)
+```
+
+Rows are data in `std/oauth/token_exchange_catalog`, not provider code.
+`token_exchange_catalog(overlays?)` returns rows keyed by authorization-server id, and
+`token_exchange_capability(provider_or_id, overlays?)` resolves the
+effective row. A provider record can carry `token_exchange: {...}` to
+override or add support for custom enterprise authorization servers.
+
+## OAuth storage (`std/oauth/storage`)
+
+Token store for the OAuth client with five interchangeable backends.
+Every handle is a dict with three closures (`get`, `set`, `delete`) so
+the client doesn't know the difference between in-process memory, an
+encrypted file, a cloud platform, or a vault.
+
+```harn
+import { memory, file, harn_cloud_session, harn_cloud_org, custom } from "std/oauth/storage"
+
+const mem = memory()                                       // ephemeral
+const disk = file("/var/lib/harn/oauth.bin", harness.env.get("KEY"))   // AES-256-GCM
+const cloud = harn_cloud_session()                          // per-session
+const shared = harn_cloud_org()                             // org-scoped
+const vault = custom({get: my_get, set: my_set, delete: my_delete})
+
+mem.set("github", {access_token: "abc"}, 3600)
+const token = mem.get("github")                            // -> TokenSet | nil
+mem.delete("github")
+```
+
+- `memory()` lives in a thread-local map and never escapes the VM.
+- `file(path, key)` writes a single AES-256-GCM envelope; the 32-byte
+  AEAD key is derived via HKDF-SHA256 from `key`. Pass high-entropy
+  bytes, not a user passphrase.
+- `harn_cloud_*()` route through the `oauth_storage` host capability
+  (`cloud_get / cloud_set / cloud_delete` plus refresh-lock acquire/release);
+  a cloud platform enforces RLS and backend-native refresh locking.
+- `custom({get, set, delete, with_refresh_lock?, id?})` validates that the
+  required handlers are callables and then dispatches to them. Back the
+  closures with a real store (HTTP, MCP, a cloud platform) rather than a
+  captured local, so state survives restarts and is shared across sessions.
+
+Full reference: [`docs/src/stdlib/oauth-storage.md`](https://harnlang.com/stdlib/oauth-storage.html).
+
+## OAuth device flow (`std/oauth/device_flow`)
+
+RFC 8628 device authorization grant for headless contexts (CI runners,
+daemons, IDE side panes). Persists the TokenSet into the same storage
+the authorization-code client reads from, so subsequent
+`OAuth.client(...)` calls see the same token without re-running the
+dance.
+
+```harn,ignore
+import { device_flow } from "std/oauth/device_flow"
+import { providers } from "std/oauth/providers"
+import { file } from "std/oauth/storage"
+
+const token_set = device_flow(providers().github, {
+  client_id: harness.env.get("GH_CLIENT_ID"),
+  scopes: ["read:user", "repo"],
+  storage: file("/var/lib/harn/ci.bin", harness.env.get("HARN_OAUTH_KEY")),
+  on_user_code: { user_code, verification_uri ->
+    harness.stdio.log("Open " + verification_uri + " and enter " + user_code)
+  },
+})
+```
+
+- **Polling honors the server's `interval`.** `authorization_pending`
+  is treated as a soft retry; `slow_down` bumps the interval by 5s;
+  `expired_token` and `access_denied` raise.
+- **Cancellable.** Each inter-poll sleep is a cancellable point.
+- **Time-mock-friendly.** Polling routes through `harness.clock.sleep_ms(ms)`, which
+  honors `harness.testing.clock_set(...)` / `harness.testing.clock_advance(...)` for tests.
+- **Audit.** `oauth.device_flow.audit` `token_obtained` with presence
+  flags only — never the `device_code` / `user_code` / access tokens.
+- **Provider support.** GitHub, Google, Microsoft, GitLab — the rest
+  of the catalog has `device_code_url: nil` and will raise.
+
+## OAuth dynamic registration (`std/oauth/dynamic_registration`)
+
+The server side of OAuth. Build RFC 7591 client metadata + RFC 8414
+authorization-server metadata, validate incoming registrations, and
+issue `client_id` / `client_secret` pairs from an in-process store.
+Embedders (`harn serve`, a cloud platform, custom hosts) mount the well-known
+endpoints + the registration handler; this module does not host HTTP
+itself.
+
+```harn,ignore
+import { providers } from "std/oauth/providers"
+import {
+  authorization_server_metadata, client_metadata, dynamic_registration_store,
+  register_client, validate_metadata, well_known_paths, well_known_response,
+} from "std/oauth/dynamic_registration"
+
+const paths = well_known_paths()  // {client_metadata, authorization_server_metadata, registration}
+const oas = authorization_server_metadata(providers().github, {registration_endpoint: paths.registration})
+const envelope = well_known_response(oas)  // {status, content_type, headers, body}
+
+const store = dynamic_registration_store()
+const result = register_client(store, {redirect_uris: ["https://app.example/cb"]})
+// result.client_id, result.client_secret (returned ONCE), result.client_id_issued_at
+```
+
+- **Strict validation.** `redirect_uris` must be absolute `https://` or
+  loopback `http://` per RFC 8252 §7.3; grant / response types and
+  `token_endpoint_auth_method` are restricted to spec-blessed enums.
+  Each validation error is prefixed `HARN-OAU-005:` for pattern
+  matching.
+- **Secret returned once.** `register_client` includes `client_secret`;
+  `get_client(store, id)` does not. Audit events carry counts only —
+  never the secret.
+- **Validation surface.** `validate_metadata(metadata)` returns
+  `{ok: bool, errors: list<string>}` without registering.
+
+## OAuth redaction (`std/oauth/redaction`)
+
+Runtime ships a default catalog of high-confidence token patterns (JWT,
+GitHub PAT classic + fine-grained, Slack `xox*`, AWS `AKIA`, OpenAI
+`sk-`, Stripe `sk_live_`/`sk_test_`, GitLab `glpat-`, npm `npm_`,
+`Authorization: Bearer ...`). Persisted transcripts / receipts /
+OTel attrs / system reminders replace matches with
+`<redacted:<pattern>:<len>>`. The original token still flows to the
+underlying tool — redaction is display-only.
+
+```harn,ignore
+import { default_patterns, drain_audit, redact, register_pattern } from "std/oauth/redaction"
+
+register_pattern("acme_api_key", "\\bACME-[A-Z0-9]{12}\\b")
+const display = redact("Bearer ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+for entry in drain_audit() {
+  // entry.code == "HARN-OAU-001"
+  // entry.pattern, entry.match_count, entry.bytes_redacted
+}
+```
+
+- **Per-thread custom patterns** via `register_pattern(name, regex)`.
+  Anchor with `\b` to avoid chewing unrelated identifiers.
+- **`drain_audit()` is the authoritative compliance contract** — works
+  on every execution backend. Audit entries also fan out to the live
+  event sink and (when multi-threaded Tokio is available) to the
+  `audit.token_redaction` event-log topic.
+
+## Gotchas (friction-log distilled)
+
+- Heredoc `<<TAG ... TAG` is **not** a source-level string. Use
+  `"""..."""`. The parser emits a targeted error pointing here.
+- `substring(s, start, end)` takes an exclusive **end** index (matching
+  `s[start:end]` slicing and `.substring`), not a length.
+- Do NOT add `trailing_var_arg = true` to `RunArgs.argv` in clap — it
+  conflicts with `last = true` at runtime. `last = true` alone is
+  sufficient for `harn run script.harn -- a b c`.
+- Don't set `minLength` on optional-feeling schema fields like
+  `improvement`. Small models often leave them blank, and validation
+  will fail every time. Use the system prompt to demand non-empty
+  strings instead.
+- On `llm_call`, `provider: "auto"` with `model: "local:foo"` strips
+  the `local:` prefix and routes to Ollama. Without `"auto"`, an
+  explicit provider such as `"local"` still wins.
+- `schema_retries` retries schema-validation failures with a
+  corrective nudge. Transient provider errors are fail-fast — compose
+  `with_retry` from `std/llm/handlers` for retry policy. The two
+  concerns stay orthogonal.
+- A schema retry is a **single-turn correction**, not a multi-turn
+  conversation. The invalid response is not persisted; the retry
+  replays the original messages with one appended user-role correction
+  that cites the validation errors and the schema. For cost / cache
+  purposes, treat the retry as one extra prompt+response on the same
+  prefix as the original call (not a growing conversation). The
+  correction text is surfaced on the `SchemaRetry` trace event as
+  `correction_prompt`.
+- Module-level `var` cross-fn mutation is not shared yet. Prefer
+  atomics (`atomic(0)` / `atomic_add`) for shared counters.
+- Small / local models benefit heavily from:
+  1. Wrapping judge input in `<transcript_to_grade>...</transcript_to_grade>`.
+  2. Forcing canonical start tokens (`Start with VERDICT:`).
+  3. `output: {schema: schema, validation: "error"}` + `schema_retries: 2`.
+  4. Generous `maxLength` / `maxItems` bounds in the schema.
+
+## Prompt templates (`.harn.prompt` / `.prompt`)
+
+Load file-backed templates via `harness.fs.render_prompt("path.prompt", bindings)` or
+`harness.fs.render_prompt(...)`. Use `harness.fs.render_template(template, bindings)` when the
+template source lives inline in a string literal. File paths resolve relative
+to the calling module's directory.
+
+**Package-root paths** — prefer `@/...` and `@<alias>/...` over
+`../../partials/foo.harn.prompt`. They anchor at the calling file's
+project root (nearest `harn.toml`) so refactors that move callers don't
+break asset references:
+
+```harn,ignore
+harness.fs.render_prompt("@/prompts/tool-examples.harn.prompt", bindings)  // project-root
+harness.fs.render_prompt("@partials/tool-examples.harn.prompt", bindings)  // [asset_roots] alias
+```
+
+Define aliases in `harn.toml`:
+
+```toml
+[asset_roots]
+partials = "Sources/BurinCore/Resources/pipelines/partials"
+```
+
+Both `harness.fs.render_prompt(...)` and `{{ include "@/..." }}` honor the same
+syntax. `harn check` validates the resolved files exist; bundle manifests
+and LSP go-to-definition follow `@`-paths to the target file.
+When an execution policy is active, file-backed templates and includes obey
+the same `workspace_roots` read boundary as `harness.fs.read_text(...)`.
+
+- `{{ name }}` — interpolation; nested with `{{ a.b[0] }}`.
+- `{{ if expr }}..{{ elif expr }}..{{ else }}..{{ end }}` — expression
+  operators: `==`, `!=`, `<`, `<=`, `>`, `>=`, `and`/`&&`, `or`/`||`,
+  `not`/`!`.
+- `{{ for x in xs }}..{{ else }}..{{ end }}` — `else` renders when empty.
+  Inside: `{{ loop.index }}`, `.index0`, `.first`, `.last`, `.length`.
+  Dict iteration: `{{ for k, v in dict }}..{{ end }}`.
+- `{{ include "partial.prompt" }}` or `{{ include "..." with { x: y } }}`
+  — resolves relative to the including file; `{{ include "@/..." }}`
+  resolves from the project root; cycle detection is built in.
+- Filters: `{{ name | upper | default: "anon" }}`. Built-ins: `upper`,
+  `lower`, `title`, `trim`, `capitalize`, `length`, `first`, `last`,
+  `reverse`, `join:sep`, `default:fallback`, `json`, `indent:n`, `lines`,
+  `escape_md`, `replace:from,to`.
+- `{{# comments stripped at parse #}}`,
+  `{{ raw }}..literal {{braces}}..{{ endraw }}`,
+  `{{- trim whitespace + one newline -}}`.
+- Missing *bare* `{{ident}}` passes through the literal source (back-compat).
+  New constructs raise `template at L:C: ...` errors.
+- **`llm` scope**: inside an LLM-aware frame (`llm_call`, the default
+  handler stack, `agent_loop`) the engine auto-injects
+  `llm = {provider, model, family, capabilities: {...}}` so a single
+  logical prompt can adapt by capability. Branch on `{{ if llm }}` for
+  the bare-render fallback; branch on `{{ if llm.capabilities.native_tools }}`
+  to pick wire envelope. `family` is a normalized token such as
+  `anthropic-claude`, `openai-gpt`, `google-gemini`, `qwen`, `llama`,
+  `mistral`, or `deepseek`.
+  User bindings that already provide an `llm` key win for back-compat
+  and trigger a one-shot warning under `template.llm_scope`.
+- **Variant resolution transcripts**: a `template.render` event lands in
+  `llm_transcript.jsonl` for every render under an LLM frame, carrying
+  the resolved `llm` snapshot and a per-branch / per-section trace.
+  Surface in the portal under "Variant resolution".
+- **Drift-prevention lints**: `harn lint` walks `.harn.prompt` files and
+  warns when a template branches on `llm.provider` / `llm.model` /
+  `llm.family` directly (`template-provider-identity-branch`) or when
+  more than three capability-aware conditionals appear in the same file
+  (`template-variant-explosion`). Configure the threshold via
+  `[lint] template_variant_branch_threshold = N`.
+- Full reference: `docs/src/prompt-templating.md`.
+
+## Discovery
+
+- Human cheatsheet: `docs/src/scripting-cheatsheet.md`.
+- Language spec: `spec/HARN_SPEC.md` (mirrored to
+  `docs/src/language-spec.md`).
+- Concurrency: `docs/src/concurrency.md` (`max_concurrent`, RPM
+  limits, channels, `select`, `deadline`).
+- LLM / agent surface: `docs/src/llm-and-agents.md`.
+- Conformance examples: `conformance/tests/*.harn`.

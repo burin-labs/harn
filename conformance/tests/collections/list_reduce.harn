@@ -1,0 +1,5 @@
+pipeline test(harness: Harness, task) {
+  const nums = [1, 2, 3, 4]
+  const sum = nums.reduce(0, { acc, x -> acc + x })
+  harness.stdio.log(sum)
+}

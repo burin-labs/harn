@@ -1,0 +1,29 @@
+pipeline default(harness: Harness) {
+  const name = harness.tools.mcp_host_spawn(
+    {name: "identity-shape", transport: "http", url: "https://identity.example.invalid/mcp"},
+    {lazy: true},
+  )
+  const status = harness.tools.mcp_host_status()
+  let entry = nil
+  for item in status {
+    if item.name == name {
+      entry = item
+    }
+  }
+  require entry != nil, "status should include the lazy server"
+  harness.stdio.println(entry.name)
+  harness.stdio.println(entry.transport)
+  harness.stdio.println(entry.url)
+  harness.stdio.println(entry.display_identity == nil)
+  harness.stdio.println(entry.active)
+  harness.stdio.println(entry.lazy)
+  let registry_entry = nil
+  for item in harness.tools.mcp_registry_status() {
+    if item.name == name {
+      registry_entry = item
+    }
+  }
+  require registry_entry != nil, "registry status should include the lazy server"
+  harness.stdio.println(registry_entry.transport)
+  harness.stdio.println(registry_entry.url)
+}

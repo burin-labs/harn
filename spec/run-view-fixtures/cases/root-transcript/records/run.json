@@ -1,0 +1,104 @@
+{
+  "_type": "run_record",
+  "id": "run_root_transcript",
+  "workflow_id": "workflow_view_fixture",
+  "workflow_name": "View fixture",
+  "task": "Summarize a sanitized support ticket",
+  "status": "completed",
+  "started_at": "2026-01-02T00:00:00Z",
+  "finished_at": "2026-01-02T00:00:03Z",
+  "metadata": {
+    "session_id": "session_root_transcript"
+  },
+  "transcript": {
+    "source": "run_root",
+    "summary": "Root transcript captured the customer-safe answer.",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Please summarize ticket FIXTURE-101."
+      },
+      {
+        "role": "assistant",
+        "content": "The ticket is resolved."
+      }
+    ],
+    "events": [
+      {
+        "kind": "assistant_message",
+        "id": "evt_root_1"
+      }
+    ]
+  },
+  "usage": {
+    "input_tokens": 12,
+    "output_tokens": 8,
+    "total_duration_ms": 3000,
+    "call_count": 1,
+    "total_cost": 0.02,
+    "models": [
+      "fixture-model"
+    ]
+  },
+  "trace_spans": [
+    {
+      "kind": "llm_call",
+      "name": "fixture completion",
+      "start_ms": 0,
+      "duration_ms": 3000,
+      "metadata": {
+        "provider": "fixture-provider",
+        "model": "fixture-model",
+        "input_tokens": 12,
+        "output_tokens": 8,
+        "cost_usd": 0.02
+      }
+    }
+  ],
+  "stages": [
+    {
+      "id": "stage_answer",
+      "node_id": "answer",
+      "kind": "llm",
+      "status": "completed",
+      "outcome": "ok",
+      "started_at": "2026-01-02T00:00:00Z",
+      "finished_at": "2026-01-02T00:00:03Z",
+      "visible_text": "The ticket is resolved.",
+      "metadata": {
+        "provider": "fixture-provider",
+        "model": "fixture-model"
+      },
+      "produced_artifact_ids": [
+        "artifact_summary"
+      ]
+    }
+  ],
+  "artifacts": [
+    {
+      "_type": "artifact",
+      "id": "artifact_summary",
+      "kind": "summary",
+      "title": "Ticket summary",
+      "text": "Sanitized ticket summary for fixture clients.",
+      "source": "fixture",
+      "stage": "stage_answer",
+      "estimated_tokens": 9,
+      "lineage": [
+        "stage_answer"
+      ]
+    }
+  ],
+  "checkpoints": [
+    {
+      "id": "checkpoint_after_answer",
+      "ready_nodes": [],
+      "completed_nodes": [
+        "answer"
+      ],
+      "last_stage_id": "stage_answer",
+      "persisted_at": "2026-01-02T00:00:03Z",
+      "reason": "completed"
+    }
+  ]
+}

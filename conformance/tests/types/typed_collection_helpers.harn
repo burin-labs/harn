@@ -1,0 +1,21 @@
+// Verifies that std/collections helpers preserve `dict<string, V>` value
+// typing through generic projection: a homogeneous int-valued input projects
+// back to a dict whose values still flow into `int` slots, and an explicit
+// type argument pins the value type at the call site.
+import { filter_nil, pick_keys } from "std/collections"
+
+pipeline default(harness: Harness, task) {
+  const counts: dict<string, int> = {a: 1, b: 2, c: 3}
+  const cleaned: dict<string, int> = filter_nil(counts)
+  harness.stdio.println(cleaned.a)
+  harness.stdio.println(cleaned.b)
+  harness.stdio.println(cleaned.c)
+  const picked: dict<string, int> = pick_keys(counts, ["a", "c"])
+  harness.stdio.println(picked.a)
+  harness.stdio.println(picked.c)
+  harness.stdio.println(contains(picked.keys(), "b"))
+  const dropped = pick_keys<int?>({a: 1, b: nil, c: 3}, ["a", "b", "c"], {drop_nil: true})
+  harness.stdio.println(dropped.a)
+  harness.stdio.println(dropped.c)
+  harness.stdio.println(contains(dropped.keys(), "b"))
+}

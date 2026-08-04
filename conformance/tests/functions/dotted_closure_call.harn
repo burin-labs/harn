@@ -1,0 +1,4 @@
+pipeline main(harness: Harness) {
+  const config = {handler: fn(name) { return "hello " + name }}
+  harness.stdio.log(config.handler("world"))
+}

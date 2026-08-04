@@ -1,0 +1,82 @@
+# well formed canonical response
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"create","content":"fn a() {}","path":"a.rs"}
+  prose="Created the file."
+  answer="Created the file."
+  done="##DONE##"
+# wrapped call parses cleanly
+  calls=1 errors=0 violations=0 stray=0
+  call run {"command":"cargo test"}
+  prose=""
+  answer=null
+  done=null
+# same-line tool_call wrapper
+  calls=1 errors=0 violations=0 stray=0
+  call run {"command":"cargo test"}
+  prose=""
+  answer=null
+  done=null
+# multiline wrapper with leading prose
+  calls=1 errors=0 violations=0 stray=0
+  call run {"command":"cargo test"}
+  prose="I'll find the file."
+  answer=null
+  done=null
+# trailing close-tag fragment only
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"cargo test"}
+  prose=""
+  answer=null
+  done=null
+# compact protocol tag aliases
+  calls=1 errors=0 violations=0 stray=0
+  call run {"command":"git status"}
+  prose="Done."
+  answer="Done."
+  done="##DONE##"
+# single bare call, no wrapper
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"x","path":"a.rs"}
+  prose=""
+  answer=null
+  done=null
+# two bare calls, no wrapper
+  calls=2 errors=0 violations=0 stray=2
+  call edit {"action":"create","content":"a","path":"a.rs"}
+  call edit {"action":"create","content":"b","path":"b.rs"}
+  prose=""
+  answer=null
+  done=null
+# stray prose alongside a tool call
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"create","content":"x","path":"a.rs"}
+  prose="def foo():\n    pass"
+  answer=null
+  done=null
+# user_response only
+  calls=0 errors=0 violations=0 stray=0
+  prose="Visible answer."
+  answer="Visible answer."
+  done=null
+# configured done body
+  calls=0 errors=0 violations=0 stray=0
+  prose=""
+  answer=null
+  done="PLAN_READY"
+# empty response
+  calls=0 errors=0 violations=0 stray=0
+  prose=""
+  answer=null
+  done=null
+# plain prose response
+  calls=0 errors=0 violations=0 stray=0
+  prose="just prose with no tags at all"
+  answer=null
+  done=null
+# two tool_call blocks
+  calls=2 errors=0 violations=0 stray=0
+  call run {"command":"echo a"}
+  call run {"command":"echo b"}
+  prose=""
+  answer=null
+  done=null

@@ -1,0 +1,228 @@
+import {
+  custom,
+  file,
+  harn_cloud_org,
+  harn_cloud_session,
+  memory,
+  storage,
+} from "std/oauth/storage"
+
+fn require_token(label, value, expected_access) {
+  if value == nil {
+    throw label + ": expected TokenSet, got nil"
+  }
+  const access = value?.access_token ?? ""
+  if access != expected_access {
+    throw label + ": expected access_token=" + expected_access + ", got " + access
+  }
+}
+
+fn require_nil(label, value) {
+  if value != nil {
+    throw label + ": expected nil, got " + to_string(value)
+  }
+}
+
+fn exercise_backend(label, store, expect_kind) {
+  if store.kind != expect_kind {
+    throw label + ": expected kind=" + expect_kind + ", got " + store.kind
+  }
+  const primary = {access_token: "tok-primary", refresh_token: "rfr-primary", expires_at_unix: 100}
+  const secondary = {access_token: "tok-secondary"}
+  store.set("primary", primary, 3600)
+  store.set("secondary", secondary)
+  require_token(label + ".get(primary)", store.get("primary"), "tok-primary")
+  require_token(label + ".get(secondary)", store.get("secondary"), "tok-secondary")
+  const locked = store.with_refresh_lock(
+    "primary",
+    { -> store.get("primary").access_token + "-locked" },
+  )
+  if locked != "tok-primary-locked" {
+    throw label + ".with_refresh_lock: expected tok-primary-locked, got " + to_string(locked)
+  }
+  // Refresh: overwrite the entry and confirm the new value is returned.
+  store.set("primary", {access_token: "tok-primary-v2", refresh_token: "rfr-primary-v2"}, 7200)
+  require_token(label + ".get(primary refreshed)", store.get("primary"), "tok-primary-v2")
+  store.delete("primary")
+  require_nil(label + ".get(primary after delete)", store.get("primary"))
+  store.delete("secondary")
+  require_nil(label + ".get(secondary after delete)", store.get("secondary"))
+  require_nil(label + ".get(missing)", store.get("never-stored"))
+}
+
+fn exercise_memory(auth: HarnessAuth) {
+  exercise_backend("memory", memory(auth), "memory")
+  // Independent memory handles do not share state.
+  const a = memory(auth)
+  const b = memory(auth)
+  a.set("shared-key", {access_token: "from-a"}, 60)
+  require_nil("memory.isolation", b.get("shared-key"))
+}
+
+fn exercise_file(harness: Harness) {
+  const path = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-oauth-storage-" + harness.random.uuid() + ".bin",
+  )
+  const key = "high-entropy-test-key-must-be-long-enough"
+  const s = file(harness.auth, path, key)
+  exercise_backend("file", s, "file")
+  // After exercise_backend deletes both keys the file should be gone.
+  if harness.fs.exists(path) {
+    throw "file: expected file to be removed once empty"
+  }
+  // Persistence + at-rest encryption: re-open with the same key.
+  const s2 = file(harness.auth, path, key)
+  s2.set("github", {access_token: "persistent"}, 600)
+  const raw = harness.fs.read_text(path)
+  if contains(raw, "persistent") {
+    throw "file: plaintext token leaked into ciphertext on disk"
+  }
+  const envelope = json_parse(raw)
+  if envelope.version != 1 {
+    throw "file: envelope version should be 1, got " + to_string(envelope.version)
+  }
+  const s3 = file(harness.auth, path, key)
+  require_token("file.persistence", s3.get("github"), "persistent")
+  // Wrong key fails fast.
+  const bad = file(harness.auth, path, "wrong-key")
+  let saw_error = false
+  try {
+    const _ = bad.get("github")
+  } catch (err) {
+    saw_error = true
+  }
+  if !saw_error {
+    throw "file: decryption with wrong key should fail"
+  }
+  s3.delete("github")
+}
+
+fn exercise_custom(auth: HarnessAuth) {
+  // Delegate to an in-process memory backend so the user-supplied
+  // closures exercise real state without relying on closure capture
+  // semantics. The contract is what matters here: get/set/delete are
+  // dispatched to the closures the caller registered.
+  const inner = memory(auth)
+  const s = custom(
+    auth,
+    {
+      get: { key -> inner.get(key) },
+      set: { key, tok, ttl = nil -> inner.set(key, tok, ttl) },
+      delete: { key -> inner.delete(key) },
+      id: "test-vault",
+    },
+  )
+  if s.id != "test-vault" {
+    throw "custom: expected id=test-vault, got " + s.id
+  }
+  exercise_backend("custom", s, "custom")
+  const locked_inner = memory(auth)
+  const locked = custom(
+    auth,
+    {
+      get: { key -> locked_inner.get(key) },
+      set: { key, tok, ttl = nil -> locked_inner.set(key, tok, ttl) },
+      delete: { key -> locked_inner.delete(key) },
+      with_refresh_lock: { key, body ->
+        locked_inner.set("lock-marker", {access_token: key}, 60)
+        return body() + "-via-custom-lock"
+      },
+      id: "test-vault-locked",
+    },
+  )
+  const locked_result = locked.with_refresh_lock(
+    "vault-key",
+    { -> locked_inner.get("lock-marker").access_token },
+  )
+  if locked_result != "vault-key-via-custom-lock" {
+    throw "custom.with_refresh_lock: hook did not wrap the body, got " + to_string(locked_result)
+  }
+}
+
+fn exercise_cloud(auth: HarnessAuth, testing: HarnessTesting, scope, factory, expect_kind) {
+  testing.clear()
+  testing.respond("auth", "oauth_storage_set", nil)
+  testing.respond("auth", "oauth_storage_delete", nil)
+  testing.respond("auth", "oauth_storage_with_refresh_lock", "locked-" + scope)
+  testing.respond(
+    "auth",
+    "oauth_storage_get",
+    {access_token: "cloud-tok", refresh_token: "cloud-rfr", scopes: ["repo"]},
+  )
+  const s = factory(auth)
+  if s.scope != scope {
+    throw "cloud[" + scope + "]: expected scope field, got " + to_string(s.scope)
+  }
+  if s.kind != expect_kind {
+    throw "cloud[" + scope + "]: expected kind=" + expect_kind + ", got " + s.kind
+  }
+  s.set("github", {access_token: "tok"}, 3600)
+  require_token("cloud[" + scope + "].get", s.get("github"), "cloud-tok")
+  s.delete("github")
+  const locked = s.with_refresh_lock("github", { -> "locked-" + scope })
+  if locked != "locked-" + scope {
+    throw "cloud[" + scope + "].with_refresh_lock returned " + to_string(locked)
+  }
+  const calls = testing.calls()
+  if len(calls) != 4 {
+    throw "cloud[" + scope + "]: expected 4 capability calls, got " + to_string(len(calls))
+  }
+  if calls[0].capability != "auth" || calls[0].method != "oauth_storage_set" {
+    throw "cloud[" + scope + "]: first call should be auth.oauth_storage_set"
+  }
+  if calls[0].args[0].scope != scope {
+    throw "cloud[" + scope + "]: storage handle carried scope=" + to_string(calls[0].args[0].scope)
+  }
+  if calls[1].method != "oauth_storage_get" || calls[1].args[0].scope != scope {
+    throw "cloud[" + scope + "]: oauth_storage_get call shape mismatch"
+  }
+  if calls[2].method != "oauth_storage_delete" || calls[2].args[0].scope != scope {
+    throw "cloud[" + scope + "]: oauth_storage_delete call shape mismatch"
+  }
+  if calls[3].method != "oauth_storage_with_refresh_lock" || calls[3].args[0].scope != scope {
+    throw "cloud[" + scope + "]: oauth_storage_with_refresh_lock call shape mismatch"
+  }
+  testing.clear()
+}
+
+fn exercise_namespace(harness: Harness) {
+  const ns = storage(harness.auth, harness.secrets)
+  if ns.memory.kind != "memory" {
+    throw "storage(harness): expected memory handle on namespace"
+  }
+  if ns.harn_cloud_session.kind != "harn_cloud_session" {
+    throw "storage(harness): expected harn_cloud_session handle on namespace"
+  }
+  if ns.harn_cloud_org.kind != "harn_cloud_org" {
+    throw "storage(harness): expected harn_cloud_org handle on namespace"
+  }
+  const path = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-oauth-storage-ns-" + harness.random.uuid() + ".bin",
+  )
+  const s = ns.file(path, "ns-key")
+  s.set("ns", {access_token: "ns-tok"}, 60)
+  require_token("namespace.file", s.get("ns"), "ns-tok")
+  s.delete("ns")
+  const inner = memory(harness.auth)
+  const cs = ns.custom(
+    {
+      get: { key -> inner.get(key) },
+      set: { key, tok, ttl = nil -> inner.set(key, tok, ttl) },
+      delete: { key -> inner.delete(key) },
+    },
+  )
+  cs.set("ns", {access_token: "ns-custom"}, 60)
+  require_token("namespace.custom", cs.get("ns"), "ns-custom")
+}
+
+pipeline test(harness: Harness, task) {
+  exercise_memory(harness.auth)
+  exercise_file(harness)
+  exercise_custom(harness.auth)
+  exercise_cloud(harness.auth, harness.testing, "session", harn_cloud_session, "harn_cloud_session")
+  exercise_cloud(harness.auth, harness.testing, "org", harn_cloud_org, "harn_cloud_org")
+  exercise_namespace(harness)
+  harness.stdio.log("oauth storage ok")
+}

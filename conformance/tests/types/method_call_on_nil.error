@@ -1,0 +1,1 @@
+cannot access method `foo` on `nil`; the value is statically known to be nil here

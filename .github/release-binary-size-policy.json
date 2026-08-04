@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "default_target": "x86_64-unknown-linux-gnu",
+  "targets": [
+    {
+      "target": "x86_64-unknown-linux-gnu",
+      "budget_bytes": 234881024,
+      "baseline": {
+        "version": "0.10.53",
+        "source_sha": "14aad890335fd4a9a0084007cab0383ede96205d",
+        "bytes": 233410816,
+        "observed_at": "2026-08-03T08:14:56Z"
+      }
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+pipeline default(harness: Harness) {
+  // Empty dict pattern — just discards the value
+  const {} = {a: 1, b: 2}
+  harness.stdio.println("empty_dict_ok")
+  // Empty list pattern — just discards the value
+  const [] = [1, 2, 3]
+  harness.stdio.println("empty_list_ok")
+  // Dict destructure: missing key gives nil
+  const {missing} = {other: 1}
+  harness.stdio.println(missing)
+  // List destructure: more bindings than elements gives nil
+  const [x, y, z] = [10, 20]
+  harness.stdio.println(x)
+  harness.stdio.println(y)
+  harness.stdio.println(z)
+  // List rest with no remaining items
+  const [head, ...tail] = [99]
+  harness.stdio.println(head)
+  harness.stdio.println(tail)
+  // Dict rest with no remaining fields
+  const {only, ...extras} = {only: "yes"}
+  harness.stdio.println(only)
+  harness.stdio.println(extras)
+  // List rest with zero-length rest
+  const [a, b, ...rest] = [1, 2]
+  harness.stdio.println(a)
+  harness.stdio.println(b)
+  harness.stdio.println(rest)
+  // Var destructuring allows reassignment
+  let {m, n} = {m: 1, n: 2}
+  m = 100
+  n = 200
+  harness.stdio.println(m)
+  // For-in with list destructuring
+  const pairs = [[1, 2], [3, 4]]
+  for [first, second] in pairs {
+    harness.stdio.println("${first}+${second}")
+  }
+}

@@ -1,0 +1,25 @@
+name: Configure Cargo sccache
+description: Enable Cargo's sccache wrapper only when it can proxy rustc cleanly.
+
+runs:
+  using: composite
+  steps:
+    - name: Enable healthy sccache wrapper
+      if: env.SCCACHE_PATH != ''
+      shell: bash
+      run: |
+        set -u
+        rustc_bin="${RUSTC:-rustc}"
+        if "${SCCACHE_PATH}" "${rustc_bin}" -vV >/dev/null; then
+          echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "${GITHUB_ENV}"
+          echo "sccache is healthy; Cargo will use RUSTC_WRAPPER=${SCCACHE_PATH}"
+        else
+          echo "::warning::sccache could not proxy '${rustc_bin} -vV'; continuing without RUSTC_WRAPPER"
+          echo "RUSTC_WRAPPER=" >> "${GITHUB_ENV}"
+        fi
+    - name: Skip missing sccache wrapper
+      if: env.SCCACHE_PATH == ''
+      shell: bash
+      run: |
+        echo "::notice::SCCACHE_PATH is empty; continuing without RUSTC_WRAPPER"
+        echo "RUSTC_WRAPPER=" >> "${GITHUB_ENV}"

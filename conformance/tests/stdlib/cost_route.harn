@@ -1,0 +1,22 @@
+import { llm_call_count } from "std/testing"
+
+pipeline test(harness: Harness, task) {
+  const routed = cost_route {
+    budget: {max_cost_usd: 1.0}
+    route_policy: {mode: "preference_list", targets: ["mock:mock"], strategy: "cheapest_first"}
+
+    harness.llm.call("hello route")
+  }
+  assert_eq(routed.provider, "mock")
+  assert_eq(routed.model, "mock")
+  assert_eq(llm_call_count(harness.llm), 1)
+  const explicit = cost_route {
+    route_policy: "always(mock:mock)"
+
+    harness.llm.call("manual route", nil, {provider: "mock", model: "mock", route_policy: "manual"})
+  }
+  assert_eq(explicit.provider, "mock")
+  assert_eq(explicit.model, "mock")
+  assert_eq(llm_call_count(harness.llm), 2)
+  harness.stdio.println("ok")
+}

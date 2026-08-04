@@ -1,0 +1,67 @@
+import { agent_reminder_providers_fire } from "std/agent/state"
+
+pipeline main(harness: Harness) {
+  const session = harness.agent.open("reminder-provider-resume-continuity")
+  harness.agent.reset(session)
+  const payload = {
+    session: {id: session},
+    worker: {id: "worker-1"},
+    suspension: {reason: "waiting on review", suspended_at_turn: 2},
+    resume: {
+      initiator: "operator",
+      input_rendered: "approved",
+      input_present: true,
+      continue_transcript: false,
+      digest: "Prior digest",
+    },
+    reason: "waiting on review",
+    suspended_at_turn: 2,
+    input_rendered: "approved",
+    input_present: true,
+    continue_transcript: false,
+    digest: "Prior digest",
+    turn: 0,
+  }
+  const first = agent_reminder_providers_fire(harness.agent, session, "worker_resumed", payload, {})
+  const second = agent_reminder_providers_fire(
+    harness.agent,
+    session,
+    "worker_resumed",
+    payload
+      + {
+      input_rendered: "approved again",
+      resume: payload.resume + {input_rendered: "approved again"},
+    },
+    {},
+  )
+  const reminders = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
+  const disabled_session = harness.agent.open("reminder-provider-resume-continuity-disabled")
+  harness.agent.reset(disabled_session)
+  const disabled = agent_reminder_providers_fire(
+    harness.agent,
+    disabled_session,
+    "worker_resumed",
+    payload + {session: {id: disabled_session}, session_id: disabled_session},
+    {reminders: {providers: ["-resume_continuity"]}},
+  )
+  harness.stdio.println(first.fired_count)
+  harness.stdio.println(second.reports[0].deduped_count)
+  harness.stdio.println(len(reminders))
+  harness.stdio.println(reminders[0].reminder.tags[0])
+  harness.stdio.println(reminders[0].reminder.dedupe_key)
+  harness.stdio.println(reminders[0].reminder.ttl_turns)
+  harness.stdio.println(reminders[0].reminder.preserve_on_compact)
+  harness.stdio.println(reminders[0].reminder.propagate)
+  harness.stdio.println(reminders[0].reminder.source)
+  harness.stdio.println(contains(reminders[0].reminder.body, "You were suspended at turn 2"))
+  harness.stdio.println(
+    contains(reminders[0].reminder.body, "You have been resumed by the operator"),
+  )
+  harness.stdio.println(
+    contains(reminders[0].reminder.body, "The resumer provided input: approved again"),
+  )
+  harness.stdio.println(
+    contains(reminders[0].reminder.body, "Pre-suspend conversation digest: Prior digest"),
+  )
+  harness.stdio.println(disabled.fired_count)
+}

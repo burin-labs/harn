@@ -1,0 +1,1010 @@
+use crate::ast::*;
+use harn_lexer::{Span, TokenKind};
+
+use super::error::ParserError;
+use super::state::Parser;
+
+fn sanitize_eval_pack_binding(id: &str) -> String {
+    let mut out = String::new();
+    let mut last_was_underscore = false;
+    for ch in id.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            out.push(ch.to_ascii_lowercase());
+            last_was_underscore = false;
+        } else if !last_was_underscore {
+            out.push('_');
+            last_was_underscore = true;
+        }
+    }
+    let trimmed = out.trim_matches('_').to_string();
+    if trimmed.is_empty() {
+        return "eval_pack_".to_string();
+    }
+    if !harn_lexer::KEYWORDS.contains(&trimmed.as_str())
+        && trimmed
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
+    {
+        trimmed
+    } else {
+        format!("eval_pack_{trimmed}")
+    }
+}
+
+fn is_attribute_key_token(token: &TokenKind) -> bool {
+    matches!(token, TokenKind::Identifier(_) | TokenKind::Retry)
+}
+
+impl Parser {
+    /// Parse an optional `throws <type>` exception-channel clause that follows
+    /// a callable's return type. A multi-type channel is written as the ordinary
+    /// bare union `throws E1 | E2` (Harn types are never parenthesized), which
+    /// [`Self::parse_type_expr`] already handles, so this needs no special union
+    /// grammar. Absent clause → `None` (unconstrained), which keeps the
+    /// annotation additive across every callable.
+    pub(super) fn parse_optional_throws(&mut self) -> Result<Option<TypeExpr>, ParserError> {
+        if self.check(&TokenKind::Throws) {
+            self.advance();
+            Ok(Some(self.parse_type_expr()?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub(super) fn parse_pipeline_with_pub(&mut self, is_pub: bool) -> Result<SNode, ParserError> {
+        let start = self.current_span();
+        self.consume(&TokenKind::Pipeline, "pipeline")?;
+        let name = self.consume_identifier("pipeline name")?;
+
+        self.consume(&TokenKind::LParen, "(")?;
+        let params = self.parse_typed_param_list()?;
+        if params.iter().any(|param| param.default_value.is_some()) {
+            return Err(self.error("Pipeline parameters do not support default values"));
+        }
+        if params.iter().any(|param| param.rest) {
+            return Err(self.error("Pipeline parameters do not support rest parameters"));
+        }
+        self.consume(&TokenKind::RParen, ")")?;
+
+        let return_type = if self.check(&TokenKind::Arrow) {
+            self.advance();
+            Some(self.parse_type_expr()?)
+        } else {
+            None
+        };
+
+        let throws = self.parse_optional_throws()?;
+
+        let extends = if self.check(&TokenKind::Extends) {
+            self.advance();
+            Some(self.consume_identifier("parent pipeline name")?)
+        } else {
+            None
+        };
+
+        self.consume(&TokenKind::LBrace, "{")?;
+        let body = self.parse_block()?;
+        self.consume(&TokenKind::RBrace, "}")?;
+
+        Ok(spanned(
+            Node::Pipeline {
+                name,
+                params,
+                return_type,
+                throws,
+                body,
+                extends,
+                is_pub,
+            },
+            Span::merge(start, self.prev_span()),
+        ))
+    }
+
+    pub(super) fn parse_pipeline(&mut self) -> Result<SNode, ParserError> {
+        self.parse_pipeline_with_pub(false)
+    }
+
+    pub(super) fn parse_import(&mut self) -> Result<SNode, ParserError> {
+        self.parse_import_with_pub(false)
+    }
+
+    pub(super) fn parse_import_with_pub(&mut self, is_pub: bool) -> Result<SNode, ParserError> {
+        let start = self.current_span();
+        self.consume(&TokenKind::Import, "import")?;
+
+        // Scoped selective import sugar:
+        // `import std::personas::prelude::{ foo, bar }`.
+        //
+        // The module graph already speaks in slash-delimited import paths, so
+        // the parser lowers this surface into the same SelectiveImport node
+        // used by `import { foo, bar } from "std/..."`.
+        if matches!(self.current_kind(), Some(TokenKind::Identifier(_)))
+            && self.peek_kind() == Some(&TokenKind::Colon)
+            && self.peek_kind_at(2) == Some(&TokenKind::Colon)
+        {
+            return self.parse_scoped_selective_import(start, is_pub);
+        }
+
+        // Namespace import: `import * as alias from "module"`.
+        if self.check(&TokenKind::Star) {
+            self.advance();
+            if !self.check_identifier("as") {
+                return Err(self.error("'as'"));
+            }
+            self.advance();
+            let alias = self.consume_identifier("namespace import alias")?;
+            self.consume(&TokenKind::From, "from")?;
+            if let Some(tok) = self.current() {
+                if let TokenKind::StringLiteral(path) = &tok.kind {
+                    let path = path.clone();
+                    self.advance();
+                    return Ok(spanned(
+                        Node::NamespaceImport {
+                            alias,
+                            path,
+                            is_pub,
+                        },
+                        Span::merge(start, self.prev_span()),
+                    ));
+                }
+            }
+            return Err(self.error("import path string"));
+        }
+
+        // Selective import: `import { foo, bar } from "module"`.
+        if self.check(&TokenKind::LBrace) {
+            self.advance();
+            self.skip_newlines();
+            let mut names = Vec::new();
+            while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
+                let name = self.consume_identifier("import name")?;
+                names.push(name);
+                self.skip_newlines();
+                if self.check(&TokenKind::Comma) {
+                    self.advance();
+                    self.skip_newlines();
+                }
+            }
+            self.consume(&TokenKind::RBrace, "}")?;
+            self.consume(&TokenKind::From, "from")?;
+            if let Some(tok) = self.current() {
+                if let TokenKind::StringLiteral(path) = &tok.kind {
+                    let path = path.clone();
+                    self.advance();
+                    return Ok(spanned(
+                        Node::SelectiveImport {
+                            names,
+                            path,
+                            is_pub,
+                        },
+                        Span::merge(start, self.prev_span()),
+                    ));
+                }
+            }
+            return Err(self.error("import path string"));
+        }
+
+        if let Some(tok) = self.current() {
+            if let TokenKind::StringLiteral(path) = &tok.kind {
+                let path = path.clone();
+                self.advance();
+                return Ok(spanned(
+                    Node::ImportDecl { path, is_pub },
+                    Span::merge(start, self.prev_span()),
+                ));
+            }
+        }
+        Err(self.error("import path string"))
+    }
+
+    fn parse_scoped_selective_import(
+        &mut self,
+        start: Span,
+        is_pub: bool,
+    ) -> Result<SNode, ParserError> {
+        let mut segments = vec![self.consume_identifier("scoped import path segment")?];
+
+        loop {
+            self.consume_double_colon("::")?;
+            if self.check(&TokenKind::LBrace) {
+                break;
+            }
+            segments.push(self.consume_identifier("scoped import path segment")?);
+        }
+
+        self.consume(&TokenKind::LBrace, "{")?;
+        self.skip_newlines();
+        let mut names = Vec::new();
+        while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
+            let name = self.consume_identifier("import name")?;
+            names.push(name);
+            self.skip_newlines();
+            if self.check(&TokenKind::Comma) {
+                self.advance();
+                self.skip_newlines();
+            }
+        }
+        self.consume(&TokenKind::RBrace, "}")?;
+
+        Ok(spanned(
+            Node::SelectiveImport {
+                names,
+                path: segments.join("/"),
+                is_pub,
+            },
+            Span::merge(start, self.prev_span()),
+        ))
+    }
+
+    fn consume_double_colon(&mut self, expected: &str) -> Result<(), ParserError> {
+        self.consume(&TokenKind::Colon, expected)?;
+        self.consume(&TokenKind::Colon, expected)?;
+        Ok(())
+    }
+
+    /// Parse one or more `@attr` / `@attr(args)` attributes followed by a
+    /// declaration. Returns an `AttributedDecl` wrapping the underlying
+    /// declaration. Attributes attach to the next declaration only;
+    /// statements other than declarations after `@attr` raise a parse
+    /// error.
+    pub(super) fn parse_attributed_decl(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
+        let mut attributes = Vec::new();
+        while self.check(&TokenKind::At) {
+            attributes.push(self.parse_one_attribute()?);
+            self.skip_newlines();
+        }
+        // `pipeline` is a top-level form that parse_statement doesn't
+        // dispatch to. Route directly so `@attr pipeline foo(...)` works.
+        let inner = if self.check(&TokenKind::Pipeline) {
+            self.parse_pipeline()?
+        } else {
+            self.parse_statement()?
+        };
+        match &inner.node {
+            Node::FnDecl { .. }
+            | Node::ToolDecl { .. }
+            | Node::SkillDecl { .. }
+            | Node::EvalPackDecl { .. }
+            | Node::Pipeline { .. }
+            | Node::StructDecl { .. }
+            | Node::EnumDecl { .. }
+            | Node::TypeDecl { .. }
+            | Node::InterfaceDecl { .. }
+            | Node::ImplBlock { .. } => {}
+            _ => {
+                return Err(ParserError::Unexpected {
+                    got: "non-declaration statement".into(),
+                    expected:
+                        "fn/tool/skill/eval_pack/pipeline/struct/enum/type/interface/impl declaration after `@attr`"
+                            .into(),
+                    span: inner.span,
+                });
+            }
+        }
+        Ok(spanned(
+            Node::AttributedDecl {
+                attributes,
+                inner: Box::new(inner),
+            },
+            Span::merge(start, self.prev_span()),
+        ))
+    }
+
+    pub(super) fn parse_one_attribute(&mut self) -> Result<Attribute, ParserError> {
+        let at_span = self.current_span();
+        self.consume(&TokenKind::At, "@")?;
+        let name = self.consume_attribute_key("attribute name")?;
+        let mut args = Vec::new();
+        if self.check(&TokenKind::LParen) {
+            self.advance();
+            self.skip_newlines();
+            while !self.check(&TokenKind::RParen) {
+                args.push(self.parse_attribute_arg()?);
+                self.skip_newlines();
+                if self.check(&TokenKind::Comma) {
+                    self.advance();
+                    self.skip_newlines();
+                } else {
+                    break;
+                }
+            }
+            self.consume(&TokenKind::RParen, ")")?;
+        }
+        Ok(Attribute {
+            name,
+            args,
+            span: Span::merge(at_span, self.prev_span()),
+        })
+    }
+
+    pub(super) fn parse_attribute_arg(&mut self) -> Result<AttributeArg, ParserError> {
+        let start = self.current_span();
+        // Detect `key: value` form by looking ahead.
+        if let (Some(t1), Some(t2)) = (self.peek_kind_at(0), self.peek_kind_at(1)) {
+            if is_attribute_key_token(t1) && matches!(t2, TokenKind::Colon) {
+                let key = self.consume_attribute_key("argument name")?;
+                self.consume(&TokenKind::Colon, ":")?;
+                let value = self.parse_attribute_value()?;
+                return Ok(AttributeArg {
+                    name: Some(key),
+                    value,
+                    span: Span::merge(start, self.prev_span()),
+                });
+            }
+        }
+        let value = self.parse_attribute_value()?;
+        Ok(AttributeArg {
+            name: None,
+            value,
+            span: Span::merge(start, self.prev_span()),
+        })
+    }
+
+    /// Parse a compile-time attribute argument value. Attribute values are
+    /// deliberately non-evaluating: literal scalars, bare or dotted
+    /// identifiers used as string sentinels (`github.pr_opened`), lists,
+    /// dicts, and simple call-shaped sentinels such as `schedule("...")`.
+    pub(super) fn parse_attribute_value(&mut self) -> Result<SNode, ParserError> {
+        let span = self.current_span();
+        let tok = self.current().ok_or_else(|| ParserError::UnexpectedEof {
+            expected: "attribute value".into(),
+            span: self.prev_span(),
+        })?;
+        let node = match &tok.kind {
+            TokenKind::StringLiteral(s) => Node::StringLiteral(s.clone()),
+            TokenKind::RawStringLiteral(s) => Node::RawStringLiteral(s.clone()),
+            TokenKind::IntLiteral(i) => Node::IntLiteral(*i),
+            TokenKind::FloatLiteral(f) => Node::FloatLiteral(*f),
+            TokenKind::True => Node::BoolLiteral(true),
+            TokenKind::False => Node::BoolLiteral(false),
+            TokenKind::Nil => Node::NilLiteral,
+            TokenKind::Continue => Node::Identifier("continue".to_string()),
+            TokenKind::Identifier(name) => {
+                let mut name = name.clone();
+                self.advance();
+                while self.check(&TokenKind::Dot) {
+                    self.advance();
+                    let property = self.consume_identifier("identifier segment after '.'")?;
+                    name.push('.');
+                    name.push_str(&property);
+                }
+                if self.check(&TokenKind::LParen) {
+                    self.advance();
+                    self.skip_newlines();
+                    let mut args = Vec::new();
+                    while !self.check(&TokenKind::RParen) {
+                        args.push(self.with_nesting("attribute argument", |parser| {
+                            parser.parse_attribute_value()
+                        })?);
+                        self.skip_newlines();
+                        if self.check(&TokenKind::Comma) {
+                            self.advance();
+                            self.skip_newlines();
+                        } else {
+                            break;
+                        }
+                    }
+                    self.consume(&TokenKind::RParen, ")")?;
+                    return Ok(spanned(
+                        Node::FunctionCall {
+                            name,
+                            type_args: Vec::new(),
+                            args,
+                        },
+                        Span::merge(span, self.prev_span()),
+                    ));
+                }
+                return Ok(spanned(
+                    Node::Identifier(name),
+                    Span::merge(span, self.prev_span()),
+                ));
+            }
+            TokenKind::LBracket => {
+                self.advance();
+                self.skip_newlines();
+                let mut items = Vec::new();
+                while !self.check(&TokenKind::RBracket) {
+                    items.push(self.with_nesting("attribute list item", |parser| {
+                        parser.parse_attribute_value()
+                    })?);
+                    self.skip_newlines();
+                    if self.check(&TokenKind::Comma) {
+                        self.advance();
+                        self.skip_newlines();
+                    } else {
+                        break;
+                    }
+                }
+                self.consume(&TokenKind::RBracket, "]")?;
+                return Ok(spanned(
+                    Node::ListLiteral(items),
+                    Span::merge(span, self.prev_span()),
+                ));
+            }
+            TokenKind::LBrace => {
+                self.advance();
+                self.skip_newlines();
+                let mut entries = Vec::new();
+                while !self.check(&TokenKind::RBrace) {
+                    let key_span = self.current_span();
+                    let key = match self.current_kind().cloned() {
+                        Some(TokenKind::Identifier(name)) => {
+                            self.advance();
+                            spanned(Node::Identifier(name), key_span)
+                        }
+                        Some(TokenKind::Retry) => {
+                            self.advance();
+                            spanned(Node::Identifier("retry".to_string()), key_span)
+                        }
+                        Some(TokenKind::StringLiteral(name)) => {
+                            self.advance();
+                            spanned(Node::StringLiteral(name), key_span)
+                        }
+                        Some(TokenKind::RawStringLiteral(name)) => {
+                            self.advance();
+                            spanned(Node::RawStringLiteral(name), key_span)
+                        }
+                        _ => return Err(self.error("attribute dict key")),
+                    };
+                    self.consume(&TokenKind::Colon, ":")?;
+                    self.skip_newlines();
+                    let value = self.with_nesting("attribute dict value", |parser| {
+                        parser.parse_attribute_value()
+                    })?;
+                    entries.push(DictEntry { key, value });
+                    self.skip_newlines();
+                    if self.check(&TokenKind::Comma) {
+                        self.advance();
+                        self.skip_newlines();
+                    } else {
+                        break;
+                    }
+                }
+                self.consume(&TokenKind::RBrace, "}")?;
+                return Ok(spanned(
+                    Node::DictLiteral(entries),
+                    Span::merge(span, self.prev_span()),
+                ));
+            }
+            TokenKind::Minus => {
+                self.advance();
+                let inner_tok = self.current().ok_or_else(|| ParserError::UnexpectedEof {
+                    expected: "number after '-'".into(),
+                    span: self.prev_span(),
+                })?;
+                let n = match &inner_tok.kind {
+                    TokenKind::IntLiteral(i) => Node::IntLiteral(-i),
+                    TokenKind::FloatLiteral(f) => Node::FloatLiteral(-f),
+                    _ => {
+                        return Err(self.error("number after '-' in attribute argument"));
+                    }
+                };
+                self.advance();
+                return Ok(spanned(n, Span::merge(span, self.prev_span())));
+            }
+            _ => return Err(self.error("attribute argument value")),
+        };
+        self.advance();
+        Ok(spanned(node, span))
+    }
+
+    fn consume_attribute_key(&mut self, expected: &str) -> Result<String, ParserError> {
+        match self.current_kind().cloned() {
+            Some(TokenKind::Identifier(name)) => {
+                self.advance();
+                Ok(name)
+            }
+            Some(TokenKind::Retry) => {
+                self.advance();
+                Ok("retry".to_string())
+            }
+            _ => Err(self.error(expected)),
+        }
+    }
+
+    pub(super) fn parse_fn_decl_with_pub(&mut self, is_pub: bool) -> Result<SNode, ParserError> {
+        self.parse_fn_decl_with_pub_and_stream(is_pub, false)
+    }
+
+    pub(super) fn parse_gen_fn_decl_with_pub(
+        &mut self,
+        is_pub: bool,
+    ) -> Result<SNode, ParserError> {
+        self.parse_fn_decl_with_pub_and_stream(is_pub, true)
+    }
+
+    fn parse_fn_decl_with_pub_and_stream(
+        &mut self,
+        is_pub: bool,
+        is_stream: bool,
+    ) -> Result<SNode, ParserError> {
+        let start = self.current_span();
+        if is_stream {
+            self.consume_contextual_keyword("gen", "gen")?;
+        }
+        self.consume(&TokenKind::Fn, "fn")?;
+        let name = self.consume_identifier("function name")?;
+
+        let type_params = if self.check(&TokenKind::Lt) {
+            self.advance();
+            self.parse_type_param_list()?
+        } else {
+            Vec::new()
+        };
+
+        self.consume(&TokenKind::LParen, "(")?;
+        let params = self.parse_typed_param_list()?;
+        self.consume(&TokenKind::RParen, ")")?;
+        let return_type = if self.check(&TokenKind::Arrow) {
+            self.advance();
+            Some(self.parse_type_expr()?)
+        } else {
+            None
+        };
+
+        let throws = self.parse_optional_throws()?;
+
+        let where_clauses = self.parse_where_clauses()?;
+
+        self.consume(&TokenKind::LBrace, "{")?;
+        let body = self.parse_block()?;
+        self.consume(&TokenKind::RBrace, "}")?;
+        Ok(spanned(
+            Node::FnDecl {
+                name,
+                type_params,
+                params,
+                return_type,
+                throws,
+                where_clauses,
+                body,
+                is_pub,
+                is_stream,
+            },
+            Span::merge(start, self.prev_span()),
+        ))
+    }
+
+    pub(super) fn parse_tool_decl(&mut self, is_pub: bool) -> Result<SNode, ParserError> {
+        let start = self.current_span();
+        self.consume(&TokenKind::Tool, "tool")?;
+        let name = self.consume_identifier("tool name")?;
+
+        self.consume(&TokenKind::LParen, "(")?;
+        let params = self.parse_typed_param_list()?;
+        self.consume(&TokenKind::RParen, ")")?;
+
+        let return_type = if self.check(&TokenKind::Arrow) {
+            self.advance();
+            Some(self.parse_type_expr()?)
+        } else {
+            None
+        };
+
+        let throws = self.parse_optional_throws()?;
+
+        self.consume(&TokenKind::LBrace, "{")?;
+
+        // Optional `description "..."` metadata preceding the tool body.
+        self.skip_newlines();
+        let mut description = None;
+        if let Some(TokenKind::Identifier(id)) = self.current_kind().cloned() {
+            if id == "description" {
+                let saved_pos = self.pos;
+                self.advance();
+                self.skip_newlines();
+                if let Some(TokenKind::StringLiteral(s)) = self.current_kind().cloned() {
+                    description = Some(s);
+                    self.advance();
+                } else {
+                    self.pos = saved_pos;
+                }
+            }
+        }
+
+        if description.is_some() {
+            let desc_end_line = self.prev_span().end_line;
+            let consumed_sep = self.consume_statement_separator();
+            if !consumed_sep && !self.check(&TokenKind::RBrace) {
+                self.require_statement_separator(desc_end_line, "tool body item")?;
+            }
+        }
+
+        let body = self.parse_block()?;
+        self.consume(&TokenKind::RBrace, "}")?;
+
+        Ok(spanned(
+            Node::ToolDecl {
+                name,
+                description,
+                params,
+                return_type,
+                throws,
+                body,
+                is_pub,
+            },
+            Span::merge(start, self.prev_span()),
+        ))
+    }
+
+    /// Parse a top-level `pub? skill NAME { <field> <expr> ... }` declaration.
+    ///
+    /// Each body entry is a `<field_name_identifier> <expression>` pair.
+    /// Newlines separate entries. Lifecycle hooks are ordinary fn-literal
+    /// expressions (`on_activate fn() { ... }`). No field names are
+    /// reserved at the parser level — the compiler validates the schema.
+    pub(super) fn parse_skill_decl(&mut self, is_pub: bool) -> Result<SNode, ParserError> {
+        let start = self.current_span();
+        self.consume(&TokenKind::Skill, "skill")?;
+        let name = self.consume_identifier("skill name")?;
+        self.consume(&TokenKind::LBrace, "{")?;
+
+        let mut fields: Vec<(String, SNode)> = Vec::new();
+        loop {
+            self.skip_newlines();
+            if self.check(&TokenKind::RBrace) {
+                break;
+            }
+            let field_name = self.consume_identifier("skill field name")?;
+            self.skip_newlines();
+            let value = self.parse_expression()?;
+            let value_end_line = value.span.end_line;
+            fields.push((field_name, value));
+            let consumed_sep = self.consume_statement_separator();
+            if !consumed_sep && !self.check(&TokenKind::RBrace) {
+                self.require_statement_separator(value_end_line, "skill field")?;
+            }
+        }
+        self.consume(&TokenKind::RBrace, "}")?;
+
+        Ok(spanned(
+            Node::SkillDecl {
+                name,
+                fields,
+                is_pub,
+            },
+            Span::merge(start, self.prev_span()),
+        ))
+    }
+
+    /// Parse a first-class eval pack declaration.
+    ///
+    /// Supported headers:
+    /// - `eval_pack my_pack { ... }`
+    /// - `eval_pack my_pack "pack-id" { ... }`
+    /// - `eval_pack "pack-id" { ... }` (binds a sanitized identifier)
+    ///
+    /// Body entries are either `field: expr` manifest fields, ordinary
+    /// statements that make up the executable eval body, or one trailing
+    /// `summarize { ... }` block.
+    pub(super) fn parse_eval_pack_decl(&mut self, is_pub: bool) -> Result<SNode, ParserError> {
+        let start = self.current_span();
+        self.consume(&TokenKind::EvalPack, "eval_pack")?;
+
+        let (binding_name, pack_id) = match self.current_kind().cloned() {
+            Some(TokenKind::Identifier(name)) => {
+                self.advance();
+                let pack_id =
+                    if let Some(TokenKind::StringLiteral(id)) = self.current_kind().cloned() {
+                        self.advance();
+                        id
+                    } else {
+                        name.clone()
+                    };
+                (name, pack_id)
+            }
+            Some(TokenKind::StringLiteral(id)) => {
+                self.advance();
+                (sanitize_eval_pack_binding(&id), id)
+            }
+            _ => return Err(self.error("eval_pack name or string id")),
+        };
+
+        self.consume(&TokenKind::LBrace, "{")?;
+        let mut fields = Vec::new();
+        let mut body = Vec::new();
+        let mut summarize = None;
+
+        loop {
+            self.skip_newlines();
+            if self.check(&TokenKind::RBrace) {
+                break;
+            }
+
+            let is_summarize = matches!(
+                (self.peek_kind_at(0), self.peek_kind_at(1)),
+                (Some(TokenKind::Identifier(name)), Some(TokenKind::LBrace)) if name == "summarize"
+            );
+            if is_summarize {
+                let summarize_start = self.current_span();
+                self.advance();
+                self.consume(&TokenKind::LBrace, "{")?;
+                let block = self.parse_block()?;
+                self.consume(&TokenKind::RBrace, "}")?;
+                if summarize.replace(block).is_some() {
+                    return Err(ParserError::Unexpected {
+                        got: "duplicate summarize block".into(),
+                        expected: "one summarize block".into(),
+                        span: summarize_start,
+                    });
+                }
+                let consumed_sep = self.consume_statement_separator();
+                if !consumed_sep && !self.check(&TokenKind::RBrace) {
+                    self.require_statement_separator(self.prev_span().end_line, "eval_pack item")?;
+                }
+                continue;
+            }
+
+            let is_field = matches!(
+                (self.peek_kind_at(0), self.peek_kind_at(1)),
+                (Some(TokenKind::Identifier(_)), Some(TokenKind::Colon))
+            );
+            if is_field {
+                let field_name = self.consume_identifier("eval_pack field name")?;
+                self.consume(&TokenKind::Colon, ":")?;
+                self.skip_newlines();
+                let value = self.parse_expression()?;
+                let value_end_line = value.span.end_line;
+                fields.push((field_name, value));
+                let consumed_sep = self.consume_statement_separator();
+                if !consumed_sep && !self.check(&TokenKind::RBrace) {
+                    self.require_statement_separator(value_end_line, "eval_pack field")?;
+                }
+                continue;
+            }
+
+            let stmt = self.parse_statement()?;
+            let end_line = stmt.span.end_line;
+            body.push(stmt);
+            let consumed_sep = self.consume_statement_separator();
+            if !consumed_sep && !self.check(&TokenKind::RBrace) {
+                self.require_statement_separator(end_line, "eval_pack body statement")?;
+            }
+        }
+        self.consume(&TokenKind::RBrace, "}")?;
+
+        Ok(spanned(
+            Node::EvalPackDecl {
+                binding_name,
+                pack_id,
+                fields,
+                body,
+                summarize,
+                is_pub,
+            },
+            Span::merge(start, self.prev_span()),
+        ))
+    }
+
+    pub(super) fn parse_type_decl_with_pub(&mut self, is_pub: bool) -> Result<SNode, ParserError> {
+        let start = self.current_span();
+        self.consume(&TokenKind::TypeKw, "type")?;
+        let name = self.consume_identifier("type name")?;
+        let type_params = if self.check(&TokenKind::Lt) {
+            self.advance();
+            self.parse_type_param_list()?
+        } else {
+            Vec::new()
+        };
+        self.consume(&TokenKind::Assign, "=")?;
+        let type_expr = self.parse_type_expr()?;
+        Ok(spanned(
+            Node::TypeDecl {
+                name,
+                type_params,
+                type_expr,
+                is_pub,
+            },
+            Span::merge(start, self.prev_span()),
+        ))
+    }
+
+    pub(super) fn parse_enum_decl_with_pub(&mut self, is_pub: bool) -> Result<SNode, ParserError> {
+        let start = self.current_span();
+        self.consume(&TokenKind::Enum, "enum")?;
+        let name = self.consume_identifier("enum name")?;
+        let type_params = if self.check(&TokenKind::Lt) {
+            self.advance();
+            self.parse_type_param_list()?
+        } else {
+            Vec::new()
+        };
+        self.consume(&TokenKind::LBrace, "{")?;
+        self.skip_newlines();
+
+        let mut variants = Vec::new();
+        while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
+            let variant_start = self.current_span();
+            let variant_name = self.consume_identifier("variant name")?;
+            let fields = if self.check(&TokenKind::LParen) {
+                self.advance();
+                let params = self.parse_typed_param_list()?;
+                self.consume(&TokenKind::RParen, ")")?;
+                params
+            } else {
+                Vec::new()
+            };
+            variants.push(EnumVariant {
+                name: variant_name,
+                fields,
+                span: Span::merge(variant_start, self.prev_span()),
+            });
+            self.skip_newlines();
+            if self.check(&TokenKind::Comma) {
+                self.advance();
+                self.skip_newlines();
+            }
+        }
+
+        self.consume(&TokenKind::RBrace, "}")?;
+        Ok(spanned(
+            Node::EnumDecl {
+                name,
+                type_params,
+                variants,
+                is_pub,
+            },
+            Span::merge(start, self.prev_span()),
+        ))
+    }
+
+    pub(super) fn parse_enum_decl(&mut self) -> Result<SNode, ParserError> {
+        self.parse_enum_decl_with_pub(false)
+    }
+
+    pub(super) fn parse_struct_decl_with_pub(
+        &mut self,
+        is_pub: bool,
+    ) -> Result<SNode, ParserError> {
+        let start = self.current_span();
+        self.consume(&TokenKind::Struct, "struct")?;
+        let name = self.consume_identifier("struct name")?;
+        let type_params = if self.check(&TokenKind::Lt) {
+            self.advance();
+            self.parse_type_param_list()?
+        } else {
+            Vec::new()
+        };
+        self.consume(&TokenKind::LBrace, "{")?;
+        self.skip_newlines();
+
+        let mut fields = Vec::new();
+        while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
+            let field_start = self.current_span();
+            let field_name = self.consume_identifier("field name")?;
+            let optional = if self.check(&TokenKind::Question) {
+                self.advance();
+                true
+            } else {
+                false
+            };
+            let type_expr = self.try_parse_type_annotation()?;
+            fields.push(StructField {
+                name: field_name,
+                type_expr,
+                optional,
+                span: Span::merge(field_start, self.prev_span()),
+            });
+            self.skip_newlines();
+            if self.check(&TokenKind::Comma) {
+                self.advance();
+                self.skip_newlines();
+            }
+        }
+
+        self.consume(&TokenKind::RBrace, "}")?;
+        Ok(spanned(
+            Node::StructDecl {
+                name,
+                type_params,
+                fields,
+                is_pub,
+            },
+            Span::merge(start, self.prev_span()),
+        ))
+    }
+
+    pub(super) fn parse_struct_decl(&mut self) -> Result<SNode, ParserError> {
+        self.parse_struct_decl_with_pub(false)
+    }
+
+    pub(super) fn parse_interface_decl(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
+        self.consume(&TokenKind::Interface, "interface")?;
+        let name = self.consume_identifier("interface name")?;
+        let type_params = if self.check(&TokenKind::Lt) {
+            self.advance();
+            self.parse_type_param_list()?
+        } else {
+            Vec::new()
+        };
+        self.consume(&TokenKind::LBrace, "{")?;
+        self.skip_newlines();
+
+        let mut associated_types = Vec::new();
+        let mut methods = Vec::new();
+        while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
+            if self.check(&TokenKind::TypeKw) {
+                let assoc_start = self.current_span();
+                self.advance();
+                let assoc_name = self.consume_identifier("associated type name")?;
+                let assoc_default = if self.check(&TokenKind::Assign) {
+                    self.advance();
+                    Some(self.parse_type_expr()?)
+                } else {
+                    None
+                };
+                associated_types.push(AssociatedType {
+                    name: assoc_name,
+                    default: assoc_default,
+                    span: Span::merge(assoc_start, self.prev_span()),
+                });
+            } else {
+                let method_start = self.current_span();
+                self.consume(&TokenKind::Fn, "fn")?;
+                let method_name = self.consume_identifier("method name")?;
+                let method_type_params = if self.check(&TokenKind::Lt) {
+                    self.advance();
+                    self.parse_type_param_list()?
+                } else {
+                    Vec::new()
+                };
+                self.consume(&TokenKind::LParen, "(")?;
+                let params = self.parse_typed_param_list()?;
+                self.consume(&TokenKind::RParen, ")")?;
+                let return_type = if self.check(&TokenKind::Arrow) {
+                    self.advance();
+                    Some(self.parse_type_expr()?)
+                } else {
+                    None
+                };
+                methods.push(InterfaceMethod {
+                    name: method_name,
+                    type_params: method_type_params,
+                    params,
+                    return_type,
+                    span: Span::merge(method_start, self.prev_span()),
+                });
+            }
+            self.skip_newlines();
+        }
+
+        self.consume(&TokenKind::RBrace, "}")?;
+        Ok(spanned(
+            Node::InterfaceDecl {
+                name,
+                type_params,
+                associated_types,
+                methods,
+            },
+            Span::merge(start, self.prev_span()),
+        ))
+    }
+
+    pub(super) fn parse_impl_block(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
+        self.consume(&TokenKind::Impl, "impl")?;
+        let type_name = self.consume_identifier("type name")?;
+        self.consume(&TokenKind::LBrace, "{")?;
+        self.skip_newlines();
+
+        let mut methods = Vec::new();
+        while !self.is_at_end() && !self.check(&TokenKind::RBrace) {
+            let is_pub = self.check(&TokenKind::Pub);
+            if is_pub {
+                self.advance();
+            }
+            let method = self.parse_fn_decl_with_pub(is_pub)?;
+            methods.push(method);
+            self.skip_newlines();
+        }
+
+        self.consume(&TokenKind::RBrace, "}")?;
+        Ok(spanned(
+            Node::ImplBlock { type_name, methods },
+            Span::merge(start, self.prev_span()),
+        ))
+    }
+}
