@@ -253,9 +253,7 @@ impl Code {
             Code::LintUnusedVariable
             | Code::LintUnusedPatternBinding
             | Code::LintUnusedParameter => Some(&REPAIR_BINDINGS_RENAME_UNUSED),
-            Code::LintCapabilityParameterName => {
-                Some(&REPAIR_BINDINGS_NAME_CAPABILITY_PARAMETER)
-            }
+            Code::LintCapabilityParameterName => Some(&REPAIR_BINDINGS_NAME_CAPABILITY_PARAMETER),
             Code::LintUnusedImport => Some(&REPAIR_IMPORTS_REMOVE_UNUSED),
             Code::LintUnusedFunction | Code::LintUnusedType => {
                 Some(&REPAIR_DECLARATIONS_REMOVE_UNUSED)

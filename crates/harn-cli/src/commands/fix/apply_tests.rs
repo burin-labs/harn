@@ -93,8 +93,12 @@ fn code_selector_does_not_defer_to_an_unselected_whole_program_pass() {
     .unwrap();
 
     let rename = Code::LintCapabilityParameterName;
-    let unselected = build_plan_with_options(&script, Some(RepairSafety::SurfaceChanging), &FixOptions::default())
-        .unwrap();
+    let unselected = build_plan_with_options(
+        &script,
+        Some(RepairSafety::SurfaceChanging),
+        &FixOptions::default(),
+    )
+    .unwrap();
     assert!(
         unselected
             .diagnostics
