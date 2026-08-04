@@ -20,12 +20,17 @@ scripts/with_env.sh harn run --no-sandbox release_harn.harn -- \
   --yes-live-release
 ```
 
-`ship-pr` prepares the release content, commits it, pushes the branch, pushes
-the signed `vX.Y.Z` tag at the pinned release commit, opens the `Release
-vX.Y.Z` PR, enables auto-merge, and writes a durable post-tag watch receipt.
-The tag is pushed before the PR merges so crates.io, release notes, binaries,
-and the container are built from the pinned tag commit, not from whatever is
-on `main` later.
+`ship-pr` does the following:
+
+- Prepares the release content and commits it.
+- Pushes the branch, and pushes the signed `vX.Y.Z` tag at the pinned release
+  commit.
+- Opens the `Release vX.Y.Z` PR and enables auto-merge.
+- Writes a durable post-tag watch receipt.
+
+The tag is pushed before the PR merges. That way crates.io, release notes,
+binaries, and the container are all built from the pinned tag commit, not from
+whatever is on `main` later.
 
 ## Flow
 
@@ -56,16 +61,20 @@ scripts/with_env.sh harn run --no-sandbox watch_harn_release.harn -- \
 ```
 
 The watcher is restart-safe. It adopts the exact workflow identities recorded
-in `.harn-runs/release-harn/watches/vX.Y.Z.json`, may dispatch bounded binary
+in `.harn-runs/release-harn/watches/vX.Y.Z.json`. It may dispatch bounded binary
 recovery, keeps the release PR armed, and continues through the post-merge
 default-branch cache warm. Poll exhaustion is a durable pending state, not
 success; rerun the same command to resume it.
 
-Terminal proof requires the signed tag, crates.io publication, the tag-keyed
-publish/build workflows, all five platform archives, `SHA256SUMS`,
-`release-assets.json`, the merged release PR, and the exact five-job cache-warm
-matrix to be successful. `--no-warm-cache` is an explicit release-only escape
-hatch, not the default.
+Terminal proof requires all of these to be successful:
+
+- The signed tag and crates.io publication.
+- The tag-keyed publish/build workflows.
+- All five platform archives, plus `SHA256SUMS` and `release-assets.json`.
+- The merged release PR.
+- The exact five-job cache-warm matrix.
+
+`--no-warm-cache` is an explicit release-only escape hatch, not the default.
 
 ## Source of truth
 
@@ -135,10 +144,10 @@ hatch, not the default.
 - Do not pass `--squash`, `--merge`, or `--rebase` to `gh pr merge --auto`;
   branch protection chooses the strategy.
 - Do not hand-edit generated files. Edit sources and regenerate.
-- Do not declare the release complete until the signed tag dereferences to the
-  intended release commit, that commit contains the exact `--at-sha` parent and
-  every `--expect-pr` prerequisite, and the durable watcher reaches terminal
-  health with the required assets and warm-matrix proof.
+- Do not declare the release complete until all three hold. The signed tag
+  dereferences to the intended release commit. That commit contains the exact
+  `--at-sha` parent and every `--expect-pr` prerequisite. The durable watcher
+  reaches terminal health with the required assets and warm-matrix proof.
 - Cross-repo consumers do not wait on a release. For `burin-code`, use
   `./scripts/fetch-harn.sh --local` in that repo to build from
   `~/projects/harn` during iteration.

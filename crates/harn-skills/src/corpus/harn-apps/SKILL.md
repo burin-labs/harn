@@ -88,9 +88,14 @@ and handled event trace. Assert stable element IDs and meaningful state. Use
 mock providers and Harn's mock clock for model-job state changes. Do not use
 wall-clock sleeps or polling in tests.
 
-Then run the app through its real host. Prove that the expected tool fired,
-effects completed, state survived a restart, and the user can recover from a
-provider error or cancel an active job. Use a real model for quality claims and
+Then run the app through its real host. Prove four things:
+
+- The expected tool fired.
+- Effects completed.
+- State survived a restart.
+- The user can recover from a provider error, or cancel an active job.
+
+Use a real model for quality claims and
 repeat stochastic trials when the claim depends on output quality.
 
 ## Follow the protocols

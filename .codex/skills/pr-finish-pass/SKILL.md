@@ -5,10 +5,10 @@ description: Final-polish pass on the current PR or feature branch before it lan
 
 # pr-finish-pass
 
-Final-polish sweep on whatever work is currently in flight — usually a
-named PR, but it works equally well on an unpushed feature branch or a
-session's accumulated diff. The goal is to get the change to a state a
-senior reviewer would land without comments.
+Final-polish sweep on whatever work is currently in flight. That is
+usually a named PR, but it works equally well on an unpushed feature
+branch or a session's accumulated diff. The goal is to get the change to
+a state a senior reviewer would land without comments.
 
 The sweep is **not** a generic code review. It targets the recurring
 issues this repo accumulates between "the feature works" and "the PR is
@@ -183,10 +183,10 @@ Strip every comment that a senior engineer would not have written:
   items`, `// return the result`. If the comment paraphrases the line
   below it, delete it.
 - **References to private / cross-org repos by name:** this repo is
-  open-source. Replace `burin-code`, `burin-labs/...`, or specific
-  internal product names with neutral phrasing — "a Harn integrator",
-  "a Harn host", "a Harn Cloud workspace", "a downstream Harn
-  consumer." External integrators read this code.
+  open-source, and external integrators read this code. Replace
+  `burin-code`, `burin-labs/...`, or internal product names with
+  neutral phrasing. Use "a Harn integrator", "a Harn host", "a Harn
+  Cloud workspace", or "a downstream Harn consumer."
 - **Task-bound or PR-bound comments:** "added for ticket #1234", "see
   PR #4567", "needed by the foo flow". Move the rationale to the
   commit message / PR description and delete the comment.
@@ -227,8 +227,8 @@ the checklist for every public-surface change:
 - **CLI surface change** → help text, README, docs, `harn-quickref.md`.
 
 If the diff touches behavior the portal renders, run the portal
-locally and check the affected view actually still works — unit tests
-miss UI drift.
+locally and check that the affected view still works. Unit tests miss
+UI drift.
 
 ### 3.5 DRY / polish
 
@@ -247,10 +247,11 @@ similar lines is not a refactor opportunity.
 
 ### 3.6 Rust → Harn opportunities
 
-If the diff added Rust code that looks like agent orchestration
-plumbing — sequencing LLM calls, retrying with different prompts,
-collecting structured outputs, branching on tool-use results — ask:
-could this be a `.harn` script composing primitive host capabilities?
+Look for Rust code the diff added that resembles agent orchestration
+plumbing. That means sequencing LLM calls, retrying with different
+prompts, collecting structured outputs, or branching on tool-use
+results. Ask whether it could be a `.harn` script that composes
+primitive host capabilities.
 
 Heuristics:
 
@@ -266,14 +267,14 @@ If the answer is yes, prefer the Harn script form. The Rust side
 should be the primitive host capability, not the orchestration. This
 is the trust boundary the repo is built on.
 
-If a refactor is too large for the current PR, file an issue with the
-specific surface to migrate and link it from the PR description.
+If a refactor is too large for the current PR, file an issue naming the
+surface to migrate. Link that issue from the PR description.
 
 ### 3.7 prompt prose that belongs in `.harn.prompt` files
 
-Long prompt strings embedded in Rust (or in `.harn` scripts as inline
-literals) should usually live in `.harn.prompt` files and be rendered
-via `template.render` / `render_prompt(...)`. Reasons:
+Long prompt strings embedded in Rust, or in `.harn` scripts as inline
+literals, should usually live in `.harn.prompt` files instead. Render
+them via `template.render` / `render_prompt(...)`. Reasons:
 
 - Harness authors can override them without forking the crate.
 - Templates support partial application, includes, and filters.
@@ -296,9 +297,9 @@ target. Split candidates:
 
 - A module with three independent submodules separated by big banner
   comments → three `mod foo` files.
-- A single struct with 40+ methods grouped by concern (parsing /
-  formatting / executing) → split into impl blocks in separate files,
-  or break the struct by concern.
+- A single struct with 40+ methods grouped by concern (parsing,
+  formatting, executing) → split it into impl blocks in separate
+  files. Or break the struct up by concern.
 - Tests inline with > 500 lines of `#[test]` → move to a `tests.rs`
   sibling.
 

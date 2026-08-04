@@ -80,11 +80,11 @@ A real release lands as **one** commit on `main` after squash:
 
 1. `Release vX.Y.Z` — code + docs + `CHANGELOG.md` + Cargo.toml /
    Cargo.lock + per-crate manifest bumps + regenerated mirrors.
-   Authored by you via `release_ship.sh --prepare --bump <type>`,
-   then **rebased onto latest `origin/main` before push** (because
-   `--prepare` takes 1–15 min and main may have moved during),
-   landed through PR / merge queue with `gh pr merge --auto`
-   enabled so it lands as soon as CI is green.
+   Authored by you via `release_ship.sh --prepare --bump <type>`.
+   Then **rebased onto latest `origin/main` before push**, because
+   `--prepare` takes 1–15 min and main may have moved meanwhile.
+   Landed through PR / merge queue with `gh pr merge --auto`
+   enabled, so it lands as soon as CI is green.
 
 That's it. The bot takes over once it lands.
 
@@ -106,10 +106,10 @@ is a published-version concern, not a developer-loop concern.
   "Build release binaries") — fires on tag push. Also accepts a
   `tag` input via `workflow_dispatch` for re-running against an
   existing tag.
-- `.github/workflows/bump-release.yml` (display name: "Open
-  version bump PR (recovery)") — `workflow_dispatch` only; used to
-  reconstruct a bump PR if a "Prepare vX.Y.Z release"-style commit
-  accidentally lands on main without the consolidated bump.
+- `.github/workflows/bump-release.yml`, display name "Open version bump
+  PR (recovery)". It is `workflow_dispatch` only. Use it to reconstruct
+  a bump PR if a "Prepare vX.Y.Z release"-style commit accidentally
+  lands on main without the consolidated bump.
 
 ## Hard rules
 

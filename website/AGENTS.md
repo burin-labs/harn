@@ -15,8 +15,8 @@ npm run build      # tsc + client + SSR + prerender into ../docs/dist
 ```
 
 Run typecheck, test, and build before pushing. The build is the real integration
-test: it prerenders every doc page through SSR, so a broken component or import
-fails there even when dev looks fine.
+test, because it prerenders every doc page through SSR. A broken component or
+import fails there even when dev looks fine.
 
 ## Conventions
 
