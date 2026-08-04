@@ -20,6 +20,23 @@ updates:
         patterns:
           - "opentelemetry*"
           - "tracing-opentelemetry"
+      # Everything else routine, in one weekly PR. Majors match no group and
+      # keep their own PR and their own revert. The excludes are what keep the
+      # named families above out of this batch: GitHub would resolve the
+      # overlap by file order, but an explicit exclusion is a property of the
+      # group rather than of its position, and `scripts/check_dependabot_groups.harn`
+      # can check it.
+      cargo-minor-patch:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "cranelift-*"
+          - "wasmtime*"
+          - "opentelemetry*"
+          - "tracing-opentelemetry"
+        update-types:
+          - "minor"
+          - "patch"
     cooldown:
       default-days: 7
 
@@ -39,10 +56,18 @@ updates:
         patterns:
           - "react"
           - "react-dom"
-      npm:
+      # Spans every configured directory. Dependabot still splits a group when
+      # two directories need incompatible versions of one package, so a portal
+      # constraint cannot drag the VS Code extension along with it.
+      npm-minor-patch:
         patterns:
           - "*"
-        group-by: "dependency-name"
+        exclude-patterns:
+          - "react"
+          - "react-dom"
+        update-types:
+          - "minor"
+          - "patch"
     cooldown:
       default-days: 7
 

@@ -1,34 +1,74 @@
 import "std/schema"
 
-type DependabotGroup = {patterns: list<string>}
+type DependabotGroup = {
+  patterns: list<string>,
+  exclude_patterns: list<string>,
+  update_types: list<string>,
+}
 
-pub type CargoGroupError = {
-  kind: "catch_all" | "missing_group" | "ambiguous_membership",
+/**
+ * What one package ecosystem's groups have to look like.
+ *
+ * `families` are the named high-risk sets that must stay reviewable on their
+ * own. `catch_all_update_types` is what the catch-all group is allowed to
+ * sweep up: `["minor", "patch"]` for package ecosystems, so a major keeps its
+ * own PR and its own revert, and `[]` for `github-actions`, where majors are
+ * runner-baseline bumps that arrive fleet-wide and are better batched.
+ */
+type EcosystemPolicy = {families: dict<string, list<string>>, catch_all_update_types: list<string>}
+
+pub type GroupErrorKind = "missing_group" \
+  | "ambiguous_membership" \
+  | "missing_catch_all" \
+  | "extra_catch_all" \
+  | "catch_all_update_types" \
+  | "unknown_ecosystem"
+
+pub type GroupError = {
+  kind: GroupErrorKind,
+  ecosystem: string,
   group: string,
   dependency: string,
   matches: list<string>,
 }
 
-const CARGO_FAMILIES: dict<string, list<string>> = {
-  cranelift: [
-    "cranelift-codegen",
-    "cranelift-frontend",
-    "cranelift-jit",
-    "cranelift-module",
-    "cranelift-native",
-    "cranelift-object",
-  ],
-  wasmtime: ["wasmtime", "wasmtime-wasi"],
-  opentelemetry: [
-    "opentelemetry",
-    "opentelemetry_sdk",
-    "opentelemetry-otlp",
-    "tracing-opentelemetry",
-  ],
+const POLICIES: dict<string, EcosystemPolicy> = {
+  cargo: {
+    families: {
+      cranelift: [
+        "cranelift-codegen",
+        "cranelift-frontend",
+        "cranelift-jit",
+        "cranelift-module",
+        "cranelift-native",
+        "cranelift-object",
+      ],
+      wasmtime: ["wasmtime", "wasmtime-wasi"],
+      opentelemetry: [
+        "opentelemetry",
+        "opentelemetry_sdk",
+        "opentelemetry-otlp",
+        "tracing-opentelemetry",
+      ],
+    },
+    catch_all_update_types: ["minor", "patch"],
+  },
+  npm: {
+    families: {"react-runtime": ["react", "react-dom"]},
+    catch_all_update_types: ["minor", "patch"],
+  },
+  "github-actions": {families: {}, catch_all_update_types: []},
 }
 
 fn dependabot_schema() {
-  const group = schema_object({patterns: schema_field(schema_list(schema_string()))})
+  const group = schema_object(
+    {
+      patterns: schema_field(schema_list(schema_string())),
+      "exclude-patterns": schema_field(schema_list(schema_string()), false),
+      "update-types": schema_field(schema_list(schema_string()), false),
+    },
+    {additional_properties: true},
+  )
   const update = schema_object(
     {
       "package-ecosystem": schema_field(schema_string()),
@@ -42,15 +82,35 @@ fn dependabot_schema() {
   )
 }
 
-/** Parse and normalize the Cargo group map at the owning YAML boundary. */
-pub fn cargo_groups_from_text(text: string) -> dict<string, DependabotGroup> {
+/**
+ * Parse and normalize every ecosystem's group map at the owning YAML boundary.
+ *
+ * Keyed by `package-ecosystem`. A second entry for one ecosystem would make
+ * "the catch-all for cargo" ambiguous, so it fails closed rather than picking
+ * one.
+ */
+pub fn groups_from_text(text: string) -> dict<string, dict<string, DependabotGroup>> {
   const document = unwrap(schema_check(yaml_parse(text), dependabot_schema()))
+  let seen: list<string> = []
+  let entries = []
   for update in document.updates {
-    if update.get("package-ecosystem") == "cargo" {
-      return update.get("groups") ?? {}
+    const ecosystem = update.get("package-ecosystem")
+    if seen.contains(ecosystem) {
+      throw "Dependabot config has two '${ecosystem}' update entries"
     }
+    seen = seen + [ecosystem]
+    const groups = (update.get("groups") ?? {}).map_values(
+      { group ->
+        {
+          patterns: group.patterns,
+          exclude_patterns: group.get("exclude-patterns") ?? [],
+          update_types: group.get("update-types") ?? [],
+        }
+      },
+    )
+    entries = entries + [pair(ecosystem, groups)]
   }
-  throw "Dependabot config has no Cargo update entry"
+  return iter(entries).to_dict()
 }
 
 /** GitHub Dependabot `patterns` use `*` as a zero-or-more wildcard. */
@@ -83,14 +143,36 @@ pub fn dependabot_pattern_matches(pattern: string, dependency: string) -> bool {
   return p == pchars.count
 }
 
+/**
+ * Whether `dependency` belongs to `group`.
+ *
+ * `exclude-patterns` wins over `patterns`, which is what keeps a catch-all
+ * from also claiming a named family. GitHub resolves such an overlap by
+ * assigning the update to the first matching group in file order, but
+ * `yaml_parse` hands back a sorted map, so file order is not observable here
+ * — and a contract that depends on it is one a reader cannot check either.
+ * Excluding the families explicitly makes membership a property of the group
+ * rather than of its position.
+ */
+fn group_matches(group: DependabotGroup, dependency: string) -> bool {
+  for excluded in group.exclude_patterns {
+    if dependabot_pattern_matches(excluded, dependency) {
+      return false
+    }
+  }
+  for pattern in group.patterns {
+    if dependabot_pattern_matches(pattern, dependency) {
+      return true
+    }
+  }
+  return false
+}
+
 pub fn matching_groups(groups: dict<string, DependabotGroup>, dependency: string) -> list<string> {
   let matches: list<string> = []
   for group in groups {
-    for pattern in group.value.patterns {
-      if dependabot_pattern_matches(pattern, dependency) {
-        matches = matches + [group.key]
-        break
-      }
+    if group_matches(group.value, dependency) {
+      matches = matches + [group.key]
     }
   }
   return matches.sorted()
@@ -108,22 +190,28 @@ fn dependabot_pattern_is_catch_all(pattern: string) -> bool {
   return true
 }
 
-pub fn cargo_group_errors(
-  groups: dict<string, DependabotGroup>,
-  families: dict<string, list<string>> = CARGO_FAMILIES,
-) -> list<CargoGroupError> {
-  let errors: list<CargoGroupError> = []
-  for group in groups {
-    for pattern in group.value.patterns {
-      if dependabot_pattern_is_catch_all(pattern) {
-        errors = errors + [{kind: "catch_all", group: group.key, dependency: "", matches: []}]
-        break
-      }
+fn group_is_catch_all(group: DependabotGroup) -> bool {
+  for pattern in group.patterns {
+    if dependabot_pattern_is_catch_all(pattern) {
+      return true
     }
   }
-  for family in families {
+  return false
+}
+
+fn error_at(kind: string, ecosystem: string, group: string) -> GroupError {
+  return {kind: kind, ecosystem: ecosystem, group: group, dependency: "", matches: []}
+}
+
+pub fn ecosystem_errors(
+  ecosystem: string,
+  groups: dict<string, DependabotGroup>,
+  policy: EcosystemPolicy,
+) -> list<GroupError> {
+  let errors: list<GroupError> = []
+  for family in policy.families {
     if groups.get(family.key) == nil {
-      errors = errors + [{kind: "missing_group", group: family.key, dependency: "", matches: []}]
+      errors = errors + [error_at("missing_group", ecosystem, family.key)]
     }
     for dependency in family.value {
       const matches = matching_groups(groups, dependency)
@@ -132,6 +220,7 @@ pub fn cargo_group_errors(
           + [
           {
             kind: "ambiguous_membership",
+            ecosystem: ecosystem,
             group: family.key,
             dependency: dependency,
             matches: matches,
@@ -140,28 +229,88 @@ pub fn cargo_group_errors(
       }
     }
   }
+  let catch_alls: list<string> = []
+  for group in groups {
+    if group_is_catch_all(group.value) {
+      catch_alls = catch_alls + [group.key]
+    }
+  }
+  catch_alls = catch_alls.sorted()
+  if catch_alls.count == 0 {
+    return errors + [error_at("missing_catch_all", ecosystem, "")]
+  }
+  if catch_alls.count > 1 {
+    return errors
+      + [
+      {
+        kind: "extra_catch_all",
+        ecosystem: ecosystem,
+        group: "",
+        dependency: "",
+        matches: catch_alls,
+      },
+    ]
+  }
+  const catch_all = groups.get(catch_alls[0])
+  if catch_all.update_types.sorted() != policy.catch_all_update_types.sorted() {
+    return errors
+      + [
+      {
+        kind: "catch_all_update_types",
+        ecosystem: ecosystem,
+        group: catch_alls[0],
+        dependency: "",
+        matches: catch_all.update_types.sorted(),
+      },
+    ]
+  }
   return errors
 }
 
-pub fn cargo_group_error_message(error: CargoGroupError) -> string {
-  if error.kind == "catch_all" {
-    return "Cargo group '${error.group}' is a catch-all"
+pub fn group_errors(
+  ecosystems: dict<string, dict<string, DependabotGroup>>,
+  policies: dict<string, EcosystemPolicy> = POLICIES,
+) -> list<GroupError> {
+  let errors: list<GroupError> = []
+  for ecosystem in ecosystems {
+    const policy = policies.get(ecosystem.key)
+    if policy == nil {
+      errors = errors + [error_at("unknown_ecosystem", ecosystem.key, "")]
+    } else {
+      errors = errors + ecosystem_errors(ecosystem.key, ecosystem.value, policy)
+    }
   }
+  return errors
+}
+
+pub fn group_error_message(error: GroupError) -> string {
   if error.kind == "missing_group" {
-    return "missing Cargo group '${error.group}'"
+    return "${error.ecosystem}: missing group '${error.group}'"
   }
-  return "${error.dependency} must match only '${error.group}', matched ${json_stringify(error.matches)}"
+  if error.kind == "missing_catch_all" {
+    return "${error.ecosystem}: no catch-all group, so every routine update opens its own PR"
+  }
+  if error.kind == "extra_catch_all" {
+    return "${error.ecosystem}: more than one catch-all group: ${json_stringify(error.matches)}"
+  }
+  if error.kind == "catch_all_update_types" {
+    return "${error.ecosystem}: catch-all '${error.group}' sweeps up ${json_stringify(error.matches)}"
+  }
+  if error.kind == "unknown_ecosystem" {
+    return "${error.ecosystem}: no grouping policy is declared for this ecosystem"
+  }
+  return "${error.ecosystem}: ${error.dependency} must match only '${error.group}', matched ${json_stringify(error.matches)}"
 }
 
 pipeline main(harness: Harness, task) {
-  const groups = cargo_groups_from_text(harness.fs.read_text(".github/dependabot.yml"))
-  const errors = cargo_group_errors(groups)
+  const ecosystems = groups_from_text(harness.fs.read_text(".github/dependabot.yml"))
+  const errors = group_errors(ecosystems)
   if errors.count > 0 {
     for error in errors {
-      harness.stdio.eprintln("error: ${cargo_group_error_message(error)}")
+      harness.stdio.eprintln("error: ${group_error_message(error)}")
     }
     return 1
   }
-  harness.stdio.println("Dependabot Cargo compatibility groups OK")
+  harness.stdio.println("Dependabot update groups OK")
   return 0
 }
