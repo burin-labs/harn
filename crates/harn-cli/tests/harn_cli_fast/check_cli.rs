@@ -126,3 +126,137 @@ fn line_column_for_offset(source: &str, offset: usize) -> (usize, usize) {
     }
     (line, col)
 }
+
+/// End-to-end on the canonical `harn check` path: a stale positional call
+/// through a namespace alias must be an error.
+///
+/// This is the #6172 shape. `harn-github-connector` v0.7.0 replaced positional
+/// parameters with one request record; every consumer call site kept the old
+/// positional form, and `harn check` reported `ok` because a namespace member
+/// was typed `any`. Arity alone cannot catch it — the stale calls pass *more*
+/// arguments than declared, and surplus arguments are tolerated by design
+/// (#3981). The parameter *type* check is what fires.
+#[test]
+fn namespace_member_call_rejects_a_stale_positional_call() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    fs::write(
+        root.join("lib.harn"),
+        "pub type Request = { owner: string, repo: string }\n\
+         pub fn branch_head(harness: Harness, request: Request) -> string { request.owner }\n",
+    )
+    .unwrap();
+    let entry = root.join("main.harn");
+    fs::write(
+        &entry,
+        "import * as connector from \"./lib\"\n\
+         fn main(harness: Harness) {\n\
+         \x20 harness.stdio.println(connector.branch_head(harness, \"owner\", \"repo\", \"branch\"))\n\
+         }\n",
+    )
+    .unwrap();
+
+    let diagnostics = namespace_check_diagnostics(&entry);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|message| message.contains("argument 2 `request`")),
+        "stale positional call must be rejected and name the parameter; got: {diagnostics:#?}"
+    );
+}
+
+/// The corrected call must pass. A gate that cannot be satisfied is worse than
+/// the gap it closes.
+#[test]
+fn namespace_member_call_accepts_the_corrected_record_call() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    fs::write(
+        root.join("lib.harn"),
+        "pub type Request = { owner: string, repo: string }\n\
+         pub fn branch_head(harness: Harness, request: Request) -> string { request.owner }\n",
+    )
+    .unwrap();
+    let entry = root.join("main.harn");
+    fs::write(
+        &entry,
+        "import * as connector from \"./lib\"\n\
+         fn main(harness: Harness) {\n\
+         \x20 harness.stdio.println(connector.branch_head(harness, {owner: \"o\", repo: \"r\"}))\n\
+         }\n",
+    )
+    .unwrap();
+
+    let diagnostics = namespace_check_diagnostics(&entry);
+    assert!(
+        diagnostics.is_empty(),
+        "corrected call must check clean; got: {diagnostics:#?}"
+    );
+}
+
+/// Type-check `entry` the way `harn check` does, with the module graph's
+/// namespace-import facts attached.
+fn namespace_check_diagnostics(entry: &Path) -> Vec<String> {
+    use harn_parser::analysis::{AnalysisDatabase, SourceId, SourceVersion, TypeCheckConfig};
+
+    let graph = harn_modules::build(std::slice::from_ref(&entry.to_path_buf()));
+    let namespace_imports: Vec<_> = graph
+        .namespace_imports_for_file(entry)
+        .expect("namespace imports resolve")
+        .into_iter()
+        .map(|info| {
+            (
+                info.alias,
+                harn_parser::NamespaceImportBinding {
+                    module_path: info.raw_path,
+                    members: info.member_names.into_iter().collect(),
+                    member_types: info
+                        .member_signatures
+                        .iter()
+                        .map(|(name, sig)| (name.clone(), sig.fn_type.clone()))
+                        .collect(),
+                    member_param_names: info
+                        .member_signatures
+                        .iter()
+                        .map(|(name, sig)| (name.clone(), sig.param_names.clone()))
+                        .collect(),
+                    member_required_params: info
+                        .member_signatures
+                        .into_iter()
+                        .map(|(name, sig)| (name, sig.required_params))
+                        .collect(),
+                },
+            )
+        })
+        .collect();
+
+    let source = fs::read_to_string(entry).unwrap();
+    let mut analysis = AnalysisDatabase::new();
+    let id = SourceId::path(entry);
+    analysis.set_source(id.clone(), source, SourceVersion(1));
+    let output = analysis
+        .typecheck(
+            &id,
+            TypeCheckConfig::new()
+                .with_strict_types(true)
+                .with_imported_names(graph.imported_names_for_file(entry))
+                .with_imported_type_decls(
+                    graph
+                        .imported_type_declarations_for_file(entry)
+                        .unwrap_or_default(),
+                )
+                .with_imported_callable_decls(
+                    graph
+                        .imported_callable_declarations_for_file(entry)
+                        .unwrap_or_default(),
+                )
+                .with_namespace_imports(namespace_imports),
+        )
+        .expect("typecheck");
+    output
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+        .map(|diagnostic| diagnostic.message.clone())
+        .collect()
+}

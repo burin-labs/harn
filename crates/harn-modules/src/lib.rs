@@ -12,6 +12,7 @@ pub mod fingerprint;
 mod import_recording;
 pub mod manifest_walk;
 mod namespace_imports;
+mod namespace_signatures;
 pub mod package_execution;
 mod package_imports;
 pub mod package_snapshot;
@@ -27,6 +28,7 @@ use declarations::{
 };
 pub use declarations::{public_declarations, DefKind, PublicDeclaration};
 pub use namespace_imports::NamespaceImportInfo;
+pub use namespace_signatures::NamespaceMemberSignature;
 pub use package_imports::{
     resolve_import_path, resolve_import_path_with_guard, resolve_import_path_with_snapshot,
 };

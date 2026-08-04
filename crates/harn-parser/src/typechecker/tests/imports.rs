@@ -396,6 +396,9 @@ pipeline t(task) {
             NamespaceImportBinding {
                 module_path: "./lib".into(),
                 members,
+                member_types: Default::default(),
+                member_param_names: Default::default(),
+                member_required_params: Default::default(),
             },
         )])
         .check(&program);
@@ -455,6 +458,9 @@ pipeline t(task) {
             NamespaceImportBinding {
                 module_path: "./lib".into(),
                 members,
+                member_types: Default::default(),
+                member_param_names: Default::default(),
+                member_required_params: Default::default(),
             },
         )])
         .check(&program);
@@ -466,5 +472,112 @@ pipeline t(task) {
     assert!(
         !errors.iter().any(|e| e.contains("no exported member")),
         "known namespace member should not error: {errors:?}"
+    );
+}
+
+/// A namespace member call is checked against its exported signature.
+///
+/// Before #6172 the alias bound every member to `any`, so `alias.member(...)`
+/// was the one call form with no argument checking at all — while the same
+/// call through a named import was checked normally.
+#[test]
+fn namespace_member_call_checks_argument_types() {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use crate::ast::{ShapeField, TypeExpr};
+    use crate::NamespaceImportBinding;
+
+    let program = parse_program(
+        r#"
+pipeline t(task) {
+  lib.head("not-a-record")
+}
+"#,
+    );
+    let request = TypeExpr::Shape(vec![ShapeField::synthetic(
+        "owner",
+        TypeExpr::Named("string".into()),
+        false,
+    )]);
+    let mut members = BTreeSet::new();
+    members.insert("head".to_string());
+    let mut member_types = BTreeMap::new();
+    member_types.insert(
+        "head".to_string(),
+        TypeExpr::FnType {
+            params: vec![request],
+            return_type: Box::new(TypeExpr::Named("string".into())),
+        },
+    );
+    let mut member_param_names = BTreeMap::new();
+    member_param_names.insert("head".to_string(), vec!["request".to_string()]);
+    let mut member_required_params = BTreeMap::new();
+    member_required_params.insert("head".to_string(), 1usize);
+
+    let diagnostics = TypeChecker::new()
+        .with_imported_names(std::iter::once("lib".into()).collect())
+        .with_namespace_imports([(
+            "lib".into(),
+            NamespaceImportBinding {
+                module_path: "./lib".into(),
+                members,
+                member_types,
+                member_param_names,
+                member_required_params,
+            },
+        )])
+        .check(&program);
+    let errors: Vec<String> = diagnostics
+        .into_iter()
+        .filter(|diag| diag.severity == DiagnosticSeverity::Error)
+        .map(|diag| diag.message)
+        .collect();
+    assert!(
+        errors.iter().any(|message| {
+            message.contains("argument 1 `request`") && message.contains("found string")
+        }),
+        "expected a typed namespace-member argument error naming the parameter, got: {errors:?}"
+    );
+}
+
+/// A member with no lowered signature keeps its gradual `any` treatment, so a
+/// signature the producer could not lower faithfully never produces a false
+/// positive.
+#[test]
+fn namespace_member_without_a_signature_stays_gradual() {
+    use std::collections::BTreeSet;
+
+    use crate::NamespaceImportBinding;
+
+    let program = parse_program(
+        r"
+pipeline t(task) {
+  lib.pick(1, 2, 3)
+}
+",
+    );
+    let mut members = BTreeSet::new();
+    members.insert("pick".to_string());
+    let diagnostics = TypeChecker::new()
+        .with_imported_names(std::iter::once("lib".into()).collect())
+        .with_namespace_imports([(
+            "lib".into(),
+            NamespaceImportBinding {
+                module_path: "./lib".into(),
+                members,
+                member_types: Default::default(),
+                member_param_names: Default::default(),
+                member_required_params: Default::default(),
+            },
+        )])
+        .check(&program);
+    let errors: Vec<String> = diagnostics
+        .into_iter()
+        .filter(|diag| diag.severity == DiagnosticSeverity::Error)
+        .map(|diag| diag.message)
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "unsigned member must stay gradual: {errors:?}"
     );
 }

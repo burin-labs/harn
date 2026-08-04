@@ -874,3 +874,101 @@ fn namespace_import_coexists_with_selective() {
     assert!(imported.contains("beta"));
     assert!(!imported.contains("alpha"));
 }
+
+/// The lowered signature must carry the target's named types structurally.
+///
+/// A namespace import does not flatten `Request` into the consumer, so a
+/// signature that still said `Named("Request")` would be unresolvable there and
+/// the parameter would go unchecked — the #6172 gap.
+#[test]
+fn namespace_member_signature_inlines_the_targets_named_types() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    write_file(
+        root,
+        "lib.harn",
+        "pub type Request = { owner: string }\n\
+         pub fn head(harness: Harness, request: Request) -> string { request.owner }\n",
+    );
+    let entry = write_file(
+        root,
+        "entry.harn",
+        "import * as lib from \"./lib\"\nlib.head(harness, {owner: \"o\"})\n",
+    );
+
+    let graph = build(std::slice::from_ref(&entry));
+    let namespaces = graph
+        .namespace_imports_for_file(&entry)
+        .expect("namespace info");
+    let signature = namespaces[0]
+        .member_signatures
+        .get("head")
+        .expect("head must have a lowered signature");
+    assert_eq!(signature.param_names, vec!["harness", "request"]);
+    assert_eq!(signature.required_params, 2);
+    let harn_parser::TypeExpr::FnType { params, .. } = &signature.fn_type else {
+        panic!("expected an FnType, got {:?}", signature.fn_type);
+    };
+    let harn_parser::TypeExpr::Shape(fields) = &params[1] else {
+        panic!("Request must inline to its shape, got {:?}", params[1]);
+    };
+    assert_eq!(fields.len(), 1);
+    assert_eq!(fields[0].name, "owner");
+}
+
+/// A defaulted tail is omissible. Deriving `required_params` from the parameter
+/// count instead rejected every legitimate short call — it flagged
+/// `stdlib/portable.harn` and `stdlib/ui.harn` in the conformance lint baseline.
+#[test]
+fn namespace_member_signature_excludes_a_defaulted_tail_from_required_params() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    write_file(
+        root,
+        "lib.harn",
+        "pub fn greet(name: string, greeting: string = \"hi\") -> string { greeting }\n",
+    );
+    let entry = write_file(
+        root,
+        "entry.harn",
+        "import * as lib from \"./lib\"\nlib.greet(\"world\")\n",
+    );
+
+    let graph = build(std::slice::from_ref(&entry));
+    let namespaces = graph
+        .namespace_imports_for_file(&entry)
+        .expect("namespace info");
+    let signature = namespaces[0]
+        .member_signatures
+        .get("greet")
+        .expect("greet must have a lowered signature");
+    assert_eq!(signature.required_params, 1);
+}
+
+/// A generic member stays gradual: lowering it to a fixed `FnType` would
+/// compare arguments against an unbound type parameter and reject valid calls.
+#[test]
+fn namespace_member_signature_leaves_generics_gradual() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    write_file(
+        root,
+        "lib.harn",
+        "pub fn pick<T>(value: T) -> T { value }\n",
+    );
+    let entry = write_file(
+        root,
+        "entry.harn",
+        "import * as lib from \"./lib\"\nlib.pick(1)\n",
+    );
+
+    let graph = build(std::slice::from_ref(&entry));
+    let namespaces = graph
+        .namespace_imports_for_file(&entry)
+        .expect("namespace info");
+    assert!(
+        !namespaces[0].member_signatures.contains_key("pick"),
+        "a generic member must not be lowered: {:?}",
+        namespaces[0].member_signatures
+    );
+}

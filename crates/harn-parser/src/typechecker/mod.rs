@@ -67,6 +67,24 @@ pub struct NamespaceImportBinding {
     pub module_path: String,
     /// Public export names from the target module.
     pub members: BTreeSet<String>,
+    /// Call signature for each callable member, as a self-contained
+    /// [`TypeExpr::FnType`] whose named types the producer already resolved
+    /// against the defining module.
+    ///
+    /// A namespace import does not flatten the target's type names into this
+    /// module, so a signature that still referenced `Request` by name would be
+    /// unresolvable here and could not be checked. Members absent from this
+    /// map stay `any`, which is what keeps an unlowerable signature (generic,
+    /// rest parameter, row-polymorphic) from being checked wrongly rather than
+    /// gradually (#6172).
+    pub member_types: std::collections::BTreeMap<String, TypeExpr>,
+    /// Declared parameter names per member, positional. `TypeExpr::FnType` is
+    /// positional only, so without these a mismatch would report `arg2` where
+    /// the named-import path reports the real parameter name.
+    pub member_param_names: std::collections::BTreeMap<String, Vec<String>>,
+    /// Required argument count per member. Defaulted trailing parameters are
+    /// omissible, so this is not the parameter count.
+    pub member_required_params: std::collections::BTreeMap<String, usize>,
 }
 
 /// A diagnostic produced by the type checker.

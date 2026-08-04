@@ -3,12 +3,13 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use crate::namespace_signatures::NamespaceMemberSignature;
 use crate::package_imports::resolve_import_path_with_snapshots;
 use crate::package_snapshot::PackageSnapshot;
 use crate::{decl_site, normalize_path, DefKind, DefSite, ImportRef, ModuleGraph, ModuleInfo};
 
 /// One `import * as alias from "..."` binding visible from a consumer file.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct NamespaceImportInfo {
     pub alias: String,
     pub raw_path: String,
@@ -17,6 +18,11 @@ pub struct NamespaceImportInfo {
     pub member_names: Vec<String>,
     /// Declaration kind for each exported member name.
     pub member_kinds: BTreeMap<String, DefKind>,
+    /// Call signature for each callable member, as a self-contained
+    /// [`TypeExpr::FnType`] with the target module's named types already
+    /// inlined. A member absent here is not statically callable (or was
+    /// deliberately left gradual); the checker keeps its `any` treatment.
+    pub member_signatures: BTreeMap<String, NamespaceMemberSignature>,
 }
 
 impl ModuleGraph {
@@ -37,7 +43,7 @@ impl ModuleGraph {
             let Some(alias) = &import.namespace_alias else {
                 continue;
             };
-            let (member_names, member_kinds) = match &import.path {
+            let (member_names, member_kinds, member_signatures) = match &import.path {
                 Some(import_path) => {
                     let imported = self
                         .modules
@@ -54,9 +60,10 @@ impl ModuleGraph {
                             kinds.insert(name.clone(), kind);
                         }
                     }
-                    (names, kinds)
+                    let signatures = self.namespace_member_signatures(import_path, &names);
+                    (names, kinds, signatures)
                 }
-                None => (Vec::new(), BTreeMap::new()),
+                None => (Vec::new(), BTreeMap::new(), BTreeMap::new()),
             };
             out.push(NamespaceImportInfo {
                 alias: alias.clone(),
@@ -64,6 +71,7 @@ impl ModuleGraph {
                 resolved_path: import.path.as_ref().map(|path| normalize_path(path)),
                 member_names,
                 member_kinds,
+                member_signatures,
             });
         }
         Some(out)
