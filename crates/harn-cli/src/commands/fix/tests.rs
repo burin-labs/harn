@@ -561,7 +561,10 @@ fn missing_root_argument_threads_a_distinct_root_past_a_narrow_harness_binding()
         &AmbientRepairContext {
             cross_module_importer_count: 0,
         },
-        &BTreeSet::new(),
+        &mut ValueEscape {
+            referenced_by_value: &BTreeSet::new(),
+            frozen: &mut Vec::new(),
+        },
     )
     .expect("root threading repair");
     let fixed = FixEdit::apply_all(source, &edits);
@@ -615,7 +618,10 @@ fn missing_root_argument_repair_preserves_parenthesized_first_argument() {
         &AmbientRepairContext {
             cross_module_importer_count: 0,
         },
-        &BTreeSet::new(),
+        &mut ValueEscape {
+            referenced_by_value: &BTreeSet::new(),
+            frozen: &mut Vec::new(),
+        },
     )
     .expect("root argument repair");
 
@@ -652,7 +658,7 @@ fn capability_only_plan_excludes_unrelated_repairs() {
     assert!(plan
         .repairs
         .iter()
-        .all(|repair| is_capability_migration_repair_id(&repair.repair.id)));
+        .all(|repair| super::repair_classes::is_capability_migration_repair_id(&repair.repair.id)));
     assert!(
         plan.repairs.iter().all(|repair| !repair.edits.is_empty()),
         "capability-only plans must contain only executable repairs: {plan:#?}"
