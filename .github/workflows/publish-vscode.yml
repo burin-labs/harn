@@ -92,6 +92,10 @@ jobs:
           name: harn-lang-vsix
           path: editors/vscode/harn-lang.vsix
           if-no-files-found: error
+          # The comment above makes this a deliberate human-facing copy (install
+          # from VSIX without marketplace secrets), so it is declared at the
+          # current effective window rather than shortened.
+          retention-days: 30
 
       # `--skip-duplicate` keeps a re-run (or a manual dispatch after a partial
       # failure) from erroring on a version that already published.

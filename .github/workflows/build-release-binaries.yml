@@ -742,6 +742,9 @@ jobs:
             crates/harn-cli/generated/cli-bytecode/
           if-no-files-found: error
           compression-level: 0
+          # Machine handoff: the build jobs download this in the same run, and
+          # nothing reads it afterwards.
+          retention-days: 1
 
   build:
     name: Build ${{ matrix.target }}
@@ -1276,6 +1279,10 @@ jobs:
           name: harn-binary-size-${{ matrix.target }}
           path: dist/binary-size-${{ matrix.target }}
           if-no-files-found: ignore
+          # Human-read diagnostic, never downloaded by a job. Declared rather
+          # than inherited so a future org-default change cannot silently
+          # shorten the window someone compares size reports across.
+          retention-days: 30
 
       - name: Describe release archive provenance
         id: release-provenance
@@ -1365,6 +1372,12 @@ jobs:
           name: harn-${{ matrix.target }}
           path: dist/harn-${{ matrix.target }}.tar.gz
           compression-level: 0
+          # One day, because this copy is duplication by design: the Release
+          # asset above is authoritative and permanent, and no
+          # `download-artifact` in this repository reads across runs (none pass
+          # `run-id`). The org default is 30 days, which held ~5 GB/week of
+          # release binaries in billable artifact storage for nothing.
+          retention-days: 1
 
       - name: Upload artifact (windows)
         if: needs.setup.outputs.is_release == 'true' && runner.os == 'Windows'
@@ -1378,6 +1391,9 @@ jobs:
           name: harn-${{ matrix.target }}
           path: dist/harn-${{ matrix.target }}.zip
           compression-level: 0
+          # Same reasoning as the unix leg above: secondary to the authoritative
+          # Release asset, never read across runs.
+          retention-days: 1
 
       # Publish THIS target's archive to the prerelease the moment it is built,
       # so consumers that only need one architecture can fetch it without
