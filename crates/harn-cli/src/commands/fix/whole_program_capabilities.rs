@@ -126,6 +126,7 @@ pub(super) fn plan(
     files: &[PathBuf],
     module_graph: &harn_modules::ModuleGraph,
     diagnostics: &[RepairCandidate],
+    referenced_by_value: &BTreeSet<String>,
 ) -> Result<Vec<RepairCandidate>, String> {
     let mut program_files = Vec::new();
     let mut callables = Vec::new();
@@ -158,7 +159,7 @@ pub(super) fn plan(
             module_graph,
         )
         .check_with_facts(&program, &source);
-        let infos = collect_callable_infos(&program, &source, &exported);
+        let infos = collect_callable_infos(&program, &source, &exported, referenced_by_value);
         let imported_capability_signatures = imported_signatures(file, module_graph, &type_aliases);
         for info in infos {
             let Some((params, body, boundary, flow_predicate)) =
@@ -301,10 +302,28 @@ pub(super) fn plan(
         }
     }
 
+    // A callable whose value is taken as a first-class reference is invoked
+    // through that reference at its declared arity, and the fixer cannot see
+    // those call sites: `handler: web_search_handler` in a registry dict is
+    // dispatched as `handler(args)`. Adding a leading capability parameter
+    // would silently move `args` into the capability slot, and no static call
+    // site exists for the type checker to report. Freeze the signature and
+    // leave the site for a human, who can wrap it — `{ args -> f(harness,
+    // args) }` — where the fixer cannot.
+    let arity_observable = callables
+        .iter()
+        .map(|callable| referenced_by_value.contains(&callable.info.name))
+        .collect::<Vec<_>>();
     let desired = callables
         .iter()
         .enumerate()
         .map(|(idx, callable)| {
+            if arity_observable[idx] {
+                return callable
+                    .carrier
+                    .as_ref()
+                    .map(|carrier| carrier.kind.clone());
+            }
             desired_carrier(callable, &requirements[idx], root_requirements[idx])
         })
         .collect::<Vec<_>>();
@@ -313,6 +332,9 @@ pub(super) fn plan(
         .zip(&requirements)
         .enumerate()
         .map(|(idx, (callable, required))| {
+            if arity_observable[idx] {
+                return BTreeMap::new();
+            }
             added_split_capability_bindings(callable, required, root_requirements[idx])
         })
         .collect::<Vec<_>>();

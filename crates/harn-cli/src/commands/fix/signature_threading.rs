@@ -19,6 +19,7 @@ pub(super) fn collect_callable_infos(
     program: &[SNode],
     source: &str,
     exported_names: &BTreeSet<String>,
+    referenced_by_value: &BTreeSet<String>,
 ) -> Vec<CallableInfo> {
     let mut infos = Vec::new();
     for node in program {
@@ -64,7 +65,7 @@ pub(super) fn collect_callable_infos(
                     has_params: has_params || !params.is_empty(),
                     bound_names,
                     harness_binding: harness_param_name(params).map(str::to_string),
-                    can_add_harness_param: true,
+                    can_add_harness_param: !referenced_by_value.contains(name),
                     calls,
                     ambient_capability_calls,
                 });
@@ -99,7 +100,7 @@ pub(super) fn collect_callable_infos(
                     has_params: has_params || !params.is_empty(),
                     bound_names,
                     harness_binding: harness_param_name(params).map(str::to_string),
-                    can_add_harness_param: true,
+                    can_add_harness_param: !referenced_by_value.contains(name),
                     calls,
                     ambient_capability_calls,
                 });
@@ -300,7 +301,35 @@ pub(super) fn repair_for_ambient_capability_plan(
     }
 }
 
+/// Names whose value is read as a first-class reference somewhere in `program`.
+///
+/// A call names its callee directly, so a bare identifier expression is always
+/// a value read: a registry entry (`handler: web_search_handler`), a callback
+/// argument, a dispatcher stored in a dict. Every such reference invokes the
+/// callable at its declared arity through a call site the fixer cannot see, so
+/// its parameter list is observable and must not move.
+///
+/// Collecting every identifier and intersecting with the callable set errs
+/// toward freezing a signature the fixer could have changed, which costs a
+/// human one edit. The opposite error silently rewires a call nothing can
+/// type-check.
+pub(super) fn collect_value_references(program: &[SNode], names: &mut BTreeSet<String>) {
+    visit::walk_program(program, &mut |node| {
+        if let Node::Identifier(name) = &node.node {
+            names.insert(name.clone());
+        }
+    });
+}
+
 pub(super) fn add_harness_param_edit(source: &str, info: &CallableInfo) -> Option<FixEdit> {
+    if !info.can_add_harness_param {
+        // Adding a leading parameter would move the first argument of every
+        // reference-dispatched call into the capability slot, with no static
+        // call site for the type checker to report. Leave it for a human, who
+        // can wrap it — `{ args -> f(harness, args) }` — where the fixer
+        // cannot.
+        return None;
+    }
     let name = harness_param_name_for_insert(info)?;
     Some(FixEdit {
         span: Span::with_offsets(

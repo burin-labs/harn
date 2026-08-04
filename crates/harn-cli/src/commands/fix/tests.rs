@@ -566,6 +566,7 @@ fn missing_root_argument_threads_a_distinct_root_past_a_narrow_harness_binding()
         &AmbientRepairContext {
             cross_module_importer_count: 0,
         },
+        &BTreeSet::new(),
     )
     .expect("root threading repair");
     let fixed = FixEdit::apply_all(source, &edits);
@@ -619,6 +620,7 @@ fn missing_root_argument_repair_preserves_parenthesized_first_argument() {
         &AmbientRepairContext {
             cross_module_importer_count: 0,
         },
+        &BTreeSet::new(),
     )
     .expect("root argument repair");
 
