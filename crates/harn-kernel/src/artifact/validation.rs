@@ -287,6 +287,19 @@ fn hash_ty(hash: &mut AbiHasher, ty: harn_builtin_meta::Ty) {
                 hash.byte(field.optional.into());
             }
         }
+        Ty::OpenShape(fields, rests) => {
+            hash.byte(12);
+            hash.len(fields.len());
+            for field in fields {
+                hash.string(field.name);
+                hash_ty(hash, field.ty);
+                hash.byte(field.optional.into());
+            }
+            hash.len(rests.len());
+            for rest in rests {
+                hash_ty(hash, *rest);
+            }
+        }
         Ty::SchemaOf(name) => {
             hash.byte(8);
             hash.string(name);

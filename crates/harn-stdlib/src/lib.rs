@@ -1048,10 +1048,10 @@ mod tests {
             .expect("std/agent/workers should export agent_lifecycle_tools");
         assert_eq!(
             lifecycle.signature,
-            "agent_lifecycle_tools(registry = nil, options = nil)"
+            "agent_lifecycle_tools(agents: HarnessAgent, registry = nil, options = nil)"
         );
-        assert_eq!(lifecycle.required_params, 0);
-        assert_eq!(lifecycle.total_params, 2);
+        assert_eq!(lifecycle.required_params, 1);
+        assert_eq!(lifecycle.total_params, 3);
     }
 
     #[test]

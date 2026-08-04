@@ -338,7 +338,7 @@ impl ValueShape {
             Ty::Named("string") | Ty::LitString(_) => Self::String,
             Ty::Named("bytes") => Self::Bytes,
             Ty::Named("list") | Ty::Apply("list" | "List", _) => Self::List,
-            Ty::Named("dict" | "record") | Ty::Shape(_) => Self::Record,
+            Ty::Named("dict" | "record") | Ty::Shape(_) | Ty::OpenShape(_, _) => Self::Record,
             Ty::Optional(_)
             | Ty::Any
             | Ty::Generic(_)

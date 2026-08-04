@@ -69,7 +69,7 @@ pipeline main(harness: Harness) {
           tool_format: "native",
           max_iterations: 4,
           token_budget: 50,
-          tools: agent_lifecycle_tools(nested_tools(harness)),
+          tools: agent_lifecycle_tools(harness.agent, nested_tools(harness)),
           allowed_tools: ["spawn_nested", "agent_await_resumption"],
           session_id: "agent-stop-middle",
           anchor: {primary: "/workspace/agent-stop-middle"},

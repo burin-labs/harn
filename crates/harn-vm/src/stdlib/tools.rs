@@ -564,7 +564,7 @@ fn tool_schema_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 #[harn_builtin(
     exposure = "pure",
     effects = [],
-    sig = "tool_define(registry: {_type: \"tool_registry\", tools: list} | closure, name: string, description: string, config: dict) -> {_type: \"tool_registry\", tools: list}",
+    sig = "tool_define(registry: {_type: \"tool_registry\", tools: list} | closure, name: string, description: string, config: @TOOL_DEFINE_CONFIG) -> {_type: \"tool_registry\", tools: list}",
     category = "tools"
 )]
 fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

@@ -286,7 +286,16 @@ fn __agent_lifecycle_add_await_tool(registry) {
   )
 }
 
-fn __agent_lifecycle_add_subagent_tools(registry) {
+/**
+ * Register the parent-side subagent lifecycle tools.
+ *
+ * Each handler closes over `agents` and takes only `args`. The tool runtime
+ * invokes a registered handler with exactly one argument, so a handler that
+ * declared its `HarnessAgent` as a leading parameter would fail at dispatch
+ * with an arity error. The closure keeps the capability explicit while it
+ * satisfies the registry's one-argument contract.
+ */
+fn __agent_lifecycle_add_subagent_tools(agents: HarnessAgent, registry) {
   let tools = registry
   if !__agent_tool_registry_has(tools, "subagent_pause") {
     tools = tool_define(
@@ -294,7 +303,7 @@ fn __agent_lifecycle_add_subagent_tools(registry) {
       "subagent_pause",
       "Cooperatively pause a running subagent after its current turn settles. Returns a resumable handle.",
       {
-        handler: __subagent_pause_tool,
+        handler: { args -> __subagent_pause_tool(agents, args) },
         parameters: {
           handle: {type: "string", description: "Worker id or worker handle to pause."},
           reason: {type: "string", description: "Why the child should pause."},
@@ -310,7 +319,7 @@ fn __agent_lifecycle_add_subagent_tools(registry) {
       "subagent_resume",
       "Resume a suspended subagent with optional input.",
       {
-        handler: __subagent_resume_tool,
+        handler: { args -> __subagent_resume_tool(agents, args) },
         parameters: {
           handle: {type: "string", description: "Worker id or worker handle to resume."},
           input: {
@@ -335,7 +344,7 @@ fn __agent_lifecycle_add_subagent_tools(registry) {
       "subagent_stop",
       "Stop a subagent. Defaults to a graceful recursive handoff summary; pass graceful=false for a hard cancel.",
       {
-        handler: __subagent_stop_tool,
+        handler: { args -> __subagent_stop_tool(agents, args) },
         parameters: {
           handle: {type: "string", description: "Worker id or worker handle to stop."},
           graceful: {
@@ -367,7 +376,7 @@ fn __agent_lifecycle_add_subagent_tools(registry) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_lifecycle_tools(registry = nil, options = nil) {
+pub fn agent_lifecycle_tools(agents: HarnessAgent, registry = nil, options = nil) {
   const opts = __worker_options(options, "agent_lifecycle_tools")
   const base = registry ?? tool_registry()
   let tools = if __agent_lifecycle_await_enabled(opts) {
@@ -376,7 +385,7 @@ pub fn agent_lifecycle_tools(registry = nil, options = nil) {
     base
   }
   if __agent_lifecycle_has_subagent_capability(base, opts) {
-    tools = __agent_lifecycle_add_subagent_tools(tools)
+    tools = __agent_lifecycle_add_subagent_tools(agents, tools)
   }
   return tools
 }

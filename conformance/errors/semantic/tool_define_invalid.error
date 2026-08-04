@@ -1,1 +1,1 @@
-argument 4 `config`: expected dict, found string
+argument 4 `config`: expected {handler?: fn(dict) -> any, ...dict}, found string
