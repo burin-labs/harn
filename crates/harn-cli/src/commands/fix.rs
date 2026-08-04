@@ -41,8 +41,8 @@ mod apply;
 use apply::apply_repairs_with_options;
 #[cfg(test)]
 use apply::{
-    apply_capability_file_edits, apply_file_edits, apply_repairs, finish_with_rollback,
-    render_capability_migration_pass, repair_path,
+    apply_capability_file_edits, apply_file_edits, apply_repairs, edit_group_key,
+    finish_with_rollback, render_capability_migration_pass, repair_path,
 };
 use reporting::{print_apply_result, print_human_plan, skipped_files_error};
 use signature_threading::{
@@ -1403,6 +1403,9 @@ impl From<&Repair> for RepairMetadataWire {
     }
 }
 
+#[cfg(test)]
+#[path = "fix/apply_tests.rs"]
+mod apply_tests;
 #[cfg(test)]
 #[path = "fix/capability_apply_tests.rs"]
 mod capability_apply_tests;
