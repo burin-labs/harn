@@ -62,6 +62,67 @@ fn code_selector_narrows_the_plan_to_the_named_diagnostic() {
     }
 }
 
+/// A repair that defers to the whole-program capability pass must not defer to
+/// a pass `--code` has excluded — that postpones it forever. Selecting only the
+/// rename in a file that also has attenuation work planned nothing at all, so a
+/// targeted migration was silently a no-op.
+#[test]
+fn code_selector_does_not_defer_to_an_unselected_whole_program_pass() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("lib.harn");
+    fs::write(
+        &script,
+        concat!(
+            "fn main(harness: Harness) {\n",
+            "  read_config(harness.fs)\n",
+            "  publish(harness)\n",
+            "}\n",
+            "\n",
+            // Already narrow, misnamed: the rename this test selects.
+            "fn read_config(harness: HarnessFs) {\n",
+            "  return harness.read_text(\"harn.toml\")\n",
+            "}\n",
+            "\n",
+            // Broad: the attenuation the whole-program pass owns, in the same
+            // file, which is what the rename was deferring to.
+            "fn publish(harness: Harness) {\n",
+            "  harness.fs.write_text(\"out.txt\", \"done\")\n",
+            "}\n",
+        ),
+    )
+    .unwrap();
+
+    let rename = Code::LintCapabilityParameterName;
+    let unselected = build_plan_with_options(&script, Some(RepairSafety::SurfaceChanging), &FixOptions::default())
+        .unwrap();
+    assert!(
+        unselected
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == Code::LintBroadHarnessParameter.as_str()),
+        "fixture must give the whole-program pass work to defer to: {:?}",
+        unselected.diagnostics
+    );
+
+    let narrowed = build_plan_with_options(
+        &script,
+        Some(RepairSafety::SurfaceChanging),
+        &FixOptions {
+            codes: BTreeSet::from([rename]),
+            ..FixOptions::default()
+        },
+    )
+    .unwrap();
+    assert!(
+        narrowed
+            .repairs
+            .iter()
+            .any(|repair| repair.diagnostic_code == rename.as_str() && !repair.edits.is_empty()),
+        "the selected rename must be planned, not deferred to an excluded pass: {:?}",
+        narrowed.repairs
+    );
+}
+
 /// A file `harn fmt` would rewrite must come back exactly as its author keeps
 /// it, apart from the repair. Formatting every edited file would turn a
 /// three-line repair into a whole-file diff for any project that does not run

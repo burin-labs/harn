@@ -118,6 +118,12 @@ impl FixOptions {
             ..Self::default()
         }
     }
+
+    /// Whether `--code` selected this candidate. An empty selector selects
+    /// every code, which is the behavior every caller had before the flag.
+    fn selects(&self, candidate: &RepairCandidate) -> bool {
+        self.codes.is_empty() || self.codes.contains(&candidate.code)
+    }
 }
 
 struct AmbientRepairContext {
@@ -338,6 +344,17 @@ fn build_plan_with_options(
         referenced_by_value,
     )?;
     if !whole_program_repairs.is_empty() {
+        // `--code` narrows what this pass *does*, not what it *saw*: the plan
+        // needs every capability diagnostic as context to choose a carrier,
+        // but a repair it emits for an unselected code is out of scope. That
+        // distinction is also what keeps deferral from starving — deferring to
+        // a pass that `--code` has excluded would postpone the local repair
+        // forever, which is exactly what `--code HARN-LNT-073` did to every
+        // rename in a file that also had attenuation work.
+        let whole_program_repairs = whole_program_repairs
+            .into_iter()
+            .filter(|repair| options.selects(repair))
+            .collect::<Vec<_>>();
         let whole_program_files = whole_program_repairs
             .iter()
             .map(|repair| {
@@ -346,6 +363,9 @@ fn build_plan_with_options(
             })
             .collect::<BTreeSet<_>>();
         candidates.retain(|candidate| {
+            // Supersession follows the real plan rather than the selected one:
+            // a per-file repair the whole-program pass replaces is wrong on its
+            // own terms, whether or not its replacement was selected.
             if is_whole_program_superseded_repair(&candidate.repair) {
                 return false;
             }
@@ -369,9 +389,7 @@ fn build_plan_with_options(
     // the same object: `--plan --code X` shows exactly what `--apply --code X`
     // will do, and `diagnostic_index` stays aligned because diagnostics and
     // repairs are both derived from `candidates` below.
-    if !options.codes.is_empty() {
-        candidates.retain(|candidate| options.codes.contains(&candidate.code));
-    }
+    candidates.retain(|candidate| options.selects(candidate));
 
     let conflicts = detect_conflicts(&candidates);
     let diagnostics = candidates
