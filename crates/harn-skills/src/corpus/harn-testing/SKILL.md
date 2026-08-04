@@ -63,6 +63,10 @@ launch behavior.
 - Preserve diagnostic codes and useful spans.
 - Update formatter, linter, tree-sitter, and editor fixtures for syntax changes.
 - Run the narrow filtered case first.
+- Pin a capability-policy root to `harness.fs.workspace_temp_dir()`, never to
+  the system temporary directory. A checkout under `/tmp` sits inside the
+  latter. The fixture then becomes in-scope, and a case asserting that an
+  out-of-scope read is refused fails on that machine alone.
 - Run `make conformance`, `make lint-harn`, and `make fmt-harn` for syntax work.
 - Keep generated spec and grammar artifacts synchronized.
 - Treat conformance as executable specification, not broad integration coverage.

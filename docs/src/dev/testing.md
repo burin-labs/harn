@@ -259,6 +259,36 @@ exempt via `CONFORMANCE_REAL_TIME_ALLOWLIST` in
 sleep on a literal duration without either entering a `harness.testing.clock_set(...)`
 block or being added to the allowlist with reviewer justification.
 
+### Capability-policy roots in conformance fixtures
+
+A fixture that pins `workspace_roots` / `read_only_roots` to prove something is
+*outside* the allowed scope must choose a root the checkout can never fall
+inside. The system temporary directory is not such a root: on Linux a checkout
+under `/tmp` sits below it, the fixture's own files become in-scope, and a case
+asserting that a pass-through read is refused fails deterministically — while
+the same case passes everywhere else (#6030).
+
+Use `harness.fs.workspace_temp_dir()`, which resolves to a workspace-owned
+`.harn-tmp/` child of the checkout:
+
+```harn,ignore
+const jail = harness.fs.workspace_temp_dir()
+harness.runtime.with_execution_policy(
+  {
+    sandbox_profile: "worktree",
+    workspace_roots: [jail],
+    // Pin reads too: an empty list inherits the runner's broad read scope.
+    read_only_roots: [jail],
+  },
+  { -> ... },
+)
+```
+
+The fixture's `harness.fs.source_dir()` is a sibling of that jail rather than
+an ancestor or descendant of it, so the out-of-scope assertion holds no matter
+where the checkout lives. `mkdtemp_in_workspace()` gives a unique child of the
+same root when a case needs its own staging directory.
+
 ## Forbidden patterns
 
 The following patterns are banned in test files by `make lint-test-patterns`.
@@ -310,7 +340,7 @@ These tests are subject to different rules:
 - Use named constants colocated with the E2E module rather than inline
   `Duration::from_millis(…)` literals so timeout values are easy to audit and
   tune.
-- Always provide a human-readable timeout message so a failure says _what_ timed
+- Always provide a human-readable timeout message so a failure says *what* timed
   out, not just that an assertion failed.
 - Do not fold process spawn and initial scheduling into a per-message response
   timeout. Give startup its own generous budget beneath nextest's test-specific
