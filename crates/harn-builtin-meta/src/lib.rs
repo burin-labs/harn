@@ -114,8 +114,18 @@ pub enum Ty {
     /// Function type. Stores params and return as references so the literal
     /// stays `Copy`.
     Fn(&'static [Ty], &'static Ty),
-    /// Record/shape type with named fields.
+    /// Record/shape type with named fields. Closed: an argument carrying a
+    /// field that is not listed here is rejected.
     Shape(&'static [ShapeFieldDescriptor]),
+    /// Open record: named fields plus one or more row tails, mirroring the
+    /// language's `{name: string, ...dict}`.
+    ///
+    /// Use this for a builtin that takes an extensible options/config dict.
+    /// A closed [`Ty::Shape`] would reject every key the signature does not
+    /// name, so such a parameter would otherwise have to fall back to a bare
+    /// `dict` and lose all field checking — including the declared type of a
+    /// `handler` slot.
+    OpenShape(&'static [ShapeFieldDescriptor], &'static [Ty]),
     /// `Schema<T>` marker — semantically `Apply("Schema", &[Generic(T)])`
     /// but distinguished so the type checker can pull the bound `T` from
     /// the *value* of the schema arg (not its declared type).
@@ -158,6 +168,34 @@ impl Ty {
     pub const fn is_any(&self) -> bool {
         matches!(self, Ty::Any)
     }
+}
+
+/// Render shape fields and row tails in the `#[harn_builtin]` sig grammar.
+///
+/// An optional field is written `name?: ty`, not `name: ty?`. The trailing
+/// form does not round-trip: the sig parser folds a trailing `?` into the
+/// type as `ty | nil` and leaves the field required.
+fn write_shape_members(
+    f: &mut core::fmt::Formatter<'_>,
+    fields: &[ShapeFieldDescriptor],
+    rests: &[Ty],
+) -> core::fmt::Result {
+    for (i, fld) in fields.iter().enumerate() {
+        if i > 0 {
+            f.write_str(", ")?;
+        }
+        let name = fld.name;
+        let ty = &fld.ty;
+        let optional = if fld.optional { "?" } else { "" };
+        write!(f, "{name}{optional}: {ty}")?;
+    }
+    for (i, rest) in rests.iter().enumerate() {
+        if i > 0 || !fields.is_empty() {
+            f.write_str(", ")?;
+        }
+        write!(f, "...{rest}")?;
+    }
+    Ok(())
 }
 
 impl core::fmt::Display for Ty {
@@ -215,17 +253,12 @@ impl core::fmt::Display for Ty {
             }
             Ty::Shape(fields) => {
                 f.write_str("{")?;
-                for (i, fld) in fields.iter().enumerate() {
-                    if i > 0 {
-                        f.write_str(", ")?;
-                    }
-                    let name = fld.name;
-                    let ty = &fld.ty;
-                    write!(f, "{name}: {ty}")?;
-                    if fld.optional {
-                        f.write_str("?")?;
-                    }
-                }
+                write_shape_members(f, fields, &[])?;
+                f.write_str("}")
+            }
+            Ty::OpenShape(fields, rests) => {
+                f.write_str("{")?;
+                write_shape_members(f, fields, rests)?;
                 f.write_str("}")
             }
             Ty::SchemaOf(t) => write!(f, "Schema<{t}>"),
@@ -412,6 +445,8 @@ mod tests {
         ShapeFieldDescriptor::optional("age", TY_INT),
     ];
 
+    const OPEN_SHAPE_RESTS: &[Ty] = &[TY_DICT];
+
     #[test]
     fn wire_identifier_keys_stay_unique_across_capabilities() {
         // `from_host_namespace` resolves by normalized spelling, so two
@@ -473,7 +508,15 @@ mod tests {
         let fn_ty = Ty::Fn(FN_PARAMS, &TY_BOOL);
         assert_eq!(format!("{fn_ty}"), "(int, string) -> bool");
         let shape = Ty::Shape(SHAPE_FIELDS);
-        assert_eq!(format!("{shape}"), "{name: string, age: int?}");
+        // An optional field renders as `age?: int`, not `age: int?`. The
+        // trailing form does not round-trip: the sig parser folds a trailing
+        // `?` into the type as `int | nil`, which leaves the field *required*
+        // and silently changes the contract.
+        assert_eq!(format!("{shape}"), "{name: string, age?: int}");
+        let open = Ty::OpenShape(SHAPE_FIELDS, OPEN_SHAPE_RESTS);
+        assert_eq!(format!("{open}"), "{name: string, age?: int, ...dict}");
+        let tail_only = Ty::OpenShape(&[], OPEN_SHAPE_RESTS);
+        assert_eq!(format!("{tail_only}"), "{...dict}");
     }
 
     const BASIC_PARAMS: &[Param] = &[Param::new("a", TY_DICT), Param::new("b", TY_DICT)];

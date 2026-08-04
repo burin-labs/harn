@@ -482,3 +482,27 @@ pub const SCHEMA_RECOVER_ENVELOPE: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("stage", TY_STRING),
     ShapeFieldDescriptor::new("repaired", TY_BOOL),
 ]);
+
+/// Config dict accepted by the `tool_define` builtin.
+///
+/// Only `handler` is named. The row tail keeps every other config key open,
+/// because a closed shape would reject the `parameters` / `executor` /
+/// `annotations` keys that real registrations carry.
+///
+/// The point of naming `handler` is its **arity**. The tool runtime invokes a
+/// registered handler with exactly one argument (see
+/// `harn-vm/src/llm/agent_tools.rs`), so a handler that declares a leading
+/// capability parameter fails at dispatch with an arity error. Because the
+/// handler is stored as a value, nothing else observes that mismatch: a direct
+/// call is caught by HARN-TYP-006, an indirect one is caught by nothing.
+/// Declaring the slot's function type lets the existing checker compare the
+/// reference's own `fn(...)` type against it at the registration site.
+///
+/// Keep this aligned with `ToolDefinitionConfig` in `std/tools`.
+pub const TOOL_DEFINE_CONFIG: Ty = Ty::OpenShape(
+    &[ShapeFieldDescriptor::optional(
+        "handler",
+        Ty::Fn(&[TY_DICT], &TY_ANY),
+    )],
+    &[TY_DICT],
+);

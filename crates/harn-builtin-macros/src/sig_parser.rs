@@ -16,19 +16,32 @@
 //!             | ident "?"                            // sugar for ty | nil
 //!             | "Schema" "<" ident ">"               // SchemaOf marker
 //!             | "(" ty ("," ty)* ")" "->" ty        // fn type
-//!             | "{" field ("," field)* "}"          // shape literal
+//!             | "{" member ("," member)* "}"        // shape literal
 //!             | int_literal | string_literal        // literal types
 //!             | "@" name                             // Ty const injection: `@NAME` →
 //!                                                    //   `<support>::shapes::NAME`;
 //!                                                    //   `@a::b::C` → absolute path
-//! field       = ident ":" ty ("?")?                 // ? AFTER type = optional field
+//! member      = field | rest
+//! field       = ident ("?")? ":" ty ("?")?          // ? AFTER name = optional field
+//! rest        = "..." ty                            // row tail ⇒ open record
 //! ```
 //!
-//! Note the `?` placement asymmetry: on a *param*, `?` goes after the name
-//! to mark it as optional (`drop_nil?: bool`). On a *type*, `?` goes after
-//! the type to express `T | nil` (`value: dict?`). On a *shape field*, `?`
-//! follows the type to mark the field as optional. This keeps each kind
-//! unambiguous.
+//! A shape with no `rest` is closed: an argument carrying a field the shape
+//! does not name is rejected. One or more row tails make it open
+//! (`{handler?: (dict) -> any, ...dict}`), which is what a builtin taking an
+//! extensible options dict needs.
+//!
+//! Note the `?` placement asymmetry: on a *param*, `?` goes after the name to
+//! mark it optional (`drop_nil?: bool`). On a *type*, `?` goes after the type
+//! to express `T | nil` (`value: dict?`).
+//!
+//! On a *shape field*, write `?` after the **name**. The trailing position is
+//! still accepted for compatibility, but it cannot express an optional field
+//! whose type is compound: `parse_ty` folds a trailing `?` into the type
+//! itself as `ty | nil`, which leaves the field required. `{age?: int}` is an
+//! optional field of type `int`; `{age: int?}` is a required field of type
+//! `int | nil`. `Display` always emits the leading form so a rendered `Ty`
+//! round-trips through this parser.
 
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::quote;
@@ -470,23 +483,41 @@ impl<'a> Parser<'a> {
             };
             return self.maybe_trailing_optional(ts);
         }
-        // Shape literal: "{x: int, y: string?}"
+        // Shape literal: "{x: int, y: string?}", or an open record carrying
+        // one or more row tails: "{handler: (dict) -> any?, ...dict}".
         if matches!(self.peek(), Some(Tok::LBrace)) {
             self.bump();
             let mut fields = Vec::new();
+            let mut rests = Vec::new();
             if !matches!(self.peek(), Some(Tok::RBrace)) {
                 loop {
-                    let fname = self.expect_ident()?;
-                    self.expect(&Tok::Colon)?;
-                    let fty = self.parse_ty()?;
-                    let foptional = matches!(self.peek(), Some(Tok::Question));
-                    if foptional {
+                    if matches!(self.peek(), Some(Tok::DotDotDot)) {
                         self.bump();
-                    }
-                    if foptional {
-                        fields.push(quote!(#support::ShapeFieldDescriptor::optional(#fname, #fty)));
+                        let rest = self.parse_ty()?;
+                        rests.push(rest);
                     } else {
-                        fields.push(quote!(#support::ShapeFieldDescriptor::new(#fname, #fty)));
+                        let fname = self.expect_ident()?;
+                        // `name?: ty` marks the field optional. The trailing
+                        // form (`name: ty?`) cannot express this: `parse_ty`
+                        // always folds a trailing `?` into the type itself as
+                        // `ty | nil`, which leaves the field required.
+                        let mut foptional = matches!(self.peek(), Some(Tok::Question));
+                        if foptional {
+                            self.bump();
+                        }
+                        self.expect(&Tok::Colon)?;
+                        let fty = self.parse_ty()?;
+                        if matches!(self.peek(), Some(Tok::Question)) {
+                            self.bump();
+                            foptional = true;
+                        }
+                        if foptional {
+                            fields.push(
+                                quote!(#support::ShapeFieldDescriptor::optional(#fname, #fty)),
+                            );
+                        } else {
+                            fields.push(quote!(#support::ShapeFieldDescriptor::new(#fname, #fty)));
+                        }
                     }
                     match self.peek() {
                         Some(Tok::Comma) => {
@@ -501,7 +532,12 @@ impl<'a> Parser<'a> {
                 }
             }
             self.expect(&Tok::RBrace)?;
-            return self.maybe_trailing_optional(quote!(#support::Ty::Shape(&[#(#fields),*])));
+            if rests.is_empty() {
+                return self.maybe_trailing_optional(quote!(#support::Ty::Shape(&[#(#fields),*])));
+            }
+            return self.maybe_trailing_optional(
+                quote!(#support::Ty::OpenShape(&[#(#fields),*], &[#(#rests),*])),
+            );
         }
         // Int literal type: "0", "-1"
         if let Some(Tok::Int(_)) = self.peek() {

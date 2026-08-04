@@ -247,7 +247,7 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
     ),
     (
         "agent_lifecycle_tools",
-        "agent_lifecycle_tools(registry?, options?) -> dict",
+        "agent_lifecycle_tools(agents, registry?, options?) -> dict",
     ),
     (
         "suspend_agent",

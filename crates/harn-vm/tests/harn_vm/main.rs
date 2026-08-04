@@ -37,6 +37,7 @@ mod github_stdlib_connectors;
 mod injection_classifier_loader;
 mod mcp_call_budget;
 mod orchestration_cutover;
+mod tool_handler_arity;
 // Formerly gated by a file-level `#![cfg(feature = "otel")]`; preserved as a
 // module-level gate so these tests exist only under `--features otel`.
 #[cfg(feature = "otel")]

@@ -59,6 +59,13 @@ pub fn ty_to_type_expr(ty: &Ty) -> TypeExpr {
                 .map(|f| ShapeField::synthetic(f.name, ty_to_type_expr(&f.ty), f.optional))
                 .collect(),
         ),
+        Ty::OpenShape(fields, rests) => TypeExpr::OpenShape {
+            fields: fields
+                .iter()
+                .map(|f| ShapeField::synthetic(f.name, ty_to_type_expr(&f.ty), f.optional))
+                .collect(),
+            rests: rests.iter().map(ty_to_type_expr).collect(),
+        },
         Ty::SchemaOf(name) => TypeExpr::Applied {
             name: "Schema".into(),
             args: vec![TypeExpr::Named((*name).into())],

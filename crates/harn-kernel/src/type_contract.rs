@@ -333,6 +333,15 @@ pub fn manifest_type_is_portable(expected: &Ty) -> bool {
         Ty::Shape(fields) => fields
             .iter()
             .all(|field| manifest_type_is_portable(&field.ty)),
+        // An open record is portable when its named fields are. The row tails
+        // stand for keys the manifest does not describe, so they are only
+        // portable if they are themselves portable container types.
+        Ty::OpenShape(fields, rests) => {
+            fields
+                .iter()
+                .all(|field| manifest_type_is_portable(&field.ty))
+                && rests.iter().all(manifest_type_is_portable)
+        }
         Ty::Generic(_) | Ty::Apply(_, _) | Ty::Fn(_, _) | Ty::SchemaOf(_) | Ty::Never => false,
     }
 }
