@@ -391,3 +391,53 @@ fn wildcard_imported_callable_is_not_an_ambient_harness_method() {
         "wildcard imports may supply the apparent ambient name: {diags:?}"
     );
 }
+
+/// Every pinned name collision resolves to its audited migration in whatever
+/// lint claims it — including `ambient-harness-method`, which does not consult
+/// the audited table at all.
+///
+/// `HARNESS_MIGRATION_DISAGREEMENTS` records four builtins whose generated
+/// registry entry names an unrelated same-named method: `read_file` /
+/// `write_file` / `delete_file` map to `harness.tools.*` (agent tools, not the
+/// filesystem capability) and `elapsed` to `harness.clock.elapsed` (a different
+/// method that inherited the name). The parser side is already guarded, but
+/// `HARN-LNT-071` renders `harness.{capability}.{method}` straight from the VM
+/// registry, so it would print exactly the string the pin exists to reject.
+///
+/// Today it cannot: all four are claimed first by `ambient-fs-builtin` /
+/// `ambient-clock-builtin`, which do use the audited answer. That is a property
+/// of *which* names are currently pinned, not a guarantee — pin a fifth name
+/// with no dedicated capability rule and the fallback ships confidently wrong
+/// advice. This asserts the outcome rather than the routing, so it holds however
+/// the name is claimed.
+#[test]
+fn a_pinned_name_collision_never_reaches_a_lint_that_would_misname_it() {
+    for (legacy, migration, reason) in harn_parser::diagnostic::HARNESS_MIGRATION_DISAGREEMENTS {
+        let source = format!("fn main(harness: Harness) {{\n  const value = {legacy}()\n}}\n");
+        let diags = lint_source(&source);
+        let entry = diags
+            .iter()
+            .find(|diag| diag.suggestion.is_some() || diag.fix.is_some())
+            .unwrap_or_else(|| panic!("`{legacy}` should draw a migration lint, got: {diags:?}"));
+        let rendered = format!(
+            "{} {}",
+            entry.message,
+            entry.suggestion.as_deref().unwrap_or_default()
+        );
+        assert!(
+            rendered.contains(migration),
+            "`{legacy}` was linted by `{}` and advised `{rendered}`, which does not name \
+             `{migration}` — {reason}",
+            entry.rule
+        );
+        // The positive assertion alone would survive advice that names both
+        // strings, which is exactly what a half-migrated renderer would emit.
+        let generated = harn_parser::diagnostic::generated_harness_migration(legacy)
+            .expect("a pinned disagreement has a generated entry to disagree with");
+        assert!(
+            !rendered.contains(generated),
+            "`{legacy}` was advised `{rendered}`, which still names the generated \
+             `{generated}` — {reason}"
+        );
+    }
+}
