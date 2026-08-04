@@ -68,3 +68,6 @@ jobs:
           name: harn-sdk-${{ matrix.language }}-${{ github.sha }}
           path: ${{ runner.temp }}/generated-sdks/${{ matrix.language }}
           if-no-files-found: error
+          # Inspected by hand when SDK codegen drifts; no job downloads it.
+          # Declared at the current effective window rather than shortened.
+          retention-days: 30
