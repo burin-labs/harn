@@ -57,6 +57,19 @@ impl SchemaTraversal {
         Ok(())
     }
 
+    /// The budget spent so far, to hand back before validating a sibling value.
+    ///
+    /// Prefer `with_child_ref_budget`. This pair exists for callers that hold
+    /// the traversal inside a larger context they also need to pass on, where a
+    /// closure would borrow that context twice.
+    pub(super) fn ref_budget_mark(&self) -> usize {
+        self.ref_expansions
+    }
+
+    pub(super) fn restore_ref_budget(&mut self, mark: usize) {
+        self.ref_expansions = mark;
+    }
+
     pub(super) fn mark_ref(&mut self) {
         self.saw_ref = true;
     }
@@ -64,6 +77,29 @@ impl SchemaTraversal {
     pub(super) fn saw_ref(&self) -> bool {
         self.saw_ref
     }
+}
+
+/// Validates one child value with the `$ref` budget it was given, and hands the
+/// same budget to the next child.
+///
+/// The budget exists to bound how much work a single value can force: `all_of`
+/// and `union` re-expand the *same* value against several branches, so a schema
+/// that branches on every hop can blow up exponentially without ever nesting
+/// deeply. That is a property of one value's subtree.
+///
+/// Spending it across the whole document instead made validation reject data
+/// for being large. An array of 300 integers whose `items` is a `$ref` is 300
+/// ordinary expansions, one per element; without this the 257th element and
+/// every element after it failed with "expansion limit exceeded", naming the
+/// data when nothing was wrong with it.
+pub(super) fn with_child_ref_budget<T>(
+    traversal: &mut SchemaTraversal,
+    f: impl FnOnce(&mut SchemaTraversal) -> T,
+) -> T {
+    let mark = traversal.ref_expansions;
+    let result = f(traversal);
+    traversal.ref_expansions = mark;
+    result
 }
 
 pub(super) fn with_schema_depth<T>(
