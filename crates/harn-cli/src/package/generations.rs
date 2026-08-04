@@ -4,6 +4,7 @@ use harn_modules::package_snapshot::{
     PackageGenerationPointer, PackageSnapshot, GENERATION_LEASE_FILE, GENERATION_LOCK_FILE,
     GENERATION_MANIFEST_FILE, GENERATION_PACKAGES_DIR,
 };
+use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -95,7 +96,19 @@ fn current_generation_matches_lock(
         }
         Err(error) => return Err(PackageError::Lockfile(error.to_string())),
     };
-    if snapshot.lock_digest() != expected_lock_digest {
+    // A byte-identical lock is trivially the same resolution, so accept it
+    // without inspecting the tree. A *differing* one is not automatically a
+    // different resolution: the digest covers the whole `harn.lock`, including
+    // `generator_version` / `protocol_artifact_version`, which record which CLI
+    // resolved the lock and have no bearing on what was materialized. Bumping
+    // Harn rewrites those two lines and nothing else, so gating on the digest
+    // alone discarded a byte-for-byte correct generation on every bump and
+    // re-fetched every dependency from its source.
+    //
+    // So fall through to the structural question instead of answering the
+    // proxy one: does the materialized tree hold exactly this lock's packages,
+    // at exactly this lock's content hashes?
+    if snapshot.lock_digest() != expected_lock_digest && !package_sets_match(&snapshot, lock) {
         return Ok(false);
     }
     for entry in &lock.packages {
@@ -118,6 +131,27 @@ fn current_generation_matches_lock(
         }
     }
     Ok(true)
+}
+
+/// Whether the generation was materialized for exactly this lock's package set.
+///
+/// The per-entry loop in [`current_generation_matches_lock`] walks the *lock*,
+/// so it can only see packages the lock still names. It cannot notice one that
+/// was dropped from the manifest and is still sitting materialized and
+/// importable in the generation. While the digest was the sole gate that gap
+/// was unreachable; now that a digest mismatch can be survived, it is not.
+fn package_sets_match(snapshot: &PackageSnapshot, lock: &LockFile) -> bool {
+    let materialized: BTreeSet<&str> = snapshot
+        .package_names()
+        .iter()
+        .map(String::as_str)
+        .collect();
+    let locked: BTreeSet<&str> = lock
+        .packages
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect();
+    materialized == locked
 }
 
 pub(crate) fn current_package_snapshot(
@@ -386,7 +420,7 @@ mod tests {
     use crate::package::test_support::{
         create_test_package_generation, write_test_generation_lock,
     };
-    use crate::package::{ensure_dependencies_materialized, MANIFEST};
+    use crate::package::{ensure_dependencies_materialized, LockEntry, MANIFEST};
     use harn_modules::package_snapshot::PackageSnapshot;
 
     fn test_context(root: &Path) -> ManifestContext {
@@ -584,5 +618,106 @@ mod tests {
                 .file_name()
                 .to_string_lossy()
                 .starts_with(STAGING_PREFIX)));
+    }
+
+    /// Publish a generation holding one git-sourced package whose recorded
+    /// `content_hash` really is the hash of what was materialized, so the
+    /// generation is genuinely valid for the lock it ships with.
+    fn publish_vendored_generation(ctx: &ManifestContext) -> (LockFile, String) {
+        let body = "pipeline main() {}\n";
+        let scratch = tempfile::tempdir().unwrap();
+        let sample = scratch.path().join("vendored");
+        fs::create_dir(&sample).unwrap();
+        fs::write(sample.join("main.harn"), body).unwrap();
+        let content_hash = crate::package::compute_content_hash(&sample).unwrap();
+
+        let lock = LockFile {
+            packages: vec![LockEntry {
+                name: "vendored".to_string(),
+                source: "git+ssh://example.invalid/vendored.git".to_string(),
+                content_hash: Some(content_hash),
+                ..LockEntry::default()
+            }],
+            ..LockFile::default()
+        };
+
+        publish_package_generation(ctx, &lock, false, |packages| {
+            let dir = packages.join("vendored");
+            fs::create_dir(&dir).unwrap();
+            fs::write(dir.join("main.harn"), body).unwrap();
+            Ok(1)
+        })
+        .unwrap();
+
+        let generation = PackageSnapshot::acquire(&ctx.dir)
+            .unwrap()
+            .unwrap()
+            .generation()
+            .to_string();
+        (lock, generation)
+    }
+
+    /// Re-stamp a published generation's stored lock as if an older CLI had
+    /// written it. `encode()` always normalizes the provenance stamps to the
+    /// running CLI, so this is the only way to express the real artifact: a
+    /// generation committed by Harn N sitting in a checkout now running N+1.
+    fn restamp_generation_lock(root: &Path, lock: &LockFile, stamp: &str) {
+        let encoded = String::from_utf8(lock.encode().unwrap()).unwrap();
+        let aged = encoded.replace(env!("CARGO_PKG_VERSION"), stamp);
+        assert_ne!(aged, encoded, "restamping must actually change the bytes");
+        write_test_generation_lock(root, &aged);
+    }
+
+    /// Bumping Harn rewrites `generator_version` and `protocol_artifact_version`
+    /// in `harn.lock` and nothing else. The materialized tree is unaffected, so
+    /// re-materializing it is pure waste — and for a private git dependency on a
+    /// cold cache it is not merely waste, it is a fetch that needs credentials
+    /// the bump does not have.
+    #[test]
+    fn bumping_only_the_generator_stamp_reuses_the_materialized_generation() {
+        let temp = tempfile::tempdir().unwrap();
+        let ctx = test_context(temp.path());
+        let (lock, generation) = publish_vendored_generation(&ctx);
+        restamp_generation_lock(temp.path(), &lock, "0.0.1-aged");
+
+        publish_package_generation(&ctx, &lock, false, |_| {
+            panic!("re-materialized a generation that already matches the lock")
+        })
+        .unwrap();
+
+        assert_eq!(
+            PackageSnapshot::acquire(temp.path())
+                .unwrap()
+                .unwrap()
+                .generation(),
+            generation,
+            "only the provenance stamps moved, so the generation must be reused"
+        );
+    }
+
+    /// The per-entry check walks the lock, so it cannot see a package the lock
+    /// no longer names. Now that a digest mismatch is survivable, that gap is
+    /// reachable: without the set comparison a dropped dependency would stay
+    /// materialized and importable.
+    #[test]
+    fn dropping_a_dependency_rebuilds_even_though_every_remaining_entry_matches() {
+        let temp = tempfile::tempdir().unwrap();
+        let ctx = test_context(temp.path());
+        let (mut lock, generation) = publish_vendored_generation(&ctx);
+        restamp_generation_lock(temp.path(), &lock, "0.0.1-aged");
+
+        lock.packages.clear();
+        publish_package_generation(&ctx, &lock, false, |_| Ok(0)).unwrap();
+
+        let snapshot = PackageSnapshot::acquire(temp.path()).unwrap().unwrap();
+        assert_ne!(
+            snapshot.generation(),
+            generation,
+            "the dependency left the lock, so its materialization must not survive"
+        );
+        assert!(
+            !snapshot.packages_root().join("vendored").exists(),
+            "dropped dependency is still importable from the generation"
+        );
     }
 }
