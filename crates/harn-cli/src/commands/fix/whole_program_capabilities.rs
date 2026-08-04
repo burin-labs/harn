@@ -140,7 +140,7 @@ pub(super) fn plan(
             .exports_for_module(file)
             .into_iter()
             .collect::<BTreeSet<_>>();
-        let root_attenuations = harn_lint::capability_attenuations(&program)
+        let root_attenuations = harn_lint::capability_attenuations(&source, &program)
             .into_iter()
             .map(|candidate| {
                 (

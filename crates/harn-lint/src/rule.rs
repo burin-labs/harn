@@ -232,10 +232,12 @@ program_rule!(
     ast,
     crate::rules::reminder_provider_count::check_reminder_provider_count
 );
+// `src`, not `ast`: attenuation is a "which capabilities are used" analysis,
+// and interpolation holes are only reachable from the file text.
 program_rule!(
     ApiDesign,
     "capability-attenuation",
-    ast,
+    src,
     crate::rules::api_design::check_api_design
 );
 
