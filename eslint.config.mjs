@@ -56,6 +56,7 @@ export default [
       ecmaVersion: "latest",
       sourceType: "module",
       globals: {
+        setTimeout: "readonly",
         structuredClone: "readonly",
         URL: "readonly",
         URLSearchParams: "readonly",
