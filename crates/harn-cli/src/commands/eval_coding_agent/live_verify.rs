@@ -456,12 +456,15 @@ fn report_from_summary(ctx: RunSummaryContext, summary: JsonValue) -> RunReport 
         .pointer("/llm/output_tokens")
         .and_then(JsonValue::as_i64)
         .unwrap_or(0);
-    let pricing = harn_vm::llm::llm_pricing_per_1k(&ctx.selector.provider, &ctx.selector.model);
-    let cost_usd = pricing
-        .map(|(input, output)| {
-            (input_tokens.max(0) as f64 * input + output_tokens.max(0) as f64 * output) / 1000.0
-        })
-        .unwrap_or(0.0);
+    // Priced through the usage-aware helper so a long-context run bills at the
+    // catalog's input-token band rather than the base rate.
+    let cost = harn_vm::llm::pricing_aware_call_cost(
+        &ctx.selector.provider,
+        &ctx.selector.model,
+        input_tokens.max(0),
+        output_tokens.max(0),
+    );
+    let cost_usd = cost.unwrap_or(0.0);
     let status = if passed {
         "passed".to_string()
     } else if ctx.exit_code == 0 {
@@ -506,7 +509,7 @@ fn report_from_summary(ctx: RunSummaryContext, summary: JsonValue) -> RunReport 
         input_tokens,
         output_tokens,
         cost_usd,
-        pricing_known: pricing.is_some(),
+        pricing_known: cost.is_some(),
         tool_calls: summary
             .pointer("/tools/calls")
             .and_then(JsonValue::as_array)

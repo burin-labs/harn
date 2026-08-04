@@ -11,6 +11,15 @@ pub struct LlmTraceEntry {
     pub provider: String,
     pub input_tokens: i64,
     pub output_tokens: i64,
+    /// The price of this exact call, as computed by the one owner of per-call
+    /// cost (`LlmResult::priced_cost_usd`). Carried rather than recomputed
+    /// because re-pricing from `(provider, model, input, output)` alone cannot
+    /// see prompt-cache accounting or the accelerated-serving tier, so a
+    /// summary that re-priced would disagree with the run's own total.
+    ///
+    /// `None` means the catalog prices no rate for this pair — which is not
+    /// the same as a call that cost nothing.
+    pub cost_usd: Option<f64>,
     pub duration_ms: u64,
 }
 

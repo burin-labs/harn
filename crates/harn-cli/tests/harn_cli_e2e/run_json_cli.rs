@@ -197,6 +197,12 @@ fn run_emit_summary_json_defaults_to_terminal_stderr_and_reports_llm_metrics() {
     assert_eq!(summary["llm"]["output_tokens"].as_i64(), Some(5));
     assert!(summary["llm"]["time_ms"].as_i64().is_some());
     assert!(summary["llm"]["cost_usd"].as_f64().is_some());
+    // Present unconditionally: without it a reader cannot tell a run that cost
+    // nothing from one whose model the catalog prices no rate for.
+    assert!(
+        summary["llm"]["unpriced_calls"].as_i64().is_some(),
+        "summary: {summary}"
+    );
 }
 
 #[test]

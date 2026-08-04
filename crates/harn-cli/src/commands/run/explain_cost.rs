@@ -511,12 +511,20 @@ fn profile_default_iterations(profile: &str) -> Option<i64> {
     }
 }
 
+/// Estimate the *input* cost of one call. Output tokens are not statically
+/// knowable, so they are priced as zero; the rendered total says so.
+///
+/// Priced through the usage-aware helper, which applies the catalog's
+/// input-token band. A statically large prompt is exactly the case where the
+/// base rate understates the bill.
 fn estimate_cost(model: &ResolvedModel, input_tokens: i64) -> (Option<f64>, CostCell) {
-    match harn_vm::llm::llm_pricing_per_1k(&model.provider, &model.model) {
-        Some((input_rate, _output_rate)) => (
-            Some(input_tokens.max(0) as f64 * input_rate / 1000.0),
-            CostCell::Amount,
-        ),
+    match harn_vm::llm::pricing_aware_call_cost(
+        &model.provider,
+        &model.model,
+        input_tokens.max(0),
+        0,
+    ) {
+        Some(cost) => (Some(cost), CostCell::Amount),
         None => (None, CostCell::Unpriced),
     }
 }
