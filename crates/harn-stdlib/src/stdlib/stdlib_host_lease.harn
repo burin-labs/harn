@@ -92,7 +92,12 @@ pub type HostLeaseScopeResult<T> = {
 }
 
 /**
- * Read the authoritative state for an explicitly named local host resource.
+ * Read the authoritative state for a local host resource.
+ *
+ * Omitting `host` reads this machine, the same lane `host_lease_acquire`
+ * claims when it is omitted there. A script cannot otherwise name its own
+ * host, so requiring one here made the read-only path unusable for exactly the
+ * resource the write path defaults to.
  *
  * This is inspection only. It never acquires, renews, releases, or claims to
  * observe a resource on another machine.
@@ -102,7 +107,7 @@ pub type HostLeaseScopeResult<T> = {
  */
 pub fn host_lease_status(
   host_lease: HarnessHostLease,
-  host: string,
+  host: string? = nil,
   resource_class: HostLeaseResourceClass = "whole-machine",
   domain: string = "default",
 ) -> HostLeaseStatus {

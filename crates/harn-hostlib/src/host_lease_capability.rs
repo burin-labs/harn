@@ -72,9 +72,34 @@ fn handle_update_metadata(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     metadata_update_to_value(&receipt)
 }
 
+/// Resolve the host a request names, defaulting to this machine.
+///
+/// Inspection and acquisition must agree on what "this host" means. When only
+/// the acquire path defaulted, a caller could acquire a lease without naming a
+/// host but had no way to name the lane it had just taken — the local hostname
+/// is not reachable from a Harn script — so the read-only path was unusable
+/// for exactly the resource the write path had made easy to claim.
+///
+/// An explicitly empty string stays an error rather than silently meaning
+/// "local": that is nearly always an unset variable reaching the call.
+fn resolve_host(
+    builtin: &'static str,
+    dict: &harn_vm::value::DictMap,
+) -> Result<String, HostlibError> {
+    match optional_string(builtin, dict, "host")? {
+        Some(host) if !host.trim().is_empty() => Ok(host),
+        Some(_) => Err(HostlibError::InvalidParameter {
+            builtin,
+            param: "host",
+            message: "must be a non-empty string when provided".to_string(),
+        }),
+        None => Ok(HostLeaseStore::default_host()),
+    }
+}
+
 fn handle_status(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let dict = dict_arg(STATUS_BUILTIN, args)?;
-    let host = require_nonempty_string(STATUS_BUILTIN, &dict, "host")?;
+    let host = resolve_host(STATUS_BUILTIN, &dict)?;
     let resource_class = resource_class(STATUS_BUILTIN, dict.get("resource_class"))?;
     let domain = optional_string(STATUS_BUILTIN, &dict, "domain")?
         .unwrap_or_else(|| DEFAULT_HOST_LEASE_DOMAIN.to_string());
@@ -89,17 +114,7 @@ fn handle_status(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
 fn handle_acquire(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let dict = dict_arg(ACQUIRE_BUILTIN, args)?;
-    let host = match optional_string(ACQUIRE_BUILTIN, &dict, "host")? {
-        Some(host) if !host.trim().is_empty() => host,
-        Some(_) => {
-            return Err(HostlibError::InvalidParameter {
-                builtin: ACQUIRE_BUILTIN,
-                param: "host",
-                message: "must be a non-empty string when provided".to_string(),
-            });
-        }
-        None => HostLeaseStore::default_host(),
-    };
+    let host = resolve_host(ACQUIRE_BUILTIN, &dict)?;
     let owner = require_nonempty_string(ACQUIRE_BUILTIN, &dict, "owner")?;
     let resource_class = resource_class(ACQUIRE_BUILTIN, dict.get("resource_class"))?;
     let domain = optional_string(ACQUIRE_BUILTIN, &dict, "domain")?

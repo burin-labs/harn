@@ -2,13 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/host_lease/status.request.json",
   "title": "host_lease.status request",
-  "description": "Read the authoritative lease state for one explicitly named local host resource.",
+  "description": "Read the authoritative lease state for one local host resource.",
   "type": "object",
   "properties": {
     "host": {
-      "type": "string",
+      "type": ["string", "null"],
       "minLength": 1,
-      "description": "Local machine resource name. Remote observation is not provided by this capability."
+      "description": "Local machine resource name; omitted or null reads this machine, matching acquire. Remote observation is not provided by this capability."
     },
     "resource_class": {
       "type": "string",
@@ -21,6 +21,5 @@
       "pattern": "^[A-Za-z0-9._-]+$"
     }
   },
-  "required": ["host"],
   "additionalProperties": false
 }
