@@ -77,38 +77,15 @@ jobs:
       contents: read
       issues: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Open or resolve the nightly-failure tracking issue
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RESULT: ${{ needs.e2e.result }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          TITLE: Nightly E2E suite is failing
-        shell: bash
-        run: |
-          set -euo pipefail
-          existing=$(gh issue list --repo "$GH_REPO" --state open --search "\"$TITLE\" in:title" \
-            --json number,title --jq "[.[] | select(.title == \"$TITLE\")][0].number // empty")
-          case "$RESULT" in
-            success)
-              if [ -n "$existing" ]; then
-                gh issue comment "$existing" --repo "$GH_REPO" \
-                  --body "Nightly E2E suite is green again: $RUN_URL — closing."
-                gh issue close "$existing" --repo "$GH_REPO"
-              fi
-              ;;
-            failure | cancelled | timed_out)
-              if [ -n "$existing" ]; then
-                gh issue comment "$existing" --repo "$GH_REPO" \
-                  --body "Still failing (\`$RESULT\`): $RUN_URL"
-              else
-                gh issue create --repo "$GH_REPO" --title "$TITLE" --body \
-                  "The scheduled nightly E2E suite did not pass (\`$RESULT\`): $RUN_URL
-
-          Opened and closed automatically by \`.github/workflows/e2e.yml\`; stays open until a nightly run is green."
-              fi
-              ;;
-            *)
-              echo "e2e result is '$RESULT' — no tracking-issue action."
-              ;;
-          esac
+        uses: ./.github/actions/scheduled-failure-issue
+        with:
+          # Unchanged: this string is the deduplication key, so any tracking
+          # issue open right now must keep matching.
+          title: Nightly E2E suite is failing
+          result: ${{ needs.e2e.result }}
+          details: The scheduled nightly E2E suite did not pass.
+          owner-file: .github/workflows/e2e.yml
