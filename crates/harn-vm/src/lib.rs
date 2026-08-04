@@ -21,6 +21,9 @@
 /// trait without each adding `harn-clock` as a direct dependency.
 pub use harn_clock as clock;
 
+mod runtime_stack;
+pub use runtime_stack::RUNTIME_STACK_SIZE;
+
 pub mod a2a;
 pub mod actor_chain;
 pub mod agent_events;

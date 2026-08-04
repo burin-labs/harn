@@ -495,28 +495,32 @@ fn main(harness: Harness) {
 
         let spawn_run = |path: std::path::PathBuf, bytes: Arc<Mutex<Vec<u8>>>| {
             let first_event_barrier = barrier.clone();
-            std::thread::spawn(move || {
-                tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("runtime")
-                    .block_on(super::super::execute_run_json(
-                        &path.to_string_lossy(),
-                        false,
-                        std::collections::HashSet::new(),
-                        Vec::new(),
-                        Vec::new(),
-                        super::super::CliLlmMockMode::Off,
-                        None,
-                        super::super::RunProfileOptions::default(),
-                        Box::new(BarrierWriter {
-                            bytes,
-                            first_event_barrier,
-                            reached_barrier: false,
-                        }),
-                        super::super::RunJsonOptions::default(),
-                    ))
-            })
+            std::thread::Builder::new()
+                .name("harn-run-json-probe".to_string())
+                .stack_size(crate::CLI_RUNTIME_STACK_SIZE)
+                .spawn(move || {
+                    tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .expect("runtime")
+                        .block_on(super::super::execute_run_json(
+                            &path.to_string_lossy(),
+                            false,
+                            std::collections::HashSet::new(),
+                            Vec::new(),
+                            Vec::new(),
+                            super::super::CliLlmMockMode::Off,
+                            None,
+                            super::super::RunProfileOptions::default(),
+                            Box::new(BarrierWriter {
+                                bytes,
+                                first_event_barrier,
+                                reached_barrier: false,
+                            }),
+                            super::super::RunJsonOptions::default(),
+                        ))
+                })
+                .expect("spawn run-json probe thread")
         };
 
         let alpha = spawn_run(alpha_path, alpha_bytes.clone());

@@ -75,26 +75,31 @@ impl OrchestratorHarness {
         let pump_drain_gate = pumps::PumpDrainGate::new();
         let task_pump_drain_gate = pump_drain_gate.clone();
 
-        let join = std::thread::spawn(move || {
-            // Use a multi-thread runtime so that blocking I/O (e.g. the OTEL
-            // SimpleSpanProcessor calling futures::executor::block_on for each
-            // span) can proceed on reactor threads while the LocalSet thread is
-            // temporarily paused.  A current-thread runtime would deadlock:
-            // block_on holds the only thread while the reactor needs that same
-            // thread to drive the TCP export.
-            let rt = tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(2)
-                .enable_all()
-                .build()
-                .expect("failed to build OrchestratorHarness tokio runtime");
-            let local = tokio::task::LocalSet::new();
-            rt.block_on(local.run_until(lifecycle::orchestrator_task(
-                config,
-                ready_tx,
-                shutdown_rx,
-                task_pump_drain_gate,
-            )));
-        });
+        // The orchestrator task drives the VM on this thread.
+        let join = std::thread::Builder::new()
+            .name("harn-orchestrator".to_string())
+            .stack_size(crate::CLI_RUNTIME_STACK_SIZE)
+            .spawn(move || {
+                // Use a multi-thread runtime so that blocking I/O (e.g. the
+                // OTEL SimpleSpanProcessor calling futures::executor::block_on
+                // for each span) can proceed on reactor threads while the
+                // LocalSet thread is temporarily paused.  A current-thread
+                // runtime would deadlock: block_on holds the only thread while
+                // the reactor needs that same thread to drive the TCP export.
+                let rt = tokio::runtime::Builder::new_multi_thread()
+                    .worker_threads(2)
+                    .enable_all()
+                    .build()
+                    .expect("failed to build OrchestratorHarness tokio runtime");
+                let local = tokio::task::LocalSet::new();
+                rt.block_on(local.run_until(lifecycle::orchestrator_task(
+                    config,
+                    ready_tx,
+                    shutdown_rx,
+                    task_pump_drain_gate,
+                )));
+            })
+            .expect("spawn OrchestratorHarness thread");
 
         match ready_rx.await {
             Ok(Ok(ready)) => Ok(Self {

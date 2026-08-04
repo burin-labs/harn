@@ -357,17 +357,22 @@ impl McpOrchestratorService {
             .insert(task_id.clone(), record);
         let service = self.clone();
         let task_session = session.clone();
-        std::thread::spawn(move || {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("build MCP task runtime");
-            runtime.block_on(async move {
-                service
-                    .run_tool_task(task_id, task_session, name, params)
-                    .await;
-            });
-        });
+        // The task runs a Harn tool on this thread, so it drives the VM.
+        std::thread::Builder::new()
+            .name("harn-mcp-task".to_string())
+            .stack_size(crate::CLI_RUNTIME_STACK_SIZE)
+            .spawn(move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("build MCP task runtime");
+                runtime.block_on(async move {
+                    service
+                        .run_tool_task(task_id, task_session, name, params)
+                        .await;
+                });
+            })
+            .expect("spawn MCP task thread");
 
         let mut result = task.to_json();
         result["resultType"] = json!("task");

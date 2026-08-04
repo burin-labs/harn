@@ -329,6 +329,7 @@ impl HarnConnectorWorker {
         let run = crate::egress::bind_policy_context(move || run_worker_loop(module_path, rx));
         let join = std::thread::Builder::new()
             .name(format!("harn-connector-{}", provider_id.as_str()))
+            .stack_size(crate::RUNTIME_STACK_SIZE)
             .spawn(run)
             .map_err(|error| ConnectorError::HarnRuntime(error.to_string()))?;
         Ok(Arc::new(Self {

@@ -1017,9 +1017,14 @@ pub(crate) const VERSION_SCHEMA_VERSION: u32 = 1;
 /// dedicated OS thread with no entered runtime context (the same clean footing
 /// the `harn-dap` multi-call alias gets from `main`) and block until the
 /// client disconnects. Reuses `harn_dap::run` verbatim; no duplicated server.
+///
+/// This thread is spawned precisely to escape the CLI's runtime thread, so it
+/// does not inherit that thread's stack — it needs the VM stack in its own
+/// right, exactly like the standalone `harn-dap` binary.
 pub(crate) fn run_dap_adapter() {
     thread::Builder::new()
         .name("harn-dap".to_string())
+        .stack_size(CLI_RUNTIME_STACK_SIZE)
         .spawn(harn_dap::run)
         .expect("spawn harn-dap adapter thread")
         .join()

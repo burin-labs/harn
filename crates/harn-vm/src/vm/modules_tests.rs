@@ -715,18 +715,22 @@ fn stdlib_artifact_cache_is_process_wide_across_threads() {
     let _guard = cache_test_guard();
     reset_stdlib_module_artifact_cache();
 
-    let handle = std::thread::spawn(|| {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("runtime builds");
-        runtime.block_on(async {
-            let mut vm = Vm::new();
-            vm.load_module_exports_from_import("std/agent/prompts")
-                .await
-                .expect("thread stdlib import succeeds");
-        });
-    });
+    let handle = std::thread::Builder::new()
+        .name("stdlib-cache-probe".to_string())
+        .stack_size(crate::RUNTIME_STACK_SIZE)
+        .spawn(|| {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("runtime builds");
+            runtime.block_on(async {
+                let mut vm = Vm::new();
+                vm.load_module_exports_from_import("std/agent/prompts")
+                    .await
+                    .expect("thread stdlib import succeeds");
+            });
+        })
+        .expect("spawn stdlib cache probe");
     handle.join().expect("thread joins");
     let thread_cached =
         cached_stdlib_module_ptr("agent/prompts").expect("thread import cached stdlib artifact");

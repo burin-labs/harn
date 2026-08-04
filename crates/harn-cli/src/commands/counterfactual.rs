@@ -175,6 +175,7 @@ fn run_plan_source(source: &str, plan_path: &Path) -> Result<JsonValue, String> 
     let plan_path = plan_path.to_path_buf();
     std::thread::Builder::new()
         .name("harn-counterfactual-plan".to_string())
+        .stack_size(crate::CLI_RUNTIME_STACK_SIZE)
         .spawn(move || run_plan_source_inner(&source, &plan_path))
         .map_err(|error| format!("failed to start counterfactual plan runner: {error}"))?
         .join()

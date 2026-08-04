@@ -21,6 +21,7 @@ pub mod sessions;
 pub mod streaming;
 pub mod tls;
 pub mod transport;
+mod vm_thread;
 pub mod ws;
 
 /// Enter Harn hostlib's private process-guardian mode, when requested.

@@ -32,7 +32,7 @@ impl DispatchRuntime {
     /// error messages (e.g. `"A2A"`, `"MCP"`).
     pub(crate) fn start(name: &'static str, core: Arc<DispatchCore>) -> Self {
         let (tx, mut rx) = mpsc::unbounded_channel::<DispatchJob>();
-        std::thread::spawn(move || {
+        crate::vm_thread::spawn_or_panic(name, move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()

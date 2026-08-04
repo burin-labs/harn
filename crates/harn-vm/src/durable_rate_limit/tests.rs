@@ -517,17 +517,23 @@ pipeline main(harness: Harness, task) {
         let base_dir = base_dir.clone();
         let source = source.clone();
         let barrier = barrier.clone();
-        handles.push(std::thread::spawn(move || {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_time()
-                .build()
-                .expect("current-thread runtime");
-            barrier.wait();
-            runtime.block_on(
-                tokio::task::LocalSet::new()
-                    .run_until(async { run_harn(&base_dir, &source).await }),
-            )
-        }));
+        handles.push(
+            std::thread::Builder::new()
+                .name("durable-rate-limit-probe".to_string())
+                .stack_size(crate::RUNTIME_STACK_SIZE)
+                .spawn(move || {
+                    let runtime = tokio::runtime::Builder::new_current_thread()
+                        .enable_time()
+                        .build()
+                        .expect("current-thread runtime");
+                    barrier.wait();
+                    runtime.block_on(
+                        tokio::task::LocalSet::new()
+                            .run_until(async { run_harn(&base_dir, &source).await }),
+                    )
+                })
+                .expect("spawn durable rate limit probe"),
+        );
     }
 
     let outputs: Vec<_> = handles

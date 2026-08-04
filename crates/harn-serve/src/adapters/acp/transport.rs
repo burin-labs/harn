@@ -126,21 +126,19 @@ async fn acp_websocket_session(config: AcpServerConfig, session: WsSession) {
     let (request_tx, request_rx) = mpsc::unbounded_channel::<serde_json::Value>();
     let (response_tx, mut response_rx) = mpsc::unbounded_channel::<String>();
 
-    let worker_thread = std::thread::Builder::new()
-        .name("harn-acp-ws".to_string())
-        .spawn(move || {
-            let runtime = match tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-            {
-                Ok(runtime) => runtime,
-                Err(error) => {
-                    eprintln!("[harn] failed to start ACP WebSocket runtime: {error}");
-                    return;
-                }
-            };
-            runtime.block_on(run_acp_channel_server(config, request_rx, response_tx));
-        });
+    let worker_thread = crate::vm_thread::spawn("harn-acp-ws", move || {
+        let runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                eprintln!("[harn] failed to start ACP WebSocket runtime: {error}");
+                return;
+            }
+        };
+        runtime.block_on(run_acp_channel_server(config, request_rx, response_tx));
+    });
     let worker_thread = match worker_thread {
         Ok(worker_thread) => worker_thread,
         Err(error) => {
