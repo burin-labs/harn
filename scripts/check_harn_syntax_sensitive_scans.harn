@@ -5,8 +5,8 @@ const SKIP_SEGMENTS = [
   "/.git/",
   "/.harn/",
   "/.harn-runs/",
+  "/.harn-tmp/",
   "/docs/dist/",
-  "/harn-docs-snippets-",
   "/node_modules/",
   "/target/",
 ]

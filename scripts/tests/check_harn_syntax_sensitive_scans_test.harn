@@ -118,7 +118,7 @@ pipeline test_temp_tree_skips_generated_and_reports_findings(harness: Harness, t
       write_text(
         harness.fs,
         root,
-        "harn-docs-snippets-AbCd/35_concurrency_8.harn",
+        ".harn-tmp/harn-docs-snippets-AbCd/35_concurrency_8.harn",
         "var " + "reg = tool_registry()\n",
       )
       write_text(harness.fs, root, "target/generated.harn", "const pattern = \"let\\\\s+x\"\n")
@@ -127,7 +127,7 @@ pipeline test_temp_tree_skips_generated_and_reports_findings(harness: Harness, t
       assert_eq(files.contains("docs/bad.md"), true)
       assert_eq(files.contains("schemas/bad.json"), true)
       assert_eq(files.contains("docs/dist/generated.md"), false)
-      assert_eq(files.contains("harn-docs-snippets-AbCd/35_concurrency_8.harn"), false)
+      assert_eq(files.contains(".harn-tmp/harn-docs-snippets-AbCd/35_concurrency_8.harn"), false)
       assert_eq(files.contains("target/generated.harn"), false)
       const report = check_harn_syntax_sensitive_scans(harness.fs, harness.process, root)
       assert_eq(report.violation_count, 3)
