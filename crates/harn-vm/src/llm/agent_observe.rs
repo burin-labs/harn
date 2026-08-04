@@ -1060,6 +1060,7 @@ pub(crate) async fn observed_llm_call(
                     provider: result.provider.clone(),
                     input_tokens: result.input_tokens,
                     output_tokens: result.output_tokens,
+                    cost_usd: result.priced_cost_usd(),
                     duration_ms,
                 });
                 if let Some(metrics) = crate::active_metrics_registry() {

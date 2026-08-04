@@ -859,6 +859,7 @@ async fn llm_completion_builtin(
         provider: result.provider.clone(),
         input_tokens: result.input_tokens,
         output_tokens: result.output_tokens,
+        cost_usd: result.priced_cost_usd(),
         duration_ms: start.elapsed().as_millis() as u64,
     });
     if let Some(span_id) = crate::tracing::current_span_id() {

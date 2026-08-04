@@ -89,9 +89,16 @@ pub(super) struct RunSummaryLlm {
     output_tokens: i64,
     time_ms: i64,
     cost_usd: f64,
+    /// Calls the catalog prices no rate for. They contribute nothing to
+    /// `cost_usd`, so a non-zero count here means `cost_usd` is a floor on the
+    /// real spend rather than the spend. Without it, a run served entirely by
+    /// an unpriced model reports `cost_usd: 0.0` and reads as free.
+    unpriced_calls: i64,
 }
 
-pub const RUN_SUMMARY_SCHEMA_VERSION: u32 = 1;
+/// v2 added `llm.unpriced_calls`. Additive: a reader that ignores it sees
+/// exactly the v1 shape.
+pub const RUN_SUMMARY_SCHEMA_VERSION: u32 = 2;
 pub const RUN_PHASE_SCHEMA_VERSION: u32 = 2;
 pub const RUN_RUSAGE_SCHEMA_VERSION: u32 = 1;
 
@@ -200,12 +207,19 @@ fn build_run_summary<'a>(
 pub(super) fn run_summary_llm_snapshot() -> RunSummaryLlm {
     let (input_tokens, output_tokens, time_ms, call_count) = harn_vm::llm::peek_trace_summary();
     let cost_usd = harn_vm::llm::peek_total_cost();
+    // Counted off the trace rather than the accumulator: the accumulator folds
+    // an unpriced call in as 0.0 and cannot tell it apart afterwards.
+    let unpriced_calls = harn_vm::llm::peek_trace()
+        .iter()
+        .filter(|entry| entry.cost_usd.is_none())
+        .count() as i64;
     RunSummaryLlm {
         call_count,
         input_tokens,
         output_tokens,
         time_ms,
         cost_usd: if cost_usd.is_finite() { cost_usd } else { 0.0 },
+        unpriced_calls,
     }
 }
 
@@ -468,9 +482,14 @@ pub(super) fn exit_code_from_return_value(value: &harn_vm::VmValue) -> i32 {
 }
 
 pub(crate) fn render_trace_summary() -> String {
+    render_trace_entries(&harn_vm::llm::take_trace())
+}
+
+/// Rendering is split from the thread-local read so the money arithmetic can
+/// be tested against constructed entries rather than a live provider call.
+fn render_trace_entries(entries: &[harn_vm::llm::LlmTraceEntry]) -> String {
     use std::fmt::Write;
 
-    let entries = harn_vm::llm::take_trace();
     if entries.is_empty() {
         return String::new();
     }
@@ -482,18 +501,17 @@ pub(crate) fn render_trace_summary() -> String {
     // Priced and unpriced calls are summed separately. This used to apply one
     // hardcoded Sonnet-4 rate ($3/$15 per MTok) to every call regardless of
     // which model served it, so a trace of any other model reported a
-    // confidently wrong dollar figure. Catalog pricing is the owner, and it
-    // returns `None` for a pair it has no rate for — a fact worth reporting
-    // rather than replacing with a guess.
+    // confidently wrong dollar figure.
+    //
+    // The price is now read off the entry rather than recomputed here. The
+    // runtime already priced each call through the one owner of per-call cost,
+    // which sees prompt-cache accounting and the accelerated-serving tier;
+    // re-pricing from tokens alone cannot, and would make this summary
+    // disagree with the run's own reported total.
     let mut priced_cost = 0.0f64;
     let mut unpriced_calls = 0usize;
     for (index, entry) in entries.iter().enumerate() {
-        let cost = harn_vm::llm::pricing_aware_call_cost(
-            &entry.provider,
-            &entry.model,
-            entry.input_tokens,
-            entry.output_tokens,
-        );
+        let cost = entry.cost_usd;
         match cost {
             Some(cost) => priced_cost += cost,
             None => unpriced_calls += 1,
@@ -536,76 +554,73 @@ pub(crate) fn render_trace_summary() -> String {
 
 #[cfg(test)]
 mod trace_summary_pricing_tests {
+    use super::render_trace_entries;
     use harn_vm::llm::LlmTraceEntry;
 
-    /// The trace summary used to price every call at one hardcoded Sonnet-4
-    /// rate ($3/$15 per MTok) regardless of which model served it. This pins
-    /// the two properties that replaced it: a real catalog price for a known
-    /// pair, and no invented price for an unknown one.
-    #[test]
-    fn a_known_pair_is_priced_from_the_catalog_and_an_unknown_pair_is_not() {
-        let known = harn_vm::llm::pricing_aware_call_cost(
-            "anthropic",
-            "claude-sonnet-4-20250514",
-            1_000_000,
-            0,
-        );
-        let unknown = harn_vm::llm::pricing_aware_call_cost(
-            "definitely-not-a-provider",
-            "definitely-not-a-model",
-            1_000_000,
-            1_000_000,
-        );
-        assert!(
-            unknown.is_none(),
-            "an unpriced pair must report absence, not a number: {unknown:?}"
-        );
-        if let Some(known) = known {
-            assert!(
-                known > 0.0,
-                "a catalog-priced pair must produce a positive cost"
-            );
+    fn entry(model: &str, cost_usd: Option<f64>) -> LlmTraceEntry {
+        LlmTraceEntry {
+            model: model.to_string(),
+            provider: "anthropic".to_string(),
+            input_tokens: 1_000,
+            output_tokens: 100,
+            cost_usd,
+            duration_ms: 5,
         }
     }
 
-    /// The old rate table would have priced these identically. Whatever the
-    /// catalog says, two different models must not be forced to the same
-    /// number by the reporter.
+    /// The summary used to price every call at one hardcoded Sonnet-4 rate
+    /// ($3/$15 per MTok) regardless of which model served it. It now sums the
+    /// price the runtime already computed, so the total is whatever the run
+    /// actually booked.
     #[test]
-    fn the_reporter_does_not_impose_one_rate_on_every_model() {
-        let entries = [
-            LlmTraceEntry {
-                model: "claude-sonnet-4-20250514".to_string(),
-                provider: "anthropic".to_string(),
-                input_tokens: 1_000_000,
-                output_tokens: 1_000_000,
-                duration_ms: 1,
-            },
-            LlmTraceEntry {
-                model: "claude-haiku-4-5-20251001".to_string(),
-                provider: "anthropic".to_string(),
-                input_tokens: 1_000_000,
-                output_tokens: 1_000_000,
-                duration_ms: 1,
-            },
-        ];
-        let priced: Vec<Option<f64>> = entries
-            .iter()
-            .map(|entry| {
-                harn_vm::llm::pricing_aware_call_cost(
-                    &entry.provider,
-                    &entry.model,
-                    entry.input_tokens,
-                    entry.output_tokens,
-                )
-            })
-            .collect();
-        if let (Some(sonnet), Some(haiku)) = (priced[0], priced[1]) {
-            assert!(
-                (sonnet - haiku).abs() > f64::EPSILON,
-                "a frontier and a small model must not price identically \
-                 (sonnet={sonnet}, haiku={haiku}); that equality was the old bug"
-            );
-        }
+    fn the_total_is_the_sum_of_the_prices_the_runtime_recorded() {
+        let rendered = render_trace_entries(&[
+            entry("claude-sonnet-4-20250514", Some(0.25)),
+            entry("claude-haiku-4-5-20251001", Some(0.0125)),
+        ]);
+        assert!(
+            rendered.contains("$0.2625"),
+            "the total must be the exact sum of the recorded prices: {rendered}"
+        );
+        assert!(
+            !rendered.contains("unpriced"),
+            "no call was unpriced, so nothing should be hedged: {rendered}"
+        );
+    }
+
+    /// An unpriced call must not be silently treated as free. The total
+    /// becomes a floor, and says how many calls it could not account for.
+    #[test]
+    fn an_unpriced_call_makes_the_total_a_floor_rather_than_a_figure() {
+        let rendered = render_trace_entries(&[
+            entry("claude-sonnet-4-20250514", Some(0.25)),
+            entry("some-model-the-catalog-does-not-price", None),
+        ]);
+        assert!(
+            rendered.contains("\u{2265}$0.2500"),
+            "a partially priced total must be marked as a floor: {rendered}"
+        );
+        assert!(
+            rendered.contains("(1 unpriced)"),
+            "the count of unaccounted calls must be stated: {rendered}"
+        );
+        assert!(
+            rendered.contains("unpriced"),
+            "the unpriced call's own row must say so: {rendered}"
+        );
+    }
+
+    /// Two models that priced differently must not collapse to one number.
+    /// That equality was the shape of the original bug.
+    #[test]
+    fn two_models_priced_differently_do_not_collapse_to_one_number() {
+        let rendered = render_trace_entries(&[
+            entry("claude-sonnet-4-20250514", Some(0.2500)),
+            entry("claude-haiku-4-5-20251001", Some(0.0125)),
+        ]);
+        assert!(
+            rendered.contains("$0.2500") && rendered.contains("$0.0125"),
+            "each call must show its own price: {rendered}"
+        );
     }
 }

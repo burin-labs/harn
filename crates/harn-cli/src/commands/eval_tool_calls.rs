@@ -439,19 +439,22 @@ fn phase_report(model: ModelSelector, output: RawPhaseOutput) -> PhaseReport {
         .unwrap_or(&model.model);
     let input_tokens = token_field(&output.response, "input_tokens");
     let output_tokens = token_field(&output.response, "output_tokens");
-    let pricing = harn_vm::llm::llm_pricing_per_1k(provider, model_id);
-    let cost_usd = pricing
-        .map(|(input, output)| {
-            (input_tokens.max(0) as f64 * input + output_tokens.max(0) as f64 * output) / 1000.0
-        })
-        .unwrap_or(0.0);
+    // Priced through the usage-aware helper so a long-context call bills at the
+    // catalog's input-token band rather than the base rate.
+    let cost = harn_vm::llm::pricing_aware_call_cost(
+        provider,
+        model_id,
+        input_tokens.max(0),
+        output_tokens.max(0),
+    );
+    let cost_usd = cost.unwrap_or(0.0);
     PhaseReport {
         model,
         latency_ms: output.latency_ms,
         input_tokens,
         output_tokens,
         cost_usd,
-        pricing_known: pricing.is_some(),
+        pricing_known: cost.is_some(),
         raw_response: Some(output.response),
     }
 }
