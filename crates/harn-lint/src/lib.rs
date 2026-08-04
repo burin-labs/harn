@@ -263,6 +263,7 @@ fn lint_full(
     linter.diagnostics.append(&mut native_load_diagnostics);
     linter.file_path = options.file_path.map(Path::to_path_buf);
     linter.trusted_host_dispatch = options.trusted_host_dispatch;
+    linter.connector_runtime_module = options.connector_runtime_module;
     linter
         .externally_imported_names
         .clone_from(externally_imported_names);

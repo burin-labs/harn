@@ -78,6 +78,10 @@ pub(crate) struct Linter<'a> {
     /// `harn check --trusted-host-dispatch`. Set from
     /// [`crate::LintOptions::trusted_host_dispatch`].
     pub(super) trusted_host_dispatch: bool,
+    /// Whether the package manifest declares this file as a provider's
+    /// connector module. Set from
+    /// [`crate::LintOptions::connector_runtime_module`].
+    pub(super) connector_runtime_module: bool,
     /// Function names imported by other files (cross-module analysis).
     /// Functions in this set are not flagged as unused even if they have
     /// no local references, because another file explicitly imports them.
@@ -176,6 +180,7 @@ impl<'a> Linter<'a> {
             source,
             file_path: None,
             trusted_host_dispatch: false,
+            connector_runtime_module: false,
             externally_imported_names: HashSet::new(),
             test_pipeline_depth: 0,
             type_declarations: Vec::new(),
@@ -210,6 +215,7 @@ impl<'a> Linter<'a> {
         let ctx = RuleCtx {
             source: self.source,
             file_path: self.file_path.as_deref(),
+            connector_runtime_module: self.connector_runtime_module,
         };
         for rule in &mut rules {
             hook(rule.as_mut(), &ctx, &mut self.diagnostics);

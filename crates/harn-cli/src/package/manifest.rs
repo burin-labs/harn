@@ -1,7 +1,10 @@
 use super::errors::PackageError;
 use super::*;
 mod check_config;
-pub use check_config::{CheckConfig, PreflightSeverity};
+mod connector_module;
+pub(crate) use check_config::absolutize_check_config_paths;
+pub use check_config::{load_check_config, CheckConfig, PreflightSeverity};
+pub use connector_module::is_declared_connector_module;
 pub use harn_modules::personas::{
     PersonaAutonomyTier, PersonaManifestEntry, PersonaStageDecl, PersonaStageExit,
     PersonaValidationError, ResolvedPersonaManifest,
@@ -1381,39 +1384,6 @@ pub(crate) fn read_manifest_from_path(path: &Path) -> Result<Manifest, PackageEr
         eprintln!("[llm_config] warning in {}: {diagnostic}", path.display());
     }
     Ok(manifest)
-}
-
-pub(crate) fn absolutize_check_config_paths(
-    mut config: CheckConfig,
-    manifest_dir: &Path,
-) -> CheckConfig {
-    if let Some(path) = config.host_capabilities_path.clone() {
-        let candidate = PathBuf::from(&path);
-        if !candidate.is_absolute() {
-            config.host_capabilities_path =
-                Some(manifest_dir.join(candidate).display().to_string());
-        }
-    }
-    if let Some(path) = config.bundle_root.clone() {
-        let candidate = PathBuf::from(&path);
-        if !candidate.is_absolute() {
-            config.bundle_root = Some(manifest_dir.join(candidate).display().to_string());
-        }
-    }
-    config
-}
-
-/// Load the `[check]` config from the nearest `harn.toml`.
-/// Walks up from the given file (or from cwd if no file is given),
-/// stopping at a `.git` boundary.
-pub fn load_check_config(harn_file: Option<&std::path::Path>) -> CheckConfig {
-    let anchor = harn_file
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    if let Some((manifest, dir)) = nearest_manifest_or_warn(&anchor) {
-        return absolutize_check_config_paths(manifest.check, &dir);
-    }
-    CheckConfig::default()
 }
 
 /// Load the `[workspace]` config and the directory of the `harn.toml`

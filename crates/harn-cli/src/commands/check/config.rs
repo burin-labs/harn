@@ -95,6 +95,10 @@ pub(crate) fn lint_options<'a>(
         // `lint` cannot disagree about who may reach a privileged wire
         // (harn#6162, harn#6171).
         trusted_host_dispatch: config.trusted_host_dispatch,
+        // The manifest's own answer about which module is a connector, so the
+        // lint does not have to infer it from the file's contents
+        // (harn#6149).
+        connector_runtime_module: crate::package::is_declared_connector_module(path),
     }
 }
 

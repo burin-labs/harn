@@ -35,6 +35,9 @@ use crate::diagnostic::LintDiagnostic;
 pub(crate) struct RuleCtx<'a> {
     pub source: Option<&'a str>,
     pub file_path: Option<&'a Path>,
+    /// Whether the package manifest declares this file as a provider's
+    /// connector module. See [`crate::LintOptions::connector_runtime_module`].
+    pub connector_runtime_module: bool,
 }
 
 /// A single lint rule plugged into the registry.
@@ -232,14 +235,37 @@ program_rule!(
     ast,
     crate::rules::reminder_provider_count::check_reminder_provider_count
 );
-// `src`, not `ast`: attenuation is a "which capabilities are used" analysis,
-// and interpolation holes are only reachable from the file text.
-program_rule!(
-    ApiDesign,
-    "capability-attenuation",
-    src,
-    crate::rules::api_design::check_api_design
-);
+/// Attenuation needs more than the AST.
+///
+/// The source, because interpolation holes are unparsed text and a capability
+/// used only inside one would otherwise count as unused. And the manifest's
+/// connector declaration, because a connector runtime export keeps its root
+/// `Harness` by contract no matter what its body happens to touch. Neither is
+/// available through the `ast` or `src` macro arms, so this rule spells out
+/// its own context.
+struct ApiDesign;
+
+impl Rule for ApiDesign {
+    fn id(&self) -> &'static str {
+        "capability-attenuation"
+    }
+
+    fn check_program(
+        &mut self,
+        program: &[SNode],
+        ctx: &RuleCtx<'_>,
+        out: &mut Vec<LintDiagnostic>,
+    ) {
+        if let Some(source) = ctx.source {
+            crate::rules::api_design::check_api_design(
+                source,
+                program,
+                ctx.connector_runtime_module,
+                out,
+            );
+        }
+    }
+}
 
 program_rule!(
     TrailingComma,
