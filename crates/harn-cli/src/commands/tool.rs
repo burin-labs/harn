@@ -111,7 +111,7 @@ mod tests {
         let destination_arg = destination.display().to_string();
         let result = std::thread::Builder::new()
             .name("typed-tool-scaffold".to_string())
-            .stack_size(16 * 1024 * 1024)
+            .stack_size(crate::CLI_RUNTIME_STACK_SIZE)
             .spawn(move || {
                 let runtime = tokio::runtime::Builder::new_current_thread()
                     .enable_all()

@@ -6,9 +6,11 @@
 
 fn main() {
     // The debug adapter drives the VM, so it needs the same stack the CLI
-    // gives it. `harn dap` already gets that from the multi-call binary's
-    // runtime thread; this standalone entry point would otherwise run the VM
-    // on the process main thread — 8 MiB on Unix, 1 MiB on Windows.
+    // gives it. The multi-call `harn dap` alias sizes its own adapter thread
+    // (see `harn_cli::entrypoint::run_dap_adapter`, which spawns a fresh
+    // thread to escape the CLI's Tokio runtime and therefore inherits nothing
+    // from it); this standalone entry point would otherwise run the VM on the
+    // process main thread — 8 MiB on Unix, 1 MiB on Windows.
     std::thread::Builder::new()
         .name("harn-dap".to_string())
         .stack_size(harn_vm::RUNTIME_STACK_SIZE)

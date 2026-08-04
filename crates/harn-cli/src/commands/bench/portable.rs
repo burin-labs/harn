@@ -199,6 +199,9 @@ fn measure_dispatch_batch(
             let gate = &gate;
             let handle = std::thread::Builder::new()
                 .name(format!("harn-portable-bench-{worker}"))
+                // Each worker runs the benchmarked program through
+                // `harn_kernel::start`, so it needs the runtime stack.
+                .stack_size(crate::CLI_RUNTIME_STACK_SIZE)
                 .spawn_scoped(scope, move || {
                     let (state_lock, start_signal) = gate;
                     let mut state = state_lock.lock().unwrap_or_else(|error| error.into_inner());

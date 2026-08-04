@@ -97,61 +97,10 @@ mod tests {
         );
     }
 
-    /// A guard against a new transport hand-rolling `thread::Builder` and
-    /// inheriting the 2 MiB default: every VM-driving thread in this crate is
-    /// expected to come from `vm_thread`. The scan is deliberately narrow — it
-    /// only flags a spawn that builds a Tokio runtime on the new thread, which
-    /// is what "drives the VM" looks like here.
-    #[test]
-    fn vm_driving_threads_are_spawned_through_this_module() {
-        let crate_src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut offenders = Vec::new();
-        let mut scanned = 0usize;
-        let mut stack = vec![crate_src.clone()];
-        while let Some(dir) = stack.pop() {
-            for entry in std::fs::read_dir(&dir).expect("read harn-serve src") {
-                let path = entry.expect("dir entry").path();
-                if path.is_dir() {
-                    stack.push(path);
-                    continue;
-                }
-                if path.extension().is_none_or(|ext| ext != "rs") {
-                    continue;
-                }
-                if path == crate_src.join("vm_thread.rs") {
-                    continue;
-                }
-                scanned += 1;
-                let source = std::fs::read_to_string(&path).expect("read source");
-                // A thread that builds a Tokio runtime on itself is how "drives
-                // the VM" looks in this crate. Threads that do something else —
-                // the rustls fixture in the A2A tests, for one — are fine on the
-                // default stack and are deliberately not flagged.
-                for pattern in ["std::thread::spawn(", "thread::Builder::new()"] {
-                    for (offset, _) in source.match_indices(pattern) {
-                        let window_end = (offset + 600).min(source.len());
-                        let window = match source.get(offset..window_end) {
-                            Some(window) => window,
-                            // A multi-byte boundary; the next match still covers
-                            // this file, and the Tokio marker is ASCII.
-                            None => continue,
-                        };
-                        if window.contains("tokio::runtime::Builder") {
-                            offenders.push(format!(
-                                "{}: `{pattern}` builds a Tokio runtime on the new thread",
-                                path.display()
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-        assert!(scanned > 10, "scan found only {scanned} sources to check");
-        assert!(
-            offenders.is_empty(),
-            "spawn VM-driving threads through `crate::vm_thread` so they get \
-             harn_vm::RUNTIME_STACK_SIZE; found:\n  {}",
-            offenders.join("\n  ")
-        );
-    }
+    // A new transport that hand-rolls `thread::Builder` instead of coming
+    // through this module is caught by
+    // `harn_vm::runtime_stack::tests::vm_driving_threads_ask_for_the_runtime_stack`,
+    // which scans the whole workspace. That check lives with the constant it
+    // enforces because the same defect shipped in three crates at once, and a
+    // per-crate scan can only ever see one of them.
 }

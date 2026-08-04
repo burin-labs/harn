@@ -160,7 +160,7 @@ mod tests {
         let moved_destination = destination.clone();
         let exit = std::thread::Builder::new()
             .name("typed-connector-scaffold".to_string())
-            .stack_size(16 * 1024 * 1024)
+            .stack_size(crate::CLI_RUNTIME_STACK_SIZE)
             .spawn(move || {
                 let runtime = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
@@ -210,7 +210,7 @@ mod tests {
             let scaffold_target = destination.clone();
             let exit = std::thread::Builder::new()
                 .name(format!("{kind}-docs-scaffold"))
-                .stack_size(16 * 1024 * 1024)
+                .stack_size(crate::CLI_RUNTIME_STACK_SIZE)
                 .spawn(move || {
                     let runtime = tokio::runtime::Builder::new_current_thread()
                         .enable_all()
