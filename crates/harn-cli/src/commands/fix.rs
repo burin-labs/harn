@@ -21,8 +21,15 @@ mod capability_arguments;
 mod capability_migrations;
 #[path = "fix/lint_context.rs"]
 mod lint_context;
+mod repair_classes;
 #[path = "fix/reporting.rs"]
 mod reporting;
+use repair_classes::{
+    defers_to_whole_program_pass, is_capability_migration_repair,
+    is_whole_program_superseded_repair,
+};
+mod value_escape;
+use value_escape::{FrozenCallable, ValueEscape};
 #[path = "fix/retired_testing.rs"]
 mod retired_testing;
 #[path = "fix/signature_threading.rs"]
@@ -302,6 +309,7 @@ fn build_plan_with_options(
 
     let mut candidates = Vec::new();
     let mut skipped_files = Vec::new();
+    let mut frozen_callables: Vec<FrozenCallable> = Vec::new();
     for file in &files {
         if options.capability_migrations_only {
             if let Some(candidate) = retired_testing::repair(file) {
@@ -316,7 +324,10 @@ fn build_plan_with_options(
             &module_graph,
             options,
             &mut candidates,
-            referenced_by_value,
+            &mut ValueEscape {
+                referenced_by_value,
+                frozen: &mut frozen_callables,
+            },
         ) {
             skipped_files.push(skipped);
         }
@@ -444,6 +455,13 @@ fn build_plan_with_options(
         repairs,
         skipped_files,
         safety_levels,
+        frozen_callables: frozen_callables
+            .into_iter()
+            .map(|frozen| FrozenCallableWire {
+                name: frozen.name,
+                reason: frozen.reason,
+            })
+            .collect(),
     })
 }
 
@@ -455,7 +473,7 @@ fn collect_file_candidates(
     module_graph: &harn_modules::ModuleGraph,
     options: &FixOptions,
     out: &mut Vec<RepairCandidate>,
-    referenced_by_value: &BTreeSet<String>,
+    escape: &mut ValueEscape<'_>,
 ) -> Result<(), SkippedFileWire> {
     let path_str = file.to_string_lossy().into_owned();
     let mut config = package::load_check_config(Some(file));
@@ -477,7 +495,7 @@ fn collect_file_candidates(
             &program,
             &source,
             &exported_names,
-            referenced_by_value,
+            escape.referenced_by_value,
         )
     } else {
         BTreeSet::new()
@@ -522,7 +540,7 @@ fn collect_file_candidates(
                 &program,
                 &exported_names,
                 &ambient_context,
-                referenced_by_value,
+                escape,
             )
         })
         .flatten();
@@ -545,7 +563,7 @@ fn collect_file_candidates(
                     &program,
                     &exported_names,
                     &ambient_context,
-                    referenced_by_value,
+                    escape,
                 );
             }
             synthesize_missing_capability_argument_repair(
@@ -566,7 +584,7 @@ fn collect_file_candidates(
                     &program,
                     &exported_names,
                     &ambient_context,
-                    referenced_by_value,
+                    escape,
                 )
             })
         });
@@ -615,14 +633,9 @@ fn collect_file_candidates(
         &lint_options,
     );
     for diag in &lint_diagnostics {
-        let Some((repair, edits, impact)) = lint_candidate_repair(
-            diag,
-            file,
-            &source,
-            &program,
-            module_graph,
-            referenced_by_value,
-        ) else {
+        let Some((repair, edits, impact)) =
+            lint_candidate_repair(diag, file, &source, &program, module_graph, escape)
+        else {
             continue;
         };
         if !repair_allowed(&repair, safety_ceiling) {
@@ -787,72 +800,13 @@ fn skipped_file_from_analysis_error(
     }
 }
 
-fn is_capability_migration_repair(repair: &Repair) -> bool {
-    is_capability_migration_repair_id(repair.id.as_str())
-}
-
-fn is_capability_migration_repair_id(id: &str) -> bool {
-    id.starts_with("bindings/thread-harness")
-        || matches!(
-            id,
-            "bindings/thread-missing-harness"
-                | "bindings/thread-root-argument"
-                | "bindings/prepend-capability-argument"
-                | "bindings/attenuate-harness"
-                | "bindings/attenuate-capability-argument"
-                | "bindings/attenuate-capability-bundle-argument"
-                // Attenuation reuses the parameter's existing name, so the
-                // migration's own output can leave a narrowed parameter still
-                // called `harness`. That is work this migration created, and
-                // the pass runs to a fixed point — if the rename were outside
-                // the set, every capability migration would end one repair
-                // short of clean and never converge.
-                | "bindings/name-capability-parameter"
-                | "imports/remove-retired-testing-helper"
-        )
-}
-
-/// Whether a per-file binding repair must yield to the whole-program
-/// capability pass for a file that pass is already rewriting.
-///
-/// Both kinds of repair address a binding, and the whole-program pass is the
-/// authority on any binding whose *type* it is about to change. Letting them
-/// plan against the same declaration in one pass has no good outcome: the
-/// conflict detector marks both unclean, both are skipped, and the migration
-/// stalls one repair short of clean forever. Deferring re-plans the local
-/// repair on the next pass, against source whose types have settled — which is
-/// also when its own analysis is finally correct.
-fn defers_to_whole_program_pass(id: &str) -> bool {
-    matches!(
-        id,
-        // A binding that looked unused before the program plan may be the
-        // carrier used by its emitted call rewrites.
-        "bindings/rename-unused"
-            // The capability a parameter carries decides what it should be
-            // called, so naming it before the pass settles its type names it
-            // after a capability it is about to stop carrying.
-            | "bindings/name-capability-parameter"
-    )
-}
-
-fn is_whole_program_superseded_repair(repair: &Repair) -> bool {
-    let id = repair.id.as_str();
-    id.starts_with("bindings/thread-harness")
-        || matches!(
-            id,
-            "bindings/thread-missing-harness"
-                | "bindings/thread-root-argument"
-                | "bindings/prepend-capability-argument"
-        )
-}
-
 fn lint_candidate_repair(
     diag: &harn_lint::LintDiagnostic,
     file: &Path,
     source: &str,
     program: &[SNode],
     module_graph: &harn_modules::ModuleGraph,
-    referenced_by_value: &BTreeSet<String>,
+    escape: &mut ValueEscape<'_>,
 ) -> Option<(Repair, Vec<FixEdit>, RepairImpactWire)> {
     if ambient_capability_handle(diag.code).is_some() {
         let exported_names = module_graph
@@ -868,7 +822,7 @@ fn lint_candidate_repair(
             program,
             &exported_names,
             &context,
-            referenced_by_value,
+            escape,
         );
     }
     let repair = diag.repair()?;
@@ -885,10 +839,10 @@ fn synthesize_ambient_capability_repair(
     program: &[SNode],
     exported_names: &BTreeSet<String>,
     context: &AmbientRepairContext,
-    referenced_by_value: &BTreeSet<String>,
+    escape: &mut ValueEscape<'_>,
 ) -> Option<(Repair, Vec<FixEdit>, RepairImpactWire)> {
     ambient_capability_handle(diag.code)?;
-    let infos = collect_callable_infos(program, source, exported_names, referenced_by_value);
+    let infos = collect_callable_infos(program, source, exported_names, escape.referenced_by_value);
     let owner_idx = infos.iter().position(|info| {
         info.ambient_capability_calls.iter().any(|call| {
             call.code == diag.code
@@ -940,6 +894,7 @@ fn synthesize_ambient_capability_repair(
 
     for &idx in &needed {
         let info = &infos[idx];
+        escape.record(info);
         edits.push(add_harness_param_edit(source, info)?);
     }
     for (callee_idx, callers) in reverse_callers.iter().enumerate() {
@@ -1110,9 +1065,9 @@ fn synthesize_missing_harness_repair(
     program: &[SNode],
     exported_names: &BTreeSet<String>,
     context: &AmbientRepairContext,
-    referenced_by_value: &BTreeSet<String>,
+    escape: &mut ValueEscape<'_>,
 ) -> Option<(Repair, Vec<FixEdit>, RepairImpactWire)> {
-    let infos = collect_callable_infos(program, source, exported_names, referenced_by_value);
+    let infos = collect_callable_infos(program, source, exported_names, escape.referenced_by_value);
     let owner_idx = infos
         .iter()
         .enumerate()
@@ -1126,6 +1081,7 @@ fn synthesize_missing_harness_repair(
     let needed = propagate_harness_requirements(&infos, &reverse_callers, owner_idx);
     let mut edits = Vec::new();
     for &idx in &needed {
+        escape.record(&infos[idx]);
         edits.push(add_harness_param_edit(source, &infos[idx])?);
     }
     for (callee_idx, callers) in reverse_callers.iter().enumerate() {
@@ -1165,9 +1121,9 @@ fn synthesize_missing_root_argument_repair(
     program: &[SNode],
     exported_names: &BTreeSet<String>,
     context: &AmbientRepairContext,
-    referenced_by_value: &BTreeSet<String>,
+    escape: &mut ValueEscape<'_>,
 ) -> Option<(Repair, Vec<FixEdit>, RepairImpactWire)> {
-    let infos = collect_callable_infos(program, source, exported_names, referenced_by_value);
+    let infos = collect_callable_infos(program, source, exported_names, escape.referenced_by_value);
     let owner_idx = infos
         .iter()
         .enumerate()
@@ -1197,6 +1153,7 @@ fn synthesize_missing_root_argument_repair(
     )?];
     for &idx in &needed {
         if infos[idx].harness_binding.is_none() {
+            escape.record(&infos[idx]);
             edits.push(add_harness_param_edit(source, &infos[idx])?);
         }
     }

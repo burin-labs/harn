@@ -41,9 +41,13 @@ fn apply_repairs_with_options_inner(
         1
     };
     let mut converged = false;
+    // The LAST pass's freeze set: an earlier pass can resolve a freeze by
+    // changing a caller, so only the settled state is worth reporting.
+    let mut frozen_callables = Vec::new();
 
     for _ in 0..max_passes {
         let plan = build_plan_with_options(target, None, options)?;
+        frozen_callables = plan.frozen_callables.clone();
         let retired_testing_prerequisite = plan.repairs.iter().any(|repair| {
             repair.repair.id == "imports/remove-retired-testing-helper"
                 && repair.applies_cleanly
@@ -144,6 +148,7 @@ fn apply_repairs_with_options_inner(
         skipped_files: remaining.skipped_files,
         post_apply_diagnostics_count: remaining.count,
         dry_run,
+        frozen_callables,
     })
 }
 

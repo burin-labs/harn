@@ -43,6 +43,21 @@ pub(crate) struct RepairPlan {
     pub skipped_files: Vec<SkippedFileWire>,
     #[serde(rename = "safetyLevels")]
     pub safety_levels: Vec<String>,
+    /// Callables the capability migration wanted to re-sign but could not.
+    /// Omitted when empty so existing consumers see byte-identical output.
+    #[serde(
+        rename = "frozenCallables",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub frozen_callables: Vec<FrozenCallableWire>,
+}
+
+/// One callable whose signature the migration froze, and why.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct FrozenCallableWire {
+    pub name: String,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -57,6 +72,13 @@ pub(crate) struct ApplyResult {
     pub post_apply_diagnostics_count: usize,
     #[serde(rename = "dryRun")]
     pub dry_run: bool,
+    /// Callables the migration froze; see [`RepairPlan::frozen_callables`].
+    #[serde(
+        rename = "frozenCallables",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub frozen_callables: Vec<FrozenCallableWire>,
 }
 
 #[derive(Debug, Clone, Serialize)]

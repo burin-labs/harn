@@ -154,3 +154,88 @@ fn capability_apply_still_threads_a_callable_that_never_escapes() {
         "the original parameter must survive the threading: {updated}"
     );
 }
+
+/// Freezing is correct; freezing silently is not.
+///
+/// The frozen callable owns the ambient capability use, so its missing
+/// parameter edit is `None` and the `?` discards the whole file's repair. The
+/// run then reports `applied 0 repair(s), skipped 0` with the capability
+/// diagnostics still standing, and nothing names the callable that blocked it
+/// (#6153).
+#[test]
+fn capability_plan_names_the_frozen_callable_that_blocked_the_migration() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let entry = temp.path().join("main.harn");
+    fs::write(
+        &entry,
+        concat!(
+            "type ResolverFn = fn(string) -> string\n",
+            "\n",
+            "fn resolve_thing(request: string) -> string {\n",
+            "  return read_text(request)\n",
+            "}\n",
+            "\n",
+            "pub fn run(harness: Harness, resolver: ResolverFn = resolve_thing) -> string {\n",
+            "  return resolver(\"q\")\n",
+            "}\n",
+        ),
+    )
+    .unwrap();
+
+    let plan = build_plan_with_options(temp.path(), None, &FixOptions::capability_migrations())
+        .expect("plan");
+
+    let frozen = plan
+        .frozen_callables
+        .iter()
+        .find(|frozen| frozen.name == "resolve_thing")
+        .unwrap_or_else(|| {
+            panic!(
+                "the frozen callable must be named; got {:?}",
+                plan.frozen_callables
+            )
+        });
+    assert!(
+        frozen.reason.contains("first-class reference"),
+        "the reason must say why it was frozen: {}",
+        frozen.reason
+    );
+    assert!(
+        frozen.reason.contains("resolve_thing(harness, args)"),
+        "the reason must show the wrap that unblocks it: {}",
+        frozen.reason
+    );
+}
+
+/// A callable the migration can re-sign must not be reported as frozen. The
+/// report is a blocked-here signal, not a log of every callable considered.
+#[test]
+fn capability_plan_reports_no_frozen_callable_when_the_migration_proceeds() {
+    let temp = tempfile::TempDir::new().unwrap();
+    fs::write(
+        temp.path().join("main.harn"),
+        concat!(
+            "fn resolve_thing(request: string) -> string {\n",
+            "  return read_text(request)\n",
+            "}\n",
+            "\n",
+            "pub fn run(harness: Harness) -> string {\n",
+            "  return resolve_thing(\"q\")\n",
+            "}\n",
+        ),
+    )
+    .unwrap();
+
+    let plan = build_plan_with_options(temp.path(), None, &FixOptions::capability_migrations())
+        .expect("plan");
+
+    assert!(
+        plan.frozen_callables.is_empty(),
+        "an unfrozen migration must report nothing: {:?}",
+        plan.frozen_callables
+    );
+    assert!(
+        !plan.repairs.is_empty(),
+        "the control must still produce its repair"
+    );
+}

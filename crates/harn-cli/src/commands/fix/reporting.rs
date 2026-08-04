@@ -3,6 +3,7 @@ use super::*;
 pub(super) fn print_human_plan(plan: &RepairPlan) {
     if plan.repairs.is_empty() && plan.skipped_files.is_empty() {
         println!("{}: no repairable diagnostics found", plan.path);
+        print_frozen_callables(&plan.frozen_callables);
         return;
     }
     if !plan.repairs.is_empty() {
@@ -32,6 +33,25 @@ pub(super) fn print_human_plan(plan: &RepairPlan) {
         }
     }
     print_skipped_files(&plan.skipped_files);
+    print_frozen_callables(&plan.frozen_callables);
+}
+
+/// Name what the migration could not re-sign.
+///
+/// Without this a frozen owner aborts the file's whole repair and the run
+/// prints `no repairable diagnostics found` — which reads as "nothing to do"
+/// rather than "blocked here" (#6153).
+pub(super) fn print_frozen_callables(frozen: &[FrozenCallableWire]) {
+    if frozen.is_empty() {
+        return;
+    }
+    println!(
+        "froze {} callable signature(s); capability migration cannot proceed for them:",
+        frozen.len()
+    );
+    for callable in frozen {
+        println!("  `{}`: {}", callable.name, callable.reason);
+    }
 }
 
 fn print_skipped_files(skipped_files: &[SkippedFileWire]) {
@@ -70,6 +90,7 @@ pub(super) fn print_apply_result(result: &ApplyResult) {
         );
     }
     print_skipped_files(&result.skipped_files);
+    print_frozen_callables(&result.frozen_callables);
 }
 
 pub(super) fn skipped_files_error(count: usize) -> String {
