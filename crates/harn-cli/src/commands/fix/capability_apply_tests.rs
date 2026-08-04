@@ -812,6 +812,99 @@ fn capability_apply_repairs_imported_capability_helpers_inside_closures() {
     assert!(!updated.contains("with_mocks"));
 }
 
+/// A capability reached only through `${...}` is still reached.
+///
+/// `visit::walk_program` stops at `Node::InterpolatedString`: the lexer keeps a
+/// hole as unparsed source text, so it has no AST children. The whole-program
+/// solver computed required capabilities with that walk, so a handle used only
+/// inside a hole looked unused. The repair then deleted it from the parameter
+/// type and every call site while the interpolation kept calling it. `harn fix
+/// --apply` runs unattended in the fleet bump workflow, so it rewrote working
+/// helpers into code that does not compile and shipped that as a bump PR
+/// (harn-cloud#1469).
+///
+/// The fixture needs THREE capabilities. With two, no attenuation repair is
+/// proposed at all and the test passes vacuously — which is exactly how an
+/// earlier version of it passed against the unfixed solver.
+///
+/// The assertion is EQUIVALENCE, not merely "did not delete": the same use
+/// inside and outside a hole must plan the same repair. "Did not delete" alone
+/// would also hold if the analysis simply gave up on any file containing a hole.
+#[test]
+fn capability_plan_counts_uses_inside_string_interpolation() {
+    let plan_edits = |name: &str, body: &str| {
+        let temp = tempfile::TempDir::new().unwrap();
+        let script = temp.path().join(name);
+        fs::write(
+            &script,
+            format!(
+                "fn with_temp_dir(harness: {{fs: HarnessFs, process: HarnessProcess, random: HarnessRandom}}, body) {{\n\
+                 {body}\
+                 \x20 harness.fs.mkdir(dir)\n\
+                 \x20 const outcome = try {{\n\
+                 \x20   body(dir)\n\
+                 \x20 }}\n\
+                 \x20 harness.process.run({{program: \"rm\", args: [\"-rf\", dir]}})\n\
+                 \x20 return unwrap(outcome)\n\
+                 }}\n\n\
+                 pipeline main(harness: Harness, task) {{\n\
+                 \x20 return with_temp_dir(\n\
+                 \x20   {{fs: harness.fs, process: harness.process, random: harness.random}},\n\
+                 \x20   {{ dir -> dir }},\n\
+                 \x20 )\n\
+                 }}\n"
+            ),
+        )
+        .unwrap();
+        // `--apply` is a different entry from `build_plan`; only this one
+        // reaches the repair that broke. Apply for real and read the file back,
+        // so the assertion is on emitted code rather than on a plan.
+        super::apply_repairs_with_options(
+            temp.path(),
+            RepairSafety::SurfaceChanging,
+            false,
+            super::FixOptions {
+                capability_migrations_only: true,
+            },
+        )
+        .unwrap();
+        fs::read_to_string(&script).unwrap()
+    };
+
+    // Identical programs; `random` is reached through a hole in one and through
+    // a plain statement in the other.
+    let through_hole = plan_edits(
+        "hole.harn",
+        "  const dir = \".tmp-${harness.random.uuid_v7()}\"\n",
+    );
+    let through_statement = plan_edits(
+        "statement.harn",
+        "  const id = harness.random.uuid_v7()\n  const dir = \".tmp-${id}\"\n",
+    );
+
+    let signature = |source: &str| {
+        source
+            .lines()
+            .find(|line| line.starts_with("fn with_temp_dir"))
+            .unwrap_or_default()
+            .to_string()
+    };
+
+    assert!(
+        !through_hole.contains("harness.random")
+            || signature(&through_hole).contains("HarnessRandom")
+            || signature(&through_hole).contains("harness: Harness"),
+        "the body still calls `harness.random`, so the repair must not have removed it \
+         from the signature:\n{through_hole}"
+    );
+    assert_eq!(
+        signature(&through_hole),
+        signature(&through_statement),
+        "a capability reached through `${{...}}` must be repaired the same as one \
+         reached through a statement"
+    );
+}
+
 #[test]
 fn capability_plan_repairs_imported_helpers_without_type_diagnostics() {
     let temp = tempfile::TempDir::new().unwrap();

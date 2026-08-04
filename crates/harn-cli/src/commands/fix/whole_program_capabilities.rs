@@ -186,6 +186,7 @@ pub(super) fn plan(
                 .get(&(info.span.start, info.span.end))
                 .cloned();
             let mut direct_requirements = direct_requirements(
+                &source,
                 params,
                 body,
                 &carriers,
@@ -222,11 +223,11 @@ pub(super) fn plan(
             let receiver = carrier
                 .as_ref()
                 .map_or("harness", |carrier| carrier.name.as_str());
-            let receiver_accesses = collect_receiver_accesses(body, receiver);
+            let receiver_accesses = collect_receiver_accesses(&source, body, receiver);
             let direct_receiver_spans = collect_direct_receiver_spans(body, receiver);
             let undefined_harness_accesses =
                 if receiver != "harness" && !info.bound_names.contains("harness") {
-                    collect_receiver_accesses(body, "harness")
+                    collect_receiver_accesses(&source, body, "harness")
                 } else {
                     Vec::new()
                 };
@@ -675,9 +676,9 @@ fn declaration_parts(
     None
 }
 
-fn collect_receiver_accesses(body: &[SNode], receiver: &str) -> Vec<ReceiverAccess> {
+fn collect_receiver_accesses(source: &str, body: &[SNode], receiver: &str) -> Vec<ReceiverAccess> {
     let mut accesses = Vec::new();
-    visit::walk_program(body, &mut |node| {
+    visit::walk_program_interpolated(source, body, &mut |node| {
         let (Node::PropertyAccess { object, property }
         | Node::OptionalPropertyAccess { object, property }) = &node.node
         else {
@@ -802,6 +803,7 @@ fn capability_carrier_kind(
 }
 
 fn direct_requirements(
+    source: &str,
     params: &[TypedParam],
     body: &[SNode],
     carriers: &[Carrier],
@@ -853,7 +855,10 @@ fn direct_requirements(
             visit::walk_node(default, &mut observe);
         }
     }
-    visit::walk_program(body, &mut observe);
+    // Interpolation-aware: a capability used only inside `${...}` is still
+    // used, and concluding otherwise deletes it from the signature while the
+    // use remains. See visit::walk_program_interpolated.
+    visit::walk_program_interpolated(source, body, &mut observe);
     required
 }
 
