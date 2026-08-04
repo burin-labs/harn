@@ -264,3 +264,71 @@ pipeline test_indent_output(harness: Harness, task) {
 pipeline test_rel_path(harness: Harness, task) {
   assert_eq(rel_path("/r/./docs/src/a.md"), "docs/src/a.md")
 }
+
+// --- staging lifecycle (#6064) ----------------------------------------------
+//
+// The checker's staging directory used to be created in the repository root
+// with `mktemp -d harn-docs-snippets-XXXXXX`. `defer` and the explicit removal
+// before `harness.runtime.exit()` cover every path the script controls, but a
+// killed process runs neither, and the runtime has no script-level
+// SIGINT/SIGTERM hook to install one. Interrupting the checker -- most easily
+// while it waits on a Harn binary/build lock -- therefore left the staged
+// snippets as untracked repository state.
+//
+// The fix confines staging to the gitignored workspace scratch root, so an
+// interrupt leaves ignored scratch instead. These tests pin that confinement,
+// which is the property that makes an un-cleaned exit harmless.
+/** Path this checker stages into, created the way `main` creates it. */
+fn staging_dir(fs: HarnessFs) -> string {
+  return fs.mkdtemp_in_workspace(STAGING_PREFIX)
+}
+
+@test
+pipeline test_staging_is_confined_to_the_workspace_scratch_root(harness: Harness, task) {
+  const dir = staging_dir(harness.fs)
+  defer {
+    harness.fs.delete(dir)
+  }
+  const root = harness.fs.workspace_temp_dir()
+  assert_eq(dir.starts_with(root + "/"), true)
+  // The unique suffix is what lets concurrent checkers stage side by side
+  // without one removing the other's directory.
+  assert_eq(dir.substring(len(root) + 1, len(dir)).starts_with(STAGING_PREFIX), true)
+  assert_eq(dir, root + "/" + dir.substring(len(root) + 1, len(dir)))
+}
+
+@test
+pipeline test_two_invocations_stage_separately(harness: Harness, task) {
+  const first = staging_dir(harness.fs)
+  const second = staging_dir(harness.fs)
+  defer {
+    harness.fs.delete(second)
+  }
+  assert_eq(first == second, false)
+  // Removing one invocation's staging leaves the other's alone.
+  harness.fs.delete(first)
+  assert_eq(harness.fs.exists(first), false)
+  assert_eq(harness.fs.exists(second), true)
+}
+
+/**
+ * The regression proper: whatever an interrupted run leaves behind must be
+ * invisible to git. Asserted through `git check-ignore` rather than by
+ * matching on the path text, so moving the scratch root cannot quietly pass.
+ */
+@test
+pipeline test_an_abandoned_staging_directory_is_not_repository_state(harness: Harness, task) {
+  const dir = staging_dir(harness.fs)
+  defer {
+    harness.fs.delete(dir)
+  }
+  // Stage a file the way the checker does, then abandon it as a kill would.
+  harness.fs.write_text(dir + "/1_example_1.harn", "let x = 1\n")
+  const ignored = harness.process.run({program: "git", args: ["check-ignore", "-q", dir]})
+  assert_eq(ignored.success, true)
+  const status = harness.process.run(
+    {program: "git", args: ["status", "--porcelain", "--untracked-files=all"]},
+  )
+  assert_eq(status.success, true)
+  assert_eq(status.stdout.contains(STAGING_PREFIX), false)
+}

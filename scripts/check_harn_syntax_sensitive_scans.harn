@@ -1,12 +1,16 @@
 import { help_requested, parse, parser } from "std/cli/argparse"
 import { find_files } from "std/fs"
 
+// `/.harn-tmp/` is the workspace scratch root. It holds the docs-snippet
+// checker's staging directory, which is full of deliberately broken snippets
+// (#6064). It replaced a `/harn-docs-snippets-` entry that matched the same
+// staging directory back when it was created in the repository root.
 const SKIP_SEGMENTS = [
   "/.git/",
   "/.harn/",
   "/.harn-runs/",
+  "/.harn-tmp/",
   "/docs/dist/",
-  "/harn-docs-snippets-",
   "/node_modules/",
   "/target/",
 ]

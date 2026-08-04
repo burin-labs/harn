@@ -36,6 +36,14 @@
 //   harn run scripts/check_docs_snippets.harn
 const DOCS_GLOB = "docs/src/**/*.md"
 
+/**
+ * Name prefix for this checker's staging directory.
+ *
+ * `check_harn_syntax_sensitive_scans.harn` skips the workspace scratch root
+ * that holds it, so staged snippets are never mistaken for repository sources.
+ */
+pub const STAGING_PREFIX = "harn-docs-snippets-"
+
 /** Count of leading space/tab characters in `line`. */
 pub fn leading_ws_len(line: string) -> int {
   let i = 0
@@ -299,16 +307,24 @@ pipeline main(harness: Harness, task) {
   }
   md_files = md_files.sorted()
   /* The runtime sandbox only permits writes inside the workspace root, so
-   * the snippet scratch directory lives there (removed afterward) rather
-   * than under the system temp dir the bash version used. */
-  const mk = harness.process.run({program: "mktemp", args: ["-d", "harn-docs-snippets-XXXXXX"]})
-  if !mk.success {
-    harness.stdio.eprintln("error: could not create temp directory")
-    harness.runtime.exit(1)
-  }
-  const tmp_dir = mk.stdout.trim()
+   * the snippet scratch directory lives there rather than under the system
+   * temp dir the bash version used.
+   *
+   * It goes under the workspace scratch root, not the repository root. Both
+   * `defer` and the explicit removal before `harness.runtime.exit()` below
+   * clear it on every path this script controls, but neither runs when the
+   * checker is killed -- the runtime has no script-level SIGINT/SIGTERM hook,
+   * and waiting on a Harn binary/build lock is exactly when someone reaches
+   * for ^C. `.harn-tmp/` is gitignored, so what an interrupt leaves behind is
+   * ignored scratch rather than untracked repository state (#6064).
+   *
+   * `mkdtemp_in_workspace` keeps the per-invocation unique suffix that lets
+   * concurrent checkers run without touching each other's staging, and
+   * `harness.fs.delete` removes only this invocation's directory through the
+   * capability boundary instead of handing a path to `rm -rf`. */
+  const tmp_dir = harness.fs.mkdtemp_in_workspace(STAGING_PREFIX)
   defer {
-    harness.process.run({program: "rm", args: ["-rf", tmp_dir]})
+    harness.fs.delete(tmp_dir)
   }
   let checked = 0
   let skipped = 0
@@ -363,7 +379,7 @@ pipeline main(harness: Harness, task) {
     harness.stdio.println("      intentional fragment.")
     // harness.runtime.exit() bypasses defer, so remove the scratch directory before reporting
     // failure to the calling shell.
-    harness.process.run({program: "rm", args: ["-rf", tmp_dir]})
+    harness.fs.delete(tmp_dir)
     harness.runtime.exit(1)
   }
 }
