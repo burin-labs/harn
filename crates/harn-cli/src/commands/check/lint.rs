@@ -16,7 +16,7 @@ use crate::package::CheckConfig;
 use super::analysis::{analyze_file, render_file_analysis_error_or_exit};
 use super::outcome::{print_lint_diagnostics, CommandOutcome};
 
-use harn_lint::{is_generated_path, path_is_stdlib_source};
+use harn_lint::is_generated_path;
 
 /// Collect the TOML sources of `language = "harn"` rules from the project's
 /// `[rules] ruleDirs` (#2849), to run as lint rules. Non-harn rules can't
@@ -103,21 +103,14 @@ pub(crate) fn lint_file_inner(
 
     let engine_rules = project_engine_rule_sources(path);
     let native_rule_paths = project_native_rule_paths(path);
-    let options = harn_lint::LintOptions {
-        file_path: Some(path),
-        require_file_header: lint_config.require_file_header,
-        require_docstrings: lint_config.require_docstrings,
-        require_public_api_types: lint_config.require_public_api_types,
-        complexity_threshold: lint_config.complexity_threshold,
-        persona_step_allowlist: &lint_config.persona_step_allowlist,
-        require_stdlib_metadata: path_is_stdlib_source(path),
-        engine_rules: &engine_rules,
-        native_rule_paths: &native_rule_paths,
-        severity_overrides: lint_config.severity_overrides.clone(),
-        // Same trust decision the type-checker reads, so `check` and `lint`
-        // cannot disagree about who may reach a privileged wire (harn#6162).
-        trusted_host_dispatch: config.trusted_host_dispatch,
-    };
+    let options = super::config::lint_options(
+        path,
+        config,
+        lint_config,
+        &engine_rules,
+        &native_rule_paths,
+        super::config::LintSurface::Lint,
+    );
     // Generated files (`*.generated.harn`) skip style/declaration lints inside
     // `lint_with_module_graph`; type diagnostics still flow so real correctness
     // errors are never hidden.
@@ -193,21 +186,14 @@ pub(crate) fn lint_fix_file(
 
     let engine_rules = project_engine_rule_sources(path);
     let native_rule_paths = project_native_rule_paths(path);
-    let options = harn_lint::LintOptions {
-        file_path: Some(path),
-        require_file_header: lint_config.require_file_header,
-        require_docstrings: lint_config.require_docstrings,
-        require_public_api_types: lint_config.require_public_api_types,
-        complexity_threshold: lint_config.complexity_threshold,
-        persona_step_allowlist: &lint_config.persona_step_allowlist,
-        require_stdlib_metadata: path_is_stdlib_source(path),
-        engine_rules: &engine_rules,
-        native_rule_paths: &native_rule_paths,
-        severity_overrides: lint_config.severity_overrides.clone(),
-        // Same trust decision the type-checker reads, so `check` and `lint`
-        // cannot disagree about who may reach a privileged wire (harn#6162).
-        trusted_host_dispatch: config.trusted_host_dispatch,
-    };
+    let options = super::config::lint_options(
+        path,
+        config,
+        lint_config,
+        &engine_rules,
+        &native_rule_paths,
+        super::config::LintSurface::Lint,
+    );
     // Generated files self-skip style lints inside `lint_with_module_graph`, so
     // no style-lint autofix edits are produced for them.
     let lint_diags = harn_lint::lint_with_module_graph(

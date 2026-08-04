@@ -193,19 +193,14 @@ pub(crate) fn lint_file_report(
 
     let engine_rules = super::lint::project_engine_rule_sources(path);
     let native_rule_paths = super::lint::project_native_rule_paths(path);
-    let options = harn_lint::LintOptions {
-        file_path: Some(path),
-        require_file_header: lint_config.require_file_header,
-        require_docstrings: lint_config.require_docstrings,
-        require_public_api_types: lint_config.require_public_api_types,
-        complexity_threshold: lint_config.complexity_threshold,
-        persona_step_allowlist: &lint_config.persona_step_allowlist,
-        require_stdlib_metadata: harn_lint::path_is_stdlib_source(path),
-        engine_rules: &engine_rules,
-        native_rule_paths: &native_rule_paths,
-        severity_overrides: lint_config.severity_overrides.clone(),
-        trusted_host_dispatch: config.trusted_host_dispatch,
-    };
+    let options = super::config::lint_options(
+        path,
+        config,
+        lint_config,
+        &engine_rules,
+        &native_rule_paths,
+        super::config::LintSurface::Lint,
+    );
     let lint_diagnostics = harn_lint::lint_with_module_graph(
         &program,
         &config.disable_rules,

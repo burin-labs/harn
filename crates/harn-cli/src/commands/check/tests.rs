@@ -20,6 +20,7 @@ use super::preflight::{is_preflight_allowed, PreflightDiagnostic};
 
 mod bundle_manifest;
 mod host_capability_discriminators;
+mod lint_option_parity;
 mod output_channel;
 mod prompt_lint;
 mod target_discovery;

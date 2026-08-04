@@ -37,6 +37,67 @@ pub(crate) fn load_harn_lint_config(path: &Path) -> HarnLintConfig {
     }
 }
 
+/// Which command is running the lint rules.
+///
+/// The two surfaces genuinely differ in one place, and naming it is the point:
+/// the difference used to be expressed as `LintOptions::default()` on the
+/// `check` side, which silently defaulted *every* field rather than the one
+/// that should differ.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LintSurface {
+    /// `harn lint`. Honors the project `[lint]` block and auto-enables the
+    /// stdlib contract lints for sources under the embedded stdlib, which is
+    /// what `LintOptions::require_stdlib_metadata` documents.
+    Lint,
+    /// The lint pass inside `harn check`. It has never loaded the `[lint]`
+    /// block, and the stdlib contract lints stay off here — teaching `harn
+    /// check` to enforce either would *add* findings to projects that set
+    /// `require_file_header` and friends, so it is a separate, deliberate
+    /// change. The trust declaration still flows, because ignoring *that* one
+    /// produces false positives rather than fewer of them.
+    Check,
+}
+
+/// The options a lint pass runs with, from the configs that own them.
+///
+/// One constructor, because the fields come from two places and the call sites
+/// had drifted: three built this struct field-for-field and identically, while
+/// `harn check`'s lint pass built `LintOptions::default()` and discarded every
+/// setting — including the trust declaration, so
+/// `harn check --trusted-host-dispatch` cleared the type error on a privileged
+/// wire and left the lint warning behind (harn#6171). A new field now reaches
+/// every surface or none, and a surface that should not get it says so.
+///
+/// `engine_rules` and `native_rule_paths` stay parameters rather than being
+/// loaded here: they are read per file from `[rules]`, and the caller that has
+/// them already paid for that walk.
+pub(crate) fn lint_options<'a>(
+    path: &'a Path,
+    config: &CheckConfig,
+    lint_config: &'a HarnLintConfig,
+    engine_rules: &'a [String],
+    native_rule_paths: &'a [PathBuf],
+    surface: LintSurface,
+) -> harn_lint::LintOptions<'a> {
+    harn_lint::LintOptions {
+        file_path: Some(path),
+        require_file_header: lint_config.require_file_header,
+        require_docstrings: lint_config.require_docstrings,
+        require_public_api_types: lint_config.require_public_api_types,
+        complexity_threshold: lint_config.complexity_threshold,
+        persona_step_allowlist: &lint_config.persona_step_allowlist,
+        require_stdlib_metadata: surface == LintSurface::Lint
+            && harn_lint::path_is_stdlib_source(path),
+        engine_rules,
+        native_rule_paths,
+        severity_overrides: lint_config.severity_overrides.clone(),
+        // The trust decision the type-checker already read, so `check` and
+        // `lint` cannot disagree about who may reach a privileged wire
+        // (harn#6162, harn#6171).
+        trusted_host_dispatch: config.trusted_host_dispatch,
+    }
+}
+
 /// Merge `[lint].disabled` from the nearest harn.toml into `disable_rules`.
 pub(crate) fn apply_harn_lint_config(path: &Path, config: &mut CheckConfig) {
     apply_loaded_harn_lint_config(&load_harn_lint_config(path), config);

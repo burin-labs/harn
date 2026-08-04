@@ -312,6 +312,13 @@ pub(crate) fn check_file_report_inner(
         }
     }
 
+    // `harn check` has never loaded the project's `[lint]` block, so its style
+    // settings stay at their defaults — named as `LintSurface::Check` rather
+    // than left to `..Default::default()`, which is how the trust declaration
+    // went missing and made `harn check --trusted-host-dispatch` clear the type
+    // error on a privileged wire while still reporting the lint warning
+    // (harn#6171).
+    let check_lint_config = super::config::HarnLintConfig::default();
     let lint_diagnostics = harn_lint::lint_with_module_graph(
         &program,
         &config.disable_rules,
@@ -319,10 +326,14 @@ pub(crate) fn check_file_report_inner(
         externally_imported_names,
         module_graph,
         path,
-        &harn_lint::LintOptions {
-            file_path: Some(path),
-            ..Default::default()
-        },
+        &super::config::lint_options(
+            path,
+            config,
+            &check_lint_config,
+            &[],
+            &[],
+            super::config::LintSurface::Check,
+        ),
     );
     diagnostic_count += lint_diagnostics.len();
     if lint_diagnostics
