@@ -102,7 +102,7 @@ pub use ambient_scope::blocking::run_blocking_with_ambient;
 pub(crate) use ambient_scope::{
     scope_ambient, scope_ambient_transaction, scope_approval_policy, scope_autonomy_policy,
     scope_command_policy, scope_dynamic_permissions, scope_inline_subtask, scope_run_event_sink,
-    AmbientExecutionScope,
+    scope_spawned_source_dir, AmbientExecutionScope,
 };
 pub use ambient_scope::{
     scope_execution_policy, scope_llm_runtime_overrides,
