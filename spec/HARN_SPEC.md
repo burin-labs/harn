@@ -4296,6 +4296,39 @@ Cyclomatic complexity counts each branching construct (`if`/`else`,
 **score-preserving** — the only way to reduce the count is to
 extract helpers or mark the function `@complexity(allow)`.
 
+#### `@host_entry`
+
+```harn,ignore
+@host_entry
+pub fn dispatch_audit_exports(harness: Harness, args: dict) -> dict {
+  const db = connect(harness.postgres, args.database_url)
+  return post(harness.net, summarize(db))
+}
+```
+
+Declares that an **embedding host** supplies this function's arguments —
+it is reached through a runtime call-into-script path from the program
+that embeds Harn, not from any call site in Harn source. The attribute
+takes no arguments and produces no runtime registration.
+
+Its effect is on tooling. Without it the function body is the only
+available evidence about the signature, so the
+`capability-attenuation` lint reports the parameter as over-broad and
+`harn fix --capability-migrations-only` rewrites it to the capabilities
+the body happens to touch — here `{net: HarnessNet, postgres:
+HarnessPostgres}`, which the host has no way to construct. The failure
+lands at dispatch rather than at `harn check`. With `@host_entry` the
+signature is treated as a contract with a caller no Harn source can
+see: the capability parameter is neither narrowed nor renamed, and the
+capability-record carrier is never proposed for it at any capability
+count.
+
+Use it only when a host really is the caller. A function Harn's own
+runtime enters is already recognized without any annotation — `main`, a
+`@job`, a trigger handler, a `handler:` callback, and a connector
+runtime export — and annotating one of those instead would record
+something untrue.
+
 #### `@acp_tool`
 
 ```harn,ignore

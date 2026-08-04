@@ -36,7 +36,7 @@ impl TypeChecker {
                 | "acp_skill" | "invariant" | "deterministic" | "semantic" | "archivist"
                 | "retroactive" | "persona" | "step" | "trigger" | "handoff" | "budget"
                 | "command" | "serial" | "heavy" | "scopes" | "policy" | "route" | "stream"
-                | "raw" | "job" | "schedule" | "queue" | "retry" => {}
+                | "raw" | "job" | "schedule" | "queue" | "retry" | "host_entry" => {}
                 other => {
                     self.warning_at(
                         Code::UnknownAttribute,
@@ -95,6 +95,17 @@ impl TypeChecker {
                         "`@{}` only applies to pipeline declarations (use on `@test` or `test_*` pipelines)",
                         attr.name
                     ),
+                    attr.span,
+                );
+            }
+            // `@host_entry` declares that an embedding host supplies the
+            // arguments. Only a function is reachable through the runtime's
+            // call-into-script path, so the attribute has no meaning anywhere
+            // else and a silent no-op would read as an accepted declaration.
+            if attr.name == "host_entry" && !matches!(inner.node, Node::FnDecl { .. }) {
+                self.warning_at(
+                    Code::InvalidAttributeTarget,
+                    "`@host_entry` only applies to function declarations".to_string(),
                     attr.span,
                 );
             }
@@ -269,7 +280,22 @@ impl TypeChecker {
             "retry" => self.validate_retry_args(attr),
             "test" => self.validate_test_args(attr),
             "test_fixture" => self.validate_test_fixture_args(attr),
+            "host_entry" => self.validate_host_entry_args(attr),
             _ => {}
+        }
+    }
+
+    /// `@host_entry` is a bare marker: it declares only *that* an embedding
+    /// host supplies the arguments, never which host or how. Accepting an
+    /// argument silently would let a author believe a name or a capability
+    /// list had been recorded when nothing reads one.
+    pub(super) fn validate_host_entry_args(&mut self, attr: &Attribute) {
+        for arg in &attr.args {
+            self.warning_at(
+                Code::InvalidAttributeArgument,
+                "`@host_entry` takes no arguments".to_string(),
+                arg.span,
+            );
         }
     }
 

@@ -131,6 +131,7 @@ pub(super) fn lint_with_stdlib_return_types(source: &str) -> Vec<LintDiagnostic>
 mod ambient_capabilities;
 mod ambient_clock;
 mod ambient_stdio;
+mod api_design;
 mod assert_pipeline;
 mod autofix;
 mod boolean_patterns;
