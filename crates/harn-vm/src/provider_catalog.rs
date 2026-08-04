@@ -45,6 +45,8 @@ mod remote;
 mod schema;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_parity_provenance;
 mod types;
 mod validation;
 
@@ -607,6 +609,9 @@ fn catalog_model(
             text: caps.text_tool_wire_format_supported,
             preferred_format: caps.preferred_tool_format.clone(),
             parity: caps.tool_mode_parity.clone(),
+            parity_source: caps
+                .tool_mode_parity_source
+                .map(|source| source.as_str().to_string()),
             parity_notes: caps.tool_mode_parity_notes.clone(),
             empirical_parity: None,
             tool_search: caps.tool_search.clone(),

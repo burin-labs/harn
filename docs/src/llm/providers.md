@@ -668,6 +668,24 @@ accepts these fields:
 | `seed_supported`, `top_k_supported`, `frequency_penalty_supported`, `presence_penalty_supported` | bool | Generation option support flags used for warnings and provider-neutral validation. |
 | `thinking_disable_directive` | string | In-prompt directive (e.g. `"/no_think"` for Qwen3 chat templates) auto-prepended to the system message when the resolved `thinking` is `Disabled`. Lets script authors write `thinking: false` uniformly across providers without learning per-template prompt directives. Idempotent — never injected twice. |
 
+`tool_mode_parity` is a *declaration* about a route, and it is always
+present: when no capability row states one, it is computed from
+`native_tools` and `text_tool_wire_format_supported`. The two used to be
+indistinguishable, so a consumer gating on the verdict could act on a
+fallback as if it were a finding (#5885). The catalog now publishes
+`tool_support.parity_source` alongside it:
+
+| Value | Meaning |
+|---|---|
+| `declared` | A capability row states the verdict outright. |
+| `derived` | Nobody stated one; computed from `native_tools` / `text_tool_wire_format_supported`. Treat as "not established". |
+
+Neither is a measurement. A forced-format sweep is separate evidence and
+lands in `tool_support.empirical_parity`, which carries the verdict together
+with native/text pass rates, a sample size, a confidence, and when it was
+run. `harn check --provider-matrix --empirical <overlay>` fills it. A guard
+that needs empirical grounding should read `empirical_parity`, not `parity`.
+
 First match wins. User rules for a given provider are consulted
 before the shipped rules — so the order inside the TOML file matters
 (place more specific patterns above wildcards).

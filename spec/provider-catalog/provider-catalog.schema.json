@@ -1437,6 +1437,12 @@
         "parity_notes": {
           "type": "string"
         },
+        "parity_source": {
+          "enum": [
+            "declared",
+            "derived"
+          ]
+        },
         "preferred_format": {
           "type": "string"
         },

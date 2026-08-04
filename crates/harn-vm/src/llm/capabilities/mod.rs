@@ -41,6 +41,8 @@ mod lookup_tests_gateway;
 #[cfg(test)]
 mod lookup_tests_kimi;
 #[cfg(test)]
+mod lookup_tests_parity;
+#[cfg(test)]
 mod lookup_tests_responses;
 #[cfg(test)]
 mod lookup_tests_system_placement;
