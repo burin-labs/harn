@@ -30,6 +30,8 @@ const RELEASE_BINARY_WORKFLOW = "build-release-binaries.yml"
 
 const RELEASE_PATH_FILTER_ACTION = "dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706"
 
+const CHECKOUT_ACTION_PREFIX = "actions/checkout@"
+
 const RELEASE_PATH_FILTER_ID = "release-build-inputs"
 
 const RELEASE_PATH_FILTER_IF = "github.event_name == 'push' && github.ref == 'refs/heads/main'"
@@ -288,6 +290,36 @@ pub fn release_warm_cache_path_matches(policy: ReleaseWarmCachePathPolicy, path:
 }
 
 /**
+ * Keep the release setup checkout unshallowed.
+ *
+ * This job pins `ref: github.sha`, so the branch that the path filter compares
+ * against is not in the clone and `dorny/paths-filter` fetches it itself. On a
+ * shallow clone that is a second `--depth=1` fetch stacked on the filter's own
+ * first one, and the second fails with `shallow file has changed since we read
+ * it`. That accounted for 13 of the 19 `Resolve release context` failures in
+ * the last 60 failed runs of the workflow — every one of them on the second
+ * fetch, never the first. The remaining 6 were rejected dispatch inputs.
+ *
+ * `fetch-depth: 0` removes the race by removing `.git/shallow`, which is why
+ * this is a guard and not a retry.
+ */
+fn release_setup_checkout_errors(steps: list) -> list<string> {
+  const checkouts = steps.filter({ step -> step_uses(step).starts_with(CHECKOUT_ACTION_PREFIX) })
+    .to_list()
+  if len(checkouts) != 1 {
+    return [
+      "${RELEASE_BINARY_WORKFLOW}:setup must contain exactly one ${CHECKOUT_ACTION_PREFIX} step",
+    ]
+  }
+  if trim(to_string(checkouts[0]?.with?.["fetch-depth"] ?? "")) != "0" {
+    return [
+      "${RELEASE_BINARY_WORKFLOW}:setup checkout must set fetch-depth: 0 so ${RELEASE_PATH_FILTER_ID} can reach its comparison branch without a second shallow fetch",
+    ]
+  }
+  return []
+}
+
+/**
  * Keep warm-cache classification tied to compile/build topology, and prove the
  * workflow consumes the typed path policy rather than maintaining a second
  * embedded path list.
@@ -308,6 +340,7 @@ pub fn release_warm_cache_path_policy_errors(
     }
   }
   const steps = workflow?.jobs?.setup?.steps ?? []
+  errors = errors + release_setup_checkout_errors(steps)
   const filter_steps = steps.filter({ step -> trim(step?.id ?? "") == RELEASE_PATH_FILTER_ID })
     .to_list()
   if len(filter_steps) != 1 {

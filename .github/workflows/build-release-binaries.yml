@@ -155,19 +155,19 @@ jobs:
           # keeps current recovery logic available for old releases. Build jobs
           # independently check out the resolved source ref.
           ref: ${{ github.sha }}
-          # Was `fetch-depth: 1`, which made this job fail intermittently with
-          # `fatal: shallow file has changed since we read it` (4 times in the
-          # last 40 failed runs, always here, always on hosted runners — so not
-          # runner infra). The paths-filter step below performs two more
-          # `--depth=1` fetches into this already-shallow clone:
+          # Must stay 0. `ref:` above pins a detached sha, so `main` is absent
+          # and the paths-filter step below fetches it itself:
           #
           #   git fetch --depth=1 --no-tags origin <base-sha>  # rewrites .git/shallow
           #   git fetch --depth=1 --no-tags origin main        # fatal
           #
-          # The race only exists because `.git/shallow` exists, so unshallowing
-          # removes the class outright rather than retrying around it. The repo
-          # is ~109 MiB and this job runs for ~10s, so the extra fetch is noise
-          # against a release build.
+          # Under `fetch-depth: 1` that second fetch died with `shallow file has
+          # changed since we read it` in 13 of this job's 19 failures across the
+          # last 60 failed runs — always the second fetch, never the first. (The
+          # other 6 were rejected dispatch inputs.) Unshallowing removes the
+          # race by removing `.git/shallow`, rather than retrying around it.
+          #
+          # scripts/check_ci_cache_policy.harn enforces this.
           fetch-depth: 0
 
       - name: Detect release build inputs

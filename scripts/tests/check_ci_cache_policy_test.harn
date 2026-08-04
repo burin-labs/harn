@@ -72,6 +72,26 @@ fn release_warm_cache_path_policy() -> ReleaseWarmCachePathPolicy {
   }
 }
 
+/** Address setup steps by id so inserting one cannot silently shift a fixture. */
+fn setup_step_by_id(workflow, id: string) {
+  return (workflow?.jobs?.setup?.steps ?? []).filter({ step -> step?.id == id }).to_list()[0]
+}
+
+/**
+ * The release setup checkout, unshallowed.
+ *
+ * `fetch-depth: 0` is load-bearing rather than cosmetic: the job pins a
+ * detached `ref`, so the path filter has to fetch its comparison branch, and
+ * stacking that second `--depth=1` fetch on a shallow clone is what produced
+ * `shallow file has changed since we read it`.
+ */
+fn release_setup_checkout() {
+  return {
+    uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+    with: {"fetch-depth": 0},
+  }
+}
+
 fn release_binary_workflow() {
   return {
     concurrency: {
@@ -86,6 +106,7 @@ fn release_binary_workflow() {
     jobs: {
       setup: {
         steps: [
+          release_setup_checkout(),
           {
             id: "release-build-inputs",
             if: "github.event_name == 'push' && github.ref == 'refs/heads/main'",
@@ -416,14 +437,15 @@ pipeline test_release_warm_cache_policy_rejects_parallel_embedded_workflow_polic
   task,
 ) {
   const workflow = release_binary_workflow()
-  const filter_step = workflow.jobs.setup.steps[0]
+  const filter_step = setup_step_by_id(workflow, "release-build-inputs")
   const invalid = {
     concurrency: workflow.concurrency,
     jobs: {
       setup: {
         steps: [
+          release_setup_checkout(),
           {...filter_step, with: {filters: "release_build_inputs:\n  - Cargo.lock"}},
-          workflow.jobs.setup.steps[1],
+          setup_step_by_id(workflow, "resolve"),
         ],
       },
     },
@@ -434,17 +456,50 @@ pipeline test_release_warm_cache_policy_rejects_parallel_embedded_workflow_polic
   )
 }
 
+pipeline test_release_warm_cache_policy_requires_an_unshallowed_setup_checkout(
+  harness: Harness,
+  task,
+) {
+  const workflow = release_binary_workflow()
+  const policy = release_warm_cache_path_policy()
+  const steps = workflow.jobs.setup.steps
+  // A shallow clone is the shape that failed: the filter's second `--depth=1`
+  // fetch dies with `shallow file has changed since we read it`.
+  const shallow = {
+    ...workflow,
+    jobs: {
+      setup: {
+        steps: [{...release_setup_checkout(), with: {"fetch-depth": 1}}]
+          + steps.slice(1, len(steps)),
+      },
+    },
+  }
+  assert_eq(
+    release_warm_cache_path_policy_errors(policy, shallow),
+    [
+      "build-release-binaries.yml:setup checkout must set fetch-depth: 0 so release-build-inputs can reach its comparison branch without a second shallow fetch",
+    ],
+  )
+  // Dropping the checkout entirely must not read as compliant.
+  const missing = {...workflow, jobs: {setup: {steps: steps.slice(1, len(steps))}}}
+  assert_eq(
+    release_warm_cache_path_policy_errors(policy, missing),
+    ["build-release-binaries.yml:setup must contain exactly one actions/checkout@ step"],
+  )
+}
+
 pipeline test_release_warm_cache_policy_requires_guarded_and_consumed_filter_output(
   harness: Harness,
   task,
 ) {
   const workflow = release_binary_workflow()
-  const filter_step = workflow.jobs.setup.steps[0]
-  const resolve_step = workflow.jobs.setup.steps[1]
+  const filter_step = setup_step_by_id(workflow, "release-build-inputs")
+  const resolve_step = setup_step_by_id(workflow, "resolve")
   const invalid = {
     jobs: {
       setup: {
         steps: [
+          release_setup_checkout(),
           {...filter_step, if: "github.event_name == 'push'"},
           {...resolve_step, run: "SHOULD_BUILD_BINARIES=true"},
         ],
