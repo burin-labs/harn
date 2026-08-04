@@ -6,7 +6,7 @@ use crate::cli::{NewArgs, ProjectTemplate};
 use crate::commands::run::RunSandboxOptions;
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
-use crate::package::current_harn_range_example;
+use crate::package::{current_harn_range_example, generate_package_docs_impl, PackageError};
 
 pub(crate) fn resolve_new_args(
     args: &NewArgs,
@@ -57,6 +57,30 @@ pub(crate) async fn init_project(name: Option<&str>, template: ProjectTemplate) 
     if exit != 0 {
         process::exit(exit);
     }
+    if let Err(error) = generate_scaffolded_docs(&dir, template) {
+        eprintln!("Failed to generate {SCAFFOLD_DOCS_PATH}: {error}");
+        process::exit(1);
+    }
+}
+
+/// Path the package and connector manifests declare as `docs_url`.
+const SCAFFOLD_DOCS_PATH: &str = "docs/api.md";
+
+/// Write `docs/api.md` through the generator that owns it.
+///
+/// The scaffold used to ship this file as a literal string, which made
+/// `harn package docs` and the template two owners of one artifact. They drifted
+/// the moment #5936 changed how signatures render, and every freshly scaffolded
+/// package failed its own `harn package verify` on a stale-docs check. The
+/// OpenAPI scaffold already generates rather than embeds; this matches it.
+fn generate_scaffolded_docs(dir: &Path, template: ProjectTemplate) -> Result<(), PackageError> {
+    if !matches!(
+        template,
+        ProjectTemplate::Package | ProjectTemplate::Connector
+    ) {
+        return Ok(());
+    }
+    generate_package_docs_impl(Some(dir), None, /* check */ false).map(|_| ())
 }
 
 async fn dispatch_to_script(
@@ -164,5 +188,68 @@ mod tests {
         assert!(source.contains("pub fn normalize_inbound(_harness: Harness, raw)"));
         let formatted = harn_fmt::format_source(&source).expect("format connector source");
         assert_eq!(source, formatted, "connector source is not canonical");
+    }
+
+    /// A scaffolded package used to fail its own `harn package verify` because
+    /// the template shipped `docs/api.md` as a literal string while
+    /// `harn package docs` generated it — two owners of one artifact, which
+    /// drifted the moment #5936 changed signature rendering.
+    ///
+    /// This lives in the fast lane on purpose. The only coverage that caught the
+    /// drift was `harn_cli_e2e`, which runs nightly, so the break sat on main
+    /// for three nights.
+    #[test]
+    fn scaffolded_package_docs_are_generated_fresh() {
+        for (template, kind) in [
+            (ProjectTemplate::Package, "package"),
+            (ProjectTemplate::Connector, "connector"),
+        ] {
+            let temp = tempfile::tempdir().expect("tempdir");
+            let destination = temp.path().join(format!("fresh-{kind}"));
+            fs::create_dir(&destination).expect("destination");
+            let scaffold_target = destination.clone();
+            let exit = std::thread::Builder::new()
+                .name(format!("{kind}-docs-scaffold"))
+                .stack_size(16 * 1024 * 1024)
+                .spawn(move || {
+                    let runtime = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .expect("runtime");
+                    runtime.block_on(async {
+                        let _guard =
+                            crate::tests::common::harn_state_lock::lock_harn_state_async().await;
+                        let exit = dispatch_to_script(
+                            Some(&format!("fresh-{kind}")),
+                            &scaffold_target,
+                            &format!("fresh-{kind}"),
+                            template,
+                        )
+                        .await;
+                        if exit == 0 {
+                            super::generate_scaffolded_docs(&scaffold_target, template)
+                                .expect("generate scaffolded docs");
+                        }
+                        exit
+                    })
+                })
+                .expect("scaffold thread")
+                .join()
+                .expect("scaffold thread completed");
+            assert_eq!(exit, 0, "{kind} scaffold failed");
+
+            let docs = destination.join(super::SCAFFOLD_DOCS_PATH);
+            assert!(docs.is_file(), "{kind} scaffold did not write {docs:?}");
+
+            // `check: true` is the same freshness comparison `harn package
+            // verify` runs, so this fails for exactly the reason the nightly did.
+            super::generate_package_docs_impl(Some(&destination), None, /* check */ true)
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "{kind} scaffold left {} stale: {error}",
+                        super::SCAFFOLD_DOCS_PATH
+                    )
+                });
+        }
     }
 }
