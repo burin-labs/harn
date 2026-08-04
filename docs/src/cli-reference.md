@@ -1198,7 +1198,7 @@ harn check --preflight warning src/
 | Flag | Description |
 |---|---|
 | `--host-capabilities <file>` | Load a host capability manifest for preflight validation. Supports plain `{capability: [ops...]}` objects, nested `{capabilities: ...}` wrappers, and per-op metadata dictionaries with optional `param_discriminators` literal sets. Discriminator policies may explicitly allow a dynamic forwarding boundary when the host verifies it separately. Overrides `[check].host_capabilities_path` in `harn.toml`. |
-| `--trusted-host-dispatch` | Check an embedder-owned route module graph with privileged host builtins such as `host_call` visible. Use only when a Rust host selects and loads the graph through the trusted-dispatch VM boundary; ordinary modules remain unprivileged. Monotonically enables `[check].trusted_host_dispatch`. |
+| `--trusted-host-dispatch` | Check an embedder-owned route module graph with privileged host builtins such as `host_call` visible. Use only when a Rust host selects and loads the graph through the trusted-dispatch VM boundary; ordinary modules remain unprivileged. Monotonically enables `[check].trusted_host_dispatch`. Reaches the lint rules `harn check` runs too, so the same call does not come back as a `HARN-LNT-072` warning. |
 | `--bundle-root <dir>` | Validate `harness.fs.render_prompt(...)`, and template paths against an alternate bundled layout root |
 | `--invariants` | Evaluate `@invariant(...)` annotations on functions, tools, and pipelines. Violations fail the check and are reported as `invariant[<name>]` diagnostics with concrete source spans. |
 | `--workspace` | Walk every path listed in `[workspace].pipelines` of the nearest `harn.toml`. Positional targets remain additive. |
