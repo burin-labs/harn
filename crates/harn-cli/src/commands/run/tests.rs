@@ -1244,6 +1244,9 @@ fn install_dependency_connector_fixture(
 #[tokio::test]
 async fn execute_run_entry_asset_alias_resolves_against_project_not_dependency() {
     let _cwd_guard = crate::tests::common::cwd_lock::lock_cwd_async().await;
+    // Loading the dependency's package contributes its provider to the
+    // process-global catalog, which outlives this test.
+    let _state_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
     harn_vm::reset_thread_local_state();
     let temp = tempfile::TempDir::new().expect("temp dir");
     let project = temp.path();
@@ -1324,6 +1327,8 @@ async fn execute_run_entry_asset_alias_resolves_against_project_not_dependency()
 #[tokio::test]
 async fn execute_run_installs_dependency_package_connector_client() {
     let _cwd_guard = crate::tests::common::cwd_lock::lock_cwd_async().await;
+    // Same as the sibling above: the provider this loads is process-global.
+    let _state_guard = crate::tests::common::harn_state_lock::lock_harn_state_async().await;
     harn_vm::reset_thread_local_state();
     let temp = tempfile::TempDir::new().expect("temp dir");
     let project = temp.path();

@@ -340,6 +340,19 @@ provenance = "{git}"
 }
 
 pub(crate) fn test_harn_connector_source(provider_id: &str) -> String {
+    test_harn_connector_source_with_schema(provider_id, "EchoEventPayload")
+}
+
+/// A connector fixture whose payload schema is named by the caller.
+///
+/// The catalog treats a provider id re-registered under a *different*
+/// schema name as a real disagreement about what that id means, so
+/// tests about catalog isolation need to vary the name independently of
+/// the id.
+pub(crate) fn test_harn_connector_source_with_schema(
+    provider_id: &str,
+    harn_schema_name: &str,
+) -> String {
     format!(
         r#"
 pub fn provider_id() {{
@@ -352,7 +365,7 @@ pub fn kinds() {{
 
 pub fn payload_schema() {{
   return {{
-harn_schema_name: "EchoEventPayload",
+harn_schema_name: "{harn_schema_name}",
 json_schema: {{
   type: "object",
   additionalProperties: true,
