@@ -3744,7 +3744,7 @@ the call sites it can see (`harness` becomes `harness.fs`, or becomes
 `{fs: harness.fs, tools: harness.tools}`). It reuses the existing parameter
 name so the new binding cannot shadow anything else in scope, which is why a
 narrowed parameter can come out of this repair still called `harness`.
-[HARN-LNT-073](HARN-LNT-073.md) reports that and renames it, so running
+`HARN-LNT-073` reports that and renames it, so running
 `harn fix` again finishes the job.
 
 #### When to keep root `Harness`
@@ -3904,7 +3904,7 @@ pub fn ack(harness: HarnessNet, url: string) {
 
 Nothing here is unsound, but `harness.http_post(...)` reads like a root handle
 with a surprising method on it. The narrowing that
-[HARN-LNT-069](HARN-LNT-069.md) asks for is only legible once the name carries
+`HARN-LNT-069` asks for is only legible once the name carries
 it too.
 
 #### How to fix
@@ -3926,7 +3926,7 @@ Harn arguments are positional, so a parameter rename moves no call site.
 `harn fix --apply --safety surface-changing` performs it, rewriting the
 parameter and every reference to it inside the function.
 
-This also finishes what [HARN-LNT-069](HARN-LNT-069.md) starts. That repair
+This also finishes what `HARN-LNT-069` starts. That repair
 narrows the type but reuses the existing parameter name, so its output can
 still read `harness: HarnessNet`; this lint then renames it.
 

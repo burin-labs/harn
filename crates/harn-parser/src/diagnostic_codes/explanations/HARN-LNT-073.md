@@ -13,7 +13,7 @@ pub fn ack(harness: HarnessNet, url: string) {
 
 Nothing here is unsound, but `harness.http_post(...)` reads like a root handle
 with a surprising method on it. The narrowing that
-[HARN-LNT-069](HARN-LNT-069.md) asks for is only legible once the name carries
+`HARN-LNT-069` asks for is only legible once the name carries
 it too.
 
 ## How to fix
@@ -35,7 +35,7 @@ Harn arguments are positional, so a parameter rename moves no call site.
 `harn fix --apply --safety surface-changing` performs it, rewriting the
 parameter and every reference to it inside the function.
 
-This also finishes what [HARN-LNT-069](HARN-LNT-069.md) starts. That repair
+This also finishes what `HARN-LNT-069` starts. That repair
 narrows the type but reuses the existing parameter name, so its output can
 still read `harness: HarnessNet`; this lint then renames it.
 
