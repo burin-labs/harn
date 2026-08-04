@@ -12,9 +12,7 @@ fn apply_preserves_separate_narrow_capability_parameters() {
             &script,
             RepairSafety::SurfaceChanging,
             false,
-            FixOptions {
-                capability_migrations_only: true,
-            },
+            FixOptions::capability_migrations(),
         )
         .unwrap();
         assert!(result.applied.is_empty(), "pass {pass}: {result:#?}");
@@ -40,9 +38,7 @@ fn apply_rewrites_ambient_call_through_root_first_split_boundary() {
         &script,
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
     assert!(!result.applied.is_empty(), "{result:#?}");
@@ -76,9 +72,7 @@ fn apply_extends_narrow_first_split_boundary_with_missing_handle() {
         &script,
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
     assert!(!first.applied.is_empty(), "{first:#?}");
@@ -103,9 +97,7 @@ fn apply_extends_narrow_first_split_boundary_with_missing_handle() {
         &script,
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
     assert!(second.applied.is_empty(), "{second:#?}");
@@ -125,9 +117,7 @@ fn apply_preserves_lone_narrow_handle_when_adding_another_capability() {
         &script,
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
     assert!(!first.applied.is_empty(), "{first:#?}");
@@ -142,9 +132,7 @@ fn apply_preserves_lone_narrow_handle_when_adding_another_capability() {
         &script,
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
     assert!(second.applied.is_empty(), "{second:#?}");
@@ -164,9 +152,7 @@ fn apply_does_not_guess_domain_argument_after_lone_narrow_handle() {
         &script,
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
     assert!(!result.applied.is_empty(), "{result:#?}");
@@ -192,9 +178,7 @@ fn apply_completes_split_capability_prefix_before_extension() {
         &script,
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
     assert!(!first.applied.is_empty(), "{first:#?}");
@@ -214,9 +198,7 @@ fn apply_completes_split_capability_prefix_before_extension() {
         &script,
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
     assert!(second.applied.is_empty(), "{second:#?}");
@@ -236,9 +218,7 @@ fn apply_defers_extension_across_missing_ordinary_parameter() {
         &script,
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
     assert!(!result.applied.is_empty(), "{result:#?}");
@@ -262,9 +242,7 @@ fn apply_does_not_widen_narrow_caller_of_split_boundary() {
         &script,
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
     assert!(result.applied.is_empty(), "{result:#?}");

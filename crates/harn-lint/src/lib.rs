@@ -29,7 +29,10 @@ mod tests;
 
 pub use diagnostic::{LintDiagnostic, LintOptions, LintSeverity, DEFAULT_COMPLEXITY_THRESHOLD};
 pub use naming::simplify_bool_comparison;
-pub use rules::api_design::{capability_attenuations, CapabilityAttenuation};
+pub use rules::api_design::{
+    capability_attenuations, root_harness_boundary_attribute, runtime_supplies_arguments,
+    CapabilityAttenuation, RuntimeBoundaries,
+};
 pub use rules::file_header::derive_file_header_title;
 pub use rules::template_variant_explosion::DEFAULT_BRANCH_THRESHOLD as DEFAULT_TEMPLATE_VARIANT_BRANCH_THRESHOLD;
 

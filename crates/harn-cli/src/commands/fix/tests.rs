@@ -307,6 +307,7 @@ fn run_returns_error_after_reporting_skipped_files() {
         dry_run: false,
         safety: None,
         capability_migrations_only: false,
+        codes: Vec::new(),
         json: false,
         path: temp.path().to_path_buf(),
     };
@@ -350,6 +351,7 @@ fn apply_rejects_needs_human_safety_ceiling() {
         dry_run: false,
         safety: Some(RepairSafety::NeedsHuman),
         capability_migrations_only: false,
+        codes: Vec::new(),
         json: false,
         path: PathBuf::from("repair_demo.harn"),
     };
@@ -405,14 +407,7 @@ fn plan_marks_stdio_repairs_surface_changing_when_harness_is_unreachable() {
     let script = temp.path().join("stdio_needs_param.harn");
     fs::write(&script, "pub fn helper() {\n  println(\"hi\")\n}\n").unwrap();
 
-    let plan = build_plan_with_options(
-        &script,
-        None,
-        FixOptions {
-            capability_migrations_only: false,
-        },
-    )
-    .unwrap();
+    let plan = build_plan_with_options(&script, None, &FixOptions::default()).unwrap();
     let repair = plan
         .repairs
         .iter()
@@ -651,14 +646,8 @@ fn capability_only_plan_excludes_unrelated_repairs() {
         "pub const EXPORTED = 1\n\npub fn helper() {\n  println(\"hi\")\n}\n\nfn load(harness: Harness) {\n  return harness.fs.cwd()\n}\n",
     )
     .unwrap();
-    let plan = build_plan_with_options(
-        &script,
-        None,
-        FixOptions {
-            capability_migrations_only: true,
-        },
-    )
-    .unwrap();
+    let plan =
+        build_plan_with_options(&script, None, &FixOptions::capability_migrations()).unwrap();
     assert!(!plan.repairs.is_empty());
     assert!(plan
         .repairs
@@ -791,14 +780,7 @@ fn plan_json_reports_cross_module_public_signature_impact() {
         )
         .unwrap();
 
-    let plan = build_plan_with_options(
-        temp.path(),
-        None,
-        FixOptions {
-            capability_migrations_only: false,
-        },
-    )
-    .unwrap();
+    let plan = build_plan_with_options(temp.path(), None, &FixOptions::default()).unwrap();
     let repair_index = plan
         .repairs
         .iter()
@@ -850,9 +832,7 @@ fn apply_thread_params_threads_harness_for_stdio_migration() {
         &script,
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: false,
-        },
+        FixOptions::default(),
     )
     .unwrap();
     assert!(
@@ -941,9 +921,7 @@ fn apply_thread_params_threads_harness_for_non_stdio_capabilities() {
             &script,
             RepairSafety::SurfaceChanging,
             false,
-            FixOptions {
-                capability_migrations_only: false,
-            },
+            FixOptions::default(),
         )
         .unwrap();
         assert!(
@@ -1014,9 +992,7 @@ fn apply_threads_missing_harness_into_pipeline_boundary() {
         &script,
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
     assert!(
@@ -1052,9 +1028,7 @@ fn apply_threads_registry_owned_harness_method_through_helper() {
         &script,
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
     assert!(
@@ -1066,13 +1040,10 @@ fn apply_threads_registry_owned_harness_method_through_helper() {
     );
 
     let updated = fs::read_to_string(&script).unwrap();
-    assert!(
-        updated.contains("fn caps(harness: HarnessLlm)"),
-        "{updated}"
-    );
+    assert!(updated.contains("fn caps(llm: HarnessLlm)"), "{updated}");
     assert!(updated.contains("caps(harness.llm)"), "{updated}");
     assert!(
-        updated.contains("harness.provider_capabilities(\"anthropic\", \"claude-opus-4-7\")"),
+        updated.contains("llm.provider_capabilities(\"anthropic\", \"claude-opus-4-7\")"),
         "{updated}"
     );
 }
@@ -1091,9 +1062,7 @@ fn apply_thread_params_threads_harness_from_pipeline_to_helper() {
         &script,
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: false,
-        },
+        FixOptions::default(),
     )
     .unwrap();
     assert!(
@@ -1193,9 +1162,7 @@ fn apply_surface_changing_threads_non_stdlib_public_api() {
         &script,
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: false,
-        },
+        FixOptions::default(),
     )
     .unwrap();
     assert!(
@@ -1243,9 +1210,7 @@ fn apply_threads_ambient_capability_from_default_parameter() {
         &script,
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
     assert!(
@@ -1258,9 +1223,7 @@ fn apply_threads_ambient_capability_from_default_parameter() {
 
     let updated = fs::read_to_string(&script).unwrap();
     assert!(
-        updated.contains(
-            "pub fn resolve(harness: HarnessFs, path: string, base: string = harness.cwd())"
-        ),
+        updated.contains("pub fn resolve(fs: HarnessFs, path: string, base: string = fs.cwd())"),
         "{updated}"
     );
     assert!(
@@ -1283,9 +1246,7 @@ fn apply_rewrites_positional_metadata_builtin_to_typed_request() {
         &script,
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
     assert!(
@@ -1298,7 +1259,7 @@ fn apply_rewrites_positional_metadata_builtin_to_typed_request() {
 
     let updated = fs::read_to_string(&script).unwrap();
     assert!(
-        updated.contains("harness.metadata_get({dir: dir, namespace: \"classification\"})"),
+        updated.contains("project.metadata_get({dir: dir, namespace: \"classification\"})"),
         "{updated}"
     );
     assert!(
@@ -1321,9 +1282,7 @@ fn apply_rewrites_zero_and_optional_metadata_arguments_to_named_requests() {
         &script,
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
 
@@ -1356,9 +1315,7 @@ fn apply_rewrites_legacy_host_projections_to_typed_snapshots() {
         &script,
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
 
@@ -1395,9 +1352,7 @@ fn apply_rewrites_ambient_calls_inside_interpolation() {
         &script,
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
 
@@ -1426,9 +1381,7 @@ fn apply_dedupes_shared_stdio_threading_edits() {
         &script,
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: false,
-        },
+        FixOptions::default(),
     )
     .unwrap();
     assert!(

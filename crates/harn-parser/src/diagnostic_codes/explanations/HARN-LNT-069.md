@@ -41,8 +41,10 @@ similar.
 the parameter, updates every use inside the helper, then narrows the argument at
 the call sites it can see (`harness` becomes `harness.fs`, or becomes
 `{fs: harness.fs, tools: harness.tools}`). It reuses the existing parameter
-name so the new binding cannot shadow anything else in scope; rename it yourself
-if a clearer name exists.
+name so the new binding cannot shadow anything else in scope, which is why a
+narrowed parameter can come out of this repair still called `harness`.
+`HARN-LNT-073` reports that and renames it, so running
+`harn fix` again finishes the job.
 
 ## When to keep root `Harness`
 

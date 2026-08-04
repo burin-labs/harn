@@ -10,13 +10,14 @@
 use std::collections::BTreeSet;
 
 use harn_builtin_meta::CapabilityId;
-use harn_lexer::Span;
+use harn_lexer::{FixEdit, Span};
 use harn_parser::{visit, DiagnosticCode as Code, Node, SNode, TypeExpr, TypedParam};
 use harn_vm::HarnessKind;
 
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
 
 const ATTENUATION_RULE: &str = "capability-attenuation";
+const PARAMETER_NAME_RULE: &str = "capability-parameter-name";
 const POSITIONAL_RULE: &str = "homogeneous-positional-api";
 const POSITIONAL_THRESHOLD: usize = 4;
 
@@ -32,62 +33,71 @@ pub struct CapabilityAttenuation {
     pub capabilities: BTreeSet<CapabilityId>,
 }
 
-/// Return every conservatively attenuable root parameter in a parsed module.
-#[must_use]
-pub fn capability_attenuations(program: &[SNode]) -> Vec<CapabilityAttenuation> {
-    // A named function installed as a handler is entered by the runtime or a
-    // host framework. That callback boundary receives the root Harness by
-    // contract even when today's body happens to use one capability. Treat
-    // this structural registration as stronger evidence than local body-use
-    // counting; narrowing it would make the callback uncallable.
-    let mut boundary_callbacks = BTreeSet::new();
-    let mut public_functions = BTreeSet::new();
-    visit::walk_program(program, &mut |node| {
-        if let Node::FnDecl {
-            name, is_pub: true, ..
-        } = &node.node
-        {
-            public_functions.insert(name.clone());
-        }
-        let Node::DictLiteral(entries) = &node.node else {
-            return;
-        };
-        for entry in entries {
-            let is_handler = matches!(
-                &entry.key.node,
-                Node::Identifier(key) | Node::StringLiteral(key) if key == "handler"
-            );
-            if is_handler {
-                if let Node::Identifier(name) = &entry.value.node {
-                    boundary_callbacks.insert(name.clone());
+/// The callables a runtime or host framework enters directly.
+///
+/// The signatures of these are a contract with a caller no source file in this
+/// module can see, so neither the *type* nor the *name* of their parameters is
+/// ours to change: narrowing one makes the callable uncallable, and renaming
+/// one renames a value the runtime supplies positionally by contract.
+/// Computing the set once and sharing it keeps [`capability_attenuations`] and
+/// [`check_capability_parameter_names`] from drifting to two answers about
+/// what counts as a boundary.
+pub struct RuntimeBoundaries {
+    /// Named functions installed as a `handler:` field. This structural
+    /// registration is stronger evidence than counting body uses.
+    callbacks: BTreeSet<String>,
+    /// Whether this module is a connector, whose runtime exports are entered
+    /// by the connector ABI rather than by local callers.
+    connector_module: bool,
+}
+
+impl RuntimeBoundaries {
+    /// Collect the boundary set for a parsed module.
+    #[must_use]
+    pub fn collect(program: &[SNode]) -> Self {
+        let mut callbacks = BTreeSet::new();
+        let mut public_functions = BTreeSet::new();
+        visit::walk_program(program, &mut |node| {
+            if let Node::FnDecl {
+                name, is_pub: true, ..
+            } = &node.node
+            {
+                public_functions.insert(name.clone());
+            }
+            let Node::DictLiteral(entries) = &node.node else {
+                return;
+            };
+            for entry in entries {
+                let is_handler = matches!(
+                    &entry.key.node,
+                    Node::Identifier(key) | Node::StringLiteral(key) if key == "handler"
+                );
+                if is_handler {
+                    if let Node::Identifier(name) = &entry.value.node {
+                        callbacks.insert(name.clone());
+                    }
                 }
             }
+        });
+        let connector_module = harn_vm::connectors::harn_module::abi::metadata_exports()
+            .iter()
+            .all(|name| public_functions.contains(*name));
+        Self {
+            callbacks,
+            connector_module,
         }
-    });
-    let connector_module = harn_vm::connectors::harn_module::abi::metadata_exports()
-        .iter()
-        .all(|name| public_functions.contains(*name));
+    }
 
-    let mut attenuations = Vec::new();
-    for declaration in program {
-        let (declaration, attributed_boundary) = match &declaration.node {
-            Node::AttributedDecl { attributes, inner } => (
-                inner.as_ref(),
-                attributes.iter().any(|attribute| attribute.name == "job"),
-            ),
-            _ => (declaration, false),
-        };
-        let Node::FnDecl {
-            name,
-            params,
-            body,
-            is_pub,
-            ..
-        } = &declaration.node
-        else {
-            continue;
-        };
-
+    /// Whether this callable is entered by a runtime or host framework
+    /// rather than by a caller in this module.
+    #[must_use]
+    pub fn contains(
+        &self,
+        name: &str,
+        params: &[TypedParam],
+        is_pub: bool,
+        attributed_boundary: bool,
+    ) -> bool {
         let trigger_boundary = params.len() >= 2
             && matches!(
                 params[0].type_expr.as_ref(),
@@ -97,19 +107,75 @@ pub fn capability_attenuations(program: &[SNode]) -> Vec<CapabilityAttenuation> 
                 params[1].type_expr.as_ref(),
                 Some(TypeExpr::Named(type_name)) if type_name == "TriggerEvent"
             );
-        let connector_boundary = connector_module
-            && *is_pub
+        let connector_boundary = self.connector_module
+            && is_pub
             && harn_vm::connectors::harn_module::abi::is_runtime_export(name);
-        if name != "main"
-            && !attributed_boundary
-            && !trigger_boundary
-            && !connector_boundary
-            && !boundary_callbacks.contains(name)
-        {
+        name == "main"
+            || attributed_boundary
+            || trigger_boundary
+            || connector_boundary
+            || self.callbacks.contains(name)
+    }
+}
+
+/// Whether an attribute makes this declaration a **root-`Harness`** runtime
+/// entrypoint.
+///
+/// `@job` is entered by the scheduler with the root handle. A flow predicate is
+/// deliberately *not* one of these: flow evaluation injects exactly one
+/// `HarnessAst`, so treating it as a root boundary would claim it needs
+/// authority the runtime never supplies.
+#[must_use]
+pub fn root_harness_boundary_attribute(outer: &SNode) -> bool {
+    let Node::AttributedDecl { attributes, .. } = &outer.node else {
+        return false;
+    };
+    attributes.iter().any(|attribute| attribute.name == "job")
+}
+
+/// Whether the runtime, rather than a caller in this module, supplies this
+/// declaration's arguments at all.
+///
+/// Broader than [`root_harness_boundary_attribute`] because it also covers flow
+/// predicates. The distinction matters: a flow predicate's handle is injected
+/// *positionally by contract*, so its name is not ours to change even though
+/// its type is narrow and known.
+#[must_use]
+pub fn runtime_supplies_arguments(outer: &SNode) -> bool {
+    let Node::AttributedDecl { attributes, inner } = &outer.node else {
+        return false;
+    };
+    root_harness_boundary_attribute(outer)
+        || harn_parser::is_flow_predicate_declaration(attributes, inner)
+}
+
+/// Return every conservatively attenuable root parameter in a parsed module.
+#[must_use]
+pub fn capability_attenuations(program: &[SNode]) -> Vec<CapabilityAttenuation> {
+    let boundaries = RuntimeBoundaries::collect(program);
+    let mut attenuations = Vec::new();
+    for outer in program {
+        let attributed = root_harness_boundary_attribute(outer);
+        let inner = match &outer.node {
+            Node::AttributedDecl { inner, .. } => inner.as_ref(),
+            _ => outer,
+        };
+        let Node::FnDecl {
+            name,
+            params,
+            body,
+            is_pub,
+            ..
+        } = &inner.node
+        else {
+            continue;
+        };
+
+        if !boundaries.contains(name, params, *is_pub, attributed) {
             attenuations.extend(params.iter().filter_map(|parameter| {
                 capability_attenuation_for_parameter(params, body, parameter).map(|capabilities| {
                     CapabilityAttenuation {
-                        declaration_span: declaration.span,
+                        declaration_span: inner.span,
                         parameter_name: parameter.name.clone(),
                         capabilities,
                     }
@@ -122,14 +188,22 @@ pub fn capability_attenuations(program: &[SNode]) -> Vec<CapabilityAttenuation> 
 
 pub(crate) fn check_api_design(program: &[SNode], diagnostics: &mut Vec<LintDiagnostic>) {
     let attenuations = capability_attenuations(program);
-    for declaration in program {
-        let declaration = match &declaration.node {
+    let module_names = module_level_names(program);
+    let boundaries = RuntimeBoundaries::collect(program);
+    for outer in program {
+        let attributed = root_harness_boundary_attribute(outer);
+        // Naming asks the broader question: a flow predicate's handle is
+        // injected positionally, so its name is a contract even though it is
+        // not a root-Harness boundary.
+        let injected = runtime_supplies_arguments(outer);
+        let declaration = match &outer.node {
             Node::AttributedDecl { inner, .. } => inner.as_ref(),
-            _ => declaration,
+            _ => outer,
         };
         let Node::FnDecl {
             name,
             params,
+            body,
             is_pub,
             ..
         } = &declaration.node
@@ -141,6 +215,9 @@ pub(crate) fn check_api_design(program: &[SNode], diagnostics: &mut Vec<LintDiag
             .filter(|candidate| candidate.declaration_span == declaration.span)
         {
             push_capability_attenuation_diagnostic(name, declaration, attenuation, diagnostics);
+        }
+        if !injected && !boundaries.contains(name, params, *is_pub, attributed) {
+            check_capability_parameter_names(name, params, body, &module_names, diagnostics);
         }
         if *is_pub {
             check_homogeneous_positionals(name, params, declaration, diagnostics);
@@ -307,6 +384,177 @@ fn check_homogeneous_positionals(
     });
 }
 
+/// Report a parameter that carries a narrow capability handle under a name
+/// that does not say which capability it carries.
+///
+/// A parameter still called `harness` reads as the root handle at every call
+/// site, which hides the very attenuation the narrower type performs. This is
+/// the counterpart to [`ATTENUATION_RULE`]: that rule narrows the type, this
+/// one keeps the name honest once the type is already narrow — including on
+/// code the fixer migrated before it named the parameter itself.
+fn check_capability_parameter_names(
+    function_name: &str,
+    params: &[TypedParam],
+    body: &[SNode],
+    module_names: &BTreeSet<String>,
+    diagnostics: &mut Vec<LintDiagnostic>,
+) {
+    for parameter in params {
+        let Some(capability) = narrow_capability_parameter(parameter) else {
+            continue;
+        };
+        let preferred = capability.field_name();
+        if parameter.name == preferred || module_names.contains(preferred) {
+            continue;
+        }
+        let Some(references) = renameable_references(params, body, &parameter.name, preferred)
+        else {
+            continue;
+        };
+
+        // `TypedParam::span` runs from an optional `...` through the default
+        // value; a non-rest parameter's name starts at its first byte.
+        let name_span = Span::with_offsets(
+            parameter.span.start,
+            parameter.span.start + parameter.name.len(),
+            parameter.span.line,
+            parameter.span.column,
+        );
+        let mut fix = vec![FixEdit {
+            span: name_span,
+            replacement: preferred.to_string(),
+        }];
+        fix.extend(references.into_iter().map(|span| FixEdit {
+            span,
+            replacement: preferred.to_string(),
+        }));
+
+        diagnostics.push(LintDiagnostic {
+            code: Code::LintCapabilityParameterName,
+            rule: PARAMETER_NAME_RULE.into(),
+            message: format!(
+                "`{function_name}` names its `{}` parameter `{}`, not `{preferred}`",
+                capability.type_name(),
+                parameter.name
+            ),
+            span: name_span,
+            severity: LintSeverity::Warning,
+            suggestion: Some(format!(
+                "rename the parameter to `{preferred}: {}` so the signature states which capability it carries; Harn arguments are positional, so no call site changes",
+                capability.type_name()
+            )),
+            fix: Some(fix),
+        });
+    }
+}
+
+/// Every name the module already spells that a parameter must not take over.
+///
+/// A callee is not an identifier node — `FunctionCall` carries its target as a
+/// plain `String` — so walking identifiers alone cannot see that `secrets` is
+/// the function this body calls. Renaming a parameter onto it produces
+/// `secrets(auth, secrets, …)`, which parses, type-checks locally, and calls a
+/// capability handle. Collect declarations, imports, and call targets across
+/// the whole module and refuse any name among them.
+fn module_level_names(program: &[SNode]) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    visit::walk_program(program, &mut |node| match &node.node {
+        Node::FunctionCall { name, .. } => {
+            names.insert(name.clone());
+        }
+        Node::FnDecl { name, .. } | Node::Pipeline { name, .. } => {
+            names.insert(name.clone());
+        }
+        Node::SelectiveImport {
+            names: imported, ..
+        } => {
+            names.extend(imported.iter().cloned());
+        }
+        Node::NamespaceImport { alias, .. } => {
+            names.insert(alias.clone());
+        }
+        _ => {}
+    });
+    names
+}
+
+/// The capability a parameter's declared type carries, when that type is a
+/// narrow sub-handle. Root `Harness` and every non-capability type yield
+/// `None`; so does a rest parameter, which collects values rather than one
+/// handle.
+fn narrow_capability_parameter(parameter: &TypedParam) -> Option<CapabilityId> {
+    // A synthetic parameter carries `Span::dummy()`, so there is no name span
+    // to rewrite and no source text the rename would improve.
+    //
+    // A leading underscore is not a spelling of the name — it is the author
+    // declaring the parameter deliberately unused, and every unused-binding
+    // lint reads it. Renaming `_fs` to `fs` silently revokes that declaration
+    // and the next pass reports the parameter as unused.
+    if parameter.rest || parameter.name.starts_with('_') || parameter.span == Span::dummy() {
+        return None;
+    }
+    match parameter.type_expr.as_ref() {
+        Some(TypeExpr::Named(name)) => CapabilityId::from_type_name(name),
+        _ => None,
+    }
+}
+
+/// Every span that a rename of `current` to `preferred` must rewrite, or
+/// `None` when the rename is not provably safe here.
+///
+/// The rename is refused when `preferred` already appears anywhere in the
+/// callable (renaming would capture it) and when a nested callable rebinds
+/// `current` (its inner references belong to a different binding). Dict-literal
+/// keys are excluded from the rewrite: they are record field names that happen
+/// to parse as identifiers, and renaming one changes the record's shape.
+fn renameable_references(
+    params: &[TypedParam],
+    body: &[SNode],
+    current: &str,
+    preferred: &str,
+) -> Option<Vec<Span>> {
+    if params.iter().any(|candidate| candidate.name == preferred) {
+        return None;
+    }
+
+    let mut references = Vec::new();
+    let mut dict_keys = BTreeSet::new();
+    let mut taken = false;
+    let mut shadowed = false;
+    let mut record = |node: &SNode| match &node.node {
+        Node::Identifier(name) if name == current => references.push(node.span),
+        Node::Identifier(name) if name == preferred => taken = true,
+        Node::FnDecl { params, .. } | Node::Closure { params, .. }
+            if params
+                .iter()
+                .any(|nested| nested.name == current || nested.name == preferred) =>
+        {
+            shadowed = true;
+        }
+        Node::DictLiteral(entries) => {
+            for entry in entries {
+                if matches!(&entry.key.node, Node::Identifier(key) if key == current) {
+                    dict_keys.insert((entry.key.span.start, entry.key.span.end));
+                }
+            }
+        }
+        _ => {}
+    };
+    for candidate in params {
+        if let Some(default) = &candidate.default_value {
+            visit::walk_node(default, &mut record);
+        }
+    }
+    visit::walk_program(body, &mut record);
+
+    (!taken && !shadowed).then(|| {
+        references
+            .into_iter()
+            .filter(|span| !dict_keys.contains(&(span.start, span.end)))
+            .collect()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use harn_lexer::Lexer;
@@ -320,6 +568,26 @@ mod tests {
         let mut diagnostics = Vec::new();
         check_api_design(&program, &mut diagnostics);
         diagnostics
+    }
+
+    /// Lint `source`, apply every `capability-parameter-name` fix, and return
+    /// the rewritten source. Asserts the result still parses, so a test can
+    /// never pass on a rename that produced invalid syntax.
+    fn rename_fixed(source: &str) -> String {
+        let edits = lint(source)
+            .into_iter()
+            .filter(|diagnostic| diagnostic.rule == PARAMETER_NAME_RULE)
+            .filter_map(|diagnostic| diagnostic.fix)
+            .flatten()
+            .collect::<Vec<_>>();
+        let mut fixed = source.to_string();
+        for edit in FixEdit::dedupe_overlapping(&edits) {
+            fixed.replace_range(edit.span.start..edit.span.end, &edit.replacement);
+        }
+        Parser::new(Lexer::new(&fixed).tokenize().expect("relex"))
+            .parse()
+            .expect("fixed source parses");
+        fixed
     }
 
     #[test]
@@ -495,5 +763,107 @@ mod tests {
             "fn private(a: int, b: int, c: int, d: int) {}\npub fn mixed(a: int, b: int, c: int, label: string) -> nil {}",
         );
         assert!(diagnostics.iter().all(|d| d.rule != POSITIONAL_RULE));
+    }
+
+    #[test]
+    fn renames_a_narrow_capability_parameter_and_its_references() {
+        let source =
+            "pub fn ack(harness: HarnessNet, url: string) { return harness.http_post(url, {}) }";
+        let diagnostics = lint(source)
+            .into_iter()
+            .filter(|diagnostic| diagnostic.rule == PARAMETER_NAME_RULE)
+            .collect::<Vec<_>>();
+        assert_eq!(diagnostics.len(), 1);
+        assert!(
+            diagnostics[0].message.contains("`harness`, not `net`"),
+            "{}",
+            diagnostics[0].message
+        );
+        assert_eq!(
+            diagnostics[0].repair().expect("repair").safety,
+            harn_parser::RepairSafety::SurfaceChanging
+        );
+        assert_eq!(
+            rename_fixed(source),
+            "pub fn ack(net: HarnessNet, url: string) { return net.http_post(url, {}) }"
+        );
+    }
+
+    #[test]
+    fn a_root_harness_parameter_keeps_its_name() {
+        // Root `Harness` is not a capability sub-handle, so `harness` is the
+        // right name for it; only the attenuation rule has anything to say.
+        let diagnostics = lint("pub fn main(harness: Harness) { harness.stdio.println(\"hi\") }");
+        assert!(diagnostics.iter().all(|d| d.rule != PARAMETER_NAME_RULE));
+    }
+
+    #[test]
+    fn an_already_named_capability_parameter_is_not_flagged() {
+        let diagnostics =
+            lint("pub fn read(fs: HarnessFs, path: string) { return fs.read_text(path) }");
+        assert!(diagnostics.iter().all(|d| d.rule != PARAMETER_NAME_RULE));
+    }
+
+    #[test]
+    fn refuses_a_rename_that_would_capture_an_existing_binding() {
+        // `net` already means something else in this body; renaming the
+        // parameter onto it would silently rebind every use.
+        let source =
+            "pub fn ack(harness: HarnessNet) { const net = 1; return harness.http_get(net) }";
+        let diagnostics = lint(source);
+        assert!(diagnostics.iter().all(|d| d.rule != PARAMETER_NAME_RULE));
+    }
+
+    #[test]
+    fn leaves_a_deliberately_unused_capability_parameter_alone() {
+        // `_fs` says "I know this is unused". Renaming it to `fs` revokes that
+        // and the unused-parameter lint then fires on the repair's own output.
+        let source = "fn inspect(_fs: HarnessFs, left: string) { return left }";
+        let diagnostics = lint(source);
+        assert!(diagnostics.iter().all(|d| d.rule != PARAMETER_NAME_RULE));
+    }
+
+    #[test]
+    fn refuses_a_rename_that_would_shadow_a_called_function() {
+        // Found on `conformance/tests/stdlib/oauth/oauth_storage_secrets.harn`:
+        // `secrets` is the imported function this body calls. A callee is a
+        // plain string in the AST, not an identifier node, so walking
+        // identifiers alone does not see it — and the rename would have
+        // produced `secrets(auth, secrets, …)`, calling a capability handle.
+        let source = "import { secrets } from \"std/oauth\"\n\nfn exercise(auth: HarnessAuth, secret_store: HarnessSecrets) {\n  return secrets(auth, secret_store, {})\n}\n";
+        let diagnostics = lint(source);
+        assert!(
+            diagnostics.iter().all(|d| d.rule != PARAMETER_NAME_RULE),
+            "{diagnostics:#?}"
+        );
+    }
+
+    #[test]
+    fn refuses_a_rename_when_a_nested_callable_rebinds_the_name() {
+        let source =
+            "pub fn ack(harness: HarnessNet) { return [1].map(fn(harness) { return harness }) }";
+        let diagnostics = lint(source);
+        assert!(diagnostics.iter().all(|d| d.rule != PARAMETER_NAME_RULE));
+    }
+
+    #[test]
+    fn leaves_a_dict_key_that_shares_the_parameter_name_alone() {
+        // `{harness: harness}` is a record field named `harness` whose value
+        // is the parameter. Only the value moves; renaming the key would
+        // change the record's shape.
+        let source = "pub fn ack(harness: HarnessNet) { return {harness: harness} }";
+        assert_eq!(
+            rename_fixed(source),
+            "pub fn ack(net: HarnessNet) { return {harness: net} }"
+        );
+    }
+
+    #[test]
+    fn renames_a_parameter_referenced_from_a_later_default() {
+        let source = "pub fn ack(harness: HarnessNet, target = harness.base_url()) { return harness.http_get(target) }";
+        assert_eq!(
+            rename_fixed(source),
+            "pub fn ack(net: HarnessNet, target = net.base_url()) { return net.http_get(target) }"
+        );
     }
 }

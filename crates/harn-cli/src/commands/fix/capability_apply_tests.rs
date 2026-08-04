@@ -195,9 +195,7 @@ fn apply_single(source: &str) -> (ApplyResult, String) {
         &script,
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
     let updated = fs::read_to_string(&script).unwrap();
@@ -242,7 +240,7 @@ fn capability_apply_preserves_multiline_declaration_and_call_whitespace() {
     );
     assert_eq!(
         callable_params(&updated, "load"),
-        vec![param("harness", "HarnessFs"), param("path", "string")]
+        vec![param("fs", "HarnessFs"), param("path", "string")]
     );
     assert_eq!(
         call_argument_paths(&updated, "load")[0][0],
@@ -274,9 +272,7 @@ fn capability_apply_preserves_an_existing_handle_for_an_imported_bundle() {
         temp.path(),
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
     assert_eq!(result.post_apply_diagnostics_count, 0, "{result:#?}");
@@ -285,7 +281,7 @@ fn capability_apply_preserves_an_existing_handle_for_an_imported_bundle() {
         callable_params(&updated, "invoke"),
         vec![
             param("setting", "string"),
-            param("harness", "HarnessObs"),
+            param("obs", "HarnessObs"),
             param("env", "HarnessEnv"),
         ]
     );
@@ -293,7 +289,7 @@ fn capability_apply_preserves_an_existing_handle_for_an_imported_bundle() {
         call_dict_argument_paths(&updated, "run_auto_mode", 0)[0],
         BTreeMap::from([
             ("env".to_string(), Some("env".to_string())),
-            ("obs".to_string(), Some("harness".to_string())),
+            ("obs".to_string(), Some("obs".to_string())),
         ])
     );
     assert_eq!(
@@ -371,19 +367,19 @@ fn capability_apply_threads_a_new_typed_argument_through_local_callers() {
     assert_eq!(result.post_apply_diagnostics_count, 0, "{result:#?}");
     assert_eq!(
         callable_params(&updated, "decode"),
-        vec![param("harness", "HarnessFs"), param("path", "string")]
+        vec![param("fs", "HarnessFs"), param("path", "string")]
     );
     assert_eq!(
         call_argument_paths(&updated, "read_json_typed_result")[0][..2],
-        [Some("harness".to_string()), Some("path".to_string())]
+        [Some("fs".to_string()), Some("path".to_string())]
     );
     assert_eq!(
         callable_params(&updated, "load"),
-        vec![param("harness", "HarnessFs")]
+        vec![param("fs", "HarnessFs")]
     );
     assert_eq!(
         call_argument_paths(&updated, "decode")[0][0],
-        Some("harness".to_string())
+        Some("fs".to_string())
     );
     assert_eq!(
         call_argument_paths(&updated, "load")[0][0],
@@ -402,6 +398,8 @@ fn capability_apply_threads_ast_into_a_predicate_entrypoint() {
     );
     assert_eq!(
         callable_params(&updated, "inspect")[0],
+        // A flow predicate is a runtime boundary: flow evaluation injects the
+        // handle positionally, so the parameter keeps its contract name.
         param("harness", "HarnessAst")
     );
     assert_eq!(
@@ -564,9 +562,7 @@ fn capability_only_plan_excludes_unrelated_preflight_repairs_at_fixed_point() {
         &script,
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
     assert!(!result.applied.is_empty(), "{result:#?}");
@@ -574,9 +570,7 @@ fn capability_only_plan_excludes_unrelated_preflight_repairs_at_fixed_point() {
     let second_plan = build_plan_with_options(
         &script,
         Some(RepairSafety::SurfaceChanging),
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        &FixOptions::capability_migrations(),
     )
     .unwrap();
     assert!(
@@ -599,9 +593,7 @@ fn capability_apply_keeps_the_burin_peer_coordination_fixture_parse_safe() {
         &script,
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
     let updated = fs::read_to_string(&script).unwrap();
@@ -611,7 +603,7 @@ fn capability_apply_keeps_the_burin_peer_coordination_fixture_parse_safe() {
     assert!(!updated.contains("strharness"), "{updated}");
     assert!(!updated.contains("foharness"), "{updated}");
     assert!(!updated.contains("asserharness"), "{updated}");
-    assert!(updated.contains("harness.store_set("), "{updated}");
+    assert!(updated.contains("runtime.store_set("), "{updated}");
     assert!(updated.contains("harness.testing.calls()"), "{updated}");
     assert!(updated.contains("with_capability_fixtures("), "{updated}");
     assert!(updated.contains("harness.testing,"), "{updated}");
@@ -673,9 +665,7 @@ fn capability_apply_recognizes_an_imported_named_capability_bundle() {
         temp.path(),
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
     let migrated_adapter = fs::read_to_string(adapter).unwrap();
@@ -711,9 +701,7 @@ fn capability_apply_keeps_exported_definition_and_imported_call_arity_equal() {
         temp.path(),
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
     let migrated_library = fs::read_to_string(library).unwrap();
@@ -758,9 +746,7 @@ fn capability_apply_widens_cross_module_carrier_without_duplicate_arguments() {
         temp.path(),
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
     let migrated_library = fs::read_to_string(library).unwrap();
@@ -885,9 +871,7 @@ fn capability_apply_formats_with_the_owning_project_config() {
         &script,
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
     let updated = fs::read_to_string(&script).unwrap();
@@ -933,9 +917,7 @@ fn capability_apply_rejects_non_ast_authority_at_flow_predicate_boundary() {
         &script,
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .expect_err("flow evaluation must not silently broaden predicate authority");
     assert_eq!(
@@ -952,7 +934,7 @@ fn capability_apply_does_not_apply_flow_authority_rules_to_handler_invariants() 
     assert_eq!(result.post_apply_diagnostics_count, 0, "{result:#?}");
     assert_eq!(
         callable_params(&updated, "inspect"),
-        vec![param("harness", "HarnessFs")]
+        vec![param("fs", "HarnessFs")]
     );
     assert_eq!(
         call_argument_paths(&updated, "inspect")[0][0],
@@ -1010,7 +992,7 @@ fn capability_apply_preserves_root_values_that_escape() {
     );
     assert_eq!(
         callable_params(&updated, "narrow"),
-        vec![param("harness", "HarnessFs")]
+        vec![param("fs", "HarnessFs")]
     );
     assert_eq!(
         call_argument_paths(&updated, "narrow")[0][0],
@@ -1030,7 +1012,7 @@ fn capability_apply_projects_accesses_to_added_split_capabilities() {
     assert_eq!(
         callable_params(&updated, "with_probe"),
         vec![
-            param("harness", "HarnessFs"),
+            param("fs", "HarnessFs"),
             param("testing", "HarnessTesting"),
             ParamContract {
                 name: "body".to_string(),
@@ -1040,12 +1022,9 @@ fn capability_apply_projects_accesses_to_added_split_capabilities() {
     );
     assert_eq!(
         call_argument_paths(&updated, "with_temp_dir")[0],
-        [Some("harness".to_string()), None],
+        [Some("fs".to_string()), None],
     );
-    assert_eq!(
-        method_receiver_paths(&updated, "write_text"),
-        vec!["harness"]
-    );
+    assert_eq!(method_receiver_paths(&updated, "write_text"), vec!["fs"]);
     assert_eq!(
         method_receiver_paths(&updated, "calls"),
         vec!["testing"],
@@ -1065,7 +1044,7 @@ fn capability_apply_replaces_an_existing_imported_carrier_in_place() {
     assert_eq!(
         callable_params(&updated, "with_probe"),
         vec![
-            param("harness", "HarnessTesting"),
+            param("testing", "HarnessTesting"),
             param("fs", "HarnessFs"),
             ParamContract {
                 name: "body".to_string(),
@@ -1133,9 +1112,7 @@ fn capability_apply_does_not_double_insert_a_multi_capability_imported_prefix() 
         temp.path(),
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
     assert_eq!(result.post_apply_diagnostics_count, 0, "{result:#?}");
@@ -1183,16 +1160,14 @@ fn capability_apply_follows_selective_re_exports_to_the_definition() {
         temp.path(),
         RepairSafety::SurfaceChanging,
         false,
-        FixOptions {
-            capability_migrations_only: true,
-        },
+        FixOptions::capability_migrations(),
     )
     .unwrap();
     assert_eq!(result.post_apply_diagnostics_count, 0, "{result:#?}");
     let core = fs::read_to_string(temp.path().join("core.harn")).unwrap();
     assert_eq!(
         callable_params(&core, "evidence_candidate_dirs"),
-        vec![param("harness", "HarnessClock"), param("items", "list")],
+        vec![param("clock", "HarnessClock"), param("items", "list")],
         "the definition behind the facade must gain the carrier"
     );
     let updated = fs::read_to_string(entry).unwrap();

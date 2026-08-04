@@ -11,10 +11,10 @@ fn constant(value) {
   return { -> value }
 }
 
-fn drop_oldest_case(agents: HarnessAgent, runtime: HarnessRuntime, stdio: HarnessStdio, bp) {
+fn drop_oldest_case(agent: HarnessAgent, runtime: HarnessRuntime, stdio: HarnessStdio, bp) {
   const gate = runtime.channel(nil, 1)
   const pool = pool_create(
-    agents,
+    agent,
     {name: "bp-drop-oldest", max_concurrent: 1, backpressure: bp.queue(1, "drop_oldest")},
   )
   const warmup = pool.submit(gated(runtime, gate, "warmup"))
@@ -25,17 +25,17 @@ fn drop_oldest_case(agents: HarnessAgent, runtime: HarnessRuntime, stdio: Harnes
   stdio.println(saturated.rejected)
   stdio.println(saturated.queued)
   runtime.send(gate, "go")
-  const results = pool_wait(agents, [warmup, old, newest])
+  const results = pool_wait(agent, [warmup, old, newest])
   stdio.println(results[1].status)
   stdio.println(results[1].rejection_policy)
   stdio.println(results[2].status)
   stdio.println(results[2].result)
 }
 
-fn drop_newest_case(agents: HarnessAgent, runtime: HarnessRuntime, stdio: HarnessStdio, bp) {
+fn drop_newest_case(agent: HarnessAgent, runtime: HarnessRuntime, stdio: HarnessStdio, bp) {
   const gate = runtime.channel(nil, 1)
   const pool = pool_create(
-    agents,
+    agent,
     {name: "bp-drop-newest", max_concurrent: 1, backpressure: bp.queue(1, "drop_newest")},
   )
   const warmup = pool.submit(gated(runtime, gate, "warmup"))
@@ -46,17 +46,17 @@ fn drop_newest_case(agents: HarnessAgent, runtime: HarnessRuntime, stdio: Harnes
   stdio.println(saturated.rejected)
   stdio.println(saturated.queued)
   runtime.send(gate, "go")
-  const results = pool_wait(agents, [warmup, old, newest])
+  const results = pool_wait(agent, [warmup, old, newest])
   stdio.println(results[1].status)
   stdio.println(results[1].result)
   stdio.println(results[2].status)
   stdio.println(results[2].rejection_policy)
 }
 
-fn ring_buffer_case(agents: HarnessAgent, runtime: HarnessRuntime, stdio: HarnessStdio, bp) {
+fn ring_buffer_case(agent: HarnessAgent, runtime: HarnessRuntime, stdio: HarnessStdio, bp) {
   const gate = runtime.channel(nil, 1)
   const pool = pool_create(
-    agents,
+    agent,
     {name: "bp-ring-buffer", max_concurrent: 1, backpressure: bp.ring_buffer(1)},
   )
   const warmup = pool.submit(gated(runtime, gate, "warmup"))
@@ -67,17 +67,17 @@ fn ring_buffer_case(agents: HarnessAgent, runtime: HarnessRuntime, stdio: Harnes
   stdio.println(saturated.backpressure.max_depth)
   stdio.println(saturated.rejected)
   runtime.send(gate, "go")
-  const results = pool_wait(agents, [warmup, old, newest])
+  const results = pool_wait(agent, [warmup, old, newest])
   stdio.println(results[1].status)
   stdio.println(results[1].rejection_policy)
   stdio.println(results[2].status)
   stdio.println(results[2].result)
 }
 
-fn fail_submitter_case(agents: HarnessAgent, runtime: HarnessRuntime, stdio: HarnessStdio, bp) {
+fn fail_submitter_case(agent: HarnessAgent, runtime: HarnessRuntime, stdio: HarnessStdio, bp) {
   const gate = runtime.channel(nil, 1)
   const pool = pool_create(
-    agents,
+    agent,
     {name: "bp-fail-submitter", max_concurrent: 1, backpressure: bp.queue(1, "fail_submitter")},
   )
   const warmup = pool.submit(gated(runtime, gate, "warmup"))
@@ -88,15 +88,15 @@ fn fail_submitter_case(agents: HarnessAgent, runtime: HarnessRuntime, stdio: Har
   stdio.println(is_err(failed))
   stdio.println(contains(to_string(unwrap_err(failed)), "HARN-POL-001"))
   runtime.send(gate, "go")
-  const results = pool_wait(agents, [warmup, queued])
+  const results = pool_wait(agent, [warmup, queued])
   stdio.println(results[0].status)
   stdio.println(results[1].result)
 }
 
-fn fail_fast_case(agents: HarnessAgent, runtime: HarnessRuntime, stdio: HarnessStdio, bp) {
+fn fail_fast_case(agent: HarnessAgent, runtime: HarnessRuntime, stdio: HarnessStdio, bp) {
   const gate = runtime.channel(nil, 1)
   const pool = pool_create(
-    agents,
+    agent,
     {name: "bp-fail-fast", max_concurrent: 1, backpressure: bp.fail_fast},
   )
   const warmup = pool.submit(gated(runtime, gate, "warmup"))
@@ -106,17 +106,17 @@ fn fail_fast_case(agents: HarnessAgent, runtime: HarnessRuntime, stdio: HarnessS
   stdio.println(is_err(failed))
   stdio.println(contains(to_string(unwrap_err(failed)), "HARN-POL-002"))
   runtime.send(gate, "go")
-  const result = pool_wait(agents, warmup)
+  const result = pool_wait(agent, warmup)
   stdio.println(result.status)
   stdio.println(result.result)
 }
 
-fn block_submitter_case(agents: HarnessAgent, runtime: HarnessRuntime, stdio: HarnessStdio, bp) {
+fn block_submitter_case(agent: HarnessAgent, runtime: HarnessRuntime, stdio: HarnessStdio, bp) {
   const gate = runtime.channel(nil, 1)
   const started = runtime.channel(nil, 1)
   const returned = runtime.channel(nil, 1)
   const pool = pool_create(
-    agents,
+    agent,
     {name: "bp-block-submitter", max_concurrent: 1, backpressure: bp.queue(1)},
   )
   const warmup = pool.submit(gated(runtime, gate, "warmup"))
@@ -132,7 +132,7 @@ fn block_submitter_case(agents: HarnessAgent, runtime: HarnessRuntime, stdio: Ha
   runtime.send(gate, "go")
   const late = await(submitter)
   stdio.println(runtime.receive(returned))
-  const results = pool_wait(agents, [warmup, queued, late])
+  const results = pool_wait(agent, [warmup, queued, late])
   stdio.println(results[0].status)
   stdio.println(results[1].result)
   stdio.println(results[2].result)

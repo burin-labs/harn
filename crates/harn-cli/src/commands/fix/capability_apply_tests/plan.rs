@@ -54,9 +54,7 @@ fn capability_plan_counts_uses_inside_string_interpolation() {
             temp.path(),
             RepairSafety::SurfaceChanging,
             false,
-            super::FixOptions {
-                capability_migrations_only: true,
-            },
+            super::FixOptions::capability_migrations(),
         )
         .unwrap();
         fs::read_to_string(&script).unwrap()

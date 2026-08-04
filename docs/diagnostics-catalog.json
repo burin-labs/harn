@@ -59,7 +59,7 @@
     {
       "id": "LNT",
       "title": "Lint rules",
-      "count": 72
+      "count": 73
     },
     {
       "id": "FMT",
@@ -2450,6 +2450,21 @@
       "category": "LNT",
       "summary": "call names a builtin whose declared exposure keeps Harn source from naming it",
       "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-073",
+      "category": "LNT",
+      "summary": "parameter carrying a narrow capability handle is not named for that capability",
+      "repairs": [
+        {
+          "id": "bindings/name-capability-parameter",
+          "safety": "surface-changing",
+          "summary": "Rename the capability parameter and its references after the capability it carries"
+        }
+      ],
       "related": [],
       "explanationPresent": true,
       "apiStability": "stable"
