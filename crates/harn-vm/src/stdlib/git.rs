@@ -318,7 +318,16 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
             let remote = required_string_arg(&args, 1, "git.push", "remote")?;
             let refspec = required_string_arg(&args, 2, "git.push", "refspec")?;
             let lease = args.get(3).filter(|value| !matches!(value, VmValue::Nil));
+            // Ref plumbing — deleting a ref, or republishing an OID the remote
+            // already holds — pushes nothing the remote has not already
+            // accepted, so a pre-push hook written to validate a developer's
+            // own commits has no subject and only contributes its repository's
+            // branch state as a failure mode.
+            let no_verify = bool_option(optional_dict_arg(&args, 4), "no_verify").unwrap_or(false);
             let mut argv = vec!["git".to_string(), "push".to_string()];
+            if no_verify {
+                argv.push("--no-verify".to_string());
+            }
             let mut mutation = GitMutation::Mutating;
             if let Some(lease) = lease {
                 let lease = parse_lease(lease, &refspec)?;
@@ -335,16 +344,17 @@ pub(crate) fn register_git_builtins(vm: &mut Vm) {
                             operation: "git.push",
                             action: "git.push",
                             cwd: repo,
-                            argv: vec![
-                                "git".to_string(),
-                                "push".to_string(),
-                                format!(
-                                    "--force-with-lease={}:{}",
-                                    lease.ref_name, lease.expected_oid
-                                ),
-                                remote,
-                                refspec.clone(),
-                            ],
+                            argv: argv
+                                .into_iter()
+                                .chain([
+                                    format!(
+                                        "--force-with-lease={}:{}",
+                                        lease.ref_name, lease.expected_oid
+                                    ),
+                                    remote,
+                                    refspec.clone(),
+                                ])
+                                .collect(),
                             mutation: GitMutation::Risky,
                             affected_paths: Vec::new(),
                             data_parser: GitDataParser::Push {
