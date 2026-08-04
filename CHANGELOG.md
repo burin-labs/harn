@@ -9,6 +9,83 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.55
+
+### Added
+
+- Documented the `harn_vm::mcp_protocol` stable-MCP cutover in
+  [Migrating to 0.10](https://docs.harnlang.com/migrations/v0.10.html) for Rust
+  embedders: the RC-to-stable rename table, the symbols that went away because
+  there is nothing left to negotiate, the `_meta` fields every request must now
+  carry, and the two renames that compile cleanly and fail at run time
+  (`HeaderName::from_static` panics on `MCP-Protocol-Version`, and
+  `server/discover` moved `serverInfo` under `_meta`).
+
+### Changed
+
+- Routine Cargo and npm minor/patch updates now arrive as one grouped Dependabot
+  PR per ecosystem instead of one PR per dependency, so a weekly batch walks the
+  merge queue once rather than eight times. Majors still open their own PR, and
+  the Cranelift, Wasmtime, OpenTelemetry, and React groups still stand alone —
+  the catch-all excludes them by pattern rather than relying on file order.
+- The `harn-testing` skill and the deterministic-test-patterns guide now record
+  which directory a conformance fixture may pin as a capability-policy root. Use
+  `harness.fs.workspace_temp_dir()`, never the system temporary directory: a
+  checkout under `/tmp` sits inside the latter, which makes the fixture's own
+  files in-scope and fails an out-of-scope assertion on that machine alone.
+- The bundled skills and the website agent guide no longer contain sentences over
+  25 words. ASD-STE100, the controlled-English standard the aerospace industry
+  uses so maintenance procedures cannot be misread, caps a descriptive sentence
+  there, and a skill card is read by a model with nobody to ask what a 50-word
+  sentence meant. Four inline enumerations became the lists they already were; no
+  guidance changed meaning.
+
+### Fixed
+
+- Interrupting `make check-docs-snippets` no longer leaves a
+  `harn-docs-snippets-*` directory at the top of the working tree. The staging
+  directory now comes from `harness.fs.mkdtemp_in_workspace`, which puts it under
+  the runtime-owned `.harn-tmp/`, so a run killed while it waits on the Harn build
+  lock leaves its scratch somewhere `git status` and the repository scanners
+  already ignore.
+- The `setup-harn` action now caches only the SHA256SUMS and release archive its
+  key names, instead of the whole bootstrap cache directory. On a runner that has
+  bootstrapped more than one Harn version or target, that directory holds all of
+  them, so every supposedly narrow cache entry archived the lot — one observed
+  entry reached 441 MB and its restore timed out after transferring 80 MB, while
+  verifying and installing the exact release archive took 7.2 seconds.
+- Loading a package contributes its trigger providers to a catalog that lives for
+  the whole process, so in a test binary every package a test loads stayed
+  registered for the rest of the run. Two tests naming one provider id for
+  different payload schemas then collided, and which of them failed depended on
+  execution order. The harn-state test lock now drops contributed providers when
+  it is acquired, and the three places that had each grown their own reset around
+  that lock compose it instead.
+- Creating a generator or stream defined in an imported module no longer leaves
+  the caller's source directory pointing at that module. `harness.fs.source_dir()`,
+  `render`, and source-relative asset resolution now keep resolving against the
+  calling file, so reading a fixture after iterating an imported generator finds
+  it where the source says it is.
+- `harn fix` no longer deletes a Harness capability whose only use is inside a
+  `"${...}"` string interpolation. The `HARN-LNT-056` attenuation rule now
+  receives the file source and walks interpolation holes, so the analysis that
+  decides an attenuation sees the same uses as the one that applies it.
+- `harn fix` no longer attenuates a connector's runtime exports away from the
+  root `harness: Harness` the connector ABI requires when one metadata export
+  lives outside the connector module. Connector modules are now read from the
+  `[[providers]] connector = { harn = ... }` declaration in `harn.toml`; the
+  previous in-file inference remains only as a fallback for sources linted with
+  no package context.
+- `std/git::git_push` accepts a lease and `options.no_verify` together. Passing
+  both used to be denied as a bare force push, with an error naming neither: the
+  `--no-verify` flag moved `--force-with-lease` off the exact argv position the
+  reviewed-dispatch check recognized, so the push fell through to the generic
+  catastrophic-command floor. That combination is the canonical ref-plumbing
+  operation — deleting a ref you have observed at an exact OID — so the feature
+  did not reach the case it was written for. The argv shape now has one owner,
+  shared by the check that selects the reviewed dispatch and the one that
+  re-validates after policy hooks run.
+
 ## v0.10.54
 
 ### Added
