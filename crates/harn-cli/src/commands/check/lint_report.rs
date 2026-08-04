@@ -39,6 +39,7 @@ pub(crate) struct LintJsonOptions {
     pub strict: bool,
     pub require_file_header: bool,
     pub require_public_api_types: bool,
+    pub trusted_host_dispatch: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -124,6 +125,7 @@ pub(crate) async fn run_lint_json(
         let mut config = crate::package::load_check_config(Some(file));
         let mut lint_config = super::load_harn_lint_config(file);
         lint_config.require_file_header |= options.require_file_header;
+        config.trusted_host_dispatch |= options.trusted_host_dispatch;
         lint_config.require_public_api_types |= options.require_public_api_types;
         super::apply_loaded_harn_lint_config(&lint_config, &mut config);
         let script_diagnostics = script_rule_diags
@@ -202,6 +204,7 @@ pub(crate) fn lint_file_report(
         engine_rules: &engine_rules,
         native_rule_paths: &native_rule_paths,
         severity_overrides: lint_config.severity_overrides.clone(),
+        trusted_host_dispatch: config.trusted_host_dispatch,
     };
     let lint_diagnostics = harn_lint::lint_with_module_graph(
         &program,

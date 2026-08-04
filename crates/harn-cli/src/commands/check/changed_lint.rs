@@ -109,6 +109,7 @@ pub(crate) async fn run_changed_lint_command(args: &crate::cli::PathTargetsArgs)
         strict: args.strict,
         require_file_header: args.require_file_header,
         require_public_api_types: args.require_public_api_types,
+        trusted_host_dispatch: args.trusted_host_dispatch,
     };
     let outcome = match run_changed_lint(changed_from, args.changed_to.as_deref(), options).await {
         Ok(outcome) => outcome,
