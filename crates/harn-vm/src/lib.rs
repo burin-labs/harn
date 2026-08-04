@@ -21,6 +21,19 @@
 /// trait without each adding `harn-clock` as a direct dependency.
 pub use harn_clock as clock;
 
+/// Native stack size a thread needs in order to drive the Harn VM.
+///
+/// Compilation and execution walk nested program structure with recursive
+/// frames, which can exceed Rust's 2 MiB default thread stack. A host that
+/// runs the VM on a thread it spawns must request this size explicitly.
+///
+/// Relying on the ambient default is not safe, and neither is relying on
+/// `RUST_MIN_STACK`: that variable is set by the CI test lanes but not by any
+/// shipped binary, so a host that depends on it passes its own tests and then
+/// aborts the whole process — a stack overflow is not a catchable panic — the
+/// first time a customer runs a deep enough script.
+pub const RUNTIME_STACK_SIZE: usize = 16 * 1024 * 1024;
+
 pub mod a2a;
 pub mod actor_chain;
 pub mod agent_events;

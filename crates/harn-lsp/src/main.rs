@@ -5,5 +5,16 @@
 //! for local development and as a standalone artifact.
 
 fn main() {
-    harn_lsp::run();
+    // The language server compiles and type-checks Harn programs, so it needs
+    // the same stack the CLI gives the VM. `harn lsp` already gets that from
+    // the multi-call binary's runtime thread; this standalone entry point would
+    // otherwise run on the process main thread — 8 MiB on Unix, 1 MiB on
+    // Windows.
+    std::thread::Builder::new()
+        .name("harn-lsp".to_string())
+        .stack_size(harn_vm::RUNTIME_STACK_SIZE)
+        .spawn(harn_lsp::run)
+        .expect("spawn harn-lsp runtime thread")
+        .join()
+        .expect("harn-lsp runtime thread panicked");
 }

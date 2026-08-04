@@ -95,22 +95,20 @@ impl EmbeddedAgent {
         let handle = AcpChannelHandle::default();
         let worker_handle = handle.clone();
 
-        let thread = thread::Builder::new()
-            .name(thread_name.into())
-            .spawn(move || {
-                let runtime = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("EmbeddedAgent: build current-thread tokio runtime");
-                let server_future = run_acp_channel_server_with_existing_handle(
-                    config,
-                    request_rx,
-                    response_tx,
-                    worker_handle,
-                );
-                runtime.block_on(server_future);
-            })
-            .expect("EmbeddedAgent: spawn ACP worker thread");
+        let thread = crate::vm_thread::spawn(thread_name, move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("EmbeddedAgent: build current-thread tokio runtime");
+            let server_future = run_acp_channel_server_with_existing_handle(
+                config,
+                request_rx,
+                response_tx,
+                worker_handle,
+            );
+            runtime.block_on(server_future);
+        })
+        .expect("EmbeddedAgent: spawn ACP worker thread");
 
         Self {
             request_tx: Some(request_tx),

@@ -65,7 +65,9 @@ use harn_lexer::Lexer;
 use harn_modules::project_config;
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
 use runtime::{build_cli_runtime, cli_runtime_mode, CliRuntimeMode};
-pub const CLI_RUNTIME_STACK_SIZE: usize = 16 * 1024 * 1024;
+/// The CLI's name for the shared runtime stack contract. Kept as a re-export
+/// rather than its own number so the CLI and the serve hosts cannot drift.
+pub const CLI_RUNTIME_STACK_SIZE: usize = harn_vm::RUNTIME_STACK_SIZE;
 static BROKEN_PIPE_PANIC_HOOK: Once = Once::new();
 
 #[cfg(feature = "hostlib")]

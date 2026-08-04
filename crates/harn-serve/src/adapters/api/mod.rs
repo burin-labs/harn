@@ -5,7 +5,6 @@ use std::net::SocketAddr;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::thread;
 
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, OriginalUri, Path as AxumPath, Query, State};
@@ -241,7 +240,7 @@ impl AcpClient {
     fn start(config: AcpServerConfig) -> (Self, mpsc::UnboundedReceiver<String>) {
         let (request_tx, request_rx) = mpsc::unbounded_channel();
         let (response_tx, response_rx) = mpsc::unbounded_channel();
-        thread::spawn(move || {
+        crate::vm_thread::spawn_or_panic("harn-acp-client", move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
