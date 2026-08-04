@@ -91,7 +91,7 @@ fn apply_repairs_with_options_inner(
             }
 
             edits_by_file
-                .entry(path.clone())
+                .entry(edit_group_key(&path))
                 .or_default()
                 .extend(repair.edits.iter().cloned());
             applied.push(AppliedRepairWire {
@@ -219,6 +219,27 @@ pub(super) fn format_edited_files(paths: &BTreeSet<String>) -> Result<(), String
     Ok(())
 }
 
+/// Group edits by the file they land in, not by how a diagnostic spelled it.
+///
+/// Diagnostics reach the plan from two passes that name the same file
+/// differently: the per-file lint pass reports `./src/workflow.harn` while the
+/// whole-program capability pass reports an absolute path. Keying edits on the
+/// raw string therefore splits one file into two groups, and because every
+/// group re-reads the file from disk, the second group applies spans computed
+/// against source the first group already rewrote. `.` sorts before `/`, so the
+/// relative group landed first and the absolute group's offsets were stale by
+/// exactly the byte delta of the earlier edits — the source corruption in
+/// #6148. Canonicalizing collapses the spellings so all edits for a file sort
+/// and apply together.
+///
+/// Falls back to the original spelling when the path cannot be canonicalized;
+/// a missing file fails later with a better message than this function could.
+pub(super) fn edit_group_key(path: &str) -> String {
+    std::fs::canonicalize(path)
+        .map(|canonical| canonical.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| path.to_string())
+}
+
 pub(super) fn repair_path(plan: &RepairPlan, repair: &RepairWire) -> Result<String, String> {
     plan.diagnostics
         .get(repair.diagnostic_index)
@@ -236,8 +257,44 @@ pub(super) fn apply_file_edits(path: &Path, edits: &[FixEditWire]) -> Result<(),
         return Ok(());
     }
     let result = edited_source(path, edits)?;
+    // A repair that writes source the parser rejects is never the right answer,
+    // and the caller cannot tell the difference afterwards: `--apply` reported
+    // "post-apply diagnostics: 0" over a file it had just made unparseable,
+    // because a file that does not parse contributes no diagnostics to count.
+    // Fail the pass instead, and name the edits so the bad span is visible
+    // rather than something the reader has to reconstruct from the wreckage.
+    harn_parser::parse_source(&result).map_err(|errors| {
+        format!(
+            "repair produced invalid Harn syntax for {}; no files from this pass were written: {errors:?}\napplied edits:\n{}",
+            path.display(),
+            describe_edits(&result, edits)
+        )
+    })?;
     std::fs::write(path, result)
         .map_err(|error| format!("failed to write {}: {error}", path.display()))
+}
+
+/// Render the edits of a rejected pass so the offending span is legible.
+fn describe_edits(edited: &str, edits: &[FixEditWire]) -> String {
+    let mut sorted = edits.to_vec();
+    sorted.sort_by_key(|edit| (edit.span.start, edit.span.end));
+    sorted
+        .iter()
+        .map(|edit| {
+            let head = edited
+                .get(..edit.span.start)
+                .map(|prefix| {
+                    let start = prefix.len().saturating_sub(30);
+                    prefix.get(start..).unwrap_or(prefix)
+                })
+                .unwrap_or("<out of range>");
+            format!(
+                "  {}..{} after {head:?} -> {:?}",
+                edit.span.start, edit.span.end, edit.replacement
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[cfg(test)]
