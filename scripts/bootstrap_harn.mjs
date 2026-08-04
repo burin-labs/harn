@@ -149,23 +149,34 @@ export function extractionCommand(archivePath, directory, target) {
   };
 }
 
-export async function fetchWithRetry(url, options = {}) {
+/** One HTTP GET. Throws on a non-2xx status so callers can branch on it. */
+async function fetchOnce(url, options = {}, extraHeaders = {}) {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
-  const attempts = options.attempts ?? 12;
-  const delayMs = options.delayMs ?? 10_000;
-  const delay =
-    options.delay ??
-    ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const response = await fetchImpl(url, {
+    headers: { "user-agent": "burin-labs/harn-bootstrap", ...extraHeaders },
+    redirect: "follow",
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return Buffer.from(await response.arrayBuffer());
+}
+
+function retrySchedule(options = {}) {
+  return {
+    attempts: options.attempts ?? 12,
+    delayMs: options.delayMs ?? 10_000,
+    delay:
+      options.delay ??
+      ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
+  };
+}
+
+export async function fetchWithRetry(url, options = {}) {
+  const { attempts, delayMs, delay } = retrySchedule(options);
   let lastError;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      const response = await fetchImpl(url, {
-        headers: { "user-agent": "burin-labs/harn-bootstrap" },
-        redirect: "follow",
-        signal: AbortSignal.timeout(30_000),
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return Buffer.from(await response.arrayBuffer());
+      return await fetchOnce(url, options);
     } catch (error) {
       lastError = error;
       if (attempt < attempts) await delay(delayMs);
@@ -260,23 +271,143 @@ export async function ensureVerifiedArchive(options) {
   return { bytes: published, cacheHit: false };
 }
 
-async function checksumManifest(options) {
-  const { metadataPath, checksumUrl } = options;
+const ASSET_DIGEST = /^sha256:([0-9a-f]{64})$/;
+
+/**
+ * SHA-256 that GitHub publishes for one named release asset.
+ *
+ * The release API exposes a per-asset `digest` as soon as the asset finishes
+ * uploading -- well before the release is finalized and `SHA256SUMS` exists.
+ * It is computed by GitHub over the stored bytes, so it is an independent
+ * check on the download rather than a restatement of it.
+ */
+export function parseAssetDigest(body, assetName) {
+  let release;
+  try {
+    release = JSON.parse(body.toString("utf8"));
+  } catch (error) {
+    throw new Error(`release API response is not JSON: ${error.message}`);
+  }
+  const assets = Array.isArray(release?.assets) ? release.assets : [];
+  const asset = assets.find((candidate) => candidate?.name === assetName);
+  if (!asset) {
+    throw new Error(`release API has no asset named ${assetName}`);
+  }
+  const match = ASSET_DIGEST.exec(String(asset.digest ?? ""));
+  if (!match) {
+    throw new Error(
+      `release API asset ${assetName} has no well-formed sha256 digest`,
+    );
+  }
+  return match[1];
+}
+
+/**
+ * Where a digest-verified install records what it trusted.
+ *
+ * A digest install publishes no `SHA256SUMS`, so the immutability guard in
+ * `checksumManifest` has nothing to compare against on a later run. This pin
+ * gives it one: if `SHA256SUMS` later states a different checksum for the same
+ * asset of the same tag, the release changed under an exact version and that
+ * must fail rather than quietly reinstall.
+ */
+function digestPinPath(metadataPath, assetName) {
+  return path.join(path.dirname(metadataPath), `${assetName}.sha256`);
+}
+
+function readDigestPin(metadataPath, assetName) {
+  try {
+    return fs
+      .readFileSync(digestPinPath(metadataPath, assetName), "utf8")
+      .trim();
+  } catch (error) {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+/**
+ * The checksum to verify the archive against, from whichever canonical source
+ * exists first.
+ *
+ * `SHA256SUMS` stays preferred: it covers the whole release and carries the
+ * immutability guarantee. But a downstream job that pins a just-published
+ * version would otherwise burn its entire timeout waiting for a file that
+ * appears only at finalization, while the exact asset it needs has been
+ * uploaded and digested for minutes (#6036). Both sources are consulted on
+ * every attempt, so the install starts as soon as either one is there, and the
+ * attempt budget is the same one a `SHA256SUMS`-only wait would have spent.
+ */
+async function resolveExpectedChecksum(options) {
+  const { metadataPath, checksumUrl, releaseApiUrl, assetName } = options;
   if (options.offline) {
-    let cached;
-    try {
-      cached = fs.readFileSync(metadataPath);
-    } catch (error) {
-      throw new Error(
-        `offline checksum metadata is unavailable at ${metadataPath}: ${error.message}`,
-      );
-    }
-    parseChecksums(cached.toString("utf8"));
-    return cached;
+    const manifest = await checksumManifest(options);
+    const checksums = parseChecksums(manifest.toString("utf8"));
+    const checksum = checksums.get(assetName);
+    if (!checksum) throw new Error(`SHA256SUMS does not contain ${assetName}`);
+    return { checksum, source: "SHA256SUMS" };
   }
 
-  const downloaded = await fetchWithRetry(checksumUrl, options);
-  parseChecksums(downloaded.toString("utf8"));
+  const { attempts, delayMs, delay } = retrySchedule(options);
+  let checksumError;
+  let digestError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const downloaded = await fetchOnce(checksumUrl, options);
+      const checksums = parseChecksums(downloaded.toString("utf8"));
+      const checksum = checksums.get(assetName);
+      if (!checksum) {
+        throw new Error(`SHA256SUMS does not contain ${assetName}`);
+      }
+      const pinned = readDigestPin(metadataPath, assetName);
+      if (pinned && pinned !== checksum) {
+        throw new Error(
+          `published SHA256SUMS disagrees with the verified asset digest for an exact release: ${assetName} was ${pinned}, SHA256SUMS says ${checksum}`,
+        );
+      }
+      publishChecksumMetadata(metadataPath, downloaded);
+      return { checksum, source: "SHA256SUMS" };
+    } catch (error) {
+      if (
+        /disagrees with the verified asset digest|changed for an exact release/.test(
+          error.message,
+        )
+      ) {
+        throw error;
+      }
+      checksumError = error;
+    }
+
+    try {
+      const body = await fetchOnce(releaseApiUrl, options, {
+        accept: "application/vnd.github+json",
+        // Unauthenticated api.github.com is 60 requests/hour per IP, which
+        // GitHub-hosted runners share. A token is optional -- the release
+        // download host needs none -- but without one this fallback is the
+        // first thing to be throttled.
+        ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
+      });
+      const checksum = parseAssetDigest(body, assetName);
+      publishFile(
+        digestPinPath(metadataPath, assetName),
+        Buffer.from(`${checksum}\n`),
+      );
+      return { checksum, source: "release asset digest" };
+    } catch (error) {
+      digestError = error;
+    }
+
+    if (attempt < attempts) await delay(delayMs);
+  }
+  throw new Error(
+    `no verification source for ${assetName} after ${attempts} attempt(s): ` +
+      `${checksumUrl}: ${checksumError?.message ?? checksumError}; ` +
+      `${releaseApiUrl}: ${digestError?.message ?? digestError}`,
+  );
+}
+
+/** Publish `SHA256SUMS`, refusing a change to an already-cached release. */
+function publishChecksumMetadata(metadataPath, downloaded) {
   if (fs.existsSync(metadataPath)) {
     const cached = fs.readFileSync(metadataPath);
     if (!cached.equals(downloaded)) {
@@ -284,7 +415,7 @@ async function checksumManifest(options) {
         `published SHA256SUMS changed for an exact release: ${metadataPath}`,
       );
     }
-    return downloaded;
+    return;
   }
   publishFile(metadataPath, downloaded);
   const published = fs.readFileSync(metadataPath);
@@ -293,7 +424,27 @@ async function checksumManifest(options) {
       `concurrent checksum metadata publication disagreed for ${metadataPath}`,
     );
   }
-  return published;
+}
+
+/**
+ * Cached `SHA256SUMS` for an offline install.
+ *
+ * Only the offline path reads this now: online, `resolveExpectedChecksum`
+ * owns fetching and publishing so that the release-asset digest can be tried
+ * in the same attempt.
+ */
+async function checksumManifest(options) {
+  const { metadataPath } = options;
+  let cached;
+  try {
+    cached = fs.readFileSync(metadataPath);
+  } catch (error) {
+    throw new Error(
+      `offline checksum metadata is unavailable at ${metadataPath}: ${error.message}`,
+    );
+  }
+  parseChecksums(cached.toString("utf8"));
+  return cached;
 }
 
 function findBinary(root, binaryName) {
@@ -681,21 +832,21 @@ export async function bootstrap(options = {}) {
   const releaseRoot = `https://github.com/${repository}/releases/download/v${resolved.version}`;
   const checksumUrl = `${releaseRoot}/SHA256SUMS`;
   const sourceUrl = `${releaseRoot}/${resolved.asset}`;
+  const releaseApiUrl = `https://api.github.com/repos/${repository}/releases/tags/v${resolved.version}`;
   const metadataPath = resolved.metadata_path;
-  const manifest = await checksumManifest({
-    metadataPath,
-    checksumUrl,
-    offline: options.offline,
-    attempts: options.attempts,
-    delayMs: options.delayMs,
-    delay: options.delay,
-    fetchImpl: options.fetchImpl,
-  });
-  const checksums = parseChecksums(manifest.toString("utf8"));
-  const expectedChecksum = checksums.get(resolved.asset);
-  if (!expectedChecksum) {
-    throw new Error(`SHA256SUMS does not contain ${resolved.asset}`);
-  }
+  const { checksum: expectedChecksum, source: checksumSource } =
+    await resolveExpectedChecksum({
+      metadataPath,
+      checksumUrl,
+      releaseApiUrl,
+      assetName: resolved.asset,
+      token: options.token,
+      offline: options.offline,
+      attempts: options.attempts,
+      delayMs: options.delayMs,
+      delay: options.delay,
+      fetchImpl: options.fetchImpl,
+    });
 
   const archivePath = resolved.archive_path;
   const verified = await ensureVerifiedArchive({
@@ -726,6 +877,7 @@ export async function bootstrap(options = {}) {
     checksum: expectedChecksum,
     cache_hit: verified.cacheHit,
     binary_sha256: installed.binaryChecksum,
+    checksum_source: checksumSource,
   };
 }
 
@@ -884,6 +1036,7 @@ export async function main(
     repository:
       cli.repository ??
       (environment.HARN_BOOTSTRAP_REPOSITORY?.trim() || undefined),
+    token: environment.HARN_BOOTSTRAP_TOKEN?.trim() || undefined,
     cacheDir:
       cli.cacheDir ??
       (environment.HARN_BOOTSTRAP_CACHE_DIR?.trim() || undefined),
