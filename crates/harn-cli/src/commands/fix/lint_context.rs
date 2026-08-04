@@ -34,6 +34,7 @@ impl FixLintContext {
             // `harn fix` never rewrites a privileged wire — `HARN-LNT-072`
             // carries no repair — so the trust flag would change nothing here.
             trusted_host_dispatch: false,
+            connector_runtime_module: crate::package::is_declared_connector_module(path),
         }
     }
 }

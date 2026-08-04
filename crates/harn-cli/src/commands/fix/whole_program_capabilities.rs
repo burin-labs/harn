@@ -140,18 +140,22 @@ pub(super) fn plan(
             .exports_for_module(file)
             .into_iter()
             .collect::<BTreeSet<_>>();
-        let root_attenuations = harn_lint::capability_attenuations(&source, &program)
-            .into_iter()
-            .map(|candidate| {
+        let root_attenuations = harn_lint::capability_attenuations(
+            &source,
+            &program,
+            crate::package::is_declared_connector_module(file),
+        )
+        .into_iter()
+        .map(|candidate| {
+            (
                 (
-                    (
-                        candidate.declaration_span.start,
-                        candidate.declaration_span.end,
-                    ),
-                    candidate.capabilities,
-                )
-            })
-            .collect::<BTreeMap<_, _>>();
+                    candidate.declaration_span.start,
+                    candidate.declaration_span.end,
+                ),
+                candidate.capabilities,
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
         let type_aliases = capability_type_aliases(&program, file, module_graph);
         let type_facts = crate::commands::check::typecheck_config(
             file,
@@ -159,7 +163,10 @@ pub(super) fn plan(
             module_graph,
         )
         .check_with_facts(&program, &source);
-        let boundaries = harn_lint::RuntimeBoundaries::collect(&program);
+        let boundaries = harn_lint::RuntimeBoundaries::collect(
+            &program,
+            crate::package::is_declared_connector_module(file),
+        );
         let infos = collect_callable_infos(&program, &source, &exported, referenced_by_value);
         let imported_capability_signatures = imported_signatures(file, module_graph, &type_aliases);
         for info in infos {

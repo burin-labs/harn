@@ -1416,6 +1416,28 @@ pub fn load_check_config(harn_file: Option<&std::path::Path>) -> CheckConfig {
     CheckConfig::default()
 }
 
+/// Whether the nearest `harn.toml` names `harn_file` as a provider's connector
+/// module.
+///
+/// The connector contract pins every runtime export of such a module to a root
+/// `harness: Harness`, so this is the fact `HARN-LNT-056` needs before it may
+/// propose narrowing one. Reading it from the manifest keeps the decision on
+/// the declaration rather than on whatever the file's contents imply
+/// (harn#6149).
+#[must_use]
+pub fn is_declared_connector_module(harn_file: &Path) -> bool {
+    let Some((manifest, dir)) = nearest_manifest_or_warn(harn_file) else {
+        return false;
+    };
+    let canonical = |path: &Path| path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let target = canonical(harn_file);
+    manifest
+        .providers
+        .iter()
+        .filter_map(|provider| provider.connector.harn.as_deref())
+        .any(|module| canonical(&dir.join(module)) == target)
+}
+
 /// Load the `[workspace]` config and the directory of the `harn.toml`
 /// it came from. Paths in the returned config are left as-is (callers
 /// resolve them against the returned `manifest_dir`).
@@ -1857,6 +1879,28 @@ helper-lib = {{ path = {} }}
         assert_eq!(workspace.pipelines, vec!["pipelines", "scripts"]);
         // Walk-up lands on the directory containing the harn.toml.
         assert_eq!(manifest_dir, root);
+    }
+
+    #[test]
+    fn connector_module_declaration_is_read_from_the_manifest() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        fs::write(
+            root.join(MANIFEST),
+            "[package]\nname = \"probe-connector\"\nversion = \"0.1.0\"\n\n[[providers]]\nid = \"probe\"\nconnector = { harn = \"src/lib.harn\" }\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        let declared = root.join("src").join("lib.harn");
+        let sibling = root.join("src").join("helpers.harn");
+        fs::write(&declared, "pub fn provider_id() { return \"probe\" }\n").unwrap();
+        fs::write(&sibling, "pub fn helper() { return 1 }\n").unwrap();
+
+        assert!(is_declared_connector_module(&declared));
+        assert!(
+            !is_declared_connector_module(&sibling),
+            "only the module the manifest names is a connector module"
+        );
     }
 
     #[test]

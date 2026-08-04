@@ -53,8 +53,11 @@ pub struct RuntimeBoundaries {
 
 impl RuntimeBoundaries {
     /// Collect the boundary set for a parsed module.
+    ///
+    /// `declared_connector_module` is the package manifest's answer, and it
+    /// wins. See the note on the fallback inference below.
     #[must_use]
-    pub fn collect(program: &[SNode]) -> Self {
+    pub fn collect(program: &[SNode], declared_connector_module: bool) -> Self {
         let mut callbacks = BTreeSet::new();
         let mut public_functions = BTreeSet::new();
         visit::walk_program(program, &mut |node| {
@@ -79,9 +82,17 @@ impl RuntimeBoundaries {
                 }
             }
         });
-        let connector_module = harn_vm::connectors::harn_module::abi::metadata_exports()
-            .iter()
-            .all(|name| public_functions.contains(*name));
+        // A declaration outranks the inference. Requiring every metadata
+        // export in this one file is evidence that it looks like a connector
+        // module, not a statement that it is one: move `payload_schema` to a
+        // sibling module and every runtime export here silently becomes
+        // attenuable, so `harn fix` rewrites `normalize_inbound` into a
+        // signature the connector ABI rejects. The inference stays for files
+        // linted with no package context, where nothing can declare anything.
+        let connector_module = declared_connector_module
+            || harn_vm::connectors::harn_module::abi::metadata_exports()
+                .iter()
+                .all(|name| public_functions.contains(*name));
         Self {
             callbacks,
             connector_module,
@@ -155,8 +166,12 @@ pub fn runtime_supplies_arguments(outer: &SNode) -> bool {
 /// convenience: string-interpolation holes are unparsed source text on the
 /// AST, so proving a capability is unused requires re-parsing them.
 #[must_use]
-pub fn capability_attenuations(source: &str, program: &[SNode]) -> Vec<CapabilityAttenuation> {
-    let boundaries = RuntimeBoundaries::collect(program);
+pub fn capability_attenuations(
+    source: &str,
+    program: &[SNode],
+    connector_runtime_module: bool,
+) -> Vec<CapabilityAttenuation> {
+    let boundaries = RuntimeBoundaries::collect(program, connector_runtime_module);
     let mut attenuations = Vec::new();
     for outer in program {
         let attributed = root_harness_boundary_attribute(outer);
@@ -193,11 +208,12 @@ pub fn capability_attenuations(source: &str, program: &[SNode]) -> Vec<Capabilit
 pub(crate) fn check_api_design(
     source: &str,
     program: &[SNode],
+    connector_runtime_module: bool,
     diagnostics: &mut Vec<LintDiagnostic>,
 ) {
-    let attenuations = capability_attenuations(source, program);
+    let attenuations = capability_attenuations(source, program, connector_runtime_module);
     let module_names = module_level_names(program);
-    let boundaries = RuntimeBoundaries::collect(program);
+    let boundaries = RuntimeBoundaries::collect(program, connector_runtime_module);
     for outer in program {
         let attributed = root_harness_boundary_attribute(outer);
         // Naming asks the broader question: a flow predicate's handle is
@@ -579,17 +595,52 @@ mod tests {
         let tokens = Lexer::new(source).tokenize().expect("lex");
         let program = Parser::new(tokens).parse().expect("parse");
         let mut diagnostics = Vec::new();
-        check_api_design(source, &program, &mut diagnostics);
+        check_api_design(source, &program, false, &mut diagnostics);
         diagnostics
     }
 
     fn attenuated(source: &str) -> Vec<BTreeSet<CapabilityId>> {
         let tokens = Lexer::new(source).tokenize().expect("lex");
         let program = Parser::new(tokens).parse().expect("parse");
-        capability_attenuations(source, &program)
+        capability_attenuations(source, &program, false)
             .into_iter()
             .map(|attenuation| attenuation.capabilities)
             .collect()
+    }
+
+    fn attenuated_in_declared_connector(source: &str) -> Vec<BTreeSet<CapabilityId>> {
+        let tokens = Lexer::new(source).tokenize().expect("lex");
+        let program = Parser::new(tokens).parse().expect("parse");
+        capability_attenuations(source, &program, true)
+            .into_iter()
+            .map(|attenuation| attenuation.capabilities)
+            .collect()
+    }
+
+    /// The connector ABI pins every runtime export to a root `Harness`.
+    ///
+    /// Inferring connector-ness from "all three metadata exports are declared
+    /// `pub fn` in this file" is evidence, not a declaration: move one to a
+    /// sibling module and `harn fix` rewrites `normalize_inbound` into a
+    /// signature the runtime rejects. `payload_schema` is the one missing here.
+    const PARTIAL_CONNECTOR: &str = "pub fn provider_id() { return \"probe\" }\n\npub fn kinds() { return [\"probe.event\"] }\n\npub fn normalize_inbound(harness: Harness, raw) {\n  return {id: harness.clock.now_ms(), raw: raw}\n}\n";
+
+    #[test]
+    fn a_declared_connector_module_keeps_its_runtime_export_root() {
+        assert!(
+            attenuated_in_declared_connector(PARTIAL_CONNECTOR).is_empty(),
+            "the manifest declares this module, so its runtime exports are boundaries"
+        );
+    }
+
+    #[test]
+    fn an_undeclared_module_still_falls_back_to_in_file_evidence() {
+        assert_eq!(
+            attenuated(PARTIAL_CONNECTOR),
+            vec![BTreeSet::from([CapabilityId::Clock])],
+            "with no package context nothing can declare anything, so the \
+             inference is all that is left"
+        );
     }
 
     /// A capability reached only through `${...}` is still reached.

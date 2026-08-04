@@ -99,4 +99,13 @@ pub struct LintOptions<'a> {
     /// `privileged_wire` finding is suppressed: trusted dispatch says who may
     /// reach the wire, not that a compiler internal became source-visible.
     pub trusted_host_dispatch: bool,
+    /// When true, the package manifest declares this file as a provider's
+    /// connector module, so its runtime exports keep the root `Harness` the
+    /// connector contract pins.
+    ///
+    /// The attenuation rule otherwise infers connector-ness from the file's
+    /// own contents, which is evidence rather than a declaration: move one
+    /// metadata export to a sibling module and every runtime export in the
+    /// file silently becomes attenuable (harn#6149).
+    pub connector_runtime_module: bool,
 }
