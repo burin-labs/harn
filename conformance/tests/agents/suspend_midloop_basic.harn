@@ -37,14 +37,11 @@ pipeline main(harness: Harness) {
         {provider: "mock", background: true, tool_format: "native", max_iterations: 4},
       )
       const suspended = wait_agent(harness.agent, handle)
-      const lifecycle = agent_lifecycle_tools(tool_registry(), {subagents: true})
+      const lifecycle = agent_lifecycle_tools(harness.agent, tool_registry(), {subagents: true})
       const pause_tool = tool_find(lifecycle, "subagent_pause")
       const resume_tool = tool_find(lifecycle, "subagent_resume")
-      const pause_again = pause_tool.handler(
-        harness.agent,
-        {handle: handle.id, reason: "parent re-pauses"},
-      )
-      const resumed = resume_tool.handler(harness.agent, {handle: handle.id})
+      const pause_again = pause_tool.handler({handle: handle.id, reason: "parent re-pauses"})
+      const resumed = resume_tool.handler({handle: handle.id})
       const done = wait_agent(harness.agent, handle)
       harness.stdio.println("suspended_status=" + suspended.status)
       harness.stdio.println("pause_again_status=" + pause_again.status)

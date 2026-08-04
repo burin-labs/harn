@@ -22,7 +22,7 @@ pipeline main(harness: Harness) {
     )
   }
   harness.stdio.println(has_code(bad_timeout_action, "HARN-SUS-002"))
-  const lifecycle = agent_lifecycle_tools(tool_registry())
+  const lifecycle = agent_lifecycle_tools(harness.agent, tool_registry())
   const await_tool = tool_find(lifecycle, "agent_await_resumption")
   const direct_tool_call = try {
     await_tool.handler({reason: "outside agent loop"})
