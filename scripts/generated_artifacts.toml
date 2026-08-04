@@ -296,6 +296,19 @@ ci = true
 make_all = true
 
 [[artifact]]
+id = "harness-migrations"
+description = "Removed-global → typed-harness-path table read by harn-parser, generated from the harn-vm migration registry. The parser compiles below the VM, so it cannot query the registry directly; without this projection it carries a second hand-written table that drifts (harn#6151)."
+gen = "gen-harness-migrations"
+check = "check-harness-migrations"
+outputs = ["crates/harn-parser/src/diagnostic/harness_migrations_generated.rs"]
+sources = [
+  "crates/harn-vm/src/stdlib/harness_migration.rs",
+  "crates/harn-cli/src/commands/harness_migration_codegen.rs",
+]
+ci = true
+make_all = true
+
+[[artifact]]
 id = "openapi-snapshot"
 description = "Harn Agents OpenAPI public path/schema surface snapshot and embedded server copy, generated from spec/openapi.yaml by scripts/check_openapi_snapshot.harn."
 gen = "gen-openapi-snapshot"
@@ -546,6 +559,9 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-prompt-grammar" = "binary"
 "check-protocol-artifacts" = "binary"
 "check-connector-schemas" = "binary"
+# The table is read out of the linked runtime registry, so a stale executable
+# reports a stale verdict.
+"check-harness-migrations" = "binary"
 "check-session-bundle-schema" = "binary"
 "check-trigger-quickref" = "binary"
 "check-provider-matrix" = "binary"

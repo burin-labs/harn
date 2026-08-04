@@ -114,9 +114,9 @@ pub(crate) use dev::DevArgs;
 pub(crate) use doc::DocArgs;
 pub(crate) use doctor::DoctorArgs;
 pub(crate) use dump::{
-    ConnectorSchemaCodegenArgs, DumpConnectorMatrixArgs, DumpHighlightKeywordsArgs,
-    DumpPortableBenchmarkSchemaArgs, DumpPromptGrammarArgs, DumpProtocolArtifactsArgs,
-    DumpTriggerQuickrefArgs,
+    ConnectorSchemaCodegenArgs, DumpConnectorMatrixArgs, DumpHarnessMigrationsArgs,
+    DumpHighlightKeywordsArgs, DumpPortableBenchmarkSchemaArgs, DumpPromptGrammarArgs,
+    DumpProtocolArtifactsArgs, DumpTriggerQuickrefArgs,
 };
 pub use eval::{
     EvalArgs, EvalCodingAgentArgs, EvalCommand, EvalContextArgs, EvalPromptArgs, EvalPromptMode,
@@ -616,6 +616,14 @@ SCRIPTING
     /// `make gen-connector-schemas` target.
     #[command(hide = true, name = "connector-schema-codegen")]
     ConnectorSchemaCodegen(ConnectorSchemaCodegenArgs),
+    /// Regenerate the removed-global → typed-harness-path table that
+    /// `harn-parser` reads, from the runtime migration registry.
+    ///
+    /// Dev-only. Hidden from `--help` — invoke via
+    /// `cargo run -p harn-cli -- dump-harness-migrations` or the
+    /// `make gen-harness-migrations` target.
+    #[command(hide = true, name = "dump-harness-migrations")]
+    DumpHarnessMigrations(DumpHarnessMigrationsArgs),
     /// Internal fixtures used by the conformance suite.
     #[command(hide = true, name = "conformance-helper")]
     ConformanceHelper(ConformanceHelperArgs),

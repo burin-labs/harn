@@ -950,7 +950,8 @@ pub(crate) async fn async_main(raw_args: Vec<String>, runtime_mode: CliRuntimeMo
         | Command::DumpTriggerQuickref(_)
         | Command::DumpConnectorMatrix(_)
         | Command::DumpProtocolArtifacts(_)
-        | Command::ConnectorSchemaCodegen(_) => commands::generate::dispatch(subcommand),
+        | Command::ConnectorSchemaCodegen(_)
+        | Command::DumpHarnessMigrations(_) => commands::generate::dispatch(subcommand),
         Command::Time(args) => match args.command {
             TimeCommand::Run(time_args) => commands::time::run(time_args).await,
         },
