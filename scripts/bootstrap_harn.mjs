@@ -667,6 +667,8 @@ export function resolveBootstrap(options = {}) {
     asset,
     cache_dir: cacheDir,
     install_dir: installDir,
+    metadata_path: path.join(cacheDir, "metadata", version, "SHA256SUMS"),
+    archive_path: path.join(cacheDir, "downloads", version, asset),
   };
 }
 
@@ -679,12 +681,7 @@ export async function bootstrap(options = {}) {
   const releaseRoot = `https://github.com/${repository}/releases/download/v${resolved.version}`;
   const checksumUrl = `${releaseRoot}/SHA256SUMS`;
   const sourceUrl = `${releaseRoot}/${resolved.asset}`;
-  const metadataPath = path.join(
-    resolved.cache_dir,
-    "metadata",
-    resolved.version,
-    "SHA256SUMS",
-  );
+  const metadataPath = resolved.metadata_path;
   const manifest = await checksumManifest({
     metadataPath,
     checksumUrl,
@@ -700,12 +697,7 @@ export async function bootstrap(options = {}) {
     throw new Error(`SHA256SUMS does not contain ${resolved.asset}`);
   }
 
-  const archivePath = path.join(
-    resolved.cache_dir,
-    "downloads",
-    resolved.version,
-    resolved.asset,
-  );
+  const archivePath = resolved.archive_path;
   const verified = await ensureVerifiedArchive({
     archivePath,
     expectedChecksum,
@@ -817,11 +809,41 @@ function appendOutput(filePath, name, value) {
   fs.appendFileSync(filePath, `${name}=${text}${os.EOL}`);
 }
 
+const OUTPUT_DELIMITER = "harn-bootstrap-output";
+
+// Write a multi-line GitHub Actions output using the heredoc form.
+// `actions/cache` takes a newline-separated `path`, which the single-line
+// `name=value` form cannot carry.
+function appendMultilineOutput(filePath, name, lines) {
+  for (const line of lines) {
+    if (line.includes(OUTPUT_DELIMITER)) {
+      throw new Error(`GitHub output ${name} contains the heredoc delimiter`);
+    }
+    if (/[\r\n]/.test(line)) {
+      throw new Error(`GitHub output ${name} entry contains a newline`);
+    }
+  }
+  const body = lines.join(os.EOL);
+  fs.appendFileSync(
+    filePath,
+    `${name}<<${OUTPUT_DELIMITER}${os.EOL}${body}${os.EOL}${OUTPUT_DELIMITER}${os.EOL}`,
+  );
+}
+
 function writeActionOutputs(filePath, result) {
   appendOutput(filePath, "version", result.version);
   appendOutput(filePath, "target", result.target);
   if (result.asset) appendOutput(filePath, "asset", result.asset);
   if (result.cache_dir) appendOutput(filePath, "cache-dir", result.cache_dir);
+  if (result.metadata_path && result.archive_path) {
+    // Exactly the immutable files this version/asset addresses. Caching
+    // `cache_dir` instead keys a version-specific entry to a directory that
+    // accumulates every version and target a runner has ever bootstrapped.
+    appendMultilineOutput(filePath, "cache-path", [
+      result.metadata_path,
+      result.archive_path,
+    ]);
+  }
   if (result.install_dir)
     appendOutput(filePath, "install-dir", result.install_dir);
   if (result.binary_path) appendOutput(filePath, "path", result.binary_path);
