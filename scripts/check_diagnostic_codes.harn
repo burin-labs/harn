@@ -349,7 +349,12 @@ pub fn check_constructor_calls_text(rel: string, needle: string, text: string) -
 /**
  * Flag `Code::Variant` references whose UpperCamelCase variant name is not in
  * `code_names`. Snake_case inherent methods (`Code::repair_template()`) are
- * intentionally ignored. Mirrors `check_unknown_code_variants`'s per-file body.
+ * intentionally ignored, and so are SCREAMING_SNAKE_CASE associated consts:
+ * the pattern requires a lowercase letter, which `Code::ALL` does not have.
+ * Only the registry file is exempt from this scan, so before the repair
+ * vocabulary moved into its own module every `Code::ALL` outside
+ * `diagnostic_codes.rs` would have been reported as an unknown variant.
+ * Mirrors `check_unknown_code_variants`'s per-file body.
  */
 pub fn check_unknown_variants_text(
   rel: string,
@@ -357,7 +362,7 @@ pub fn check_unknown_variants_text(
   code_names: list<string>,
 ) -> list<string> {
   let out: list<string> = []
-  for m in regex_captures(r"\bCode::([A-Z][A-Za-z0-9_]*)", text, "") {
+  for m in regex_captures(r"\bCode::([A-Z][A-Za-z0-9_]*[a-z][A-Za-z0-9_]*)", text, "") {
     const variant = m.groups[0]
     if !code_names.contains(variant) {
       out = out + ["${rel}:${line_of(text, m.start)}: unknown Code::${variant}"]

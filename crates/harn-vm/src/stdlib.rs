@@ -688,6 +688,145 @@ pub fn stdlib_builtin_metadata() -> Vec<crate::vm::VmBuiltinMetadata> {
     stdlib_probe_vm().builtin_metadata()
 }
 
+/// Declared exposure of a registered builtin, or `None` when the VM registers
+/// no builtin by that name.
+///
+/// `harn_builtin_meta` calls itself "the semantic owner for which script
+/// surface may reach a builtin", and its vocabulary is explicit:
+/// `PrivilegedWire` is documented as "User modules cannot name or re-export
+/// it" and `RuntimeInternal` as "never source-visible". The typechecker
+/// enforces that. Nothing else read it — [`stdlib_builtin_names`] answers the
+/// different question of what the VM has *registered*, so a consumer that
+/// treats that set as the callable surface goes quiet on exactly the calls the
+/// typechecker will reject. `host_call` is the case that surfaced it: declared
+/// `privileged_wire`, rejected by `harn check`, and silent under `harn lint`
+/// across 114 call sites in one downstream repo (harn#6126).
+pub fn builtin_exposure(name: &str) -> Option<harn_builtin_meta::BuiltinExposure> {
+    use std::sync::OnceLock;
+    static BY_NAME: OnceLock<
+        std::collections::HashMap<String, harn_builtin_meta::BuiltinExposure>,
+    > = OnceLock::new();
+    BY_NAME
+        .get_or_init(|| {
+            stdlib_probe_vm()
+                .builtin_metadata()
+                .into_iter()
+                .map(|entry| (entry.name().to_string(), entry.contract().exposure))
+                .collect()
+        })
+        .get(name)
+        .copied()
+}
+
+/// The declared harness method that owns a host-wire operation name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HarnessMethodTarget {
+    pub capability: harn_builtin_meta::CapabilityId,
+    pub method: &'static str,
+}
+
+impl HarnessMethodTarget {
+    /// Source spelling of the call target, without the harness root.
+    pub fn path(&self) -> String {
+        format!("{}.{}", self.capability.field_name(), self.method)
+    }
+}
+
+/// Resolve a host-wire operation name such as `"prmonitor.run_commands"` to
+/// the `harness.<capability>.<method>` that declares it, when one exists.
+///
+/// Host wires carry their destination as a *string*, so a call to one is
+/// opaque to every name-keyed check in the toolchain: the operation name is
+/// data, not a symbol. Reading it back through the declared contract is what
+/// turns "you cannot call this" into "call this instead", which is the whole
+/// difference for a downstream repo holding hundreds of such call sites
+/// (harn#6126).
+///
+/// Resolution composes two owners rather than adding a third table.
+/// `capability_binding_for_schema` goes first because it owns the deliberate
+/// remappings — a `"session.open"` wire is `harness.agent.session_open`, not
+/// the `harness.session` handle a namespace match alone would reach. Its
+/// `HOST_CAPABILITY_GROUPS` domain is only part of the declared surface
+/// (5 of 86 real targets), so the manifest answers the rest.
+///
+/// Returns `None` when the namespace names no capability, when the capability
+/// declares no such method, or when a normalized match would be ambiguous. A
+/// wrong destination is worse than none: it would aim a migration at the wrong
+/// method.
+pub fn harness_method_for_host_operation(operation: &str) -> Option<HarnessMethodTarget> {
+    use harn_builtin_meta::{wire_identifier_key, BuiltinExposure, CapabilityId};
+    use std::collections::HashMap;
+    use std::sync::OnceLock;
+
+    let (namespace, operation_method) = operation.split_once('.')?;
+    if let Some((capability, method)) =
+        harn_builtin_meta::host_capabilities::capability_binding_for_schema(
+            namespace,
+            operation_method,
+        )
+    {
+        return Some(HarnessMethodTarget { capability, method });
+    }
+
+    static BY_CAPABILITY: OnceLock<HashMap<CapabilityId, Vec<&'static str>>> = OnceLock::new();
+    let declared = BY_CAPABILITY.get_or_init(|| {
+        let mut index: HashMap<CapabilityId, Vec<&'static str>> = HashMap::new();
+        // The manifest, not a probe VM: `stdlib_probe_vm().builtin_metadata()`
+        // sees only what that VM registers — 334 harness methods against the
+        // manifest's 978 — and the ones it misses are the host-implemented
+        // capabilities a wire actually targets. Alias entries repeat a
+        // primary's contract under a second name, so a capability-method
+        // projection must take only canonical entries.
+        for entry in all_builtin_manifest() {
+            if !entry.is_canonical() {
+                continue;
+            }
+            if let BuiltinExposure::HarnessMethod { capability, method } = entry.contract.exposure {
+                index.entry(capability).or_default().push(method);
+            }
+        }
+        index
+    });
+
+    // Wires predate the typed vocabulary and spell the namespace without a
+    // separator, so `prmonitor` names the `pr_monitor` capability.
+    let capability = CapabilityId::from_host_namespace(namespace)?;
+    let methods = declared.get(&capability)?;
+    if let Some(exact) = methods.iter().find(|method| **method == operation_method) {
+        return Some(HarnessMethodTarget {
+            capability,
+            method: exact,
+        });
+    }
+    let wanted = wire_identifier_key(operation_method);
+    let mut lenient = methods
+        .iter()
+        .filter(|method| wire_identifier_key(method) == wanted);
+    let only = lenient.next()?;
+    lenient.next().is_none().then_some(HarnessMethodTarget {
+        capability,
+        method: only,
+    })
+}
+
+/// Whether Harn source may write this builtin's bare name in a call.
+///
+/// A harness method is reached as `harness.<capability>.<method>` rather than
+/// as a global, so it is not bare-nameable either. `Undeclared` is a migration
+/// state rather than a promise, and answering `true` there keeps this
+/// predicate from inventing a restriction the contract has not made yet.
+pub fn exposure_is_source_nameable(exposure: harn_builtin_meta::BuiltinExposure) -> bool {
+    use harn_builtin_meta::BuiltinExposure;
+    match exposure {
+        BuiltinExposure::PureGlobal
+        | BuiltinExposure::CapabilityFunction { .. }
+        | BuiltinExposure::Undeclared => true,
+        BuiltinExposure::HarnessMethod { .. }
+        | BuiltinExposure::PrivilegedWire
+        | BuiltinExposure::RuntimeInternal => false,
+    }
+}
+
 /// Reset thread-local stdlib state. Call between test runs.
 ///
 /// Note: `long_running::reset_state()` is intentionally NOT called here
@@ -745,6 +884,58 @@ pub fn reset_stdlib_state() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn host_operation_resolves_to_its_declared_harness_method() {
+        let target = harness_method_for_host_operation("ast.outline")
+            .expect("`ast.outline` is declared by harn-hostlib");
+        assert_eq!(target.path(), "ast.outline");
+    }
+
+    #[test]
+    fn host_operation_namespace_matching_ignores_underscores() {
+        // Host wires spell the namespace without a separator. The capability
+        // field name has one, and both must reach the same method.
+        let squashed = harness_method_for_host_operation("prmonitor.run_commands")
+            .expect("`prmonitor` names the `pr_monitor` capability");
+        let spelled = harness_method_for_host_operation("pr_monitor.run_commands")
+            .expect("the declared spelling resolves too");
+        assert_eq!(squashed, spelled);
+        assert_eq!(squashed.path(), "pr_monitor.run_commands");
+    }
+
+    #[test]
+    fn host_operation_without_a_declared_owner_resolves_to_nothing() {
+        // A wildcard, an unknown capability, and a real capability with no
+        // such method. Each must decline rather than guess: naming the wrong
+        // destination would point a migration at the wrong method.
+        for operation in [
+            "ast.*",
+            "capability.operation",
+            "runtime.set_result",
+            "ast",
+            "",
+        ] {
+            assert_eq!(
+                harness_method_for_host_operation(operation),
+                None,
+                "`{operation}` must not resolve"
+            );
+        }
+    }
+
+    #[test]
+    fn host_operation_honors_the_schema_tables_deliberate_remapping() {
+        // Session persistence is owned by `HarnessAgent`, so the `session.*`
+        // hostlib schema is exposed as `harness.agent.session_*`. A resolver
+        // that matched the namespace against the capability vocabulary would
+        // answer `harness.session.open` — a real handle, and the wrong one.
+        // This is why the resolver defers to `capability_binding_for_schema`
+        // rather than keeping a second table.
+        let target = harness_method_for_host_operation("session.open")
+            .expect("`session.open` is a declared hostlib schema operation");
+        assert_eq!(target.path(), "agent.session_open");
+    }
 
     #[tokio::test(flavor = "current_thread")]
     async fn register_vm_stdlib_passes_default_harness_only_to_main() {
