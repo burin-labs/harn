@@ -115,9 +115,18 @@ chmod +x "$fake_harn"
 
 record="$tmp_root/harn-record.txt"
 env_record="$tmp_root/harn-env-record.txt"
-env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
+# The release gate derives its Cargo cache from the durable storage root, so
+# every invocation below must be pointed at a scratch one. Exported once rather
+# than per call: an invocation that missed it would silently build state in the
+# developer's real `~/.cache`.
+cache_home="$tmp_root/xdg-cache"
+export XDG_CACHE_HOME="$cache_home"
+unset HARN_DEV_SETUP_STORAGE_ROOT
+
+env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR -u HARN_DEV_SETUP_STORAGE_ROOT \
   HARN_RELEASE_ROOT="$release_root" \
   HARN_BIN="$fake_harn" \
+  XDG_CACHE_HOME="$cache_home" \
   FAKE_HARN_RECORD="$record" \
   FAKE_HARN_ENV_RECORD="$env_record" \
   "$release_gate" notes --version v1.2.3 > "$tmp_root/notes.txt"
@@ -129,9 +138,10 @@ if [[ "$actual" != "$expected" ]]; then
   exit 1
 fi
 
-default_tmp="${TMPDIR:-/tmp}"
-default_tmp="${default_tmp%/}"
-expected_target="$default_tmp/harn-release-gate-target-release-root"
+# The release gate's Cargo cache must live on the durable dev-setup storage
+# root. Under `$TMPDIR` macOS reaps individual files out of a maturing target
+# and leaves the fingerprints behind, which Cargo reads as fresh (#6212).
+expected_target="$cache_home/harn/dev-setup/release-gate-target/release-root"
 expected_build="$expected_target"
 if ! grep -Fxq "CARGO_TARGET_DIR=$expected_target" "$env_record"; then
   echo "release_gate did not default CARGO_TARGET_DIR to a release-local path" >&2
@@ -144,9 +154,28 @@ if ! grep -Fxq "CARGO_BUILD_BUILD_DIR=$expected_build" "$env_record"; then
   exit 1
 fi
 
-env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
+# Falsifier for the durability claim: moving `$TMPDIR` must not move the cache.
+# Before #6212 this was the only thing that decided where it lived.
+tmpdir_probe_record="$tmp_root/harn-env-record-tmpdir-probe.txt"
+mkdir -p "$tmp_root/other-tmp"
+env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR -u HARN_DEV_SETUP_STORAGE_ROOT \
   HARN_RELEASE_ROOT="$release_root" \
   HARN_BIN="$fake_harn" \
+  XDG_CACHE_HOME="$cache_home" \
+  TMPDIR="$tmp_root/other-tmp" \
+  FAKE_HARN_RECORD="$record" \
+  FAKE_HARN_ENV_RECORD="$tmpdir_probe_record" \
+  "$release_gate" notes --version v1.2.3 > "$tmp_root/notes-tmpdir-probe.txt"
+if ! grep -Fxq "CARGO_TARGET_DIR=$expected_target" "$tmpdir_probe_record"; then
+  echo "release_gate let TMPDIR decide its Cargo target dir" >&2
+  cat "$tmpdir_probe_record" >&2
+  exit 1
+fi
+
+env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR -u HARN_DEV_SETUP_STORAGE_ROOT \
+  HARN_RELEASE_ROOT="$release_root" \
+  HARN_BIN="$fake_harn" \
+  XDG_CACHE_HOME="$cache_home" \
   FAKE_HARN_RECORD="$record" \
   FAKE_HARN_ENV_RECORD="$env_record" \
   "$release_gate" audit --validate-only > "$tmp_root/audit-standalone.txt"
@@ -457,8 +486,9 @@ run_audit() {
     HARN_RELEASE_ROOT="$audit_root" \
     HARN_BIN="$fake_audit_harn" \
     TMPDIR="$tmp_root" \
+    XDG_CACHE_HOME="$cache_home" \
     FAKE_AUDIT_RECORD="$audit_record" \
-    env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR \
+    env -u CARGO_TARGET_DIR -u CARGO_BUILD_BUILD_DIR -u HARN_DEV_SETUP_STORAGE_ROOT \
       "$release_gate" audit "$@" > "$tmp_root/audit-$label.txt" 2>&1 || {
     cat "$tmp_root/audit-$label.txt" >&2
     exit 1
@@ -467,12 +497,12 @@ run_audit() {
 
 run_audit full
 
-if grep -Fq "HARN_BIN=$tmp_root/harn-release-gate-target-audit-root/debug/harn" "$audit_record"; then
+if grep -Fq "HARN_BIN=$cache_home/harn/dev-setup/release-gate-target/audit-root/debug/harn" "$audit_record"; then
   echo "release_gate audit exposed the cargo target harn binary to an audit lane" >&2
   cat "$audit_record" >&2
   exit 1
 fi
-if grep -Fq "HARN_CONFORMANCE_HARN_BIN=$tmp_root/harn-release-gate-target-audit-root/debug/harn" "$audit_record"; then
+if grep -Fq "HARN_CONFORMANCE_HARN_BIN=$cache_home/harn/dev-setup/release-gate-target/audit-root/debug/harn" "$audit_record"; then
   echo "release_gate audit exposed the cargo target conformance harn binary to an audit lane" >&2
   cat "$audit_record" >&2
   exit 1

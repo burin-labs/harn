@@ -14,11 +14,19 @@ release_gate_target_name() {
   printf '%s' "$(basename "$ROOT_DIR")" | tr -c 'A-Za-z0-9._-' '-'
 }
 
+# The release gate's Cargo cache lives under the same durable storage root as
+# every dev-setup profile, NOT under `$TMPDIR`. macOS prunes `/var/folders/.../T`
+# by file age and removes individual files rather than whole trees, so a
+# long-lived target there decays into intact directories and fingerprints with
+# missing build-script outputs — Cargo then considers the script fresh and never
+# regenerates them. That gets more likely the longer the cache survives, which
+# is the opposite of what a cache should do, and it surfaces in the most
+# expensive part of a release.
 default_release_gate_target_dir() {
-  local tmp_root
-  tmp_root="${TMPDIR:-/tmp}"
-  tmp_root="${tmp_root%/}"
-  printf '%s/harn-release-gate-target-%s\n' "$tmp_root" "$(release_gate_target_name)"
+  local storage_root
+  storage_root="${HARN_DEV_SETUP_STORAGE_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/harn/dev-setup}"
+  storage_root="${storage_root%/}"
+  printf '%s/release-gate-target/%s\n' "$storage_root" "$(release_gate_target_name)"
 }
 
 default_release_gate_package_target_dir() {
@@ -98,46 +106,141 @@ release_gate_clean_stale_out_dir_packages() {
     "$operation" "$recovery_elapsed"
 }
 
+# How many recovery rounds one operation may spend. Cargo reports only the
+# FIRST missing build-script output it trips over, so a single classification
+# can never name more than the packages that failed on that attempt. A decayed
+# cache holds several, and cleaning one at a time used to exhaust a retry
+# budget of one: a v0.10.55 attempt cleaned `libsqlite3-sys` for `package-audit`
+# and then went terminal on `tree-sitter`, a package the classifier had already
+# named correctly for a sibling lane moments earlier.
+RELEASE_GATE_STALE_RECOVERY_ROUNDS="${RELEASE_GATE_STALE_RECOVERY_ROUNDS:-4}"
+
+# Discard a target directory whose decay has outrun per-package classification.
+# Only ever called with a directory this script derived or a caller explicitly
+# configured, and only after a round classified nothing it had not already
+# cleaned.
+release_gate_clear_stale_target_dir() {
+  local operation="$1"
+  local target_dir="$2"
+  local build_dir="$3"
+  if [[ -z "$target_dir" || "$target_dir" != /* || "$target_dir" == "/" ]]; then
+    echo "error: refused to clear implausible target dir for $operation: '$target_dir'" >&2
+    return 1
+  fi
+  printf 'recovery: package-scoped cleanup found nothing new for %s; clearing %s\n' \
+    "$operation" "$target_dir"
+  rm -rf -- "$target_dir"
+  if [[ -n "$build_dir" && "$build_dir" == /* && "$build_dir" != "/" \
+    && "$build_dir" != "$target_dir"/* && "$build_dir" != "$target_dir" ]]; then
+    rm -rf -- "$build_dir"
+  fi
+}
+
+# Spend one recovery round on `diagnostics`, cleaning whatever it names that
+# `cleaned` has not already accounted for. `cleaned` and `fallback_state` carry
+# state across rounds for a single operation; the caller owns both files.
+#
+# Exit status:
+#   0  cleaned a package set no earlier round had seen — a retry is warranted
+#   1  the failure names no stale build-script output; not recoverable
+#   2  classification failed closed
+#   3  nothing new was named, so the whole target directory was cleared instead
+#   4  the target directory had already been cleared; out of moves
+#   5  the cleanup itself failed
+release_gate_recover_stale_out_dir_round() {
+  local operation="$1"
+  local diagnostics="$2"
+  local cleaned="$3"
+  local fallback_state="$4"
+  local target_dir="${5:-$CARGO_TARGET_DIR}"
+  local build_dir="${6:-$CARGO_BUILD_BUILD_DIR}"
+
+  local packages fresh classification_status=0
+  packages="$(mktemp)"
+  fresh="$(mktemp)"
+  release_gate_stale_out_dir_packages "$diagnostics" "$packages" "$build_dir" \
+    || classification_status=$?
+  if [[ "$classification_status" -ne 0 ]]; then
+    rm -f "$packages" "$fresh"
+    return "$classification_status"
+  fi
+
+  comm -23 "$packages" "$cleaned" > "$fresh"
+  if [[ -s "$fresh" ]]; then
+    if ! release_gate_clean_stale_out_dir_packages \
+      "$operation" "$fresh" "$target_dir" "$build_dir"; then
+      rm -f "$packages" "$fresh"
+      return 5
+    fi
+    cat "$fresh" >> "$cleaned"
+    sort -u -o "$cleaned" "$cleaned"
+    rm -f "$packages" "$fresh"
+    return 0
+  fi
+  rm -f "$packages" "$fresh"
+
+  if [[ -f "$fallback_state" ]]; then
+    return 4
+  fi
+  : > "$fallback_state"
+  release_gate_clear_stale_target_dir "$operation" "$target_dir" "$build_dir" || return 5
+  return 3
+}
+
+# Report a terminal recovery status. Shared so both recovery sites describe the
+# same outcome the same way.
+release_gate_report_stale_recovery_failure() {
+  local operation="$1"
+  local status="$2"
+  case "$status" in
+    1) echo "error: $operation failed without a recoverable stale build-script output" >&2 ;;
+    2) echo "error: $operation stale-output classification failed closed" >&2 ;;
+    4) echo "error: $operation still failed after its target directory was cleared" >&2 ;;
+    5) echo "error: $operation stale build-script cleanup failed" >&2 ;;
+    *) echo "error: $operation exhausted its stale build-script recovery rounds" >&2 ;;
+  esac
+}
+
 release_gate_run_with_stale_out_dir_recovery() {
   local operation="$1"
   shift
-  local first_diagnostics packages retry_diagnostics
-  first_diagnostics="$(mktemp)"
-  packages="$(mktemp)"
-  retry_diagnostics="$(mktemp)"
-  if "$@" 2> "$first_diagnostics"; then
-    rm -f "$first_diagnostics" "$packages" "$retry_diagnostics"
-    return 0
-  fi
-  cat "$first_diagnostics" >&2
+  local diagnostics cleaned fallback_state
+  diagnostics="$(mktemp)"
+  cleaned="$(mktemp)"
+  # Existence is the flag, so reserve the name and remove the file.
+  fallback_state="$(mktemp)"
+  rm -f "$fallback_state"
+  local round=0 recovery_status=0
 
-  local classification_status=0
-  release_gate_stale_out_dir_packages "$first_diagnostics" "$packages" || classification_status=$?
-  if [[ "$classification_status" -eq 1 ]]; then
-    rm -f "$first_diagnostics" "$packages" "$retry_diagnostics"
-    echo "error: $operation failed without a recoverable stale build-script output" >&2
-    return 1
-  fi
-  if [[ "$classification_status" -ne 0 ]]; then
-    rm -f "$first_diagnostics" "$packages" "$retry_diagnostics"
-    echo "error: $operation stale-output classification failed closed" >&2
-    return 1
-  fi
+  while :; do
+    if "$@" 2> "$diagnostics"; then
+      rm -f "$diagnostics" "$cleaned" "$fallback_state"
+      if [[ "$round" -gt 0 ]]; then
+        echo "recovery: $operation succeeded after stale build-script cleanup"
+      fi
+      return 0
+    fi
+    cat "$diagnostics" >&2
 
-  if ! release_gate_clean_stale_out_dir_packages "$operation" "$packages"; then
-    rm -f "$first_diagnostics" "$packages" "$retry_diagnostics"
-    return 1
-  fi
-  printf 'recovery: retrying %s once\n' "$operation"
-  if "$@" 2> "$retry_diagnostics"; then
-    rm -f "$first_diagnostics" "$packages" "$retry_diagnostics"
-    echo "recovery: $operation succeeded after package-scoped cleanup"
-    return 0
-  fi
-  cat "$retry_diagnostics" >&2
-  rm -f "$first_diagnostics" "$packages" "$retry_diagnostics"
-  echo "error: $operation retry failed after package-scoped stale-output cleanup" >&2
-  return 1
+    if [[ "$round" -ge "$RELEASE_GATE_STALE_RECOVERY_ROUNDS" ]]; then
+      rm -f "$diagnostics" "$cleaned" "$fallback_state"
+      release_gate_report_stale_recovery_failure "$operation" 0
+      return 1
+    fi
+
+    recovery_status=0
+    release_gate_recover_stale_out_dir_round \
+      "$operation" "$diagnostics" "$cleaned" "$fallback_state" || recovery_status=$?
+    if [[ "$recovery_status" -ne 0 && "$recovery_status" -ne 3 ]]; then
+      rm -f "$diagnostics" "$cleaned" "$fallback_state"
+      release_gate_report_stale_recovery_failure "$operation" "$recovery_status"
+      return 1
+    fi
+
+    round=$(( round + 1 ))
+    printf 'recovery: retrying %s (round %s of %s)\n' \
+      "$operation" "$round" "$RELEASE_GATE_STALE_RECOVERY_ROUNDS"
+  done
 }
 
 release_gate_warm_prebuild() {
@@ -675,7 +778,8 @@ cmd_audit() {
     local step="${steps[$idx]}"
     local runner="${runners[$idx]}"
     local first_log="$tmp/$step.first-attempt.log"
-    local packages="$tmp/$step.stale-packages"
+    local cleaned="$tmp/$step.cleaned-packages"
+    local fallback_state="$tmp/$step.target-cleared"
     local recovery_target_dir="$CARGO_TARGET_DIR"
     local recovery_build_dir="$CARGO_BUILD_BUILD_DIR"
     if [[ "$step" == "package-audit" ]]; then
@@ -683,46 +787,54 @@ cmd_audit() {
       recovery_build_dir="$HARN_PACKAGE_VERIFY_BUILD_DIR"
     fi
 
-    local classification_status=0
-    release_gate_stale_out_dir_packages \
-      "$tmp/$step.log" "$packages" "$recovery_build_dir" || classification_status=$?
-    if [[ "$classification_status" -eq 1 ]]; then
-      echo "recovery: $step failed without a recoverable stale build-script output"
-      failed=1
-      failed_steps+=("$step")
-      continue
-    fi
-    if [[ "$classification_status" -ne 0 ]]; then
-      echo "error: $step stale-output classification failed closed" >&2
-      failed=1
-      failed_steps+=("$step")
-      continue
-    fi
-    cp "$tmp/$step.log" "$first_log"
-    if ! release_gate_clean_stale_out_dir_packages \
-      "$step" "$packages" "$recovery_target_dir" "$recovery_build_dir"; then
-      failed=1
-      failed_steps+=("$step")
-      continue
-    fi
+    : > "$cleaned"
+    rm -f "$fallback_state"
 
-    echo "recovery: retrying $step once after every initial audit lane settled"
-    run_step "$step" "$runner" &
-    local retry_pid
-    retry_pid=$!
-    if wait "$retry_pid"; then
+    # Each round cleans only what earlier rounds have not already cleaned, so a
+    # cache holding several decayed packages is repaired across rounds instead
+    # of spending one retry on the first package Cargo happened to report.
+    local round=0 recovery_status=0 step_recovered=0
+    while [[ "$round" -lt "$RELEASE_GATE_STALE_RECOVERY_ROUNDS" ]]; do
+      recovery_status=0
+      release_gate_recover_stale_out_dir_round \
+        "$step" "$tmp/$step.log" "$cleaned" "$fallback_state" \
+        "$recovery_target_dir" "$recovery_build_dir" || recovery_status=$?
+      if [[ "$recovery_status" -ne 0 && "$recovery_status" -ne 3 ]]; then
+        break
+      fi
+
+      # Preserve the pre-recovery diagnostics once a retry is actually going to
+      # happen; `run_step` overwrites the lane log in place. A lane that never
+      # recovers has only one attempt, and reprinting it as a "first attempt"
+      # would just duplicate the terminal log.
+      if [[ "$round" -eq 0 ]]; then
+        cp "$tmp/$step.log" "$first_log"
+      fi
+      round=$(( round + 1 ))
+      printf 'recovery: retrying %s (round %s of %s) after every initial audit lane settled\n' \
+        "$step" "$round" "$RELEASE_GATE_STALE_RECOVERY_ROUNDS"
+      run_step "$step" "$runner" &
+      local retry_pid
+      retry_pid=$!
       local retry_dur
+      if wait "$retry_pid"; then
+        retry_dur="$([[ -f "$tmp/$step.dur" ]] && cat "$tmp/$step.dur" || echo '?')"
+        printf 'ok: %-15s (%ss retry)\n' "$step" "$retry_dur"
+        echo "recovery: $step succeeded after stale build-script cleanup"
+        step_recovered=1
+        break
+      fi
       retry_dur="$([[ -f "$tmp/$step.dur" ]] && cat "$tmp/$step.dur" || echo '?')"
-      printf 'ok: %-15s (%ss retry)\n' "$step" "$retry_dur"
-      echo "recovery: $step succeeded after package-scoped cleanup"
-    else
-      local retry_dur
-      retry_dur="$([[ -f "$tmp/$step.dur" ]] && cat "$tmp/$step.dur" || echo '?')"
-      printf 'fail: %-13s (%ss retry)\n' "$step" "$retry_dur"
-      echo "error: $step retry failed after package-scoped stale-output cleanup" >&2
-      failed=1
-      failed_steps+=("$step")
+      printf 'fail: %-13s (%ss retry %s)\n' "$step" "$retry_dur" "$round"
+      recovery_status=0
+    done
+
+    if [[ "$step_recovered" -eq 1 ]]; then
+      continue
     fi
+    release_gate_report_stale_recovery_failure "$step" "$recovery_status"
+    failed=1
+    failed_steps+=("$step")
   done
 
   # The performance ratchet measures wall and CPU time, so running it beside

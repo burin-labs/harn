@@ -83,6 +83,26 @@ case "${1:-}" in
       echo 'error[E0308]: ordinary compiler failure' >&2
       exit 101
     fi
+    # Cargo stops at the FIRST missing build-script output, so a decayed cache
+    # reveals one package per attempt. Recovery has to keep going.
+    if [[ "$FAKE_CARGO_MODE" == "cascading" ]]; then
+      if [[ "$count" -eq 1 ]]; then
+        echo "error: couldn't read $CARGO_BUILD_BUILD_DIR/debug/build/libsqlite3-sys-ec7fd4252cc18b37/out/bindgen.rs: No such file or directory (os error 2)" >&2
+        exit 101
+      fi
+      if [[ "$count" -eq 2 ]]; then
+        echo "error: couldn't read $CARGO_BUILD_BUILD_DIR/debug/build/tree-sitter-bb1d5a918bffdfb1/out/stdlib-symbols.txt: No such file or directory (os error 2)" >&2
+        exit 101
+      fi
+    fi
+    # Decay that per-package cleanup cannot reach: the same package keeps
+    # failing until the whole target directory is discarded.
+    if [[ "$FAKE_CARGO_MODE" == "unreachable" ]]; then
+      if [[ -f "$CARGO_TARGET_DIR/sentinel" ]]; then
+        echo "error: couldn't read $CARGO_BUILD_BUILD_DIR/debug/build/libsqlite3-sys-ec7fd4252cc18b37/out/bindgen.rs: No such file or directory (os error 2)" >&2
+        exit 101
+      fi
+    fi
     if [[ "$count" -eq 1 ]]; then
       if [[ "$FAKE_CARGO_MODE" == "outside" ]]; then
         echo "error: couldn't read $CARGO_TARGET_DIR/unrelated/debug/build/tree-sitter-bb1d5a918bffdfb1/out/file: No such file or directory (os error 2)" >&2
@@ -206,7 +226,9 @@ run_case() {
     "$target/incremental" \
     "$build/debug/build/libsqlite3-sys-ec7fd4252cc18b37/out" \
     "$build/debug/build/tree-sitter-bb1d5a918bffdfb1/out"
-  touch "$target/deps/keep" "$target/incremental/keep"
+  # Survives package-scoped `cargo clean`; disappears only if the whole target
+  # directory is discarded.
+  touch "$target/deps/keep" "$target/incremental/keep" "$target/sentinel"
   : > "$state/cargo-record"
   : > "$state/make-record"
   set +e
@@ -352,7 +374,7 @@ if [[ ! -f "$aot_target/deps/keep" ]]; then
   echo "source-only AOT recovery discarded unrelated target artifacts" >&2
   exit 1
 fi
-grep -Fq 'recovery: shared CLI AOT preparation succeeded after package-scoped cleanup' \
+grep -Fq 'recovery: shared CLI AOT preparation succeeded after stale build-script cleanup' \
   "$aot_state/output"
 
 run_parallel_case() {
@@ -412,7 +434,7 @@ if [[ "$(paste -sd, "$parallel_state/event-record")" != \
   cat "$parallel_state/event-record" >&2
   exit 1
 fi
-if ! grep -Fq 'recovery: retrying rust-audit once after every initial audit lane settled' \
+if ! grep -Fq 'recovery: retrying rust-audit (round 1 of' \
   "$parallel_state/output"; then
   echo "parallel recovery telemetry is missing" >&2
   cat "$parallel_state/output" >&2
@@ -540,6 +562,51 @@ fi
 if ! grep -Fq 'killed by SIGKILL (exit 137)' "$killed_state/output"; then
   echo "failure summary did not report how the lane died" >&2
   cat "$killed_state/output" >&2
+  exit 1
+fi
+
+# Regression for #6212. A v0.10.55 release cleaned the one package its first
+# classification named and then went terminal on a second stale package, because
+# recovery had a retry budget of exactly one. Each round must clean what that
+# round reveals.
+cascading_state=$(run_case cascading cascading)
+if [[ "$(<"$cascading_state/status")" -ne 0 ]]; then
+  echo "cascading stale packages should recover across rounds" >&2
+  cat "$cascading_state/output" >&2
+  exit 1
+fi
+if [[ "$(grep -c '^build -p harn-cli --bin harn --quiet$' "$cascading_state/cargo-record")" -ne 3 ]]; then
+  echo "cascading recovery should build three times (initial + two rounds)" >&2
+  cat "$cascading_state/cargo-record" >&2
+  exit 1
+fi
+if ! grep -Fxq 'clean -p libsqlite3-sys' "$cascading_state/cargo-record" \
+  || ! grep -Fxq 'clean -p tree-sitter' "$cascading_state/cargo-record"; then
+  echo "each cascading round should clean only the package that round revealed" >&2
+  cat "$cascading_state/cargo-record" >&2
+  exit 1
+fi
+if [[ ! -f "$tmp_root/target cascading/sentinel" ]]; then
+  echo "cascading recovery discarded the target dir it did not need to" >&2
+  exit 1
+fi
+
+# Decay past what per-package classification can reach: the round names only
+# packages an earlier round already cleaned, so the cache itself is the problem.
+unreachable_state=$(run_case unreachable unreachable)
+if [[ "$(<"$unreachable_state/status")" -ne 0 ]]; then
+  echo "unreachable stale output should recover by clearing the target dir" >&2
+  cat "$unreachable_state/output" >&2
+  exit 1
+fi
+if ! grep -Fq 'recovery: package-scoped cleanup found nothing new for warm prebuild; clearing' \
+  "$unreachable_state/output"; then
+  echo "whole-target fallback telemetry is missing" >&2
+  cat "$unreachable_state/output" >&2
+  exit 1
+fi
+if [[ -f "$tmp_root/target unreachable/sentinel" ]]; then
+  echo "whole-target fallback did not actually clear the target dir" >&2
   exit 1
 fi
 

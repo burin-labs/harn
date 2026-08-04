@@ -54,7 +54,16 @@ while IFS= read -r storage_root; do
   target_roots+=("$target_root")
 done < <(storage_roots | awk '!seen[$0]++')
 
-if [[ "${#target_roots[@]}" -eq 0 ]]; then
+# The release gate's Cargo caches sit beside the setup targets under the same
+# storage roots (#6212).
+release_target_roots=()
+while IFS= read -r storage_root; do
+  release_root="${storage_root%/}/release-gate-target"
+  [[ -d "$release_root" ]] || continue
+  release_target_roots+=("$release_root")
+done < <(storage_roots | awk '!seen[$0]++')
+
+if [[ "${#target_roots[@]}" -eq 0 && "${#release_target_roots[@]}" -eq 0 ]]; then
   echo "no harn-target dirs at configured setup storage roots; nothing to prune"
   exit 0
 fi
@@ -111,6 +120,9 @@ mtime_epoch() {
 }
 
 removed=0; kept=0; summary_printed=0
+# Every root actually walked, so the summary cannot claim narrower coverage
+# than the run had.
+walked_roots=()
 
 print_summary() {
   [ "$summary_printed" -eq 1 ] && return 0
@@ -118,7 +130,11 @@ print_summary() {
   suffix=""
   [ "$dry_run" -eq 1 ] && suffix=" (dry-run)"
   local roots
-  roots="$(IFS=,; echo "${target_roots[*]}")"
+  if [ "${#walked_roots[@]}" -gt 0 ]; then
+    roots="$(IFS=,; echo "${walked_roots[*]}")"
+  else
+    roots="$(IFS=,; echo "${target_roots[*]}")"
+  fi
   echo "harn-target GC: kept=$kept removed=$removed (roots=$roots)$suffix"
 }
 
@@ -144,11 +160,15 @@ done | sort -u | while read -r wt; do
   # derived-name fallback (matches dev_setup.sh::derive_target_dir)
   printf '%s-%s\n' "$(basename "$(dirname "$wt")")" "$(basename "$wt")"
 done | sort -u > "$keep_file" || true
-for target_root in "${target_roots[@]}"; do
+prune_root() {
+  local target_root="$1"
+  local keep="$2"
+  local d name m sz
+  walked_roots+=("$target_root")
   for d in "$target_root"/*; do
     [ -d "$d" ] || continue
     name="$(basename "$d")"
-    if grep -qxF "$name" "$keep_file"; then kept=$((kept+1)); continue; fi
+    if grep -qxF "$name" "$keep"; then kept=$((kept+1)); continue; fi
     if ! m="$(mtime_epoch "$d")"; then
       echo "skip (mtime unavailable): $name"; kept=$((kept+1)); continue
     fi
@@ -164,6 +184,33 @@ for target_root in "${target_roots[@]}"; do
     fi
     removed=$((removed+1))
   done
+}
+
+for target_root in "${target_roots[@]}"; do
+  prune_root "$target_root" "$keep_file"
+done
+
+# The release gate keeps its Cargo cache beside the setup targets rather than
+# under `$TMPDIR`, where the OS used to reap it a file at a time (#6212). Each
+# release root gets its own, and release worktrees are ephemeral, so without a
+# GC here every finished release would leave a multi-gigabyte cache behind
+# forever. These are named after the release root alone, so they need their own
+# keep-set: a bare worktree leaf must not also protect a `<parent>-<leaf>` entry
+# under `harn-target`.
+release_keep_file="$(mktemp)"
+trap 'rm -f "$keep_file" "$release_keep_file"; print_summary' EXIT
+discover_repo_roots | while read -r repo; do
+  [ -n "$repo" ] || continue
+  git -C "$repo" worktree list --porcelain 2>/dev/null \
+    | awk '/^worktree /{print substr($0,10)}' || true
+done | sort -u | while read -r wt; do
+  [ -n "$wt" ] || continue
+  # Mirrors release_gate.sh::release_gate_target_name.
+  printf '%s\n' "$(printf '%s' "$(basename "$wt")" | tr -c 'A-Za-z0-9._-' '-')"
+done | sort -u > "$release_keep_file" || true
+
+for release_root in "${release_target_roots[@]}"; do
+  prune_root "$release_root" "$release_keep_file"
 done
 
 print_summary
