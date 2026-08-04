@@ -5,6 +5,15 @@
 # the slow-test timeouts below. The goal of this file is to guarantee that
 # no single test can wedge the suite indefinitely (historically, tests that
 # bound a `TcpListener` in blocking mode have hung CI for many minutes).
+#
+# Custom profiles inherit `[[profile.default.overrides]]` per setting: for a
+# test T and setting S, nextest applies the first override in the *running*
+# profile that matches T and configures S, and otherwise the first override in
+# `default` that matches T and configures S. So a profile only needs to restate
+# an override when its value genuinely differs from `default`. (An earlier
+# revision of this file asserted the opposite and duplicated every override into
+# `ci` and `flake-detection`; `cargo nextest show-config test-groups --profile
+# <name>` reports the inherited entries as "override for default profile".)
 
 [profile.default]
 # Fast suite. Excludes the subprocess-spawning `harn-cli` integration tests
@@ -19,15 +28,8 @@ default-filter = "not (package(harn-cli) and kind(test)) or (package(harn-cli) a
 # Any test that runs longer than 15s is considered "slow"; if it exceeds
 # the 60s hard cap three times it is terminated so the suite keeps moving.
 slow-timeout = { period = "15s", terminate-after = 4, grace-period = "5s" }
-# Nextest's upstream default FD-leak grace period is 200ms. Under full
-# workspace fan-out, fast Rust tests in the largest binaries can take longer
-# than that to close captured stdout/stderr after libtest reports success,
-# which creates noisy "passed (leaky)" results attributed to whichever fast
-# test happened to finish at the wrong moment. Loaded-machine full-suite runs
-# have shown the same false attribution just past 2s and again at the former
-# 5s ceiling (pure in-process harn-fmt layout tests that finish in <10ms when
-# idle), so keep this long enough for libtest teardown under contention while
-# still failing real long-lived leaked subprocesses.
+# Leak detection: see the "Leaked-handle detection" section below for why the
+# period is 10s and why the verdict is only enforced off macOS.
 leak-timeout = { period = "10s", result = "fail" }
 # Terminate runaway tests after 60 seconds by default. Tests that legitimately
 # need more time must opt in via an override below.
@@ -62,6 +64,64 @@ fail-fast = false
 failure-output = "immediate-final"
 success-output = "never"
 
+# Flake-detection profile: zero retries, no fail-fast, tighter slow-test
+# threshold. Used by the flake-detection CI workflow which runs touched
+# test binaries 50x at --test-threads=8.
+[profile.flake-detection]
+retries = 0
+slow-timeout = { period = "15s", terminate-after = 4, grace-period = "5s" }
+leak-timeout = { period = "10s", result = "fail" }
+fail-fast = false
+failure-output = "immediate-final"
+success-output = "never"
+
+# ---------------------------------------------------------------------------
+# Leaked-handle detection
+# ---------------------------------------------------------------------------
+# Nextest's leak check is narrow and specific: after a test process exits it
+# waits `leak-timeout` for that process's captured stdout/stderr pipes to reach
+# EOF. The only thing that can hold them open is a *subprocess that inherited
+# one of those two streams*. Upstream is explicit that this is the whole
+# mechanism — children spawned with piped or null stdio are not detectable.
+#
+# That mechanism does not explain the verdicts this workspace has collected on
+# macOS. The tests flagged over time include pure in-process harn-fmt layout
+# tests and `stdlib::sandbox::workspace_env_integration::
+# os_sandbox_still_denies_writes_outside_the_workspace` (#6115), which spawns
+# only through `op_interrupt::capture_output_interruptible` — and that helper
+# sets stdout and stderr to `Stdio::piped()` and stdin to `Stdio::null()`
+# *before* spawning. Neither test can hand an inheritable stream to anything,
+# so neither can produce a real leaked handle. The verdicts were false.
+#
+# The period was raised three times chasing this (200ms upstream default -> 2s
+# -> 5s -> 10s), each time after a loaded full-suite macOS run, and each bump
+# only moved the next false verdict further out. It never converged because the
+# holder is not the blamed test: under full workspace fan-out on macOS, nextest
+# reports leaks against processes that provably spawned nothing. Raising the
+# period a fourth time makes the gate decorative, and a per-test
+# `result = "pass"` exemption for a *sandbox* test would suppress exactly the
+# escaped-child class that test exists to catch.
+#
+# So the verdict is scoped to the platform where it is trustworthy instead of
+# being tuned globally or exempted test by test. Off macOS it stays strict for
+# the whole workspace — which is a real tightening, because the previous
+# per-package `result = "pass"` exemptions (all of harn-cli, one harn-hostlib
+# test) were justified by this same macOS fan-out behavior yet disabled the
+# gate on Linux and Windows too. Harn's inherited-stdio spawn paths are
+# cross-platform (`mcp/connect.rs` inherits child stderr;
+# `hostlib/process/real.rs` honors `OutputCapture::Inherit`), so a genuine
+# escaped child still fails the Linux and Windows lanes.
+#
+# Known blind spot: a leaked child of a macOS-only spawn path — `sandbox-exec`
+# above all — is now reported as `PASS (leaky)` rather than failing the run.
+# Nothing else observes that today.
+[[profile.default.overrides]]
+platform = { host = 'cfg(target_os = "macos")' }
+leak-timeout = { period = "10s", result = "pass" }
+
+# ---------------------------------------------------------------------------
+# Concurrency groups
+# ---------------------------------------------------------------------------
 # Tests that spawn the `harn` debug binary as a subprocess used to need a
 # bounded `max-threads = 4` cap to avoid macOS dyld + AMFI cold-cache
 # scheduler starvation: when N tests simultaneously cold-spawn the
@@ -96,16 +156,44 @@ success-output = "never"
 [test-groups]
 harn-subprocess = { max-threads = 8 }
 harn-cli-bin = { max-threads = 8 }
-# harn-dap's unit tests are short, but several construct debugger VMs,
-# Tokio runtimes, and host-bridge state. Under full workspace fan-out on
-# macOS, that binary can report a passed test as "leaky" while teardown is
-# delayed by neighboring DAP tests. Keep leak failures enabled and remove
-# the concurrency pressure instead.
+# harn-dap's unit tests are short, but several construct debugger VMs, Tokio
+# runtimes, and host-bridge state. Serializing the binary keeps the leak
+# verdict meaningful on the platforms that still enforce it rather than
+# trading it away for concurrency.
 harn-dap = { max-threads = 1 }
 # Windows AppContainer process launches and `icacls` grants exercise shared
 # OS resources. Keep these tests serialized under nextest so a valid sandbox
 # spawn is not forced to contend with several sibling AppContainer launches.
 harn-windows-sandbox = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = "package(harn-cli) and kind(test)"
+test-group = "harn-subprocess"
+
+[[profile.default.overrides]]
+filter = 'package(harn-vm) and test(/process_options_cross_platform|session_environment_leak|sandbox_exec_profile_allows_swiftpm_manifest_evaluation|installed_toolchains_use_the_workspace_owned_state|operator_meta_collects_workflows_hooks_manifests_and_merge_policy/)'
+test-group = "harn-subprocess"
+
+[[profile.default.overrides]]
+filter = "package(harn-cli) and binary(harn)"
+test-group = "harn-cli-bin"
+
+[[profile.default.overrides]]
+filter = 'package(harn-dap) and binary(stdio_smoke) and test(dap_stdio_hits_breakpoint_and_reads_a_local_variable)'
+test-group = "harn-dap"
+slow-timeout = { period = "60s", terminate-after = 4, grace-period = "10s" }
+
+[[profile.default.overrides]]
+filter = "package(harn-dap)"
+test-group = "harn-dap"
+
+[[profile.default.overrides]]
+filter = 'package(harn-vm) and test(/windows_process_sandbox|replay_dispatch_scopes_harn_replay_per_dispatch_and_child_process/)'
+test-group = "harn-windows-sandbox"
+
+# ---------------------------------------------------------------------------
+# Slow-test budgets
+# ---------------------------------------------------------------------------
 # Transport-layer LLM tests do real localhost TCP with a 3s accept deadline.
 # They're bounded internally but give them a bit more room than the default
 # slow-test threshold to reduce false-positive flags on cold CI workers.
@@ -113,6 +201,9 @@ harn-windows-sandbox = { max-threads = 1 }
 filter = 'package(harn-vm) and test(/llm::api::tests/)'
 slow-timeout = { period = "30s", terminate-after = 3, grace-period = "5s" }
 
+# CI workers are slower than a developer machine; the same transport tests need
+# a wider ceiling there. This is the one budget that genuinely differs from
+# `default`, so it is the one override `ci` has to restate.
 [[profile.ci.overrides]]
 filter = 'package(harn-vm) and test(/llm::api::tests/)'
 slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
@@ -136,18 +227,13 @@ slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
 filter = 'package(harn-vm) and test(/request_catalog_audit_validates_every_catalog_route_in_process/)'
 slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
 
-[[profile.ci.overrides]]
-filter = 'package(harn-vm) and test(/request_catalog_audit_validates_every_catalog_route_in_process/)'
-slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
-
+# ---------------------------------------------------------------------------
+# Wall-clock budget tests: reserve the runner while they measure
+# ---------------------------------------------------------------------------
 # This is an explicit 10,000-event wall-clock budget, not merely a functional
 # test. Reserve the runner while it measures so the result describes the FTS
 # query rather than whichever CPU-heavy workspace tests happen to overlap it.
 [[profile.default.overrides]]
-filter = 'package(harn-session-store) and test(sqlite_10k_event_fts_query_completes_under_500ms)'
-threads-required = "num-cpus"
-
-[[profile.ci.overrides]]
 filter = 'package(harn-session-store) and test(sqlite_10k_event_fts_query_completes_under_500ms)'
 threads-required = "num-cpus"
 
@@ -158,154 +244,12 @@ threads-required = "num-cpus"
 filter = 'package(harn-vm) and test(persisted_10k_event_tool_timeline_opens_under_500ms)'
 threads-required = "num-cpus"
 
-[[profile.ci.overrides]]
-filter = 'package(harn-vm) and test(persisted_10k_event_tool_timeline_opens_under_500ms)'
-threads-required = "num-cpus"
-
-# Bound aggregate parallelism for tests that spawn host processes. The group
-# includes harn-cli integration tests plus the harn-vm process, sandbox, and
-# installed-toolchain seams below. Keeping those projections on one budget is
-# important: independent per-binary caps still oversubscribe the same kernel
-# process, dyld, and toolchain resources during a full workspace run.
-#
-# harn-cli also contains hundreds of fast parser/unit tests alongside
-# subprocess-heavy integration tests. Under full workspace fan-out on macOS,
-# nextest can attribute delayed captured-output teardown to an arbitrary fast
-# test after libtest has already reported success. Keep the leak wait bounded
-# so real runaway tests still finish the suite, but treat the package's
-# leaked-handle signal as diagnostic until upstream nextest/libtest attribution
-# is precise enough to gate on. The library target needs this independently of
-# the integration-test concurrency cap because it contains in-process tests.
-[[profile.default.overrides]]
-filter = "package(harn-cli) and kind(lib)"
-leak-timeout = { period = "10s", result = "pass" }
-
-# Under full workspace fan-out, this in-memory verdict test has intermittently
-# outlived nextest's captured-output grace period despite owning no subprocess
-# or background worker. Keep leak detection strict for the rest of hostlib.
-[[profile.default.overrides]]
-filter = "package(harn-hostlib) and test(verdict::tests::no_active_scope_is_rejected)"
-leak-timeout = { period = "10s", result = "pass" }
-
-[[profile.default.overrides]]
-filter = "package(harn-cli) and kind(test)"
-test-group = "harn-subprocess"
-leak-timeout = { period = "10s", result = "pass" }
-
-[[profile.default.overrides]]
-filter = 'package(harn-vm) and test(/process_options_cross_platform|session_environment_leak|sandbox_exec_profile_allows_swiftpm_manifest_evaluation|installed_toolchains_use_the_workspace_owned_state|operator_meta_collects_workflows_hooks_manifests_and_merge_policy/)'
-test-group = "harn-subprocess"
-
-[[profile.default.overrides]]
-filter = "package(harn-cli) and binary(harn)"
-test-group = "harn-cli-bin"
-leak-timeout = { period = "10s", result = "pass" }
-
-[[profile.default.overrides]]
-filter = 'package(harn-dap) and binary(stdio_smoke) and test(dap_stdio_hits_breakpoint_and_reads_a_local_variable)'
-test-group = "harn-dap"
-slow-timeout = { period = "60s", terminate-after = 4, grace-period = "10s" }
-
-[[profile.default.overrides]]
-filter = "package(harn-dap)"
-test-group = "harn-dap"
-
-[[profile.default.overrides]]
-filter = 'package(harn-vm) and test(/windows_process_sandbox|replay_dispatch_scopes_harn_replay_per_dispatch_and_child_process/)'
-test-group = "harn-windows-sandbox"
-
-[[profile.ci.overrides]]
-filter = "package(harn-cli) and kind(lib)"
-leak-timeout = { period = "10s", result = "pass" }
-
-[[profile.ci.overrides]]
-filter = "package(harn-hostlib) and test(verdict::tests::no_active_scope_is_rejected)"
-leak-timeout = { period = "10s", result = "pass" }
-
-[[profile.ci.overrides]]
-filter = "package(harn-cli) and kind(test)"
-test-group = "harn-subprocess"
-leak-timeout = { period = "10s", result = "pass" }
-
-[[profile.ci.overrides]]
-filter = 'package(harn-vm) and test(/process_options_cross_platform|session_environment_leak|sandbox_exec_profile_allows_swiftpm_manifest_evaluation|installed_toolchains_use_the_workspace_owned_state|operator_meta_collects_workflows_hooks_manifests_and_merge_policy/)'
-test-group = "harn-subprocess"
-
-[[profile.ci.overrides]]
-filter = "package(harn-cli) and binary(harn)"
-test-group = "harn-cli-bin"
-leak-timeout = { period = "10s", result = "pass" }
-
-[[profile.ci.overrides]]
-filter = 'package(harn-dap) and binary(stdio_smoke) and test(dap_stdio_hits_breakpoint_and_reads_a_local_variable)'
-test-group = "harn-dap"
-slow-timeout = { period = "60s", terminate-after = 4, grace-period = "10s" }
-
-[[profile.ci.overrides]]
-filter = "package(harn-dap)"
-test-group = "harn-dap"
-
-[[profile.ci.overrides]]
-filter = 'package(harn-vm) and test(/windows_process_sandbox|replay_dispatch_scopes_harn_replay_per_dispatch_and_child_process/)'
-test-group = "harn-windows-sandbox"
-
-# Flake-detection profile: zero retries, no fail-fast, tighter slow-test
-# threshold.  Used by the flake-detection CI workflow which runs touched
-# test binaries 50× at --test-threads=8.
-#
-# Profile overrides do NOT inherit from [[profile.default.overrides]], so
-# the subprocess-group caps and leak-timeout exemptions must be duplicated
-# here to avoid false "leaky" failures and DAP teardown races.
-[profile.flake-detection]
-retries = 0
-slow-timeout = { period = "15s", terminate-after = 4, grace-period = "5s" }
-leak-timeout = { period = "10s", result = "fail" }
-fail-fast = false
-failure-output = "immediate-final"
-success-output = "never"
-
-[[profile.flake-detection.overrides]]
-filter = 'package(harn-vm) and test(/llm::api::tests/)'
-slow-timeout = { period = "30s", terminate-after = 3, grace-period = "5s" }
-
-[[profile.flake-detection.overrides]]
-filter = 'package(harn-vm) and test(/request_catalog_audit_validates_every_catalog_route_in_process/)'
-slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
-
-[[profile.flake-detection.overrides]]
-filter = "package(harn-cli) and kind(lib)"
-leak-timeout = { period = "10s", result = "pass" }
-
-[[profile.flake-detection.overrides]]
-filter = "package(harn-hostlib) and test(verdict::tests::no_active_scope_is_rejected)"
-leak-timeout = { period = "10s", result = "pass" }
-
-[[profile.flake-detection.overrides]]
-filter = "package(harn-cli) and kind(test)"
-test-group = "harn-subprocess"
-leak-timeout = { period = "10s", result = "pass" }
-
-[[profile.flake-detection.overrides]]
-filter = 'package(harn-vm) and test(/process_options_cross_platform|session_environment_leak|sandbox_exec_profile_allows_swiftpm_manifest_evaluation|installed_toolchains_use_the_workspace_owned_state|operator_meta_collects_workflows_hooks_manifests_and_merge_policy/)'
-test-group = "harn-subprocess"
-
-[[profile.flake-detection.overrides]]
-filter = "package(harn-cli) and binary(harn)"
-test-group = "harn-cli-bin"
-leak-timeout = { period = "10s", result = "pass" }
-
-[[profile.flake-detection.overrides]]
-filter = 'package(harn-dap) and binary(stdio_smoke) and test(dap_stdio_hits_breakpoint_and_reads_a_local_variable)'
-test-group = "harn-dap"
-slow-timeout = { period = "60s", terminate-after = 4, grace-period = "10s" }
-
-[[profile.flake-detection.overrides]]
-filter = "package(harn-dap)"
-test-group = "harn-dap"
-
-# E2E profile overrides: throttle subprocess concurrency the same way the
-# default/ci profiles do so nightly runs stay deterministic.
+# ---------------------------------------------------------------------------
+# E2E profile overrides
+# ---------------------------------------------------------------------------
+# The e2e suite spawns a real `harn` binary for essentially every test, so its
+# leak window is wider and stays advisory on every platform. `default` supplies
+# the `harn-subprocess` group; only the leak budget differs here.
 [[profile.e2e.overrides]]
 filter = "package(harn-cli) and kind(test)"
-test-group = "harn-subprocess"
 leak-timeout = { period = "15s", result = "pass" }

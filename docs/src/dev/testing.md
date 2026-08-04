@@ -320,14 +320,30 @@ These tests are subject to different rules:
   composes better with async code and gives cleaner error messages.
 
 Nextest's `leak-timeout` is a post-success reaping grace period, not a proof
-that the named test leaked. Under full workspace fan-out on a loaded machine,
-libtest can finish a pure in-process test in milliseconds while neighboring
-binaries delay process teardown past a short window, and nextest attributes
-the `LEAK-FAIL` to whichever fast test completed at the wrong moment. Raise
-the shared grace period in `.config/nextest.toml` (keeping `result = "fail"`)
-when loaded-machine evidence shows false attribution at the current ceiling;
-use a narrowly filtered override with `result = "pass"` only when a specific
-test keeps false-firing after the shared window is already generous.
+that the named test leaked. Nextest waits that long after a test process exits
+for the process's captured stdout and stderr to reach EOF, so the only thing it
+can actually detect is **a subprocess that inherited one of those two streams**.
+A test that spawns nothing, or that spawns only through
+`op_interrupt::capture_output_interruptible` (which pipes stdout and stderr and
+nulls stdin before spawning), cannot produce a real leaked handle — a
+`LEAK-FAIL` against one of those is false by construction.
+
+Under full workspace fan-out on macOS the suite collects exactly those false
+verdicts, against pure in-process tests and against sandbox tests whose only
+child gets piped stdio. `.config/nextest.toml` therefore scopes the verdict to
+the platform where it is trustworthy: `result = "fail"` everywhere, with a
+single `platform = { host = 'cfg(target_os = "macos")' }` override downgrading
+it to `result = "pass"` on macOS.
+
+Do **not** respond to a new `LEAK-FAIL` by raising the shared grace period —
+that was tried three times (200ms upstream default, then 2s, 5s, 10s) and never
+converged, because the process holding the handle is not the test being blamed.
+Do not add a per-test `result = "pass"` override either; the ones that used to
+exist were all justified by this macOS behavior and silently disabled the gate
+on Linux and Windows as well. If a `LEAK-FAIL` appears on a non-macOS lane,
+treat it as a real escaped child and find it: the inherited-stdio spawn paths
+are `crates/harn-vm/src/mcp/connect.rs` and
+`crates/harn-hostlib/src/process/real.rs` under `OutputCapture::Inherit`.
 
 ## Checking the embedded app host
 
