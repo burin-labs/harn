@@ -74,10 +74,38 @@ pub(crate) fn trace_llm_call(entry: LlmTraceEntry) {
     });
 }
 
-/// Fine-grained event emitted during agent loop execution. Captures tool
-/// calls, LLM calls, interventions, compaction, and phase changes so
-/// downstream consumers (portal, IDE hosts, cloud runners) can display
-/// execution traces without reconstructing them from raw JSON.
+/// The loop and tool facts an agent session already records durably.
+///
+/// Tool activity and loop completion never reached the trace event log:
+/// `ToolExecution`, `ToolRejected`, `LoopIntervention`, `PhaseChange`, and
+/// `LoopComplete` were declared here but no code ever emitted them, so every
+/// summary reported `tool_executions: 0`, `tools_used: []`, and
+/// `status: "unknown"` even for runs whose transcript held the calls (#5997).
+///
+/// The fix is not a second set of events to keep in step with the transcript.
+/// The session that produces `result.tools` and `result.llm` is already the
+/// canonical owner of these facts, so the summary reads them from there.
+#[derive(Debug, Clone, Default)]
+pub struct AgentLoopFacts {
+    pub status: String,
+    pub iterations: usize,
+    /// Wall time for the whole loop, when something canonical measured it.
+    /// `None` serializes as null rather than zero: no agent session records a
+    /// loop duration today, and a zero would read as an instantaneous run.
+    pub total_duration_ms: Option<u64>,
+    pub tool_executions: usize,
+    pub tool_rejections: usize,
+    /// Distinct tools that ran, in first-use order.
+    pub tools_used: Vec<String>,
+}
+
+/// Fine-grained event emitted during agent loop execution. Captures LLM
+/// calls, provider retries, compaction, and typed checkpoints so downstream
+/// consumers (portal, IDE hosts, cloud runners) can display execution traces
+/// without reconstructing them from raw JSON.
+///
+/// Tool and loop-lifecycle facts deliberately do NOT live here; see
+/// [`AgentLoopFacts`].
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentTraceEvent {
@@ -90,41 +118,10 @@ pub enum AgentTraceEvent {
         duration_ms: u64,
         iteration: usize,
     },
-    ToolExecution {
-        tool_name: String,
-        tool_use_id: String,
-        duration_ms: u64,
-        status: String,
-        classification: String,
-        iteration: usize,
-    },
-    ToolRejected {
-        tool_name: String,
-        reason: String,
-        iteration: usize,
-    },
-    LoopIntervention {
-        tool_name: String,
-        kind: String,
-        count: usize,
-        iteration: usize,
-    },
     ContextCompaction {
         archived_messages: usize,
         new_summary_len: usize,
         iteration: usize,
-    },
-    PhaseChange {
-        from_phase: String,
-        to_phase: String,
-        iteration: usize,
-    },
-    LoopComplete {
-        status: String,
-        iterations: usize,
-        total_duration_ms: u64,
-        tools_used: Vec<String>,
-        successful_tools: Vec<String>,
     },
     /// Emitted when `llm_call` re-prompts the model after the previous
     /// response failed `output_schema` validation. One event per retry;
@@ -215,13 +212,26 @@ pub fn peek_agent_trace() -> Vec<AgentTraceEvent> {
 }
 
 /// Produce a rolled-up summary of agent trace events as JSON.
+///
+/// The loop and tool fields report `loop_facts: "unavailable"`, because this
+/// entry point has no session to read them from. A caller that holds the
+/// session — the terminal agent result — must use
+/// [`agent_trace_summary_with_loop`] instead, or it will publish zeros beside
+/// a transcript that recorded real tool calls.
 pub fn agent_trace_summary() -> serde_json::Value {
+    agent_trace_summary_inner(None)
+}
+
+/// Produce the summary with loop and tool counters taken from the canonical
+/// session state rather than from trace events, which never carried them.
+pub fn agent_trace_summary_with_loop(facts: &AgentLoopFacts) -> serde_json::Value {
+    agent_trace_summary_inner(Some(facts))
+}
+
+fn agent_trace_summary_inner(facts: Option<&AgentLoopFacts>) -> serde_json::Value {
     AGENT_TRACE.with(|v| {
         let events = v.borrow();
         let mut llm_calls = 0usize;
-        let mut tool_executions = 0usize;
-        let mut tool_rejections = 0usize;
-        let mut interventions = 0usize;
         let mut compactions = 0usize;
         let mut native_text_tool_fallbacks = 0usize;
         let mut native_text_tool_fallback_rejections = 0usize;
@@ -233,11 +243,19 @@ pub fn agent_trace_summary() -> serde_json::Value {
         let mut total_input_tokens = 0i64;
         let mut total_output_tokens = 0i64;
         let mut total_llm_duration_ms = 0u64;
-        let mut total_tool_duration_ms = 0u64;
-        let mut tools_used: Vec<String> = Vec::new();
-        let mut status = "unknown".to_string();
-        let mut iterations = 0usize;
-        let mut total_duration_ms = 0u64;
+
+        let default_facts = AgentLoopFacts::default();
+        let loop_facts = facts.unwrap_or(&default_facts);
+        let status = if facts.is_some() && !loop_facts.status.is_empty() {
+            loop_facts.status.clone()
+        } else {
+            "unknown".to_string()
+        };
+        let loop_facts_source = if facts.is_some() {
+            "observed"
+        } else {
+            "unavailable"
+        };
 
         for event in events.iter() {
             match event {
@@ -252,36 +270,8 @@ pub fn agent_trace_summary() -> serde_json::Value {
                     total_output_tokens += output_tokens;
                     total_llm_duration_ms += duration_ms;
                 }
-                AgentTraceEvent::ToolExecution {
-                    tool_name,
-                    duration_ms,
-                    ..
-                } => {
-                    tool_executions += 1;
-                    total_tool_duration_ms += duration_ms;
-                    if !tools_used.contains(tool_name) {
-                        tools_used.push(tool_name.clone());
-                    }
-                }
-                AgentTraceEvent::ToolRejected { .. } => {
-                    tool_rejections += 1;
-                }
-                AgentTraceEvent::LoopIntervention { .. } => {
-                    interventions += 1;
-                }
                 AgentTraceEvent::ContextCompaction { .. } => {
                     compactions += 1;
-                }
-                AgentTraceEvent::PhaseChange { .. } => {}
-                AgentTraceEvent::LoopComplete {
-                    status: s,
-                    iterations: i,
-                    total_duration_ms: d,
-                    ..
-                } => {
-                    status = s.clone();
-                    iterations = *i;
-                    total_duration_ms = *d;
                 }
                 AgentTraceEvent::SchemaRetry { .. } => {}
                 AgentTraceEvent::SchemaStreamAborted { .. } => {
@@ -309,13 +299,23 @@ pub fn agent_trace_summary() -> serde_json::Value {
         }
 
         serde_json::json!({
+            // Loop and tool facts come from the session, not from these
+            // events. `loop_facts` says whether a caller supplied them: an
+            // "unavailable" summary is reporting the absence of a session,
+            // not an agent that used no tools.
+            "loop_facts": loop_facts_source,
             "status": status,
-            "iterations": iterations,
-            "total_duration_ms": total_duration_ms,
+            "iterations": loop_facts.iterations,
+            "total_duration_ms": loop_facts.total_duration_ms,
+            "tool_executions": loop_facts.tool_executions,
+            "tool_rejections": loop_facts.tool_rejections,
+            "tools_used": loop_facts.tools_used,
+            // Every provider call, including schema retries, empty-completion
+            // retries, and model-ladder advances. `result.llm` counts only the
+            // accepted result of each agent turn, so the two legitimately
+            // differ; `token_scope` names which is which.
+            "token_scope": "every_provider_call",
             "llm_calls": llm_calls,
-            "tool_executions": tool_executions,
-            "tool_rejections": tool_rejections,
-            "interventions": interventions,
             "compactions": compactions,
             "native_text_tool_fallbacks": native_text_tool_fallbacks,
             "native_text_tool_fallback_rejections": native_text_tool_fallback_rejections,
@@ -327,8 +327,6 @@ pub fn agent_trace_summary() -> serde_json::Value {
             "total_input_tokens": total_input_tokens,
             "total_output_tokens": total_output_tokens,
             "total_llm_duration_ms": total_llm_duration_ms,
-            "total_tool_duration_ms": total_tool_duration_ms,
-            "tools_used": tools_used,
         })
     })
 }

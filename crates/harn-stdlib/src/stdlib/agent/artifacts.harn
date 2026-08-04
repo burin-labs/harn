@@ -59,6 +59,7 @@ pub type AgentTerminal = {kind: string, reason: string, owner: string}
 pub type AgentLlmUsage = {
   iterations: int,
   duration_ms: int,
+  token_scope?: string,
   input_tokens: int,
   output_tokens: int,
   cache_read_tokens: int,
@@ -69,14 +70,24 @@ pub type AgentLlmUsage = {
 pub type AgentToolTotals = {calls: int, successful: int, rejected: int, mode?: string}
 
 // Deterministic run-trace rollup. Every field is a count/rollup, never prose.
+//
+// `loop_facts` reports where the loop and tool counters came from: "observed"
+// means a caller supplied the session that owns them, "unavailable" means no
+// session was in hand and the counters are absent rather than measured. They
+// used to be silently zero because nothing ever emitted the tool and loop
+// trace events they were rolled up from.
+//
+// `token_scope` is "every_provider_call" here and "accepted_turn_results" on
+// `AgentLlmUsage`, so a reader can see why the two token counts differ.
 pub type AgentTraceSummary = {
   status: string,
   iterations: int,
-  total_duration_ms: int,
+  total_duration_ms?: int?,
   llm_calls: int,
   tool_executions: int,
   tool_rejections: int,
-  interventions?: int,
+  loop_facts?: string,
+  token_scope?: string,
   compactions?: int,
   empty_completion_retries?: int,
   models_advances?: int,
@@ -85,7 +96,6 @@ pub type AgentTraceSummary = {
   total_input_tokens?: int,
   total_output_tokens?: int,
   total_llm_duration_ms?: int,
-  total_tool_duration_ms?: int,
   tools_used?: list<string>,
 }
 

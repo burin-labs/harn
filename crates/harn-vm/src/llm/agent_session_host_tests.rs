@@ -5,11 +5,10 @@ use crate::agent_events::AgentEvent;
 use super::run_identity::agent_init_control;
 use super::{
     assistant_message_from_llm_result, canonical_acp_stop_reason, canonical_provider_stop_reason,
-    dict_get, initial_user_content, is_length_truncation, json_to_vm, last_assistant_text,
-    list_items, pair_orphaned_tool_use, reset_agent_session_host_state,
-    screenshots_from_tool_result, seed_host_session_provider_model, synthesize_orphan_tool_results,
-    text_has_tool_call_prefix, tool_result_message_for_provider,
-    truncated_tool_call_should_continue, vm_to_json,
+    dict_get, initial_user_content, is_length_truncation, json_to_vm, list_items,
+    pair_orphaned_tool_use, reset_agent_session_host_state, screenshots_from_tool_result,
+    seed_host_session_provider_model, synthesize_orphan_tool_results, text_has_tool_call_prefix,
+    tool_result_message_for_provider, truncated_tool_call_should_continue, vm_to_json,
 };
 
 #[path = "agent_session_host_mock_dispatch_tests.rs"]
@@ -1081,7 +1080,7 @@ fn final_visible_text_skips_control_only_assistant_turns() {
     }));
 
     assert_eq!(
-        last_assistant_text(&snapshot).as_deref(),
+        crate::llm::agent_result_projection::last_assistant_text(&snapshot).as_deref(),
         Some("Final answer before sentinel.")
     );
 }
