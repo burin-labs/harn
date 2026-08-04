@@ -333,6 +333,7 @@ confidence: 0.75\n\
 summary: Listed the workspace\n\
 ## END_LOOP_STATE";
     let mut result = LlmResult {
+        attempts: Default::default(),
         text_projection: None,
         served_fast: false,
         text: text.to_string(),

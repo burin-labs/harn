@@ -702,6 +702,7 @@ pub(crate) fn parse_response(
     let telemetry = ProviderTelemetry::from_gemini_interactions_usage(usage, request_id);
 
     Ok(LlmResult {
+        attempts: Default::default(),
         text_projection: None,
         served_fast: false,
         text,

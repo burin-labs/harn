@@ -588,6 +588,7 @@ mod tests {
     #[test]
     fn structured_output_candidates_include_tool_call_arguments() {
         let result = crate::llm::api::LlmResult {
+            attempts: Default::default(),
             text_projection: None,
             served_fast: false,
             text: String::new(),

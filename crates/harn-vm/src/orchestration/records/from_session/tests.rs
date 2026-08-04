@@ -631,3 +631,117 @@ async fn the_cost_aggregate_is_exact_rather_than_float_accumulated() {
         .sum();
     assert!((span_total - usage.total_cost).abs() < 1e-9);
 }
+
+fn llm_call_with_attempts(cost: f64, total: i64, rate_limited: i64) -> AppendEvent {
+    AppendEvent::new(
+        custom("llm_call"),
+        transcript_event(
+            "llm_call",
+            json!({
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+                "cost_usd": cost,
+                "input_tokens": 100,
+                "model": "gpt-5.6-luna",
+                "output_tokens": 10,
+                "provider": "openai",
+                "provider_attempts": {
+                    "total": total,
+                    "retries": total - 1,
+                    "rate_limited": rate_limited,
+                    "empty_completion": 0,
+                    "other": total - 1 - rate_limited,
+                },
+            }),
+        ),
+    )
+}
+
+/// #5847: a run whose provider rejected 47 of 146 requests with a retryable
+/// 429 reported 96 clean calls and no contention signal at all. The call count
+/// and the request count are different facts and a report has to carry both.
+#[tokio::test]
+async fn retried_provider_requests_are_visible_alongside_the_call_count() {
+    let store = MemorySessionStore::default();
+    let meta = store
+        .create(CreateSession::default())
+        .await
+        .expect("create session");
+    for event in [
+        llm_call_with_attempts(0.01, 3, 2),
+        llm_call_with_attempts(0.01, 1, 0),
+        llm_call_with_attempts(0.01, 2, 0),
+    ] {
+        store.append(&meta.id, event).await.expect("append");
+    }
+
+    let run = project_run_record_from_session(&store, &meta.id)
+        .await
+        .expect("project");
+    assert_eq!(
+        run.usage.as_ref().expect("usage").call_count,
+        3,
+        "three logical calls"
+    );
+    let attempts = run
+        .metadata
+        .get("provider_attempts")
+        .expect("a run that retried must say so");
+    assert_eq!(attempts.get("total").and_then(|v| v.as_i64()), Some(6));
+    assert_eq!(attempts.get("retries").and_then(|v| v.as_i64()), Some(3));
+    assert_eq!(
+        attempts.get("rate_limited").and_then(|v| v.as_i64()),
+        Some(2),
+        "rate limiting is the signal that explains a slow or truncated run"
+    );
+    assert_eq!(attempts.get("other").and_then(|v| v.as_i64()), Some(1));
+}
+
+/// A block of zeroes on every clean run would train a reader to skip the one
+/// place the contention signal appears.
+#[tokio::test]
+async fn a_run_that_never_retried_reports_no_attempt_block() {
+    let (store, id) = capstone_like_store().await;
+    let run = project_run_record_from_session(&store, &id)
+        .await
+        .expect("project");
+    assert!(
+        !run.metadata.contains_key("provider_attempts"),
+        "no retries means nothing to report"
+    );
+}
+
+/// Sessions recorded before provider attempts existed carry no entry. Counting
+/// them as one request each keeps the total a lower bound instead of reporting
+/// fewer requests than there were calls.
+#[tokio::test]
+async fn calls_recorded_before_attempts_existed_count_as_one_request_each() {
+    let store = MemorySessionStore::default();
+    let meta = store
+        .create(CreateSession::default())
+        .await
+        .expect("create session");
+    // One old-shape call, one new-shape call that retried twice.
+    store
+        .append(&meta.id, llm_call(100, 10, 0.01))
+        .await
+        .expect("append");
+    store
+        .append(&meta.id, llm_call_with_attempts(0.01, 3, 3))
+        .await
+        .expect("append");
+
+    let run = project_run_record_from_session(&store, &meta.id)
+        .await
+        .expect("project");
+    let attempts = run.metadata.get("provider_attempts").expect("attempts");
+    assert_eq!(
+        attempts.get("total").and_then(|v| v.as_i64()),
+        Some(4),
+        "1 (unrecorded, floored to one request) + 3 (recorded)"
+    );
+    assert_eq!(
+        attempts.get("rate_limited").and_then(|v| v.as_i64()),
+        Some(3)
+    );
+}

@@ -9,6 +9,7 @@ fn response_event_and_returned_usage_share_priced_cost() {
     crate::llm_config::clear_user_overrides();
 
     let priced = crate::llm::api::LlmResult {
+        attempts: Default::default(),
         text_projection: None,
         text: "priced result".to_string(),
         tool_calls: Vec::new(),

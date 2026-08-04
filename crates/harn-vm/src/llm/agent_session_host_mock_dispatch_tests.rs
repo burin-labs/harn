@@ -40,6 +40,7 @@ fn mock_style_native_tool_calls_reach_assistant_envelope() {
     // test sees zero tool-call events and stops with end_turn.
     use super::super::super::api::{vm_build_llm_result, LlmResult, ProviderTelemetry};
     let result = LlmResult {
+        attempts: Default::default(),
         text_projection: None,
         served_fast: false,
         text: String::new(),

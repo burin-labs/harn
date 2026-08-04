@@ -37,6 +37,20 @@ pub(crate) const OUTPUT_TOKENS: &str = "/transcript_event/metadata/output_tokens
 pub(crate) const CACHE_READ_TOKENS: &str = "/transcript_event/metadata/cache_read_tokens";
 pub(crate) const CACHE_WRITE_TOKENS: &str = "/transcript_event/metadata/cache_write_tokens";
 pub(crate) const COST_USD: &str = "/transcript_event/metadata/cost_usd";
+/// Provider requests issued for one logical `llm_call`, including the one that
+/// succeeded. Absent on calls recorded before the field existed, which is
+/// distinct from a recorded 1.
+pub(crate) const PROVIDER_ATTEMPTS_TOTAL: &str =
+    "/transcript_event/metadata/provider_attempts/total";
+/// Requests rejected with a retryable rate-limit error before one succeeded.
+pub(crate) const PROVIDER_ATTEMPTS_RATE_LIMITED: &str =
+    "/transcript_event/metadata/provider_attempts/rate_limited";
+/// Requests that returned a completion with nothing the loop could act on.
+pub(crate) const PROVIDER_ATTEMPTS_EMPTY: &str =
+    "/transcript_event/metadata/provider_attempts/empty_completion";
+/// Retryable failures that were neither rate limiting nor empty completions.
+pub(crate) const PROVIDER_ATTEMPTS_OTHER: &str =
+    "/transcript_event/metadata/provider_attempts/other";
 
 /// Provider-stable identifier joining a `tool_call` to its `tool_call_update`
 /// and `tool_result` events.

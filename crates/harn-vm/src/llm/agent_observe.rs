@@ -642,6 +642,12 @@ pub(crate) async fn observed_llm_call(
     // serve that RECOVERED from an empty flake — the exact recovered-vs-terminal
     // distinction the escalation guard hinges on.
     let mut empty_completion_retries = 0usize;
+    // Why each retry happened, kept beside `attempt` (which counts them all).
+    // #5847: a run whose provider rejected 47 of 146 requests with a retryable
+    // 429 reported 96 clean calls, because nothing downstream could tell a
+    // first-try serve from one that fought through rate limiting.
+    let mut rate_limited_retries = 0u32;
+    let mut other_retries = 0u32;
     loop {
         let opts: &super::api::LlmCallOptions = working.as_ref();
         // Network-only circuit breaker: if this route has seen sustained
@@ -1101,6 +1107,14 @@ pub(crate) async fn observed_llm_call(
                 } else {
                     super::rate_limit::observe_network_outcome_for_llm_call(opts, false);
                 }
+                result.attempts = super::api::ProviderAttempts {
+                    // `attempt` is a zero-based retry counter, so the request
+                    // that succeeded is one more than the retries before it.
+                    total: u32::try_from(attempt).unwrap_or(u32::MAX).saturating_add(1),
+                    rate_limited: rate_limited_retries,
+                    empty_completion: u32::try_from(empty_completion_retries).unwrap_or(u32::MAX),
+                    other: other_retries,
+                };
                 return Ok(result);
             }
             Err(error) => {
@@ -1310,6 +1324,11 @@ pub(crate) async fn observed_llm_call(
                     native_tool_channel_degrade.then(|| degrade_options_to_text_channel(opts));
                 let stream_degraded_options = stream_transport_degrade
                     .then(|| degrade_options_to_non_streaming_transport(opts));
+                if matches!(classified.reason, super::api::LlmErrorReason::RateLimit) {
+                    rate_limited_retries += 1;
+                } else if !empty_completion_error {
+                    other_retries += 1;
+                }
                 attempt += 1;
                 let backoff = llm_retry_backoff_ms(&error, attempt, &opts.provider);
                 crate::events::log_warn(

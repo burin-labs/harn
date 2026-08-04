@@ -77,6 +77,7 @@ pub(super) fn request_text_content(message: &serde_json::Value) -> String {
 
 pub(super) fn empty_result(provider: &str, model: &str) -> LlmResult {
     LlmResult {
+        attempts: Default::default(),
         text_projection: None,
         served_fast: false,
         text: String::new(),
