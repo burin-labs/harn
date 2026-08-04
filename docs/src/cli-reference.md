@@ -1131,7 +1131,14 @@ harn fix --plan --json --safety behavior-preserving src/
 harn fix --apply --safety behavior-preserving main.harn
 harn fix --apply --dry-run --json --safety scope-local src/
 harn fix --apply --safety surface-changing src/
+harn fix --apply --safety surface-changing --code HARN-LNT-073 src/
 ```
+
+`--code <CODE>` restricts the run to one diagnostic code and may be repeated;
+omitting it keeps every code. Use it when a migration should touch one class of
+finding rather than everything at its safety ceiling. Narrowing happens in the
+plan, so `--plan --code <CODE>` shows exactly what `--apply --code <CODE>`
+writes.
 
 Ambient-capability migrations add an explicit `harness: Harness` parameter and
 update callers. This is a surface-changing repair because Harn has no ambient
@@ -1154,6 +1161,12 @@ files. Apply mode requires
 --json` returns `schemaVersion`, `applied[]`, `skipped[]`, `skippedFiles[]`,
 and `post_apply_diagnostics_count`. `--dry-run` reports the same apply set
 without writing files.
+
+Apply mode preserves a file's formatting state rather than imposing one. A
+repair changes line lengths, so a file that was in canonical `harn fmt` form is
+formatted again after the edit and stays canonical; a file that was not is
+returned exactly as its author keeps it, so the diff stays the size of the
+repair.
 
 ## harn check
 
