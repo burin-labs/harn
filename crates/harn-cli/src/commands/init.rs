@@ -58,7 +58,7 @@ pub(crate) async fn init_project(name: Option<&str>, template: ProjectTemplate) 
         process::exit(exit);
     }
     if let Err(error) = generate_scaffolded_docs(&dir, template) {
-        eprintln!("Failed to generate {}: {error}", SCAFFOLD_DOCS_PATH);
+        eprintln!("Failed to generate {SCAFFOLD_DOCS_PATH}: {error}");
         process::exit(1);
     }
 }
