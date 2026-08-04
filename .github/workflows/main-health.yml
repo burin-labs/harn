@@ -74,6 +74,16 @@ jobs:
           set -euo pipefail
 
           broken=()
+          unknown=()
+
+          # `gh run list --workflow` returns nothing both for a workflow that
+          # does not exist and for one that has simply never run on a schedule.
+          # Without this list the two are indistinguishable, so renaming a
+          # watched suite would quietly drop it from monitoring and leave the
+          # report looking healthy — the same silent decay this check exists to
+          # catch. Resolve the names once and treat a miss as an error.
+          known="$(gh api "repos/$GH_REPO/actions/workflows" --paginate --jq '.workflows[].name')"
+
           {
             echo "| suite | recent scheduled runs (newest first) | verdict |"
             echo "| --- | --- | --- |"
@@ -81,6 +91,15 @@ jobs:
 
           while IFS= read -r suite; do
             [[ -n "$suite" ]] || continue
+
+            # Fixed-string, whole-line match: suite names contain spaces and
+            # hyphens, so a substring or regex match would happily accept a
+            # renamed neighbour.
+            if ! grep -Fxq "$suite" <<< "$known"; then
+              unknown+=("$suite")
+              echo "| $suite | — | **UNKNOWN — no such workflow** |" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
 
             # `conclusion` is null while a run is still going; drop those so an
             # in-flight run cannot break a streak that is genuinely unbroken.
@@ -117,7 +136,7 @@ jobs:
 
           sha="$(gh api "repos/$GH_REPO/commits/main" --jq '.sha')"
 
-          if (( ${#broken[@]} == 0 )); then
+          if (( ${#broken[@]} == 0 && ${#unknown[@]} == 0 )); then
             gh api "repos/$GH_REPO/statuses/$sha" -X POST \
               -f state=success -f context="main health" \
               -f description="all watched scheduled suites passing" >/dev/null
@@ -125,11 +144,14 @@ jobs:
             exit 0
           fi
 
-          summary="$(IFS='; '; echo "${broken[*]}")"
+          # A name that resolves to nothing is reported as loudly as a break:
+          # it means this check is watching less than it claims to.
+          problems=("${broken[@]}" "${unknown[@]/#/no such workflow: }")
+          summary="$(IFS='; '; echo "${problems[*]}")"
           gh api "repos/$GH_REPO/statuses/$sha" -X POST \
             -f state=failure -f context="main health" \
             -f description="${summary:0:139}" \
             -f target_url="https://github.com/$GH_REPO/actions/runs/${GITHUB_RUN_ID}" >/dev/null
 
-          echo "::error::persistently failing on main — $summary"
+          echo "::error::main health — $summary"
           exit 1
