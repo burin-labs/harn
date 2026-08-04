@@ -531,17 +531,24 @@ fn host_lease_capability_registers_scoped_lifecycle() {
         ]
     );
 
+    // An omitted host now reads this machine, matching acquire, so the
+    // registration contract is checked with an explicitly empty host instead:
+    // defaulting must stay narrow enough that an unset variable still fails
+    // loudly rather than silently retargeting the local lane. Validation
+    // rejects it before any store lookup, so this assertion touches no real
+    // lease state.
     let entry = registry
         .find("hostlib_host_lease_status")
         .expect("registered");
-    let error = (entry.handler)(&[]).expect_err("host is required");
-    match error {
-        HostlibError::MissingParameter { builtin, param } => {
-            assert_eq!(builtin, "hostlib_host_lease_status");
-            assert_eq!(param, "host");
-        }
-        other => panic!("expected missing host error, got {other:?}"),
-    }
+    let mut request_fields = harn_vm::value::DictMap::new();
+    request_fields.insert("host".into(), VmValue::String("".into()));
+    let request = VmValue::Dict(request_fields.into());
+    let error = (entry.handler)(&[request]).expect_err("an empty host is not a default");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("host"),
+        "error must name the offending parameter, got {rendered}"
+    );
 
     let whitespace_host = VmValue::dict([("host", VmValue::string("  "))]);
     let error = (entry.handler)(&[whitespace_host]).expect_err("blank host is invalid");
@@ -794,6 +801,80 @@ pipeline default(harness: Harness, task) {{
             }
         });
     }
+}
+
+#[test]
+fn stdlib_host_lease_status_defaults_to_the_host_acquire_claims() {
+    let root = TempDir::new().expect("lease root");
+    let _env = HostLeaseRootGuard::set(root.path());
+
+    // A Harn script cannot name its own machine, so when acquire defaulted the
+    // host and status did not, a script could take a lane and then had no way
+    // to read it back. This round trip is the falsifier: both calls omit the
+    // host, and the second must observe the lease the first took.
+    let source = r#"
+import { host_lease_acquire, host_lease_status } from "std/host_lease"
+
+pipeline default(harness: Harness, task) {
+  const acquired = host_lease_acquire(
+    harness.host_lease,
+    {owner: "default-host-test", domain: "release-owner", ttl_ms: 60000},
+  )
+  const observed = host_lease_status(harness.host_lease, nil, "whole-machine", "release-owner")
+  return {claimed_host: acquired.handle.host, observed: observed}
+}
+"#;
+
+    let result = expect_dict(execute_harn(source).expect("default-host round trip"));
+    let claimed_host = result
+        .get("claimed_host")
+        .map(VmValue::display)
+        .expect("acquire reports the host it defaulted to");
+    assert!(
+        !claimed_host.trim().is_empty(),
+        "acquire must resolve a concrete host, got {claimed_host:?}"
+    );
+
+    let Some(VmValue::Dict(observed)) = result.get("observed") else {
+        panic!("status must return a state record");
+    };
+    assert_eq!(
+        observed.get("host").map(VmValue::display),
+        Some(claimed_host),
+        "status must default to the same host acquire claimed"
+    );
+    let Some(VmValue::Dict(active)) = observed.get("active") else {
+        panic!("status defaulting to the local host must see the lease just taken");
+    };
+    assert_eq!(
+        active.get("owner").map(VmValue::display),
+        Some("default-host-test".to_string())
+    );
+}
+
+#[test]
+fn stdlib_host_lease_status_rejects_an_explicitly_empty_host() {
+    let root = TempDir::new().expect("lease root");
+    let _env = HostLeaseRootGuard::set(root.path());
+
+    // Defaulting applies to an omitted host, never to an empty string: that is
+    // almost always an unset variable reaching the call, and silently reading
+    // the local machine would hide it. Acquire has always rejected it, and the
+    // two paths now share one resolver so they cannot drift apart.
+    let source = r#"
+import { host_lease_status } from "std/host_lease"
+
+pipeline default(harness: Harness, task) {
+  return host_lease_status(harness.host_lease, "   ", "whole-machine", "release-owner")
+}
+"#;
+
+    let error = execute_harn(source).expect_err("an empty host must not read the local machine");
+    let rendered = error.to_string();
+    assert!(
+        rendered.contains("host"),
+        "error must name the offending parameter, got {rendered}"
+    );
 }
 
 #[test]
