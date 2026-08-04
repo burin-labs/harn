@@ -79,6 +79,15 @@ mod tests {
     /// Scope is `crates/`, which is every workspace member and so every shipped
     /// host. `bench/` is out, and builds its runtimes on the current thread
     /// rather than a spawned one, so there is nothing there to catch.
+    ///
+    /// What this does *not* catch, so nobody over-trusts it: a thread that
+    /// drives the VM without building a Tokio runtime on itself. Of the ~76
+    /// non-test spawn sites in the workspace this judges only the ~10 shaped
+    /// like a transport or worker. `run_dap_adapter`, the counterfactual plan
+    /// runner, and the connector worker loop all drive the VM through a plain
+    /// function call and were found by reading, not by this scan. Deciding
+    /// those needs a call graph; recognizing the idiom that actually recurs
+    /// does not, and that idiom is where every instance so far has lived.
     #[test]
     fn vm_driving_threads_ask_for_the_runtime_stack() {
         let crates_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
