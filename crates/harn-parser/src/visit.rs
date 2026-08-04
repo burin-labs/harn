@@ -31,6 +31,55 @@ pub fn walk_program(program: &[SNode], visitor: &mut impl FnMut(&SNode)) {
     walk_stack(&mut stack, visitor);
 }
 
+/// Walk `program` INCLUDING the expressions inside `${...}` string
+/// interpolation.
+///
+/// [`walk_program`] cannot reach them: the lexer stores a hole as unparsed
+/// source text plus a position, so `Node::InterpolatedString` is a leaf with no
+/// AST children by construction. Any analysis that asks "is this name used?"
+/// and walks with [`walk_program`] alone answers NO for a name used only inside
+/// a hole — an unsound answer, not merely an incomplete one.
+///
+/// That is not hypothetical. The whole-program capability solver computed a
+/// helper's required capabilities that way, concluded `random` was unused
+/// because its only use was `"...${harness.random.uuid_v7()}"`, and deleted it
+/// from the parameter type and every call site. The repair runs automatically
+/// in the fleet bump workflow, so it rewrote working code into code that does
+/// not compile (`value of type nil has no method uuid_v7`) and shipped it as a
+/// bump PR (harn-cloud#1469).
+///
+/// `source` must be the whole file `program` was parsed from, so re-parsed
+/// holes carry spans in the containing file's coordinates and stay safe to edit
+/// against. A hole that fails to re-parse is skipped: it cannot be a well-typed
+/// use, and the containing parse already reported it.
+pub fn walk_program_interpolated(
+    source: &str,
+    program: &[SNode],
+    visitor: &mut impl FnMut(&SNode),
+) {
+    let mut holes = Vec::new();
+    walk_program(program, &mut |node| {
+        if let Node::InterpolatedString(segments) = &node.node {
+            for segment in segments {
+                if let harn_lexer::StringSegment::Expression(text, line, column) = segment {
+                    holes.push((text.clone(), *line, *column));
+                }
+            }
+        }
+        visitor(node);
+    });
+    // Recurse: an interpolation inside an interpolation is rare but legal, and
+    // stopping at one level would restore the same unsoundness one layer down.
+    while let Some((text, line, column)) = holes.pop() {
+        let Some(expression) =
+            crate::interpolation::parse_expression(Some(source), &text, line, column)
+        else {
+            continue;
+        };
+        walk_program_interpolated(source, std::slice::from_ref(&expression), visitor);
+    }
+}
+
 /// Return whether a program contains a member access or method call whose
 /// receiver is a bare identifier (`Name.Member`). This is the only syntax
 /// whose lowering needs to distinguish an imported enum namespace from an
