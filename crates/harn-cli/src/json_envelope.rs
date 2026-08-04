@@ -634,15 +634,15 @@ mod tests {
         let entries = catalog();
         let entry = entries
             .iter()
-            .find(|entry| entry.command == "fix plan")
-            .expect("fix plan schema should be registered");
+            .find(|entry| entry.command == "fix --plan")
+            .expect("fix --plan schema should be registered");
         assert_eq!(
             entry.schema_version,
             crate::commands::fix::FIX_PLAN_SCHEMA_VERSION
         );
         let entry = entries
             .iter()
-            .find(|entry| entry.command == "fix apply")
+            .find(|entry| entry.command == "fix --apply")
             .expect("fix apply schema should be registered");
         assert_eq!(
             entry.schema_version,

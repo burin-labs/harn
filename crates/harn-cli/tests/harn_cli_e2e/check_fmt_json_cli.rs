@@ -206,7 +206,7 @@ fn check_matrix_json_uses_envelope_and_legacy_format_warns() {
 
 #[test]
 fn check_and_fmt_are_registered_in_json_schema_catalog() {
-    for command in ["check", "fmt", "check provider-matrix"] {
+    for command in ["check", "fmt", "check --provider-matrix"] {
         let output = Command::new(binary_path())
             .args(["--json-schemas", "--command", command])
             .output()
