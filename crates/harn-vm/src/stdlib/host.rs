@@ -12,7 +12,7 @@ use crate::vm::{AsyncBuiltinCtx, Vm};
 mod bridge;
 pub(crate) mod fixtured_operations;
 mod operation_registry;
-mod process_dispatch;
+pub(crate) mod process_dispatch;
 mod process_exec;
 // Public so tests and embedders can share the per-turn memo allowlist even
 // when probing host_call outside the stdlib builtin (harn#5190).

@@ -820,13 +820,12 @@ async fn exec_argv(command: &GitCommand) -> Result<VmValue, VmError> {
         "operation": command.operation,
         "session_id": crate::llm::current_agent_session_id(),
     });
-    if command.operation == "git.push"
+    let reviewed_lease_push = command.operation == "git.push"
         && command.mutation == GitMutation::Risky
-        && command
-            .argv
-            .get(2)
-            .is_some_and(|arg| arg.starts_with("--force-with-lease="))
-    {
+        && command.argv.split_first().is_some_and(|(program, args)| {
+            crate::stdlib::host::process_dispatch::is_reviewed_git_push_with_lease(program, args)
+        });
+    if reviewed_lease_push {
         crate::stdlib::host::dispatch_reviewed_git_push_with_lease(&params, caller).await
     } else {
         crate::stdlib::host::dispatch_process_exec(&params, caller).await

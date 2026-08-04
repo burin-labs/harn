@@ -297,3 +297,85 @@ pipeline main(harness: Harness, _task) {{
         "the hooked push must not reach the remote: {refs}"
     );
 }
+
+#[test]
+fn a_leased_ref_deletion_can_also_skip_the_checkouts_pre_push_hook() {
+    // Deleting a ref under a lease is the canonical ref-plumbing operation, and
+    // it is the one that needs both flags at once. The lease makes the push a
+    // `--force-with-lease=<ref>:<oid>`, which only reaches the remote through
+    // the reviewed dispatch; adding `--no-verify` used to move the lease off
+    // the exact position that dispatch recognized, so the push fell through to
+    // the generic command floor and was denied as a bare force push — naming
+    // neither the lease nor the hook. Falsifier: the same leased delete without
+    // `no_verify` is rejected by the hook and the ref survives.
+    let fixture = protected_push_fixture();
+    let hook = fixture.repo.join(".git/hooks/pre-push");
+    fs::create_dir_all(hook.parent().expect("hooks dir")).expect("create hooks dir");
+    fs::write(&hook, "#!/bin/sh\necho 'pre-push refused' >&2\nexit 1\n").expect("write hook");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).expect("chmod hook");
+    }
+    let remote = fixture.root.path().join("remote.git");
+    git(
+        &remote,
+        &[
+            "update-ref",
+            "refs/heads/attempt",
+            fixture.expected_oid.trim(),
+        ],
+    );
+    git(&fixture.repo, &["checkout", "-q", "-b", "no-upstream"]);
+
+    let script = fixture.root.path().join("delete_ref.harn");
+    fs::write(
+        &script,
+        format!(
+            r#"import {{ git_push }} from "std/git"
+
+pipeline main(harness: Harness, _task) {{
+  const lease = {{ref: "refs/heads/attempt", expected_oid: "{oid}"}}
+  const hooked = git_push(harness.process, "origin", ":refs/heads/attempt", {repo}, lease)
+  assert(!hooked.success)
+  const plumbed = git_push(
+    harness.process,
+    "origin",
+    ":refs/heads/attempt",
+    {repo},
+    lease,
+    {{no_verify: true}},
+  )
+  assert(plumbed.success)
+  harness.stdio.println("leased-delete-ok")
+}}
+"#,
+            oid = fixture.expected_oid.trim(),
+            repo = harn_string(&fixture.repo),
+        ),
+    )
+    .expect("write script");
+
+    let output = run_harn(
+        &fixture,
+        &[
+            "run",
+            "--allow-process-network",
+            "--approve-risky",
+            "git.push",
+            script.to_str().unwrap(),
+        ],
+    );
+    assert_success(&output, "harn run with leased ref deletion");
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("leased-delete-ok"),
+        "stdout:\n{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+
+    let refs = git(&remote, &["for-each-ref", "--format=%(refname)"]);
+    assert!(
+        !refs.contains("refs/heads/attempt"),
+        "the leased deletion must reach the remote: {refs}"
+    );
+}

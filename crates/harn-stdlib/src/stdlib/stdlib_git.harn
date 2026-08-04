@@ -581,6 +581,11 @@ pub fn git_rebase(process: HarnessProcess, base_ref: string, repo = ".") -> GitR
  * would otherwise impose the repository's branch and tracking state on an
  * operation that does not depend on either.
  *
+ * It composes with `lease`, which is the case ref plumbing usually wants:
+ * deleting a ref you have observed at an exact OID. The lease still names the
+ * OID the push may replace, so skipping the hook does not widen what reaches
+ * the remote.
+ *
  * @effects: [process, network]
  * @errors: []
  */
