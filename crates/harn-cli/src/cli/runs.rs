@@ -2,6 +2,8 @@ use clap::{Args, Subcommand};
 use std::path::{Path, PathBuf};
 use std::process;
 
+use super::run_source::{resolve_run_path_or_exit, SessionSourceArgs};
+
 #[derive(Debug, Args)]
 pub(crate) struct RunsArgs {
     #[command(subcommand)]
@@ -26,7 +28,10 @@ pub(crate) enum RunsCommand {
 pub(crate) struct RunsExportTrainingArgs {
     /// Path to a run record JSON file, or a directory holding run records.
     /// A directory with more than one record requires `--run-id`.
-    pub path: String,
+    #[arg(required_unless_present = "from_session")]
+    pub path: Option<String>,
+    #[command(flatten)]
+    pub source: SessionSourceArgs,
     /// Run id this export must project. Required to disambiguate a directory
     /// holding several runs, and otherwise asserted against the record.
     #[arg(long)]
@@ -45,7 +50,10 @@ pub(crate) struct RunsExportTrainingArgs {
 #[derive(Debug, Args)]
 pub(crate) struct RunsInspectArgs {
     /// Path to the run record JSON file.
-    pub path: String,
+    #[arg(required_unless_present = "from_session")]
+    pub path: Option<String>,
+    #[command(flatten)]
+    pub source: SessionSourceArgs,
     /// Optional baseline run record to diff against.
     #[arg(long)]
     pub compare: Option<String>,
@@ -54,7 +62,10 @@ pub(crate) struct RunsInspectArgs {
 #[derive(Debug, Args)]
 pub(crate) struct RunsViewArgs {
     /// Path to a run record JSON file or a directory containing run records.
-    pub path: String,
+    #[arg(required_unless_present = "from_session")]
+    pub path: Option<String>,
+    #[command(flatten)]
+    pub source: SessionSourceArgs,
     /// Aggregate matching records into a harn.session_view.v1 projection.
     #[arg(long)]
     pub session: bool,
@@ -66,37 +77,39 @@ pub(crate) struct RunsViewArgs {
 #[derive(Debug, Args)]
 pub(crate) struct RunsReportArgs {
     /// Root run record JSON file.
-    pub path: String,
+    #[arg(required_unless_present = "from_session")]
+    pub path: Option<String>,
+    #[command(flatten)]
+    pub source: SessionSourceArgs,
     /// Optional SQLite event log to add to each agent timeline.
     #[arg(long, value_name = "PATH")]
     pub events_db: Option<PathBuf>,
 }
 
+/// A review names exactly one input. Stating that as a required, exclusive
+/// group keeps it one declaration instead of a `conflicts_with` /
+/// `required_unless_present` pair per input, which grows quadratically and is
+/// where a third input would otherwise have been quietly under-constrained.
 #[derive(Debug, Args)]
+#[command(group(
+    clap::ArgGroup::new("review_input")
+        .required(true)
+        .args(["report", "run_record", "from_session"])
+))]
 pub(crate) struct RunsReviewArgs {
     /// Review an existing harn.run_report.v1 JSON file.
-    #[arg(
-        long,
-        value_name = "PATH",
-        conflicts_with = "run_record",
-        required_unless_present = "run_record"
-    )]
+    #[arg(long, value_name = "PATH")]
     pub report: Option<PathBuf>,
     /// Build and review a report directly from this root run record.
-    #[arg(
-        long,
-        value_name = "PATH",
-        conflicts_with = "report",
-        required_unless_present = "report"
-    )]
+    #[arg(long, value_name = "PATH")]
     pub run_record: Option<PathBuf>,
-    /// Optional SQLite event log used when building a report from --run-record.
-    #[arg(
-        long,
-        value_name = "PATH",
-        requires = "run_record",
-        conflicts_with = "report"
-    )]
+    /// Review a run projected from a persisted session. Equivalent to
+    /// `--run-record` against the record the projection materializes.
+    #[command(flatten)]
+    pub source: SessionSourceArgs,
+    /// Optional SQLite event log used when building a report from
+    /// `--run-record` or `--session`.
+    #[arg(long, value_name = "PATH", conflicts_with = "report")]
     pub events_db: Option<PathBuf>,
     /// Read the review rubric from this UTF-8 file.
     #[arg(long, value_name = "PATH")]
@@ -113,9 +126,13 @@ pub(crate) struct RunsReviewArgs {
 pub(crate) async fn run_runs_command(args: RunsArgs) {
     match args.command {
         RunsCommand::Inspect(inspect) => {
-            crate::inspect_run_record(&inspect.path, inspect.compare.as_deref());
+            let path = resolve_run_path_or_exit(inspect.path.as_deref(), &inspect.source).await;
+            crate::inspect_run_record(&path, inspect.compare.as_deref());
         }
-        RunsCommand::View(view) => print_view(&view.path, view.session, view.json),
+        RunsCommand::View(view) => {
+            let path = resolve_run_path_or_exit(view.path.as_deref(), &view.source).await;
+            print_view(&path, view.session, view.json);
+        }
         RunsCommand::Report(report) => {
             let code = crate::commands::run_report::run(report).await;
             if code != 0 {

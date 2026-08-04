@@ -425,9 +425,12 @@ or signature material has been changed.
 
 ## harn session
 
-Export, validate, import, and check canonical session bundles.
+List persisted sessions, and export, validate, import, and check canonical
+session bundles.
 
 ```bash
+harn session list
+harn session list --session-root /path/to/workspace --limit 10 --json
 harn session export .harn-runs/<run>/run.json --out run.bundle.json
 harn session export .harn-runs/<run>/run.json --local --out run.local.bundle.json
 harn session export .harn-runs/<run>/run.json --replay-only --out run.replay.bundle.json
@@ -438,6 +441,7 @@ harn session schema --check
 
 | Subcommand | Description |
 |---|---|
+| `list` | Lists the agent sessions persisted in `.harn/session-store.sqlite`, newest first, with status, event count, cost, and title. These ids are the input to `harn runs --from-session`. |
 | `export <run-record>` | Writes a `harn_session_bundle` envelope. Default output is sanitized; `--local` preserves local-only content; `--replay-only` withholds prompt/tool payload fields. |
 | `validate <bundle>` | Validates required fields, schema version, bundle type, and high-confidence secret markers without writing a run record. |
 | `import <bundle>` | Validates the bundle and materializes a local run record from `replay.run_record` or replay metadata. |
@@ -2553,7 +2557,35 @@ harn runs report .harn-runs/<run>.json
 harn runs report .harn-runs/<run>.json --events-db .harn/events.sqlite
 harn runs review --report run-report.json --rubric review-rubric.md --model <model>
 harn runs review --run-record .harn-runs/<run>.json --events-db .harn/events.sqlite
+harn runs report --from-session <session-id>
+harn runs report --from-session <session-id> --session-root /path/to/workspace
 ```
+
+### Reporting on a run that never wrote a run record
+
+Nothing on the agent-session path writes a run record: `save_run_record` is
+called from `std/records`, `std/workflow`, and `run_review`, so a record exists
+only when a Harn *script* asks for one. A host that drives the agent loop
+directly — an IDE, or a headless agent run — persists every event and no run
+record, which used to leave every command on this page inapplicable to it.
+
+`--from-session <id>` projects the run record from the session Harn already
+persisted, and every `harn runs` subcommand accepts it in place of a path.
+`--session-root` names the workspace holding `.harn/session-store.sqlite`,
+defaulting to the current directory. The projected record is written under
+`.harn-runs/<session-id>.json`, so a host can resolve a session's record by id
+without tracking a path.
+
+A projected record carries a `metadata.projected_from` block naming its source,
+the session's own status, and the fields the projection could not recover:
+`usage.total_duration_ms` (session `llm_call` events record tokens, cost, model,
+and provider, but no per-call latency — pass `--events-db` to add that from the
+event log), `policy`, and `replay_fixture`. Workflow-shaped fields — stages,
+transitions, checkpoints — come back empty because an agent session has none,
+which is the accurate reading rather than a missing value.
+
+A session left `open` by a host that exited without closing it still reports its
+loop's own terminal verdict, so a finished run is not described as running.
 
 `harn runs report` follows the root record's typed child-run pointers and emits
 the versioned `harn.run_report.v1` JSON projection. The report has one row per

@@ -16,6 +16,8 @@ use harn_session_store::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::agent_sessions::event_facts as facts;
+use crate::agent_sessions::event_facts::{semantic_string, semantic_value};
 use crate::event_log::{AnyEventLog, EventId, EventLog, LogError, LogEvent, Topic};
 use crate::orchestration::{load_run_record, RunRecord, RunTraceSpanRecord};
 use crate::redact::{current_policy, RedactionPolicy};
@@ -656,31 +658,10 @@ fn merge_stored_tool_result(existing: &mut SessionTimelineNode, mut event: Store
     debug_assert!(matches!(&event.kind, SessionEventKind::ToolResult));
     let source_event_id = event.headers.remove("source_event_id");
     let message_id = event.headers.remove("message_id");
-    let tool_name = semantic_string(
-        &event.payload,
-        &[
-            "/transcript_event/metadata/tool_name",
-            "/raw_message/name",
-            "/raw_message/tool_calls/0/name",
-        ],
-    );
-    let role = semantic_string(
-        &event.payload,
-        &["/transcript_event/role", "/raw_message/role"],
-    );
-    let output = semantic_value(
-        &event.payload,
-        &[
-            "/transcript_event/metadata/output",
-            "/raw_message/content",
-            "/transcript_event/text",
-        ],
-    );
-    let is_error = event
-        .payload
-        .pointer("/transcript_event/metadata/is_error")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false);
+    let tool_name = semantic_string(&event.payload, &facts::TOOL_NAME_ANY);
+    let role = semantic_string(&event.payload, &facts::ROLE);
+    let output = semantic_value(&event.payload, &facts::TOOL_OUTPUT_ANY);
+    let is_error = facts::bool_at(&event.payload, facts::TOOL_IS_ERROR);
     let end_ms = nonnegative_u64(event.ts_ms);
     let mut attributes = event.payload;
     if let serde_json::Value::Object(attributes) = &mut attributes {
@@ -802,28 +783,14 @@ fn stored_event_node(mut event: StoredEvent) -> SessionTimelineNode {
         SessionEventKind::ToolResult => tool_result_status(&event),
         SessionEventKind::Custom { custom_type } if custom_type == "agent_run_terminal" => event
             .payload
-            .pointer("/transcript_event/metadata/final_status")
+            .pointer(facts::FINAL_STATUS)
             .and_then(serde_json::Value::as_str)
             .unwrap_or("completed"),
         _ => "completed",
     }
     .to_string();
-    let tool_name = || {
-        semantic_string(
-            &event.payload,
-            &[
-                "/transcript_event/metadata/tool_name",
-                "/raw_message/name",
-                "/raw_message/tool_calls/0/name",
-            ],
-        )
-    };
-    let visible_text = || {
-        semantic_string(
-            &event.payload,
-            &["/transcript_event/text", "/raw_message/content"],
-        )
-    };
+    let tool_name = || semantic_string(&event.payload, &facts::TOOL_NAME_ANY);
+    let visible_text = || semantic_string(&event.payload, &facts::TEXT);
     let name = match &event.kind {
         SessionEventKind::ToolCall => tool_name().or_else(visible_text),
         // Result text is output, not the tool's product label. The
@@ -851,38 +818,18 @@ fn stored_event_node(mut event: StoredEvent) -> SessionTimelineNode {
         })
     })
     .collect();
-    let role = semantic_string(
-        &event.payload,
-        &["/transcript_event/role", "/raw_message/role"],
-    );
+    let role = semantic_string(&event.payload, &facts::ROLE);
     let semantic_attribute = match &event.kind {
-        SessionEventKind::ToolCall => semantic_value(
-            &event.payload,
-            &[
-                "/transcript_event/metadata/input",
-                "/raw_message/input",
-                "/raw_message/tool_calls/0/arguments",
-            ],
-        )
-        .map(|value| ("input", value)),
-        SessionEventKind::ToolResult => semantic_value(
-            &event.payload,
-            &[
-                "/transcript_event/metadata/output",
-                "/raw_message/content",
-                "/transcript_event/text",
-            ],
-        )
-        .map(|value| ("output", value)),
+        SessionEventKind::ToolCall => {
+            semantic_value(&event.payload, &facts::TOOL_INPUT_ANY).map(|value| ("input", value))
+        }
+        SessionEventKind::ToolResult => {
+            semantic_value(&event.payload, &facts::TOOL_OUTPUT_ANY).map(|value| ("output", value))
+        }
         _ => None,
     };
-    let is_error = matches!(&event.kind, SessionEventKind::ToolResult).then(|| {
-        event
-            .payload
-            .pointer("/transcript_event/metadata/is_error")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false)
-    });
+    let is_error = matches!(&event.kind, SessionEventKind::ToolResult)
+        .then(|| facts::bool_at(&event.payload, facts::TOOL_IS_ERROR));
     let mut attributes = event.payload;
     if let serde_json::Value::Object(attributes) = &mut attributes {
         attributes.insert("sessionId".to_string(), event.session_id.clone().into());
@@ -927,24 +874,6 @@ fn stored_event_node(mut event: StoredEvent) -> SessionTimelineNode {
     }
 }
 
-fn semantic_string(payload: &serde_json::Value, pointers: &[&str]) -> Option<String> {
-    pointers.iter().find_map(|pointer| {
-        payload
-            .pointer(pointer)
-            .and_then(serde_json::Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-    })
-}
-
-fn semantic_value(payload: &serde_json::Value, pointers: &[&str]) -> Option<serde_json::Value> {
-    pointers
-        .iter()
-        .find_map(|pointer| payload.pointer(pointer))
-        .cloned()
-}
-
 fn nonnegative_u64(value: i64) -> Option<u64> {
     u64::try_from(value).ok()
 }
@@ -972,12 +901,7 @@ fn merge_missing_attributes_owned(current: &mut serde_json::Value, previous: ser
 }
 
 fn tool_result_status(event: &StoredEvent) -> &'static str {
-    if event
-        .payload
-        .pointer("/transcript_event/metadata/is_error")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false)
-    {
+    if facts::bool_at(&event.payload, facts::TOOL_IS_ERROR) {
         "failed"
     } else {
         "completed"

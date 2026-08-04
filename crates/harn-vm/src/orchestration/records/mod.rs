@@ -6,6 +6,7 @@
 mod action_graph;
 mod diff;
 mod eval_pack;
+mod from_session;
 mod json;
 mod persistence;
 mod report;
@@ -27,6 +28,11 @@ pub use eval_pack::{
     load_eval_suite_manifest, normalize_eval_pack_manifest_value, normalize_eval_suite_manifest,
     replay_fixture_from_run, validate_eval_pack_split, EvalPackLiveExecutor,
     EvalPackLiveExecutorRequest, EvalPackLiveVerifyOutcome,
+};
+pub use from_session::{
+    default_projection_path, list_session_runs, materialize_session_run_record,
+    project_run_record_from_session, SessionRunSummary, AGENT_SESSION_WORKFLOW_ID,
+    PROJECTION_SOURCE, UNRECOVERABLE_FIELDS,
 };
 pub use persistence::{
     load_agent_session_replay_events, load_agent_session_replay_events_from_log, load_run_record,

@@ -1,5 +1,7 @@
 //! User-facing `harn runs review` adapter.
 
+use std::path::PathBuf;
+
 use crate::cli::RunsReviewArgs;
 
 pub(crate) async fn run(args: RunsReviewArgs) -> i32 {
@@ -13,7 +15,17 @@ pub(crate) async fn run(args: RunsReviewArgs) -> i32 {
         },
         None => harn_vm::orchestration::DEFAULT_RUN_REVIEW_RUBRIC.to_string(),
     };
-    let input = match (args.report, args.run_record) {
+    // A projected session yields a run record, so it joins the `--run-record`
+    // arm rather than becoming a third kind of review input. Clap's
+    // `review_input` group already guarantees exactly one of the three was
+    // given; this only decides which arm a `--from-session` lands in.
+    let run_record = match args.source.from_session {
+        Some(_) => Some(PathBuf::from(
+            crate::cli::resolve_run_path_or_exit(None, &args.source).await,
+        )),
+        None => args.run_record,
+    };
+    let input = match (args.report, run_record) {
         (Some(path), None) => harn_vm::orchestration::RunReviewInput::Report {
             path,
             allowed_roots: Vec::new(),
@@ -22,7 +34,9 @@ pub(crate) async fn run(args: RunsReviewArgs) -> i32 {
             super::run_report::request_for_run_record(run_record_path, args.events_db),
         ),
         _ => {
-            eprintln!("error: exactly one of --report or --run-record is required");
+            eprintln!(
+                "error: exactly one of --report, --run-record, or --from-session is required"
+            );
             return 2;
         }
     };
@@ -98,6 +112,7 @@ mod tests {
         let code = run(RunsReviewArgs {
             report: Some(report_path),
             run_record: None,
+            source: Default::default(),
             events_db: None,
             rubric: None,
             model: Some("gpt-5.6-luna".to_string()),

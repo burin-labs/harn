@@ -4,6 +4,11 @@ use std::cell::RefCell;
 #[derive(Debug, Clone)]
 pub struct LlmTraceEntry {
     pub model: String,
+    /// Provider that served the call. Carried alongside `model` because
+    /// catalog pricing resolves on the (provider, model) pair, and a trace
+    /// summary that priced by model alone would silently misprice every model
+    /// served by more than one provider.
+    pub provider: String,
     pub input_tokens: i64,
     pub output_tokens: i64,
     pub duration_ms: u64,
