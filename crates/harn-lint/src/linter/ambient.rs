@@ -369,6 +369,12 @@ impl Linter<'_> {
             return;
         }
         let (surface, route) = match exposure {
+            // A privileged artifact is exactly who `privileged_wire` admits, so
+            // reporting it there is a false positive — and one that lands on a
+            // host's entire corpus at once (harn#6162). `RuntimeInternal` keeps
+            // firing below: trusted dispatch says who may reach the wire, not
+            // that a compiler internal became source-visible.
+            BuiltinExposure::PrivilegedWire if self.trusted_host_dispatch => return,
             BuiltinExposure::PrivilegedWire => (
                 "a privileged embedder wire",
                 self.privileged_wire_route(args),

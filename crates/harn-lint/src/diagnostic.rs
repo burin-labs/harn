@@ -89,4 +89,14 @@ pub struct LintOptions<'a> {
     /// a rule to `error` or demote one to `info` via `[lint]`. Owned (not
     /// `&[..]`) because a `HashMap` reference has no const empty default.
     pub severity_overrides: std::collections::HashMap<String, LintSeverity>,
+    /// When true, this source is a privileged artifact, so calling a builtin
+    /// declared `privileged_wire` is sanctioned rather than a finding.
+    ///
+    /// This mirrors `harn check --trusted-host-dispatch`, which is how an
+    /// embedder type-checks the scripts it serves from its own host bridge.
+    /// The two surfaces answering differently is what made `HARN-LNT-072`
+    /// report a host's own corpus as broken (harn#6162). Only the
+    /// `privileged_wire` finding is suppressed: trusted dispatch says who may
+    /// reach the wire, not that a compiler internal became source-visible.
+    pub trusted_host_dispatch: bool,
 }

@@ -108,6 +108,9 @@ pub(crate) fn lint_file_inner(
         engine_rules: &engine_rules,
         native_rule_paths: &native_rule_paths,
         severity_overrides: lint_config.severity_overrides.clone(),
+        // Same trust decision the type-checker reads, so `check` and `lint`
+        // cannot disagree about who may reach a privileged wire (harn#6162).
+        trusted_host_dispatch: config.trusted_host_dispatch,
     };
     // Generated files (`*.generated.harn`) skip style/declaration lints inside
     // `lint_with_module_graph`; type diagnostics still flow so real correctness
@@ -195,6 +198,9 @@ pub(crate) fn lint_fix_file(
         engine_rules: &engine_rules,
         native_rule_paths: &native_rule_paths,
         severity_overrides: lint_config.severity_overrides.clone(),
+        // Same trust decision the type-checker reads, so `check` and `lint`
+        // cannot disagree about who may reach a privileged wire (harn#6162).
+        trusted_host_dispatch: config.trusted_host_dispatch,
     };
     // Generated files self-skip style lints inside `lint_with_module_graph`, so
     // no style-lint autofix edits are produced for them.

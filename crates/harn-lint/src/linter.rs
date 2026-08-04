@@ -74,6 +74,10 @@ pub(crate) struct Linter<'a> {
     pub(super) in_impl_block: bool,
     pub(super) source: Option<&'a str>,
     pub(super) file_path: Option<PathBuf>,
+    /// Whether this source runs as a privileged artifact, mirroring
+    /// `harn check --trusted-host-dispatch`. Set from
+    /// [`crate::LintOptions::trusted_host_dispatch`].
+    pub(super) trusted_host_dispatch: bool,
     /// Function names imported by other files (cross-module analysis).
     /// Functions in this set are not flagged as unused even if they have
     /// no local references, because another file explicitly imports them.
@@ -171,6 +175,7 @@ impl<'a> Linter<'a> {
             in_impl_block: false,
             source,
             file_path: None,
+            trusted_host_dispatch: false,
             externally_imported_names: HashSet::new(),
             test_pipeline_depth: 0,
             type_declarations: Vec::new(),

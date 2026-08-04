@@ -16,6 +16,24 @@ fn parse_and_lint(source: &str) -> Option<Vec<LintDiagnostic>> {
     Some(lint_with_source(&program, source))
 }
 
+/// Lint `source` as a privileged artifact, the way
+/// `harn lint --trusted-host-dispatch` does.
+fn lint_trusted(source: &str) -> Vec<LintDiagnostic> {
+    let tokens = Lexer::new(source).tokenize().expect("tokenize");
+    let program = Parser::new(tokens).parse().expect("parse");
+    crate::lint_full(
+        &program,
+        &[],
+        Some(source),
+        &std::collections::HashSet::new(),
+        &crate::LintOptions {
+            trusted_host_dispatch: true,
+            ..Default::default()
+        },
+        None,
+    )
+}
+
 /// The `non-source-callable-builtin` suggestion for `source`, or a panic
 /// naming what came out instead.
 fn wire_route(source: &str) -> String {
@@ -104,6 +122,73 @@ fn non_literal_operation_falls_back_to_the_generic_route() {
     assert!(
         route.contains("harness.<capability>.<operation>"),
         "suggestion should stay generic, got: {route}"
+    );
+}
+
+#[test]
+fn trusted_host_dispatch_does_not_report_a_privileged_wire() {
+    // A privileged artifact is exactly who `privileged_wire` admits. Reporting
+    // it there lands on a host's whole corpus at once — 84 findings in
+    // harn-cloud, 114 in burin-code (harn#6162).
+    let source =
+        "fn main(harness: Harness) {\n  let out = host_call(\"ast.outline\", {path: \"a.rs\"})\n}\n";
+    assert_eq!(
+        count_rule(&lint_source(source), "non-source-callable-builtin"),
+        1,
+        "untrusted lint must still report it"
+    );
+    assert_eq!(
+        count_rule(&lint_trusted(source), "non-source-callable-builtin"),
+        0,
+        "trusted host dispatch admits the wire"
+    );
+}
+
+#[test]
+fn trusted_host_dispatch_still_reports_a_runtime_internal() {
+    // The flag says who may reach a *wire*. A compiler/runtime internal is
+    // never source-visible, to anyone, so it must keep reporting under both
+    // regimes — otherwise the flag is a blanket mute rather than a trust
+    // decision.
+    //
+    // Registry-driven rather than a hardcoded name: the rule only reaches a
+    // `RuntimeInternal` when no migration recipe claims it first, and which
+    // names satisfy that moves as capabilities land. Pick whatever the live
+    // registry currently reports, then assert the flag does not silence it.
+    let probe = harn_vm::stdlib::stdlib_builtin_names()
+        .into_iter()
+        .filter(|name| !name.starts_with("__") && !name.starts_with("hostlib_"))
+        .filter(|name| !name.contains('.'))
+        .filter(|name| {
+            matches!(
+                harn_vm::stdlib::builtin_exposure(name),
+                Some(harn_builtin_meta::BuiltinExposure::RuntimeInternal)
+            )
+        })
+        .map(|name| format!("fn main(harness: Harness) {{\n  {name}()\n}}\n"))
+        .find(|source| {
+            parse_and_lint(source).is_some_and(|diagnostics| {
+                count_rule(&diagnostics, "non-source-callable-builtin") == 1
+            })
+        })
+        .expect("some runtime-internal builtin reports the rule");
+
+    assert_eq!(
+        count_rule(&lint_trusted(&probe), "non-source-callable-builtin"),
+        1,
+        "trusted host dispatch must not hide a runtime internal: {probe}"
+    );
+}
+
+#[test]
+fn trusted_host_dispatch_still_reports_a_migrated_ambient_builtin() {
+    // Measured on the real corpus: under the flag burin-code's HARN-LNT-072
+    // count goes to zero while its HARN-LNT-071 count stays at 99. The flag
+    // admits the wire and changes nothing about the capability migrations.
+    let source = "fn main(harness: Harness) {\n  log_info(\"hello\")\n}\n";
+    assert_eq!(
+        count_rule(&lint_trusted(source), "ambient-harness-method"),
+        1
     );
 }
 

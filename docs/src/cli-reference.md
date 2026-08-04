@@ -1053,6 +1053,26 @@ complete inline schema with `harn --json-schemas --command lint`, and decode it
 in Harn through `std/cli/envelope`. Diagnostic `span` values are UTF-8
 half-open byte offsets `[start, end)`.
 
+`--trusted-host-dispatch` lints the given files as privileged artifacts, so a
+call to a builtin declared `privileged_wire` — `host_call` and its kin — is
+sanctioned rather than a `HARN-LNT-072` finding. Use it when the host that
+serves those operations from its own bridge is the one linting them; ordinary
+source stays unprivileged. The flag mirrors
+[`harn check --trusted-host-dispatch`](#harn-check) and, like it, monotonically
+enables `[check] trusted_host_dispatch`. Declaring the key in `harn.toml` is
+usually better than passing the flag at every call site, because it governs
+`harn check` and `harn lint` together:
+
+```toml
+[check]
+trusted_host_dispatch = true
+```
+
+Only the `privileged_wire` finding is suppressed. The declaration says who may
+reach a wire, not that a runtime internal became source-visible, so a
+`runtime_internal` builtin and a capability method called as a bare global both
+keep reporting.
+
 `--require-public-api-types` reports every untyped public function or pipeline
 parameter and return as `HARN-LNT-067`. Set
 `[lint] require_public_api_types = true` in `harn.toml` to apply the same policy

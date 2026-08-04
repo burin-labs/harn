@@ -31,6 +31,9 @@ impl FixLintContext {
             engine_rules: &self.engine_rules,
             native_rule_paths: &self.native_rule_paths,
             severity_overrides: self.lint.severity_overrides.clone(),
+            // `harn fix` never rewrites a privileged wire — `HARN-LNT-072`
+            // carries no repair — so the trust flag would change nothing here.
+            trusted_host_dispatch: false,
         }
     }
 }

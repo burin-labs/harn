@@ -18,6 +18,24 @@ fn test_parses_public_api_type_lint_override() {
 }
 
 #[test]
+fn lint_parses_trusted_host_dispatch() {
+    // Spelled the same as `harn check --trusted-host-dispatch`, so a host
+    // linting the corpus it serves does not have to learn a second name.
+    let cli = Cli::parse_from(["harn", "lint", "--trusted-host-dispatch", "routes/"]);
+    let Command::Lint(args) = cli.command.unwrap() else {
+        panic!("expected lint command");
+    };
+    assert!(args.trusted_host_dispatch);
+    assert_eq!(args.targets, ["routes/"]);
+
+    let plain = Cli::parse_from(["harn", "lint", "routes/"]);
+    let Command::Lint(plain) = plain.command.unwrap() else {
+        panic!("expected lint command");
+    };
+    assert!(!plain.trusted_host_dispatch, "unprivileged by default");
+}
+
+#[test]
 fn lint_parses_changed_revision_mode_without_targets() {
     let cli = Cli::parse_from([
         "harn",

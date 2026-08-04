@@ -20,6 +20,12 @@ pub(crate) struct PathTargetsArgs {
     /// See `docs/src/cli-json-contract.md` for the envelope shape.
     #[arg(long)]
     pub json: bool,
+    /// Lint these files as privileged artifacts, so a call to a
+    /// `privileged_wire` builtin is sanctioned rather than a finding. Matches
+    /// `harn check --trusted-host-dispatch`; use it when the host serving
+    /// those operations is the one linting them.
+    #[arg(long = "trusted-host-dispatch")]
+    pub trusted_host_dispatch: bool,
     /// Only enforce diagnostics that overlap lines added since this Git revision.
     #[arg(
         long = "changed-from",
