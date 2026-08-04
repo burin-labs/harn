@@ -1,3 +1,9 @@
+//! `harn lint` over `.harn` sources.
+//!
+//! Every line this module prints is human-readable, so it all goes to stderr;
+//! see [`super::outcome::print_lint_diagnostics`] for why.
+#![deny(clippy::print_stdout)]
+
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process;
@@ -147,7 +153,7 @@ pub(crate) fn lint_file_inner(
     }
 
     if diagnostics.is_empty() {
-        println!("{path_str}: no issues found");
+        eprintln!("{path_str}: no issues found");
         return CommandOutcome::default();
     }
 
@@ -250,7 +256,7 @@ pub(crate) fn lint_fix_file(
         process::exit(1);
     });
 
-    println!("{path_str}: applied {applied} fix(es)");
+    eprintln!("{path_str}: applied {applied} fix(es)");
 
     let output2 = analyze_file(analysis, path, config, module_graph)
         .unwrap_or_else(|error| render_file_analysis_error_or_exit(&path_str, error));

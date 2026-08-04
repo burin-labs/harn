@@ -12,6 +12,10 @@
 //!   same format as `harn lint` uses for `.harn` files.
 //! - [`lint_prompt_fix_file`] — apply prompt-template fixes and report any
 //!   diagnostics that remain.
+//!
+//! Output goes to stderr in its entirety, like the `.harn` path; see
+//! [`super::outcome::print_lint_diagnostics`].
+#![deny(clippy::print_stdout)]
 
 use std::path::{Path, PathBuf};
 use std::process;
@@ -47,7 +51,7 @@ pub(crate) fn lint_prompt_file_inner(
     };
     let diagnostics = harn_lint::lint_prompt_template(&source, branch_threshold, disabled_rules);
     if diagnostics.is_empty() {
-        println!("{path_str}: no issues found");
+        eprintln!("{path_str}: no issues found");
         return CommandOutcome::default();
     }
     outcome_from_diagnostics(&path_str, &source, &diagnostics)
@@ -88,7 +92,7 @@ pub(crate) fn lint_prompt_fix_file(
         eprintln!("Failed to write {path_str}: {error}");
         process::exit(1);
     });
-    println!("{path_str}: applied {applied} fix(es)");
+    eprintln!("{path_str}: applied {applied} fix(es)");
 
     let remaining = harn_lint::lint_prompt_template(&fixed, branch_threshold, disabled_rules);
     outcome_from_diagnostics(&path_str, &fixed, &remaining)
