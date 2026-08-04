@@ -511,3 +511,54 @@ fn loud(slice) -> bool { return true }
         "expected confidence-range warning, got {warns:?}"
     );
 }
+
+#[test]
+fn test_host_entry_is_recognized_on_a_function() {
+    let warns = warnings(
+        r"
+@host_entry
+pub fn dispatch(harness: Harness, args: dict) -> dict { return args }
+",
+    );
+    assert!(
+        warns
+            .iter()
+            .all(|w| !w.contains("unknown attribute") && !w.contains("only applies")),
+        "`@host_entry` should be recognized on a function: {warns:?}"
+    );
+}
+
+#[test]
+fn test_host_entry_on_a_non_function_warns() {
+    let warns = warnings(
+        r"
+@host_entry
+pipeline dispatch(task) {}
+",
+    );
+    assert!(
+        warns
+            .iter()
+            .any(|w| w.contains("`@host_entry` only applies to function declarations")),
+        "expected an invalid-target warning, got {warns:?}"
+    );
+}
+
+/// The attribute records only *that* a host is the caller. Accepting an
+/// argument silently would let an author believe a name or capability list had
+/// been declared when nothing reads one.
+#[test]
+fn test_host_entry_arguments_warn() {
+    let warns = warnings(
+        r#"
+@host_entry(name: "dispatch")
+pub fn dispatch(harness: Harness) -> int { return 1 }
+"#,
+    );
+    assert!(
+        warns
+            .iter()
+            .any(|w| w.contains("`@host_entry` takes no arguments")),
+        "expected a no-arguments warning, got {warns:?}"
+    );
+}

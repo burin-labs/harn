@@ -1167,6 +1167,8 @@ fn capability_apply_does_not_double_insert_a_multi_capability_imported_prefix() 
 #[path = "capability_apply_tests/prefix_invariant.rs"]
 mod prefix_invariant;
 
+#[path = "capability_apply_tests/host_entry.rs"]
+mod host_entry;
 #[path = "capability_apply_tests/plan.rs"]
 mod plan;
 #[path = "capability_apply_tests/value_escape.rs"]

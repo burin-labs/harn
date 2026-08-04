@@ -46,10 +46,29 @@ pub struct RuntimeBoundaries {
     /// Named functions installed as a `handler:` field. This structural
     /// registration is stronger evidence than counting body uses.
     callbacks: BTreeSet<String>,
+    /// Named functions carrying [`HOST_ENTRY_ATTRIBUTE`].
+    host_entries: BTreeSet<String>,
     /// Whether this module is a connector, whose runtime exports are entered
     /// by the connector ABI rather than by local callers.
     connector_module: bool,
 }
+
+/// Declares that an embedding host, not a caller in this program, supplies a
+/// callable's arguments.
+///
+/// Every other boundary in [`RuntimeBoundaries`] is recognizable from something
+/// Harn owns — a name, a trigger signature, a `handler:` field, a package
+/// manifest. A function an embedding Rust host reaches through the runtime's
+/// call-into-script path has none of those: its only registration lives in the
+/// host's own source, which no Harn tool can read. Without a declaration the
+/// body is the sole evidence, and `harn fix` narrows the signature to what the
+/// body happens to touch — producing a parameter type the host cannot pass and
+/// a failure at dispatch rather than at `harn check` (#6193).
+///
+/// The type checker owns the recognized attribute vocabulary; a rename there
+/// that missed this name would show up as `test_host_entry_is_recognized_on_a_function`
+/// and `host_entry_suppresses_the_attenuation_diagnostic` failing together.
+const HOST_ENTRY_ATTRIBUTE: &str = "host_entry";
 
 impl RuntimeBoundaries {
     /// Collect the boundary set for a parsed module.
@@ -59,6 +78,7 @@ impl RuntimeBoundaries {
     #[must_use]
     pub fn collect(program: &[SNode], declared_connector_module: bool) -> Self {
         let mut callbacks = BTreeSet::new();
+        let mut host_entries = BTreeSet::new();
         let mut public_functions = BTreeSet::new();
         visit::walk_program(program, &mut |node| {
             if let Node::FnDecl {
@@ -66,6 +86,16 @@ impl RuntimeBoundaries {
             } = &node.node
             {
                 public_functions.insert(name.clone());
+            }
+            if let Node::AttributedDecl { attributes, inner } = &node.node {
+                if let Node::FnDecl { name, .. } = &inner.node {
+                    if attributes
+                        .iter()
+                        .any(|attribute| attribute.name == HOST_ENTRY_ATTRIBUTE)
+                    {
+                        host_entries.insert(name.clone());
+                    }
+                }
             }
             let Node::DictLiteral(entries) = &node.node else {
                 return;
@@ -95,6 +125,7 @@ impl RuntimeBoundaries {
                 .all(|name| public_functions.contains(*name));
         Self {
             callbacks,
+            host_entries,
             connector_module,
         }
     }
@@ -126,6 +157,7 @@ impl RuntimeBoundaries {
             || trigger_boundary
             || connector_boundary
             || self.callbacks.contains(name)
+            || self.host_entries.contains(name)
     }
 }
 
