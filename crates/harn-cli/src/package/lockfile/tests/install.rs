@@ -575,8 +575,56 @@ acme-lib = {{ git = "{git}", rev = "v1.0.0" }}
 
     install_packages_in(workspace.env(), false, None, false).unwrap();
     fs::remove_dir_all(cache_dir.join("git")).unwrap();
+    // The generation holds the same content, and resolution will now read the
+    // dependency's manifest from there rather than refetching. Remove it too,
+    // so this stays a test about content being available nowhere.
+    fs::remove_dir_all(current_packages_dir(root)).unwrap();
     let error = install_packages_in(workspace.env(), true, None, true).unwrap_err();
     assert!(error.to_string().contains("offline mode"));
+}
+
+/// Resolution reads each dependency's manifest to walk transitive dependencies.
+/// It used to take that read from the package cache, so populating the cache --
+/// a network fetch when cold -- was required even by a fully pinned lock. The
+/// generation already holds that content at the hash the lock pins, so it can
+/// answer the same question without the source being reachable at all.
+#[test]
+fn offline_locked_install_resolves_from_the_generation_when_the_cache_is_gone() {
+    let (_repo_tmp, repo, _branch) = create_git_package_repo();
+    let project_tmp = tempfile::tempdir().unwrap();
+    let root = project_tmp.path();
+    let workspace = TestWorkspace::new(root);
+    let cache_dir = workspace.cache_dir();
+    fs::create_dir_all(root.join(".git")).unwrap();
+    let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
+    fs::write(
+        root.join(MANIFEST),
+        format!(
+            r#"
+[package]
+name = "workspace"
+version = "0.1.0"
+
+[dependencies]
+acme-lib = {{ git = "{git}", rev = "v1.0.0" }}
+"#
+        ),
+    )
+    .unwrap();
+
+    install_packages_in(workspace.env(), false, None, false).unwrap();
+    // Neither the cache nor the origin survives; only the materialized
+    // generation does.
+    fs::remove_dir_all(cache_dir.join("git")).unwrap();
+    fs::remove_dir_all(&repo).unwrap();
+
+    let installed = install_packages_in(workspace.env(), true, None, true).unwrap();
+
+    assert_eq!(installed, 1);
+    assert!(current_packages_dir(root)
+        .join("acme-lib")
+        .join("lib.harn")
+        .is_file());
 }
 
 #[test]

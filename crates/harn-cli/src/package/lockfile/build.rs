@@ -4,6 +4,34 @@
 
 use super::resolution::fill_provenance;
 use crate::package::*;
+use harn_modules::package_snapshot::PackageSnapshot;
+
+/// The dependency's directory inside the current package generation, when what
+/// is materialized there is exactly the content the lock pins.
+///
+/// Resolution needs each dependency's own manifest in order to walk transitive
+/// dependencies. Reading it from the package cache means *populating* the cache,
+/// and populating it on a cold cache means fetching from the source -- so a
+/// fully pinned lock still required the network on every install, and for a
+/// private git dependency it required credentials that automated bumps do not
+/// carry.
+///
+/// The generation already holds that content, checked against the same
+/// `content_hash` the cache itself would be verified against. A matching hash
+/// means the bytes are the ones the source would have served, so the manifest
+/// read is equivalent and the fetch is redundant. On any mismatch -- a changed
+/// pin, a new dependency, a missing generation -- this yields nothing and the
+/// caller fetches as before.
+fn materialized_package_dir(
+    ctx: &ManifestContext,
+    alias: &str,
+    expected_hash: &str,
+) -> Option<PathBuf> {
+    let snapshot = PackageSnapshot::acquire(&ctx.dir).ok()??;
+    let directory = snapshot.packages_root().join(alias);
+    (directory.is_dir() && materialized_hash_matches(&directory, expected_hash))
+        .then_some(directory)
+}
 
 pub(crate) fn dependency_conflict_message(
     existing: &LockEntry,
@@ -210,16 +238,21 @@ pub(crate) fn build_lockfile(
                         .content_hash
                         .as_deref()
                         .ok_or_else(|| format!("missing content hash for {alias}"))?;
-                    ensure_git_cache_populated_in(
-                        workspace,
-                        url,
-                        &entry.source,
-                        commit,
-                        Some(expected_hash),
-                        false,
-                        offline,
-                    )?;
-                    let cache_dir = git_cache_dir_in(workspace, &entry.source, commit)?;
+                    let cache_dir = match materialized_package_dir(ctx, &alias, expected_hash) {
+                        Some(dir) => dir,
+                        None => {
+                            ensure_git_cache_populated_in(
+                                workspace,
+                                url,
+                                &entry.source,
+                                commit,
+                                Some(expected_hash),
+                                false,
+                                offline,
+                            )?;
+                            git_cache_dir_in(workspace, &entry.source, commit)?
+                        }
+                    };
                     if entry.manifest_digest.is_none()
                         || entry.package_version.is_none()
                         || entry.provenance.is_none()
@@ -247,15 +280,20 @@ pub(crate) fn build_lockfile(
                         .content_hash
                         .as_deref()
                         .ok_or_else(|| format!("missing content hash for {alias}"))?;
-                    ensure_archive_cache_populated_in(
-                        workspace,
-                        url,
-                        &entry.source,
-                        expected_hash,
-                        false,
-                        offline,
-                    )?;
-                    let cache_dir = archive_cache_dir_in(workspace, &entry.source, expected_hash)?;
+                    let cache_dir = match materialized_package_dir(ctx, &alias, expected_hash) {
+                        Some(dir) => dir,
+                        None => {
+                            ensure_archive_cache_populated_in(
+                                workspace,
+                                url,
+                                &entry.source,
+                                expected_hash,
+                                false,
+                                offline,
+                            )?;
+                            archive_cache_dir_in(workspace, &entry.source, expected_hash)?
+                        }
+                    };
                     if entry.manifest_digest.is_none()
                         || entry.package_version.is_none()
                         || entry.provenance.is_none()
