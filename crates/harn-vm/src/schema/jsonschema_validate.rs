@@ -4,7 +4,7 @@ use std::sync::{Arc, OnceLock};
 use crate::value::{StructLayout, VmValue};
 
 use super::canonicalize::{canonical_to_json_schema, resolve_canonical_ref_with_path};
-use super::limits::SchemaTraversal;
+use super::limits::{with_child_ref_budget, SchemaTraversal};
 use super::result::{ValidationIssue, ValidationResult};
 use super::type_check::{actual_value_type, schema_type_name, value_matches_type};
 use super::validate::ValidationOptions;
@@ -423,9 +423,27 @@ fn validate_harn_types_inner(
                 if let (Some(child), Some(child_schema)) =
                     (fields.get(name), child_schema.as_dict())
                 {
+                    with_child_ref_budget(traversal, |traversal| {
+                        validate_harn_types(
+                            child,
+                            child_schema,
+                            root,
+                            &child_path(path, name),
+                            numeric_compat,
+                            traversal,
+                            ref_stack,
+                            errors,
+                        );
+                    });
+                }
+            }
+        }
+        if let Some(VmValue::Dict(extra_schema)) = schema.get("additional_properties") {
+            for (name, child) in fields.iter().filter(|(name, _)| !known.contains(*name)) {
+                with_child_ref_budget(traversal, |traversal| {
                     validate_harn_types(
                         child,
-                        child_schema,
+                        extra_schema,
                         root,
                         &child_path(path, name),
                         numeric_compat,
@@ -433,37 +451,25 @@ fn validate_harn_types_inner(
                         ref_stack,
                         errors,
                     );
-                }
-            }
-        }
-        if let Some(VmValue::Dict(extra_schema)) = schema.get("additional_properties") {
-            for (name, child) in fields.iter().filter(|(name, _)| !known.contains(*name)) {
-                validate_harn_types(
-                    child,
-                    extra_schema,
-                    root,
-                    &child_path(path, name),
-                    numeric_compat,
-                    traversal,
-                    ref_stack,
-                    errors,
-                );
+                });
             }
         }
     } else if let (Some(items), Some(VmValue::Dict(item_schema))) =
         (collection_items(value), schema.get("items"))
     {
         for (index, child) in items.iter().enumerate() {
-            validate_harn_types(
-                child,
-                item_schema,
-                root,
-                &index_path(path, index),
-                numeric_compat,
-                traversal,
-                ref_stack,
-                errors,
-            );
+            with_child_ref_budget(traversal, |traversal| {
+                validate_harn_types(
+                    child,
+                    item_schema,
+                    root,
+                    &index_path(path, index),
+                    numeric_compat,
+                    traversal,
+                    ref_stack,
+                    errors,
+                );
+            });
         }
     }
 }
@@ -547,15 +553,15 @@ fn apply_defaults_inner(
                     continue;
                 };
                 if let Some(child) = fields.get(name).cloned() {
-                    fields.insert(
-                        name.clone(),
-                        apply_defaults(&child, child_schema, root, numeric_compat, traversal),
-                    );
+                    let normalized = with_child_ref_budget(traversal, |traversal| {
+                        apply_defaults(&child, child_schema, root, numeric_compat, traversal)
+                    });
+                    fields.insert(name.clone(), normalized);
                 } else if let Some(default) = child_schema.get("default") {
-                    fields.insert(
-                        name.clone(),
-                        apply_defaults(default, child_schema, root, numeric_compat, traversal),
-                    );
+                    let normalized = with_child_ref_budget(traversal, |traversal| {
+                        apply_defaults(default, child_schema, root, numeric_compat, traversal)
+                    });
+                    fields.insert(name.clone(), normalized);
                 }
             }
         }
@@ -569,7 +575,11 @@ fn apply_defaults_inner(
     {
         let values = items
             .iter()
-            .map(|item| apply_defaults(item, item_schema, root, numeric_compat, traversal))
+            .map(|item| {
+                with_child_ref_budget(traversal, |traversal| {
+                    apply_defaults(item, item_schema, root, numeric_compat, traversal)
+                })
+            })
             .collect::<Vec<_>>();
         return if matches!(normalized, VmValue::Set(_)) {
             VmValue::set(values)

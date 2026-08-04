@@ -260,14 +260,18 @@ fn first_object_param_error(
                 continue;
             };
             let child_param = format!("{param_name}.{key}");
-            if let Some(error) = first_param_validation_error_inner(
+            // Each field gets the same `$ref` budget; see `with_child_ref_budget`.
+            let mark = context.traversal.ref_budget_mark();
+            let error = first_param_validation_error_inner(
                 child,
                 child_schema,
                 root_schema,
                 &child_param,
                 options,
                 context,
-            ) {
+            );
+            context.traversal.restore_ref_budget(mark);
+            if let Some(error) = error {
                 return Some(error);
             }
         }
@@ -284,14 +288,17 @@ fn first_object_param_error(
         Some(VmValue::Dict(extra_schema)) => {
             for (key, value) in fields.iter().filter(|(key, _)| !known_keys.contains(*key)) {
                 let child_param = format!("{param_name}.{key}");
-                if let Some(error) = first_param_validation_error_inner(
+                let mark = context.traversal.ref_budget_mark();
+                let error = first_param_validation_error_inner(
                     value,
                     extra_schema,
                     root_schema,
                     &child_param,
                     options,
                     context,
-                ) {
+                );
+                context.traversal.restore_ref_budget(mark);
+                if let Some(error) = error {
                     return Some(error);
                 }
             }

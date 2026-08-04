@@ -227,6 +227,68 @@ fn many_refs_are_rejected_at_expansion_limit() {
     assert_schema_error_contains(&schema, "schema $ref expansion limit exceeded (256)");
 }
 
+/// A `$ref` item schema costs one expansion per element, which is ordinary work
+/// and must not be charged against a document-wide budget.
+///
+/// Spending the budget across the whole value made validation reject data for
+/// being large: past the 256th element every remaining element failed with
+/// "schema $ref expansion limit exceeded", naming the data when the data was
+/// fine. Observed on a real host response — `run_command` returns
+/// `process_cleanup.reaped_children`, an array whose items are a `$ref`, and on
+/// a busy machine the whole call threw rather than returning its result.
+#[test]
+fn a_wide_array_of_ref_items_is_not_charged_a_document_wide_budget() {
+    let schema = make_vm_dict(vec![
+        ("type", s("list")),
+        (
+            "items",
+            make_vm_dict(vec![("$ref", s("#/definitions/Int"))]),
+        ),
+        (
+            "definitions",
+            make_vm_dict(vec![("Int", make_vm_dict(vec![("type", s("int"))]))]),
+        ),
+    ]);
+    let canonical = canonicalize_schema_value(&schema).expect("schema canonicalizes");
+
+    let width = DEFAULT_SCHEMA_MAX_REF_EXPANSIONS * 4;
+    let value = make_list((0..width).map(|index| VmValue::Int(index as i64)).collect());
+    let report = validate_schema_value(
+        &value,
+        &canonical,
+        ValidationOptions {
+            apply_defaults: false,
+            numeric_compat: false,
+        },
+    );
+    assert!(
+        report.errors.is_empty(),
+        "a {width}-element array of ints should validate, got {:?}",
+        report.errors
+    );
+
+    // The budget still has to catch a genuinely bad element anywhere in the
+    // array, so the fix must not have turned validation off past element 256.
+    let mut mixed = (0..width)
+        .map(|index| VmValue::Int(index as i64))
+        .collect::<Vec<_>>();
+    mixed[width - 1] = s("not an int");
+    let report = validate_schema_value(
+        &make_list(mixed),
+        &canonical,
+        ValidationOptions {
+            apply_defaults: false,
+            numeric_compat: false,
+        },
+    );
+    assert_eq!(
+        report.errors.len(),
+        1,
+        "the last element is still checked: {:?}",
+        report.errors
+    );
+}
+
 #[test]
 fn deep_ref_chain_is_rejected_at_depth_limit() {
     let schema = deep_ref_chain_schema(DEFAULT_SCHEMA_MAX_DEPTH + 2);
@@ -296,6 +358,45 @@ fn runtime_param_schema_cycles_are_rejected() {
             .to_string()
             .contains("cyclic schema reference: # -> #"),
         "expected cyclic-ref error, got {error:?}"
+    );
+}
+
+/// The request side of the same budget.
+///
+/// The schema here holds a single `$ref`; the breadth is in the *value*, which
+/// is where a caller's data lives. Each field costs one expansion, so charging
+/// them to one budget rejected a parameter for having many keys.
+#[test]
+fn a_wide_object_param_is_not_charged_a_document_wide_budget() {
+    let schema = make_vm_dict(vec![
+        ("type", s("dict")),
+        (
+            "additional_properties",
+            make_vm_dict(vec![("$ref", s("#/definitions/Str"))]),
+        ),
+        (
+            "definitions",
+            make_vm_dict(vec![("Str", make_vm_dict(vec![("type", s("string"))]))]),
+        ),
+    ]);
+
+    let width = DEFAULT_SCHEMA_MAX_REF_EXPANSIONS * 2;
+    let mut fields = BTreeMap::new();
+    for index in 0..width {
+        fields.insert(format!("f{index:04}"), s("ok"));
+    }
+
+    schema_assert_param(&VmValue::dict(fields.clone()), "payload", &schema)
+        .expect("a wide object parameter should validate");
+
+    // And a wrong field past the old cutoff is still reported.
+    let last = format!("f{:04}", width - 1);
+    fields.insert(last.clone(), VmValue::Int(7));
+    let error = schema_assert_param(&VmValue::dict(fields), "payload", &schema)
+        .expect_err("the last field is still checked");
+    assert!(
+        error.to_string().contains(&format!("payload.{last}")),
+        "expected the offending field to be named, got {error:?}"
     );
 }
 
