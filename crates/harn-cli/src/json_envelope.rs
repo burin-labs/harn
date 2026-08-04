@@ -238,7 +238,7 @@ pub fn catalog() -> Vec<SchemaEntry> {
             schema_json: None,
         },
         SchemaEntry {
-            command: "check provider-matrix",
+            command: "check --provider-matrix",
             schema_version: crate::commands::check::provider_matrix::PROVIDER_MATRIX_SCHEMA_VERSION,
             description: "Provider/model capability matrix rows.",
             schema_json: None,
@@ -347,7 +347,7 @@ pub fn catalog() -> Vec<SchemaEntry> {
             schema_json: None,
         },
         SchemaEntry {
-            command: "check connector-matrix",
+            command: "check --connector-matrix",
             schema_version: crate::commands::check::connector_matrix::CONNECTOR_MATRIX_SCHEMA_VERSION,
             description: "Connector package capability matrix rows.",
             schema_json: None,
@@ -374,13 +374,13 @@ pub fn catalog() -> Vec<SchemaEntry> {
             schema_json: None,
         },
         SchemaEntry {
-            command: "fix plan",
+            command: "fix --plan",
             schema_version: crate::commands::fix::FIX_PLAN_SCHEMA_VERSION,
             description: "Plan repair-bearing diagnostics without editing files.",
             schema_json: None,
         },
         SchemaEntry {
-            command: "fix apply",
+            command: "fix --apply",
             schema_version: crate::commands::fix::FIX_APPLY_SCHEMA_VERSION,
             description: "Apply clean repair edits at or below a declared safety ceiling.",
             schema_json: None,
@@ -484,6 +484,102 @@ mod tests {
         value: u32,
     }
 
+    /// Split a catalog row into subcommand paths plus any trailing flags.
+    ///
+    /// Rows are not all plain subcommand paths:
+    /// `"portable compile|start|resume"` covers three siblings, and
+    /// `"test --json-out"` names a command *and* one of its flags.
+    fn catalog_command_paths(command: &str) -> (Vec<Vec<String>>, Vec<String>) {
+        let tokens: Vec<&str> = command.split_whitespace().collect();
+        let split = tokens
+            .iter()
+            .position(|token| token.starts_with('-'))
+            .unwrap_or(tokens.len());
+        let (subcommands, flags) = tokens.split_at(split);
+        let flags = flags.iter().map(|f| f.to_string()).collect();
+        let Some((leaves, prefix)) = subcommands.split_last() else {
+            return (Vec::new(), flags);
+        };
+        let paths = leaves
+            .split('|')
+            .map(|leaf| {
+                let mut path: Vec<String> = prefix.iter().map(|s| (*s).to_string()).collect();
+                path.push(leaf.to_string());
+                path
+            })
+            .collect();
+        (paths, flags)
+    }
+
+    fn resolve_command<'a>(root: &'a clap::Command, path: &[String]) -> Option<&'a clap::Command> {
+        let mut current = root;
+        for segment in path {
+            current = current.get_subcommands().find(|sub| {
+                sub.get_name() == segment || sub.get_all_aliases().any(|alias| alias == segment)
+            })?;
+        }
+        Some(current)
+    }
+
+    /// Every catalog row must name a command the CLI actually exposes.
+    ///
+    /// `catalog()` is hand-maintained next to clap's command tree, so the two
+    /// are separate owners of one surface and drift silently. They did: the
+    /// catalog kept saying `skills list` after #3664 renamed the noun to
+    /// `skill`, and the only coverage that noticed lived in the nightly-only
+    /// e2e suite, where it sat red for three nights.
+    #[test]
+    fn catalog_commands_exist_in_the_cli() {
+        use clap::CommandFactory;
+        let root = crate::cli::Cli::command();
+        // Collect every mismatch rather than panicking on the first: drift
+        // arrives in batches after a rename, and fixing them one CI run at a
+        // time is how this diverged in the first place.
+        // Rows whose trailing token is a positional *value*, not a subcommand.
+        // `harn test [TARGET]` documents `conformance` as one of its accepted
+        // values. Kept as an explicit list rather than relaxing the rule to
+        // "parent accepts positionals" — that relaxation would also have waved
+        // through `check provider-matrix`, which was a real bug this test found.
+        const POSITIONAL_VALUE_ROWS: &[&str] = &["test conformance"];
+
+        let mut drift = Vec::new();
+        for entry in catalog() {
+            if POSITIONAL_VALUE_ROWS.contains(&entry.command) {
+                continue;
+            }
+            let (paths, flags) = catalog_command_paths(entry.command);
+            for path in paths {
+                let Some(command) = resolve_command(&root, &path) else {
+                    drift.push(format!(
+                        "`{}` names no such command (row: `{}`)",
+                        path.join(" "),
+                        entry.command
+                    ));
+                    continue;
+                };
+                for flag in &flags {
+                    let long = flag.trim_start_matches('-');
+                    if !command
+                        .get_arguments()
+                        .any(|arg| arg.get_long() == Some(long))
+                    {
+                        drift.push(format!(
+                            "`{}` takes no `{flag}` (row: `{}`)",
+                            path.join(" "),
+                            entry.command
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(
+            drift.is_empty(),
+            "`--json-schemas` advertises {} command(s) the CLI does not expose:\n  {}",
+            drift.len(),
+            drift.join("\n  ")
+        );
+    }
+
     #[test]
     fn ok_envelope_round_trips() {
         let env = JsonEnvelope::ok(7, Payload { value: 42 });
@@ -538,15 +634,15 @@ mod tests {
         let entries = catalog();
         let entry = entries
             .iter()
-            .find(|entry| entry.command == "fix plan")
-            .expect("fix plan schema should be registered");
+            .find(|entry| entry.command == "fix --plan")
+            .expect("fix --plan schema should be registered");
         assert_eq!(
             entry.schema_version,
             crate::commands::fix::FIX_PLAN_SCHEMA_VERSION
         );
         let entry = entries
             .iter()
-            .find(|entry| entry.command == "fix apply")
+            .find(|entry| entry.command == "fix --apply")
             .expect("fix apply schema should be registered");
         assert_eq!(
             entry.schema_version,

@@ -377,8 +377,11 @@ fn json_schemas_catalog_lists_skills_list_and_get() {
         .iter()
         .filter_map(|e| e["command"].as_str())
         .collect();
-    assert!(commands.contains("skills list"), "missing skills list");
-    assert!(commands.contains("skills get"), "missing skills get");
+    // Singular since #3664 unified the noun. `harn skills` is gone outright —
+    // it exits with `unrecognized subcommand 'skills'` — so the catalog naming
+    // it would have been the bug.
+    assert!(commands.contains("skill list"), "missing skill list");
+    assert!(commands.contains("skill get"), "missing skill get");
 }
 
 fn write_disk_skill(path: &Path, name: &str) {
