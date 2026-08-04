@@ -105,6 +105,7 @@ GATES=(
   check-diagnostics-catalog
   check-protocol-artifacts
   check-connector-schemas
+  check-harness-migrations
   check-openapi-snapshot
   check-session-bundle-schema
   check-provider-catalog

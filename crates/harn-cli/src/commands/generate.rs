@@ -46,6 +46,12 @@ pub(crate) fn dispatch(command: Command) {
                 args.artifact_version.as_deref(),
             );
         }
+        Command::DumpHarnessMigrations(args) => {
+            let code = commands::harness_migration_codegen::run(&args);
+            if code != 0 {
+                process::exit(code);
+            }
+        }
         Command::ConnectorSchemaCodegen(args) => {
             let code = commands::connector_schema_codegen::run(&args);
             if code != 0 {

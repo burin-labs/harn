@@ -6,6 +6,29 @@ use yansi::{Color, Paint};
 use crate::diagnostic_codes::Repair;
 use crate::ParserError;
 
+mod harness_migrations_generated;
+
+/// The typed harness path that replaced a removed global, from the generated
+/// projection of `harn_vm::stdlib::harness_migration_for_builtin`.
+///
+/// `harn-parser` compiles below `harn-vm`, so it cannot query the registry;
+/// `make gen-harness-migrations` emits the table and
+/// `make check-harness-migrations` keeps it from drifting.
+///
+/// **This is the fallback, not the first answer.** The hand-written tables
+/// above it encode migration decisions the registry cannot express, because the
+/// registry is keyed by name and some legacy globals collide with unrelated
+/// typed methods — the ambient `read_file` migrated to `harness.fs.read_text`,
+/// but a *different* `harness.tools.read_file` also exists, and that is what a
+/// name lookup finds. [`removed_global_replacement`] composes the sources in
+/// the right order; [`HARNESS_MIGRATION_DISAGREEMENTS`] is the audited list.
+pub fn generated_harness_migration(name: &str) -> Option<&'static str> {
+    harness_migrations_generated::HARNESS_MIGRATIONS
+        .binary_search_by_key(&name, |(legacy, _)| *legacy)
+        .ok()
+        .map(|index| harness_migrations_generated::HARNESS_MIGRATIONS[index].1)
+}
+
 pub struct RelatedSpanLabel<'a> {
     pub span: &'a Span,
     pub label: &'a str,
@@ -157,6 +180,84 @@ pub fn renamed_stdlib_symbol(name: &str) -> Option<&'static str> {
         _ => None,
     }
 }
+
+/// What an undefined name *should* have been, for the type checker's
+/// "did you mean".
+///
+/// Three sources, narrowest first: the in-place renames above, then the
+/// `harness_*_replacement` families, then [`generated_harness_migration`] for
+/// the long tail — 417 generated rows against roughly 60 hand-written ones.
+///
+/// Deliberately separate from [`renamed_stdlib_symbol`], which the linter uses
+/// to decide whether to raise `HARN-LNT-001`. Widening *that* makes every
+/// migrated global draw two warnings: the rename lint and the capability-family
+/// lint that already claims the name (`HARN-LNT-052`/`053`/`054`/`057`/`071`).
+/// Measured before splitting them — a four-call probe went from four findings to
+/// eight. Which lint should own a name is a policy question; answering "what
+/// replaced it" is not, and only the type checker asks this one.
+///
+/// Order matters, and not for style. The generated table is keyed by builtin
+/// name, and some legacy globals share a name with an unrelated typed method —
+/// the ambient `read_file` migrated to `harness.fs.read_text`, while a separate
+/// `harness.tools.read_file` agent tool is what a name lookup finds.
+/// [`HARNESS_MIGRATION_DISAGREEMENTS`] pins those, so a new one is a build
+/// failure rather than a confidently wrong suggestion.
+pub fn removed_global_replacement(name: &str) -> Option<&'static str> {
+    if let Some(replacement) = renamed_stdlib_symbol(name) {
+        return Some(replacement);
+    }
+    for family in HARNESS_REPLACEMENT_FAMILIES {
+        if let Some(replacement) = family(name) {
+            return Some(replacement);
+        }
+    }
+    generated_harness_migration(name)
+}
+
+/// The `harness_*_replacement` families, in one list so anything meaning "any
+/// capability migration" walks the same set.
+///
+/// A new family belongs here as well as beside its siblings. Nothing proves
+/// that mechanically — Rust has no reflection over free functions — but this
+/// list is the only way anything reaches them in bulk, so forgetting it leaves
+/// the new family unreachable rather than half-wired.
+pub const HARNESS_REPLACEMENT_FAMILIES: &[fn(&str) -> Option<&'static str>] = &[
+    harness_clock_replacement,
+    harness_stdio_replacement,
+    harness_fs_replacement,
+    harness_env_replacement,
+    harness_random_replacement,
+    harness_net_replacement,
+];
+
+/// Legacy globals whose hand-written migration deliberately differs from what a
+/// name lookup in the generated table finds, with the reason.
+///
+/// Reviewed rather than discovered: a new entry means the runtime registry and
+/// the migration record disagree about a name, which is a finding to
+/// investigate — not a list to extend casually.
+pub const HARNESS_MIGRATION_DISAGREEMENTS: &[(&str, &str, &str)] = &[
+    (
+        "read_file",
+        "harness.fs.read_text",
+        "`harness.tools.read_file` is an agent tool, not the filesystem capability",
+    ),
+    (
+        "write_file",
+        "harness.fs.write_text",
+        "`harness.tools.write_file` is an agent tool, not the filesystem capability",
+    ),
+    (
+        "delete_file",
+        "harness.fs.delete",
+        "`harness.tools.delete_file` is an agent tool, not the filesystem capability",
+    ),
+    (
+        "elapsed",
+        "harness.clock.monotonic_ms",
+        "`elapsed` was renamed, so the same-named `harness.clock.elapsed` is not its successor",
+    ),
+];
 
 /// Map an ambient clock-capability builtin to its `harness.clock.*`
 /// replacement. Returns the new identifier text (including the receiver
@@ -957,5 +1058,93 @@ mod tests {
             parser_error_help(&err),
             Some("add a closing `}` to finish this block")
         );
+    }
+}
+
+#[cfg(test)]
+mod harness_migration_tests {
+    use super::{
+        generated_harness_migration, removed_global_replacement, renamed_stdlib_symbol,
+        HARNESS_MIGRATION_DISAGREEMENTS, HARNESS_REPLACEMENT_FAMILIES,
+    };
+
+    /// The case that motivated harn#6151: the type checker's fuzzy fallback
+    /// answered `uuid_v5` — a name-based UUID — for the time-ordered `uuid_v7`,
+    /// while the runtime record one crate away already knew the answer.
+    #[test]
+    fn a_migrated_global_resolves_instead_of_falling_through_to_a_guess() {
+        assert_eq!(
+            removed_global_replacement("uuid_v7"),
+            Some("harness.random.uuid_v7")
+        );
+        // And the linter's narrower question is unchanged, so `uuid_v7` does
+        // not start drawing a rename lint on top of its capability lint.
+        assert_eq!(renamed_stdlib_symbol("uuid_v7"), None);
+    }
+
+    /// The generated table is keyed by builtin name, and a few legacy globals
+    /// share a name with an unrelated typed method. The hand-written answer has
+    /// to win, or `harn check` sends a filesystem call to an agent tool.
+    #[test]
+    fn a_name_collision_resolves_to_the_migration_not_the_same_named_method() {
+        for (legacy, migration, reason) in HARNESS_MIGRATION_DISAGREEMENTS {
+            assert_eq!(
+                removed_global_replacement(legacy),
+                Some(*migration),
+                "`{legacy}` must resolve to its migration — {reason}"
+            );
+            assert_ne!(
+                generated_harness_migration(legacy),
+                Some(*migration),
+                "`{legacy}` is pinned as a disagreement but the generated table now \
+                 agrees; drop it from HARNESS_MIGRATION_DISAGREEMENTS"
+            );
+        }
+    }
+
+    /// Every hand-written family entry either matches the generated table or is
+    /// a pinned disagreement. A fifth divergence fails here rather than shipping
+    /// a confidently wrong "did you mean".
+    #[test]
+    fn no_unreviewed_disagreement_between_the_hand_written_and_generated_tables() {
+        let pinned: Vec<&str> = HARNESS_MIGRATION_DISAGREEMENTS
+            .iter()
+            .map(|(legacy, _, _)| *legacy)
+            .collect();
+        let mut unreviewed = Vec::new();
+        for (legacy, generated) in super::harness_migrations_generated::HARNESS_MIGRATIONS {
+            if pinned.contains(legacy) {
+                continue;
+            }
+            for family in HARNESS_REPLACEMENT_FAMILIES {
+                if let Some(hand_written) = family(legacy) {
+                    if hand_written != *generated {
+                        unreviewed.push(format!(
+                            "`{legacy}`: hand-written={hand_written} generated={generated}"
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(
+            unreviewed.is_empty(),
+            "these names disagree without a reviewed reason:\n{}",
+            unreviewed.join("\n")
+        );
+    }
+
+    /// The generator emits the table sorted; the lookup binary-searches it.
+    #[test]
+    fn the_generated_table_is_sorted_and_unique() {
+        let table = super::harness_migrations_generated::HARNESS_MIGRATIONS;
+        assert!(table.len() > 100, "expected the whole migrated surface");
+        for pair in table.windows(2) {
+            assert!(
+                pair[0].0 < pair[1].0,
+                "`{}` and `{}` are out of order or duplicated",
+                pair[0].0,
+                pair[1].0
+            );
+        }
     }
 }

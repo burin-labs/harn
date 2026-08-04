@@ -89,6 +89,18 @@ pub(crate) struct ConnectorSchemaCodegenArgs {
 }
 
 #[derive(Debug, Args)]
+pub(crate) struct DumpHarnessMigrationsArgs {
+    /// Path for the vendored generated Rust table (relative to the repo root).
+    #[arg(long, value_name = "FILE")]
+    pub out: Option<String>,
+    /// Verify the vendored table matches the runtime registry; exit non-zero if
+    /// stale. Used by CI to keep the type checker's "did you mean" answers from
+    /// drifting away from the migration record the linter uses.
+    #[arg(long)]
+    pub check: bool,
+}
+
+#[derive(Debug, Args)]
 pub(crate) struct DumpProtocolArtifactsArgs {
     /// Directory for generated protocol schemas and bindings.
     #[arg(long, default_value = "spec/protocol-artifacts")]

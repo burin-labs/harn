@@ -39,7 +39,7 @@ impl TypeChecker {
             .chain(scope.all_fn_names())
             .chain(imported.iter().cloned())
             .collect();
-        let suggestion = crate::diagnostic::renamed_stdlib_symbol(name)
+        let suggestion = crate::diagnostic::removed_global_replacement(name)
             .map(str::to_string)
             .or_else(|| {
                 crate::diagnostic::find_closest_match(
