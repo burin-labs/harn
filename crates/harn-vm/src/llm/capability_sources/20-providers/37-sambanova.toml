@@ -1,0 +1,155 @@
+# ---------- SambaNova Cloud — fast RDU OpenAI-compatible inference -----------
+# SambaNova serves large open weights (DeepSeek, Llama 4, Qwen) at high
+# throughput on an OpenAI chat-completions surface with native tool calls.
+# DeepSeek reasoning routes expose an inline thinking trace; Llama 4 routes
+# are non-thinking multimodal. Catalog keys are `sambanova/<wire>`.
+
+[[provider.sambanova]]
+model_match = "*deepseek-v3.2*"
+native_tools = true
+preferred_tool_format = "native"
+tool_mode_parity = "interchangeable"
+tool_mode_parity_notes = "2026-06-20 Harn agent-loop smoke: SambaNova DeepSeek-V3.2 completed both native and JSON tool loops with reasoning disabled. Earlier native false negatives were caused by Harn's parser treating terse final answers as billed no-ops; keep native preferred."
+structured_output = "native"
+thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.sambanova]]
+model_match = "*deepseek*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.sambanova]]
+model_match = "*llama*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+vision = true
+vision_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
+# probed 2026-06-24 (docs/eval/provider-tool-mode-sweep-2026-06-24.md, N=5,
+# forced-format single-tool authoring of a backslash-heavy Zig body): native
+# 0/5 fidelity AND json 0/5 fidelity (both mangle backslashes — the `\\` Zig
+# multiline prefix collapses to `\`), while heredoc text was 5/5 byte-clean. The
+# escape-free text channel is the only reliable carrier for code on this route.
+[[provider.sambanova]]
+model_match = "*minimax*"
+native_tools = true
+preferred_tool_format = "text"
+tool_mode_parity = "native_unreliable"
+tool_mode_parity_notes = "2026-06-24 forced-format sweep (N=5): SambaNova MiniMax-M2.7 corrupted a backslash-heavy body on BOTH native (0/5) and fenced-JSON (0/5); heredoc text carried it byte-clean 5/5."
+structured_output = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.sambanova]]
+model_match = "*gemma-4*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+vision = true
+vision_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+# SambaNova-hosted GPT-OSS is the same Harmony model as cerebras/fireworks
+# gpt-oss-120b. Placed BEFORE the catch-all `*` rule (first match wins) so it
+# does not fall through to the non-reasoning default — without it
+# `reasoning_required_for_tools` resolves OFF and the eval loop bills a
+# noncommittal because gpt-oss calls tools INSIDE the chain-of-thought channel.
+# Reasoning-effort thinking {low, medium, high}, `reasoning_required_for_tools =
+# true`. Must NOT carry a Qwen-style `auto_reasoning_overrides = "off"`.
+#
+# TOOL CHANNEL — PINNED TO TEXT (matches the Fireworks #3505 gpt-oss precedent).
+# SambaNova's gpt-oss native channel is a Harmony footgun: a 2026-06-24 Harn
+# agent-loop run (gpt-oss-120b, zig-feat, tool grounding present) ended with a
+# provider/tool-protocol failure on the native channel — the same empty
+# `tool_calls` / reasoning-channel-only class reported across the open-source
+# engines (vLLM #22578, vLLM #44216, SGLang #8976/#10738, openai/harmony #68,
+# HuggingFace openai/gpt-oss-20b discussion #80). The clean+reliable channel on
+# pay-per-token gpt-oss routes is TEXT (heredoc). `tool_mode_parity =
+# "native_unreliable"` makes a `native` pin auto-correct to `text` via
+# `validate_tool_format` with an explanatory `correction`, so no alias pin or
+# `--tool-format native` can silently re-introduce the protocol failure.
+# NOTE: this route is ALSO `serving_precision = "degraded"` (below) — even with
+# the text-channel pin it must not back a meter baseline.
+[[provider.sambanova]]
+model_match = "*gpt-oss*"
+native_tools = false
+preferred_tool_format = "text"
+tool_mode_parity = "native_unreliable"
+tool_mode_parity_notes = "2026-06-24 Harn agent-loop (gpt-oss-120b, zig-feat, tool grounding present): SambaNova native ended with a provider/tool-protocol failure (Harmony empty tool_calls / reasoning-channel-only class). Text/heredoc is the clean pay-per-token channel. See vLLM #22578/#44216, SGLang #8976/#10738, openai/harmony #68."
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high"]
+reasoning_required_for_tools = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+# SambaNova serves gpt-oss at DEGRADED quality (quantized). PROVEN during the
+# 2026-06 meter-convergence effort: c-feat 0/5 and cpp-storage 0/5 on SambaNova
+# vs 3/3 and 1/1 on the OpenRouter full-precision reference. The numbers looked
+# like a capability collapse but were provider contamination. The precision
+# canary MUST refuse to ledger a meter baseline on this route.
+serving_precision = "degraded"
+
+[[provider.sambanova]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"

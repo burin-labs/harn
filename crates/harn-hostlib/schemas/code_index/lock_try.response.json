@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/lock_try.response.json",
+  "title": "code_index.lock_try response",
+  "description": "Lock acquisition result. When `locked` is false, `holder` is the id of the agent currently holding the path (or null if the lock has just expired).",
+  "type": "object",
+  "properties": {
+    "locked": { "type": "boolean" },
+    "holder": { "type": ["integer", "null"], "minimum": 1 }
+  },
+  "required": ["locked", "holder"],
+  "additionalProperties": false
+}

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/manage_packages.request.json",
+  "title": "tools.manage_packages request",
+  "description": "Add, remove, or refresh project dependencies. The host is responsible for surfacing approval before any mutation actually runs.",
+  "type": "object",
+  "properties": {
+    "operation": {
+      "type": "string",
+      "enum": ["install", "add", "remove", "update", "refresh"]
+    },
+    "ecosystem": {
+      "type": "string",
+      "description": "e.g. \"cargo\", \"npm\", \"swift\", \"pip\"; resolved by the host when omitted."
+    },
+    "packages": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "cwd": { "type": "string" },
+    "dev": { "type": "boolean", "default": false }
+  },
+  "required": ["operation"],
+  "additionalProperties": false
+}

@@ -1,0 +1,66 @@
+{
+  "_type": "merge_captain_golden",
+  "scenario": "merge_group_failure_actionable",
+  "description": "A merge group fails. Merge Captain fetches logs, receives approval, marks the PR actionable, and opens a useful repair ticket.",
+  "max_model_calls": 1,
+  "max_tool_calls": 5,
+  "max_repeat": 1,
+  "require_approval_for": [
+    {"glob": "*merge_queue_return_actionable*"},
+    {"glob": "*ticket_create*"},
+    {"glob": "*merge_pull_request*"}
+  ],
+  "forbidden_actions": [
+    {"glob": "*force_push*"},
+    {"glob": "*merge_pull_request*"}
+  ],
+  "expected_state_transitions": [
+    "intake",
+    "observe_merge_group_failure",
+    "fetch_failure_logs",
+    "decide_repair",
+    "approval_gate",
+    "return_actionable",
+    "open_ticket"
+  ],
+  "state_steps": [
+    {
+      "step": "intake",
+      "tools": [{"glob": "*pull_request*"}],
+      "required": true
+    },
+    {
+      "step": "observe_merge_group_failure",
+      "tools": [{"glob": "*merge_queue_status*"}],
+      "verifier": true,
+      "required": true
+    },
+    {
+      "step": "fetch_failure_logs",
+      "tools": [{"glob": "*logs_fetch*"}],
+      "required": true
+    },
+    {
+      "step": "decide_repair",
+      "plan_fields": ["ticket_body"],
+      "required": true
+    },
+    {
+      "step": "approval_gate",
+      "events": ["feedback_injected"],
+      "approval_gate": true,
+      "required": true
+    },
+    {
+      "step": "return_actionable",
+      "tools": [{"glob": "*return_actionable*"}],
+      "merge_action": true,
+      "required": true
+    },
+    {
+      "step": "open_ticket",
+      "tools": [{"glob": "*ticket_create*"}],
+      "required": true
+    }
+  ]
+}

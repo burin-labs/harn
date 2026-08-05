@@ -1,0 +1,12 @@
+policy
+true
+secret_key field is reserved
+true
+false
+true
+false
+2
+channel_guardrail_blocked
+secret_key field is reserved
+channel_guardrail_warning
+panic channel under review

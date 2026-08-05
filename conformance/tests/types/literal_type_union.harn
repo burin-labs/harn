@@ -1,0 +1,27 @@
+/**
+ * Literal types can appear as union members in `type` aliases and
+ * on bare annotations. They round-trip through schema_of as enum schemas.
+ */
+type Verdict = "pass" | "fail" | "unclear"
+
+type Score = 0 | 1 | 2
+
+pipeline test(harness: Harness, task) {
+  // Assignable: a literal flows into its base-typed slot.
+  const v: Verdict = "pass"
+  const s: Score = 2
+  harness.stdio.println(v)
+  harness.stdio.println(s)
+  // schema_of emits canonical enum JSON Schema.
+  const vs = schema_of(Verdict)
+  const ss = schema_of(Score)
+  harness.stdio.println(vs.type)
+  harness.stdio.println(vs.enum)
+  harness.stdio.println(ss.type)
+  harness.stdio.println(ss.enum)
+  // schema_is accepts conforming values and rejects non-members.
+  harness.stdio.println(schema_is("fail", Verdict))
+  harness.stdio.println(schema_is("nope", Verdict))
+  harness.stdio.println(schema_is(1, Score))
+  harness.stdio.println(schema_is(5, Score))
+}

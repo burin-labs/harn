@@ -1,0 +1,107 @@
+[package]
+name = "harn-serve"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Shared outbound workflow server core for Harn adapters"
+
+[dependencies]
+async-trait = "0.1"
+axum = { version = "0.8", features = ["multipart", "ws"] }
+axum-server = { version = "0.8", features = ["tls-rustls"] }
+base64 = "0.22"
+bytes = "1"
+futures = "0.3"
+globset = "0.4"
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.57" }
+harn-clock = { path = "../harn-clock", version = "=0.10.57" }
+harn-modules = { path = "../harn-modules", version = "=0.10.57" }
+harn-parser = { path = "../harn-parser", version = "=0.10.57" }
+harn-session-store = { path = "../harn-session-store", version = "=0.10.57" }
+# `default-features = false` keeps the in-process embedding surface lean:
+# Postgres (sqlx) and the hostlib grammars are opt-in via this crate's
+# feature flags rather than dragged in unconditionally. harn-cli re-enables
+# the full set for CLI parity; Cargo's feature unification means any build
+# that includes harn-cli still gets everything.
+harn-vm = { path = "../harn-vm", version = "=0.10.57", default-features = false }
+harn-hostlib = { path = "../harn-hostlib", version = "=0.10.57", optional = true, default-features = false }
+hex = "0.4"
+hmac = "0.13"
+ipnet = "2"
+rcgen = "0.14"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rustls = { version = "0.23", features = ["aws-lc-rs"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml_ng = "0.10"
+sha2 = "0.11"
+subtle = "2"
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
+time = { version = "0.3", features = ["formatting"] }
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+toml = "1.1"
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.7", features = ["compression-br", "compression-gzip", "compression-zstd", "cors"] }
+tracing = "0.1"
+url = "2"
+uuid = { version = "1", features = ["v4", "v7"] }
+arcstr = { version = "1", features = ["serde", "std"] }
+
+[features]
+default = []
+
+# Wire hostlib's deterministic tools (file I/O, search, process, secret
+# store) into the server. No tree-sitter or grammars — the right set for
+# lightweight smoke evals and any in-process client that never issues an
+# AST-precise edit. All of `harn-serve`'s hostlib integration gates on this
+# feature, so the richer sets below build on top of it.
+hostlib = ["dep:harn-hostlib"]
+
+# hostlib + the full code-intelligence surface (tree-sitter + every grammar
+# family). The parity-critical set Burin's Rust TUI uses for evals that
+# exercise AST-precise edits, rename, or the symbol index.
+hostlib-full = ["hostlib", "harn-hostlib/full"]
+
+# Re-enable the VM's Postgres (`pg.*`) builtins, dropped here by default.
+vm-postgres = ["harn-vm/postgres"]
+
+# Re-enable the VM's SQLite (`sqlite_*`) builtins, dropped here by default.
+vm-sqlite = ["harn-vm/sqlite"]
+
+# Everything the full CLI ships, for consumers that want one-flag parity.
+full = ["hostlib-full", "vm-postgres", "vm-sqlite"]
+
+[dependencies.jsonwebtoken]
+# Used by the a2a-push OIDC verifier to opt callers into a non-default
+# JWT signing algorithm (e.g. HS256 for HMAC providers; default is
+# RS256). harn-vm already pins this transitive dep, but we name it
+# directly so the parse helper can refer to `jsonwebtoken::Algorithm`.
+version = "11"
+default-features = false
+features = ["use_pem", "aws_lc_rs"]
+
+[dev-dependencies]
+async-compression = { version = "0.4", features = ["tokio", "gzip"] }
+filetime = "0.2"
+# harn-serve depends on harn-vm with `default-features = false` (lean embedding
+# — see lean-embedding.yml), so the `pg.*` builtins are off in the library
+# build. A handful of integration tests (e.g. the `@budget(pg_queries)` gate in
+# tests/limits_loadgen.rs) drive a `pg_mock_pool` against the dispatch core and
+# need those builtins registered. Re-declaring harn-vm here with `postgres`
+# turns it on for harn-serve's OWN test/bench builds only: cargo merges normal +
+# dev dependency features for test targets, while the library build and every
+# downstream embedder still see the lean `default-features = false` view. This
+# makes `cargo nextest run -p harn-serve` green in isolation without the test
+# silently relying on workspace-wide feature unification (which masked the gap:
+# it passed under `--workspace` but failed under `-p harn-serve`).
+harn-vm = { path = "../harn-vm", version = "=0.10.57", default-features = false, features = ["postgres"] }
+futures-util = "0.3"
+hex = "0.4"
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+
+[lints]
+workspace = true

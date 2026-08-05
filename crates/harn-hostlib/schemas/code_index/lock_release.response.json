@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/lock_release.response.json",
+  "title": "code_index.lock_release response",
+  "description": "Always `true`; unknown agent/path pairs resolve to a no-op.",
+  "type": "boolean"
+}

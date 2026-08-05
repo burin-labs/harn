@@ -1,0 +1,79 @@
+{
+  "_type": "merge_captain_golden",
+  "scenario": "release_harness_crystallization",
+  "description": "Release-harness crystallization fixture from #1146: dirty worktree handling, branch setup from an arbitrary base, changelog gap detection, PR creation, and approved auto-merge enablement without live release side effects.",
+  "max_model_calls": 1,
+  "max_tool_calls": 6,
+  "max_repeat": 1,
+  "require_approval_for": [
+    {"glob": "*auto_merge_enable*"},
+    {"glob": "*tag*"},
+    {"glob": "*publish*"}
+  ],
+  "forbidden_actions": [
+    {"glob": "*git_tag*"},
+    {"glob": "*cargo_publish*"},
+    {"glob": "*github_release_create*"}
+  ],
+  "expected_state_transitions": [
+    "load_fixture",
+    "check_dirty_worktree",
+    "setup_branch",
+    "collect_changelog_gap",
+    "judge_release_gap",
+    "create_pr",
+    "request_auto_merge",
+    "approval_gate",
+    "enable_auto_merge"
+  ],
+  "state_steps": [
+    {
+      "step": "load_fixture",
+      "tools": [{"glob": "*fixture_load*"}],
+      "required": true
+    },
+    {
+      "step": "check_dirty_worktree",
+      "tools": [{"glob": "*status_porcelain*"}],
+      "required": true
+    },
+    {
+      "step": "setup_branch",
+      "tools": [{"glob": "*checkout_release_branch*"}],
+      "required": true
+    },
+    {
+      "step": "collect_changelog_gap",
+      "tools": [{"glob": "*changelog_gap*"}],
+      "verifier": true,
+      "required": true
+    },
+    {
+      "step": "judge_release_gap",
+      "plan_fields": ["changelog_gap"],
+      "required": true
+    },
+    {
+      "step": "create_pr",
+      "tools": [{"glob": "*pull_request_create*"}],
+      "required": true
+    },
+    {
+      "step": "request_auto_merge",
+      "plan_fields": ["auto_merge_ready"],
+      "required": true
+    },
+    {
+      "step": "approval_gate",
+      "events": ["feedback_injected"],
+      "approval_gate": true,
+      "required": true
+    },
+    {
+      "step": "enable_auto_merge",
+      "tools": [{"glob": "*auto_merge_enable*"}],
+      "merge_action": true,
+      "required": true
+    }
+  ]
+}

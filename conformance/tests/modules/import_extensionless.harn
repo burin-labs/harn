@@ -1,0 +1,6 @@
+import "lib/helpers"
+
+pipeline test(harness: Harness, task) {
+  harness.stdio.log(double(3))
+  harness.stdio.log(greet("harn"))
+}

@@ -1,0 +1,114 @@
+# nonascii quoted value
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"café ☕ 日本"}
+  prose=""
+  answer=null
+  done=null
+# nonascii template value
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"café ☕ 日本"}
+  prose=""
+  answer=null
+  done=null
+# nonascii tagged value
+  calls=1 errors=0 violations=0 stray=0
+  call run {"command":"café ☕ 日本"}
+  prose=""
+  answer=null
+  done=null
+# object literal between prose lines
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"package a\n","path":"a.go"}
+  prose="I'll write the scaffold now.\n\nThat should work."
+  answer=null
+  done=null
+# multiline template literal body
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"replace_body","new_body":"\nfunc Foo() {\n    return 1\n}\n","path":"a.go"}
+  prose=""
+  answer=null
+  done=null
+# escaped backtick inside template literal
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"line with a ` backtick","path":"a.md"}
+  prose=""
+  answer=null
+  done=null
+# single line template literal
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"hello world","path":"simple.txt"}
+  prose=""
+  answer=null
+  done=null
+# multiline template literal as whole value
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"package main\n\nfunc main() {}\n","path":"a.go"}
+  prose=""
+  answer=null
+  done=null
+# folds string concatenation
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"hello world","path":"a.txt"}
+  prose=""
+  answer=null
+  done=null
+# folds go backtick struct tag concatenation
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"package main\n\ntype S struct {\n\tServices []ServiceStatus `json:\"services\"` // tail\n}\n","path":"status.go"}
+  prose=""
+  answer=null
+  done=null
+# rejects non-string concatenation operand
+  calls=0 errors=1 violations=0 stray=0
+  err "TOOL CALL PARSE ERROR: `edit(...)` — expected a string fragment after `+` in string concatenation, got `1`. Tool arguments must be a TypeScript object literal: `{ key: value, key: value }`. Raw: { action: \"create\", path: \"a.txt\", content: \"x\" + 1 })"
+  prose=""
+  answer=null
+  done=null
+# nested object and array literals
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"x","new_body":{"flag":true,"nested":[1,2,"three"]},"path":"a.go"}
+  prose=""
+  answer=null
+  done=null
+# trailing commas
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"x","path":"a.go"}
+  prose=""
+  answer=null
+  done=null
+# line and block comments
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"package a","path":"a.go"}
+  prose=""
+  answer=null
+  done=null
+# single quoted string literals
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","path":"a.go"}
+  prose=""
+  answer=null
+  done=null
+# double quoted string value
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"go test ./internal/manifest/"}
+  prose=""
+  answer=null
+  done=null
+# equals as key value separator
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"x","path":"a.go"}
+  prose=""
+  answer=null
+  done=null
+# equals before heredoc value
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"package main","path":"a.go"}
+  prose=""
+  answer=null
+  done=null
+# leading dot floats
+  calls=1 errors=0 violations=0 stray=0
+  call run {"command":"x","limit":0.1,"weight":-0.5}
+  prose=""
+  answer=null
+  done=null

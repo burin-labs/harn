@@ -1,0 +1,4 @@
+pipeline default(harness: Harness) {
+  const schema = {type: "dict", required: ["name", "age"]}
+  json_validate({name: "alice"}, schema)
+}

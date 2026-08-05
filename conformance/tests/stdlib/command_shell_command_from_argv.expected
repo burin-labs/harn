@@ -1,0 +1,10 @@
+ls -R
+go test ./...
+'python' '-c' 'print('"'"'a b'"'"')'
+'echo' ''
+printf hi
+cargo test
+cargo nextest run
+zig build test
+'echo' 'two words'
+'printf' 'a b'

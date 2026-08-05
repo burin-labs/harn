@@ -1,0 +1,44 @@
+pipeline main(harness: Harness, task) {
+  const narrower = actor_chain_validate_scope_attenuation(
+    {
+      sub: "user:owner",
+      scopes: ["repo:read", "repo:write"],
+      act: {sub: "agent:reviewer", scopes: ["repo:read"]},
+    },
+    {raise: false, alert: false},
+  )
+  harness.stdio.println(narrower.ok)
+  const equal = actor_chain_validate_scope_attenuation(
+    {
+      sub: "user:owner",
+      scope: "repo:read repo:write",
+      act: {sub: "agent:reviewer", scopes: ["repo:read", "repo:write"]},
+    },
+    {raise: false, alert: false},
+  )
+  harness.stdio.println(equal.ok)
+  const widened = actor_chain_validate_scope_attenuation(
+    {
+      sub: "user:owner",
+      scopes: ["repo:read"],
+      act: {sub: "agent:writer", scopes: ["repo:read", "repo:write"]},
+    },
+    {raise: false, alert: false},
+  )
+  harness.stdio.println(widened.ok)
+  harness.stdio.println(widened.error.kind)
+  harness.stdio.println(widened.error.mode)
+  harness.stdio.println(widened.error.parent_subject)
+  harness.stdio.println(widened.error.child_subject)
+  harness.stdio.println(widened.error.extra_scopes[0])
+  const strict = actor_chain_validate_scope_attenuation(
+    {
+      sub: "user:owner",
+      scopes: ["repo:read", "repo:write"],
+      act: {sub: "agent:reviewer", scopes: ["repo:read", "repo:write"]},
+    },
+    {policy: {mode: "strict-subset", alert_on_violation: false}, raise: false, alert: false},
+  )
+  harness.stdio.println(strict.ok)
+  harness.stdio.println(strict.error.mode)
+}

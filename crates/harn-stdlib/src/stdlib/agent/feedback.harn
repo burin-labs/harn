@@ -1,0 +1,248 @@
+import { agent_render_tool_call_exemplar } from "std/agent/preflight"
+import { agent_emit_event, agent_session_inject_feedback } from "std/agent/state"
+
+/**
+ * One feedback candidate before turn-level policy is applied.
+ *
+ * `source` names the producer and `reason` names the observed condition.
+ * `action` is optional; when both stop and continue candidates exist, stop
+ * wins explicitly. `next_step` participates in knowledge-state deduplication.
+ */
+pub type AgentFeedbackCandidate = {
+  content: string,
+  source: string,
+  reason: string,
+  action?: "inform" | "continue" | "stop",
+  kind?: string,
+  priority?: int,
+  next_step?: string,
+}
+
+/** One surviving, reason-coded feedback message. */
+pub type AgentFeedbackMessage = {
+  content: string,
+  sources: list<string>,
+  reasons: list<string>,
+  action: "inform" | "continue" | "stop",
+  kind: string,
+  priority: int,
+  next_step?: string,
+}
+
+fn __feedback_action(value) -> string {
+  if value == "stop" || value == "continue" {
+    return value
+  }
+  return "inform"
+}
+
+fn __feedback_action_priority(action: string) -> int {
+  if action == "stop" {
+    return 300
+  }
+  if action == "continue" {
+    return 200
+  }
+  return 100
+}
+
+fn __feedback_unique(values: list<string>) -> list<string> {
+  let out = []
+  for value in values {
+    if value != "" && !contains(out, value) {
+      out = out.appending(value)
+    }
+  }
+  return out
+}
+
+fn __feedback_candidate(candidate) -> dict {
+  const action = __feedback_action(candidate?.action)
+  const source = to_string(candidate?.source ?? "unknown")
+  const reason = to_string(candidate?.reason ?? "unspecified")
+  return {
+    content: to_string(candidate?.content ?? ""),
+    sources: [source],
+    reasons: [reason],
+    action: action,
+    kind: to_string(candidate?.kind ?? source),
+    priority: candidate?.priority ?? __feedback_action_priority(action),
+    next_step: trim(to_string(candidate?.next_step ?? "")),
+  }
+}
+
+fn __feedback_merge(left, right) -> dict {
+  const right_wins = right.priority > left.priority
+  const winner = if right_wins {
+    right
+  } else {
+    left
+  }
+  return winner
+    + {
+    sources: __feedback_unique(left.sources + right.sources),
+    reasons: __feedback_unique(left.reasons + right.reasons),
+    next_step: if winner.next_step != "" {
+      winner.next_step
+    } else if left.next_step != "" {
+      left.next_step
+    } else {
+      right.next_step
+    },
+  }
+}
+
+fn __feedback_has_stop(messages) -> bool {
+  for message in messages {
+    if message.action == "stop" {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Compose feedback for one turn.
+ *
+ * Policy is deterministic:
+ * - byte-identical content is merged once, preserving every source/reason code;
+ * - stop candidates suppress contradictory continue candidates;
+ * - an unchanged `next_step` is suppressed when `context.history` carries the
+ *   same knowledge-state hash;
+ * - survivors retain input order, so equal-priority sources never reorder.
+ *
+ * Returns `{messages, suppressed, history}`. `suppressed` is reason-coded so a
+ * durable caller can explain every dropped candidate.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_feedback_compose(candidates, context = nil) -> dict {
+  const ctx = context ?? {}
+  const history = ctx?.history ?? {}
+  const knowledge_state = to_string(ctx?.knowledge_state ?? "")
+  let messages = []
+  let suppressed = []
+  for raw in candidates ?? [] {
+    const candidate = __feedback_candidate(raw)
+    if candidate.content == "" {
+      suppressed = suppressed.appending(
+        {
+          source: candidate.sources[0],
+          reason: candidate.reasons[0],
+          suppression_reason: "empty_content",
+        },
+      )
+      continue
+    }
+    if candidate.next_step != ""
+      && candidate.next_step
+      == to_string(history?.next_step ?? "")
+      && knowledge_state != ""
+      && knowledge_state
+      == to_string(history?.knowledge_state ?? "") {
+      suppressed = suppressed.appending(
+        {
+          source: candidate.sources[0],
+          reason: candidate.reasons[0],
+          suppression_reason: "unchanged_next_step",
+        },
+      )
+      continue
+    }
+    let duplicate_index = -1
+    for entry in messages.enumerate() {
+      if duplicate_index < 0 && entry.value.content == candidate.content {
+        duplicate_index = entry.index
+      }
+    }
+    if duplicate_index >= 0 {
+      messages[duplicate_index] = __feedback_merge(messages[duplicate_index], candidate)
+      suppressed = suppressed.appending(
+        {
+          source: candidate.sources[0],
+          reason: candidate.reasons[0],
+          suppression_reason: "byte_identical_duplicate",
+        },
+      )
+    } else {
+      messages = messages.appending(candidate)
+    }
+  }
+  if __feedback_has_stop(messages) {
+    let kept = []
+    for message in messages {
+      if message.action == "continue" {
+        suppressed = suppressed.appending(
+          {
+            source: message.sources[0],
+            reason: message.reasons[0],
+            suppression_reason: "contradicted_by_stop",
+          },
+        )
+      } else {
+        kept = kept.appending(message)
+      }
+    }
+    messages = kept
+  }
+  let next_history = history
+  for message in messages {
+    if message.next_step != "" {
+      next_history = {next_step: message.next_step, knowledge_state: knowledge_state}
+    }
+  }
+  return {messages: messages, suppressed: suppressed, history: next_history}
+}
+
+/**
+ * Compose, durably record, and inject one turn's feedback.
+ *
+ * The typed checkpoint is the durable explanation channel; the ordinary
+ * feedback messages remain backward-compatible model-visible transcript rows.
+ *
+ * @effects: [agent]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_feedback_emit(
+  agent: HarnessAgent,
+  session_id: string,
+  candidates,
+  context = nil,
+) -> dict {
+  const composed = agent_feedback_compose(candidates, context)
+  agent_emit_event(
+    agent,
+    session_id,
+    "typed_checkpoint",
+    {
+      schema: "harn.agent_feedback_composition.v1",
+      messages: composed.messages,
+      suppressed: composed.suppressed,
+      knowledge_state: to_string(context?.knowledge_state ?? ""),
+      history: composed.history,
+    },
+  )
+  for message in composed.messages {
+    agent_session_inject_feedback(agent, session_id, message.kind, message.content)
+  }
+  return composed
+}
+
+/**
+ * Render a feedback exemplar through the session-locked tool format owner.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_feedback_tool_example(
+  llm: HarnessLlm,
+  tool_name: string,
+  args = [],
+  options = nil,
+) -> string {
+  return agent_render_tool_call_exemplar(llm, tool_name, args, options)
+}

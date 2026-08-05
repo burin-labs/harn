@@ -1,0 +1,12 @@
+loop_facts=observed
+executions_match=true
+rejections_match=true
+tools_used=["lookup"]
+executions=1
+rejections=1
+successful=["lookup"]
+rejected=["explode"]
+status=done
+iterations_match=true
+trace_token_scope=every_provider_call
+llm_token_scope=accepted_turn_results

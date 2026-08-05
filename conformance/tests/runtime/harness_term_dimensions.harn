@@ -1,0 +1,11 @@
+fn main(harness: Harness) {
+  harness.stdio.println(harness.term.width() > 0)
+  harness.stdio.println(harness.term.height() > 0)
+  harness.testing.stdin_set("s3cr3t\n")
+  harness.testing.capture_stderr_start()
+  const password = harness.term.read_password("password: ")
+  const prompt = harness.testing.capture_stderr_take()
+  harness.stdio.println(password == "s3cr3t")
+  harness.stdio.println(prompt == "password: ")
+  harness.testing.stdin_reset()
+}

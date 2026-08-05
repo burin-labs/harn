@@ -1,0 +1,157 @@
+/**
+ * `harn models test` renderer.
+ *
+ * The actual smoke test runs in a host primitive —
+ * `harn_vm::llm::run_model_smoke_test` builds bespoke
+ * `LlmCallOptions`, streams via `vm_call_llm_full_streaming`, probes
+ * provider readiness, and computes pricing. None of that is reachable
+ * from script-land today without a wider VM surface. The shim runs the
+ * smoke test, captures the result (or
+ * error), and hands a single JSON envelope here for formatting.
+ *
+ * Inputs (from the dispatch shim):
+ *   HARN_MODELS_TEST_RESULT_JSON — JSON envelope. On success:
+ *     {
+ *       "ok": true,
+ *       "result": {
+ *         "model_id", "provider", "latency_ms", "first_token_ms"?,
+ *         "input_tokens", "output_tokens", "estimated_cost_usd"
+ *       }
+ *     }
+ *     On failure:
+ *     {"ok": false, "error": "..."}
+ *   HARN_OUTPUT_JSON — "1" for JSON output, else human text.
+ */
+fn __safe_string(value, fallback: string) -> string {
+  if type_of(value) == "string" {
+    return value
+  }
+  return fallback
+}
+
+fn __safe_dict(value) -> dict {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+/**
+ * Round display costs to a compact number of significant digits. Internal
+ * accounting keeps full precision; this renderer owns user-facing readability.
+ */
+fn __round_sig(value, digits: int) -> float {
+  const f = to_float(value) ?? 0.0
+  if f == 0.0 {
+    return 0.0
+  }
+  const scale = pow(10, digits - 1 - floor(log10(abs(f))))
+  return round(f * scale) / scale
+}
+
+fn __format_cost(value) -> string {
+  const f = __round_sig(value, 4)
+  const negative = f < 0.0
+  const abs_f = if negative {
+    -f
+  } else {
+    f
+  }
+  const sign = if negative && abs_f != 0.0 {
+    "-"
+  } else {
+    ""
+  }
+  return sign + to_string(abs_f)
+}
+
+/**
+ * Render the success line:
+ * `model_id=... provider=... latency_ms=... first_token_ms=... \
+ *  input_tokens=... output_tokens=... estimated_cost_usd=<4 sig figs>`.
+ * `first_token_ms` is `"-"` when the streaming probe didn't see a
+ * delta in time.
+ */
+fn __render_success_line(result: dict) -> string {
+  const first_token = if result["first_token_ms"] == nil {
+    "-"
+  } else {
+    to_string(result["first_token_ms"])
+  }
+  return "model_id=" + __safe_string(result["model_id"], "")
+    + " provider="
+    + __safe_string(result["provider"], "")
+    + " latency_ms="
+    + to_string(result["latency_ms"] ?? 0)
+    + " first_token_ms="
+    + first_token
+    + " input_tokens="
+    + to_string(result["input_tokens"] ?? 0)
+    + " output_tokens="
+    + to_string(result["output_tokens"] ?? 0)
+    + " estimated_cost_usd="
+    + __format_cost(result["estimated_cost_usd"] ?? 0.0)
+}
+
+/**
+ * Build the success JSON envelope. Fields are:
+ * `model_id`, `provider`, `latency_ms`, `first_token_ms?`,
+ * `input_tokens`, `output_tokens`, `estimated_cost_usd`.
+ * `first_token_ms` is absent when nil.
+ */
+fn __render_success_envelope(result: dict) -> string {
+  let envelope = {
+    model_id: __safe_string(result["model_id"], ""),
+    provider: __safe_string(result["provider"], ""),
+    latency_ms: result["latency_ms"] ?? 0,
+    input_tokens: result["input_tokens"] ?? 0,
+    output_tokens: result["output_tokens"] ?? 0,
+    estimated_cost_usd: __round_sig(result["estimated_cost_usd"] ?? 0.0, 4),
+  }
+  if result["first_token_ms"] != nil {
+    envelope = envelope + {first_token_ms: result["first_token_ms"]}
+  }
+  return json_stringify_pretty(envelope)
+}
+
+/**
+ * Render the failure JSON envelope in compact form for shell-friendly
+ * piping.
+ */
+fn __render_failure_envelope(error: string) -> string {
+  return json_stringify({ok: false, error: error})
+}
+
+fn main(harness: Harness) -> int {
+  const raw = harness.env.get_or("HARN_MODELS_TEST_RESULT_JSON", "")
+  if raw == "" {
+    harness.stdio.eprintln("internal error: HARN_MODELS_TEST_RESULT_JSON not set by dispatch shim")
+    return 70
+  }
+  const envelope = try {
+    json_parse(raw)
+  } catch (e) {
+    harness.stdio.eprintln("internal error: failed to parse models-test result: " + e.message)
+    return 70
+  }
+  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  const ok = envelope["ok"] ?? false
+  if ok {
+    const result = __safe_dict(envelope["result"])
+    if json_mode {
+      harness.stdio.println(__render_success_envelope(result))
+    } else {
+      harness.stdio.println(__render_success_line(result))
+    }
+    return 0
+  }
+  const error = __safe_string(envelope["error"], "unknown error")
+  if json_mode {
+    // JSON failures go to STDOUT, not stderr; the channel split matters
+    // for shells piping `--json`.
+    harness.stdio.println(__render_failure_envelope(error))
+  } else {
+    harness.stdio.eprintln(error)
+  }
+  return 1
+}

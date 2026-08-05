@@ -1,0 +1,8 @@
+pipeline test(harness: Harness, task) {
+  fn call_one(f: fn(int) -> int) -> int {
+    return f(1)
+  }
+  const needs_two = fn(x: int, y: int) -> int { return x + y }
+  const callback: fn(int) -> int = needs_two
+  harness.stdio.println(call_one(callback))
+}

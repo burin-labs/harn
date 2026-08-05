@@ -1,0 +1,9 @@
+attempt,error,findings,prior_text,stage,task,verification
+REPLACEMENT for attempt 2
+expect_status: expected 0, got 7
+true
+true
+true
+true
+false
+unchanged

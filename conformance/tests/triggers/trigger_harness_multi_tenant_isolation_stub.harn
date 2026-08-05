@@ -1,0 +1,7 @@
+pipeline test(harness: Harness, task) {
+  const result = harness.runtime.trigger_test_harness("multi_tenant_isolation_stub")
+  harness.stdio.println(result.ok)
+  harness.stdio.println(result.stub)
+  harness.stdio.println(len(result.emitted) == 2)
+  harness.stdio.println(!result.details.cross_tenant_leak)
+}

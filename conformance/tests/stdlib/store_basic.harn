@@ -1,0 +1,26 @@
+pipeline default(harness: Harness) {
+  // Start clean
+  harness.runtime.store_clear()
+  // Set and get
+  harness.runtime.store_set("name", "alice")
+  harness.runtime.store_set("age", 30)
+  harness.stdio.println(harness.runtime.store_get("name"))
+  harness.stdio.println(harness.runtime.store_get("age"))
+  // Get missing key
+  harness.stdio.println(harness.runtime.store_get("missing"))
+  // List keys
+  const keys = harness.runtime.store_list()
+  harness.stdio.println(len(keys))
+  // Delete
+  harness.runtime.store_delete("age")
+  harness.stdio.println(harness.runtime.store_get("age"))
+  harness.stdio.println(len(harness.runtime.store_list()))
+  // Complex values
+  harness.runtime.store_set("config", {theme: "dark", size: 14})
+  const cfg = harness.runtime.store_get("config")
+  harness.stdio.println(cfg.theme)
+  harness.stdio.println(cfg.size)
+  // Clear
+  harness.runtime.store_clear()
+  harness.stdio.println(len(harness.runtime.store_list()))
+}

@@ -1,0 +1,4 @@
+fn main(harness: Harness) {
+  harness.stdio.println(to_string(1d))
+  harness.stdio.println(to_string(2w))
+}

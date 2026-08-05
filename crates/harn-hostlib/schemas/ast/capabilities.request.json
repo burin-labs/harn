@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/capabilities.request.json",
+  "title": "ast.capabilities request",
+  "description": "Query the per-language AST-precise edit capability matrix. Omit `language` to enumerate every shipped grammar.",
+  "type": "object",
+  "properties": {
+    "language": {
+      "type": "string",
+      "description": "Optional canonical name or alias (e.g. \"rust\", \"ts\", \"yml\") to filter to a single language."
+    }
+  },
+  "additionalProperties": false
+}

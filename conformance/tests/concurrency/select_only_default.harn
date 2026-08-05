@@ -1,0 +1,17 @@
+pipeline test(harness: Harness, task) {
+  // Select with only a default arm and no channel arms
+  select {
+    default {
+      harness.stdio.log("immediate")
+    }
+  }
+  // Select-only-default in a loop should not hang
+  const items = [0, 1, 2]
+  for i in items {
+    select {
+      default {
+        harness.stdio.log("tick ${i}")
+      }
+    }
+  }
+}

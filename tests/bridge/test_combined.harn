@@ -1,0 +1,9 @@
+pipeline default(harness: Harness, task) {
+  // Test multiple bridge calls in sequence
+  const file_content = harness.fs.read_text("README.md")
+  harness.stdio.log("File: ${file_content}")
+  const llm_response = harness.llm.call("Summarize this", "Be brief")
+  harness.stdio.log("LLM: ${llm_response}")
+  harness.stdio.progress("done", "All bridge calls completed")
+  harness.stdio.log("Success")
+}

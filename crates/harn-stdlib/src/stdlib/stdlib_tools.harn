@@ -1,0 +1,133 @@
+/**
+ * Registry value produced by `tool_registry()` / `tool_define(...)`.
+ *
+ * Packages that accept or forward registries through typed public APIs
+ * should import this alias from `std/tools` instead of `dict` or a local
+ * structural copy.
+ */
+pub type ToolRegistry = {_type: "tool_registry", tools: list}
+
+type ToolDefinitionConfig = {
+  parameters?: dict,
+  returns?: dict,
+  output_schema?: dict,
+  handler?: fn(dict) -> any,
+  executor?: string,
+  host_capability?: string,
+  mcp_server?: string,
+  defer_loading?: bool,
+  namespace?: string,
+  annotations?: dict,
+  meta?: dict,
+  guidance?: string,
+}
+
+/**
+ * Declarative tool spec accepted by `tool_define_many` / `tool_registry_from`.
+ *
+ * System-prompt `guidance` is co-located with the tool. When this tool is
+ * present in the active tool set, the runtime auto-injects this text as a
+ * capability-gated system-prompt fragment (gated on the tool's own
+ * presence), so instruction and tool can never drift. Omit it and the
+ * instruction never appears. See docs/src/prompt-assembly.md.
+ */
+pub type ToolDefinitionSpec = {
+  name: string,
+  description?: string,
+  desc?: string,
+  config?: ToolDefinitionConfig,
+  parameters?: dict,
+  returns?: dict,
+  output_schema?: dict,
+  handler?: fn(dict) -> any,
+  executor?: string,
+  host_capability?: string,
+  mcp_server?: string,
+  defer_loading?: bool,
+  namespace?: string,
+  annotations?: dict,
+  meta?: dict,
+  guidance?: string,
+}
+
+type PathScopeMatcherOptions = {
+  scope?: string,
+  arg_keys?: list<string>,
+  mount_modes?: list<string>,
+  on_violation?: string,
+  patterns?: list<string>,
+}?
+
+/**
+ * path_scope returns a dynamic-permissions matcher that checks path args
+ * against the active session workspace anchor.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: path_scope({mount_modes: ["extend"]})
+ */
+pub fn path_scope(options: PathScopeMatcherOptions = nil) -> dict {
+  const opts = options ?? {}
+  let matcher = {
+    type: "path_scope",
+    scope: opts?.scope ?? "anchor_plus_mounted",
+    arg_keys: opts?.arg_keys ?? ["path", "destination", "source", "file"],
+    on_violation: opts?.on_violation ?? "deny",
+  }
+  if opts?.mount_modes != nil {
+    matcher = matcher + {mount_modes: opts.mount_modes}
+  }
+  if opts?.patterns != nil {
+    matcher = matcher + {patterns: opts.patterns}
+  }
+  return matcher
+}
+
+fn __tool_spec_config(spec: ToolDefinitionSpec) -> ToolDefinitionConfig {
+  if type_of(spec) != "dict" {
+    throw "tool_define_many: each spec must be a dict"
+  }
+  let config = spec.config ?? {}
+  for key in spec.keys() {
+    if !contains(["name", "description", "desc", "config"], key) {
+      config = config + {[key]: spec[key]}
+    }
+  }
+  return config
+}
+
+/**
+ * tool_define_many adds a list of tool specs to a registry.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn tool_define_many(registry: ToolRegistry, specs: list<ToolDefinitionSpec>) -> ToolRegistry {
+  if type_of(specs) != "list" {
+    throw "tool_define_many: specs must be a list"
+  }
+  let tools = registry ?? tool_registry()
+  for spec in specs {
+    const name = spec.name
+    const description = spec.description ?? spec.desc
+    if name == nil || name == "" {
+      throw "tool_define_many: each spec needs a non-empty name"
+    }
+    if description == nil || description == "" {
+      throw "tool_define_many: each spec needs a non-empty description"
+    }
+    tools = tool_define(tools, name, description, __tool_spec_config(spec))
+  }
+  return tools
+}
+
+/**
+ * tool_registry_from creates a registry from a list of tool specs.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn tool_registry_from(specs: list<ToolDefinitionSpec>) -> ToolRegistry {
+  return tool_define_many(tool_registry(), specs)
+}

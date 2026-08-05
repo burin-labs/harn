@@ -1,0 +1,14 @@
+pipeline test(harness: Harness, task) {
+  harness.stdio.println(base64url_encode(">>>???///"))
+  harness.stdio.println(base64url_decode("Pj4-Pz8_Ly8v"))
+  // Binary-safe URL-safe base64: non-UTF-8 octets round-trip, padded or not.
+  const raw = bytes_from_hex("0001ff80")
+  const encoded = bytes_to_base64url(raw)
+  harness.stdio.println(encoded)
+  harness.stdio.println(bytes_to_hex(bytes_from_base64url(encoded)))
+  harness.stdio.println(bytes_to_hex(bytes_from_base64url("AAH_gA==")))
+  harness.stdio.println(base32_encode("foobar"))
+  harness.stdio.println(base32_decode("MZXW6YTBOI======"))
+  harness.stdio.println(hex_encode("hello"))
+  harness.stdio.println(hex_decode("68656c6c6f"))
+}

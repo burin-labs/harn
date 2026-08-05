@@ -1,0 +1,76 @@
+import { with_circuit_breaker } from "std/llm/handlers"
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline default(harness: Harness) {
+  const raw_handler = fn(call) { return harness.llm.call(call.prompt, call?.system, call.opts) }
+  const pooled = with_circuit_breaker(harness, raw_handler, {threshold: 2, reset_ms: 60000})
+  const bad_call = {prompt: "bad route", system: nil, opts: {provider: "mock", model: "bad-model"}}
+  const good_call = {
+    prompt: "good route",
+    system: nil,
+    opts: {provider: "mock", model: "good-model"},
+  }
+  with_llm_script(
+    harness.llm,
+    [
+      {error: {category: "server_error", message: "bad model failed once"}},
+      {error: {category: "server_error", message: "bad model failed twice"}},
+      llm_text("healthy"),
+      {error: {category: "server_error", message: "shared circuit failed"}},
+    ],
+    { ->
+      try {
+        pooled(bad_call)
+      } catch (e1) {
+        harness.stdio.println(error_category(e1))
+      }
+      harness.stdio.println(harness.runtime.circuit_check("llm:mock:bad-model"))
+      try {
+        pooled(bad_call)
+      } catch (e2) {
+        harness.stdio.println(error_category(e2))
+      }
+      harness.stdio.println(harness.runtime.circuit_check("llm:mock:bad-model"))
+      harness.stdio.println(harness.runtime.circuit_check("llm:mock:good-model"))
+      harness.stdio.println(pooled(good_call).text)
+      harness.stdio.println(harness.runtime.circuit_check("llm:mock:good-model"))
+      try {
+        pooled(bad_call)
+      } catch (e3) {
+        harness.stdio.println(e3.category)
+        harness.stdio.println(e3.circuit)
+      }
+      harness.stdio.println(len(harness.llm.mock_calls()))
+      const shared = with_circuit_breaker(
+        harness,
+        raw_handler,
+        {name: "shared-model-circuit", threshold: 1, reset_ms: 60000},
+      )
+      try {
+        shared(bad_call)
+      } catch (e4) {
+        harness.stdio.println(error_category(e4))
+      }
+      try {
+        shared(good_call)
+      } catch (e5) {
+        harness.stdio.println(e5.category)
+        harness.stdio.println(e5.circuit)
+      }
+      harness.stdio.println(len(harness.llm.mock_calls()))
+      const unset = with_circuit_breaker(
+        harness,
+        fn(_call) {
+          throw "missing route failed"
+        },
+        {threshold: 1, reset_ms: 60000},
+      )
+      try {
+        unset({prompt: "missing route", opts: {}})
+      } catch (e6) {
+        harness.stdio.println(error_category(e6))
+      }
+      harness.stdio.println(harness.runtime.circuit_check("llm:<unset>:<unset>"))
+    },
+  )
+}

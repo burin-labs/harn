@@ -1,0 +1,62 @@
+@persona(name: "merge_captain")
+pub fn merge_captain_persona(ctx) {
+  return build_merge_plan_step(ctx)
+}
+
+fn sample_pull_request() {
+  return {
+    repo: "burin-labs/harn",
+    number: 463,
+    title: "Persona template pack v0",
+    failing_checks: ["ci / rust"],
+    stale_threads: ["acceptance coverage"],
+    release_blockers: ["needs-human-release-note"],
+    merge_conflicts: false,
+  }
+}
+
+fn merge_risk(pr) {
+  if len(pr.failing_checks) > 0 || len(pr.stale_threads) > 0 || len(pr.release_blockers) > 0 {
+    return "high"
+  }
+  if pr.merge_conflicts {
+    return "high"
+  }
+  return "low"
+}
+
+@step(name: "build_merge_plan", approval: required, receipt: audit, error_boundary: fail, budget: {max_tokens: 1000})
+fn build_merge_plan_step(pr) {
+  const risk = merge_risk(pr)
+  const handoff = if risk == "high" {
+    "review_captain"
+  } else {
+    nil
+  }
+  return {
+    persona: "merge_captain",
+    execution_mode: "dry_run",
+    approval_required: true,
+    repo: pr.repo,
+    pr_number: pr.number,
+    summary: "dry-run plan for PR #${pr.number}",
+    plan: [
+      "Summarize failing checks and stale review threads.",
+      "Ask for approval before posting receipts or mutating labels.",
+      "Hand off review risk when unresolved comments remain.",
+    ],
+    review_risk: risk,
+    receipt: {
+      kind: "merge_receipt",
+      status: "pending_approval",
+      blockers: pr.failing_checks + pr.stale_threads + pr.release_blockers,
+    },
+    handoff: handoff,
+  }
+}
+
+pub pipeline run(harness: Harness, task) -> dict {
+  const result = build_merge_plan_step(sample_pull_request())
+  harness.stdio.println(json_stringify(result))
+  return result
+}

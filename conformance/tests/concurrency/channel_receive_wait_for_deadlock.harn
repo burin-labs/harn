@@ -1,0 +1,11 @@
+pipeline test(harness: Harness, task) {
+  const left = harness.runtime.channel("left", 1)
+  const right = harness.runtime.channel("right", 1)
+  parallel 2 { i ->
+    if i == 0 {
+      harness.runtime.receive(left)
+    } else {
+      harness.runtime.receive(right)
+    }
+  }
+}

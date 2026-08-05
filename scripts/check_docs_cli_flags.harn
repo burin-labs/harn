@@ -1,0 +1,587 @@
+// Verify long flags in docs/src bash/sh Harn examples exist in `harn --help`.
+//
+// Ported from scripts/check_docs_cli_flags.sh (bash + inline python):
+// same bash-block extraction, backslash continuation joining, shlex-style
+// tokenizing, `harn` segment discovery, subcommand-path walking against
+// cached `--help` output, and the same FAIL / summary / hint output.
+//
+// Usage:
+//   harn run scripts/check_docs_cli_flags.harn
+const DOCS_GLOB = "docs/src/**/*.md"
+
+const ALLOW_STALE = "harn-doc-cli: allow-stale"
+
+const COMMAND_SEPARATORS: list<string> = ["&&", "||", ";", "|"]
+
+/** Repo-relative form of a glob result (strip the `/./` marker). */
+pub fn rel_path(path: string) -> string {
+  const idx = path.index_of("/./")
+  if idx >= 0 {
+    return path.substring(idx + 3, path.len())
+  }
+  return path
+}
+
+/** Strip trailing whitespace (Python `str.rstrip()`). */
+pub fn right_trim(s: string) -> string {
+  let end = s.len()
+  while end > 0 && s.char_at(end - 1).trim() == "" {
+    end = end - 1
+  }
+  return s.substring(0, end)
+}
+
+/** True when `c` is a word character or hyphen ([A-Za-z0-9_-]). */
+pub fn is_word_or_hyphen(c: string) -> bool {
+  return c == "-" || c == "_"
+    || "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+    .contains(c)
+}
+
+/**
+ * Fenced bash/sh blocks in a markdown source: `{first_line, lines}`
+ * records where `first_line` is the 1-based number of the first content
+ * line. Fences must be exactly ```bash or ```sh; any ``` line closes.
+ */
+pub fn bash_blocks(text: string) -> list {
+  let blocks: list = []
+  let in_block = false
+  let block_start = 0
+  let body: list<string> = []
+  let line_no = 0
+  for line in text.lines() {
+    line_no = line_no + 1
+    if !in_block {
+      if line == "```bash" || line == "```sh" {
+        in_block = true
+        block_start = line_no + 1
+        body = []
+      }
+      continue
+    }
+    if line.starts_with("```") {
+      blocks = blocks + [{first_line: block_start, lines: body}]
+      in_block = false
+      continue
+    }
+    body = body + [line]
+  }
+  return blocks
+}
+
+/**
+ * Join backslash-continued physical lines into logical commands:
+ * `{line_no, command, allow_stale}` records. `line_no` is the first
+ * physical line; the allow-stale marker on any physical line marks the
+ * whole logical line.
+ */
+pub fn logical_lines(block_lines: list<string>, first_line: int) -> list {
+  let out: list = []
+  let buffer: list<string> = []
+  let start_line = first_line
+  let allow_stale = false
+  let offset = 0
+  for line in block_lines {
+    const line_number = first_line + offset
+    offset = offset + 1
+    let raw = line
+    if buffer.count == 0 {
+      start_line = line_number
+      allow_stale = false
+    }
+    if raw.contains(ALLOW_STALE) {
+      allow_stale = true
+    }
+    const trimmed = right_trim(raw)
+    const continued = trimmed.ends_with("\\")
+    if continued {
+      raw = trimmed.substring(0, trimmed.len() - 1)
+    }
+    buffer = buffer + [raw]
+    if !continued {
+      out = out + [{line_no: start_line, command: buffer.join(" "), allow_stale: allow_stale}]
+      buffer = []
+    }
+  }
+  if buffer.count > 0 {
+    out = out + [{line_no: start_line, command: buffer.join(" "), allow_stale: allow_stale}]
+  }
+  return out
+}
+
+/**
+ * POSIX-shlex-style tokenizer (Python `shlex.split(comments=True,
+ * posix=True)` after padding shell separators with spaces). Returns nil
+ * on a parse error (unclosed quote / dangling escape), matching the
+ * Python ValueError path.
+ */
+@complexity(allow)
+pub fn shell_tokens(command: string) -> list<string>? {
+  // shlex does not split shell separators unless whitespace-delimited.
+  const padded = regex_replace(r"(\|\||&&|[;|])", " $1 ", command)
+  const cs = chars(padded)
+  const n = cs.count
+  let tokens: list<string> = []
+  let token = ""
+  let has_token = false
+  let state = " "
+  let i = 0
+  while i < n {
+    const c = cs[i]
+    if state == " " {
+      if c.trim() == "" {
+        i = i + 1
+        continue
+      }
+      if c == "#" {
+        // Comment: discard the rest of the (single-line) input.
+        break
+      }
+      if c == "\\" {
+        if i + 1 >= n {
+          return nil
+        }
+        token = token + cs[i + 1]
+        has_token = true
+        state = "a"
+        i = i + 2
+        continue
+      }
+      if c == "'" || c == "\"" {
+        state = c
+        has_token = true
+        i = i + 1
+        continue
+      }
+      token = token + c
+      has_token = true
+      state = "a"
+      i = i + 1
+      continue
+    }
+    if state == "a" {
+      if c.trim() == "" {
+        tokens = tokens + [token]
+        token = ""
+        has_token = false
+        state = " "
+        i = i + 1
+        continue
+      }
+      if c == "#" {
+        break
+      }
+      if c == "\\" {
+        if i + 1 >= n {
+          return nil
+        }
+        token = token + cs[i + 1]
+        i = i + 2
+        continue
+      }
+      if c == "'" || c == "\"" {
+        state = c
+        i = i + 1
+        continue
+      }
+      token = token + c
+      i = i + 1
+      continue
+    }
+    if state == "'" {
+      if c == "'" {
+        state = "a"
+      } else {
+        token = token + c
+      }
+      i = i + 1
+      continue
+    }
+    // state == "\"" (double quote)
+    if c == "\"" {
+      state = "a"
+      i = i + 1
+      continue
+    }
+    if c == "\\" {
+      if i + 1 >= n {
+        return nil
+      }
+      const nc = cs[i + 1]
+      if nc == "\"" || nc == "\\" {
+        token = token + nc
+      } else {
+        // Inside double quotes the backslash stays literal before other
+        // characters (shlex escapedquotes semantics).
+        token = token + c + nc
+      }
+      i = i + 2
+      continue
+    }
+    token = token + c
+    i = i + 1
+  }
+  if state == "'" || state == "\"" {
+    return nil
+  }
+  if has_token || token != "" {
+    tokens = tokens + [token]
+  }
+  return tokens
+}
+
+/** Split a token stream into command segments at shell separators. */
+pub fn command_segments(tokens: list<string>) -> list {
+  let segments: list = []
+  let segment: list<string> = []
+  for token in tokens {
+    if COMMAND_SEPARATORS.contains(token) {
+      if segment.count > 0 {
+        segments = segments + [segment]
+        segment = []
+      }
+    } else {
+      segment = segment + [token]
+    }
+  }
+  if segment.count > 0 {
+    segments = segments + [segment]
+  }
+  return segments
+}
+
+/** True for `NAME=value` environment-assignment tokens. */
+pub fn is_assignment(token: string) -> bool {
+  return regex_captures(r"^[A-Za-z_][A-Za-z0-9_]*=", token).count > 0
+}
+
+/**
+ * Find the `harn` invocation inside one command segment, skipping shell
+ * prompt/redirect tokens, a leading `env`, and env assignments. Returns
+ * the args after `harn`, or nil when the segment is not a harn call.
+ */
+pub fn find_harn_segment(segment: list<string>) -> list<string>? {
+  let index = 0
+  while index < segment.count && (segment[index] == "$" || segment[index] == ">") {
+    index = index + 1
+  }
+  if index < segment.count && segment[index] == "env" {
+    index = index + 1
+  }
+  while index < segment.count && is_assignment(segment[index] ?? "") {
+    index = index + 1
+  }
+  if index < segment.count && segment[index] == "harn" {
+    return segment.slice(index + 1, segment.count)
+  }
+  return nil
+}
+
+/**
+ * Subcommand names from a `--help` text: the two-space-indented first
+ * words under a `Commands:` heading (until the first blank line).
+ */
+pub fn parse_command_names(help_text: string) -> list<string> {
+  let names: list<string> = []
+  let in_commands = false
+  for line in help_text.lines() {
+    if line.trim() == "Commands:" {
+      in_commands = true
+      continue
+    }
+    if in_commands && line.trim() == "" {
+      break
+    }
+    if in_commands {
+      const ms = regex_captures(r"^\s{2}([A-Za-z0-9_-]+)\b", line)
+      if ms.count > 0 {
+        const name: string = ms[0].groups[0]
+        if !names.contains(name) {
+          names = names + [name]
+        }
+      }
+    }
+  }
+  return names
+}
+
+/**
+ * Long flags advertised in a `--help` text: `{flags, takes}` where
+ * `takes[flag]` records whether the flag is followed by a `<VALUE>` /
+ * `[<VALUE>]` placeholder. The Python original used a `(?<![\w-])`
+ * look-behind; the preceding-character check is done by hand here.
+ */
+pub fn parse_help_flags(help_text: string) {
+  let flags: list<string> = []
+  let takes: dict<string, bool> = {}
+  for line in help_text.lines() {
+    for m in regex_captures(r"--([A-Za-z0-9][A-Za-z0-9-]*)\b", line) {
+      if m.start > 0 && is_word_or_hyphen(line.char_at(m.start - 1)) {
+        continue
+      }
+      const flag = "--" + m.groups[0]
+      if !flags.contains(flag) {
+        flags = flags + [flag]
+      }
+      const after = line.substring(m.end, line.len())
+      takes[flag] = regex_captures(r"^\s+(<|\[<)", after).count > 0
+    }
+  }
+  return {flags: flags, takes: takes}
+}
+
+/** Cache key for a subcommand path. */
+fn path_key(path: list<string>) -> string {
+  return path.join(" ")
+}
+
+/**
+ * Memoized `--help` fetch. `state` is `{help, flagsets}` (dicts keyed by
+ * the joined path); `fetch(path)` produces the raw help text. Returns
+ * `{state, text}` — Harn dicts are value-typed, so the caches thread
+ * through explicitly.
+ */
+pub fn help_text_cached(state, path: list<string>, fetch: fn(list<string>) -> string) {
+  const key = path_key(path)
+  const cached = state.help[key]
+  if cached != nil {
+    return {state: state, text: cached}
+  }
+  const text = fetch(path)
+  let help = state.help
+  help[key] = text
+  return {state: {...state, help: help}, text: text}
+}
+
+/** Memoized `parse_help_flags` over the cached help text. */
+pub fn help_flags_cached(state, path: list<string>, fetch: fn(list<string>) -> string) {
+  const key = path_key(path)
+  const cached = state.flagsets[key]
+  if cached != nil {
+    return {state: state, flags: cached.flags, takes: cached.takes}
+  }
+  const ht = help_text_cached(state, path, fetch)
+  const parsed = parse_help_flags(ht.text)
+  let flagsets = ht.state.flagsets
+  flagsets[key] = parsed
+  return {state: {...ht.state, flagsets: flagsets}, flags: parsed.flags, takes: parsed.takes}
+}
+
+/** Flags accepted at `path`: the union over every prefix of the path. */
+pub fn accepted_flags_cached(state, path: list<string>, fetch: fn(list<string>) -> string) {
+  let st = state
+  let accepted: list<string> = []
+  let depth = 0
+  while depth <= path.count {
+    const r = help_flags_cached(st, path.slice(0, depth), fetch)
+    st = r.state
+    for f in r.flags {
+      if !accepted.contains(f) {
+        accepted = accepted + [f]
+      }
+    }
+    depth = depth + 1
+  }
+  return {state: st, flags: accepted}
+}
+
+/**
+ * Walk one harn invocation's args, building the subcommand path and
+ * collecting long flags the corresponding `--help` does not advertise.
+ * Returns `{state, path, missing}`.
+ */
+pub fn analyze_harn_args(state, args: list<string>, fetch: fn(list<string>) -> string) {
+  let st = state
+  let path: list<string> = []
+  let missing: list<string> = []
+  let index = 0
+  while index < args.count {
+    const token = args[index]
+    if token == "--" {
+      break
+    }
+    if token.starts_with("--") {
+      const eq = token.index_of("=")
+      const flag = if eq >= 0 {
+        token.substring(0, eq)
+      } else {
+        token
+      }
+      const ar = accepted_flags_cached(st, path, fetch)
+      st = ar.state
+      const accepted = ar.flags
+      if !accepted.contains(flag) {
+        missing = missing + [flag]
+      }
+      const hr = help_flags_cached(st, path, fetch)
+      st = hr.state
+      const takes_value = hr.takes[flag] ?? false
+      if eq
+        < 0
+        && index + 1 < args.count
+        && !(args[index + 1] ?? "").starts_with("-")
+        && (takes_value || !accepted.contains(flag)) {
+        index = index + 2
+      } else {
+        index = index + 1
+      }
+      continue
+    }
+    if token.starts_with("-") {
+      index = index + 1
+      continue
+    }
+    const cr = help_text_cached(st, path, fetch)
+    st = cr.state
+    if parse_command_names(cr.text).contains(token) {
+      path = path + [token]
+    }
+    index = index + 1
+  }
+  return {state: st, path: path, missing: missing}
+}
+
+/** True when any arg is a long flag (counts as a checked invocation). */
+pub fn has_long_flag(args: list<string>) -> bool {
+  for token in args {
+    if token.starts_with("--") {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Resolve the harn binary whose --help is authoritative: $HARN_BIN wins,
+ * else the workspace target dir's debug build (building it quietly when
+ * missing) — the same ladder as the bash original.
+ */
+fn resolve_harn_bin(harness: Harness) -> string {
+  const env_bin = harness.env.get("HARN_BIN")
+  if env_bin != nil && env_bin != "" {
+    return env_bin
+  }
+  let target_dir = ""
+  const meta = harness.process.run(
+    {program: "cargo", args: ["metadata", "--no-deps", "--format-version", "1"]},
+  )
+  if meta.success {
+    const parsed = try {
+      json_parse(meta.stdout)
+    } catch (err) {
+      nil
+    }
+    target_dir = parsed?.target_directory ?? ""
+  }
+  if target_dir == "" {
+    target_dir = harness.env.get("CARGO_TARGET_DIR") ?? ""
+  }
+  if target_dir == "" {
+    target_dir = "target"
+  }
+  const bin = "${target_dir}/debug/harn"
+  if !harness.fs.exists(bin) {
+    harness.stdio.eprintln("building harn-cli (set HARN_BIN to skip)...")
+    const build = harness.process.run({program: "cargo", args: ["build", "-q", "-p", "harn-cli"]})
+    if !build.success {
+      harness.stdio.eprint(build.stderr)
+      throw "cargo build -p harn-cli failed"
+    }
+  }
+  return bin
+}
+
+fn fetch_help(process: HarnessProcess, harn_bin: string, path: list<string>) -> string {
+  const res = process.run({program: harn_bin, args: path + ["--help"]})
+  if res.exit_code == 0 {
+    return res.stdout + res.stderr
+  }
+  return ""
+}
+
+pipeline main(harness: Harness, task) {
+  const harn_bin = resolve_harn_bin(harness)
+  const fetch = { path: list<string> -> fetch_help(harness.process, harn_bin, path) }
+  let md_files: list<string> = []
+  for g in harness.fs.glob(DOCS_GLOB) {
+    md_files = md_files + [rel_path(g)]
+  }
+  let state = {help: {}, flagsets: {}}
+  let checked = 0
+  let skipped = 0
+  let parse_errors: list = []
+  let failures: list = []
+  for md_file in md_files.sorted() {
+    const text = harness.fs.read_text(md_file)
+    for block in bash_blocks(text) {
+      for logical in logical_lines(block.lines, block.first_line) {
+        if logical.allow_stale {
+          skipped = skipped + 1
+          continue
+        }
+        const tokens = shell_tokens(logical.command)
+        if tokens == nil {
+          if logical.command.contains("harn") {
+            parse_errors = parse_errors
+              + [
+              {file: md_file, line_no: logical.line_no, command: logical.command},
+            ]
+          }
+          continue
+        }
+        for segment in command_segments(tokens) {
+          const args = find_harn_segment(segment)
+          if args == nil {
+            continue
+          }
+          const res = analyze_harn_args(state, args, fetch)
+          state = res.state
+          if has_long_flag(args) {
+            checked = checked + 1
+          }
+          if res.missing.count > 0 {
+            failures = failures
+              + [
+              {
+                file: md_file,
+                line_no: logical.line_no,
+                command: segment.join(" "),
+                path: res.path,
+                missing: res.missing,
+              },
+            ]
+          }
+        }
+      }
+    }
+  }
+  for err in parse_errors {
+    harness.stdio.println("FAIL: ${err.file}:${err.line_no}")
+    harness.stdio.println("      could not parse shell command containing harn")
+    harness.stdio.println("      command: ${err.command}")
+  }
+  for failure in failures {
+    const help_target = if failure.path.count > 0 {
+      "harn " + failure.path.join(" ")
+    } else {
+      "harn"
+    }
+    harness.stdio.println("FAIL: ${failure.file}:${failure.line_no}")
+    harness.stdio.println("      command: ${failure.command}")
+    harness.stdio.println("      checked: ${help_target} --help")
+    harness.stdio.println("      missing long flag(s): ${failure.missing.join(", ")}")
+  }
+  const total_failures = parse_errors.count + failures.count
+  harness.stdio.println("")
+  harness.stdio.println(
+    "docs CLI flags: ${checked} flag-bearing harn invocation(s) checked, ${skipped} skipped, ${total_failures} failed",
+  )
+  if total_failures > 0 {
+    harness.stdio.println("")
+    harness.stdio.println(
+      "hint: fix the docs or add inline `# ${ALLOW_STALE}` for intentional stale examples.",
+    )
+    return 1
+  }
+  return 0
+}

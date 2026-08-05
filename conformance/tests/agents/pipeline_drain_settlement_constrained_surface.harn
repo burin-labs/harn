@@ -1,0 +1,49 @@
+/**
+ * Settlement-agent drain loop (#1856 P-03) flips the
+ * `settlement_agent_active` flag on for the duration of the loop body
+ * so constrained-surface guards can reject non-allowlisted tool calls
+ * with HARN-DRN-002. The fixture registers an `on_drain_decision`
+ * session hook that introspects the flag at the moment a disposition
+ * fires, then verifies it is `false` again once the loop exits — so
+ * the gate is correctly scoped to the loop body and does not leak.
+ *
+ * Tracking: harn#1856 (P-03), harn#1853 (epic).
+ */
+import { lifecycle_audit_log_take, on_finish_drain } from "std/lifecycle"
+
+pipeline default(harness: Harness) {
+  const observed_active = harness.runtime.atomic(0)
+  const observed_inactive = harness.runtime.atomic(0)
+  harness.agent.clear_session_hooks()
+  harness.agent.register_session_hook(
+    "on_drain_decision",
+    { _hook_harness, event ->
+      if __host_settlement_agent_active() {
+        harness.runtime.atomic_add(observed_active, 1)
+      } else {
+        harness.runtime.atomic_add(observed_inactive, 1)
+      }
+      return nil
+    },
+  )
+  harness.agent.pipeline_on_finish(
+    { harness, return_value ->
+      harness.handoff_to("nightly-drain", {note: "alpha"})
+      const pre = __host_settlement_agent_active()
+      const result = on_finish_drain(harness, return_value)
+      const post = __host_settlement_agent_active()
+      const _audits = lifecycle_audit_log_take(harness.obs)
+      harness.stdio.println("pre_active=" + to_string(pre))
+      harness.stdio.println("post_active=" + to_string(post))
+      harness.stdio.println(
+        "observed_active=" + to_string(harness.runtime.atomic_get(observed_active)),
+      )
+      harness.stdio.println(
+        "observed_inactive=" + to_string(harness.runtime.atomic_get(observed_inactive)),
+      )
+      harness.stdio.println("status=" + result.status)
+      return result.return_value
+    },
+  )
+  return "ok"
+}

@@ -1,0 +1,206 @@
+/**
+ * transcript_project policies derive a clean model-visible prefix from
+ * an immutable raw transcript without touching its audit lineage. This
+ * test covers raw, clean_tool_repair, squash_failed_calls,
+ * summary_prefix, custom, and the signed-reasoning guardrail.
+ */
+fn raw_transcript() {
+  return transcript_from_messages(
+    [
+      {role: "user", content: "run it"},
+      {role: "assistant", content: "", tool_calls: [{id: "call_1", name: "run", arguments: {}}]},
+      {
+        role: "tool",
+        tool_call_id: "call_1",
+        name: "run",
+        content: "Error: missing arg",
+        is_error: true,
+      },
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [{id: "call_2", name: "run", arguments: {arg: "x"}}],
+      },
+      {role: "tool", tool_call_id: "call_2", name: "run", content: "ok"},
+    ],
+  )
+}
+
+fn signed_reasoning_transcript() {
+  return transcript_from_messages(
+    [
+      {role: "user", content: "go"},
+      {
+        role: "assistant",
+        content: [
+          {type: "thinking", thinking: "private chain", signature: "abc"},
+          {type: "tool_use", id: "c", name: "run", input: {}},
+        ],
+      },
+      {role: "tool", tool_call_id: "c", name: "run", content: "Error", is_error: true},
+      {role: "assistant", content: "", tool_calls: [{id: "c2", name: "run", arguments: {}}]},
+      {role: "tool", tool_call_id: "c2", name: "run", content: "ok"},
+    ],
+  )
+}
+
+fn gc_transcript() {
+  let stale = "src/old.rs\n"
+  let rooted = "src/live.rs\nIMPORTANT_LIVE_VALUE\n"
+  for i in range(0, 80) {
+    stale = stale + "old stale line " + to_string(i) + "\n"
+    rooted = rooted + "live rooted line " + to_string(i) + "\n"
+  }
+  return transcript_from_messages(
+    [
+      {role: "user", content: "inspect old and live files"},
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [{id: "old_call", name: "read", arguments: {path: "src/old.rs"}}],
+      },
+      {role: "tool", tool_call_id: "old_call", name: "read", content: stale},
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [{id: "live_call", name: "read", arguments: {path: "src/live.rs"}}],
+      },
+      {role: "tool", tool_call_id: "live_call", name: "read", content: rooted},
+      {role: "assistant", content: "The active change is in src/live.rs."},
+      {role: "user", content: "Continue from the live file finding."},
+    ],
+  )
+}
+
+fn long_gc_transcript(stale_count) {
+  let messages = [{role: "user", content: "inspect many stale files and one live file"}]
+  for i in range(0, stale_count) {
+    const path = "src/stale_" + to_string(i) + ".rs"
+    const call_id = "stale_call_" + to_string(i)
+    let body = path + "\n"
+    for j in range(0, 24) {
+      body = body + "stale output " + to_string(i) + " line " + to_string(j) + "\n"
+    }
+    messages = messages.appending(
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [{id: call_id, name: "read", arguments: {path: path}}],
+      },
+    )
+    messages = messages.appending(
+      {role: "tool", tool_call_id: call_id, name: "read", content: body},
+    )
+  }
+  let live_body = "src/live.rs\nIMPORTANT_LIVE_VALUE\n"
+  for k in range(0, 24) {
+    live_body = live_body + "live output line " + to_string(k) + "\n"
+  }
+  messages = messages.appending(
+    {
+      role: "assistant",
+      content: "",
+      tool_calls: [{id: "live_call", name: "read", arguments: {path: "src/live.rs"}}],
+    },
+  )
+  const live_result_index = messages.count
+  messages = messages.appending(
+    {role: "tool", tool_call_id: "live_call", name: "read", content: live_body},
+  )
+  messages = messages.appending(
+    {role: "assistant", content: "The active change is in src/live.rs."},
+  )
+  messages = messages.appending({role: "user", content: "Continue from the live file finding."})
+  return {transcript: transcript_from_messages(messages), live_result_index: live_result_index}
+}
+
+pipeline default(harness: Harness) {
+  const transcript = raw_transcript()
+  const raw_result = transcript_project(transcript, {policy: "raw"})
+  harness.stdio.println("raw_policy:" + raw_result.policy)
+  harness.stdio.println("raw_kept:" + to_string(raw_result.kept_count))
+  harness.stdio.println("raw_dropped:" + to_string(raw_result.dropped_count))
+  const hash_prefix = substring(raw_result.prefix_hash, 0, 7)
+  harness.stdio.println("raw_hash_prefix:" + hash_prefix)
+  const clean = transcript_project(transcript, {policy: "clean_tool_repair"})
+  harness.stdio.println("clean_policy:" + clean.policy)
+  harness.stdio.println("clean_kept:" + to_string(clean.kept_count))
+  harness.stdio.println("clean_dropped:" + to_string(clean.dropped_count))
+  harness.stdio.println("clean_blocked:" + to_string(clean.provider_safety_blocked))
+  harness.stdio.println("clean_event_kind:" + clean.event.kind)
+  const squashed = transcript_project(transcript, "squash_failed_calls")
+  harness.stdio.println("squash_dropped:" + to_string(squashed.dropped_count))
+  const summary = transcript_project(transcript, {policy: "summary_prefix", keep_last: 2})
+  harness.stdio.println("summary_kept:" + to_string(summary.kept_count))
+  harness.stdio.println("summary_first_role:" + summary.messages[0].role)
+  const user_only_projector = fn(messages) {
+    let kept = []
+    for message in messages {
+      if message.role == "user" {
+        kept = kept.appending(message)
+      }
+    }
+    return {messages: kept, reason: "user_only"}
+  }
+  const custom = transcript_project(transcript, {policy: "custom", projector: user_only_projector})
+  harness.stdio.println("custom_messages:" + to_string(len(custom.messages)))
+  harness.stdio.println("custom_reason:" + custom.reason)
+  const blocked = transcript_project(signed_reasoning_transcript(), {policy: "clean_tool_repair"})
+  harness.stdio.println("blocked_safety:" + to_string(blocked.provider_safety_blocked))
+  harness.stdio.println("blocked_dropped:" + to_string(blocked.dropped_count))
+  const bypassed = transcript_project(
+    signed_reasoning_transcript(),
+    {policy: "clean_tool_repair", respect_provider_signatures: false},
+  )
+  harness.stdio.println("bypassed_safety:" + to_string(bypassed.provider_safety_blocked))
+  harness.stdio.println("bypassed_dropped:" + to_string(bypassed.dropped_count))
+  const gc = transcript_project(
+    gc_transcript(),
+    {policy: "reachability_gc", root_window: 2, min_chars: 100},
+  )
+  harness.stdio.println("gc_policy:" + gc.policy)
+  harness.stdio.println("gc_redacted:" + to_string(gc.redacted_count))
+  harness.stdio.println("gc_reclaimed:" + to_string(gc.reclaimed_tokens > 0))
+  harness.stdio.println(
+    "gc_old_reclaimed:"
+      + to_string(gc.messages[2].content.contains("reclaimed by reachability_gc")),
+  )
+  harness.stdio.println(
+    "gc_live_preserved:" + to_string(gc.messages[4].content.contains("IMPORTANT_LIVE_VALUE")),
+  )
+  harness.stdio.println(
+    "gc_roots:" + to_string(gc.event.metadata.roots_consulted.contains("last_2_messages")),
+  )
+  harness.stdio.println("gc_pointer:" + gc.redaction_pointers[0].source)
+  const blocked_gc = transcript_project(
+    gc_transcript(),
+    {policy: "reachability_gc", root_window: 2, min_chars: 100, require_write_barrier: true},
+  )
+  harness.stdio.println("gc_barrier_blocked:" + to_string(blocked_gc.redacted_count == 0))
+  const long_case = long_gc_transcript(60)
+  const long_raw = transcript_project(long_case.transcript, {policy: "raw"})
+  const long_gc = transcript_project(
+    long_case.transcript,
+    {policy: "reachability_gc", root_window: 2, min_chars: 100},
+  )
+  const long_barrier_gc = transcript_project(
+    long_case.transcript,
+    {
+      policy: "reachability_gc",
+      root_window: 2,
+      min_chars: 100,
+      require_write_barrier: true,
+      write_barrier_refs: ["scratchpad:live-file-state"],
+    },
+  )
+  harness.stdio.println("long_raw_redacted:" + to_string(long_raw.redacted_count))
+  harness.stdio.println("long_gc_redacted:" + to_string(long_gc.redacted_count))
+  harness.stdio.println("long_gc_reclaimed:" + to_string(long_gc.reclaimed_tokens > 1000))
+  harness.stdio.println(
+    "long_gc_live_preserved:"
+      + to_string(
+      long_gc.messages[long_case.live_result_index].content.contains("IMPORTANT_LIVE_VALUE"),
+    ),
+  )
+  harness.stdio.println("long_barrier_gc_redacted:" + to_string(long_barrier_gc.redacted_count))
+}

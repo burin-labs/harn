@@ -1,0 +1,704 @@
+pub import "std/agent/action_graph"
+import { agent_loop } from "std/agent/loop"
+pub import "std/agent/result_text"
+pub import "std/agent/workers"
+import "std/collections"
+import "std/context"
+import { llm_call_options } from "std/llm/options"
+import { workflow_execute } from "std/workflow/execute"
+
+/**
+ * workflow_model_spec.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn workflow_model_spec(llm: HarnessLlm, config) {
+  const target = config?.model ?? config?.model_alias ?? config?.model_tier ?? config?.tier
+  if target == nil || target == "" {
+    return nil
+  }
+  return llm.pick_model(target, filter_nil({provider: config?.provider}))
+}
+
+/**
+ * workflow_options.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn workflow_options(llm: HarnessLlm, config) {
+  const spec = workflow_model_spec(llm, config)
+  const option_keys = __llm_call_option_registry().keys
+    + [
+    "loop_until_done",
+    "max_iterations",
+    "max_nudges",
+    "nudge",
+    "turn_policy",
+    "stop_after_successful_tools",
+    "require_successful_tools",
+    "tool_retries",
+    "tool_backoff_ms",
+    "native_tool_fallback",
+  ]
+  return filter_nil(
+    pick_keys(config ?? {}, option_keys)
+      + {
+      provider: config?.provider ?? spec?.provider,
+      model: config?.model ?? spec?.id,
+      context_callback: config?.context_callback ?? config?.context_filter,
+    },
+  )
+}
+
+/**
+ * stage_config.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn stage_config(flow, overrides, stage_name) {
+  const combined = (flow ?? {}) + (overrides ?? {})
+  const stage = combined[stage_name] ?? {}
+  const merged = combined + stage
+  return filter_nil(merged + {_stage: stage_name})
+}
+
+/**
+ * stage_prompt.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn stage_prompt(task, config) {
+  const ctx = config?.context
+  return prompt_compose(
+    task,
+    ctx,
+    filter_nil(
+      {
+        system: config?.system,
+        task_label: config?.task_label,
+        separator: config?.context_separator,
+        max_chars: config?.context_max_chars,
+        section_max_chars: config?.context_section_max_chars,
+      },
+    ),
+  )
+}
+
+/**
+ * run_stage.
+ *
+ * @effects: [llm.call]
+ * @errors: []
+ */
+pub fn run_stage(harness: Harness, task, config) {
+  const prompt = stage_prompt(task, config)
+  const opts = workflow_options(harness.llm, config)
+  if config?.mode == "completion" {
+    return harness.llm.completion(
+      prompt?.prompt,
+      config?.suffix,
+      prompt?.system,
+      llm_call_options(opts),
+    )
+  }
+  if config?.mode == "llm" || !config?.loop_until_done {
+    return harness.llm.call(prompt?.prompt, prompt?.system, llm_call_options(opts))
+  }
+  return agent_loop(
+    harness,
+    prompt?.prompt,
+    prompt?.system,
+    opts + {loop_until_done: config?.loop_until_done ?? true},
+  )
+}
+
+/**
+ * verify_command.
+ *
+ * @effects: [host]
+ * @errors: []
+ */
+pub fn verify_command(process: HarnessProcess, config) {
+  if config?.command == nil || config?.command == "" {
+    return nil
+  }
+  const invocation = process.shell_invocation({command: config.command})
+  const output = process.run({program: invocation.program, args: invocation.args})
+  let ok = output?.success
+  if config?.expect_status != nil {
+    ok = output?.exit_code == config.expect_status
+  }
+  if config?.expect_text != nil {
+    ok = ok && contains(output?.combined ?? "", config?.expect_text)
+  }
+  return {kind: "command", ok: ok, output: output}
+}
+
+/**
+ * verify_result.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn verify_result(process: HarnessProcess, task, result, config) {
+  if config == nil {
+    return nil
+  }
+  if config?.command != nil {
+    return verify_command(process, config)
+  }
+  if config?.assert_text != nil {
+    return {
+      kind: "text",
+      ok: contains(result?.text ?? "", config?.assert_text),
+      output: result?.text ?? "",
+    }
+  }
+  return nil
+}
+
+/**
+ * repair_task.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn repair_task(original_task, verification, config) {
+  if config?.prompt != nil {
+    return config?.prompt
+  }
+  const summary = json_stringify(verification)
+  return "The previous attempt did not pass verification.\n\nVerification:\n" + summary
+    + "\n\nContinue working on the original task and fix the problem.\n\nOriginal task:\n"
+    + original_task
+}
+
+/**
+ * workflow.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn workflow(config) {
+  return workflow_graph(config ?? {})
+}
+
+/**
+ * Executes a task through the supplied workflow graph and summarizes its stages.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn task_run(harness: Harness, task, flow, overrides) {
+  const graph = workflow_graph(flow ?? {})
+  const runtime = workflow_execute(harness, task, graph, overrides?.artifacts ?? [], overrides)
+  const stages = runtime?.run?.stages ?? []
+  let act = nil
+  let verify = nil
+  let repair = nil
+  const artifacts = runtime?.artifacts ?? []
+  const latest_text = if len(artifacts) > 0 {
+    artifacts[len(artifacts) - 1]?.text
+  } else {
+    act?.visible_text
+  }
+  for stage in stages {
+    if act == nil {
+      act = stage
+      continue
+    }
+    if verify == nil && (stage?.node_id == "verify" || stage?.kind == "verify") {
+      verify = stage
+      continue
+    }
+    if repair == nil && stage?.node_id == "repair" {
+      repair = stage
+    }
+  }
+  const status = if verify?.status == "failed" || repair != nil {
+    "needs_attention"
+  } else {
+    runtime?.status ?? "completed"
+  }
+  return {
+    task: task,
+    workflow: graph?.name ?? "workflow",
+    status: status,
+    text: latest_text,
+    result: runtime,
+    act: act,
+    repair: repair,
+    verification: verify,
+    final_verification: verify,
+    transcript: runtime?.transcript,
+    run: runtime?.run,
+    artifacts: artifacts,
+  }
+}
+
+/**
+ * workflow_continue.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn workflow_continue(harness: Harness, prev, task, flow, overrides) {
+  const transcript = prev?.transcript ?? prev
+  const merged = (overrides ?? {}) + {transcript: transcript}
+  return task_run(harness, task, flow, merged)
+}
+
+fn __workflow_existing_transcript(result) {
+  return result?.run?.transcript ?? result?.transcript ?? result?.result?.transcript
+}
+
+fn __workflow_build_transcript(task, workflow_name, text: string, metadata) {
+  const base_metadata = metadata ?? {}
+  const transcript_metadata = base_metadata + {workflow: workflow_name}
+  let built = transcript(transcript_metadata)
+  if task {
+    built = add_user(built, [{type: "text", text: task, visibility: "public"}])
+  }
+  if text {
+    built = add_assistant(built, [{type: "output_text", text: text, visibility: "public"}])
+  }
+  return built
+}
+
+fn __workflow_result_artifacts(existing, text: string, workflow_name) {
+  let run_artifacts = existing ?? []
+  let has_visible_result_artifact = false
+  if text {
+    for item in run_artifacts {
+      if item?.text == text {
+        has_visible_result_artifact = true
+      }
+    }
+    if !has_visible_result_artifact {
+      run_artifacts = run_artifacts
+        + [
+        artifact(
+          {
+            kind: "summary",
+            title: "Visible result",
+            text: text,
+            source: workflow_name,
+            freshness: "fresh",
+            relevance: 1.0,
+            metadata: {visibility: "public"},
+          },
+        ),
+      ]
+    }
+  }
+  return run_artifacts
+}
+
+fn __workflow_result_metadata(base_run, options) {
+  const base_metadata = base_run?.metadata ?? {}
+  const option_metadata = options?.metadata ?? {}
+  return base_metadata + option_metadata
+}
+
+/**
+ * workflow_result_transcript.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn workflow_result_transcript(task, workflow_name, result, metadata) {
+  const existing = __workflow_existing_transcript(result)
+  if existing {
+    return existing
+  }
+  const text = workflow_result_text(result)
+  return __workflow_build_transcript(task, workflow_name, text, metadata)
+}
+
+/**
+ * workflow_result_run.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn workflow_result_run(obs: HarnessObs, task, workflow_name, result, artifacts, options) {
+  const base_run = if result?._type == "run_record" {
+    result
+  } else {
+    result?.run ?? {}
+  }
+  const text = workflow_result_text(result)
+  const metadata = __workflow_result_metadata(base_run, options)
+  const transcript = if __workflow_existing_transcript(result) {
+    __workflow_existing_transcript(result)
+  } else {
+    __workflow_build_transcript(task, workflow_name, text, metadata)
+  }
+  const run_artifacts = __workflow_result_artifacts(
+    base_run?.artifacts ?? result?.artifacts ?? artifacts,
+    text,
+    workflow_name,
+  )
+  return run_record(
+    base_run
+      + {
+      workflow_id: base_run?.workflow_id ?? workflow_name,
+      workflow_name: base_run?.workflow_name ?? workflow_name,
+      task: task,
+      status: options?.status ?? base_run?.status ?? "completed",
+      transcript: transcript,
+      artifacts: run_artifacts,
+      trace_spans: obs.trace_spans(),
+      metadata: metadata,
+    },
+  )
+}
+
+/**
+ * workflow_result_persist.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn workflow_result_persist(
+  fs: HarnessFs,
+  obs: HarnessObs,
+  task,
+  workflow_name,
+  result,
+  artifacts,
+  options,
+) {
+  const base_run = if result?._type == "run_record" {
+    result
+  } else {
+    result?.run ?? {}
+  }
+  const text = workflow_result_text(result)
+  const metadata = __workflow_result_metadata(base_run, options)
+  const transcript = if __workflow_existing_transcript(result) {
+    __workflow_existing_transcript(result)
+  } else {
+    __workflow_build_transcript(task, workflow_name, text, metadata)
+  }
+  const run_artifacts = __workflow_result_artifacts(
+    base_run?.artifacts ?? result?.artifacts ?? artifacts,
+    text,
+    workflow_name,
+  )
+  const run = run_record(
+    base_run
+      + {
+      workflow_id: base_run?.workflow_id ?? workflow_name,
+      workflow_name: base_run?.workflow_name ?? workflow_name,
+      task: task,
+      status: options?.status ?? base_run?.status ?? "completed",
+      transcript: transcript,
+      artifacts: run_artifacts,
+      trace_spans: obs.trace_spans(),
+      metadata: metadata,
+    },
+  )
+  const persisted = fs.run_record_save(run, options?.path)
+  return {
+    path: persisted?.path,
+    persisted_path: persisted?.path,
+    run: persisted?.run,
+    status: persisted?.run?.status ?? "completed",
+    transcript: persisted?.run?.transcript,
+    artifacts: persisted?.run?.artifacts ?? [],
+    visible_text: text,
+  }
+}
+
+/**
+ * handoff_artifact.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn handoff_artifact(value) {
+  const item = handoff(value)
+  const target = item?.target_persona_or_human ?? {}
+  const label = target?.label ?? target?.id ?? "unknown"
+  return artifact(
+    {
+      kind: "handoff",
+      title: "Handoff to " + label,
+      text: handoff_context(item),
+      data: item,
+      source: item?.source_persona,
+      freshness: "fresh",
+      relevance: item?.confidence ?? 1.0,
+      metadata: {handoff_id: item?.id, target_kind: target?.kind, target_label: label},
+    },
+  )
+}
+
+/**
+ * workflow_session.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn workflow_session(prev) {
+  const transcript = prev?.transcript ?? prev?.result?.transcript ?? prev
+  const run = prev?.run ?? prev?.result?.run
+  const persisted_path = prev?.persisted_path ?? prev?.path ?? run?.persisted_path
+  const workflow_id = prev?.workflow_id ?? run?.workflow_id ?? prev?.workflow ?? run?.workflow_name
+  return {
+    _type: "workflow_session",
+    workflow_id: workflow_id,
+    transcript: transcript,
+    run: run,
+    persisted_path: persisted_path,
+    status: prev?.status ?? run?.status ?? transcript?.state ?? "active",
+    workflow: prev?.workflow ?? run?.workflow?.name,
+    task: prev?.task ?? run?.task,
+    summary: transcript_summary(transcript),
+    transcript_state: transcript?.state ?? "active",
+    message_count: len(transcript_messages(transcript)),
+    event_count: len(transcript_events(transcript)),
+    asset_count: len(transcript_assets(transcript)),
+    usage: run?.usage ?? prev?.usage,
+  }
+}
+
+/**
+ * workflow_session_new.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn workflow_session_new(metadata) {
+  const raw = metadata ?? {}
+  const workflow_id = raw?.workflow_id ?? raw?.workflow
+  return workflow_session({status: "active", workflow_id: workflow_id, transcript: transcript(raw)})
+}
+
+/**
+ * workflow_session_restore.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn workflow_session_restore(fs: HarnessFs, source) {
+  const run = if type_of(source) == "string" {
+    fs.run_record_load(source)
+  } else {
+    source?.run ?? source
+  }
+  return workflow_session(
+    {
+      status: run?.status ?? "restored",
+      workflow_id: run?.workflow_id,
+      run: run,
+      persisted_path: run?.persisted_path,
+      transcript: run?.transcript ?? transcript(),
+    },
+  )
+}
+
+/**
+ * workflow_session_fork.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn workflow_session_fork(prev) {
+  const session = workflow_session(prev)
+  return workflow_session(session + {transcript: transcript_fork(session.transcript)})
+}
+
+/**
+ * workflow_session_archive.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn workflow_session_archive(prev) {
+  const session = workflow_session(prev)
+  return workflow_session(
+    session + {status: "archived", transcript: transcript_archive(session.transcript)},
+  )
+}
+
+/**
+ * workflow_session_resume.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn workflow_session_resume(prev) {
+  const session = workflow_session(prev)
+  return workflow_session(
+    session + {status: "active", transcript: transcript_resume(session.transcript)},
+  )
+}
+
+/**
+ * workflow_compact.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn workflow_compact(agent: HarnessAgent, prev, options) {
+  const transcript = prev?.transcript ?? prev
+  return agent.compact_transcript(transcript, options)
+}
+
+/**
+ * workflow_session_compact.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn workflow_session_compact(agent: HarnessAgent, prev, options) {
+  const session = workflow_session(prev)
+  return workflow_session(
+    session + {transcript: agent.compact_transcript(session.transcript, options)},
+  )
+}
+
+/**
+ * workflow_reset.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn workflow_reset(agent: HarnessAgent, prev, carry_summary) {
+  const current_transcript = prev?.transcript ?? prev
+  if carry_summary && transcript_summary(current_transcript) {
+    return agent.compact_transcript(current_transcript, {keep_last: 0})
+  }
+  return transcript()
+}
+
+/**
+ * workflow_session_reset.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn workflow_session_reset(agent: HarnessAgent, prev, carry_summary) {
+  const session = workflow_session(prev)
+  return workflow_session(
+    {
+      workflow_id: session.workflow_id,
+      workflow: session.workflow,
+      status: "active",
+      transcript: workflow_reset(agent, session.transcript, carry_summary),
+    },
+  )
+}
+
+/**
+ * continue_as_new.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn continue_as_new(agent: HarnessAgent, runtime: HarnessRuntime, prev, options = nil) {
+  const session = workflow_session(prev)
+  const carry_summary = options?.carry_summary ?? true
+  const _ = runtime.workflow_continue_as_new(session)
+  return workflow_session(
+    {
+      workflow_id: session.workflow_id,
+      workflow: session.workflow,
+      status: "active",
+      persisted_path: session.persisted_path,
+      run: session.run,
+      transcript: workflow_reset(agent, session.transcript, carry_summary),
+    },
+  )
+}
+
+/**
+ * workflow_session_persist.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn workflow_session_persist(fs: HarnessFs, prev, path) {
+  const session = workflow_session(prev)
+  if session.run == nil {
+    return session
+  }
+  const persisted = fs.run_record_save(session.run, path)
+  return workflow_session(session + {run: persisted?.run, persisted_path: persisted?.path})
+}
+
+/**
+ * worker_request.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn worker_request(worker) {
+  return worker?.request ?? worker?.worker?.request ?? worker?.data?.request
+}
+
+/**
+ * worker_result.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn worker_result(worker) {
+  return worker?.result ?? worker?.data?.payload ?? worker?.worker?.result
+}
+
+/**
+ * worker_provenance.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn worker_provenance(worker) {
+  return worker?.provenance ?? worker?.worker?.provenance ?? worker?.data?.provenance
+}
+
+/**
+ * worker_research_questions.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn worker_research_questions(worker) {
+  return worker_request(worker)?.research_questions ?? []
+}
+
+/**
+ * worker_action_items.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn worker_action_items(worker) {
+  return worker_request(worker)?.action_items ?? []
+}
+
+/**
+ * worker_workflow_stages.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn worker_workflow_stages(worker) {
+  return worker_request(worker)?.workflow_stages ?? []
+}
+
+/**
+ * worker_verification_steps.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn worker_verification_steps(worker) {
+  return worker_request(worker)?.verification_steps ?? []
+}

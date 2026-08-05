@@ -1,0 +1,76 @@
+/**
+ * S-11 (#1847): a self-park with `conditions.trigger` registers an
+ * auto-resume trigger handle, and firing a synthetic event against that
+ * handle drives the suspended worker to completion via the runtime
+ * auto-resume path (initiator: "triggered"). No operator `resume_agent`
+ * call is required — the loop wakes itself.
+ *
+ * Asserts:
+ *   - Suspension is reported with `conditions.trigger` round-tripped
+ *     (kind + provider) and `auto_resume_trigger` populated with a
+ *     non-nil dispatcher handle id.
+ *   - `trigger_fire` against the registered handle reports `dispatched`.
+ *   - The auto-resumed loop reaches `completed` without any explicit
+ *     `resume_agent` call from the test pipeline.
+ *
+ * This is the "synthetic trigger fires; runtime auto-resumes" leg of
+ * the suspend/resume contract (see docs/src/agent-lifecycle.md §
+ * Conditioned resume).
+ */
+import "std/agents"
+import { llm_text, with_llm_script } from "std/testing"
+import "std/triggers"
+
+pipeline main(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        tool_calls: [
+          {
+            id: "park_trigger",
+            name: "agent_await_resumption",
+            arguments: {
+              reason: "waiting on pr.merged",
+              conditions: {trigger: {kind: "pr.merged", provider: "webhook"}},
+            },
+          },
+        ],
+        input_tokens: 7,
+        output_tokens: 3,
+      },
+      llm_text("auto-resumed by trigger"),
+    ],
+    { ->
+      const handle = sub_agent_run(
+        harness,
+        "Park until the PR is merged.",
+        {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
+      )
+      const suspended = wait_agent(harness.agent, handle)
+      const trigger_handle = suspended?.suspension?.auto_resume_trigger
+      harness.stdio.println("status=" + suspended.status)
+      harness.stdio.println(
+        "conditions_trigger_kind=" + (suspended?.suspension?.conditions?.trigger?.kind ?? ""),
+      )
+      harness.stdio.println(
+        "conditions_trigger_provider="
+          + (suspended?.suspension?.conditions?.trigger?.provider ?? ""),
+      )
+      harness.stdio.println("has_trigger_handle=" + to_string(trigger_handle?.id != nil))
+      const fired: DispatchHandle = harness.runtime.trigger_fire(
+        trigger_handle,
+        {
+          provider: "webhook",
+          kind: "pr.merged",
+          payload: {number: 42, merged: true},
+          headers: {x_delivery: "suspend-conditioned-trigger"},
+        },
+      )
+      harness.stdio.println("dispatch_status=" + fired.status)
+      const done = wait_agent(harness.agent, handle)
+      harness.stdio.println("final_status=" + done.status)
+      harness.stdio.println("has_transcript=" + to_string(done.has_transcript))
+    },
+  )
+}

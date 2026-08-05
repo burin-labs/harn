@@ -1,0 +1,43 @@
+pipeline default(harness: Harness) {
+  const workflow_id = "wf-messages-" + harness.random.uuid()
+  const target = {workflow_id: workflow_id}
+  const signaled = harness.runtime.workflow_signal(target, "new_customer_joined", {customer_id: 1})
+  harness.stdio.println(signaled?.status?.pending_count == 1)
+  const signal = harness.runtime.workflow_receive(target)
+  harness.stdio.println(signal?.kind == "signal")
+  harness.stdio.println(signal?.name == "new_customer_joined")
+  harness.stdio.println(signal?.payload?.customer_id == 1)
+  const published = harness.runtime.workflow_publish_query(target, "progress_pct", 42)
+  harness.stdio.println(published?.query_count == 1)
+  harness.stdio.println(harness.runtime.workflow_query(target, "progress_pct") == 42)
+  const waiter = spawn {
+    let result = harness.runtime.workflow_update(
+      target,
+      "adjust_budget",
+      {max_usd: 10},
+      {timeout_ms: 1000},
+    )
+    harness.stdio.println(result?.ok)
+  }
+  harness.clock.sleep_ms(50ms)
+  const update = harness.runtime.workflow_receive(target)
+  harness.stdio.println(update?.kind == "update")
+  harness.stdio.println(update?.name == "adjust_budget")
+  harness.stdio.println(update?.payload?.max_usd == 10)
+  harness.stdio.println(update?.request_id != nil)
+  harness.runtime.workflow_respond_update(target, update?.request_id, {ok: true}, update?.name)
+  const _ = await(waiter)
+  const paused = harness.runtime.workflow_pause(target)
+  harness.stdio.println(paused?.paused)
+  const pause_event = harness.runtime.workflow_receive(target)
+  harness.stdio.println(pause_event?.kind == "control")
+  harness.stdio.println(pause_event?.name == "pause")
+  const resumed = harness.runtime.workflow_resume(target)
+  harness.stdio.println(!resumed?.paused)
+  const resume_event = harness.runtime.workflow_receive(target)
+  harness.stdio.println(resume_event?.name == "resume")
+  const next = harness.runtime.continue_as_new(target)
+  harness.stdio.println(next?.workflow_id == workflow_id)
+  const status = harness.runtime.workflow_status(target)
+  harness.stdio.println(status?.generation == 2)
+}

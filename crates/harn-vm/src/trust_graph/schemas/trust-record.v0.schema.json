@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/opentrustgraph/v0/trust-record.schema.json",
+  "title": "OpenTrustGraph TrustRecord",
+  "description": "One autonomy, approval, or control-plane event in an append-only OpenTrustGraph chain.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "record_id",
+    "agent",
+    "action",
+    "outcome",
+    "trace_id",
+    "autonomy_tier",
+    "timestamp",
+    "chain_index",
+    "previous_hash",
+    "entry_hash",
+    "metadata"
+  ],
+  "properties": {
+    "schema": {
+      "const": "opentrustgraph/v0"
+    },
+    "record_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Globally unique record id. UUIDv7 is recommended."
+    },
+    "agent": {
+      "type": "string",
+      "minLength": 1
+    },
+    "action": {
+      "type": "string",
+      "minLength": 1
+    },
+    "approver": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "description": "Actor that satisfied the approval gate, or null when no approval gate applied."
+    },
+    "outcome": {
+      "type": "string",
+      "enum": ["success", "failure", "denied", "timeout"]
+    },
+    "trace_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "autonomy_tier": {
+      "type": "string",
+      "enum": ["shadow", "suggest", "act_with_approval", "act_auto"]
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "cost_usd": {
+      "type": ["number", "null"],
+      "minimum": 0
+    },
+    "chain_index": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "previous_hash": {
+      "type": ["string", "null"],
+      "pattern": "^(sha256:[0-9a-f]{64})$"
+    },
+    "entry_hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Runtime-specific detail bag. Consumers must preserve unknown keys."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "success"
+          },
+          "autonomy_tier": {
+            "const": "act_with_approval"
+          },
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "approval": {
+                "type": "object",
+                "properties": {
+                  "required": {
+                    "const": true
+                  }
+                },
+                "required": ["required"]
+              }
+            },
+            "required": ["approval"]
+          }
+        },
+        "required": ["outcome", "autonomy_tier", "metadata"]
+      },
+      "then": {
+        "properties": {
+          "approver": {
+            "type": "string",
+            "minLength": 1
+          },
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "approval": {
+                "$ref": "#/$defs/approvalReceipt"
+              }
+            },
+            "required": ["approval"]
+          }
+        },
+        "required": ["approver"]
+      }
+    }
+  ],
+  "$defs": {
+    "approvalReceipt": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["required", "quorum", "signatures"],
+      "properties": {
+        "required": {
+          "const": true
+        },
+        "quorum": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "signatures": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["reviewer", "signed_at", "signature"],
+            "properties": {
+              "reviewer": {
+                "type": "string",
+                "minLength": 1
+              },
+              "signed_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "signature": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

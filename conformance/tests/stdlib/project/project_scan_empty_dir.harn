@@ -1,0 +1,13 @@
+import "std/project"
+
+pipeline test(harness: Harness, task) {
+  const root = path_join(harness.fs.workspace_temp_dir(), "project_scan_empty")
+  harness.fs.mkdir(root)
+  const ev = project_scan(harness.project, root, {tiers: ["ambient", "config"]})
+  const tree = project_scan_tree(harness.project, root, {tiers: ["ambient"], depth: 1})
+  harness.stdio.println(ev.path.ends_with("/project_scan_empty"))
+  harness.stdio.println(len(ev.languages) == 0)
+  harness.stdio.println(len(ev.frameworks) == 0)
+  harness.stdio.println(len(ev.build_systems) == 0)
+  harness.stdio.println(len(tree["."].languages) == 0)
+}

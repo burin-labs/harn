@@ -1,0 +1,79 @@
+// estimate_call_cost: catalog hit returns cost_usd + breakdown; provider
+// fallback returns cost using provider-level rates; unknown commercial
+// pricing returns pricing_known=false instead of silently zeroing.
+import { estimate_call_cost, format_usd } from "std/llm/economics"
+
+pipeline default(harness: Harness) {
+  // Sonnet 4: 3.00/15.00 per MTok. 10k input + 1k output =
+  //   10000 * 3/1e6 + 1000 * 15/1e6 = 0.03 + 0.015 = 0.045.
+  const row = estimate_call_cost(
+    {
+      provider: "anthropic",
+      model: "claude-sonnet-4-20250514",
+      input_tokens: 10000,
+      output_tokens: 1000,
+    },
+  )
+  harness.stdio.println("pricing_known=" + to_string(row.pricing_known))
+  harness.stdio.println("cost=" + format_usd(row.cost_usd))
+  harness.stdio.println("input=" + format_usd(row.breakdown.input_usd))
+  harness.stdio.println("output=" + format_usd(row.breakdown.output_usd))
+  // With cache: 8k cache_read, 2k regular input, 1k output.
+  //   regular = 2000 * 3/1e6 = 0.006
+  //   cache_read = 8000 * 0.3/1e6 = 0.0024
+  //   output = 1000 * 15/1e6 = 0.015
+  //   total = 0.0234
+  const cached = estimate_call_cost(
+    {
+      provider: "anthropic",
+      model: "claude-sonnet-4-20250514",
+      input_tokens: 10000,
+      output_tokens: 1000,
+      cache_read_tokens: 8000,
+    },
+  )
+  harness.stdio.println("cached cost=" + format_usd(cached.cost_usd))
+  harness.stdio.println("cached cache_read=" + format_usd(cached.breakdown.cache_read_usd))
+  // 100 calls multiplies total cost.
+  const many = estimate_call_cost(
+    {
+      provider: "anthropic",
+      model: "claude-sonnet-4-20250514",
+      input_tokens: 1000,
+      output_tokens: 100,
+      calls: 100,
+    },
+  )
+  harness.stdio.println("calls=" + to_string(many.calls))
+  harness.stdio.println("many cost=" + format_usd(many.cost_usd))
+  // Unknown commercial: pricing_known=false, cost_usd nil.
+  const unknown = estimate_call_cost(
+    {
+      provider: "nonexistent_provider",
+      model: "ghost-model",
+      input_tokens: 1000,
+      output_tokens: 500,
+    },
+  )
+  harness.stdio.println("unknown_known=" + to_string(unknown.pricing_known))
+  harness.stdio.println("unknown_cost_nil=" + to_string(unknown.cost_usd == nil))
+  // The route has priced input and prompt caching, but no published cached-read
+  // tier. Cached usage is therefore explicitly unpriceable.
+  const unknown_cache_tier = estimate_call_cost(
+    {
+      provider: "deepinfra",
+      model: "deepinfra/deepseek-ai/DeepSeek-V3.2",
+      input_tokens: 1000,
+      cache_read_tokens: 800,
+    },
+  )
+  harness.stdio.println("unknown_cache_known=" + to_string(unknown_cache_tier.pricing_known))
+  harness.stdio.println("unknown_cache_cost_nil=" + to_string(unknown_cache_tier.cost_usd == nil))
+  harness.stdio.println("unknown_cache_reason=" + to_string(unknown_cache_tier.unpriced_reason))
+  // Free provider (ollama): pricing_known=true, cost=0.
+  const free = estimate_call_cost(
+    {provider: "ollama", model: "llama3.2", input_tokens: 1000, output_tokens: 500},
+  )
+  harness.stdio.println("free_known=" + to_string(free.pricing_known))
+  harness.stdio.println("free_cost=" + format_usd(free.cost_usd))
+}

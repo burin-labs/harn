@@ -1,0 +1,52 @@
+[package]
+name = "harn-guard"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Downloadable on-device prompt-injection classifier for Harn (Layer 2)"
+
+[dependencies]
+# Only the security seam (InjectionClassifier registration) and runtime paths are
+# needed; postgres and the other default features stay off to keep this lean.
+harn-vm = { path = "../harn-vm", version = "=0.10.57", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+thiserror = "2"
+
+# Inference runtime — pulled in ONLY by the optional `neural` feature so the
+# default binary never links an ONNX runtime or a tokenizer. `ort` downloads a
+# prebuilt ONNX Runtime at build time (pyke CDN); `tokenizers` loads the model's
+# `tokenizer.json`. Both are off by default, so no ordinary lane builds them.
+# `download-binaries` requires a TLS feature once defaults are off; use
+# `tls-rustls` to match the workspace rustls posture (see #5690).
+#
+# They are not uncovered, though: `make check-all-features` type-checks this
+# feature set with `ORT_SKIP_DOWNLOAD=1`, which is the gate #5690 produced. It
+# proves the wiring compiles — including the TLS feature that broke — while
+# fetching no ONNX Runtime and running no inference. So a version bump here has
+# compile evidence behind it and no behavioral evidence; weigh a release-
+# candidate bump on that basis.
+ort = { version = "=2.0.0-rc.12", optional = true, default-features = false, features = [
+    "download-binaries",
+    "tls-rustls",
+] }
+tokenizers = { version = "0.23", optional = true, default-features = false, features = [
+    "onig",
+] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[features]
+# Management layer (catalog + store + resolve) is dependency-light and always on.
+default = []
+# `neural` pulls the on-device inference runtime (ONNX) — slice 2b. Kept off by
+# default so the release binary never links a model runtime.
+neural = ["dep:ort", "dep:tokenizers"]
+
+[lints]
+workspace = true

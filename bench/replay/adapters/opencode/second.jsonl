@@ -1,0 +1,5 @@
+{"type":"message","id":"m1","role":"assistant","content":"I will inspect the file before editing."}
+{"type":"tool_call","id":"t1","tool":"read_file","arguments":{"path":"README.md"},"result":{"ok":true,"bytes":128}}
+{"type":"permission","id":"p1","action":"write_file","capability":"fs.write","decision":"approved","reviewer":"operator"}
+{"type":"tool_call","id":"t2","tool":"write_file","arguments":{"path":"notes/summary.md"},"result":{"ok":true}}
+{"type":"llm","id":"l1","provider":"local","model":"qwen","usage":{"input_tokens":42,"output_tokens":11}}

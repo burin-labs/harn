@@ -1,0 +1,21 @@
+// Verifies `agent_session_push_bridge_injection` errors out when no
+// host bridge is attached to the session (#2211). Conformance harness
+// runs without an ACP transport, so this path always trips the guard;
+// the test pins the error shape so a future change that swallows the
+// error fails loudly.
+import { agent_session_push_bridge_injection } from "std/agent/state"
+
+pipeline main(harness: Harness) {
+  const result = try {
+    agent_session_push_bridge_injection(
+      harness.agent,
+      "bridge-push-no-bridge",
+      {body: "should fail", mode: "interrupt_immediate"},
+    )
+  }
+  harness.stdio.println(is_err(result))
+  if is_err(result) {
+    const err = unwrap_err(result)
+    harness.stdio.println(contains(to_string(err), "no host bridge"))
+  }
+}

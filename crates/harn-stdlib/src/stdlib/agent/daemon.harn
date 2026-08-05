@@ -1,0 +1,154 @@
+// @harn-entrypoint-category agent.stdlib
+import { daemon_timer_feedback_prompt, daemon_watch_feedback_prompt } from "std/agent/prompts"
+import {
+  agent_emit_event,
+  agent_reminder_providers_fire,
+  agent_session_inject_feedback,
+} from "std/agent/state"
+import { agent_await_resumption } from "std/agent/workers"
+
+fn __daemon_compaction_summary(opts) {
+  if !(opts?.consolidate_on_idle ?? false) {
+    return nil
+  }
+  if !(opts?.auto_compact ?? false) {
+    return nil
+  }
+  const callback = opts?.compact_callback
+  if callback == nil {
+    return nil
+  }
+  const compacted = callback([])
+  if type_of(compacted) == "dict" {
+    return compacted?.summary
+  }
+  if type_of(compacted) == "string" {
+    return compacted
+  }
+  return nil
+}
+
+fn __agent_daemon_feedback(fs: HarnessFs, wake, opts) {
+  if wake?.reason == "timer" {
+    return {kind: wake?.feedback_kind ?? "timer", text: daemon_timer_feedback_prompt(fs, opts)}
+  }
+  if wake?.reason == "watch" || wake?.changed_paths != nil {
+    const changed_paths = wake?.changed_paths ?? []
+    const changed_paths_text = if type_of(changed_paths) == "list" {
+      join(changed_paths, ", ")
+    } else {
+      to_string(changed_paths)
+    }
+    return {
+      kind: wake?.feedback_kind ?? wake?.reason ?? "daemon",
+      text: daemon_watch_feedback_prompt(fs, {changed_paths: changed_paths_text}, opts),
+    }
+  }
+  if wake?.feedback != nil {
+    return {kind: wake?.feedback_kind ?? wake?.reason ?? "daemon", text: wake.feedback}
+  }
+  return nil
+}
+
+fn __agent_daemon_timeout_condition(timeout_ms) {
+  if timeout_ms <= 0 {
+    return nil
+  }
+  return {
+    duration_minutes: to_int(max(1, ceil(timeout_ms * 1.0 / 60000.0))),
+    on_timeout: "resume_with_input",
+  }
+}
+
+fn __agent_daemon_raw_resume_conditions(opts, timeout_ms) {
+  let conditions = {}
+  const timeout = __agent_daemon_timeout_condition(timeout_ms)
+  if timeout != nil {
+    conditions = conditions + {timeout: timeout}
+  }
+  const event_topic = opts?.resume_event_topic ?? opts?.daemon_event_topic
+  if event_topic != nil {
+    conditions = conditions + {on_event: event_topic}
+  }
+  if len(conditions.keys()) == 0 {
+    return nil
+  }
+  return conditions
+}
+
+fn __agent_daemon_await_resumption(agent: HarnessAgent, session, opts, iteration, timeout_ms) {
+  const request = agent_await_resumption(
+    agent,
+    "daemon idle",
+    __agent_daemon_raw_resume_conditions(opts, timeout_ms),
+  )
+  agent_emit_event(
+    agent,
+    session.session_id,
+    "tool_call_audit",
+    {
+      tool_call_id: "daemon_idle:" + to_string(iteration),
+      tool_name: "agent_await_resumption",
+      audit: {
+        layer: "agent_lifecycle",
+        status: "daemon_idle",
+        initiator: "self",
+        reason: request.reason,
+        conditions: request.conditions,
+      },
+    },
+  )
+  return request
+}
+
+/**
+ * agent_daemon_snapshot.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_daemon_snapshot(
+  agent: HarnessAgent,
+  session,
+  opts,
+  daemon_state = "idle",
+  iteration = 0,
+) {
+  const summary = __daemon_compaction_summary(opts)
+  let snapshot_opts = opts + {daemon_state: daemon_state, total_iterations: iteration}
+  if summary != nil {
+    snapshot_opts = snapshot_opts + {transcript_summary: summary}
+  }
+  return agent.daemon_snapshot(session.session_id, snapshot_opts)
+}
+
+/**
+ * agent_daemon_step.
+ *
+ * @effects: [host, agent]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_daemon_step(agent: HarnessAgent, fs: HarnessFs, session, opts, iteration) {
+  const snapshot = agent_daemon_snapshot(agent, session, opts, "idle", iteration)
+  const timeout = opts?.wake_interval_ms ?? 0
+  __agent_daemon_await_resumption(agent, session, opts, iteration, timeout)
+  const idle_payload = {
+    session: {id: session.session_id},
+    iteration: iteration,
+    wake_interval_ms: timeout,
+    consolidate_on_idle: opts?.consolidate_on_idle ?? false,
+  }
+  __host_fire_session_hook("session_idle", idle_payload)
+  agent_reminder_providers_fire(agent, session.session_id, "session_idle", idle_payload, opts)
+  let wake = agent.daemon_wait(session.session_id, timeout)
+  while wake?.reason == nil && timeout > 0 {
+    wake = agent.daemon_wait(session.session_id, timeout)
+  }
+  const feedback = __agent_daemon_feedback(fs, wake, opts)
+  if feedback != nil {
+    agent_session_inject_feedback(agent, session.session_id, feedback.kind, feedback.text)
+  }
+  return {snapshot: snapshot, wake: wake}
+}

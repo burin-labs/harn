@@ -1,0 +1,54 @@
+type Receipt = {id: string}
+
+type RuleResult = {ok: bool}
+
+type Step<T> = {value: T}
+
+type MaybeStep<T> = {value: T?}
+
+type ValidationRule<T> = {name: string, validate: fn(T, dict) -> RuleResult}
+
+type SchemaContract<T> = {base: T, rules: list<ValidationRule<T>>}
+
+fn int_step() -> Step<int> {
+  return {value: 1}
+}
+
+fn values<T>(_steps: list<Step<T>>) -> list<T> {
+  return []
+}
+
+fn maybe_values<T>(_steps: list<MaybeStep<T>>) -> list<T> {
+  return []
+}
+
+fn validate_receipt(receipt: Receipt, _context: dict) -> RuleResult {
+  return {ok: receipt.id != ""}
+}
+
+fn validation_rule<T>(name: string, validate: fn(T, dict) -> RuleResult) -> ValidationRule<T> {
+  return {name: name, validate: validate}
+}
+
+fn receipt_contract() -> SchemaContract<Receipt> {
+  return {base: {id: "r-1"}, rules: [validation_rule("has-id", validate_receipt)]}
+}
+
+fn artifacts<T>(_contract: SchemaContract<T>) -> list<T> {
+  return []
+}
+
+fn artifact_groups<T>(_contracts: list<SchemaContract<T>>) -> list<T> {
+  return []
+}
+
+pipeline test(harness: Harness, task) {
+  const ints: list<int> = values([int_step()])
+  const nullable_ints: list<int> = maybe_values([{value: 1}])
+  const receipts: list<Receipt> = artifacts(receipt_contract())
+  const grouped_receipts: list<Receipt> = artifact_groups([receipt_contract()])
+  const explicit_empty: list<int> = values<int>([])
+  harness.stdio.println(
+    "nested aliases inferred: ${ints.count + nullable_ints.count + receipts.count + grouped_receipts.count + explicit_empty.count}",
+  )
+}

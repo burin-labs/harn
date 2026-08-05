@@ -1,0 +1,56 @@
+import "std/triggers"
+
+/**
+ * CH-04 (#1875): `key` partitions events by JSON path. Each distinct key
+ * value maintains its own counter + window. Repo-A reaches `count` first
+ * and fires immediately; repo-B fires later when its own threshold is
+ * reached.
+ */
+fn handle_batch(harness: Harness, event) {
+  const batch_len = if event.batch == nil {
+    0
+  } else {
+    len(event.batch)
+  }
+  const first = event.batch[0]
+  const repo = first.provider_payload.payload.repo
+  harness.channels.append("batch.key.fired", {repo: repo, batch_size: batch_len})
+}
+
+pipeline test(harness: Harness, task) {
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(
+    harness.random.range(100000, 999999),
+  )
+  const _ = harness.runtime.trigger_register(
+    {
+      id: "batch-key-" + unique,
+      kind: "channel.emit",
+      provider: "channel",
+      autonomy_tier: "act_auto",
+      handler: handle_batch,
+      when: nil,
+      retry: nil,
+      match: {events: ["channel:batch.key.input"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      batch: {count: 2, window: "10m", key: "repo"},
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  const _ = harness.channels.append("batch.key.input", {repo: "repoA", seq: 1})
+  const _ = harness.channels.append("batch.key.input", {repo: "repoB", seq: 1})
+  const only_a = harness.channels.events("batch.key.fired")
+  harness.stdio.println("after-one-each:" + to_string(len(only_a)))
+  const _ = harness.channels.append("batch.key.input", {repo: "repoA", seq: 2})
+  const one_fired = harness.channels.events("batch.key.fired")
+  harness.stdio.println("after-repoA-pair:" + to_string(len(one_fired)))
+  harness.stdio.println("first-fired-repo:" + one_fired[0].payload.repo)
+  const _ = harness.channels.append("batch.key.input", {repo: "repoB", seq: 2})
+  const both_fired = harness.channels.events("batch.key.fired")
+  harness.stdio.println("after-repoB-pair:" + to_string(len(both_fired)))
+  harness.stdio.println("second-fired-repo:" + both_fired[1].payload.repo)
+}

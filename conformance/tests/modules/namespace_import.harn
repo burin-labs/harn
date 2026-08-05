@@ -1,0 +1,6 @@
+import * as lib from "namespace_import_lib"
+
+pipeline default(harness: Harness) {
+  harness.stdio.println(lib.greet("world"))
+  harness.stdio.println(lib.answer())
+}

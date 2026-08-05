@@ -1,0 +1,4 @@
+[harn] variant: NotFound
+[harn] field: /users/42
+[harn] propagated: plain string error
+[harn] timeout variant: Timeout

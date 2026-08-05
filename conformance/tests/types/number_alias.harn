@@ -1,0 +1,15 @@
+fn add_one(x: number) -> number {
+  return x + 1
+}
+
+fn ops(a: number, b: number) -> number {
+  return a + b - a * b
+}
+
+pipeline test(harness: Harness, task) {
+  const n: number = 3
+  harness.stdio.log(n)
+  harness.stdio.log(add_one(3))
+  harness.stdio.log(add_one(7.5))
+  harness.stdio.log(ops(4, 2))
+}

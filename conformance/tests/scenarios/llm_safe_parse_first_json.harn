@@ -1,0 +1,37 @@
+// std/llm/safe.parse_first_json salvages and parses the first JSON value from
+// sloppy model text: strips code fences, skips balanced-but-invalid candidates,
+// returns nil when nothing parses. Salvage path only — prefer
+// llm_call_structured when you control the request.
+import { parse_first_json } from "std/llm/safe"
+
+pipeline default(harness: Harness) {
+  // JSON inside a code fence.
+  harness.stdio.println(json_stringify(parse_first_json("```json\n{\"ok\": true}\n```")))
+  harness.stdio.println("---")
+  // Leading prose + trailing garbage.
+  harness.stdio.println(
+    json_stringify(parse_first_json("Here you go: {\"a\": 1, \"b\": [2, 3]} enjoy!")),
+  )
+  harness.stdio.println("---")
+  // A balanced-but-invalid prose span before the real payload is skipped.
+  harness.stdio.println(json_stringify(parse_first_json("{see below} for details: {\"real\": 1}")))
+  harness.stdio.println("---")
+  // Array payload.
+  harness.stdio.println(
+    json_stringify(parse_first_json("results were [1, \"two\", {\"three\": 3}] overall")),
+  )
+  harness.stdio.println("---")
+  // Braces and escaped quotes inside strings survive the scan AND the parse.
+  harness.stdio.println(
+    json_stringify(parse_first_json("{\"msg\": \"brace } and quote \\\" inside\"}")),
+  )
+  harness.stdio.println("---")
+  // No JSON -> nil.
+  harness.stdio.println(to_string(parse_first_json("nothing structured here") ?? "nil"))
+  harness.stdio.println("---")
+  // Balanced but never valid -> nil.
+  harness.stdio.println(to_string(parse_first_json("{not json at all}") ?? "nil"))
+  harness.stdio.println("---")
+  // nil input -> nil.
+  harness.stdio.println(to_string(parse_first_json(nil) ?? "nil"))
+}

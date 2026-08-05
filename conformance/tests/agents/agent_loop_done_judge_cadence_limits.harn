@@ -1,0 +1,110 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn judge_events(events) {
+  return events.filter({ event -> event.type == "judge_decision" })
+}
+
+pipeline default(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("<user_response>healthy one</user_response>\n<done>##DONE##</done>"),
+      llm_text("<user_response>healthy two</user_response>\n<done>##DONE##</done>"),
+      llm_text("<user_response>healthy three</user_response>\n<done>##DONE##</done>"),
+    ],
+    { ->
+      const stalled_session = "done-judge-stalled-" + harness.random.uuid()
+      const stalled = agent_capture_events(
+        harness.agent,
+        stalled_session,
+        fn() { return agent_loop(
+          harness,
+          "Do not judge unless stalled.",
+          nil,
+          {
+            provider: "mock",
+            loop_until_done: true,
+            max_iterations: 3,
+            max_nudges: 10,
+            session_id: stalled_session,
+            done_judge: {cadence: {when: "stalled"}},
+          },
+        ) },
+      )
+      harness.stdio.println(stalled.result.status)
+      harness.stdio.println(stalled.result.llm.iterations)
+      harness.stdio.println(len(judge_events(stalled.events)))
+      harness.stdio.println(len(harness.llm.mock_calls()))
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("<user_response>capped one</user_response>\n<done>##DONE##</done>"),
+      llm_text(
+        "{\"verdict\":\"continue\",\"reasoning\":\"first and only judge fire\",\"next_step\":\"keep going\"}",
+      ),
+      llm_text("<user_response>capped two</user_response>\n<done>##DONE##</done>"),
+      llm_text("<user_response>capped three</user_response>\n<done>##DONE##</done>"),
+      llm_text("<user_response>capped four</user_response>\n<done>##DONE##</done>"),
+    ],
+    { ->
+      const capped_session = "done-judge-cap-" + harness.random.uuid()
+      const capped = agent_capture_events(
+        harness.agent,
+        capped_session,
+        fn() { return agent_loop(
+          harness,
+          "Judge once at most.",
+          nil,
+          {
+            provider: "mock",
+            loop_until_done: true,
+            max_iterations: 4,
+            max_nudges: 10,
+            session_id: capped_session,
+            done_judge: {cadence: {every: 1, max_invocations: 1}},
+          },
+        ) },
+      )
+      harness.stdio.println(capped.result.status)
+      harness.stdio.println(capped.result.llm.iterations)
+      harness.stdio.println(len(judge_events(capped.events)))
+      harness.stdio.println(len(harness.llm.mock_calls()))
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("<user_response>closure one</user_response>\n<done>##DONE##</done>"),
+      llm_text("<user_response>closure two</user_response>\n<done>##DONE##</done>"),
+      llm_text("{\"verdict\":\"done\",\"reasoning\":\"closure accepted on turn two\"}"),
+    ],
+    { ->
+      const closure_session = "done-judge-closure-" + harness.random.uuid()
+      const closure = agent_capture_events(
+        harness.agent,
+        closure_session,
+        fn() { return agent_loop(
+          harness,
+          "Judge when the loop-state predicate says so.",
+          nil,
+          {
+            provider: "mock",
+            loop_until_done: true,
+            max_iterations: 3,
+            max_nudges: 10,
+            session_id: closure_session,
+            done_judge: {cadence: {when: { state -> state.iteration == 2 }}},
+          },
+        ) },
+      )
+      harness.stdio.println(closure.result.status)
+      harness.stdio.println(closure.result.llm.iterations)
+      harness.stdio.println(len(judge_events(closure.events)))
+      harness.stdio.println(len(harness.llm.mock_calls()))
+    },
+  )
+}

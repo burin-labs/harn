@@ -1,0 +1,19 @@
+// Conformance test for std/llm/handlers::with_retry — never retries on
+// non-retryable statuses such as schema_validation.
+import { with_retry } from "std/llm/handlers"
+
+pipeline default(harness: Harness) {
+  const counter = harness.runtime.atomic(0)
+  const synthetic = { _call ->
+    let _ = harness.runtime.atomic_add(counter, 1)
+    return {ok: false, status: "schema_validation", error: "bad shape"}
+  }
+  const caller = with_retry(harness, synthetic, {max_attempts: 5, base_ms: 1})
+  const env = caller(
+    {prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
+  )
+  harness.stdio.println(env.ok)
+  harness.stdio.println(env.status)
+  harness.stdio.println(env.retries_attempted)
+  harness.stdio.println(harness.runtime.atomic_get(counter))
+}

@@ -1,0 +1,180 @@
+import { help_requested, parse, parser } from "std/cli/argparse"
+
+const ARTIFACTS_REL = "spec/protocol-artifacts"
+
+const PYTHON_BINDING_PROBE = """
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+from collections.abc import Mapping
+
+
+def load_bindings(artifacts: Path):
+    sys.path.insert(0, str(artifacts / "python"))
+    import harn_protocol
+
+    return harn_protocol
+
+
+def assert_round_trip(label: str, expected: Mapping[str, object], actual: Mapping[str, object]) -> None:
+    expected_canonical = json.dumps(expected, sort_keys=True)
+    actual_canonical = json.dumps(actual, sort_keys=True)
+    if expected_canonical != actual_canonical:
+        raise AssertionError(
+            f"{label} round-trip mismatch:\\n  expected: {expected_canonical}\\n  actual:   {actual_canonical}"
+        )
+
+
+def main() -> int:
+    artifacts = Path(sys.argv[1]).resolve()
+    hp = load_bindings(artifacts)
+    fixture = json.loads((artifacts / "fixtures" / "round_trip.json").read_text())
+
+    if fixture["artifactVersion"] != hp.HARN_PROTOCOL_ARTIFACT_VERSION:
+        raise AssertionError(
+            f"version drift: bindings={hp.HARN_PROTOCOL_ARTIFACT_VERSION} fixture={fixture['artifactVersion']}"
+        )
+    if fixture["harnAgentEventMethod"] != hp.HARN_AGENT_EVENT_METHOD:
+        raise AssertionError(
+            f"agent-event method drift: bindings={hp.HARN_AGENT_EVENT_METHOD} fixture={fixture['harnAgentEventMethod']}"
+        )
+    if fixture["harnProviderCatalogMethod"] != hp.HARN_PROVIDER_CATALOG_METHOD:
+        raise AssertionError(
+            f"provider-catalog method drift: bindings={hp.HARN_PROVIDER_CATALOG_METHOD} fixture={fixture['harnProviderCatalogMethod']}"
+        )
+
+    envelopes = fixture["envelopes"]
+    cases = [
+        ("ACPRequest", envelopes["request"], hp.ACPRequest),
+        ("ACPResponse", envelopes["response"], hp.ACPResponse),
+        ("ACPResponse (error)", envelopes["errorResponse"], hp.ACPResponse),
+        ("ACPSessionUpdateNotification", envelopes["sessionUpdateNotification"], hp.ACPSessionUpdateNotification),
+        ("HarnAgentEventNotification", envelopes["agentEventNotification"], hp.HarnAgentEventNotification),
+        ("A2ATask", fixture["a2aTask"], hp.A2ATask),
+        ("MCPTool", fixture["mcpTool"], hp.MCPTool),
+        ("MCPDiscoverResult", fixture["mcpDiscoverResult"], hp.MCPDiscoverResult),
+        ("MCPInputRequiredResult", fixture["mcpInputRequiredResult"], hp.MCPInputRequiredResult),
+        ("MCPUnsupportedProtocolVersionError", fixture["mcpUnsupportedProtocolVersionError"], hp.MCPUnsupportedProtocolVersionError),
+        ("ToolCallReceipt", fixture["toolCallReceipt"], hp.ToolCallReceipt),
+    ]
+    for label, payload, cls in cases:
+        instance = cls.from_wire(payload)
+        assert_round_trip(label, payload, instance.to_wire())
+
+    print("python bindings: OK")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
+
+fn repo_root(fs: HarnessFs) -> string {
+  return path_normalize(path_join(fs.source_dir(), ".."))
+}
+
+fn effective_repo_root(fs: HarnessFs, root: string = "") -> string {
+  if root != "" {
+    return path_normalize(root)
+  }
+  return repo_root(fs)
+}
+
+fn artifact_root(fs: HarnessFs, root: string = "") -> string {
+  return path_join(effective_repo_root(fs, root), ARTIFACTS_REL)
+}
+
+pub fn python_binding_probe_args(artifacts: string) -> list<string> {
+  return ["-c", PYTHON_BINDING_PROBE, artifacts]
+}
+
+pub fn check_python_protocol_bindings(
+  fs: HarnessFs,
+  process: HarnessProcess,
+  python: string = "python3",
+  root: string = "",
+) -> dict {
+  const artifacts = artifact_root(fs, root)
+  const binding = path_join(artifacts, "python", "harn_protocol.py")
+  const compile = process.run({program: python, args: ["-m", "py_compile", binding]})
+  if !compile.success {
+    return {
+      ok: false,
+      stage: "py_compile",
+      artifacts: artifacts,
+      stdout: compile.stdout,
+      stderr: compile.stderr,
+    }
+  }
+  const probe = process.run({program: python, args: python_binding_probe_args(artifacts)})
+  return {
+    ok: probe.success,
+    stage: if probe.success {
+      "ok"
+    } else {
+      "round_trip"
+    },
+    artifacts: artifacts,
+    stdout: probe.stdout,
+    stderr: probe.stderr,
+  }
+}
+
+fn arg_spec() {
+  return parser(
+    {
+      name: "check_protocol_bindings",
+      args: [
+        {kind: "flag", name: "python", long: "--python", parse: "string", default: "python3"},
+        {kind: "flag", name: "root", long: "--root", parse: "string", default: ""},
+      ],
+    },
+  )
+}
+
+fn emit_captured(stdio: HarnessStdio, report: dict) -> nil {
+  const stdout = to_string(report.stdout ?? "")
+  const stderr = to_string(report.stderr ?? "")
+  if stdout.trim() != "" {
+    stdio.println(stdout.trim())
+  }
+  if stderr.trim() != "" {
+    stdio.eprintln(stderr.trim())
+  }
+  return nil
+}
+
+fn main(harness: Harness) {
+  if help_requested(argv) {
+    harness.stdio.println(
+      "usage: harn run scripts/check_protocol_bindings.harn -- [--python PYTHON] [--root PATH]",
+    )
+    return nil
+  }
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
+    harness.runtime.exit(2)
+  }
+  const parsed = unwrap(parsed_result).options
+  const report = check_python_protocol_bindings(
+    harness.fs,
+    harness.process,
+    to_string(parsed?.python ?? "python3"),
+    to_string(parsed?.root ?? ""),
+  )
+  if report.ok ?? false {
+    emit_captured(harness.stdio, report)
+    return nil
+  }
+  harness.stdio.eprintln(
+    "error: Python protocol binding "
+      + to_string(report.stage)
+      + " check failed for "
+      + to_string(report.artifacts),
+  )
+  emit_captured(harness.stdio, report)
+  harness.runtime.exit(1)
+}

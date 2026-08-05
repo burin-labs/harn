@@ -1,0 +1,115 @@
+// Reserved-token call delimiters: the `[[CALL]` / `[[CALL]]` wire form.
+//
+// A local qwen3.6 eval dispatched ZERO tool calls across 23 turns while
+// correctly emitting `[[CALL]]...[[/CALL]]` blocks every turn, because the
+// wire→canonical remap lived on a route the unregistered llamacpp fallback
+// bypassed. Transport now remaps the well-formed spelling before the parser
+// sees it, so what reaches the parser is the MALFORMED one: `[[CALL]`, a
+// bracket short, which no remap catches.
+//
+// The parser normalizes that stub to a real call tag and recovers the action
+// rather than leaking it as prose — and when the stub's body is cut off, it
+// says TRUNCATED instead. Silence is the thing being ruled out: a stub that
+// reaches visible prose or canonical replay is how the agent came to
+// hallucinate completion in the first place.
+//
+// The boundary is byte-exactness: `[[CALL]` inside an argument, inside a closed
+// fence, or spelled `[[CALLER]` is data, and must survive untouched.
+import { probe, probe_canonical, sample_registry } from "_tool_parse_probe"
+
+pipeline main(harness: Harness) {
+  // The observed shape: a malformed opener, a complete call, a well-formed
+  // close that transport has already canonicalized.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "malformed opener with a complete call",
+    """[[CALL]
+run({ command: "cargo test -p core" })
+</tool_call>""",
+    sample_registry(),
+  )
+  probe_canonical(
+    harness.agent,
+    harness.stdio,
+    "malformed opener leaves no debris in canonical replay",
+    """[[CALL]
+run({ command: "cargo test -p core" })
+</tool_call>""",
+    sample_registry(),
+  )
+  // A truncated opener must emit a typed TRUNCATED diagnostic, never prose.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "malformed opener, truncated body",
+    "[[CALL]\nedit({ action: \"create\", path: \"a.rs\"",
+    sample_registry(),
+  )
+  // A literal marker inside a tool argument is consumed within the block.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "literal bracket marker inside an argument",
+    """<tool_call>
+edit({ action: "create", path: "a.txt", content: "[[CALL] literal" })
+</tool_call>""",
+    sample_registry(),
+  )
+  // `[[CALLER]` is not the marker: its seventh byte is `E`, not `]`.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "unknown bracket text stays prose",
+    "[[CALLER] is not a call",
+    sample_registry(),
+  )
+  // A marker inside a closed fence is fenced example text.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "bracket marker in a closed fence stays prose",
+    """```
+[[CALL]
+```""",
+    sample_registry(),
+  )
+  // The well-formed wire spelling as the parser would see it if transport had
+  // not remapped it: there is no `<tool_call>` block to anchor on, so nothing
+  // normalizes the brackets. With a registry the stray sniffer still finds and
+  // executes the inner bare call — the delimiters themselves survive into
+  // visible prose, which is the debris canonicalization exists to remove.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "raw wire form, registry present",
+    """[[CALL]]
+run({ command: "cargo build" })
+[[/CALL]]""",
+    sample_registry(),
+  )
+  // The field condition: the same bytes with no registry. The sniffer can
+  // execute nothing, and the regression being ruled out is silence — the call
+  // vanishing with zero calls AND zero diagnostics, which is what let the agent
+  // conclude nothing had happened and hallucinate completion.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "raw wire form, no registry",
+    """[[CALL]]
+run({ command: "cargo build" })
+[[/CALL]]""",
+    nil,
+  )
+  // The same bytes after the transport remap, which is what the parser is
+  // actually contracted to handle.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "canonicalized wire form dispatches",
+    """<tool_call>
+run({ command: "cargo build" })
+</tool_call>""",
+    sample_registry(),
+  )
+}

@@ -1,0 +1,335 @@
+import {
+  agent_monologue_actuation_config,
+  agent_monologue_actuation_initial_state,
+  agent_monologue_actuation_observe,
+} from "std/agent/monologue_actuation"
+import "std/agent/stall_config"
+import "std/agent/stall_observation"
+import {
+  AgentStallConfig,
+  AgentStallObservation,
+  AgentStallState,
+  AgentStallWarning,
+} from "std/agent/stall_types"
+import {
+  agent_emit_event,
+  agent_session_inject_feedback,
+  agent_session_totals,
+} from "std/agent/state"
+import { verification_gate_input } from "std/verification"
+
+/**
+ * agent_stall_repair_config exposes the parsed evidence-aware repair knobs
+ * (repair_aware / post_edit_reverify / stuck_same_diagnostic_after /
+ * reserved_terminal_verify[_iterations]) so the agent loop can decide whether to
+ * honor the post-edit re-verify mandate and the reserved terminal-verify guard
+ * without reaching into the private config parser.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_stall_repair_config(raw_config) -> dict {
+  const config = __agent_stall_config(raw_config)
+  return {
+    repair_aware: config.repair_aware,
+    post_edit_reverify: config.post_edit_reverify,
+    stuck_same_diagnostic_after: config.stuck_same_diagnostic_after,
+    no_net_progress_extend_guard: config.no_net_progress_extend_guard,
+    no_net_progress_extend_after: config.no_net_progress_extend_after,
+    no_net_progress_hard_cap_after: config.no_net_progress_hard_cap_after,
+    reserved_terminal_verify: config.reserved_terminal_verify,
+    reserved_terminal_verify_iterations: config.reserved_terminal_verify_iterations,
+    zero_write_terminal_verify: config.zero_write_terminal_verify,
+  }
+}
+
+/**
+ * __agent_stall_fold_verify_state folds the host's verify-state fact for one
+ * turn (#burin-cutover seam 1). It is inert unless a `progress_signal` callback
+ * is configured. The callback receives the FULL post-turn payload and returns
+ * the turn's monotone best verify-state scalar (e.g. tests-passing count, or 1
+ * when the build is clean else 0); nil means "no verification evidence this
+ * turn" = FLAT (the high-water mark is preserved and the turn does NOT count as
+ * an advance). `turn_made_edit` reports whether a workspace write landed on the
+ * turn `payload` describes.
+ *
+ *   - scalar > high-water (or first ever) => VERIFIER ADVANCED: raise the
+ *     high-water, reset `verify_turns_since_advance` to 0 and clear
+ *     `verify_wrote_since_advance`. Genuine progress; the axis is quiet again.
+ *   - scalar <= high-water, or nil        => VERIFIER FLAT: increment
+ *     `verify_turns_since_advance`, and set `verify_wrote_since_advance` if a
+ *     write landed this turn (arming the short write-axis cut).
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn __agent_stall_fold_verify_state(
+  state: AgentStallState,
+  config: AgentStallConfig,
+  payload,
+  turn_made_edit: bool,
+) -> AgentStallState {
+  if config.progress_signal == nil {
+    return state
+  }
+  const raw = config.progress_signal(payload)
+  if raw == nil {
+    return state
+      + {
+      verify_turns_since_advance: state.verify_turns_since_advance + 1,
+      verify_wrote_since_advance: state.verify_wrote_since_advance || turn_made_edit,
+    }
+  }
+  const scalar = to_float(raw)
+  const advanced = !state.verify_state_seen || scalar > state.verify_state_high
+  if advanced {
+    return state
+      + {
+      verify_state_seen: true,
+      verify_state_high: scalar,
+      verify_turns_since_advance: 0,
+      verify_wrote_since_advance: false,
+    }
+  }
+  return state
+    + {
+    verify_state_seen: true,
+    verify_turns_since_advance: state.verify_turns_since_advance + 1,
+    verify_wrote_since_advance: state.verify_wrote_since_advance || turn_made_edit,
+  }
+}
+
+/**
+ * agent_stall_no_net_progress reports whether THIS turn is a no-net-advancement
+ * thrash for the purpose of the loop's budget-extension decision. It is the
+ * harn-side twin of burin's no-net-progress ripcord: the default extension
+ * policy treats any tool-calling turn as "progress" and keeps extending the
+ * iteration budget, so a model re-hitting the SAME compile/test failure every
+ * turn (no error draining toward a green build) buys unbounded runway.
+ *
+ * VERIFY-STATE AXIS (#burin-cutover seam 1): when the host supplies a
+ * `progress_signal` callback the decision keys on whether the VERIFIER moved,
+ * not on edit/tool signatures ("writes are not progress"). Two cut predicates:
+ *   (A) long-stall: the same failure diagnostic recurred for at least
+ *       `verify_state_streak` turns AND the verify-state scalar has not advanced
+ *       for at least `verify_state_stall_turns` turns; OR the same diagnostic
+ *       hard-recurred `verify_state_recurrence_hard` times on its own.
+ *   (B) write-axis: the verify-state scalar has not advanced for at least
+ *       `no_verifier_progress_limit` turns AND a write landed during that
+ *       non-advancing streak (edit lands every turn but the verifier never
+ *       moves) — no long wait required.
+ *
+ * SIGNATURE AXIS (default, no `progress_signal`): returns true ONLY when the
+ * guard is enabled AND the loop is on the verify-bearing FAILING path
+ * (`last_diagnostic_class == "fail"`) AND the same failure signature has
+ * recurred for at least `no_net_progress_extend_after` turns OR the hard
+ * failing-verify floor has crossed `no_net_progress_hard_cap_after`. Default
+ * OFF: when the guard is disabled and no callback is supplied it always returns
+ * false, preserving today's behavior byte-identically.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_stall_no_net_progress(raw_config, stall_state: AgentStallState) -> bool {
+  const config = __agent_stall_config(raw_config)
+  if config.progress_signal != nil {
+    // Each predicate is independently armable (#burin-cutover): a disarmed
+    // predicate contributes false to the OR regardless of its evidence, so a host
+    // can turn a single branch off (default: all armed = the fixed OR, byte-identical).
+    const predicates = config.no_net_progress_predicates
+    const streak = stall_state.same_diagnostic_streak
+    const long_stall = predicates.long_stall
+      && streak >= config.verify_state_streak
+      && stall_state.verify_turns_since_advance
+      >= config
+      .verify_state_stall_turns
+    // Hard-recurrence trips on EITHER a consecutive same-diagnostic streak OR the
+    // TOTAL (non-consecutive) occurrences of the CURRENT failure signature across
+    // the run. The total counter catches interleaved churn (the same dead API /
+    // error re-proposed N times with off-signature failures churning between, so
+    // the consecutive streak keeps resetting and never trips). Both predicates
+    // share `verify_state_recurrence_hard`.
+    const sig_total = to_int(
+      (stall_state.verify_signature_counts ?? {})[stall_state.last_diagnostic_signature] ?? 0,
+    )
+      ?? 0
+    const hard_recurrence = predicates.hard_recurrence
+      && (streak >= config.verify_state_recurrence_hard
+      || sig_total
+      >= config
+      .verify_state_recurrence_hard)
+    const write_axis = predicates.write_axis
+      && stall_state.verify_turns_since_advance
+      >= config
+      .no_verifier_progress_limit
+      && stall_state.verify_wrote_since_advance
+    return long_stall || hard_recurrence || write_axis
+  }
+  if !config.no_net_progress_extend_guard {
+    return false
+  }
+  if stall_state.last_diagnostic_class != "fail" {
+    return false
+  }
+  return stall_state.same_diagnostic_streak >= config.no_net_progress_extend_after
+    || stall_state
+    .failing_verify_turns
+    >= config.no_net_progress_hard_cap_after
+}
+
+/**
+ * True once the latest workspace write has a passing non-edit check.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_stall_verified_write_satisfied(raw_config, stall_state: AgentStallState) -> bool {
+  const config = __agent_stall_config(raw_config)
+  return config.enabled
+    && config.post_edit_reverify
+    && stall_state.write_epoch > 0
+    && stall_state.verified_write_epoch >= stall_state.write_epoch
+    && !stall_state.reverify_owed
+    && stall_state.last_diagnostic_class == "pass"
+}
+
+/**
+ * True when the same passing check is repeated after the latest write is green.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_stall_repeated_verified_pass(raw_config, stall_state: AgentStallState) -> bool {
+  return agent_stall_verified_write_satisfied(raw_config, stall_state)
+    && stall_state.last_outcome_kind
+    == "ok"
+    && stall_state.same_observation_streak >= 2
+}
+
+/**
+ * agent_stall_current_failure projects the current-failure model into a
+ * stop-payload block (nil when there is no live failure). Used to enrich the
+ * terminal `stuck` and budget-exhaustion payloads with WHAT failed, not just
+ * "budget exhausted".
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_stall_current_failure(stall_state: AgentStallState) {
+  if stall_state.last_diagnostic_class != "fail" {
+    return nil
+  }
+  return {
+    class: stall_state.last_diagnostic_class,
+    signature: stall_state.last_diagnostic_signature,
+    snippet: stall_state.last_diagnostic_snippet,
+    same_diagnostic_streak: stall_state.same_diagnostic_streak,
+  }
+}
+
+/**
+ * agent_stall_clear_current_failure clears the current-failure model so a
+ * SUCCESSFUL terminal hand-back (clean done / a passing `verify_completion`)
+ * does not report a stale `current_failure`. A run can complete without ever
+ * flowing a passing verification result through the fold (e.g. the loop stops
+ * `done` after the model's prose, or `verify_completion` passes out-of-band),
+ * which would otherwise leave `last_diagnostic_class == "fail"`. The loop calls
+ * this on the successful-termination signal before `agent_stall_apply_result`.
+ * A stuck / exhausted run does NOT call this, so it still carries the failure.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_stall_clear_current_failure(stall_state: AgentStallState) -> AgentStallState {
+  return stall_state
+    + {
+    last_diagnostic_class: "pass",
+    last_diagnostic_delta_current: {},
+    last_diagnostic_delta_status: "cleared",
+    last_diagnostic_delta_reason: "terminal_success",
+    same_diagnostic_streak: 0,
+    failing_verify_turns: 0,
+    reverify_owed: false,
+    verified_write_epoch: stall_state.write_epoch,
+  }
+}
+
+/**
+ * agent_stall_apply_result adds stall diagnostics to an agent-loop result,
+ * including the evidence-aware repair loop's `current_failure` summary on the
+ * terminal hand-back when a live failure remains.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_stall_apply_result(
+  result: dict,
+  stall_enabled: bool,
+  stall_state: AgentStallState,
+) -> dict {
+  if !stall_enabled && len(stall_state.warnings) == 0 {
+    return result
+  }
+  const base = result
+    + {
+    repeated_tool_calls: stall_state.repeated_tool_calls,
+    stall_warnings: stall_state.warnings,
+    suspected_loop: len(stall_state.warnings) > 0,
+  }
+  const current_failure = agent_stall_current_failure(stall_state)
+  if current_failure == nil {
+    return base
+  }
+  return base + {current_failure: current_failure}
+}
+
+pub fn __agent_done_judge_stall_cadence(opts) {
+  const judge = opts?.done_judge
+  if type_of(judge) != "dict" {
+    return nil
+  }
+  const cadence = judge?.cadence
+  if type_of(cadence) != "dict" || cadence?.when != "stalled" {
+    return nil
+  }
+  return cadence
+}
+
+/**
+ * agent_stall_done_judge_due decides whether the stall done judge is due.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_stall_done_judge_due(opts, 0, 3)
+ */
+pub fn agent_stall_done_judge_due(opts, invocations: int, turn_number: int) -> bool {
+  const cadence = __agent_done_judge_stall_cadence(opts)
+  if cadence == nil {
+    return false
+  }
+  const max_invocations = cadence?.max_invocations
+  if max_invocations != nil && invocations >= max_invocations {
+    return false
+  }
+  const min_iterations = cadence?.min_iterations_before_first
+  if min_iterations != nil && turn_number <= min_iterations {
+    return false
+  }
+  const every = cadence?.every
+  if every != nil && turn_number % every != 0 {
+    return false
+  }
+  return true
+}
+
+// -------------------------------------------------------------------------------------------------
+
+//

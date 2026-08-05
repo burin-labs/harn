@@ -1,0 +1,14 @@
+[package]
+name = "provider-catalog-notice"
+
+[[triggers]]
+id = "provider-catalog-notice"
+kind = "cron"
+provider = "cron"
+match = { events = ["cron.tick"] }
+handler = "run_provider_catalog_notice"
+schedule = "0 */6 * * *"
+timezone = "Etc/UTC"
+budget = { daily_cost_usd = 0.40, max_concurrent = 1, on_budget_exhausted = "retry_later" }
+concurrency = { max = 1 }
+dedupe_key = "event.dedupe_key"

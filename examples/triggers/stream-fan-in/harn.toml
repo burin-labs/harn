@@ -1,0 +1,28 @@
+[package]
+name = "stream-fan-in"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "market-fan-in"
+handler = "handlers::on_market_event"
+when = "handlers::should_handle"
+debounce = { key = "event.provider + \":\" + event.kind", period = "2s" }
+
+[[triggers.sources]]
+id = "open"
+kind = "cron"
+provider = "cron"
+match = { events = ["cron.tick"] }
+schedule = "0 14 * * 1-5"
+timezone = "America/New_York"
+
+[[triggers.sources]]
+id = "quotes"
+kind = "stream"
+provider = "kafka"
+match = { events = ["quote.tick"] }
+topic = "quotes"
+consumer_group = "harn-market"
+window = { mode = "sliding", key = "event.provider_payload.key", size = "5m", every = "1m", max_items = 5000 }

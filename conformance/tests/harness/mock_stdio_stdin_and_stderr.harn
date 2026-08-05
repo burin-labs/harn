@@ -1,0 +1,6 @@
+fn main(harness: Harness) {
+  harness.stdio.eprintln("warm-up")
+  harness.stdio.println(harness.stdio.read_line())
+  harness.stdio.eprint("trail ")
+  harness.stdio.println(harness.stdio.prompt("answer: "))
+}

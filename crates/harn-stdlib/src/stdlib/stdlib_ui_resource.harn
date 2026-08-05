@@ -1,0 +1,707 @@
+/*
+ * std/ui_resource - MCP Apps-compatible UI resource envelopes with text and
+ * structured fallbacks.
+ *
+ * Harn workflows describe interactive UI resources without depending on a
+ * browser runtime. Hosts that advertise MCP Apps capability receive the
+ * `ui://` resource and a `_meta.ui` block matching the MCP Apps overview
+ * (https://modelcontextprotocol.io/extensions/apps/overview). Hosts that do
+ * not advertise the capability receive the same payload with the resource
+ * stripped, leaving a text fallback and an optional structured fallback so
+ * the tool result is still useful in plain chat or headless contexts.
+ *
+ * The resource HTML is validated through `std/artifact/web` so the same
+ * network/host-bridge/secret rules used by safe artifact patching apply to
+ * embedded UI payloads. Validation findings remain attached to the resource
+ * envelope and to the tool-result wrapper, and `ui_tool_result_validate`
+ * refuses to ship a resource whose HTML failed validation unless the caller
+ * explicitly opts in to a degraded preview.
+ */
+import { web_artifact_text_fallback, web_artifact_validate } from "std/artifact/web"
+import { filter_nil } from "std/collections"
+
+pub type UiMcpToolAudience = "model" | "app"
+
+pub type UiResourceContentsEncoding = "utf8" | "base64"
+
+pub type UiResourceCsp = {
+  default_src: list<string>,
+  script_src: list<string>,
+  style_src: list<string>,
+  img_src: list<string>,
+  connect_src: list<string>,
+  frame_ancestors: list<string>,
+  sandbox: list<string>,
+}
+
+pub type UiResourceValidationSummary = {
+  ok: bool,
+  error_codes: list<string>,
+  warning_codes: list<string>,
+}
+
+pub type UiResource = {
+  schema: "harn.ui_resource.v1",
+  uri: string,
+  name: string,
+  description?: string,
+  mime_type: string,
+  profile: string,
+  contents: string,
+  contents_encoding: "utf8" | "base64",
+  content_sha256: string,
+  size_bytes: int,
+  version?: string,
+  permissions: list<string>,
+  capabilities: list<string>,
+  csp: UiResourceCsp,
+  validation: UiResourceValidationSummary,
+  meta: dict,
+}
+
+pub type UiResourceOptions = {
+  description?: string,
+  mime_type?: string,
+  profile?: string,
+  contents_encoding?: UiResourceContentsEncoding,
+  version?: string,
+  permissions?: list<string>,
+  capabilities?: list<string>,
+  csp?: UiResourceCsp,
+  validation?: dict,
+  meta?: dict,
+}?
+
+pub type UiToolMetaUi = {resource_uri: string, visibility: list<UiMcpToolAudience>}
+
+pub type UiToolMeta = {schema: "harn.ui_tool_meta.v1", ui: UiToolMetaUi}
+
+pub type UiToolMetaOptions = {visibility?: list<UiMcpToolAudience>}?
+
+pub type UiMcpToolMetadataUi = {resourceUri: string, visibility: list<UiMcpToolAudience>}
+
+pub type UiMcpToolMetadata = {ui: UiMcpToolMetadataUi}
+
+pub type UiMcpResourceCsp = {
+  connectDomains: list<string>,
+  resourceDomains: list<string>,
+  frameDomains: list<string>,
+  baseUriDomains: list<string>,
+}
+
+pub type UiMcpResourceOptions = {
+  connect_domains?: list<string>,
+  resource_domains?: list<string>,
+  frame_domains?: list<string>,
+  base_uri_domains?: list<string>,
+  permissions?: dict,
+  domain?: string,
+  prefers_border?: bool,
+}?
+
+pub type UiMcpResourceRegistration = {
+  uri: string,
+  name: string,
+  description?: string,
+  mime_type: string,
+  text: string,
+  meta: dict,
+}
+
+pub type UiTextFallback = {schema: "harn.ui_fallback.text.v1", content: string}
+
+pub type UiStructuredFallback = {
+  schema: "harn.ui_fallback.structured.v1",
+  data: dict,
+  text?: string,
+}
+
+pub type UiStructuredFallbackOptions = {text?: string}?
+
+pub type UiDefaultTextFallbackOptions = {max_chars?: int}?
+
+pub type UiHostCapabilities = {
+  apps: bool,
+  profiles: list<string>,
+  permissions: list<string>,
+  bridges: list<string>,
+}
+
+pub type UiHostCapabilityInput = dict?
+
+pub type UiToolCallEnvelope = {
+  schema: "harn.ui_tool_call.v1",
+  jsonrpc: "2.0",
+  id: string,
+  method: "tools/call",
+  params: dict,
+}
+
+pub type UiToolCallOptions = {id?: string, meta?: dict}?
+
+pub type UiContextUpdateEnvelope = {
+  schema: "harn.ui_context_update.v1",
+  jsonrpc: "2.0",
+  id: string,
+  method: "ui/update-model-context",
+  params: dict,
+}
+
+pub type UiContextUpdateOptions = {id?: string}?
+
+pub type UiToolResult = {
+  schema: "harn.ui_tool_result.v1",
+  ui_resource?: UiResource,
+  meta: UiToolMeta,
+  text_fallback: UiTextFallback,
+  structured_fallback?: UiStructuredFallback,
+  validation: UiResourceValidationSummary,
+  selected: string,
+}
+
+pub type UiToolResultOptions = {
+  tool_meta?: UiToolMeta,
+  tool_meta_options?: UiToolMetaOptions,
+  text_fallback?: UiTextFallback | string,
+  structured_fallback?: UiStructuredFallback,
+  allow_invalid_resource?: bool,
+  fallback?: UiDefaultTextFallbackOptions,
+}?
+
+const UI_RESOURCE_SCHEMA = "harn.ui_resource.v1"
+
+const UI_TOOL_META_SCHEMA = "harn.ui_tool_meta.v1"
+
+const UI_TEXT_FALLBACK_SCHEMA = "harn.ui_fallback.text.v1"
+
+const UI_STRUCTURED_FALLBACK_SCHEMA = "harn.ui_fallback.structured.v1"
+
+const UI_TOOL_RESULT_SCHEMA = "harn.ui_tool_result.v1"
+
+const UI_TOOL_CALL_SCHEMA = "harn.ui_tool_call.v1"
+
+const UI_CONTEXT_UPDATE_SCHEMA = "harn.ui_context_update.v1"
+
+const UI_MCP_APP_PROFILE = "mcp-app"
+
+const UI_MCP_APP_MIME_TYPE = "text/html;profile=mcp-app"
+
+const UI_DEFAULT_CSP = {
+  default_src: ["'self'"],
+  script_src: ["'self'", "'unsafe-inline'"],
+  style_src: ["'self'", "'unsafe-inline'"],
+  img_src: ["'self'", "data:"],
+  connect_src: ["'none'"],
+  frame_ancestors: ["'none'"],
+  sandbox: ["allow-scripts", "allow-same-origin"],
+}
+
+fn __ui_text(value) {
+  if value == nil {
+    return ""
+  }
+  return trim(to_string(value))
+}
+
+fn __ui_first(values) {
+  for value in values {
+    const text = __ui_text(value)
+    if text != "" {
+      return text
+    }
+  }
+  return nil
+}
+
+fn __ui_str_list(values) {
+  let out = []
+  for value in values ?? [] {
+    const text = __ui_text(value)
+    if text != "" && !out.contains(text) {
+      out = out.appending(text)
+    }
+  }
+  return out
+}
+
+fn __ui_validate_uri(uri) {
+  const text = __ui_text(uri)
+  if text == "" {
+    throw "std/ui_resource: uri is required"
+  }
+  if !text.starts_with("ui://") {
+    throw "std/ui_resource: uri must use the ui:// scheme, got " + text
+  }
+  return text
+}
+
+fn __ui_validation_summary(validation) {
+  return {
+    ok: validation?.ok ?? false,
+    error_codes: validation?.error_codes ?? [],
+    warning_codes: validation?.warning_codes ?? [],
+  }
+}
+
+fn __ui_csp(options) {
+  const base = options?.csp ?? UI_DEFAULT_CSP
+  return {
+    default_src: __ui_str_list(base.default_src ?? UI_DEFAULT_CSP.default_src),
+    script_src: __ui_str_list(base.script_src ?? UI_DEFAULT_CSP.script_src),
+    style_src: __ui_str_list(base.style_src ?? UI_DEFAULT_CSP.style_src),
+    img_src: __ui_str_list(base.img_src ?? UI_DEFAULT_CSP.img_src),
+    connect_src: __ui_str_list(base.connect_src ?? UI_DEFAULT_CSP.connect_src),
+    frame_ancestors: __ui_str_list(base.frame_ancestors ?? UI_DEFAULT_CSP.frame_ancestors),
+    sandbox: __ui_str_list(base.sandbox ?? UI_DEFAULT_CSP.sandbox),
+  }
+}
+
+/**
+ * Build a Content-Security-Policy header value from a CSP dict.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ui_resource_csp_header(csp: UiResourceCsp) -> string {
+  let directives = []
+  const entries = [
+    {name: "default-src", values: csp.default_src},
+    {name: "script-src", values: csp.script_src},
+    {name: "style-src", values: csp.style_src},
+    {name: "img-src", values: csp.img_src},
+    {name: "connect-src", values: csp.connect_src},
+    {name: "frame-ancestors", values: csp.frame_ancestors},
+  ]
+  for entry in entries {
+    if len(entry.values) > 0 {
+      directives = directives.appending(entry.name + " " + join(entry.values, " "))
+    }
+  }
+  return join(directives, "; ")
+}
+
+/**
+ * Build the `sandbox` attribute value for the host iframe.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ui_resource_sandbox_attr(csp: UiResourceCsp) -> string {
+  return join(csp.sandbox, " ")
+}
+
+/**
+ * Build a `harn.ui_resource.v1` envelope from HTML source.
+ *
+ * `options.contents_encoding` selects between inline UTF-8 (default) and
+ * base64. Validation always runs through `std/artifact/web` so resource
+ * envelopes pin the same network/host-bridge/secret guarantees the rest of
+ * Harn's artifact pipeline uses.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ui_resource(
+  uri: string,
+  name: string,
+  html: string,
+  options: UiResourceOptions = nil,
+) -> UiResource {
+  const normalized_uri = __ui_validate_uri(uri)
+  const normalized_name = __ui_text(name)
+  if normalized_name == "" {
+    throw "std/ui_resource: name is required"
+  }
+  const source = html ?? ""
+  // MCP Apps resources communicate with the host through postMessage by
+  // contract, so we default to allowing the artifact-web host-bridge surface.
+  // Callers can pin a tighter policy via `options.validation`.
+  const validation_options = {allow_host_bridge: true}.merging(options?.validation ?? {})
+  const validation = web_artifact_validate(source, validation_options)
+  const encoding = options?.contents_encoding ?? "utf8"
+  const contents = if encoding == "base64" {
+    bytes_to_base64(bytes_from_string(source))
+  } else if encoding == "utf8" {
+    source
+  } else {
+    throw "std/ui_resource: contents_encoding must be utf8 or base64, got " + __ui_text(encoding)
+  }
+  const envelope = {
+    schema: UI_RESOURCE_SCHEMA,
+    uri: normalized_uri,
+    name: normalized_name,
+    description: __ui_first([options?.description]),
+    mime_type: options?.mime_type ?? UI_MCP_APP_MIME_TYPE,
+    profile: options?.profile ?? UI_MCP_APP_PROFILE,
+    contents: contents,
+    contents_encoding: encoding,
+    content_sha256: "sha256:" + sha256(source),
+    size_bytes: len(source),
+    version: __ui_first([options?.version]),
+    permissions: __ui_str_list(options?.permissions ?? []),
+    capabilities: __ui_str_list(options?.capabilities ?? []),
+    csp: __ui_csp(options),
+    validation: __ui_validation_summary(validation),
+    meta: options?.meta ?? {},
+  }
+  return filter_nil(envelope)
+}
+
+/**
+ * Build a `_meta.ui` tool-declaration block describing a UI resource.
+ *
+ * MCP Apps hosts read `_meta.ui.resourceUri` from tool descriptions, so the
+ * returned envelope mirrors the host-facing keys via `to_mcp_meta` for direct
+ * inclusion in MCP `tools/list` payloads.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ui_tool_meta(resource: UiResource, options: UiToolMetaOptions = nil) -> UiToolMeta {
+  const visibility = __ui_str_list(options?.visibility ?? ["model", "app"])
+  if len(visibility) == 0 {
+    throw "std/ui_resource: visibility must include model, app, or both"
+  }
+  for audience in visibility {
+    if !["model", "app"].contains(audience) {
+      throw "std/ui_resource: visibility entries must be model or app"
+    }
+  }
+  const ui = {resource_uri: resource.uri, visibility: visibility}
+  return {schema: UI_TOOL_META_SCHEMA, ui: ui}
+}
+
+/**
+ * Serialize `ui_tool_meta` into the MCP Apps `_meta.ui` dict shape.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ui_tool_meta_to_mcp(meta: UiToolMeta) -> UiMcpToolMetadata {
+  const ui = meta.ui
+  return {ui: filter_nil({resourceUri: ui.resource_uri, visibility: ui.visibility})}
+}
+
+/**
+ * Project a Harn UI resource into the exact config accepted by
+ * `harness.tools.mcp_resource`.
+ *
+ * Security metadata follows the stable MCP Apps resource-content contract.
+ * External domains and browser permissions are empty by default, so a host
+ * can enforce a restrictive sandbox without interpreting Harn-only fields.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ui_resource_to_mcp(
+  resource: UiResource,
+  options: UiMcpResourceOptions = nil,
+) -> UiMcpResourceRegistration {
+  const csp: UiMcpResourceCsp = {
+    connectDomains: __ui_str_list(options?.connect_domains ?? []),
+    resourceDomains: __ui_str_list(options?.resource_domains ?? []),
+    frameDomains: __ui_str_list(options?.frame_domains ?? []),
+    baseUriDomains: __ui_str_list(options?.base_uri_domains ?? []),
+  }
+  const ui = filter_nil(
+    {
+      csp: csp,
+      permissions: options?.permissions,
+      domain: __ui_first([options?.domain]),
+      prefersBorder: options?.prefers_border,
+    },
+  )
+  const text = if resource.contents_encoding == "base64" {
+    bytes_to_string(bytes_from_base64(resource.contents))
+  } else {
+    resource.contents
+  }
+  return filter_nil(
+    {
+      uri: resource.uri,
+      name: resource.name,
+      description: resource.description,
+      mime_type: resource.mime_type,
+      text: text,
+      meta: {ui: ui},
+    },
+  )
+}
+
+/**
+ * Build a text fallback envelope for hosts without embedded UI support.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ui_text_fallback(content: string) -> UiTextFallback {
+  const text = __ui_text(content)
+  if text == "" {
+    throw "std/ui_resource: text fallback content must not be empty"
+  }
+  return {schema: UI_TEXT_FALLBACK_SCHEMA, content: text}
+}
+
+/**
+ * Build a structured fallback envelope for hosts that prefer JSON results.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ui_structured_fallback(
+  data: dict,
+  options: UiStructuredFallbackOptions = nil,
+) -> UiStructuredFallback {
+  if data == nil {
+    throw "std/ui_resource: structured fallback data is required"
+  }
+  return filter_nil(
+    {schema: UI_STRUCTURED_FALLBACK_SCHEMA, data: data, text: __ui_first([options?.text])},
+  )
+}
+
+fn __ui_default_text_fallback(
+  resource: UiResource,
+  fallback_options: UiDefaultTextFallbackOptions,
+) {
+  const html = if resource.contents_encoding == "base64" {
+    bytes_to_string(bytes_from_base64(resource.contents))
+  } else {
+    resource.contents
+  }
+  const max_chars = fallback_options?.max_chars ?? 2000
+  return web_artifact_text_fallback(html, {max_chars: max_chars})
+}
+
+/**
+ * Wrap a UI resource and matching fallbacks into a single tool-result envelope.
+ *
+ * Hosts that advertise MCP Apps support read `ui_resource` and the
+ * accompanying `_meta.ui`. Hosts without that capability still render either
+ * the text fallback or the optional structured fallback. The text fallback is
+ * mandatory so every host has a non-empty rendering path.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ui_tool_result(resource: UiResource, options: UiToolResultOptions = nil) -> UiToolResult {
+  const meta = options?.tool_meta ?? ui_tool_meta(resource, options?.tool_meta_options)
+  const text_fallback = if options?.text_fallback != nil {
+    if options?.text_fallback?.schema == UI_TEXT_FALLBACK_SCHEMA {
+      options?.text_fallback
+    } else {
+      ui_text_fallback(to_string(options?.text_fallback))
+    }
+  } else {
+    ui_text_fallback(__ui_default_text_fallback(resource, options?.fallback))
+  }
+  const structured = options?.structured_fallback
+  const allow_invalid = options?.allow_invalid_resource ?? false
+  const include_resource = resource.validation.ok || allow_invalid
+  const envelope = {
+    schema: UI_TOOL_RESULT_SCHEMA,
+    ui_resource: include_resource ? resource : nil,
+    meta: meta,
+    text_fallback: text_fallback,
+    structured_fallback: structured,
+    validation: __ui_validation_summary(resource.validation),
+    selected: "ui_resource",
+  }
+  return filter_nil(envelope)
+}
+
+/**
+ * Normalize a host-advertised capabilities dict into a `UiHostCapabilities`.
+ *
+ * MCP Apps (`capabilities.apps = {enabled, profiles, ...}`), the OpenAI Apps
+ * SDK (`ui.apps = true` + `ui.profiles`), and bare `{apps: true}` flag shapes
+ * all funnel through the same returned surface so downstream selection logic
+ * does not need host-specific branches.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ui_host_capabilities(input: UiHostCapabilityInput = nil) -> UiHostCapabilities {
+  const value = input ?? {}
+  const extension = value?.extensions?.["io.modelcontextprotocol/ui"]
+  const extension_mimes = __ui_str_list(extension?.mimeTypes ?? [])
+  const extension_apps = extension_mimes.contains(UI_MCP_APP_MIME_TYPE)
+  const apps_flag = value?.apps?.enabled ?? value?.ui?.apps ?? value?.apps ?? extension_apps
+  const apps = type_of(apps_flag) == "bool" ? apps_flag : false
+  let profile_source = value?.apps?.profiles
+  if profile_source == nil {
+    profile_source = value?.ui?.profiles
+  }
+  if profile_source == nil {
+    profile_source = value?.profiles
+  }
+  if profile_source == nil && extension_apps {
+    profile_source = [UI_MCP_APP_PROFILE]
+  }
+  const declared_profiles = __ui_str_list(profile_source ?? [])
+  const profiles = if len(declared_profiles) > 0 {
+    declared_profiles
+  } else {
+    apps ? [UI_MCP_APP_PROFILE] : []
+  }
+  return {
+    apps: apps || extension_apps || len(declared_profiles) > 0,
+    profiles: profiles,
+    permissions: __ui_str_list(
+      value?.apps?.permissions ?? value?.ui?.permissions ?? value?.permissions,
+    ),
+    bridges: __ui_str_list(value?.apps?.bridges ?? value?.ui?.bridges ?? value?.bridges),
+  }
+}
+
+/**
+ * Return true if the host capabilities advertise MCP Apps support.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ui_host_supports_apps(capabilities: UiHostCapabilityInput = nil) -> bool {
+  const caps = ui_host_capabilities(capabilities)
+  if !caps.apps {
+    return false
+  }
+  if len(caps.profiles) == 0 {
+    return true
+  }
+  return caps.profiles.contains(UI_MCP_APP_PROFILE)
+}
+
+/**
+ * Choose the best representation for a host.
+ *
+ * Returns a copy of `result` with `selected` set to `"ui_resource"`,
+ * `"structured_fallback"`, or `"text_fallback"`. Hosts without UI support
+ * receive the same envelope minus `ui_resource` so they still see the
+ * fallbacks and provenance metadata.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ui_select_for_host(
+  result: UiToolResult,
+  capabilities: UiHostCapabilityInput = nil,
+) -> UiToolResult {
+  const supports_apps = ui_host_supports_apps(capabilities)
+  const resource = result.ui_resource
+  const resource_ok = resource != nil && resource.validation.ok
+  if supports_apps && resource_ok {
+    let selected_result: UiToolResult = result
+    selected_result.selected = "ui_resource"
+    return selected_result
+  }
+  const selected = if result.structured_fallback != nil {
+    "structured_fallback"
+  } else {
+    "text_fallback"
+  }
+  let selected_result: UiToolResult = result
+  selected_result.ui_resource = nil
+  selected_result.selected = selected
+  return selected_result
+}
+
+/**
+ * Build the host->guest JSON-RPC envelope a sandboxed UI sees over postMessage.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ui_tool_call_envelope(
+  name: string,
+  params: dict? = nil,
+  options: UiToolCallOptions = nil,
+) -> UiToolCallEnvelope {
+  const tool_name = __ui_text(name)
+  if tool_name == "" {
+    throw "std/ui_resource: tool name is required"
+  }
+  const id = (options?.id ?? "ui_call_")
+    + substring(
+    sha256(tool_name + json_stringify(params ?? {})),
+    0,
+    16,
+  )
+  return {
+    schema: UI_TOOL_CALL_SCHEMA,
+    jsonrpc: "2.0",
+    id: id,
+    method: "tools/call",
+    params: filter_nil({name: tool_name, arguments: params ?? {}, _meta: options?.meta}),
+  }
+}
+
+/**
+ * Build the guest->host JSON-RPC envelope used to update model-visible context.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ui_context_update_envelope(
+  key: string,
+  value,
+  options: UiContextUpdateOptions = nil,
+) -> UiContextUpdateEnvelope {
+  const context_key = __ui_text(key)
+  if context_key == "" {
+    throw "std/ui_resource: context update key is required"
+  }
+  const id = (options?.id ?? "ui_ctx_")
+    + substring(sha256(context_key + json_stringify(value)), 0, 16)
+  return {
+    schema: UI_CONTEXT_UPDATE_SCHEMA,
+    jsonrpc: "2.0",
+    id: id,
+    method: "ui/update-model-context",
+    params: {structuredContent: {[context_key]: value}},
+  }
+}
+
+/**
+ * Validate a tool-result envelope and its inner shapes.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ui_tool_result_validate(result: UiToolResult) -> UiToolResult {
+  if result.schema != UI_TOOL_RESULT_SCHEMA {
+    throw "std/ui_resource: unsupported tool result schema " + __ui_text(result.schema)
+  }
+  if result.text_fallback.schema != UI_TEXT_FALLBACK_SCHEMA {
+    throw "std/ui_resource: text_fallback is required"
+  }
+  if __ui_text(result.text_fallback.content) == "" {
+    throw "std/ui_resource: text_fallback content must not be empty"
+  }
+  if result.meta.schema != UI_TOOL_META_SCHEMA {
+    throw "std/ui_resource: meta block is required"
+  }
+  if result.ui_resource != nil {
+    const resource = result.ui_resource
+    if resource.schema != UI_RESOURCE_SCHEMA {
+      throw "std/ui_resource: ui_resource has unsupported schema " + __ui_text(resource.schema)
+    }
+    if !resource.validation.ok {
+      throw "std/ui_resource: ui_resource failed validation (codes: "
+        + join(
+        resource.validation.error_codes,
+        ",",
+      )
+        + ")"
+    }
+  }
+  if result.structured_fallback != nil {
+    const structured = result.structured_fallback
+    if structured.schema != UI_STRUCTURED_FALLBACK_SCHEMA {
+      throw "std/ui_resource: structured_fallback has unsupported schema "
+        + __ui_text(
+        structured.schema,
+      )
+    }
+  }
+  return result
+}

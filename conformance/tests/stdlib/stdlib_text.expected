@@ -1,0 +1,51 @@
+42
+-7
+3.5
+12
+9
+2.25
+1.5
+2
+./lib/test.go
+/src/main.rs
+2
+internal/manifest/parser.go
+internal/manifest/parser_extra_test.go
+2
+code
+go
+fmt.Println("hi")
+call
+python
+2
+2
+true
+one
+two
+three
+true
+false
+true
+true
+true
+false
+FAIL test2
+error: bad input
+assert failed
+[api   ]
+[already-wider]
+[0007]
+[0042]
+[   ]
+-----
+[ababab]
+[]
+[]
+1.2.3
+nil
+["1","2","3"]
+[]
+["12","34","56"]
+[]
+01...9
+01...89

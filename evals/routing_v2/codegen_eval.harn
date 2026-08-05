@@ -1,0 +1,337 @@
+import "std/collections"
+
+/**
+ * Multi-task routing_policy v2 eval.
+ *
+ * Runs the same task list across four cells:
+ *
+ *   strategy \ context   | bare prompt | + harn-language skill
+ *   ---------------------+-------------+-----------------------
+ *   baseline (devstral)  |    cell A   |       cell B
+ *   routed (devstral→opus,
+ *           typecheck)   |    cell C   |       cell D
+ *
+ * The skill body lives in `harn_language_skill.md` (captured from
+ * `harn skill get harn-language --full` so the cell-B/D system prompt
+ * matches what a real coding agent would inject).
+ *
+ * Cost is computed from per-call tokens against a hard-coded OpenRouter
+ * rate table (Devstral $0.10/$0.30 per M, Opus $5/$25 per M).
+ */
+const CHEAP_MODEL = {provider: "openrouter", model: "mistralai/devstral-small"}
+
+const FRONTIER_MODEL = {provider: "openrouter", model: "anthropic/claude-opus-4.7"}
+
+const MAX_TOKENS = 500
+
+const SKILL_BODY_PATH = "evals/routing_v2/harn_language_skill.md"
+
+const TASKS = [
+  {
+    id: "fib",
+    prompt: "Write a Harn function `fib(n: int) -> int` that returns the n-th Fibonacci number. "
+      + "Definition: fib(0)=0, fib(1)=1, fib(n)=fib(n-1)+fib(n-2). "
+      + "Output ONLY the function definition wrapped in a ```harn fenced code block.",
+  },
+  {
+    id: "trivial_let",
+    prompt: "Output exactly this Harn snippet inside a ```harn fenced code block:\n"
+      + "let answer: int = 42\n"
+      + "No prose, no extra code.",
+  },
+  {
+    id: "sum_list",
+    prompt: "Write a Harn function `sum_list(items: list) -> int` that returns the sum of all integers "
+      + "in the list. Use a `for` loop. Output ONLY the function in a ```harn code block.",
+  },
+  {
+    id: "is_even_pipeline",
+    prompt: "Write a Harn pipeline named `check` that takes one parameter `task` of type int, and prints "
+      + "'even' if task is divisible by 2, else 'odd'. Use `pipeline check(task: int) { ... }`. Use "
+      + "`harness.stdio.println(\"even\")` for printing. Output ONLY the pipeline definition in a ```harn block.",
+  },
+  {
+    id: "fix_typo",
+    prompt: "The following Harn snippet has a typo — `funtion` should be `fn`. Output the corrected "
+      + "snippet inside a ```harn code block:\n"
+      + "funtion greet(name: string) {\n  harness.stdio.println(\"hello \" + name)\n}",
+  },
+]
+
+fn or_pricing_usd_per_m(stdio: HarnessStdio, model: string) -> dict {
+  if model == "mistralai/devstral-small" {
+    return {input: 0.1, output: 0.3}
+  }
+  if model == "anthropic/claude-opus-4.7" {
+    return {input: 5.0, output: 25.0}
+  }
+  // Unknown model id — the OpenRouter API has accepted both
+  // `<vendor>/<model>` and `openrouter/<vendor>/<model>` shapes in the
+  // past, and silently zero-pricing a routed candidate distorts the
+  // cell totals beyond recognition. Warn loudly so eval operators can
+  // extend the table rather than burying the discrepancy.
+  stdio.println(
+    "warning: unknown model id `" + model + "`; pricing as zero — update or_pricing_usd_per_m",
+  )
+  return {input: 0.0, output: 0.0}
+}
+
+fn cost_for_tokens(
+  stdio: HarnessStdio,
+  model: string,
+  input_tokens: int,
+  output_tokens: int,
+) -> float {
+  const p = or_pricing_usd_per_m(stdio, model)
+  return to_float(input_tokens) / 1000000.0 * to_float(p.input)
+    + to_float(output_tokens) / 1000000.0
+    * to_float(
+    p.output,
+  )
+}
+
+fn extract_first_fenced_harn(text: string) -> string {
+  const after_open = split(text, "```harn")
+  if len(after_open) < 2 {
+    return ""
+  }
+  const body_and_after = after_open[1]
+  const before_close = split(body_and_after, "```")
+  if len(before_close) < 1 {
+    return ""
+  }
+  return trim(before_close[0])
+}
+
+/**
+ * Grade a candidate using the SAME verifier the routing_policy uses.
+ *
+ * Pushes the code as a mock-LLM response into a 1-link routing_policy whose
+ * only verifier is `typecheck`. The chain returns immediately because the
+ * mock provider is free + deterministic; whatever the verifier emits is the
+ * canonical "would the typecheck gate have accepted this" answer.
+ *
+ * The catch arm only swallows known routing-shaped errors (dicts carrying a
+ * `reason` field, or strings mentioning routing/budget/verifier). Any other
+ * exception is printed verbatim so unrelated bugs can't silently inflate the
+ * "escalate" bucket and disguise themselves as low baseline quality.
+ */
+fn grade_outcome(llm: HarnessLlm, stdio: HarnessStdio, code: string) -> string {
+  llm.mock_push_scope()
+  llm.mock_enqueue({text: code, model: "mock", provider: "mock"})
+  const policy = llm.routing_policy(
+    {
+      chain: [{provider: "mock", model: "mock"}],
+      escalate_on: [{kind: "typecheck", extract_fenced: false, on_fail: "escalate"}],
+      label: "typecheck-grader",
+    },
+  )
+  const outcome = try {
+    const validation = llm.call("validate", nil, {routing: policy, max_tokens: 1})
+    const attempts = validation.routing.attempts
+    if len(attempts) > 0 {
+      attempts[0]?.verifier_outcome ?? "escalate"
+    } else {
+      "escalate"
+    }
+  } catch (err) {
+    const err_text = to_string(err)
+    const reason = if type_of(err) == "dict" {
+      to_string(err?.reason ?? "")
+    } else {
+      ""
+    }
+    const is_routing_shape = reason != ""
+      || contains(err_text, "routing")
+      || contains(err_text, "budget")
+      || contains(err_text, "verifier")
+    if !is_routing_shape {
+      stdio.println("grade_outcome: unexpected exception (not routing-shaped): " + err_text)
+    }
+    "escalate"
+  }
+  llm.mock_pop_scope()
+  return outcome
+}
+
+fn typechecks(llm: HarnessLlm, stdio: HarnessStdio, code: string) -> bool {
+  if trim(code) == "" {
+    return false
+  }
+  return grade_outcome(llm, stdio, code) == "accept"
+}
+
+fn attempt_cost(stdio: HarnessStdio, attempt: dict) -> float {
+  const input = to_int(attempt?.input_tokens ?? 0)
+  const output = to_int(attempt?.output_tokens ?? 0)
+  return cost_for_tokens(stdio, attempt.model, input, output)
+}
+
+fn run_one_baseline(llm: HarnessLlm, stdio: HarnessStdio, task: dict, system: dict) -> dict {
+  const result = llm.call(
+    task.prompt,
+    system.body,
+    {
+      provider: CHEAP_MODEL.provider,
+      model: CHEAP_MODEL.model,
+      max_tokens: MAX_TOKENS,
+      budget: {max_cost_usd: 0.2},
+    },
+  )
+  const code = extract_first_fenced_harn(result.text)
+  return {
+    task_id: task.id,
+    strategy: "baseline",
+    context: system.label,
+    cost_usd: cost_for_tokens(
+      stdio,
+      CHEAP_MODEL.model,
+      result.usage.input_tokens,
+      result.usage.output_tokens,
+    ),
+    input_tokens: result.usage.input_tokens,
+    output_tokens: result.usage.output_tokens,
+    code: code,
+    looks_valid: typechecks(llm, stdio, code),
+  }
+}
+
+fn run_one_routed(llm: HarnessLlm, stdio: HarnessStdio, task: dict, system: dict) -> dict {
+  const policy = llm.routing_policy(
+    {
+      chain: [
+        {provider: CHEAP_MODEL.provider, model: CHEAP_MODEL.model, label: "cheap"},
+        {provider: FRONTIER_MODEL.provider, model: FRONTIER_MODEL.model, label: "frontier"},
+      ],
+      escalate_on: [{kind: "typecheck", extract_fenced: true, on_fail: "escalate"}],
+      budget: {per_call_usd: 0.5, session_usd: 2.5, on_exceed: "abort"},
+      max_refines_per_link: 0,
+      label: "routing-v2",
+    },
+  )
+  const result = llm.call(task.prompt, system.body, {routing: policy, max_tokens: MAX_TOKENS})
+  const code = extract_first_fenced_harn(result.text)
+  const attempts = result.routing.attempts
+  const selected = result.routing.selected ?? 0
+  const final_model = attempts[selected].model
+  const total_cost = sum_by(attempts, { a -> attempt_cost(stdio, a) })
+  const escalated = len(attempts) > 1
+  return {
+    task_id: task.id,
+    strategy: "routed",
+    context: system.label,
+    cost_usd: total_cost,
+    escalated: escalated,
+    attempts: attempts,
+    selected: selected,
+    final_model: final_model,
+    code: code,
+    looks_valid: typechecks(llm, stdio, code),
+  }
+}
+
+fn run_task_quartet(llm: HarnessLlm, stdio: HarnessStdio, task: dict, skill_body: string) -> dict {
+  stdio.println("=== task " + task.id + " ===")
+  const bare = {label: "bare", body: nil}
+  const with_skill = {label: "skill", body: skill_body}
+  const baseline_bare = run_one_baseline(llm, stdio, task, bare)
+  const baseline_skill = run_one_baseline(llm, stdio, task, with_skill)
+  const routed_bare = run_one_routed(llm, stdio, task, bare)
+  const routed_skill = run_one_routed(llm, stdio, task, with_skill)
+  stdio.println(
+    "  baseline_bare  cost=" + to_string(baseline_bare.cost_usd)
+      + " valid="
+      + to_string(baseline_bare.looks_valid),
+  )
+  stdio.println(
+    "  baseline_skill cost=" + to_string(baseline_skill.cost_usd)
+      + " valid="
+      + to_string(baseline_skill.looks_valid),
+  )
+  stdio.println(
+    "  routed_bare    cost=" + to_string(routed_bare.cost_usd)
+      + " valid="
+      + to_string(routed_bare.looks_valid)
+      + " escalated="
+      + to_string(routed_bare.escalated),
+  )
+  stdio.println(
+    "  routed_skill   cost=" + to_string(routed_skill.cost_usd)
+      + " valid="
+      + to_string(routed_skill.looks_valid)
+      + " escalated="
+      + to_string(routed_skill.escalated),
+  )
+  return {
+    baseline_bare: baseline_bare,
+    baseline_skill: baseline_skill,
+    routed_bare: routed_bare,
+    routed_skill: routed_skill,
+  }
+}
+
+fn col_totals(rows: list, key: string) -> dict {
+  const cost = sum_by(rows, { row -> to_float(row[key].cost_usd) })
+  const valid = count_where(rows, { row -> row[key].looks_valid })
+  return {cost_usd: cost, valid: valid}
+}
+
+/**
+ * Sanity check that `grade_outcome` returns "accept" on a code snippet
+ * we know typechecks. If this fires, the verifier-receipt shape upstream
+ * has shifted and every baseline output will silently be classified as
+ * "escalate" — which would make the eval results meaningless.
+ */
+fn smoke_check_grade_outcome(llm: HarnessLlm, stdio: HarnessStdio) {
+  const outcome = grade_outcome(llm, stdio, "let answer: int = 42\n")
+  if outcome != "accept" {
+    throw "grade_outcome regression: known-good snippet returned `" + outcome
+      + "` instead of `accept`"
+  }
+}
+
+fn main(harness: Harness) {
+  smoke_check_grade_outcome(harness.llm, harness.stdio)
+  const skill_body = harness.fs.read_text(SKILL_BODY_PATH)
+  const rows = TASKS.map({ task -> run_task_quartet(harness.llm, harness.stdio, task, skill_body) })
+  const bb = col_totals(rows, "baseline_bare")
+  const bs = col_totals(rows, "baseline_skill")
+  const rb = col_totals(rows, "routed_bare")
+  const rs = col_totals(rows, "routed_skill")
+  const n = len(TASKS)
+  harness.stdio.println("=========================================")
+  harness.stdio.println(
+    "baseline_bare  : valid=" + to_string(bb.valid) + "/" + to_string(n)
+      + " cost="
+      + to_string(bb.cost_usd),
+  )
+  harness.stdio.println(
+    "baseline_skill : valid=" + to_string(bs.valid) + "/" + to_string(n)
+      + " cost="
+      + to_string(bs.cost_usd),
+  )
+  harness.stdio.println(
+    "routed_bare    : valid=" + to_string(rb.valid) + "/" + to_string(n)
+      + " cost="
+      + to_string(rb.cost_usd),
+  )
+  harness.stdio.println(
+    "routed_skill   : valid=" + to_string(rs.valid) + "/" + to_string(n)
+      + " cost="
+      + to_string(rs.cost_usd),
+  )
+  harness.stdio.println(
+    json_stringify_pretty(
+      {
+        summary: {
+          n_tasks: n,
+          baseline_bare: bb,
+          baseline_skill: bs,
+          routed_bare: rb,
+          routed_skill: rs,
+        },
+        rows: rows,
+      },
+    ),
+  )
+}

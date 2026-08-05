@@ -1,0 +1,11 @@
+[review_captain][pr={{ pr }}][stage=review]
+
+Review this {{ file_count }}-file diff:
+{{ for f in files }}
+- {{ f.path }} (+{{ f.loc_added }}/-{{ f.loc_removed }}, {{ f.risk }} risk)
+{{- end }}
+
+Total lines added: {{ total_added }}.
+
+Identify regressions, missing test coverage, and risky paths. Ask exactly one
+clarifying question, then propose a verdict.

@@ -1,0 +1,6 @@
+{
+  "_type": "merge_captain_mock_scenario",
+  "scenario": "playground_3repos",
+  "transcript": "../../personas/merge_captain/transcripts/green_pr.jsonl",
+  "golden": "../../personas/merge_captain/goldens/green_pr.json"
+}

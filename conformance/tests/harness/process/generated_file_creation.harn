@@ -1,0 +1,9 @@
+fn main(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("generated-file-creation")
+  const target = path_join(root, "generated.rs")
+  const created = harness.process.run(
+    {program: "sh", args: ["-c", "printf fixture > \"" + target + "\""], cwd: root},
+  )
+  harness.stdio.println(created.success)
+  harness.stdio.println(harness.fs.read_text(target))
+}

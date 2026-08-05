@@ -1,0 +1,598 @@
+/**
+ * std/triggers — typed trigger envelopes shared across inbound providers.
+ *
+ * Import with: `import "std/triggers"`.
+ *
+ * Harn owns the stable trigger envelope and core ingress payloads. Connector
+ * packages own provider-specific payload schemas and cross the runtime boundary
+ * through `ExtensionProviderPayload`; this module does not duplicate those
+ * package contracts.
+ */
+type ProviderId = string
+
+type SignatureVerified = {state: "verified"}
+
+type SignatureUnsigned = {state: "unsigned"}
+
+type SignatureFailed = {state: "failed", reason: string}
+
+type SignatureStatus = SignatureVerified | SignatureUnsigned | SignatureFailed
+
+type CronEventPayload = {
+  provider: "cron",
+  cron_id: string?,
+  schedule: string?,
+  tick_at: string,
+  raw: dict,
+}
+
+type GenericWebhookPayload = {
+  provider: "webhook",
+  source: string?,
+  content_type: string?,
+  raw: dict,
+}
+
+type A2aPushPayload = {
+  provider: "a2a-push",
+  task_id: string?,
+  task_state: string?,
+  artifact: any?,
+  sender: string?,
+  actor_chain: any?,
+  raw: dict,
+  kind: string,
+}
+
+type StreamEventPayload = {
+  provider: "kafka" | "nats" | "pulsar" | "postgres-cdc" | "email" | "websocket",
+  event: string,
+  source: string?,
+  stream: string?,
+  partition: string?,
+  offset: string?,
+  key: string?,
+  timestamp: string?,
+  headers: dict,
+  raw: dict,
+}
+
+type ChannelEventPayload = {
+  provider: "channel",
+  id: string,
+  name: string,
+  name_resolved: string,
+  scope: string,
+  scope_id: string,
+  payload: any,
+  emitted_by: string,
+  tenant_id: string?,
+  session_id: string?,
+  pipeline_id: string?,
+}
+
+type ExtensionProviderPayload = {provider: string, schema_name: string, raw: dict}
+
+type ProviderPayload = CronEventPayload \
+  | GenericWebhookPayload \
+  | A2aPushPayload \
+  | StreamEventPayload \
+  | ChannelEventPayload \
+  | ExtensionProviderPayload
+
+type ProviderSecretRequirement = {name: string, required: bool, namespace: string}
+
+type ProviderOutboundMethod = {name: string}
+
+type ProviderSignatureVerificationNone = {kind: "none"}
+
+type ProviderSignatureVerificationHmac = {
+  kind: "hmac",
+  variant: string,
+  raw_body: bool,
+  signature_header: string,
+  timestamp_header: string?,
+  id_header: string?,
+  default_tolerance_secs: int?,
+  digest: string,
+  encoding: string,
+}
+
+type ProviderSignatureVerification = ProviderSignatureVerificationNone \
+  | ProviderSignatureVerificationHmac
+
+type ProviderRuntimeBuiltin = {
+  kind: "builtin",
+  connector: string,
+  default_signature_variant: string?,
+}
+
+type ProviderRuntimePlaceholder = {kind: "placeholder"}
+
+type ProviderRuntime = ProviderRuntimeBuiltin | ProviderRuntimePlaceholder
+
+type ProviderCatalogEntry = {
+  provider: string,
+  kinds: list<string>,
+  schema_name: string,
+  outbound_methods: list<ProviderOutboundMethod>,
+  secret_requirements: list<ProviderSecretRequirement>,
+  signature_verification: ProviderSignatureVerification,
+  runtime: ProviderRuntime,
+}
+
+type TriggerEvent = {
+  id: string,
+  provider: ProviderId,
+  kind: string,
+  received_at: string,
+  occurred_at: string?,
+  dedupe_key: string,
+  trace_id: string,
+  tenant_id: string?,
+  headers: dict,
+  batch: list<dict>?,
+  raw_body: bytes?,
+  provider_payload: ProviderPayload,
+  signature_status: SignatureStatus,
+}
+
+type TriggerState = "registering" | "active" | "draining" | "terminated"
+
+type TriggerBindingSource = "manifest" | "dynamic"
+
+type TriggerHandler = fn(Harness, TriggerEvent) -> any | string
+
+type TriggerPredicate = fn(Harness, TriggerEvent) -> bool | Result<bool, any>
+
+type TriggerMatch = {events: list<string>?}
+
+type TriggerBudget = {
+  max_cost_usd: float?,
+  max_tokens: int?,
+  daily_cost_usd: float?,
+  hourly_cost_usd: float?,
+  max_concurrent: int?,
+  on_budget_exhausted: string?,
+}
+
+type TriggerWhenBudget = {max_cost_usd: float?, tokens_max: int?, timeout: string?}
+
+type TriggerRetryBackoff = "svix" | "immediate"
+
+type TriggerRetry = {max: int?, backoff: TriggerRetryBackoff?}
+
+type AutonomyTier = "shadow" | "suggest" | "act_with_approval" | "act_auto"
+
+type TrustOutcome = "success" | "failure" | "denied" | "timeout"
+
+/**
+ * CH-04 (#1875): aggregation buffer attached to a trigger. The runtime
+ * collects matching events per (binding, partition_key) and dispatches
+ * the handler with a batched event when `count` is reached or `window`
+ * elapses.
+ *
+ * - `count`: fire after this many matching events.
+ * - `window`: bucket size (e.g. "10m", "1h"). Required.
+ * - `key`: optional dot-path into the channel payload; events with the
+ *   same value at this path accumulate in the same bucket. Missing path
+ *   = global bucket.
+ * - `expire_action`: `"fire_partial"` (default) invokes the handler with
+ *   the partial batch; `"discard"` drops it. The legacy alias `"fire"`
+ *   is accepted as a synonym for `"fire_partial"`.
+ */
+type TriggerBatchSpec = {count: int, window: string, key: string?, expire_action: string?}
+
+type TriggerConfig = {
+  id: string?,
+  kind: string,
+  provider: ProviderId,
+  autonomy_tier: AutonomyTier?,
+  handler: TriggerHandler,
+  when: TriggerPredicate?,
+  when_budget: TriggerWhenBudget?,
+  retry: TriggerRetry?,
+  match: TriggerMatch?,
+  events: list<string>?,
+  dedupe_key: string?,
+  filter: string?,
+  batch: TriggerBatchSpec?,
+  allow_cleartext: bool?,
+  budget: TriggerBudget?,
+  manifest_path: string?,
+  package_name: string?,
+}
+
+type TriggerMetrics = {
+  received: int,
+  dispatched: int,
+  failed: int,
+  dlq: int,
+  in_flight: int,
+  last_received_ms: int?,
+  cost_total_usd_micros: int,
+  cost_today_usd_micros: int,
+  cost_hour_usd_micros: int,
+}
+
+type TriggerBinding = {
+  id: string,
+  version: int,
+  source: TriggerBindingSource,
+  kind: string,
+  provider: string,
+  autonomy_tier: AutonomyTier,
+  handler_kind: string,
+  state: TriggerState,
+  metrics: TriggerMetrics,
+  daily_cost_usd: float?,
+  hourly_cost_usd: float?,
+  on_budget_exhausted: string,
+}
+
+type TriggerHandle = TriggerBinding
+
+type DispatchHandle = {
+  event_id: string,
+  binding_id: string,
+  binding_version: int,
+  status: string,
+  replay_of_event_id: string?,
+  dlq_entry_id: string?,
+  error: string?,
+  result: any?,
+}
+
+type DlqAttempt = {attempt: int, at: string, status: string, error: string?}
+
+type DlqEntry = {
+  id: string,
+  event_id: string,
+  binding_id: string,
+  binding_version: int,
+  provider: string,
+  kind: string,
+  state: string,
+  error: string,
+  error_class: string,
+  event: TriggerEvent,
+  retry_history: list<DlqAttempt>,
+}
+
+type TriggerActionGraphEvent = {kind: string, headers: dict, payload: dict}
+
+type TrustEntryId = string
+
+type CapabilityPolicy = {
+  tools: list<string>,
+  capabilities: dict,
+  workspace_roots: list<string>,
+  side_effect_level: string?,
+  recursion_limit: int?,
+  tool_arg_constraints: list<dict>,
+  tool_annotations: dict,
+}
+
+type TrustRecord = {
+  schema: string,
+  record_id: string,
+  agent: string,
+  action: string,
+  approver: string?,
+  outcome: TrustOutcome,
+  trace_id: string,
+  autonomy_tier: AutonomyTier,
+  timestamp: string,
+  cost_usd: float?,
+  chain_index: int,
+  previous_hash: string?,
+  entry_hash: string,
+  metadata: dict,
+}
+
+type TrustTraceGroup = {trace_id: string, records: list<TrustRecord>}
+
+type TrustQueryFilters = {
+  agent: string?,
+  action: string?,
+  since: string?,
+  until: string?,
+  tier: AutonomyTier?,
+  outcome: TrustOutcome?,
+  limit: int?,
+  grouped_by_trace: bool?,
+}
+
+type TrustScore = {
+  agent: string,
+  action: string?,
+  total: int,
+  successes: int,
+  failures: int,
+  denied: int,
+  timeouts: int,
+  success_rate: float,
+  latest_outcome: TrustOutcome?,
+  latest_timestamp: string?,
+  effective_tier: AutonomyTier,
+  policy: CapabilityPolicy,
+}
+
+type TrustChainReport = {
+  topic: string,
+  total: int,
+  verified: bool,
+  root_hash: string?,
+  broken_at_event_id: int?,
+  errors: list<string>,
+}
+
+type HandlerContext = {
+  agent: string,
+  action: string,
+  trace_id: string,
+  replay_of_event_id: string?,
+  autonomy_tier: AutonomyTier,
+  trigger_event: TriggerEvent,
+}
+
+type StreamWindowMode = "tumbling" | "sliding" | "session"
+
+type StreamWindowSpec = {
+  mode: StreamWindowMode,
+  key: string?,
+  size: string?,
+  every: string?,
+  gap: string?,
+  max_items: int?,
+}
+
+type StreamForkPlan = {kind: "stream.fork", source: any, branches: list<any>}
+
+type StreamJoinPlan = {kind: "stream.join", source: any, join: dict}
+
+type StreamWindowPlan = {kind: "stream.window", events: list<any>, window: StreamWindowSpec}
+
+type StreamLlmClassifyConfig = {cache?: string, model?: string, provider?: string}
+
+type StreamLlmClassifyOptions = StreamLlmClassifyConfig?
+
+type StreamLlmClassifyPlan = {
+  kind: "stream.llm_classify",
+  input: any,
+  labels: list<string>,
+  cache: string?,
+  options: StreamLlmClassifyConfig,
+}
+
+type SpawnToPoolOptions = {
+  pool: string,
+  priority_from?: string,
+  key_from?: string,
+  task_factory: fn(TriggerEvent) -> any,
+}
+
+type SpawnToPoolHandler = {
+  kind: string,
+  pool: string,
+  priority_from: string?,
+  key_from: string?,
+  task_factory: fn(TriggerEvent) -> any,
+}
+
+type ReminderTarget = string | fn(TriggerEvent) -> string?
+
+type ReminderPropagateMode = "none" | "session" | "all" | string
+
+type ReminderInjectOptions = {
+  target?: ReminderTarget,
+  body: string,
+  tags?: list<string>,
+  ttl_turns?: int,
+  dedupe_key?: string,
+  propagate?: ReminderPropagateMode,
+  role_hint?: string,
+  preserve_on_compact?: bool,
+}
+
+type ReminderInjectHandler = {
+  kind: string,
+  target: ReminderTarget?,
+  body: string,
+  tags: list<string>?,
+  ttl_turns: int?,
+  dedupe_key: string?,
+  propagate: ReminderPropagateMode?,
+  role_hint: string?,
+  preserve_on_compact: bool?,
+}
+
+type InterruptTargets = string | list<string> | fn(TriggerEvent) -> list<string>
+
+type InterruptAndSuspendOptions = {target_agents?: InterruptTargets, reason?: string}
+
+type InterruptAndSuspendHandler = {kind: string, target_agents: InterruptTargets?, reason: string?}
+
+/**
+ * SpawnToPool builds a handler-variant dict that routes matched events into
+ * a named agent pool (#1883) instead of spawning a fresh worker per event.
+ *
+ * The dispatcher resolves `pool` by name, invokes `task_factory(event)` to
+ * build the per-event closure, and submits that closure under the pool's
+ * queue strategy + backpressure policy. `priority_from` and `key_from` are
+ * dotted paths into the trigger event JSON (e.g. `"tenant_id"`,
+ * `"provider_payload.urgency"`). Missing paths fall back to the default
+ * priority (0) and a null fair-queue key.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: harness.runtime.trigger_register({handler: SpawnToPool({pool: "pr-review", task_factory: { event -> { -> review(event) } }})})
+ */
+pub fn SpawnToPool(options: SpawnToPoolOptions) -> SpawnToPoolHandler {
+  return {
+    kind: "spawn_to_pool",
+    pool: options.pool,
+    priority_from: options.priority_from,
+    key_from: options.key_from,
+    task_factory: options.task_factory,
+  }
+}
+
+/**
+ * ReminderInject builds a handler-variant dict that injects a
+ * `SystemReminder` (#1815) into the target running session when the trigger
+ * matches (#1876). Unlike Local/Worker handlers, no new task is spawned —
+ * the reminder appears at the target session's next turn boundary.
+ *
+ * `target` accepts the string `"current"` (the trigger's owning session,
+ * the default), `"parent"` (the parent of the owning session), any other
+ * string as a concrete session id, or a closure `event -> string?` that
+ * returns the session id at dispatch time. The closure form lets the
+ * trigger pick a target dynamically from the event payload.
+ *
+ * `body` is a `.harn.prompt` template rendered against `{{ event }}`,
+ * `{{ match }}` (`matched_at`), and `{{ batch }}` when flow-control
+ * batching is in effect.
+ *
+ * `tags`, `ttl_turns`, `dedupe_key`, `propagate`, `role_hint`, and
+ * `preserve_on_compact` mirror `transcript.inject_reminder` (#1815 R-02);
+ * see `docs/src/system-reminders.md`. Missing target sessions are dropped
+ * gracefully with a `triggers.reminder_inject.audit` audit entry instead
+ * of failing the dispatch.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: harness.runtime.trigger_register({handler: ReminderInject({target: "current", body: "{{ event.kind }} arrived"})})
+ */
+pub fn ReminderInject(options: ReminderInjectOptions) -> ReminderInjectHandler {
+  return {
+    kind: "reminder_inject",
+    target: options.target,
+    body: options.body,
+    tags: options.tags,
+    ttl_turns: options.ttl_turns,
+    dedupe_key: options.dedupe_key,
+    propagate: options.propagate,
+    role_hint: options.role_hint,
+    preserve_on_compact: options.preserve_on_compact,
+  }
+}
+
+/**
+ * InterruptAndSuspend builds a handler-variant dict that, on match, broadcasts
+ * an emergency "panic" signal to a set of running workers and suspends each
+ * one synchronously via the cooperative-suspend pipeline (#1910). Unlike
+ * `ReminderInject` (next-turn-boundary) and `Local`/`Worker` (spawns a fresh
+ * task), this variant bypasses the normal turn-boundary delivery contract —
+ * it is the org-scoped "stop everything" override.
+ *
+ * `target_agents` accepts the string `"all"` (every worker in the local
+ * registry — the default), a list of concrete worker-id strings, or a
+ * closure `event -> list<string>` that returns the worker-id list at
+ * dispatch time. The closure form lets a single trigger registration pick
+ * targets dynamically based on the event payload (e.g. all workers tagged
+ * with a given org or tenant).
+ *
+ * `reason` is propagated to every suspended worker's `WorkerSuspension`
+ * envelope, the `WorkerSuspended` lifecycle event, and the
+ * `triggers.interrupt_and_suspend.audit` audit entries. Defaults to
+ * `"panic"`.
+ *
+ * Already-suspended or terminal workers are skipped (no double-suspend,
+ * no error); unknown worker ids returned by a closure are skipped
+ * gracefully so a stale id never fails the broadcast. An empty target list
+ * records a single roll-up audit and returns a successful
+ * `status: "broadcast"` with `suspended_count: 0` — graceful no-op rather
+ * than dispatch failure.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: harness.runtime.trigger_register({handler: InterruptAndSuspend({target_agents: "all", reason: "build_storm"})})
+ */
+pub fn InterruptAndSuspend(options: InterruptAndSuspendOptions) -> InterruptAndSuspendHandler {
+  return {
+    kind: "interrupt_and_suspend",
+    target_agents: options.target_agents,
+    reason: options.reason,
+  }
+}
+
+/**
+ * list_providers.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn list_providers(llm: HarnessLlm) -> list<ProviderCatalogEntry> {
+  return llm.list_providers_native()
+}
+
+/**
+ * stream_fork returns a declarative fan-out plan for stream handlers.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn stream_fork(source, branches = []) -> StreamForkPlan {
+  return {kind: "stream.fork", source: source, branches: branches}
+}
+
+/**
+ * stream_join returns a declarative fan-in plan for stream handlers.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn stream_join(source, join: dict? = nil) -> StreamJoinPlan {
+  return {kind: "stream.join", source: source, join: join ?? {}}
+}
+
+fn __stream_llm_classify_options(
+  options: StreamLlmClassifyOptions = nil,
+) -> StreamLlmClassifyConfig {
+  let config = {}
+  if options?.cache != nil {
+    config = config + {cache: options?.cache}
+  }
+  if options?.model != nil {
+    config = config + {model: options?.model}
+  }
+  if options?.provider != nil {
+    config = config + {provider: options?.provider}
+  }
+  return config
+}
+
+/**
+ * window_by groups stream events with the same manifest window shape.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn window_by(events, window: StreamWindowSpec) -> StreamWindowPlan {
+  return {kind: "stream.window", events: events, window: window}
+}
+
+/**
+ * llm_classify describes a cached classifier step without forcing a provider call during planning.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn llm_classify(
+  input,
+  labels: list<string>,
+  options: StreamLlmClassifyOptions = nil,
+) -> StreamLlmClassifyPlan {
+  const config = __stream_llm_classify_options(options)
+  return {
+    kind: "stream.llm_classify",
+    input: input,
+    labels: labels,
+    cache: config.cache,
+    options: config,
+  }
+}

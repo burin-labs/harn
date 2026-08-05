@@ -1,0 +1,18 @@
+pipeline test(harness: Harness, task) {
+  enum NetworkError {
+    Timeout
+  }
+  enum AuthError {
+    Unauthorized(msg)
+  }
+  // This typed catch only catches NetworkError — AuthError propagates
+  try {
+    try {
+      throw AuthError.Unauthorized("bad token")
+    } catch (e: NetworkError) {
+      harness.stdio.log("wrong handler — should not reach here")
+    }
+  } catch (e) {
+    harness.stdio.log("outer caught: ${e.variant}")
+  }
+}

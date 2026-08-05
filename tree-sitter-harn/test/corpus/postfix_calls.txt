@@ -1,0 +1,45 @@
+==================
+Expression Result Calls
+==================
+
+pipeline test(task) {
+  const chained = f(1)(2)
+  const parenthesized = (outer(3))(4)
+  const separate = outer
+  (5)
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    (identifier)
+    (parameter_list
+      (typed_parameter
+        (identifier)))
+    (block
+      (const_binding
+        (identifier)
+        (call_expression
+          (call_expression
+            (identifier)
+            (argument_list
+              (integer_literal)))
+          (argument_list
+            (integer_literal))))
+      (const_binding
+        (identifier)
+        (call_expression
+          (parenthesized_expression
+            (call_expression
+              (identifier)
+              (argument_list
+                (integer_literal))))
+          (argument_list
+            (integer_literal))))
+      (const_binding
+        (identifier)
+        (identifier))
+      (expression_statement
+        (parenthesized_expression
+          (integer_literal))))))

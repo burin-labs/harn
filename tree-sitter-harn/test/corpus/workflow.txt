@@ -1,0 +1,67 @@
+==================
+Workflow Graph Call
+==================
+
+pipeline main(task) {
+  let flow = workflow_graph({entry: "act"})
+  if true {
+    return flow
+  }
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)))
+    (block
+      (let_binding
+        name: (identifier)
+        value: (call_expression
+          function: (identifier)
+          (argument_list
+            (dict_literal
+              (dict_entry
+                key: (identifier)
+                value: (string_literal
+                  (string_delimiter)
+                  (string_content)
+                  (string_delimiter)))))))
+      (if_statement
+        condition: (true)
+        consequence: (block
+          (return_statement
+            (identifier)))))))
+
+==================
+Typed Pipeline Contract
+==================
+
+pub pipeline deploy(config: DeployConfig, dry_run: bool) -> string {
+  return config.region
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)
+        type: (type_annotation
+          (identifier)))
+      (typed_parameter
+        name: (identifier)
+        type: (type_annotation
+          (identifier))))
+    return_type: (type_annotation
+      (identifier))
+    (block
+      (return_statement
+        (property_access
+          object: (identifier)
+          property: (identifier))))))

@@ -1,0 +1,10 @@
+cleanup:value
+value
+cleanup:direct
+caught:direct
+cleanup:nested
+caught:nested
+caught:cleanup
+cleanup:throw operand
+caught:throw operand
+[cleanup:1, body:2, cleanup:2, cleanup:3]

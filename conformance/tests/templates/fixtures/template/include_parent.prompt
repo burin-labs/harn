@@ -1,0 +1,5 @@
+Hello!
+{{ include "include_partial.prompt" }}
+--
+{{ include "include_partial.prompt" with { name: "override" } }}
+Done.

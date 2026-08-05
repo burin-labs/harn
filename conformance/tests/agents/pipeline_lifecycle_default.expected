@@ -1,0 +1,6 @@
+pre_finish has_on_finish=true
+audit_count=1
+audit_kind=pipeline_finalized
+audit_reason=no_unsettled
+result=7
+post_finish return_value=7

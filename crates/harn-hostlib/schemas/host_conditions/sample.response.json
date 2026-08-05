@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/host_conditions/sample.response.json",
+  "title": "host_conditions.sample response",
+  "description": "Environment-neutral answers to the stable ambient contention questions.",
+  "type": "object",
+  "properties": {
+    "schema_version": {"const": 1},
+    "observed_at_ms": {"type": "integer"},
+    "environment": {
+      "type": "string",
+      "enum": ["bare_metal", "virtualized", "containerized", "unknown"]
+    },
+    "sample_cost_us": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "End-to-end source sampling cost in microseconds."
+    },
+    "questions": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {"$ref": "#/$defs/Observation"}
+    }
+  },
+  "required": [
+    "schema_version",
+    "observed_at_ms",
+    "environment",
+    "sample_cost_us",
+    "questions"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "Observation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "question": {"$ref": "#/$defs/Question"},
+            "status": {"const": "observed"},
+            "contention": {"type": "number", "minimum": 0, "maximum": 1},
+            "reason": {"type": "null"}
+          },
+          "required": ["question", "status", "contention", "reason"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "question": {"$ref": "#/$defs/Question"},
+            "status": {"enum": ["unavailable", "not_observable"]},
+            "contention": {"type": "null"},
+            "reason": {"type": "string", "minLength": 1}
+          },
+          "required": ["question", "status", "contention", "reason"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "Question": {
+      "type": "string",
+      "enum": [
+        "promised_cpu",
+        "nominal_speed",
+        "accelerator_shared",
+        "memory_or_io_contended"
+      ]
+    }
+  }
+}

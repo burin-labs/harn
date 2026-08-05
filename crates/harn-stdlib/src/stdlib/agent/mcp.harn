@@ -1,0 +1,197 @@
+/**
+ * agent_mcp_bootstrap_if_needed.
+ *
+ * @effects: [host, mcp]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_mcp_bootstrap_if_needed(tools: HarnessTools, session, opts) {
+  const specs = opts?.mcp_servers
+  if specs == nil || len(specs) == 0 {
+    return opts
+  }
+  return __mcp_bootstrap_and_admit(tools, session, opts, specs)
+}
+
+/**
+ * agent_mcp_mount_additional.
+ *
+ * Mount MCP servers declared by a skill that activated mid-conversation.
+ * Only servers whose name is not already mounted (tracked via the
+ * `_mcp_server_info` running list the bootstrap path appends to) are
+ * bootstrapped, so a live server is never re-connected and its tools are
+ * never duplicated in the catalog or ceiling. `__host_mcp_bootstrap`
+ * replaces the session's MCP client map on every call, so re-bootstrapping
+ * the full set would drop live handles — mounting ONLY the delta keeps
+ * every previously mounted server intact.
+ *
+ * The delta bootstrap result is stashed on the returned opts as
+ * `_mcp_delta_bootstrap` (nil when nothing new mounted) so the caller can
+ * admit the same tools into the current turn's options with
+ * `agent_mcp_admit_bootstrap` — no second host round-trip.
+ *
+ * @effects: [host, mcp]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_mcp_mount_additional(tools: HarnessTools, session, opts, requested_specs) {
+  const delta = __mcp_delta_specs(opts, requested_specs ?? [])
+  if len(delta) == 0 {
+    return opts + {_mcp_delta_bootstrap: nil}
+  }
+  const mounted = __mcp_bootstrap_and_admit(tools, session, opts, delta)
+  return mounted + {_mcp_delta_bootstrap: mounted?._mcp_bootstrap}
+}
+
+/**
+ * agent_mcp_admit_bootstrap.
+ *
+ * Admit an already-computed `__host_mcp_bootstrap` result's tools into a
+ * second opts view (catalog merge + ceiling extension) without a fresh
+ * host call. Lets a mid-conversation mount thread the new tools into the
+ * current turn's options as well as the persistent loop options.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_mcp_admit_bootstrap(opts, result) {
+  if type_of(result) != "dict" {
+    return opts
+  }
+  return __mcp_admit_tools(opts, result)
+}
+
+/** Bootstrap `specs` and admit their tools into `opts` (catalog + ceiling). */
+fn __mcp_bootstrap_and_admit(tools: HarnessTools, session, opts, specs) {
+  const result = tools.mcp_bootstrap(session.session_id, specs)
+  const prior_info = opts?._mcp_server_info ?? []
+  const out = opts
+    + {
+    _mcp_bootstrap: result,
+    _mcp_server_info: prior_info + (result?.server_info ?? []),
+  }
+  return __mcp_admit_tools(out, result)
+}
+
+/**
+ * Merge a bootstrap result's `tools_added` into the catalog (deduping by
+ * dispatch name) and extend the execution-policy tool ceiling so the tools
+ * are visible AND callable. Idempotent: a tool already present is skipped.
+ */
+fn __mcp_admit_tools(opts, result) {
+  const tools_added = result?.tools_added ?? []
+  if len(tools_added) == 0 {
+    return opts
+  }
+  const existing = opts?.tools
+  const existing_tools = if existing?._type == "tool_registry" {
+    existing?.tools ?? []
+  } else {
+    []
+  }
+  const reg = {_type: "tool_registry", tools: __mcp_merge_tool_lists(existing_tools, tools_added)}
+  return __with_mcp_tool_ceiling(opts + {tools: reg}, tools_added)
+}
+
+/** Append `added` tools to `existing`, skipping any whose name is present. */
+fn __mcp_merge_tool_lists(existing, added) {
+  let out = existing
+  let names = []
+  for entry in existing {
+    const name = __mcp_tool_ceiling_name(entry)
+    if name != "" {
+      names = names + [name]
+    }
+  }
+  for entry in added {
+    const name = __mcp_tool_ceiling_name(entry)
+    if name != "" && names.contains(name) {
+      continue
+    }
+    out = out + [entry]
+    if name != "" {
+      names = names + [name]
+    }
+  }
+  return out
+}
+
+/** Spec entries whose server name is neither already mounted nor a dup. */
+fn __mcp_delta_specs(opts, specs) {
+  const mounted = __mcp_mounted_server_ids(opts)
+  let delta = []
+  let seen = []
+  for spec in specs {
+    const name = to_string(spec?.name ?? "")
+    if name == "" || mounted.contains(name) || seen.contains(name) {
+      continue
+    }
+    delta = delta + [spec]
+    seen = seen + [name]
+  }
+  return delta
+}
+
+/** Server names already mounted this run, from the running `_mcp_server_info`. */
+fn __mcp_mounted_server_ids(opts) {
+  let ids = []
+  for info in opts?._mcp_server_info ?? [] {
+    const name = to_string(info?.name ?? "")
+    if name != "" && !ids.contains(name) {
+      ids = ids + [name]
+    }
+  }
+  return ids
+}
+
+/**
+ * Admit the just-bootstrapped MCP tools into the execution-policy tool
+ * ceiling so the agent that can SEE them in its catalog can also CALL them.
+ *
+ * The catalog merge above adds the `server__tool` entries to `opts.tools`,
+ * which is what makes the model aware of them; without a matching entry in
+ * `opts.policy.tools` (the ceiling enforced by
+ * `enforce_current_policy_for_tool`) every dispatch is denied with
+ * "exceeds tool ceiling". An MCP tool is a runtime projection — its name is
+ * not known until `tools/list` returns — so the ceiling can only learn it
+ * here, at boot time, not from the host's static surface declaration.
+ *
+ * An EMPTY `policy.tools` means "no ceiling" (allow any tool), so we only
+ * extend a non-empty ceiling: adding names to an empty list would flip an
+ * open policy into a closed one and silently forbid the host's own tools.
+ * Idempotent: never double-adds a name already present.
+ */
+fn __with_mcp_tool_ceiling(opts, tools_added) {
+  const policy = opts?.policy
+  if type_of(policy) != "dict" {
+    return opts
+  }
+  const ceiling = policy?.tools
+  if type_of(ceiling) != "list" || len(ceiling) == 0 {
+    return opts
+  }
+  let names = []
+  for entry in tools_added {
+    const name = __mcp_tool_ceiling_name(entry)
+    if name != "" && !ceiling.contains(name) && !names.contains(name) {
+      names = names + [name]
+    }
+  }
+  if len(names) == 0 {
+    return opts
+  }
+  return opts + {policy: policy + {tools: ceiling + names}}
+}
+
+/** Resolve a bootstrapped tool entry's dispatch name (flat or OpenAI-shape). */
+fn __mcp_tool_ceiling_name(entry) {
+  if type_of(entry) != "dict" {
+    return ""
+  }
+  const flat = to_string(entry?.name ?? "")
+  if flat != "" {
+    return flat
+  }
+  return to_string(entry?.function?.name ?? "")
+}

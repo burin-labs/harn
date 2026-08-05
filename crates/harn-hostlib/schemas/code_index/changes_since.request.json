@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/changes_since.request.json",
+  "title": "code_index.changes_since request",
+  "description": "Return every recorded change with `seq > since`, ordered by seq ascending. `limit` keeps only the most recent N entries when supplied.",
+  "type": "object",
+  "properties": {
+    "seq": { "type": "integer", "minimum": 0 },
+    "limit": { "type": "integer", "minimum": 1 }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,17 @@
+dict
+[name, score]
+string
+true
+false
+dict
+[label]
+true
+false
+bool
+bool
+int
+true
+false
+dict
+dict
+true

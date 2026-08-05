@@ -1,0 +1,793 @@
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use crate::chunk::{InlineCacheEntry, PropertyCacheTarget};
+use crate::value::{string_char_count, VmError, VmValue};
+
+/// Resolve a (possibly negative) list-assignment index against `len`, erroring
+/// if it falls outside the list. A negative index counts from the end (`-1` is
+/// the last element). Out-of-range indices — in *either* direction — are an
+/// error: unlike reads/slices, an assignment cannot silently clamp, or it would
+/// corrupt an unrelated element (e.g. `a[-100] = x` writing to index 0).
+fn resolve_list_assign_index(i: i64, len: usize) -> Result<usize, VmError> {
+    let pos = if i < 0 { len as i64 + i } else { i };
+    if pos < 0 || pos as usize >= len {
+        return Err(VmError::Runtime(format!(
+            "Index {i} out of bounds for list of length {len}"
+        )));
+    }
+    Ok(pos as usize)
+}
+
+impl super::super::Vm {
+    fn concat_display_values(parts: &[VmValue]) -> String {
+        let all_strings_len = parts.iter().try_fold(0usize, |len, part| match part {
+            VmValue::String(text) => Some(len + text.len()),
+            _ => None,
+        });
+        let mut result = String::with_capacity(all_strings_len.unwrap_or(0));
+        for part in parts {
+            part.write_display(&mut result);
+        }
+        result
+    }
+
+    fn index_from_end(index: i64) -> Option<usize> {
+        index
+            .checked_neg()?
+            .checked_sub(1)
+            .and_then(|offset| usize::try_from(offset).ok())
+    }
+
+    fn string_index(s: &str, index: i64) -> VmValue {
+        if s.is_ascii() {
+            let pos = if index < 0 {
+                Self::index_from_end(index)
+                    .and_then(|offset| offset.checked_add(1))
+                    .and_then(|distance| s.len().checked_sub(distance))
+            } else {
+                usize::try_from(index).ok()
+            };
+            return pos
+                .and_then(|pos| s.as_bytes().get(pos))
+                .map(|byte| VmValue::char_value(*byte as char))
+                .unwrap_or(VmValue::Nil);
+        }
+
+        if index < 0 {
+            let Some(index) = Self::index_from_end(index) else {
+                return VmValue::Nil;
+            };
+            return s
+                .chars()
+                .rev()
+                .nth(index)
+                .map(VmValue::char_value)
+                .unwrap_or(VmValue::Nil);
+        }
+        s.chars()
+            .nth(match usize::try_from(index) {
+                Ok(index) => index,
+                Err(_) => return VmValue::Nil,
+            })
+            .map(VmValue::char_value)
+            .unwrap_or(VmValue::Nil)
+    }
+
+    fn try_cached_property(
+        cache: Option<&(u16, PropertyCacheTarget)>,
+        name_idx: u16,
+        obj: &VmValue,
+    ) -> Option<VmValue> {
+        let (cached_name_idx, target) = cache?;
+        if *cached_name_idx != name_idx {
+            return None;
+        }
+
+        match (target, obj) {
+            (PropertyCacheTarget::DictField(name), VmValue::Dict(map)) => {
+                Some(map.get(name.as_ref()).cloned().unwrap_or(VmValue::Nil))
+            }
+            (
+                PropertyCacheTarget::StructField { field_name, index },
+                VmValue::StructInstance(si),
+            ) => {
+                let crate::value::StructInstanceData { layout, fields } = &**si;
+                if layout
+                    .field_names()
+                    .get(*index)
+                    .is_some_and(|candidate| candidate.as_str() == field_name.as_ref())
+                {
+                    Some(
+                        fields
+                            .get(*index)
+                            .and_then(Option::as_ref)
+                            .cloned()
+                            .unwrap_or(VmValue::Nil),
+                    )
+                } else {
+                    None
+                }
+            }
+            (PropertyCacheTarget::ListCount, VmValue::List(items)) => {
+                Some(VmValue::Int(items.len() as i64))
+            }
+            (PropertyCacheTarget::ListEmpty, VmValue::List(items)) => {
+                Some(VmValue::Bool(items.is_empty()))
+            }
+            (PropertyCacheTarget::ListFirst, VmValue::List(items)) => {
+                Some(items.first().cloned().unwrap_or(VmValue::Nil))
+            }
+            (PropertyCacheTarget::ListLast, VmValue::List(items)) => {
+                Some(items.last().cloned().unwrap_or(VmValue::Nil))
+            }
+            (PropertyCacheTarget::StringCount, VmValue::String(s)) => {
+                Some(VmValue::Int(string_char_count(s) as i64))
+            }
+            (PropertyCacheTarget::StringEmpty, VmValue::String(s)) => {
+                Some(VmValue::Bool(s.is_empty()))
+            }
+            (PropertyCacheTarget::PairFirst, VmValue::Pair(p)) => Some(p.0.clone()),
+            (PropertyCacheTarget::PairSecond, VmValue::Pair(p)) => Some(p.1.clone()),
+            (PropertyCacheTarget::EnumVariant, VmValue::EnumVariant(enum_variant)) => {
+                Some(VmValue::String(enum_variant.variant.clone()))
+            }
+            (PropertyCacheTarget::EnumFields, VmValue::EnumVariant(enum_variant)) => {
+                Some(VmValue::List(Arc::clone(&enum_variant.fields)))
+            }
+            (PropertyCacheTarget::HarnessSubHandle(kind), VmValue::Harness(handle)) => {
+                handle.sub_handle_kind(*kind).map(VmValue::harness)
+            }
+            _ => None,
+        }
+    }
+
+    fn property_cache_target(obj: &VmValue, name: &str) -> Option<PropertyCacheTarget> {
+        match obj {
+            VmValue::Dict(_) => Some(PropertyCacheTarget::DictField(Arc::from(name))),
+            VmValue::StructInstance(si) => {
+                let layout = &si.layout;
+                layout
+                    .field_index(name)
+                    .map(|index| PropertyCacheTarget::StructField {
+                        field_name: Arc::from(name),
+                        index,
+                    })
+            }
+            VmValue::List(_) => match name {
+                "count" => Some(PropertyCacheTarget::ListCount),
+                "empty" => Some(PropertyCacheTarget::ListEmpty),
+                "first" => Some(PropertyCacheTarget::ListFirst),
+                "last" => Some(PropertyCacheTarget::ListLast),
+                _ => None,
+            },
+            VmValue::String(_) => match name {
+                "count" => Some(PropertyCacheTarget::StringCount),
+                "empty" => Some(PropertyCacheTarget::StringEmpty),
+                _ => None,
+            },
+            VmValue::Pair(_) => match name {
+                "first" => Some(PropertyCacheTarget::PairFirst),
+                "second" => Some(PropertyCacheTarget::PairSecond),
+                _ => None,
+            },
+            VmValue::EnumVariant(_) => match name {
+                "variant" => Some(PropertyCacheTarget::EnumVariant),
+                "fields" => Some(PropertyCacheTarget::EnumFields),
+                _ => None,
+            },
+            VmValue::Harness(handle) if handle.kind() == crate::harness::HarnessKind::Root => {
+                crate::harness::HarnessKind::from_field_name(name)
+                    .map(PropertyCacheTarget::HarnessSubHandle)
+            }
+            VmValue::Harness(_) => None,
+            _ => None,
+        }
+    }
+
+    fn resolve_property(obj: &VmValue, name: &str, optional: bool) -> Result<VmValue, VmError> {
+        let result = match obj {
+            VmValue::Nil if optional => VmValue::Nil,
+            VmValue::Dict(map) => map.get(name).cloned().unwrap_or(VmValue::Nil),
+            VmValue::List(items) => match name {
+                "count" => VmValue::Int(items.len() as i64),
+                "empty" => VmValue::Bool(items.is_empty()),
+                "first" => items.first().cloned().unwrap_or(VmValue::Nil),
+                "last" => items.last().cloned().unwrap_or(VmValue::Nil),
+                _ => VmValue::Nil,
+            },
+            VmValue::String(s) => match name {
+                "count" => VmValue::Int(string_char_count(s) as i64),
+                "empty" => VmValue::Bool(s.is_empty()),
+                _ => VmValue::Nil,
+            },
+            VmValue::EnumVariant(enum_variant) => match name {
+                "variant" => VmValue::String(enum_variant.variant.clone()),
+                "fields" => VmValue::List(Arc::clone(&enum_variant.fields)),
+                _ => VmValue::Nil,
+            },
+            VmValue::StructInstance(si) => {
+                let crate::value::StructInstanceData { layout, fields } = &**si;
+                layout
+                    .field_index(name)
+                    .and_then(|index| fields.get(index))
+                    .and_then(Clone::clone)
+                    .unwrap_or(VmValue::Nil)
+            }
+            VmValue::Pair(p) => match name {
+                "first" => p.0.clone(),
+                "second" => p.1.clone(),
+                _ if optional => VmValue::Nil,
+                _ => {
+                    return Err(VmError::TypeError(format!(
+                        "cannot access property `{name}` on pair (expected `first` or `second`)"
+                    )));
+                }
+            },
+            VmValue::Harness(handle) => match handle.sub_handle(name) {
+                Some(sub) => VmValue::harness(sub),
+                None if optional => VmValue::Nil,
+                None => {
+                    let fields = harn_builtin_meta::CapabilityId::ALL
+                        .iter()
+                        .map(|capability| format!("`{}`", capability.field_name()))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    return Err(VmError::TypeError(format!(
+                        "cannot access property `{name}` on {} — Harness exposes {fields}",
+                        handle.type_name(),
+                    )));
+                }
+            },
+            VmValue::Nil => {
+                return Err(VmError::TypeError(format!(
+                    "cannot access property `{name}` on nil — use `?.{name}` for optional access, or narrow with a `!= nil` guard before reading fields"
+                )));
+            }
+            _ if optional => VmValue::Nil,
+            _ => {
+                return Err(VmError::TypeError(format!(
+                    "cannot access property `{name}` on {} — only dicts, structs, lists, strings, and pairs support property access",
+                    obj.type_name()
+                )));
+            }
+        };
+        Ok(result)
+    }
+
+    pub(super) fn execute_build_list(&mut self) {
+        let frame = self.frames.last_mut().unwrap();
+        let count = frame.chunk.read_u16(frame.ip) as usize;
+        frame.ip += 2;
+        let items = self.stack.split_off(self.stack.len().saturating_sub(count));
+        self.stack.push(VmValue::List(std::sync::Arc::new(items)));
+    }
+
+    pub(super) fn execute_build_dict(&mut self) {
+        let frame = self.frames.last_mut().unwrap();
+        let count = frame.chunk.read_u16(frame.ip) as usize;
+        frame.ip += 2;
+        let pairs = self
+            .stack
+            .split_off(self.stack.len().saturating_sub(count * 2));
+        let mut map = BTreeMap::new();
+        let mut pairs = pairs.into_iter();
+        while let Some(key) = pairs.next() {
+            if let Some(value) = pairs.next() {
+                map.insert(key.display(), value);
+            }
+        }
+        self.stack.push(VmValue::dict(map));
+    }
+
+    pub(super) fn execute_subscript(&mut self, optional: bool) -> Result<(), VmError> {
+        let idx = self.pop()?;
+        let obj = self.pop()?;
+        if optional && matches!(obj, VmValue::Nil) {
+            self.stack.push(VmValue::Nil);
+            return Ok(());
+        }
+        let result = match (&obj, &idx) {
+            (VmValue::List(items), VmValue::Int(i)) => {
+                if *i < 0 {
+                    let pos = items.len() as i64 + *i;
+                    if pos < 0 {
+                        VmValue::Nil
+                    } else {
+                        items.get(pos as usize).cloned().unwrap_or(VmValue::Nil)
+                    }
+                } else {
+                    items.get(*i as usize).cloned().unwrap_or(VmValue::Nil)
+                }
+            }
+            (VmValue::Dict(map), VmValue::String(key)) => {
+                map.get(key.as_str()).cloned().unwrap_or(VmValue::Nil)
+            }
+            (VmValue::Dict(map), _) => map
+                .get(idx.display().as_str())
+                .cloned()
+                .unwrap_or(VmValue::Nil),
+            (VmValue::Range(r), VmValue::Int(i)) => {
+                let len = r.len();
+                let pos = if *i < 0 { len + *i } else { *i };
+                match r.get(pos) {
+                    Some(v) => VmValue::Int(v),
+                    None => {
+                        return Err(VmError::Runtime(format!(
+                            "range index out of range: index {i} for range of length {len}",
+                        )));
+                    }
+                }
+            }
+            (VmValue::String(s), VmValue::Int(i)) => Self::string_index(s, *i),
+            _ => {
+                return Err(VmError::TypeError(format!(
+                    "cannot index into {} with {}",
+                    obj.type_name(),
+                    idx.type_name()
+                )));
+            }
+        };
+        self.stack.push(result);
+        Ok(())
+    }
+
+    pub(super) fn execute_slice(&mut self) -> Result<(), VmError> {
+        let end_val = self.pop()?;
+        let start_val = self.pop()?;
+        let obj = self.pop()?;
+
+        let result = match &obj {
+            VmValue::List(items) => {
+                let len = items.len() as i64;
+                let start = match &start_val {
+                    VmValue::Nil => 0i64,
+                    VmValue::Int(i) => {
+                        if *i < 0 {
+                            (len + *i).max(0)
+                        } else {
+                            (*i).min(len)
+                        }
+                    }
+                    _ => {
+                        return Err(VmError::TypeError(format!(
+                            "slice start must be an integer, got {}",
+                            start_val.type_name()
+                        )));
+                    }
+                };
+                let end = match &end_val {
+                    VmValue::Nil => len,
+                    VmValue::Int(i) => {
+                        if *i < 0 {
+                            (len + *i).max(0)
+                        } else {
+                            (*i).min(len)
+                        }
+                    }
+                    _ => {
+                        return Err(VmError::TypeError(format!(
+                            "slice end must be an integer, got {}",
+                            end_val.type_name()
+                        )));
+                    }
+                };
+                if start >= end {
+                    VmValue::List(std::sync::Arc::new(vec![]))
+                } else {
+                    let sliced: Vec<VmValue> = items[start as usize..end as usize].to_vec();
+                    VmValue::List(std::sync::Arc::new(sliced))
+                }
+            }
+            VmValue::String(s) => {
+                let char_count = string_char_count(s) as i64;
+                let start = match &start_val {
+                    VmValue::Nil => 0i64,
+                    VmValue::Int(i) => {
+                        if *i < 0 {
+                            (char_count + *i).max(0)
+                        } else {
+                            (*i).min(char_count)
+                        }
+                    }
+                    _ => {
+                        return Err(VmError::TypeError(format!(
+                            "slice start must be an integer, got {}",
+                            start_val.type_name()
+                        )));
+                    }
+                };
+                let end = match &end_val {
+                    VmValue::Nil => char_count,
+                    VmValue::Int(i) => {
+                        if *i < 0 {
+                            (char_count + *i).max(0)
+                        } else {
+                            (*i).min(char_count)
+                        }
+                    }
+                    _ => {
+                        return Err(VmError::TypeError(format!(
+                            "slice end must be an integer, got {}",
+                            end_val.type_name()
+                        )));
+                    }
+                };
+                if start >= end {
+                    VmValue::String(arcstr::ArcStr::from(""))
+                } else {
+                    let start_idx = start as usize;
+                    let end_idx = end as usize;
+                    let byte_start = s
+                        .char_indices()
+                        .nth(start_idx)
+                        .map(|(b, _)| b)
+                        .unwrap_or(s.len());
+                    let byte_end = s
+                        .char_indices()
+                        .nth(end_idx)
+                        .map(|(b, _)| b)
+                        .unwrap_or(s.len());
+                    VmValue::String(arcstr::ArcStr::from(&s[byte_start..byte_end]))
+                }
+            }
+            _ => {
+                return Err(VmError::TypeError(format!(
+                    "cannot slice {}",
+                    obj.type_name()
+                )))
+            }
+        };
+        self.stack.push(result);
+        Ok(())
+    }
+
+    pub(super) fn execute_get_property(&mut self, optional: bool) -> Result<(), VmError> {
+        let (chunk, cache_site, name_idx) = {
+            let frame = self.frames.last_mut().unwrap();
+            let chunk = Arc::clone(&frame.chunk);
+            let cache_site = frame.inline_cache_site_for_previous_op();
+            let name_idx = frame.chunk.read_u16(frame.ip);
+            frame.ip += 2;
+            (chunk, cache_site, name_idx)
+        };
+        let cached_property = cache_site
+            .slot
+            .and_then(|slot| self.peek_property_cache_by_index(cache_site.cache_set, slot));
+
+        let obj = self.pop()?;
+        if optional && matches!(obj, VmValue::Nil) {
+            self.stack.push(VmValue::Nil);
+        } else if let Some(result) =
+            Self::try_cached_property(cached_property.as_ref(), name_idx, &obj)
+        {
+            self.stack.push(result);
+        } else {
+            let (result, target) = {
+                let name = Self::const_str(&chunk.constants[name_idx as usize])?;
+                (
+                    Self::resolve_property(&obj, name, optional)?,
+                    Self::property_cache_target(&obj, name),
+                )
+            };
+
+            if let (Some(slot), Some(target)) = (cache_site.slot, target) {
+                self.set_inline_cache_entry_by_index(
+                    cache_site.cache_set,
+                    cache_site.slot_count,
+                    slot,
+                    InlineCacheEntry::Property { name_idx, target },
+                );
+            }
+            self.stack.push(result);
+        }
+        Ok(())
+    }
+
+    pub(super) fn execute_set_property(&mut self) -> Result<(), VmError> {
+        let (chunk, prop_idx, var_idx) = {
+            let frame = self.frames.last_mut().unwrap();
+            let prop_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let var_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            (Arc::clone(&frame.chunk), prop_idx, var_idx)
+        };
+        let prop_name = Self::const_str(&chunk.constants[prop_idx])?;
+        let var_name = Self::const_str(&chunk.constants[var_idx])?;
+        let new_value = self.pop()?;
+        let target = self
+            .env
+            .get(var_name)
+            .map(|value| (value, true))
+            .or_else(|| {
+                self.active_local_slot_value(var_name)
+                    .map(|value| (value, false))
+            });
+        if let Some((obj, environment_backed)) = target {
+            let assign_value = |vm: &mut Self, value: VmValue| -> Result<(), VmError> {
+                if environment_backed {
+                    vm.env.assign(var_name, value)?;
+                } else {
+                    vm.assign_active_local_slot(var_name, value, false)?;
+                }
+                Ok(())
+            };
+            match obj {
+                VmValue::Dict(map) => {
+                    let mut new_map = (*map).clone();
+                    new_map.insert(crate::value::intern_key(prop_name), new_value);
+                    assign_value(self, VmValue::dict(new_map))?;
+                }
+                VmValue::StructInstance(_) => {
+                    let new_obj = obj
+                        .struct_instance_with_property(prop_name, new_value)
+                        .expect("struct instance matched above");
+                    assign_value(self, new_obj)?;
+                }
+                _ => {
+                    return Err(VmError::TypeError(format!(
+                        "cannot set property `{prop_name}` on {}",
+                        obj.type_name()
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn execute_set_subscript(&mut self) -> Result<(), VmError> {
+        let (chunk, var_idx) = {
+            let frame = self.frames.last_mut().unwrap();
+            let var_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            (Arc::clone(&frame.chunk), var_idx)
+        };
+        let var_name = Self::const_str(&chunk.constants[var_idx])?;
+        let index = self.pop()?;
+        let new_value = self.pop()?;
+
+        // A captured cell is an explicit lexical address and wins over any
+        // unrelated same-named slot still active in the frame.
+        if let Some(obj) = self.env.get(var_name) {
+            match obj {
+                VmValue::List(items) => {
+                    let Some(i) = index.as_int() else {
+                        return Err(Self::list_index_type_error(&index));
+                    };
+                    let mut new_items =
+                        Arc::try_unwrap(items).unwrap_or_else(|items| (*items).clone());
+                    let idx = resolve_list_assign_index(i, new_items.len())?;
+                    new_items[idx] = new_value;
+                    self.env
+                        .assign(var_name, VmValue::List(std::sync::Arc::new(new_items)))?;
+                }
+                VmValue::Dict(map) => {
+                    let key = crate::value::intern_key(&index.display());
+                    let mut new_map = Arc::try_unwrap(map).unwrap_or_else(|map| (*map).clone());
+                    new_map.insert(key, new_value);
+                    self.env.assign(var_name, VmValue::dict(new_map))?;
+                }
+                other => return Err(Self::subscript_assign_type_error(&other)),
+            }
+            return Ok(());
+        }
+
+        // Fast path: when the binding is an active local slot, mutate the
+        // contained dict/list in place via `Arc::make_mut`. This skips the
+        // defensive `VmValue::clone` + collection clone the env-fallback
+        // path has to pay, which is the per-iteration cost behind builder
+        // loops like `out[k] = v` and `aliases[id] = …`.
+        if let Some(slot_idx) = self.active_local_slot_index(var_name) {
+            let frame = self.frames.last_mut().unwrap();
+            if !frame.chunk.local_slots[slot_idx].mutable {
+                return Err(VmError::ImmutableAssignment(var_name.to_string()));
+            }
+            let slot = &mut frame.local_slots[slot_idx];
+            match &mut slot.value {
+                VmValue::List(items) => {
+                    let Some(i) = index.as_int() else {
+                        return Err(Self::list_index_type_error(&index));
+                    };
+                    let idx = resolve_list_assign_index(i, items.len())?;
+                    let cell = &mut Arc::make_mut(items)[idx];
+                    crate::value::recursion::dismantle(std::mem::replace(cell, new_value));
+                    slot.synced = false;
+                    return Ok(());
+                }
+                VmValue::Dict(map) => {
+                    let key = crate::value::intern_key(&index.display());
+                    if let Some(previous) = Arc::make_mut(map).insert(key, new_value) {
+                        crate::value::recursion::dismantle(previous);
+                    }
+                    slot.synced = false;
+                    return Ok(());
+                }
+                other => return Err(Self::subscript_assign_type_error(other)),
+            }
+        }
+
+        Ok(())
+    }
+
+    pub(super) fn execute_set_local_slot_property(&mut self) -> Result<(), VmError> {
+        let (chunk, prop_idx, slot_idx) = {
+            let frame = self.frames.last_mut().unwrap();
+            let prop_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let slot_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            (Arc::clone(&frame.chunk), prop_idx, slot_idx)
+        };
+        let prop_name = Self::const_str(&chunk.constants[prop_idx])?;
+        let new_value = self.pop()?;
+
+        let frame = self.frames.last_mut().unwrap();
+        let Some(info) = frame.chunk.local_slots.get(slot_idx) else {
+            return Err(VmError::Runtime(format!(
+                "Invalid local slot index: {slot_idx}"
+            )));
+        };
+        if !info.mutable {
+            return Err(VmError::ImmutableAssignment(info.name.clone()));
+        }
+        let Some(slot) = frame.local_slots.get_mut(slot_idx) else {
+            return Err(VmError::Runtime(format!(
+                "Invalid local slot index: {slot_idx}"
+            )));
+        };
+        if !slot.initialized {
+            return Err(VmError::UndefinedVariable(info.name.clone()));
+        }
+
+        if let VmValue::Dict(map) = &mut slot.value {
+            if let Some(previous) =
+                Arc::make_mut(map).insert(crate::value::intern_key(prop_name), new_value)
+            {
+                crate::value::recursion::dismantle(previous);
+            }
+            slot.synced = false;
+            return Ok(());
+        }
+
+        if matches!(slot.value, VmValue::StructInstance(_)) {
+            let next = slot
+                .value
+                .struct_instance_with_property(prop_name, new_value)
+                .expect("struct instance matched above");
+            slot.value = next;
+            slot.synced = false;
+            return Ok(());
+        }
+
+        Err(VmError::TypeError(format!(
+            "cannot set property `{prop_name}` on {}",
+            slot.value.type_name()
+        )))
+    }
+
+    pub(super) fn execute_set_local_slot_subscript(&mut self) -> Result<(), VmError> {
+        let slot_idx = {
+            let frame = self.frames.last_mut().unwrap();
+            let slot_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            slot_idx
+        };
+        let index = self.pop()?;
+        let new_value = self.pop()?;
+
+        let frame = self.frames.last_mut().unwrap();
+        let Some(info) = frame.chunk.local_slots.get(slot_idx) else {
+            return Err(VmError::Runtime(format!(
+                "Invalid local slot index: {slot_idx}"
+            )));
+        };
+        if !info.mutable {
+            return Err(VmError::ImmutableAssignment(info.name.clone()));
+        }
+        let Some(slot) = frame.local_slots.get_mut(slot_idx) else {
+            return Err(VmError::Runtime(format!(
+                "Invalid local slot index: {slot_idx}"
+            )));
+        };
+        if !slot.initialized {
+            return Err(VmError::UndefinedVariable(info.name.clone()));
+        }
+
+        match &mut slot.value {
+            VmValue::List(items) => {
+                let Some(i) = index.as_int() else {
+                    return Err(Self::list_index_type_error(&index));
+                };
+                let idx = resolve_list_assign_index(i, items.len())?;
+                let cell = &mut Arc::make_mut(items)[idx];
+                crate::value::recursion::dismantle(std::mem::replace(cell, new_value));
+                slot.synced = false;
+                Ok(())
+            }
+            VmValue::Dict(map) => {
+                let key = crate::value::intern_key(&index.display());
+                if let Some(previous) = Arc::make_mut(map).insert(key, new_value) {
+                    crate::value::recursion::dismantle(previous);
+                }
+                slot.synced = false;
+                Ok(())
+            }
+            other => Err(Self::subscript_assign_type_error(other)),
+        }
+    }
+
+    /// Index-assignment on a list requires an int index — mirrors the read
+    /// path's "cannot index into list with …" wording.
+    fn list_index_type_error(index: &VmValue) -> VmError {
+        VmError::TypeError(format!("cannot index into list with {}", index.type_name()))
+    }
+
+    /// Index-assignment is only supported on lists and dicts. Strings and
+    /// other scalar values raise the same class of error as unsupported
+    /// property assignment.
+    fn subscript_assign_type_error(target: &VmValue) -> VmError {
+        VmError::TypeError(format!(
+            "cannot assign by index into {}; only lists and dicts support \
+             index assignment",
+            target.type_name()
+        ))
+    }
+
+    pub(super) fn execute_concat(&mut self) {
+        let frame = self.frames.last_mut().unwrap();
+        let count = frame.chunk.read_u16(frame.ip) as usize;
+        frame.ip += 2;
+        let start = self.stack.len().saturating_sub(count);
+        let result = Self::concat_display_values(&self.stack[start..]);
+        self.stack.truncate(start);
+        self.stack
+            .push(VmValue::String(arcstr::ArcStr::from(result)));
+    }
+
+    pub(super) fn execute_build_enum(&mut self) -> Result<(), VmError> {
+        let (chunk, enum_idx, variant_idx, field_count) = {
+            let frame = self.frames.last_mut().unwrap();
+            let enum_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let variant_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let field_count = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            (Arc::clone(&frame.chunk), enum_idx, variant_idx, field_count)
+        };
+        let enum_name = chunk
+            .constant_string_rc(enum_idx)
+            .ok_or_else(|| VmError::TypeError("expected string constant".into()))?;
+        let variant = chunk
+            .constant_string_rc(variant_idx)
+            .ok_or_else(|| VmError::TypeError("expected string constant".into()))?;
+        let fields = self
+            .stack
+            .split_off(self.stack.len().saturating_sub(field_count));
+        self.stack
+            .push(VmValue::enum_variant(enum_name, variant, fields));
+        Ok(())
+    }
+
+    pub(super) fn execute_match_enum(&mut self) -> Result<(), VmError> {
+        let (chunk, enum_idx, variant_idx) = {
+            let frame = self.frames.last_mut().unwrap();
+            let enum_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            let variant_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            (Arc::clone(&frame.chunk), enum_idx, variant_idx)
+        };
+        let enum_name = Self::const_str(&chunk.constants[enum_idx])?;
+        let variant_name = Self::const_str(&chunk.constants[variant_idx])?;
+        let val = self.pop()?;
+        let matches = match &val {
+            VmValue::EnumVariant(enum_variant) => enum_variant.is_variant(enum_name, variant_name),
+            _ => false,
+        };
+        self.stack.push(val);
+        self.stack.push(VmValue::Bool(matches));
+        Ok(())
+    }
+}

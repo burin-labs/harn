@@ -1,0 +1,54 @@
+let active_bindings = []
+
+pub fn provider_id() {
+  return "github"
+}
+
+pub fn kinds() {
+  return ["webhook"]
+}
+
+pub fn payload_schema() {
+  return {
+    harn_schema_name: "GitHubEventPayload",
+    json_schema: {type: "object", additionalProperties: true},
+  }
+}
+
+pub fn init(_harness: Harness, ctx) {
+  if ctx.provider_id != "github" {
+    throw "unexpected provider id"
+  }
+}
+
+pub fn activate(harness: Harness, bindings) {
+  active_bindings = bindings
+  harness.obs.metrics_inc("github_contract_activations", len(bindings))
+}
+
+pub fn shutdown(harness: Harness) {
+  harness.obs.metrics_inc("github_contract_shutdown")
+}
+
+pub fn normalize_inbound(harness: Harness, raw) {
+  const body = raw.body_json ?? json_parse(raw.body_text)
+  const token = harness.secrets.read("github/contract-token")
+  harness.obs.event_log_emit(
+    "connectors.github.contract",
+    "normalize",
+    {event: raw.headers["X-GitHub-Event"] ?? raw.headers["x-github-event"], token: token},
+  )
+  return {
+    type: "event",
+    event: {
+      kind: raw.headers["X-GitHub-Event"] ?? raw.headers["x-github-event"],
+      dedupe_key: raw.headers["X-GitHub-Delivery"] ?? raw.headers["x-github-delivery"],
+      payload: body,
+      signature_status: {state: "verified"},
+    },
+  }
+}
+
+pub fn call(_harness: Harness, method, _args) {
+  throw "method_not_found:" + method
+}

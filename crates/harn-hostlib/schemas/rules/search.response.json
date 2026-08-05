@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/rules/search.response.json",
+  "title": "rules.search response",
+  "type": "object",
+  "properties": {
+    "result": { "type": "string", "enum": ["ok"] },
+    "match_count": { "type": "integer", "minimum": 0 },
+    "matches": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Match" }
+    }
+  },
+  "required": ["result", "match_count", "matches"],
+  "additionalProperties": false,
+  "$defs": {
+    "Match": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string" },
+        "text": { "type": "string" },
+        "start_row": { "type": "integer", "minimum": 0 },
+        "start_col": { "type": "integer", "minimum": 0 },
+        "end_row": { "type": "integer", "minimum": 0 },
+        "end_col": { "type": "integer", "minimum": 0 },
+        "captures": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "capture_metadata": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "path",
+        "text",
+        "start_row",
+        "start_col",
+        "end_row",
+        "end_col",
+        "captures",
+        "capture_metadata"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

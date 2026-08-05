@@ -1,0 +1,6 @@
+import "pub_import_selective_facade"
+
+pipeline default(harness: Harness) {
+  harness.stdio.println(alpha())
+  harness.stdio.println(beta())
+}

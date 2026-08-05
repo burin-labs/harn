@@ -1,0 +1,5 @@
+message=working
+entries=0
+replace=true
+metadata.source=message-test
+validation_error=true

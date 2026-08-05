@@ -1,0 +1,1343 @@
+import { pick_keys } from "std/collections"
+import { command_run } from "std/command"
+import "std/hitl"
+
+fn __stage_list(value) {
+  if type_of(value) == "list" {
+    return value
+  }
+  return []
+}
+
+fn __stage_string(value, fallback = "") {
+  if type_of(value) == "string" {
+    return value
+  }
+  return fallback
+}
+
+fn __stage_bool(value, fallback = false) {
+  if type_of(value) == "bool" {
+    return value
+  }
+  return fallback
+}
+
+fn __stage_i64(value) {
+  if type_of(value) == "int" {
+    return value
+  }
+  return nil
+}
+
+fn __stage_has_key(value, key) {
+  return type_of(value) == "dict" && contains(value.keys(), key)
+}
+
+fn __stage_string_list(values) {
+  let out = []
+  for value in __stage_list(values) {
+    out = out.appending(to_string(value))
+  }
+  return out
+}
+
+fn __stage_visible_text(result) {
+  return __stage_string(result?.visible_text ?? result?.text, "")
+}
+
+fn __stage_exit_status(result) {
+  const value = result?.exit_status ?? result?.status_code ?? result?.status
+  return __stage_i64(value)
+}
+
+fn __stage_artifact_ids(artifacts) {
+  let ids = []
+  for artifact in artifacts {
+    if type_of(artifact?.id) == "string" {
+      ids = ids.appending(artifact.id)
+    }
+  }
+  return ids
+}
+
+fn __stage_first_string(values, fallback) {
+  if type_of(values) != "list" || len(values) == 0 || type_of(values[0]) != "string" {
+    return fallback
+  }
+  return values[0]
+}
+
+fn __stage_artifact_from_value(node_id, kind, index, value, lineage, title) {
+  return {
+    _type: "artifact",
+    kind: kind,
+    title: title,
+    text: if type_of(value) == "string" {
+      value
+    } else {
+      nil
+    },
+    data: value,
+    source: node_id,
+    freshness: "fresh",
+    relevance: 1.0,
+    lineage: lineage,
+    stage: node_id,
+    metadata: {index: index},
+  }
+}
+
+fn __stage_artifact_from_text_and_data(node_id, kind, index, text, data, lineage, title) {
+  return {
+    _type: "artifact",
+    kind: kind,
+    title: title,
+    text: text,
+    data: data,
+    source: node_id,
+    freshness: "fresh",
+    relevance: 1.0,
+    lineage: lineage,
+    stage: node_id,
+    metadata: {index: index},
+  }
+}
+
+fn __stage_texts(artifacts) {
+  let texts = []
+  for artifact in artifacts {
+    if type_of(artifact?.text) == "string" {
+      texts = texts.appending(artifact.text)
+    }
+  }
+  return texts
+}
+
+fn __stage_error_message(error) {
+  if error == nil {
+    return ""
+  }
+  if type_of(error) == "dict" {
+    return error?.message ?? json_stringify(error)
+  }
+  return to_string(error)
+}
+
+fn __stage_error_category(error) {
+  if type_of(error) == "dict" && type_of(error?.category) == "string" {
+    return error.category
+  }
+  return ""
+}
+
+fn __stage_artifacts_contain_text(artifacts, needle) {
+  for artifact in artifacts {
+    if type_of(artifact?.text) == "string" && contains(artifact.text, needle) {
+      return true
+    }
+  }
+  return false
+}
+
+fn __stage_artifacts_contain_kind(artifacts, kind) {
+  for artifact in artifacts {
+    if artifact?.kind == kind {
+      return true
+    }
+  }
+  return false
+}
+
+fn __stage_logical_command_runner(command_tool) {
+  return command_tool == "run" || command_tool == "command_run" || command_tool == "process.exec"
+}
+
+fn __stage_command_argv(command_tool, args) {
+  if type_of(args) == "list" {
+    const argv = __stage_string_list(args)
+    if __stage_logical_command_runner(command_tool) {
+      return argv
+    }
+    return [command_tool] + argv
+  }
+  if args == nil {
+    if __stage_logical_command_runner(command_tool) {
+      return []
+    }
+    return [command_tool]
+  }
+  if type_of(args) == "string" {
+    if __stage_logical_command_runner(command_tool) {
+      return [args]
+    }
+    return [command_tool, args]
+  }
+  if __stage_logical_command_runner(command_tool) {
+    return [json_stringify(args)]
+  }
+  return [command_tool, json_stringify(args)]
+}
+
+fn __stage_command_spec(node) {
+  const metadata = node?.metadata ?? {}
+  const explicit = metadata?.command_spec
+  if type_of(explicit) == "dict" || type_of(explicit) == "list" {
+    return explicit
+  }
+  const command_tool = __stage_string(metadata?.command_tool, "")
+  const args = metadata?.command_args
+  if type_of(args) == "dict" {
+    if __stage_has_key(args, "mode") || __stage_has_key(args, "command") {
+      return args
+    }
+    if type_of(args?.argv) == "list" {
+      const argv = if command_tool == "" || __stage_logical_command_runner(command_tool) {
+        __stage_string_list(args.argv)
+      } else {
+        [command_tool] + __stage_string_list(args.argv)
+      }
+      return args + {mode: args?.mode ?? "argv", argv: argv}
+    }
+    if type_of(args?.args) == "list" && command_tool != "" {
+      return args + {mode: "argv", argv: __stage_command_argv(command_tool, args.args)}
+    }
+    if type_of(args?.spec) == "dict" || type_of(args?.spec) == "list" {
+      return args.spec
+    }
+  }
+  if command_tool == "" {
+    return nil
+  }
+  const argv = __stage_command_argv(command_tool, args)
+  if len(argv) == 0 {
+    return nil
+  }
+  return {mode: "argv", argv: argv}
+}
+
+fn __stage_command_options(node) {
+  const metadata = node?.metadata ?? {}
+  const args = metadata?.command_args
+  let options: dict = {capture: {max_inline_bytes: 65536}}
+  if type_of(args) == "dict" {
+    options = options
+      + pick_keys(
+      args,
+      [
+        "cwd",
+        "env",
+        "env_mode",
+        "stdin",
+        "timeout_ms",
+        "background",
+        "background_after_ms",
+        "capture",
+        "max_inline_bytes",
+        "policy_context",
+      ],
+      {drop_nil: true},
+    )
+  }
+  return options
+}
+
+fn __stage_prepare_fork() {
+  return {
+    handled: true,
+    result: {status: "completed", text: "forked"},
+    artifacts: [],
+    outcome: "forked",
+    branch: "fork",
+  }
+}
+
+fn __stage_prepare_join() {
+  return {
+    handled: true,
+    result: {status: "completed", text: "joined"},
+    artifacts: [],
+    outcome: "joined",
+    branch: "join",
+  }
+}
+
+fn __stage_prepare_condition(node, artifacts) {
+  const condition = workflow_evaluate_condition(
+    {metadata: node?.metadata ?? {}, artifacts: artifacts},
+  )
+  return {
+    handled: true,
+    result: {
+      status: "completed",
+      text: if condition.matched {
+        "true"
+      } else {
+        "false"
+      },
+    },
+    artifacts: [],
+    outcome: if condition.matched {
+      "condition_true"
+    } else {
+      "condition_false"
+    },
+    branch: if condition.matched {
+      "true"
+    } else {
+      "false"
+    },
+  }
+}
+
+fn __stage_prepare_reduce(node_id, node, artifacts) {
+  const separator = node?.reduce_policy?.separator ?? "\n\n"
+  const reduced_text = __stage_texts(artifacts).join(separator)
+  const output_kind = __stage_first_string(node?.output_contract?.output_kinds, "summary")
+  return {
+    handled: true,
+    result: {status: "completed", text: reduced_text},
+    artifacts: [
+      __stage_artifact_from_value(
+        node_id,
+        output_kind,
+        0,
+        reduced_text,
+        __stage_artifact_ids(artifacts),
+        "reduce " + node_id + " output",
+      ),
+    ],
+    outcome: "reduced",
+    branch: "reduced",
+  }
+}
+
+fn __stage_prepare_escalation(node_id, node, consumed_artifact_ids) {
+  const reason = node?.escalation_policy?.reason ?? "manual review required"
+  const output_kind = __stage_first_string(node?.output_contract?.output_kinds, "plan")
+  return {
+    handled: true,
+    result: {status: "completed", text: reason},
+    artifacts: [
+      __stage_artifact_from_value(
+        node_id,
+        output_kind,
+        0,
+        {
+          queue: node?.escalation_policy?.queue,
+          level: node?.escalation_policy?.level,
+          reason: reason,
+        },
+        consumed_artifact_ids,
+        "escalation " + node_id,
+      ),
+    ],
+    outcome: "escalated",
+    branch: "escalated",
+  }
+}
+
+fn __stage_prepare_manual_gate(interaction: HarnessInteraction, node_id, node, artifacts) {
+  const metadata = node?.metadata ?? {}
+  const approval_id = __stage_string(metadata?.approval_id, node_id)
+  const prompt = __stage_string(
+    metadata?.approval_prompt,
+    __stage_string(node?.prompt, "Approve task-plan gate `" + approval_id + "`"),
+  )
+  const skippable = __stage_bool(metadata?.approval_skippable, false)
+  const consumed_artifact_ids = __stage_artifact_ids(artifacts)
+  let options: dict = {
+    detail: {
+      node_id: node_id,
+      approval_id: approval_id,
+      prompt: prompt,
+      artifact_ids: consumed_artifact_ids,
+      task_plan_kind: metadata?.task_plan_kind,
+      task_plan_purpose: metadata?.task_plan_purpose,
+    },
+  }
+  options = options + pick_keys(metadata, ["reviewers", "quorum", "deadline"], {drop_nil: true})
+  const requested = try {
+    interaction.request_approval(prompt, options)
+  }
+  if is_err(requested) {
+    const error = unwrap_err(requested)
+    const category = __stage_error_category(error)
+    const skipped = skippable && category == "timeout"
+    const branch = if skipped {
+      "skipped"
+    } else if category == "approval_denied"
+      || contains(
+      __stage_error_message(error),
+      "denied",
+    ) {
+      "denied"
+    } else {
+      "failed"
+    }
+    const status = if branch == "failed" {
+      "failed"
+    } else {
+      "completed"
+    }
+    const data = {approval_id: approval_id, approved: false, skipped: skipped, error: error}
+    const output_kind = __stage_first_string(node?.output_contract?.output_kinds, "approval")
+    return {
+      handled: true,
+      result: {status: status, text: branch, visible_text: branch, approval: data},
+      artifacts: [
+        __stage_artifact_from_text_and_data(
+          node_id,
+          output_kind,
+          0,
+          branch,
+          data,
+          consumed_artifact_ids,
+          "approval " + approval_id,
+        ),
+      ],
+      outcome: branch,
+      branch: branch,
+    }
+  }
+  const approval = unwrap(requested)
+  const approved = __stage_bool(approval?.approved, false)
+  const branch = if approved {
+    "approved"
+  } else if skippable {
+    "skipped"
+  } else {
+    "denied"
+  }
+  const text = if approved {
+    "approved"
+  } else if skippable {
+    "skipped"
+  } else {
+    "denied"
+  }
+  const data = {
+    approval_id: approval_id,
+    approved: approved,
+    skipped: !approved && skippable,
+    approval: approval,
+  }
+  const output_kind = __stage_first_string(node?.output_contract?.output_kinds, "approval")
+  return {
+    handled: true,
+    result: {status: "completed", text: text, visible_text: text, approval: data},
+    artifacts: [
+      __stage_artifact_from_text_and_data(
+        node_id,
+        output_kind,
+        0,
+        text,
+        data,
+        consumed_artifact_ids,
+        "approval " + approval_id,
+      ),
+    ],
+    outcome: branch,
+    branch: branch,
+  }
+}
+
+fn __stage_prepare_command(tools: HarnessTools, node_id, node, consumed_artifact_ids) {
+  const spec = __stage_command_spec(node)
+  const output_kind = __stage_first_string(node?.output_contract?.output_kinds, "command_result")
+  if spec == nil {
+    const data = {ok: false, status: "failed", error: "missing deterministic command argv"}
+    return {
+      handled: true,
+      result: {status: "failed", text: data.error, visible_text: data.error, error: data.error},
+      artifacts: [
+        __stage_artifact_from_text_and_data(
+          node_id,
+          output_kind,
+          0,
+          data.error,
+          data,
+          consumed_artifact_ids,
+          "command " + node_id + " result",
+        ),
+      ],
+      outcome: "command_failed",
+      branch: "failed",
+    }
+  }
+  const command_result = command_run(tools, spec, __stage_command_options(node))
+  const ok = __stage_bool(command_result?.ok ?? command_result?.success, false)
+  const text = __stage_string(command_result?.combined, __stage_string(command_result?.stdout, ""))
+  const status = if ok {
+    "completed"
+  } else {
+    "failed"
+  }
+  const result = command_result
+    + {
+    status: status,
+    text: text,
+    visible_text: text,
+    exit_status: command_result?.exit_code,
+  }
+  return {
+    handled: true,
+    result: result,
+    artifacts: [
+      __stage_artifact_from_text_and_data(
+        node_id,
+        output_kind,
+        0,
+        text,
+        command_result,
+        consumed_artifact_ids,
+        "command " + node_id + " result",
+      ),
+    ],
+    outcome: if ok {
+      "command_completed"
+    } else {
+      "command_failed"
+    },
+    branch: if ok {
+      "success"
+    } else {
+      "failed"
+    },
+  }
+}
+
+fn __stage_compaction_messages(artifacts) {
+  let messages = []
+  for artifact in artifacts {
+    const text = __stage_string(artifact?.text, "")
+    if text != "" {
+      messages = messages.appending({role: "assistant", content: text})
+    }
+  }
+  if len(messages) == 0 {
+    return [{role: "assistant", content: "No artifact text was available to compact."}]
+  }
+  return messages
+}
+
+fn __stage_compaction_options(node) {
+  const metadata = node?.metadata ?? {}
+  const policy = node?.auto_compact ?? {}
+  let options = {strategy: "truncate"}
+  const keep_last = __stage_i64(metadata?.compact_preserve_recent ?? policy?.keep_last)
+  if keep_last != nil {
+    options = options + {keep_last: keep_last}
+  }
+  const threshold = __stage_i64(policy?.token_threshold ?? policy?.target_tokens)
+  if threshold != nil {
+    options = options + {target_tokens: threshold}
+  }
+  return options
+}
+
+fn __stage_prepare_compact(agent: HarnessAgent, node_id, node, artifacts, consumed_artifact_ids) {
+  const options = __stage_compaction_options(node)
+  const transcript = transcript_from_messages(__stage_compaction_messages(artifacts))
+  const compacted = agent.compact_transcript(transcript, options)
+  const fallback = __stage_texts(artifacts).join("\n\n")
+  const summary = __stage_string(transcript_summary(compacted), fallback)
+  const text = if summary == "" {
+    "compacted"
+  } else {
+    summary
+  }
+  const output_kind = __stage_first_string(node?.output_contract?.output_kinds, "summary")
+  const data = {summary: text, transcript: compacted, compact_options: options}
+  return {
+    handled: true,
+    result: {status: "completed", text: text, visible_text: text, compacted: true},
+    artifacts: [
+      __stage_artifact_from_text_and_data(
+        node_id,
+        output_kind,
+        0,
+        text,
+        data,
+        consumed_artifact_ids,
+        "compact " + node_id + " output",
+      ),
+    ],
+    outcome: "compacted",
+    branch: "compacted",
+  }
+}
+
+/**
+ * Normalize a fn-verify verdict into the verification shape the retry loop
+ * threads. A callable verifier receives the attempt result and returns either
+ * a bool, or a dict `{ok: bool, findings?: string | list<string>, ...}`. The
+ * returned `findings` (explicit list/string, or derived from a `checks` list —
+ * so a verdict re-emitted from `workflow_evaluate_verification` keeps its
+ * findings) reach the next attempt's repair prompt via `__stage_retry_context`.
+ */
+fn __stage_evaluate_fn_verify(verify, result) {
+  // A user verifier can throw (e.g. `result.output` on a nil field). Contain it
+  // as a failed verification carrying the throw message so the attempt loop
+  // stays intact and can retry with feedback — a bad verifier must not abort
+  // the whole run.
+  const attempted = try {
+    verify(result)
+  }
+  if is_err(attempted) {
+    return {
+      kind: "fn",
+      ok: false,
+      findings: ["verifier threw: " + __stage_error_message(unwrap_err(attempted))],
+    }
+  }
+  const verdict = unwrap(attempted)
+  if type_of(verdict) == "bool" {
+    return {kind: "fn", ok: verdict, findings: []}
+  }
+  if type_of(verdict) != "dict" {
+    return {kind: "fn", ok: verdict != nil, findings: []}
+  }
+  const findings = if type_of(verdict?.findings) == "string" && trim(verdict.findings) != "" {
+    [verdict.findings]
+  } else {
+    __stage_verification_findings(verdict)
+  }
+  return {
+    kind: __stage_string(verdict?.kind, "fn"),
+    ok: __stage_bool(verdict?.ok, false),
+    findings: findings,
+  }
+}
+
+/**
+ * workflow_evaluate_verification.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn workflow_evaluate_verification(config = nil) {
+  const verify = config?.verify
+  const result = config?.result ?? {}
+  // fn-verify mode: a callable verifier composes verification with arbitrary
+  // Harn logic. It receives the attempt result and returns a verdict; a
+  // failing verdict's findings thread into the next attempt's repair prompt.
+  if __stage_is_callable(verify) {
+    return __stage_evaluate_fn_verify(verify, result)
+  }
+  if type_of(verify) != "dict" {
+    return {kind: "none", ok: true}
+  }
+  const visible_text = __stage_visible_text(result)
+  const exit_status = __stage_exit_status(result)
+  let checks = []
+  if type_of(verify?.assert_text) == "string" {
+    checks = checks.appending(
+      {
+        kind: "assert_text",
+        ok: contains(visible_text, verify.assert_text),
+        expected: verify.assert_text,
+      },
+    )
+  }
+  if type_of(verify?.expect_status) == "int" {
+    checks = checks.appending(
+      {
+        kind: "expect_status",
+        ok: exit_status == verify.expect_status,
+        expected: verify.expect_status,
+        actual: exit_status,
+      },
+    )
+  }
+  if len(checks) == 0 {
+    return {kind: "none", ok: true}
+  }
+  let ok = true
+  for check in checks {
+    if !__stage_bool(check?.ok, false) {
+      ok = false
+    }
+  }
+  return {kind: "composite", ok: ok, checks: checks}
+}
+
+/**
+ * workflow_evaluate_condition.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn workflow_evaluate_condition(config = nil) {
+  const artifacts = __stage_list(config?.artifacts)
+  const metadata = config?.metadata ?? {}
+  const consumed = __stage_artifact_ids(artifacts)
+  if type_of(metadata?.contains_text) == "string" {
+    return {
+      matched: __stage_artifacts_contain_text(artifacts, metadata.contains_text),
+      consumed_artifact_ids: consumed,
+    }
+  }
+  if type_of(metadata?.artifact_kind) == "string" {
+    return {
+      matched: __stage_artifacts_contain_kind(artifacts, metadata.artifact_kind),
+      consumed_artifact_ids: consumed,
+    }
+  }
+  return {matched: len(artifacts) > 0, consumed_artifact_ids: consumed}
+}
+
+/**
+ * workflow_classify_stage_outcome.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn workflow_classify_stage_outcome(config = nil) {
+  const node_kind = __stage_string(config?.node_kind, "")
+  const {result = {}, verification = {}} = config ?? {}
+  const verified_ok = __stage_bool(verification?.ok, true)
+  const result_status = __stage_string(result?.status, "completed")
+  const stage_succeeded = if node_kind == "verify" {
+    verified_ok
+  } else {
+    result_status == "done" || result_status == "completed"
+  }
+  const outcome = if node_kind == "verify" {
+    if verified_ok {
+      "verified"
+    } else {
+      "verification_failed"
+    }
+  } else if !stage_succeeded {
+    result_status
+  } else if node_kind == "subagent" {
+    "subagent_completed"
+  } else {
+    "success"
+  }
+  const branch = if node_kind == "verify" {
+    if verified_ok {
+      "passed"
+    } else {
+      "failed"
+    }
+  } else if stage_succeeded {
+    "success"
+  } else {
+    "failed"
+  }
+  return {outcome: outcome, branch: branch}
+}
+
+/**
+ * workflow_stage_attempt_outcome.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn workflow_stage_attempt_outcome(config = nil) {
+  const {node = {}, result = {}} = config ?? {}
+  const verification = if config?.verification != nil {
+    config.verification
+  } else {
+    workflow_evaluate_verification({verify: node?.verify, result: result})
+  }
+  const classified = workflow_classify_stage_outcome(
+    {node_kind: __stage_string(node?.kind, ""), result: result, verification: verification},
+  )
+  return {outcome: classified.outcome, branch: classified.branch, verification: verification}
+}
+
+/**
+ * workflow_prepare_static_stage.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn workflow_prepare_static_stage(
+  agent: HarnessAgent,
+  interaction: HarnessInteraction,
+  tools: HarnessTools,
+  config = nil,
+) {
+  const node_id = __stage_string(config?.node_id, "stage")
+  const node = config?.node ?? {}
+  const kind = __stage_string(node?.kind, "")
+  const mode = __stage_string(node?.mode, "")
+  const artifacts = __stage_list(config?.artifacts)
+  const consumed_artifact_ids = __stage_artifact_ids(artifacts)
+  if kind == "fork" {
+    return __stage_prepare_fork()
+  }
+  if kind == "join" {
+    return __stage_prepare_join()
+  }
+  if kind == "condition" {
+    return __stage_prepare_condition(node, artifacts)
+  }
+  if kind == "reduce" {
+    return __stage_prepare_reduce(node_id, node, artifacts)
+  }
+  if kind == "escalation" {
+    return __stage_prepare_escalation(node_id, node, consumed_artifact_ids)
+  }
+  if kind == "stage" && mode == "manual" && __stage_bool(node?.metadata?.human_gate, false) {
+    return __stage_prepare_manual_gate(interaction, node_id, node, artifacts)
+  }
+  if kind == "stage" && mode == "command" {
+    return __stage_prepare_command(tools, node_id, node, consumed_artifact_ids)
+  }
+  if kind == "stage" && mode == "compact" {
+    return __stage_prepare_compact(agent, node_id, node, artifacts, consumed_artifact_ids)
+  }
+  return {handled: false}
+}
+
+/** True when a value is an invokable closure / function. */
+fn __stage_is_callable(value) -> bool {
+  const kind = type_of(value)
+  return kind == "function" || kind == "closure" || kind == "fn"
+}
+
+fn __stage_max_attempts(policy, node) {
+  const from_policy = __stage_i64(policy?.max_attempts)
+  const from_node = __stage_i64(node?.retry_policy?.max_attempts)
+  const value = from_policy ?? from_node ?? 1
+  if value < 1 {
+    return 1
+  }
+  return value
+}
+
+fn __stage_feedback_enabled(policy) -> bool {
+  const feedback = policy?.feedback
+  if type_of(feedback) == "dict" {
+    return true
+  }
+  return type_of(feedback) == "bool" && feedback
+}
+
+fn __stage_feedback_max_chars(policy) {
+  const feedback = policy?.feedback
+  if type_of(feedback) == "dict" {
+    return __stage_i64(feedback?.max_chars) ?? 2000
+  }
+  return 2000
+}
+
+/**
+ * Extract human-readable findings from a settled attempt's verification. A
+ * verification carries `{kind, ok, checks: [{kind, ok, expected, actual}]}`
+ * (see workflow_evaluate_verification), or an explicit `findings` list.
+ */
+fn __stage_verification_findings(verification) {
+  if type_of(verification) != "dict" {
+    return []
+  }
+  if type_of(verification?.findings) == "list" {
+    return __stage_string_list(verification.findings)
+  }
+  let out = []
+  for check in __stage_list(verification?.checks) {
+    if !__stage_bool(check?.ok, true) {
+      const kind = __stage_string(check?.kind, "check")
+      out = out.appending(
+        kind + ": expected " + to_string(check?.expected) + ", got " + to_string(check?.actual),
+      )
+    }
+  }
+  return out
+}
+
+fn __stage_truncate(text, max_chars) {
+  const value = to_string(text)
+  if max_chars <= 0 || len(value) <= max_chars {
+    return value
+  }
+  return value.substring(0, max_chars)
+}
+
+/**
+ * The exact retry-context contract passed to `repair_prompt_builder`. Keys are
+ * pinned by conformance: {task, attempt, findings, verification, error,
+ * prior_text, stage}. `attempt` is the just-failed attempt number whose
+ * findings are threaded forward; the returned string runs as attempt N+1.
+ */
+fn __stage_retry_context(config) {
+  const prior = config?.prior ?? {}
+  return {
+    task: __stage_string(config?.task, ""),
+    attempt: __stage_i64(config?.attempt) ?? 1,
+    findings: __stage_verification_findings(prior?.verification),
+    verification: prior?.verification,
+    error: prior?.error,
+    prior_text: __stage_visible_text(prior?.result),
+    stage: config?.node ?? {},
+  }
+}
+
+/**
+ * workflow_stage_retry_task computes the task string for a retry attempt.
+ *
+ * `config` = {policy, task, attempt, prior, node} where `attempt` is the
+ * just-failed attempt number and `prior` is its settled payload. Precedence:
+ * a callable `policy.repair_prompt_builder` (receives the full retry context
+ * and returns the replacement task verbatim) wins; otherwise `policy.feedback`
+ * appends a bounded "Previous attempt N failed: <findings>" template; with
+ * neither set the original task is returned unchanged (blind retry).
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn workflow_stage_retry_task(config = nil) {
+  const cfg = config ?? {}
+  const policy = cfg?.policy ?? {}
+  const base_task = __stage_string(cfg?.task, "")
+  const builder = policy?.repair_prompt_builder
+  if __stage_is_callable(builder) {
+    return to_string(builder(__stage_retry_context(cfg)))
+  }
+  if __stage_feedback_enabled(policy) {
+    const failed_attempt = __stage_i64(cfg?.attempt) ?? 1
+    const context = __stage_retry_context(cfg)
+    const findings = context.findings
+    const detail = if len(findings) > 0 {
+      join(findings, "\n")
+    } else {
+      __stage_string(context.error, context.prior_text)
+    }
+    const bounded = __stage_truncate(detail, __stage_feedback_max_chars(policy))
+    return base_task + "\n\nPrevious attempt " + to_string(failed_attempt) + " failed: " + bounded
+  }
+  return base_task
+}
+
+/**
+ * Apply a callable (fn-verify) verifier to a settled attempt.
+ *
+ * The dict/command `verify` path is classified inside `__host_stage_execute_once`
+ * (which only gates the branch for `kind: "verify"` nodes). A *callable* verify
+ * is invoked here instead — after the leaf settles, inside this attempt loop —
+ * so it gates whatever stage kind reached the loop (subagent stages and the
+ * deterministic execute stages, i.e. the same paths that honor `max_attempts`),
+ * including a subagent self-verifying its own output. A failing verdict forces
+ * the retry-eligible `failed` branch and carries its findings on the attempt's
+ * `verification`, which `workflow_stage_retry_task` threads into the next
+ * attempt's repair prompt. A passing verdict leaves the host-computed
+ * branch/outcome untouched and just attaches the (findings-empty) verification.
+ * Non-callable verify returns the settled payload unchanged.
+ */
+fn __stage_apply_fn_verify(node, settled) {
+  const verify = node?.verify
+  if !__stage_is_callable(verify) {
+    return settled
+  }
+  const verification = workflow_evaluate_verification({verify: verify, result: settled?.result})
+  if __stage_bool(verification.ok, false) {
+    return settled + {verification: verification}
+  }
+  return settled + {branch: "failed", outcome: "verification_failed", verification: verification}
+}
+
+/**
+ * Shape an inline executor's return value into the settled attempt payload
+ * `__host_stage_execute_once` produces (`{ok, result, artifacts, transcript,
+ * outcome, branch, verification}`), so the executor leaf and the delegated
+ * worker leaf are indistinguishable to the retry loop. A bare (non-dict) return
+ * is treated as the visible text; a dict may carry a full `result`, or a `text`
+ * convenience field that is wrapped into `{visible_text}`. `artifacts` defaults
+ * empty; `transcript` falls back to the input transcript; `outcome`/`branch`/
+ * `verification` default to a clean success and are normally decided by the
+ * node's `verify` gate running around this leaf.
+ */
+fn __stage_shape_executor_result(raw, transcript) {
+  if type_of(raw) != "dict" {
+    return {
+      ok: true,
+      result: {status: "completed", visible_text: to_string(raw)},
+      artifacts: [],
+      transcript: transcript,
+      outcome: "completed",
+      branch: nil,
+      verification: nil,
+    }
+  }
+  const result = if type_of(raw?.result) == "dict" {
+    raw.result
+  } else {
+    {status: "completed", visible_text: __stage_string(raw?.text, "")}
+  }
+  return {
+    ok: true,
+    result: result,
+    artifacts: __stage_list(raw?.artifacts),
+    transcript: raw?.transcript ?? transcript,
+    outcome: __stage_string(raw?.outcome, "completed"),
+    branch: raw?.branch,
+    verification: if type_of(raw?.verification) == "dict" {
+      raw.verification
+    } else {
+      nil
+    },
+  }
+}
+
+/**
+ * Inline executor leaf: run a caller-supplied closure as the stage leaf instead
+ * of spawning a delegated worker. The closure receives the retry context
+ * `{task, attempt, prior_findings, prior_verification, prior_text, artifacts}`
+ * — the same feedback-threaded `task` the delegated leaf would run, plus the
+ * prior failed attempt's structured findings/verification so a bespoke executor
+ * can repair without re-parsing the prompt — and returns `{result | text,
+ * artifacts?, transcript?, verification?}`. Its output is shaped into the same
+ * settled payload the host leaf returns, so the SAME fn-verify gate, retry-with-
+ * feedback threading, and (Rust sole-writer) attempt recording run around it
+ * unchanged. A throw is contained as a failed attempt (`{ok: false, error}`),
+ * mirroring the host leaf's Ok/Err discrimination — a bad executor must not
+ * abort the whole run.
+ */
+fn __stage_run_executor(node, task, attempt, prior, selected, transcript) {
+  const context = {
+    task: task,
+    attempt: attempt,
+    prior_findings: __stage_verification_findings(prior?.verification),
+    prior_verification: prior?.verification,
+    prior_text: __stage_visible_text(prior?.result),
+    artifacts: selected,
+  }
+  const executor = node?.executor
+  const attempted = try {
+    executor(context)
+  }
+  if is_err(attempted) {
+    return {
+      ok: false,
+      error: "stage executor threw: " + __stage_error_message(unwrap_err(attempted)),
+      outcome: "error",
+      branch: "error",
+    }
+  }
+  return __stage_shape_executor_result(unwrap(attempted), transcript)
+}
+
+fn __stage_attempt_record(
+  random: HarnessRandom,
+  attempt,
+  status,
+  outcome,
+  branch,
+  error,
+  verification,
+) {
+  return {
+    attempt: attempt,
+    status: status,
+    outcome: outcome,
+    branch: branch,
+    error: error,
+    verification: verification,
+    started_at: random.uuid_v7(),
+    finished_at: random.uuid_v7(),
+  }
+}
+
+/**
+ * workflow_execute_stage_attempts drives the per-stage attempt/retry loop.
+ *
+ * Called by the Rust shim `execute_stage_attempts` (stage.rs) with the node,
+ * task, artifacts, input transcript, and the raw retry policy (which carries
+ * the `repair_prompt_builder` closure). Returns the executed-stage payload the
+ * shim reconstructs into an `ExecutedStage`. Default policy (no feedback, no
+ * builder) re-issues the unmodified task on every attempt — byte-identical to
+ * the legacy Rust loop.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn workflow_execute_stage_attempts(
+  random: HarnessRandom,
+  task,
+  node_id,
+  node = nil,
+  artifacts = nil,
+  transcript = nil,
+  retry_policy = nil,
+) {
+  const node_dict = node ?? {}
+  const base_task = __stage_string(task, "")
+  const arts = __stage_list(artifacts)
+  const policy = retry_policy ?? {}
+  const selection = __host_stage_select_artifacts(node_dict, arts)
+  const selected = __stage_list(selection?.artifacts)
+  const consumed_artifact_ids = __stage_string_list(selection?.consumed_artifact_ids)
+  const usage_before = __host_llm_usage_snapshot()
+  const max_attempts = __stage_max_attempts(policy, node_dict)
+  let attempts = []
+  let attempt = 1
+  let prior = nil
+  while attempt <= max_attempts {
+    const attempt_task = if attempt == 1 {
+      base_task
+    } else {
+      workflow_stage_retry_task(
+        {policy: policy, task: base_task, attempt: attempt - 1, prior: prior, node: node_dict},
+      )
+    }
+    // Inline executor leaf: when the node carries a callable `executor`, run it
+    // as the leaf (in-process, this same VM/thread) instead of spawning a
+    // delegated worker. Everything below — fn-verify gate, retry-with-feedback
+    // threading, sole-writer attempt recording — is byte-identical either way.
+    const raw_settled = if __stage_is_callable(node_dict?.executor) {
+      __stage_run_executor(node_dict, attempt_task, attempt, prior, selected, transcript)
+    } else {
+      __host_stage_execute_once(
+        node_id,
+        node_dict,
+        attempt_task,
+        attempt,
+        arts,
+        selected,
+        transcript,
+      )
+    }
+    // fn-verify mode: a callable `verify` gates the settled attempt (any stage
+    // kind) and threads its findings forward. The dict/command verify path is
+    // already classified inside the host call above, so this is a no-op there.
+    const settled = if __stage_bool(raw_settled.ok, false) {
+      __stage_apply_fn_verify(node_dict, raw_settled)
+    } else {
+      raw_settled
+    }
+    if __stage_bool(settled?.ok, false) {
+      const branch = settled?.branch
+      const success = branch != "failed"
+      const status = if success {
+        "completed"
+      } else {
+        "failed"
+      }
+      attempts = __host_stage_record_attempt(
+        attempts,
+        __stage_attempt_record(
+          random,
+          attempt,
+          status,
+          settled?.outcome,
+          branch,
+          nil,
+          settled?.verification,
+        ),
+      )
+      if success || attempt == max_attempts {
+        return {
+          status: status,
+          outcome: settled?.outcome,
+          branch: branch,
+          result: settled?.result,
+          artifacts: __stage_list(settled?.artifacts),
+          transcript: settled?.transcript,
+          verification: settled?.verification,
+          usage: __host_llm_usage_delta(usage_before, nil),
+          error: if success {
+            nil
+          } else {
+            "verification failed"
+          },
+          attempts: attempts,
+          consumed_artifact_ids: consumed_artifact_ids,
+        }
+      }
+      prior = settled
+    } else {
+      const error_message = __stage_string(settled?.error, "")
+      attempts = __host_stage_record_attempt(
+        attempts,
+        __stage_attempt_record(random, attempt, "failed", "error", "error", error_message, nil),
+      )
+      if attempt == max_attempts {
+        return {
+          status: "failed",
+          outcome: "error",
+          branch: "error",
+          result: {status: "failed", text: ""},
+          artifacts: [],
+          transcript: transcript,
+          verification: nil,
+          usage: __host_llm_usage_delta(usage_before, nil),
+          error: error_message,
+          attempts: attempts,
+          consumed_artifact_ids: consumed_artifact_ids,
+        }
+      }
+      prior = settled
+    }
+    attempt = attempt + 1
+  }
+  throw "workflow_execute_stage_attempts: retry loop exited without settling"
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// Stage -> agent_loop policy flattening (design D5).
+//
+// The ~15 per-stage policy structs (model policy, auto-compaction, tool spec,
+// capability + approval policy, workflow skill registry, nested-execution
+// attribution) collapse into the single options dict the agent loop consumes.
+// This flattening used to live in Rust (`workflow_stage_agent_loop_options`);
+// it now lives here — Harn decides *what options the loop gets*. Rust keeps
+// only enforcement: it re-derives the capability ceiling
+// (`tool spec ∩ stage capability_policy`) and rejects the flattened result if
+// `flattened.policy` widens it (`enforce_flattened_ceiling`, stage.rs).
+
+// -------------------------------------------------------------------------------------------------
+
+fn __stage_compact_keep_last(raw) {
+  const primary = __stage_i64(raw?.compact_keep_last)
+  if primary != nil && primary >= 0 {
+    return primary
+  }
+  const fallback = __stage_i64(raw?.keep_last)
+  if fallback != nil && fallback >= 0 {
+    return fallback
+  }
+  return nil
+}
+
+/**
+ * Flatten the stage's auto-compaction policy into `options`. Mirrors the
+ * former Rust `add_workflow_agent_compaction_options`: a disabled policy pins
+ * `auto_compact: false` and stops; an enabled policy layers the token / hard
+ * limit knobs (typed) plus the raw keep-last / summarize-prompt / callback
+ * fields the typed struct cannot carry.
+ */
+fn __stage_flatten_compaction(options, typed, raw) {
+  if !__stage_bool(typed?.enabled, false) {
+    return options + {auto_compact: false}
+  }
+  let out = options + {auto_compact: true}
+  const threshold = __stage_i64(typed?.token_threshold)
+  if threshold != nil {
+    out = out + {compact_threshold: threshold}
+  }
+  const tool_output = __stage_i64(typed?.tool_output_max_chars)
+  if tool_output != nil {
+    out = out + {tool_output_max_chars: tool_output}
+  }
+  const hard_limit = __stage_i64(typed?.hard_limit_tokens)
+  if hard_limit != nil {
+    out = out + {hard_limit_tokens: hard_limit}
+  }
+  if type_of(typed?.compact_strategy) == "string" {
+    out = out + {compact_strategy: typed.compact_strategy}
+  }
+  if type_of(typed?.hard_limit_strategy) == "string" {
+    out = out + {hard_limit_strategy: typed.hard_limit_strategy}
+  }
+  const keep_last = __stage_compact_keep_last(raw)
+  if keep_last != nil {
+    out = out + {compact_keep_last: keep_last}
+  }
+  if type_of(raw?.summarize_prompt) == "string" && trim(raw.summarize_prompt) != "" {
+    out = out + {summarize_prompt: raw.summarize_prompt}
+  }
+  if type_of(raw) == "dict" {
+    for key in ["compress_callback", "mask_callback"] {
+      if __stage_has_key(raw, key) {
+        out = out + {[key]: raw[key]}
+      }
+    }
+    if __stage_has_key(raw, "custom_compactor") {
+      out = out + {compact_callback: raw.custom_compactor}
+    }
+  }
+  return out
+}
+
+/**
+ * workflow_flatten_agent_loop_options collapses a stage's policy structs into
+ * the agent_loop options dict.
+ *
+ * `config` = {
+ *   base,             // normalized agent_loop options (std/workflow/options)
+ *   raw_model_policy, // stage model_policy as a raw value (may carry closures)
+ *   auto_compact,     // typed AutoCompactPolicy
+ *   raw_auto_compact, // stage auto_compact as a raw value (callbacks, keep_last)
+ *   tools,            // tool spec, or nil when the stage exposes no tools
+ *   skills,           // workflow-level skill registry (default only)
+ *   skill_match,      // workflow-level skill match config (default only)
+ *   policy,           // host-computed capability ceiling (tool spec ∩ stage)
+ *   approval_policy,  // stage tool-approval policy
+ *   session_id, tool_format,
+ *   nested_kind, nested_label, // nested-execution attribution
+ * }
+ *
+ * Precedence mirrors the former Rust flattener: the raw model policy overrides
+ * the normalized base, workflow skill defaults and a nested command policy
+ * fill only unset keys, then compaction / tools / capability ceiling / approval
+ * policy / session / attribution are layered on top. Rust enforces
+ * `result.policy ⊆ config.policy` when the dict re-enters the host, so a buggy
+ * flatten cannot widen a ceiling.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn workflow_flatten_agent_loop_options(config = nil) {
+  const cfg = config ?? {}
+  let options = cfg?.base ?? {}
+  // 1. Raw model-policy entries override the normalized base. Nil-valued keys
+  //    are skipped so an explicit `foo: nil` does not shadow a base default.
+  const raw_model_policy = cfg?.raw_model_policy
+  if type_of(raw_model_policy) == "dict" {
+    for key in raw_model_policy.keys() {
+      if raw_model_policy[key] != nil {
+        options = options + {[key]: raw_model_policy[key]}
+      }
+    }
+  }
+  // 2. Workflow-level skill registry defaults (only when the stage left them unset).
+  if !contains(options.keys(), "skills") && cfg?.skills != nil {
+    options = options + {skills: cfg.skills}
+  }
+  if !contains(options.keys(), "skill_match") && cfg?.skill_match != nil {
+    options = options + {skill_match: cfg.skill_match}
+  }
+  // 3. Hoist a command policy declared under `model_policy.policy` (unless the
+  //    stage already set a top-level command_policy).
+  if !contains(options.keys(), "command_policy") {
+    const nested_command_policy = raw_model_policy?.policy?.command_policy
+    if nested_command_policy != nil {
+      options = options + {command_policy: nested_command_policy}
+    }
+  }
+  // 4. Auto-compaction.
+  options = __stage_flatten_compaction(options, cfg?.auto_compact ?? {}, cfg?.raw_auto_compact)
+  // 5. Tool spec (host forwards a value only when the stage exposes tools).
+  if cfg?.tools != nil {
+    options = options + {tools: cfg.tools}
+  }
+  // 6. Capability ceiling + approval policy. `policy` is the host-computed
+  //    ceiling; the host re-checks the returned value never widens it.
+  options = options + {policy: cfg?.policy ?? {}, approval_policy: cfg?.approval_policy}
+  // 7. Session + tool format.
+  options = options
+    + {
+    session_id: __stage_string(cfg?.session_id, ""),
+    tool_format: __stage_string(cfg?.tool_format, ""),
+  }
+  // 8. Nested-execution attribution.
+  options = options
+    + {
+    _nested_kind: __stage_string(cfg?.nested_kind, ""),
+    _nested_label: __stage_string(cfg?.nested_label, ""),
+  }
+  return options
+}

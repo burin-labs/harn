@@ -1,0 +1,19 @@
+import { obs } from "std/observability"
+
+pipeline default(harness: Harness) {
+  const o = obs(harness.obs)
+  o.reset()
+  o.configure(
+    {
+      backend: o.Backend.compose(
+        [o.Backend.otel("http://collector.example"), o.Backend.honeycomb("key", "dataset")],
+      ),
+    },
+  )
+  o.log("fanout", "info", {component: "compose"})
+  const emitted = o.events_take()
+  harness.stdio.println(len(emitted))
+  harness.stdio.println(emitted[0].backend)
+  harness.stdio.println(emitted[1].backend)
+  harness.stdio.println(emitted[1].payload.component)
+}

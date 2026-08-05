@@ -1,0 +1,3 @@
+fn main(harness: Harness) {
+  harness.stdio.println(harness.fs.read_text("/fixture.txt"))
+}

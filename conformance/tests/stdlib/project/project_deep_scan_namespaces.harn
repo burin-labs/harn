@@ -1,0 +1,93 @@
+import "std/project"
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline test(harness: Harness, task) {
+  const suffix = harness.random.uuid()
+  const alpha_namespace = "alpha-${suffix}"
+  const beta_namespace = "beta-${suffix}"
+  const root = path_join(harness.fs.workspace_temp_dir(), "project-deep-scan-ns-" + suffix)
+  harness.fs.mkdir(root)
+  harness.fs.write_text(path_join(root, "README.md"), "# repo\n")
+  with_llm_script(
+    harness.llm,
+    [llm_text("{\"purpose\":\"alpha root\"}"), llm_text("{\"purpose\":\"beta root\"}")],
+    { ->
+      const alpha = project_deep_scan(
+        harness.project,
+        harness.clock,
+        root,
+        {
+          namespace: alpha_namespace,
+          tiers: ["ambient", "enriched"],
+          incremental: true,
+          depth: nil,
+          enrichment: {
+            prompt: "Return valid JSON only.",
+            provider: "mock",
+            schema: {purpose: "string"},
+          },
+        },
+      )
+      const beta = project_deep_scan(
+        harness.project,
+        harness.clock,
+        root,
+        {
+          namespace: beta_namespace,
+          tiers: ["ambient", "enriched"],
+          incremental: true,
+          depth: nil,
+          enrichment: {
+            prompt: "Return valid JSON only.",
+            provider: "mock",
+            schema: {purpose: "string"},
+          },
+        },
+      )
+      const alpha_cached = project_deep_scan(
+        harness.project,
+        harness.clock,
+        root,
+        {
+          namespace: alpha_namespace,
+          tiers: ["ambient", "enriched"],
+          incremental: true,
+          depth: nil,
+          enrichment: {
+            prompt: "Return valid JSON only.",
+            provider: "mock",
+            schema: {purpose: "string"},
+          },
+        },
+      )
+      const beta_cached = project_deep_scan(
+        harness.project,
+        harness.clock,
+        root,
+        {
+          namespace: beta_namespace,
+          tiers: ["ambient", "enriched"],
+          incremental: true,
+          depth: nil,
+          enrichment: {
+            prompt: "Return valid JSON only.",
+            provider: "mock",
+            schema: {purpose: "string"},
+          },
+        },
+      )
+      harness.stdio.println(alpha["."].enriched.purpose == "alpha root")
+      harness.stdio.println(beta["."].enriched.purpose == "beta root")
+      harness.stdio.println(alpha_cached["."].enriched.purpose == "alpha root")
+      harness.stdio.println(beta_cached["."].enriched.purpose == "beta root")
+      harness.stdio.println(
+        project_deep_scan_status(harness.project, alpha_namespace, root).cache_hits == 1,
+      )
+      harness.stdio.println(
+        project_deep_scan_status(harness.project, beta_namespace, root).cache_hits == 1,
+      )
+      harness.stdio.println(len(harness.llm.mock_calls()) == 2)
+      harness.fs.delete(root)
+    },
+  )
+}

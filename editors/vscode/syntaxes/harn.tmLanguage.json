@@ -1,0 +1,183 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Harn",
+  "scopeName": "source.harn",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#keywords" },
+    { "include": "#storage" },
+    { "include": "#constants" },
+    { "include": "#types" },
+    { "include": "#functions" },
+    { "include": "#operators" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.harn",
+          "match": "//.*$"
+        },
+        {
+          "include": "#block-comment"
+        }
+      ]
+    },
+    "block-comment": {
+      "name": "comment.block.harn",
+      "begin": "/\\*",
+      "end": "\\*/",
+      "patterns": [
+        {
+          "include": "#block-comment"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.raw.harn",
+          "begin": "r\"",
+          "end": "\"",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.string.begin.harn" }
+          },
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.string.end.harn" }
+          }
+        },
+        {
+          "name": "string.quoted.triple.harn",
+          "begin": "\"\"\"",
+          "end": "\"\"\"",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.string.begin.harn" }
+          },
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.string.end.harn" }
+          },
+          "patterns": [
+            { "include": "#string-interpolation" }
+          ]
+        },
+        {
+          "name": "string.quoted.double.harn",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.harn",
+              "match": "\\\\."
+            },
+            { "include": "#string-interpolation" }
+          ]
+        }
+      ]
+    },
+    "string-interpolation": {
+      "patterns": [
+        {
+          "name": "meta.embedded.expression.harn",
+          "begin": "\\$\\{",
+          "end": "\\}",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.template-expression.begin.harn" }
+          },
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.template-expression.end.harn" }
+          },
+          "patterns": [
+            { "include": "source.harn" }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.duration.harn",
+          "match": "\\b\\d+(ms|s|m|h|d|w)\\b"
+        },
+        {
+          "name": "constant.numeric.float.harn",
+          "match": "\\b\\d+\\.\\d+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.harn",
+          "match": "\\b\\d+\\b"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.harn",
+          "match": "\\b(if|else|for|in|while|match|return|break|continue|try|catch|throw|finally|import|from|spawn|parallel|defer|retry|guard|deadline|to|exclusive|require|yield|emit|mutex|select)\\b"
+        },
+        {
+          "name": "keyword.declaration.harn",
+          "match": "\\b(pipeline|fn|tool|skill|eval_pack|enum|struct|interface|impl|type|where|extends|override|pub)\\b"
+        }
+      ]
+    },
+    "storage": {
+      "patterns": [
+        {
+          "name": "storage.type.harn",
+          "match": "\\b(let|const|var)\\b"
+        }
+      ]
+    },
+    "constants": {
+      "patterns": [
+        {
+          "name": "constant.language.harn",
+          "match": "\\b(true|false|nil)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "support.type.harn",
+          "match": "\\b(int|float|decimal|string|bool|list|dict|any|void|owned)\\b"
+        },
+        {
+          "name": "entity.name.type.harn",
+          "match": "\\b[A-Z][a-zA-Z0-9_]*\\b"
+        }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        {
+          "name": "entity.name.function.harn",
+          "match": "\\b([a-z_][a-zA-Z0-9_]*)\\s*(?=\\()"
+        },
+        {
+          "name": "support.function.builtin.harn",
+          "match": "\\b(log|print|println|assert|assert_eq|assert_ne|type_of|to_string|to_int|to_float|decimal|len|push|pop|keys|values|has_key|delete|sort|reverse|join|split|trim|starts_with|ends_with|contains|replace|to_upper|to_lower|json_stringify|json_parse|read_file|write_file|file_exists|exec|env|timestamp|abs|min|max|floor|ceil|round|sqrt|pow|random|regex_match|regex_replace|http_get|http_post|http_request|llm_call|llm_stream|agent_loop|channel|send|receive|close|sleep|emit_channel|channel_events|channel_subscribe|channel_consumer_cursor|channel_ack|conversation|add_user|add_assistant|add_system|add_message|add_tool_result|tool_registry|tool_list|tool_find|tool_select|tool_remove|tool_count|tool_describe|tool_schema|tool_prompt|tool_parse_call|tool_format_result|skill_registry|skill_define|skill_list|skill_find|skill_select|skill_remove|skill_count|skill_describe)\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.harn",
+          "match": "(\\*\\*|\\|>|->|=>|\\.\\.=?|&&|\\|\\||\\?\\?|\\?\\.|\\?\\[|==|!=|<=|>=|[+\\-*/%<>]=?|=|!|[&|])"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.separator.harn",
+          "match": "[{}()\\[\\],;:]"
+        }
+      ]
+    }
+  }
+}

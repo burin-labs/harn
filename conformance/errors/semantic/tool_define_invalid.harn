@@ -1,0 +1,5 @@
+pipeline test(harness: Harness, task) {
+  // tool_define with non-dict config should error
+  const r = tool_registry()
+  tool_define(r, "test", "description", "not a dict")
+}

@@ -1,0 +1,18 @@
+{
+  "description": "Repository command guard shared with Claude Code.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$(git rev-parse --show-toplevel)/scripts/agent-shell-guard.sh\"",
+            "timeout": 10,
+            "statusMessage": "Checking repository command"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+pipeline test(harness: Harness, task) {
+  // What a binding annotation must keep accepting: records with extra fields
+  // (shapes are open), int where float is declared, nil for an optional, and
+  // anything at all for `any` — the declared opt-out.
+  const doc: {name: string} = json_parse("{\"name\": \"ada\", \"extra\": 1}")
+  harness.stdio.log(doc.name)
+  const ratio: float = 3
+  harness.stdio.log(ratio)
+  const missing: string? = nil
+  harness.stdio.log(missing)
+  const untyped: any = json_parse("[1, 2, 3]")
+  harness.stdio.log(untyped.count)
+  const items: list<string> = ["a", "b"]
+  harness.stdio.log(items.count)
+}

@@ -1,0 +1,28 @@
+import { with_llm_script } from "std/testing"
+
+/**
+ * A `models:` ladder and an explicit `routing:` policy both drive model
+ * selection, so combining them is ambiguous and must error up front rather
+ * than silently ignoring the ladder.
+ */
+pipeline test(harness: Harness, task) {
+  with_llm_script(
+    harness.llm,
+    [{text: "should never run", model: "mock", provider: "mock"}],
+    { ->
+      const out = try {
+        harness.llm.call(
+          "hi",
+          nil,
+          {
+            models: ["mock-a", "mock-b"],
+            routing: harness.llm.routing_policy({chain: [{provider: "mock", model: "mock-a"}]}),
+          },
+        )
+      } catch (e) {
+        {msg: to_string(e)}
+      }
+      harness.stdio.println(contains(out.msg, "cannot be combined with an explicit"))
+    },
+  )
+}

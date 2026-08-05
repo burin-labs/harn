@@ -1,0 +1,201 @@
+# Prompt assembly
+
+Every system prompt Harn sends to a model is the deterministic reduction of an
+ordered list of **fragments**, unless the caller selects an exclusive
+replacement root. The public `system` option supplies a string, an ordered
+`{content, title?, position?, enabled?}` list, or
+`{mode: "replace", content: string}`. In composed mode, those fragments, the
+agent's primary system text, capability-gated tool guidance, project context
+profiles, and rendered
+[system reminders](./system-reminders.md) all flow through one reducer. There is
+no parallel string-concatenation path, and there is no place where an
+instruction is glued on by hand and silently drifts from the rest of the prompt.
+
+Because assembly is a single reduction, it is also fully **auditable**: the
+runtime can answer "why is this sentence in the prompt?" and "what would the
+prompt look like without tool X?" without anyone reverse-engineering a
+concatenation.
+
+Each provider-bound call carries that reduction as a typed
+`harn.llm.context_manifest.v1` value. The transcript retains it in a deduplicated
+`context_manifest` event before `provider_call_request`; the request's
+`served_context.manifest_content_hash` resolves to those exact retained manifest
+bytes. A stale or contradictory manifest fails the call before the request is
+journaled.
+
+## Exclusive replacement root
+
+Use an exclusive root when the caller needs the supplied bytes to be the
+entire system prompt:
+
+```harn
+agent_loop(task, nil, {
+  system: {
+    mode: "replace",
+    content: "You are the complete system prompt.",
+  },
+})
+```
+
+Replacement is structural, not a winning fragment or a list of fields to
+blank. It bypasses ordinary fragment reduction and suppresses the positional
+system argument, fragment lists, agent-loop contracts, context-profile
+fragments, skill and tool guidance, provider thinking directives, and
+conversation-level `system`/`developer` messages. The `content` bytes are not
+trimmed or joined. Tools and ordinary user/assistant history remain available;
+this contract replaces the system channel, not the capability or conversation
+surface.
+
+`prompt_explain` reports `root: "replacement"` and exactly one included
+`replacement` fragment. At the live boundary, `llm_mock_calls()[n].system`
+provides the served-byte proof.
+
+## Fragments
+
+A fragment is one contributor to the system string:
+
+| field | meaning |
+| --- | --- |
+| `id` | stable identifier, e.g. `host:system_before`, `primary:active_skills`, `tool:todo.guidance` |
+| `source` / `producer` | who contributed it (`host:*`, `primary`, `reminder`, `tool:<name>`) |
+| `bucket` | `before` (preamble … primary … reminders) or `after` (appendix/suffix and tail recitations) |
+| `requires_tools` | included only when every named tool is in the active tool set |
+| `requires_caps` | included only when every named capability flag is set |
+| `body` | the already-rendered text; trimmed, and skipped if empty |
+
+The retained projection adds `included`, `reason`, `bytes`, and a redacted
+`blake3:` `digest` for every segment. Included segment bytes plus the documented
+blank-line separator bytes must exactly equal `system_prompt_bytes`;
+`whole_prompt_digest` must equal the served-context system-prompt digest.
+Duplicate included `(id, digest)` pairs and replacement roots containing any
+extra segment are rejected.
+
+The reducer emits all included `before` fragments in declaration order, then all
+included `after` fragments, joined by a blank line.
+
+## The primary block is decomposed
+
+The agent's per-turn primary system text is itself a composite — the base system
+prompt, MCP advisory context, active skills, the skill catalog, the progress-tool
+nudge, and the loop/tool contracts. Rather than glue these into one opaque
+`primary` string, [`agent_loop`](./llm-and-agents.md) hands the assembler each part as its
+own fragment through the internal `_system_fragments` channel, so every part is
+traced on its own (`primary:system`, `primary:active_skills`,
+`primary:loop_contract`, …) and can be gated with `requires_tools` independently.
+Those internal fragments may also set `bucket: "after"` when a live recitation
+must land at the prompt tail.
+Joining the fragment bodies with a blank line reproduces the single string the
+legacy path produced, so the assembled prompt is unchanged — only its provenance
+is finer-grained. `agent_build_turn_system_fragments` is the stdlib helper that
+emits the list; `agent_build_turn_system` is the thin wrapper that joins it.
+
+## Tool guidance rides with the tool
+
+The drift-proof way to attach an instruction to a tool is to co-locate it with
+the tool definition. Any tool that declares a `guidance` string auto-contributes
+a fragment gated on that tool's own presence:
+
+```harn
+tool_define(registry, "todo", "Add, update, and complete plan items", {
+  parameters: { /* … */ },
+  handler: todo_handler,
+  guidance: "When working from a plan or task list, always update the TODO tracker after each item.",
+})
+```
+
+When `todo` is in the active tool set, the instruction appears. Drop the tool and
+the instruction vanishes — the two share one source of truth and cannot drift.
+This is the canonical answer to "tell the model to use the TODO tracker, but only
+when a TODO tool is actually available." No `if`, no hand-maintained list of tool
+names in prose.
+
+Guidance is prompt-side metadata: it is rendered into the system prompt but is
+never sent to the provider as part of the tool's schema.
+
+## Project profiles are fragments too
+
+[`project_context_profile`](./project-scan.md#context-profiles) resolves project
+signals such as Git remotes, language/build files, supplied code-librarian
+signals, and available credential aliases into reducer-ready fragments. Agent
+preflight forwards `context_profile.prompt_fragments` through `_system_fragments`;
+direct `llm_call` and `prompt_explain` users pass `context_profile` in
+options.
+
+Each profile fragment is capability-gated. For example, a Rust profile fragment
+carries `requires_caps: ["language.rust"]`; `prompt_explain(...)` then records
+the `profile:rust` trace with the capability reason instead of making the
+project guidance an opaque always-on paragraph.
+
+## Inspecting the assembled prompt
+
+`prompt_explain(options)` assembles the system prompt from the same options you
+would hand [`agent_loop`](./llm-and-agents.md) and returns the final string plus a
+provenance record for every fragment — included or excluded, with the reason and
+byte count:
+
+```harn
+const explained = prompt_explain({
+  system: "You are a pragmatic engineering partner.",
+  tools: [
+    { name: "todo", description: "Track plan items", guidance: "Always update the TODO tracker." },
+    { name: "read", description: "Read a file" },
+  ],
+})
+// explained.system     → the assembled string
+// explained.root       → "composed" (or "replacement")
+// explained.fragments  → [{ id, source, producer, bucket, included, reason,
+//                           bytes, digest }, …]
+// explained.whole_prompt_digest / system_prompt_bytes → whole-prompt receipt
+// explained.included / explained.excluded → counts
+```
+
+Each fragment's `reason` tells you exactly why it is or isn't present — for
+example `tool(s) present: todo` for a guidance fragment that made it in, or
+`requires tool \`todo\` (not available)` for one gated out. The bundled
+`harn demo prompt-guidance` scenario assembles a prompt with and without a tool
+and prints the provenance side by side.
+
+Session **reminders** are layered at live call time from the active session, so
+`prompt_explain` shows the static system prompt (host parts + primary +
+capability-gated tool guidance). See [System reminders](./system-reminders.md)
+for the dynamic, turn-boundary layer that composes into the same reducer at call
+time.
+
+The manifest accounts for the top-level system-prompt channel. Conversation
+messages are explicitly marked `served_context_digest_only` and remain covered
+by `served_context.messages_content_hash`; their per-message assembly is not
+claimed here. Retained manifests name their boundary as
+`llm_request_payload_egress`, after capability-derived directives and
+route-specific system placement have produced the send-safe payload. When that
+conversion changes the system bytes, the manifest carries an `egress:system`
+segment and an `egress_delta` joining the options-side and payload-side byte
+counts and digests. Provider adapter transforms and wire serialization below
+`LlmRequestPayload` remain outside the contract. Every Harn logical LLM entry
+point flows through `observed_llm_call`, and the raw prepared single-route
+transport primitives require an observer-issued attempt token. Compaction,
+rerank, workflow, fallback, and streaming provider attempts therefore cannot
+silently bypass the manifest spine. Digests are computed after the active
+transcript redaction policy. Readers continue to accept historical manifests
+whose boundary is `observed_llm_call_pre_egress`.
+
+Set `call_role` when a harness needs to distinguish semantic callers, for
+example `model.router`. Harn-owned paths already declare the same purpose
+vocabulary through `mock_scope` (`agent.main`, `compaction`, `completion.judge`,
+`step.judge`, and the guardrail/classifier roles); production telemetry and
+fixture routing project that one declaration. Supplying both keys with
+different values is an error, and `call_role` alone also routes mock fixtures
+to the same scope. An undeclared purpose is retained as `unattributed`, never
+inferred from `session_id`. Both the manifest and `provider_call_request`
+retain the resolved role and the current delegated-worker `actor_chain`, when
+one exists.
+
+## Relationship to other primitives
+
+- [System reminders](./system-reminders.md) are the dynamic subset of fragments:
+  they carry a lifecycle (TTL, dedupe, preserve-on-compact) and are injected at
+  turn boundaries, but they reduce through the same assembler.
+- [Prompt templating](./prompt-templating.md) (`.harn.prompt`) renders a
+  fragment's `body`; assembly decides whether and where that body appears.
+- Capability-adaptive rendering chooses the *wire format* of the assembled
+  prompt per model capability; fragment assembly chooses *which content* is
+  present.

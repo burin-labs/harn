@@ -1,0 +1,4 @@
+pipeline default(harness: Harness, task) {
+  const content = harness.fs.read_text("src/main.rs")
+  harness.stdio.log(content)
+}

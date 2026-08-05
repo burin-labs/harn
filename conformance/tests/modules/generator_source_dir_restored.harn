@@ -1,0 +1,27 @@
+import { count_to } from "lib/source_dir_generator"
+
+/**
+ * A generator body runs as its own task and must anchor source-relative
+ * resolution on the module that defined it. Creating or draining one must
+ * leave the *caller's* source dir exactly as it found it, so a later
+ * source-relative read here still resolves against this file's directory
+ * rather than `lib/`. Regression coverage for #6160.
+ */
+pipeline test(harness: Harness, task) {
+  const before = harness.fs.source_dir()
+  const created = count_to(3)
+  harness.stdio.log(harness.fs.source_dir() == before)
+  let total = 0
+  for value in created {
+    total = total + value
+  }
+  harness.stdio.log(harness.fs.source_dir() == before)
+  // An abandoned generator leaves a live task parked on its channel; it must
+  // not leak either.
+  const abandoned = count_to(3)
+  for value in abandoned {
+    break
+  }
+  harness.stdio.log(harness.fs.source_dir() == before)
+  harness.stdio.log(total)
+}

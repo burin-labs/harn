@@ -1,0 +1,532 @@
+use std::collections::BTreeSet;
+use std::io::{self, Write};
+use std::path::PathBuf;
+
+use crate::execute;
+
+/// Harn REPL keyword completer.
+struct HarnCompleter {
+    keywords: Vec<String>,
+}
+
+impl reedline::Completer for HarnCompleter {
+    fn complete(&mut self, line: &str, pos: usize) -> Vec<reedline::Suggestion> {
+        let text = &line[..pos];
+        let word_start = text
+            .rfind(|c: char| !c.is_alphanumeric() && c != '_')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        let prefix = &text[word_start..];
+        if prefix.is_empty() {
+            return Vec::new();
+        }
+
+        self.keywords
+            .iter()
+            .filter(|kw| kw.starts_with(prefix) && kw.as_str() != prefix)
+            .map(|kw| reedline::Suggestion {
+                value: kw.clone(),
+                description: None,
+                style: None,
+                extra: None,
+                span: reedline::Span::new(word_start, pos),
+                append_whitespace: true,
+                ..Default::default()
+            })
+            .collect()
+    }
+}
+
+/// Harn REPL syntax highlighter.
+struct HarnHighlighter {
+    keywords: Vec<String>,
+}
+
+impl reedline::Highlighter for HarnHighlighter {
+    fn highlight(&self, line: &str, _cursor: usize) -> reedline::StyledText {
+        let mut styled = reedline::StyledText::new();
+        let mut remaining = line;
+
+        while !remaining.is_empty() {
+            if remaining.starts_with(|c: char| c.is_alphabetic() || c == '_') {
+                let end = remaining
+                    .find(|c: char| !c.is_alphanumeric() && c != '_')
+                    .unwrap_or(remaining.len());
+                let word = &remaining[..end];
+                if self.keywords.contains(&word.to_string()) {
+                    styled.push((
+                        nu_ansi_term::Style::new()
+                            .fg(nu_ansi_term::Color::Blue)
+                            .bold(),
+                        word.to_string(),
+                    ));
+                } else if word == "true" || word == "false" || word == "nil" {
+                    styled.push((
+                        nu_ansi_term::Style::new().fg(nu_ansi_term::Color::Yellow),
+                        word.to_string(),
+                    ));
+                } else {
+                    styled.push((nu_ansi_term::Style::new(), word.to_string()));
+                }
+                remaining = &remaining[end..];
+            } else if remaining.starts_with('"') {
+                let end = remaining[1..]
+                    .find('"')
+                    .map(|i| i + 2)
+                    .unwrap_or(remaining.len());
+                let s = &remaining[..end];
+                styled.push((
+                    nu_ansi_term::Style::new().fg(nu_ansi_term::Color::Green),
+                    s.to_string(),
+                ));
+                remaining = &remaining[end..];
+            } else if remaining.starts_with("//") {
+                styled.push((
+                    nu_ansi_term::Style::new().fg(nu_ansi_term::Color::DarkGray),
+                    remaining.to_string(),
+                ));
+                remaining = "";
+            } else if remaining.starts_with(|c: char| c.is_ascii_digit()) {
+                let end = remaining
+                    .find(|c: char| !c.is_ascii_digit() && c != '.' && c != '_')
+                    .unwrap_or(remaining.len());
+                let num = &remaining[..end];
+                styled.push((
+                    nu_ansi_term::Style::new().fg(nu_ansi_term::Color::Cyan),
+                    num.to_string(),
+                ));
+                remaining = &remaining[end..];
+            } else {
+                let ch = &remaining[..remaining.ceil_char_boundary(1)];
+                styled.push((nu_ansi_term::Style::new(), ch.to_string()));
+                remaining = &remaining[ch.len()..];
+            }
+        }
+        styled
+    }
+}
+
+/// Harn REPL validator for multi-line input.
+struct HarnValidator;
+
+impl reedline::Validator for HarnValidator {
+    fn validate(&self, line: &str) -> reedline::ValidationResult {
+        if scan_input_state(line).is_incomplete() {
+            reedline::ValidationResult::Incomplete
+        } else {
+            reedline::ValidationResult::Complete
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct InputScanState {
+    brace_depth: usize,
+    paren_depth: usize,
+    bracket_depth: usize,
+    in_string: bool,
+    raw_string: bool,
+    escaping: bool,
+    in_line_comment: bool,
+}
+
+impl InputScanState {
+    fn is_incomplete(self) -> bool {
+        self.in_string || self.brace_depth > 0 || self.paren_depth > 0 || self.bracket_depth > 0
+    }
+}
+
+fn scan_input_state(input: &str) -> InputScanState {
+    let mut state = InputScanState::default();
+    let mut chars = input.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if state.in_line_comment {
+            if ch == '\n' {
+                state.in_line_comment = false;
+            }
+            continue;
+        }
+
+        if state.in_string {
+            if state.raw_string {
+                if ch == '"' {
+                    state.in_string = false;
+                    state.raw_string = false;
+                }
+                continue;
+            }
+
+            if state.escaping {
+                state.escaping = false;
+                continue;
+            }
+
+            match ch {
+                '\\' => state.escaping = true,
+                '"' => state.in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+
+        match ch {
+            '/' if chars.peek() == Some(&'/') => {
+                chars.next();
+                state.in_line_comment = true;
+            }
+            'r' if chars.peek() == Some(&'"') => {
+                chars.next();
+                state.in_string = true;
+                state.raw_string = true;
+            }
+            '"' => state.in_string = true,
+            '{' => state.brace_depth += 1,
+            '}' => state.brace_depth = state.brace_depth.saturating_sub(1),
+            '(' => state.paren_depth += 1,
+            ')' => state.paren_depth = state.paren_depth.saturating_sub(1),
+            '[' => state.bracket_depth += 1,
+            ']' => state.bracket_depth = state.bracket_depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+
+    state
+}
+
+fn repl_completion_entries() -> Vec<String> {
+    let mut entries = BTreeSet::new();
+    for keyword in harn_lexer::KEYWORDS {
+        entries.insert((*keyword).to_string());
+    }
+    for builtin in repl_builtin_names() {
+        entries.insert(builtin);
+    }
+    entries.into_iter().collect()
+}
+
+fn repl_builtin_names() -> Vec<String> {
+    let mut vm = harn_vm::Vm::new();
+    harn_vm::register_vm_stdlib(&mut vm);
+    crate::install_default_hostlib(&mut vm);
+    let base_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    harn_vm::register_store_builtins(&mut vm, &base_dir);
+    harn_vm::register_metadata_builtins(&mut vm, &base_dir);
+    harn_vm::register_checkpoint_builtins(&mut vm, &base_dir, "repl");
+    let mut names = vm.builtin_names();
+    names.sort();
+    names
+}
+
+fn repl_history_path() -> PathBuf {
+    harn_vm::user_dirs::home_dir()
+        .map(|home| home.join(".harn").join("repl_history"))
+        .unwrap_or_else(|| PathBuf::from(".harn").join("repl_history"))
+}
+
+/// Accumulated REPL state shared by the interactive and piped drivers.
+///
+/// Replay model: each accepted line is appended to `accumulated` and the whole
+/// block is re-executed on every new input so bindings persist. Side effects
+/// from prior lines run again on each cycle, so only the newly emitted output
+/// tail is printed.
+#[derive(Default)]
+struct ReplSession {
+    accumulated: Vec<String>,
+    // Top-level `fn`/`struct`/`enum`/`type` items live outside the pipeline
+    // body, so they're tracked separately and spliced in at emit time.
+    top_level: Vec<String>,
+    prior_output_len: usize,
+    // Bare expressions get auto-wrapped as `let _N = <expr>` so the value
+    // is both displayed and reachable later via `_1`, `_2`, ...
+    result_counter: usize,
+}
+
+impl ReplSession {
+    /// Evaluate one accepted input line, printing any newly produced output.
+    /// The line is trimmed; blank lines are a no-op.
+    async fn eval_line(&mut self, raw_line: &str) {
+        let line = raw_line.trim().to_string();
+        if line.is_empty() {
+            return;
+        }
+
+        let first_word = line.split_whitespace().next();
+        let is_top_level = matches!(
+            first_word,
+            Some("fn" | "struct" | "enum" | "type" | "pub" | "import"),
+        );
+        // Statement-introducing keywords skip the bare-expression
+        // auto-wrap path.
+        let is_statement_kw = matches!(
+            first_word,
+            Some(
+                "let"
+                    | "var"
+                    | "if"
+                    | "for"
+                    | "while"
+                    | "return"
+                    | "break"
+                    | "continue"
+                    | "match"
+                    | "try"
+                    | "throw"
+                    | "log"
+                    | "print"
+                    | "println"
+                    | "assert"
+                    | "assert_eq"
+                    | "assert_ne"
+                    | "spawn"
+                    | "guard"
+                    | "deadline"
+                    | "retry"
+                    | "parallel"
+                    | "defer"
+                    | "mutex"
+            ),
+        );
+        let is_assignment = !is_top_level
+            && !is_statement_kw
+            && line.contains('=')
+            && !line.contains("==")
+            && !line.contains("!=")
+            && !line.contains("<=")
+            && !line.contains(">=");
+        let is_bare_expression = !is_top_level && !is_statement_kw && !is_assignment;
+
+        let emitted_line = if is_bare_expression {
+            self.result_counter += 1;
+            let counter = self.result_counter;
+            format!("let _{counter} = {line}\nharness.stdio.println(to_string(_{counter}))")
+        } else {
+            line.clone()
+        };
+
+        let body_lines = if is_top_level {
+            self.accumulated.clone()
+        } else {
+            let mut body = self.accumulated.clone();
+            body.push(emitted_line.clone());
+            body
+        };
+        let top_level_block = if is_top_level {
+            let mut tl = self.top_level.clone();
+            tl.push(line.clone());
+            tl.join("\n")
+        } else {
+            self.top_level.join("\n")
+        };
+
+        let body_block = body_lines.join("\n");
+        let source = if top_level_block.is_empty() {
+            format!("pipeline repl(harness: Harness, task) {{\n{body_block}\n}}")
+        } else {
+            format!("{top_level_block}\npipeline repl(harness: Harness, task) {{\n{body_block}\n}}")
+        };
+
+        match execute(&source, None).await {
+            Ok(output) => {
+                // Skip the prior prefix so replayed side effects
+                // from earlier lines don't print again.
+                let new_portion = if output.len() > self.prior_output_len {
+                    &output[self.prior_output_len..]
+                } else {
+                    ""
+                };
+                if !new_portion.is_empty() {
+                    io::stdout().write_all(new_portion.as_bytes()).ok();
+                }
+                self.prior_output_len = output.len();
+                if is_top_level {
+                    self.top_level.push(line);
+                } else {
+                    self.accumulated.push(emitted_line);
+                }
+            }
+            Err(e) => eprintln!("Error: {e}"),
+        }
+    }
+}
+
+pub(crate) async fn run_repl() {
+    use std::io::IsTerminal;
+
+    // Without a controlling terminal (e.g. `printf '1+2\n' | harn repl`), the
+    // interactive line editor cannot open the tty and fails with os error 6.
+    // Fall back to reading piped source from stdin to EOF instead of crashing.
+    if std::io::stdin().is_terminal() {
+        run_repl_interactive().await;
+    } else {
+        run_repl_piped().await;
+    }
+}
+
+/// Read Harn source from stdin to EOF and evaluate it line-by-line, joining
+/// lines that leave a delimiter open (multi-line `fn`/`if`/... blocks) before
+/// executing. Used when stdin is not a tty.
+async fn run_repl_piped() {
+    use std::io::Read;
+
+    let mut input = String::new();
+    if std::io::stdin().read_to_string(&mut input).is_err() {
+        return;
+    }
+
+    let mut session = ReplSession::default();
+    let mut pending = String::new();
+    for line in input.lines() {
+        if !pending.is_empty() {
+            pending.push('\n');
+        }
+        pending.push_str(line);
+        if scan_input_state(&pending).is_incomplete() {
+            continue;
+        }
+        let block = std::mem::take(&mut pending);
+        session.eval_line(&block).await;
+    }
+    // Best-effort flush of a trailing unterminated block.
+    if !pending.trim().is_empty() {
+        session.eval_line(&pending).await;
+    }
+}
+
+async fn run_repl_interactive() {
+    use reedline::{DefaultPrompt, DefaultPromptSegment, FileBackedHistory, Reedline, Signal};
+
+    println!("Harn REPL v{}", env!("CARGO_PKG_VERSION"));
+    println!("Type expressions or statements. Ctrl+C or Ctrl+D to exit.");
+
+    let completion_entries = repl_completion_entries();
+
+    let completer = Box::new(HarnCompleter {
+        keywords: completion_entries.clone(),
+    });
+    let highlighter = Box::new(HarnHighlighter {
+        keywords: completion_entries,
+    });
+    let validator = Box::new(HarnValidator);
+
+    let history_path = repl_history_path();
+    if let Some(parent) = history_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
+    let history = Box::new(
+        FileBackedHistory::with_file(1000, history_path)
+            .unwrap_or_else(|_| FileBackedHistory::new(1000).expect("history")),
+    );
+
+    let mut line_editor = Reedline::create()
+        .with_completer(completer)
+        .with_highlighter(highlighter)
+        .with_validator(validator)
+        .with_history(history);
+
+    let prompt = DefaultPrompt::new(
+        DefaultPromptSegment::Basic("harn".to_string()),
+        DefaultPromptSegment::Empty,
+    );
+
+    let mut session = ReplSession::default();
+
+    loop {
+        // reedline blocks on terminal input, so off-thread it.
+        let input = tokio::task::spawn_blocking({
+            let mut editor = std::mem::replace(&mut line_editor, Reedline::create());
+            let prompt = prompt.clone();
+            move || {
+                let result = editor.read_line(&prompt);
+                (editor, result)
+            }
+        })
+        .await;
+
+        match input {
+            Ok((editor, Ok(Signal::Success(line)))) => {
+                line_editor = editor;
+                session.eval_line(&line).await;
+            }
+            Ok((_, Ok(Signal::CtrlC))) | Ok((_, Ok(Signal::CtrlD))) => {
+                println!("Goodbye!");
+                break;
+            }
+            Ok((_, Ok(_))) => {
+                break;
+            }
+            Ok((_editor, Err(e))) => {
+                eprintln!("Read error: {e}");
+                break;
+            }
+            Err(e) => {
+                eprintln!("Runtime error: {e}");
+                break;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{repl_builtin_names, scan_input_state, HarnValidator};
+
+    #[test]
+    fn validator_marks_unclosed_delimiters_incomplete() {
+        let state = scan_input_state("if ready {\n  __io_println(\"ok\")");
+        assert!(state.is_incomplete());
+    }
+
+    #[test]
+    fn validator_ignores_delimiters_inside_strings_and_comments() {
+        let state = scan_input_state("__io_println(\"{\") // }\nlet xs = [1, 2]");
+        assert!(!state.is_incomplete());
+    }
+
+    #[test]
+    fn validator_tracks_unclosed_strings() {
+        let state = scan_input_state("__io_println(\"hello");
+        assert!(state.is_incomplete());
+    }
+
+    #[test]
+    fn repl_builtin_names_include_live_stdlib_entries() {
+        let builtins = repl_builtin_names();
+        assert!(!builtins.iter().any(|name| name == "http_get"));
+        assert!(builtins.iter().any(|name| name == "uuid"));
+        assert!(!builtins.iter().any(|name| name == "workflow_execute"));
+    }
+
+    #[test]
+    fn validator_type_exists_for_reedline_integration() {
+        #[allow(clippy::no_effect_underscore_binding)]
+        let _validator = HarnValidator;
+    }
+
+    #[tokio::test]
+    async fn eval_line_runs_headless_without_a_tty() {
+        // The piped driver (stdin is not a tty) relies on `eval_line` running
+        // outside any terminal. Exercise a binding, a bare expression, and a
+        // top-level `fn` to guard against the os-error-6 regression.
+        let mut session = super::ReplSession::default();
+        session.eval_line("let x = 40").await;
+        assert_eq!(session.accumulated.len(), 1);
+        session.eval_line("fn inc(n) { return n + 1 }").await;
+        assert_eq!(session.top_level.len(), 1);
+        session.eval_line("inc(x) + 1").await;
+        // Binding + bare expression are accumulated; the `fn` is top-level.
+        assert_eq!(session.accumulated.len(), 2);
+        assert_eq!(session.result_counter, 1);
+    }
+
+    #[test]
+    fn repl_exits_on_ctrl_c_and_ctrl_d() {
+        assert!(matches!(reedline::Signal::CtrlC, reedline::Signal::CtrlC));
+        assert!(matches!(reedline::Signal::CtrlD, reedline::Signal::CtrlD));
+        assert!(!matches!(
+            reedline::Signal::Success("__io_println(1)".into()),
+            reedline::Signal::CtrlC | reedline::Signal::CtrlD
+        ));
+    }
+}

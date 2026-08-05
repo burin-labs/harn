@@ -1,0 +1,18 @@
+import { stream_validator } from "std/json"
+
+pipeline default(harness: Harness, task) {
+  const validator = stream_validator(
+    harness.runtime,
+    {
+      type: "dict",
+      required: ["name", "age"],
+      properties: {name: {type: "string"}, age: {type: "int"}},
+    },
+  )
+  harness.stdio.println(validator.feed("{\"name\"").variant)
+  harness.stdio.println(validator.value() == nil)
+  harness.stdio.println(validator.feed(":\"Ada\",\"age\":").variant)
+  harness.stdio.println(validator.feed("42}").variant)
+  harness.stdio.println(validator.value().name)
+  harness.stdio.println(validator.value().age)
+}

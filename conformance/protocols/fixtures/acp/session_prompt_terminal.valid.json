@@ -1,0 +1,49 @@
+{
+  "name": "acp.session_prompt.typed_terminal",
+  "protocol": "acp",
+  "schema": "schemas/acp-session-update.schema.json",
+  "expect": "valid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "id": 41,
+      "result": {
+        "stopReason": "max_turn_requests",
+        "_meta": {
+          "harn": {
+            "terminal": {
+              "kind": "policy_budget",
+              "reason": "max_iterations",
+              "owner": "policy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 42,
+      "result": {
+        "stopReason": "end_turn",
+        "_meta": {
+          "harn": {
+            "terminal": {
+              "kind": "unknown",
+              "reason": "exception",
+              "owner": "unknown"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "matrix": {
+    "version": "v0.12.2",
+    "family": "session_prompt",
+    "case": "typed_terminal_truth",
+    "source": {
+      "kind": "hand_authored",
+      "description": "Harn prompt-result extension preserving policy-budget and unknown terminal truth independently of ACP stopReason."
+    }
+  }
+}

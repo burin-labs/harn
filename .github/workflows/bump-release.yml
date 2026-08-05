@@ -1,0 +1,185 @@
+name: Open version bump PR (recovery)
+
+# RECOVERY-ONLY workflow. Default release flow consolidates the prepare
+# and bump into a single human PR titled "Release vX.Y.Z" — see
+# .claude/commands/release-harn.md and .codex/commands/harn-release.md.
+# This workflow used to auto-fire on push to main; it now requires a
+# manual workflow_dispatch and exists for two recovery cases:
+#
+#   1. A "Prepare vX.Y.Z release"-style commit accidentally landed on
+#      main without the consolidated Cargo.toml/Cargo.lock bump. Run
+#      this workflow to open the bump PR after the fact.
+#   2. Bootstrapping a brand-new workspace crate (HARN_BOOTSTRAP_NEW_CRATES);
+#      the audit's package-audit lane needs special handling that the
+#      consolidated flow can also opt into, but historically lived here.
+#
+# Runs ./scripts/release_ship.sh --bump <type> under the
+# harn-release-bot App identity. Once this workflow's PR lands, the
+# publish-release.yml workflow auto-fires on tag drift to ship.
+on:
+  workflow_dispatch:
+    inputs:
+      bootstrap_new_crates:
+        description: >-
+          First-release bootstrap for a new workspace crate that an
+          already-published crate (e.g. harn-cli) now depends on. Sets
+          HARN_BOOTSTRAP_NEW_CRATES=1, which skips the publish dry-run
+          and audit package checks for downstream crates that need it on
+          crates.io. The real publish on finalize resumes the remaining
+          dependency DAG and waits for newly uploaded dependencies to
+          become selectable. See harn#609.
+        type: boolean
+        default: false
+      skip_dry_run:
+        description: >-
+          Skip only the publish dry-run gate. Useful if the dry-run is
+          flaky for an unrelated reason and you've already validated
+          the release content elsewhere.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: open-version-bump-pr
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  open-bump-pr:
+    name: Open version bump PR
+    runs-on: ubuntu-latest
+    # workflow_dispatch only — the push trigger was removed when the
+    # release flow consolidated to a single PR.
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      # Mint a short-lived App installation token so the bump branch
+      # push and the bump PR are authored by harn-release-bot. Using
+      # the App identity also means the bump PR's CI will fire
+      # normally (GHA suppresses downstream workflows on
+      # GITHUB_TOKEN-authenticated pushes; App tokens bypass that).
+      - name: Mint GitHub App installation token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: main
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Detect bump type from CHANGELOG vs Cargo.toml
+        id: bump
+        run: |
+          set +e
+          BUMP="$(cargo run --quiet --bin harn -- run scripts/detect_bump_type.harn)"
+          rc=$?
+          set -e
+          if [[ $rc -eq 2 ]]; then
+            echo "::notice::No bump needed (Cargo.toml and CHANGELOG already match)."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ $rc -ne 0 ]]; then
+            echo "::error::detect_bump_type.harn failed with exit code $rc"
+            exit $rc
+          fi
+          echo "type=$BUMP" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "Detected bump type: $BUMP"
+
+      - uses: ./.github/actions/rust-toolchain
+        if: steps.bump.outputs.skip != 'true'
+        with:
+          components: clippy, rustfmt
+
+      - uses: ./.github/actions/sccache-install
+        if: steps.bump.outputs.skip != 'true'
+        # sccache is a build-cache optimization, not a build requirement. The
+        # upstream action sometimes fails on merge_group / restricted-token
+        # events with "Bad credentials" when api.github.com gates the release
+        # lookup; a cold build is a fine fallback, but the job shouldn't fail.
+        continue-on-error: true
+
+      - name: Configure Cargo to use sccache
+        if: steps.bump.outputs.skip != 'true' && env.SCCACHE_PATH != ''
+        run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
+
+      - uses: ./.github/actions/rust-cache
+        if: steps.bump.outputs.skip != 'true'
+        with:
+          shared-key: workspace
+          cache-bin: false
+
+      - name: Install cargo-nextest
+        if: steps.bump.outputs.skip != 'true'
+        uses: taiki-e/install-action@065d6a08a14e61e89fb0a4c10eecdbdef39c7d8e # v2.85.4
+        continue-on-error: true
+        with:
+          tool: nextest@0.9.132
+
+      - uses: ./.github/actions/node-cache
+        if: steps.bump.outputs.skip != 'true'
+        with:
+          node-version: "22"
+          cache-dependency-path: crates/harn-cli/portal/package-lock.json
+
+      - name: Install portal dependencies
+        if: steps.bump.outputs.skip != 'true'
+        working-directory: crates/harn-cli/portal
+        run: npm ci
+
+      - name: Install ripgrep
+        # security-audit lane greps the repo via `rg` — install
+        # explicitly to match the local dev expectation.
+        if: steps.bump.outputs.skip != 'true'
+        uses: ./.github/actions/apt-install
+        with:
+          packages: ripgrep
+          check-command: rg
+
+      - name: Build tree-sitter grammar
+        # grammar-audit's verify_tree_sitter_parse.harn loads the
+        # compiled grammar from tree-sitter-harn/harn.{so,dylib}.
+        if: steps.bump.outputs.skip != 'true'
+        working-directory: tree-sitter-harn
+        run: |
+          npm ci
+          npm run build
+
+      - name: Configure git identity
+        if: steps.bump.outputs.skip != 'true'
+        run: |
+          git config --global user.name "harn-release-bot[bot]"
+          git config --global user.email "harn-release-bot[bot]@users.noreply.github.com"
+
+      - name: Run release_ship.sh --bump
+        if: steps.bump.outputs.skip != 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          # gh CLI inside release_ship.sh uses GH_TOKEN for `gh pr
+          # create` and `gh pr merge --auto`. Using the App token
+          # makes the bump PR author the bot, consistent with the
+          # branch pusher.
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          # First-release bootstrap for a brand-new workspace crate.
+          # release_ship.sh + verify_crate_packages.sh both honor the
+          # env var: skip the publish dry-run and downstream package
+          # checks that fail when a path-dep crate isn't on crates.io yet.
+          # Defaults to "0" on push events.
+          HARN_BOOTSTRAP_NEW_CRATES: ${{ inputs.bootstrap_new_crates && '1' || '0' }}
+        run: |
+          args=(--bump "${{ steps.bump.outputs.type }}")
+          if [[ "${{ inputs.skip_dry_run }}" == "true" ]]; then
+            args+=(--skip-dry-run)
+          fi
+          ./scripts/release_ship.sh "${args[@]}"

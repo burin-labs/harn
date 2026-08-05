@@ -1,0 +1,62 @@
+import * as portable from "std/portable"
+import * as ui from "std/ui"
+
+pipeline test(harness: Harness, task) {
+  const source = """
+fn reduce(input: {count: int, delta: int}) -> {count: int} {
+  return {count: input.count + input.delta}
+}
+"""
+  const compiled = portable.compile(source, "reduce")
+  assert(is_ok(compiled), "portable reducer compiles")
+  const program = unwrap(compiled)
+  harness.stdio.println(program.schema)
+  harness.stdio.println(len(program.digest))
+  const completed = portable.start(program, {count: 40, delta: 2})
+  harness.stdio.println(completed.status)
+  harness.stdio.println(completed.value.count)
+  const privileged = portable.compile(
+    """
+fn ask(harness: Harness, input: string) -> string {
+  return harness.interaction.ask(input)
+}
+""",
+    "ask",
+  )
+  assert(is_ok(privileged), "portable capability function compiles")
+  const privileged_program = unwrap(privileged)
+  const denied = portable.start(privileged_program, "Continue?")
+  harness.stdio.println(denied.status)
+  harness.stdio.println(denied.diagnostic.code)
+  const grant_set = portable.grants(["interaction.ask"], bytes_from_hex("07".repeat(32)))
+  const suspended = portable.start(privileged_program, "Continue?", grant_set)
+  harness.stdio.println(suspended.status)
+  harness.stdio.println(suspended.request.capability + "." + suspended.request.operation)
+  const resumed = portable.resume(
+    privileged_program,
+    suspended.snapshot,
+    portable.accept(suspended.request, "yes"),
+    grant_set,
+  )
+  harness.stdio.println(resumed.status)
+  harness.stdio.println(resumed.value)
+  const run = portable.run(
+    privileged_program,
+    "Continue?",
+    grant_set,
+    fn(request) { return portable.accept(request, "handled") },
+  )
+  harness.stdio.println(run.value)
+  const invalid = portable.compile("fn reduce( {", "reduce")
+  harness.stdio.println(is_err(invalid))
+  harness.stdio.println(unwrap_err(invalid)[0].code)
+  const resource = ui.portable_app_resource(
+    "ui://harn/tests/portable",
+    "Portable test",
+    "test.handle_event",
+    program,
+    {count: 0},
+  )
+  harness.stdio.println(resource.capabilities.contains("harn.portable.v1"))
+  harness.stdio.println(resource.contents.contains("harn-portable-worker"))
+}

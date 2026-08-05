@@ -1,0 +1,57 @@
+import { cache_clear } from "std/cache"
+import { llm_cache_key, with_cache } from "std/llm/handlers"
+import { with_llm_script } from "std/testing"
+
+pipeline default(harness: Harness) {
+  const store = {
+    backend: "sqlite",
+    namespace: "with-cache-" + harness.random.uuid(),
+    path: path_join(
+      harness.fs.workspace_temp_dir(),
+      "harn-with-cache-sqlite-" + harness.random.uuid() + ".sqlite",
+    ),
+  }
+  cache_clear(harness.llm, {store: store})
+  with_llm_script(
+    harness.llm,
+    [
+      {text: "cached answer", model: "mock-model", provider: "mock"},
+      {text: "fresh answer", model: "mock-model", provider: "mock"},
+    ],
+    { ->
+      const opts = {provider: "mock", model: "mock-model", store: store, stream: false}
+      harness.stdio.println(
+        llm_cache_key("same prompt", "same system", opts).starts_with("sha256:"),
+      )
+      const first = with_cache(harness, "same prompt", "same system", opts)
+      const second = with_cache(harness, "same prompt", "same system", opts)
+      harness.stdio.println(first.text)
+      harness.stdio.println(second.text)
+      harness.stdio.println(json_stringify(first) == json_stringify(second))
+      harness.stdio.println(len(harness.llm.mock_calls()) == 1)
+      const skipped = with_cache(harness, "same prompt", "same system", opts + {tools: []})
+      harness.stdio.println(skipped.text)
+      harness.stdio.println(len(harness.llm.mock_calls()) == 2)
+    },
+  )
+  const fs_store = {
+    backend: "fs",
+    namespace: "with-cache-fs-" + harness.random.uuid(),
+    path: path_join(harness.fs.workspace_temp_dir(), "harn-with-cache-fs-" + harness.random.uuid()),
+  }
+  with_llm_script(
+    harness.llm,
+    [
+      {text: "fs cached", model: "mock-model", provider: "mock"},
+      {text: "fs fresh", model: "mock-model", provider: "mock"},
+    ],
+    { ->
+      const fs_opts = {provider: "mock", model: "mock-model", store: fs_store, stream: false}
+      const fs_first = with_cache(harness, "fs prompt", nil, fs_opts)
+      const fs_second = with_cache(harness, "fs prompt", nil, fs_opts)
+      harness.stdio.println(fs_first.text)
+      harness.stdio.println(fs_second.text)
+      harness.stdio.println(len(harness.llm.mock_calls()) == 1)
+    },
+  )
+}

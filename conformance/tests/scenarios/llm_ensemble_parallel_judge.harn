@@ -1,0 +1,14 @@
+// Conformance test for std/llm/ensemble::parallel_judge — output
+// preserves input order even with bounded concurrency.
+import { parallel_judge } from "std/llm/ensemble"
+
+pipeline default(harness: Harness) {
+  const judge_fn = { item -> {verdict: "score-" + to_string(item)} }
+  const results = parallel_judge(harness, [1, 2, 3, 4, 5, 6], judge_fn, {max_concurrent: 2})
+  harness.stdio.println(len(results))
+  harness.stdio.println(results[0].item)
+  harness.stdio.println(results[0].verdict.verdict)
+  harness.stdio.println(results[5].item)
+  harness.stdio.println(results[5].verdict.verdict)
+  harness.stdio.println(results[3].ok)
+}

@@ -1,0 +1,30 @@
+/**
+ * CH-03 (#1874): emits to one tenant scope MUST NOT leak into another
+ * tenant's read view. The resolver routes both writes and reads through
+ * `tenant:<id>:<name>`, so `harness.channels.events(...)` against a different
+ * `tenant_id` reads an entirely different topic.
+ */
+pipeline default(harness: Harness) {
+  const _ = harness.channels.append(
+    "pr.merged",
+    {who: "alice"},
+    {id: "ten-A-1", tenant_id: "tenant-A"},
+  )
+  const _ = harness.channels.append(
+    "pr.merged",
+    {who: "bob"},
+    {id: "ten-B-1", tenant_id: "tenant-B"},
+  )
+  const tenant_a = harness.channels.events("pr.merged", {tenant_id: "tenant-A"})
+  const tenant_b = harness.channels.events("pr.merged", {tenant_id: "tenant-B"})
+  const tenant_c = harness.channels.events("pr.merged", {tenant_id: "tenant-C"})
+  harness.stdio.println(len(tenant_a))
+  harness.stdio.println(tenant_a[0].payload.who)
+  harness.stdio.println(tenant_a[0].scope)
+  harness.stdio.println(tenant_a[0].scope_id)
+  harness.stdio.println(len(tenant_b))
+  harness.stdio.println(tenant_b[0].payload.who)
+  harness.stdio.println(tenant_b[0].scope_id)
+  // Tenant C never emitted — its view is empty.
+  harness.stdio.println(len(tenant_c))
+}

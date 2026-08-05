@@ -1,0 +1,44 @@
+fn read_only_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "read",
+    "Read a file",
+    {
+      handler: { args -> "" },
+      parameters: {path: {type: "string", description: "Path to read"}},
+      returns: {type: "string"},
+    },
+  )
+  return tools
+}
+
+pipeline test(harness: Harness, task) {
+  // Test agent() edge cases
+  // Agent with no config
+  const a1 = agent("minimal", {})
+  assert(a1._type == "agent", "empty config should still be agent")
+  assert(a1.name == "minimal", "should have name")
+  // Agent config with no system prompt — system defaults to nil
+  const cfg = agent_config(a1, "do something")
+  assert(cfg.system == nil, "system should be nil when not provided")
+  assert(cfg.prompt == "do something", "prompt should be set")
+  // Agent with all options
+  const a2 = agent(
+    "full",
+    {
+      system: "You are helpful",
+      provider: "mock",
+      model: "test",
+      max_iterations: 3,
+      tool_format: "native",
+      tools: read_only_tools(),
+    },
+  )
+  const cfg2 = agent_config(a2, "test")
+  assert_eq(cfg2.options.provider, "mock")
+  assert_eq(cfg2.options.tool_format, "native")
+  harness.stdio.log("agent edge case tests passed")
+}
+
+import { agent, agent_config } from "std/agent/workers"
