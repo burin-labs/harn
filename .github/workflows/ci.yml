@@ -868,6 +868,17 @@ jobs:
           # Full history + tags so the changelog retroactive-edit check can
           # traverse BASE..HEAD and inspect commit trailers.
           fetch-depth: 0
+          # Every git-reading Harn script in this lane depends on this.
+          # `persist-credentials: true` leaves an `include.path` in .git/config
+          # pointing at $RUNNER_TEMP/git-credentials-*.config, which lives
+          # outside the workspace and is therefore unreadable inside the Harn
+          # sandbox. Git refuses to parse an unreadable include and exits 128
+          # for *every* invocation, so `check_changelog_no_retroactive_edits`,
+          # `verify_release_metadata`, and the protocol symbol guard all read
+          # their base as unavailable and — before those guards were taught to
+          # fail closed — reported a clean sweep they never performed. Nothing
+          # in this lane pushes, so the credentials are pure liability.
+          persist-credentials: false
       # This lane only executes Harn scripts. Download the small CLI artifact,
       # not the multi-gigabyte nextest archive consumed in workspace-test archive mode.
       - name: Download portable Harn CLI

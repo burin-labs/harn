@@ -112,6 +112,32 @@ pub fn trailer_values(messages: string, prefix: string) -> list<string> {
 }
 
 /**
+ * Condense git's stderr into one reportable line.
+ *
+ * Every non-empty line is kept, joined with `; `. Taking only the first line
+ * loses the decisive one: git prefixes an unreadable `include.path` with
+ * `warning:` and then fails anyway, so a first-line-only report names a warning
+ * and hides the fatal error that actually stopped the command.
+ */
+pub fn git_error_detail(stderr: string, exit_code: int) -> string {
+  let parts: list<string> = []
+  for raw in stderr.split("\n") {
+    const line = raw.trim()
+    if line != "" {
+      parts = parts + [line]
+    }
+  }
+  if parts.count == 0 {
+    return "git exited " + to_string(exit_code) + " with no message"
+  }
+  const joined = parts.join("; ")
+  if joined.len() > 400 {
+    return joined.substring(0, 400) + " …"
+  }
+  return joined
+}
+
+/**
  * Resolve `ref` to a commit id. Returns `{sha, error}`; exactly one is set.
  *
  * Guards must do this before reading any path at `ref`, because `git show
@@ -126,11 +152,11 @@ pub fn resolve_commit(process: HarnessProcess, ref: string) -> dict {
   if result.success && result.stdout.trim() != "" {
     return {sha: result.stdout.trim(), error: ""}
   }
-  let detail = result.stderr.trim()
-  if detail == "" {
-    detail = "not a commit in this clone"
+  if result.stderr.trim() == "" && result.exit_code == 1 {
+    // `--quiet` reports "no such commit" as a silent exit 1.
+    return {sha: "", error: "not a commit in this clone"}
   }
-  return {sha: "", error: detail.split("\n")[0] ?? detail}
+  return {sha: "", error: git_error_detail(result.stderr, result.exit_code)}
 }
 
 /**
@@ -157,11 +183,7 @@ pub fn git_show_at(process: HarnessProcess, ref: string, path: string) -> dict {
   if absent {
     return {found: false, text: "", error: ""}
   }
-  let detail = stderr.trim()
-  if detail == "" {
-    detail = "git show exited " + to_string(result.exit_code) + " with no message"
-  }
-  return {found: false, text: "", error: detail.split("\n")[0] ?? detail}
+  return {found: false, text: "", error: git_error_detail(stderr, result.exit_code)}
 }
 
 /**
