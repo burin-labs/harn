@@ -6,7 +6,7 @@
 // changelog entry, but nothing named the symbols, so the first report of it was
 // a Swift compile error in a downstream repin two days later.
 import "../check_protocol_symbol_removals.harn"
-import { has_trailer, trailer_values } from "../git_base.harn"
+import { git_show_at, has_trailer, resolve_commit, trailer_values } from "../git_base.harn"
 
 const TS_SAMPLE = """
 export const MCP_PROTOCOL_VERSION = "2026-07-28"
@@ -129,4 +129,49 @@ pipeline test_failure_report_names_symbols_and_the_escape_hatch(harness: Harness
   // next reader treats a published-contract break as a lint to silence.
   assert_eq(report.contains("downstream contract"), true)
   assert_eq(report.contains("abc123"), true)
+}
+
+@test
+pipeline test_probe_failure_report_names_the_path_and_the_remedy(harness: Harness, task) {
+  const report = probe_failure_report(
+    "HEAD^1",
+    [{path: "(base ref)", error: "not a commit in this clone"}],
+  )
+  assert_eq(report.contains("HEAD^1"), true)
+  assert_eq(report.contains("not a commit in this clone"), true)
+  // An operator reading this in a CI log needs the remedy, not just the symptom.
+  assert_eq(report.contains("fetch-depth: 0"), true)
+  assert_eq(report.contains("PROTOCOL_SYMBOL_GUARD_BASE"), true)
+  // And it must not read as a clean comparison.
+  assert_eq(report.contains("did not make"), true)
+}
+
+@test
+pipeline test_unreachable_base_fails_instead_of_reporting_clean(harness: Harness, task) {
+  // The regression that motivated this: `git show <unfetched-sha>:<path>` says
+  // the path "exists on disk, but not in <sha>" — the same wording it uses for
+  // a path that genuinely was not in the tree. Read as absence, an unfetched
+  // base makes the guard exit 0 having compared nothing.
+  const missing = resolve_commit(
+    harness.process,
+    "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+  )
+  assert_eq(missing.sha, "")
+  assert_eq(missing.error != "", true)
+  const present = resolve_commit(harness.process, "HEAD")
+  assert_eq(present.error, "")
+  assert_eq(present.sha.len() >= 7, true)
+}
+
+@test
+pipeline test_git_show_at_separates_absence_from_failure(harness: Harness, task) {
+  const head = resolve_commit(harness.process, "HEAD").sha
+  const found = git_show_at(harness.process, head, "scripts/git_base.harn")
+  assert_eq(found.found, true)
+  assert_eq(found.error, "")
+  assert_eq(found.text.contains("pub fn git_run"), true)
+  const absent = git_show_at(harness.process, head, "scripts/no_such_file_here.harn")
+  assert_eq(absent.found, false)
+  // Absence at a resolved commit is an answer, not a failure.
+  assert_eq(absent.error, "")
 }

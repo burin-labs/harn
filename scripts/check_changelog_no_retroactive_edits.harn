@@ -22,8 +22,10 @@ import {
   commit_messages_since,
   flag_value,
   git_run,
+  git_show_at,
   has_trailer,
   resolve_base_ref,
+  resolve_commit,
 } from "./git_base.harn"
 
 const CHANGELOG_REL = "CHANGELOG.md"
@@ -329,12 +331,41 @@ pipeline main(harness: Harness, task) {
     flag_value(argv, "--base"),
     "CHANGELOG_GUARD_BASE",
   )
-  const base_show = git_run(harness.process, ["show", base + ":" + CHANGELOG_REL])
-  if !base_show.success {
-    // No base to compare against -- nothing to enforce.
+  const resolved = resolve_commit(harness.process, base)
+  if resolved.error != "" {
+    harness.stdio.eprintln(
+      "check_changelog_no_retroactive_edits: base=" + base + " resolved=none — "
+        + resolved.error,
+    )
+    harness.stdio.eprintln(
+      "The guard compares " + CHANGELOG_REL + " at HEAD against the same file at the"
+        + " base ref. With the base unresolvable it cannot tell a retroactive edit"
+        + " from a clean branch, so it fails rather than reporting a comparison it"
+        + " did not make. In CI this usually means the base commit was never"
+        + " fetched: give the checkout enough history (`fetch-depth: 0`) or point"
+        + " the guard at a ref that is present, via --base or CHANGELOG_GUARD_BASE.",
+    )
+    return 1
+  }
+  const base_show = git_show_at(harness.process, base, CHANGELOG_REL)
+  harness.stdio.println(
+    "check_changelog_no_retroactive_edits: base=" + base + " resolved="
+      + resolved.sha.substring(0, 12)
+      + " base_file="
+      + (if base_show.found { "read" } else { "absent" }),
+  )
+  if base_show.error != "" {
+    harness.stdio.eprintln(
+      "check_changelog_no_retroactive_edits: could not read " + CHANGELOG_REL
+        + " at " + base + " — " + base_show.error,
+    )
+    return 1
+  }
+  if !base_show.found {
+    // The changelog did not exist at the base commit: nothing to compare.
     return 0
   }
-  const base_text = base_show.stdout
+  const base_text = base_show.text
   if has_bypass_trailer(commit_messages_since(harness.process, base)) {
     harness.stdio.println(
       "check_changelog_no_retroactive_edits: bypassed via Allow-Retroactive-Changelog trailer",

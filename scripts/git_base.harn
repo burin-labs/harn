@@ -112,6 +112,59 @@ pub fn trailer_values(messages: string, prefix: string) -> list<string> {
 }
 
 /**
+ * Resolve `ref` to a commit id. Returns `{sha, error}`; exactly one is set.
+ *
+ * Guards must do this before reading any path at `ref`, because `git show
+ * <unfetched-sha>:<path>` reports the same "exists on disk, but not in ..."
+ * message as a path that genuinely was not in the tree. Without a separate
+ * resolution step, a base commit the clone never fetched is indistinguishable
+ * from a file the branch just added — and the second reading is the one that
+ * exits 0.
+ */
+pub fn resolve_commit(process: HarnessProcess, ref: string) -> dict {
+  const result = git_run(process, ["rev-parse", "--verify", "--quiet", ref + "^{commit}"])
+  if result.success && result.stdout.trim() != "" {
+    return {sha: result.stdout.trim(), error: ""}
+  }
+  let detail = result.stderr.trim()
+  if detail == "" {
+    detail = "not a commit in this clone"
+  }
+  return {sha: "", error: detail.split("\n")[0] ?? detail}
+}
+
+/**
+ * Read `path` as it stood at `ref`.
+ *
+ * Returns `{found, text, error}`. `found` is true only when git produced the
+ * blob. When git says the path is absent at that ref, `found` is false and
+ * `error` is empty: with `ref` already resolved to a commit, that is a real
+ * answer and it means nothing could have been removed. Every other git failure
+ * leaves `error` set.
+ *
+ * The distinction is the whole point. Collapsing "absent at base" and "git
+ * could not answer" into one falsy result is what lets a guard report a clean
+ * comparison it never performed.
+ */
+pub fn git_show_at(process: HarnessProcess, ref: string, path: string) -> dict {
+  const result = git_run(process, ["show", ref + ":" + path])
+  if result.success {
+    return {found: true, text: result.stdout, error: ""}
+  }
+  const stderr = result.stderr
+  const absent = stderr.contains("does not exist in")
+    || stderr.contains("exists on disk, but not in")
+  if absent {
+    return {found: false, text: "", error: ""}
+  }
+  let detail = stderr.trim()
+  if detail == "" {
+    detail = "git show exited " + to_string(result.exit_code) + " with no message"
+  }
+  return {found: false, text: "", error: detail.split("\n")[0] ?? detail}
+}
+
+/**
  * Read `--flag value` or `--flag=value` style options out of argv.
  * Returns nil when the flag is absent.
  */
