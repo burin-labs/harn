@@ -3684,8 +3684,14 @@ harn package registry verify ./harn-package-index.toml --remote \
 ```
 
 `--remote` additionally resolves every published Git tag and fails if it no
-longer points at the full commit SHA recorded in `rev`. The JSON output and
-optional receipt file use `harn.package_registry_verification.v1`.
+longer points at the full commit SHA recorded in `rev`, then reads `harn.toml`
+at that commit and fails if it declares a different package name or version
+than the entry advertises. A tag can resolve to exactly the right commit while
+that commit sells a different version, so tag identity alone does not prove the
+entry. Yanked versions are skipped: resolution already refuses them, so the
+registry makes no live claim about their source. The JSON output and optional
+receipt file use `harn.package_registry_verification.v1` and report
+`resolved_git_versions` and `verified_manifests`.
 
 ## harn rule publish / search
 
