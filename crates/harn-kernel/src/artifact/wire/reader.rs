@@ -4,7 +4,9 @@ use crate::Constant;
 
 use std::collections::BTreeMap;
 
-use super::{WireChunk, WireFunction, WireLocalSlot, WireModule, WireParam, WireProgram};
+use super::{
+    WireBindingType, WireChunk, WireFunction, WireLocalSlot, WireModule, WireParam, WireProgram,
+};
 use crate::artifact::validation::{semantic_abi_fingerprint, MetadataBudget};
 use crate::artifact::{ArtifactLimits, Diagnostic, EntryKind};
 
@@ -204,6 +206,16 @@ impl<'a> ArtifactReader<'a> {
                 scope_depth: self.u32("local scope depth")?,
             });
         }
+        let binding_type_count = self.count("binding types", self.limits.max_metadata_entries)?;
+        self.budget.metadata(binding_type_count)?;
+        let mut binding_types = Vec::with_capacity(binding_type_count);
+        for _ in 0..binding_type_count {
+            binding_types.push(WireBindingType {
+                name: self.string("binding-type name")?,
+                type_expr: self.type_expr(1)?,
+                nominal_type_names: self.string_vec("binding nominal type names")?,
+            });
+        }
         let references_outer_names = self.boolean("outer-name reference flag")?;
         Ok(WireChunk {
             code,
@@ -213,6 +225,7 @@ impl<'a> ArtifactReader<'a> {
             source_file,
             functions,
             local_slots,
+            binding_types,
             references_outer_names,
         })
     }

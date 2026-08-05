@@ -4165,8 +4165,14 @@ unvalidated boundary value is used directly
 - Prefer a typed result schema at the call site when the boundary supports it,
   or pass the value through `schema_expect()` / guard it with `schema_is()`
   before property or subscript access.
-- Add a shape annotation when the producer is intentionally dynamic but the
-  consumer needs a fixed contract.
+- A type annotation on the binding also validates: since harn#6252 a declared
+  type is checked where it is written, exactly as a declared parameter type is
+  checked where it is passed. `const doc: {name: string} = json_parse(text)`
+  rejects a payload whose `name` is not a string.
+- Choose between them by the report you want on failure. A binding assertion
+  names the binding and the declared type; `schema_expect()` names the field
+  that failed and why. For a payload from outside the program, the second is
+  usually worth the extra line.
 
 ### `HARN-RCV-001`
 

@@ -705,6 +705,7 @@ fn string_budget_covers_every_wire_metadata_family() {
             columns: vec![1],
             source_file: Some(source.into()),
             functions: Vec::new(),
+            binding_types: Vec::new(),
             local_slots: vec![WireLocalSlot {
                 name: local.into(),
                 mutable: false,
@@ -832,7 +833,7 @@ fn rejects_jumps_to_operands_and_invalid_try_handlers() {
         crate::Op::Return as u8,
     ];
     assert_eq!(
-        validate_code(&try_code, &[Constant::String("Error".into())], 0, 0, 0,)
+        validate_code(&try_code, &[Constant::String("Error".into())], 0, 0, 0, 0)
             .unwrap_err()
             .code,
         "artifact_invalid_jump"
@@ -843,7 +844,7 @@ fn rejects_jumps_to_operands_and_invalid_try_handlers() {
 fn validates_secondary_operands_and_builtin_identity() {
     let property = [crate::Op::SetLocalSlotProperty as u8, 0, 0, 0, 1];
     assert_eq!(
-        validate_code(&property, &[Constant::String("field".into())], 0, 1, 0,)
+        validate_code(&property, &[Constant::String("field".into())], 0, 1, 0, 0)
             .unwrap_err()
             .code,
         "artifact_invalid_index"
@@ -851,7 +852,7 @@ fn validates_secondary_operands_and_builtin_identity() {
 
     let method = [crate::Op::MethodCall as u8, 0, 0, 0];
     assert_eq!(
-        validate_code(&method, &[Constant::Int(0)], 0, 0, 0)
+        validate_code(&method, &[Constant::Int(0)], 0, 0, 0, 0)
             .unwrap_err()
             .code,
         "artifact_invalid_constant_type"
@@ -864,6 +865,7 @@ fn validates_secondary_operands_and_builtin_identity() {
             Constant::String("input".into()),
             Constant::String("int".into()),
         ],
+        0,
         0,
         0,
         0,
@@ -884,6 +886,7 @@ fn validates_secondary_operands_and_builtin_identity() {
         0,
         0,
         0,
+        0,
     )
     .unwrap();
     assert_eq!(
@@ -897,6 +900,7 @@ fn validates_secondary_operands_and_builtin_identity() {
             0,
             0,
             0,
+            0
         )
         .unwrap_err()
         .code,
@@ -908,7 +912,7 @@ fn validates_secondary_operands_and_builtin_identity() {
     builtin.extend_from_slice(&0_u16.to_be_bytes());
     builtin.push(0);
     assert_eq!(
-        validate_code(&builtin, &[Constant::String("len".into())], 0, 0, 0,)
+        validate_code(&builtin, &[Constant::String("len".into())], 0, 0, 0, 0)
             .unwrap_err()
             .code,
         "artifact_builtin_id_mismatch"
@@ -919,7 +923,7 @@ fn validates_secondary_operands_and_builtin_identity() {
     named_call.extend_from_slice(&crate::BuiltinId::from_name(name).raw().to_be_bytes());
     named_call.extend_from_slice(&0_u16.to_be_bytes());
     named_call.push(1);
-    validate_code(&named_call, &[Constant::String(name.into())], 0, 0, 0).unwrap();
+    validate_code(&named_call, &[Constant::String(name.into())], 0, 0, 0, 0).unwrap();
 }
 
 #[test]

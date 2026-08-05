@@ -182,6 +182,7 @@ harn_opcode_macros::define_opcodes! {
 
     // === Type checking ===
     CheckType { sync(self.execute_check_type()), disasm: check_type("CHECK_TYPE"), flags: [reads_outer_name] };
+    AssertBindingType { sync(self.execute_assert_binding_type()), disasm: binding_type_u16("ASSERT_BINDING_TYPE") };
 
     // === Result try operator ===
     TryUnwrap { sync(self.execute_try_unwrap()), disasm: bare("TRY_UNWRAP") };

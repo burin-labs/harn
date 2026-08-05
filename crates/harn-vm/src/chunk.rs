@@ -37,6 +37,22 @@ pub(crate) use disassembly::*;
 mod inline_cache;
 pub(crate) use inline_cache::*;
 
+/// One annotated `let` / `const` binding site of a chunk, indexed by
+/// `Op::AssertBindingType`.
+///
+/// The native mirror of `harn_kernel::BindingTypeSlot`. Both execution targets
+/// validate this slot through `harn_kernel::type_contract::matches_type`, so a
+/// binding assertion is one of the few checks that is bit-for-bit the same
+/// decision natively and in the portable kernel.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BindingTypeSlot {
+    pub name: String,
+    pub type_expr: TypeExpr,
+    /// Struct and enum names mentioned by `type_expr`. Every other named type
+    /// is unconstrained at runtime, matching parameter semantics.
+    pub nominal_type_names: Vec<String>,
+}
+
 /// A constant value in the constant pool.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Constant {
@@ -180,6 +196,9 @@ pub struct Chunk {
     constant_strings: Arc<Mutex<Vec<Option<crate::value::HarnStr>>>>,
     /// Source-name metadata for slot-indexed locals in this chunk.
     pub(crate) local_slots: Vec<LocalSlotInfo>,
+    /// Declared types for annotated `let` / `const` sites in this chunk,
+    /// indexed by the `AssertBindingType` operand.
+    pub(crate) binding_types: Vec<BindingTypeSlot>,
     /// True when this chunk's bytecode emits an opcode that resolves a
     /// name through the runtime env (`GetVar`, `SetVar`, `CallBuiltin`,
     /// `CallBuiltinSpread`, `CheckType`). The closure-call hot path uses
@@ -238,6 +257,7 @@ impl Clone for Chunk {
             ])),
             constant_strings: Arc::new(Mutex::new(vec![None; self.constants.len()])),
             local_slots: self.local_slots.clone(),
+            binding_types: self.binding_types.clone(),
             references_outer_names: self.references_outer_names,
             #[cfg(debug_assertions)]
             balance_depth: self.balance_depth,
@@ -262,6 +282,8 @@ pub struct CachedChunk {
     pub(crate) functions: Vec<CachedCompiledFunction>,
     pub(crate) inline_cache_slots: BTreeMap<usize, usize>,
     pub(crate) local_slots: Vec<LocalSlotInfo>,
+    #[serde(default)]
+    pub(crate) binding_types: Vec<BindingTypeSlot>,
     #[serde(default)]
     pub(crate) references_outer_names: bool,
 }
@@ -534,6 +556,7 @@ fn op_stack_delta(op: Op, count: u16) -> Option<i32> {
         // Value-preserving: unary ops, by-name lookups/checks, and scope /
         // iterator / exception-handler bookkeeping (the last three touch
         // side stacks, not the operand stack).
+        AssertBindingType => 0,
         Negate | Not | GetProperty | GetPropertyOpt | CheckType | TryUnwrap | TryWrapOk | Swap
         | PushScope | PopScope | PopIterator | PopHandler => 0,
         // Pop two, push one.
@@ -674,6 +697,15 @@ impl Chunk {
                     scope_depth: slot.scope_depth,
                 })
                 .collect(),
+            binding_types: portable
+                .binding_types
+                .into_iter()
+                .map(|slot| BindingTypeSlot {
+                    name: slot.name,
+                    type_expr: slot.type_expr,
+                    nominal_type_names: slot.nominal_type_names,
+                })
+                .collect(),
             references_outer_names: portable.references_outer_names,
             #[cfg(debug_assertions)]
             balance_depth: 0,
@@ -698,6 +730,7 @@ impl Chunk {
             inline_caches: Arc::new(Mutex::new(Vec::new())),
             constant_strings: Arc::new(Mutex::new(Vec::new())),
             local_slots: Vec::new(),
+            binding_types: Vec::new(),
             references_outer_names: false,
             #[cfg(debug_assertions)]
             balance_depth: 0,
@@ -1099,6 +1132,7 @@ impl Chunk {
                 .collect(),
             inline_cache_slots: self.inline_cache_slots.clone(),
             local_slots: self.local_slots.clone(),
+            binding_types: self.binding_types.clone(),
             references_outer_names: self.references_outer_names,
         }
     }
@@ -1114,6 +1148,7 @@ impl Chunk {
             functions,
             inline_cache_slots,
             local_slots,
+            binding_types,
             references_outer_names,
         } = cached;
         let inline_cache_count = inline_cache_slots.len();
@@ -1153,6 +1188,7 @@ impl Chunk {
             ])),
             constant_strings: Arc::new(Mutex::new(vec![None; constants_count])),
             local_slots,
+            binding_types,
             references_outer_names,
             #[cfg(debug_assertions)]
             balance_depth: 0,

@@ -605,11 +605,18 @@ const REPAIR_TYPES_ADD_SHAPE_ANNOTATION: RepairTemplate = RepairTemplate {
 
 /// The repair for a boundary value read without validation.
 ///
-/// Deliberately not `types/add-shape-annotation`. An annotation is erased
-/// before the value exists, so annotating a `json_parse` result changes
-/// nothing a payload can violate — it only removes the diagnostic. Offering it
-/// as the one-step fix for a rule about validation would auto-apply the escape
-/// the rule exists to close (harn#6234).
+/// Since harn#6252 a binding annotation *is* enforced, so annotating a
+/// `json_parse` result does validate it — the original reason for keeping
+/// `types/add-shape-annotation` away from this rule (that the annotation was
+/// erased, and so removed the diagnostic without removing the hazard) no longer
+/// holds.
+///
+/// This still offers schema validation rather than the annotation, for a
+/// different and narrower reason: a binding assertion reports the declared type
+/// and the value's kind, while `schema_expect` reports which field failed and
+/// why. For an untrusted payload that difference is the whole diagnosis. The
+/// annotation is now a correct fix; it is not the most informative one, and a
+/// one-step automated repair should offer the most informative.
 const REPAIR_TYPES_VALIDATE_BOUNDARY_VALUE: RepairTemplate = RepairTemplate {
     id: "types/validate-boundary-value",
     summary: "Validate the parsed value with schema_expect() or schema_check() before reading it",
@@ -958,14 +965,16 @@ mod tests {
     /// an inline options dict bypassing the typed option constructors, where no
     /// untrusted payload is involved and naming the shape is the whole fix.
     #[test]
-    fn boundary_validation_codes_are_not_repaired_by_an_annotation() {
+    fn boundary_validation_codes_offer_the_most_informative_repair() {
         for code in [Code::BoundaryValueUnvalidated, Code::LintUntypedDictAccess] {
             let Some(template) = code.repair_template() else {
                 continue;
             };
             assert_ne!(
                 template.id, "types/add-shape-annotation",
-                "{code:?} is a boundary-validation rule; its repair must validate, not annotate"
+                "{code:?} is a boundary-validation rule; an annotation validates the value \
+                 (harn#6252) but reports only the declared type and the value's kind, so the \
+                 offered one-step repair must be the one that names the failing field"
             );
         }
     }

@@ -52,9 +52,9 @@ pub use execution::{
 };
 pub use opcode::{
     opcode_abi_fingerprint, Op, OperandKind, Portability, OPCODE_ABI_ARTIFACT_VERSION,
-    OPCODE_ABI_FINGERPRINT_V2,
+    OPCODE_ABI_FINGERPRINT_V3,
 };
-pub use program::{Chunk, CompiledFunction, Constant, LocalSlotInfo, ParamSlot};
+pub use program::{BindingTypeSlot, Chunk, CompiledFunction, Constant, LocalSlotInfo, ParamSlot};
 
 mod chunk {
     pub use crate::program::*;

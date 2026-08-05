@@ -29,9 +29,12 @@ use harn_parser::builtin_signatures::{self, BuiltinSignature, TyExt};
 use harn_parser::typechecker::format_type;
 use harn_parser::TypeExpr;
 
-use crate::chunk::{CompiledFunction, ParamSlot};
+use crate::chunk::{BindingTypeSlot, CompiledFunction, ParamSlot};
 use crate::runtime_guards::RuntimeParamGuard;
-use crate::value::{ArgTypeMismatchError, ArityExpect, ArityMismatchError, VmError, VmValue};
+use crate::value::{
+    ArgTypeMismatchError, ArityExpect, ArityMismatchError, BindingTypeMismatchError, VmError,
+    VmValue,
+};
 use crate::vm::CallArgs;
 
 impl TypeContractValue for VmValue {
@@ -168,6 +171,32 @@ fn assert_value_matches_type_with_generics(
             span,
         })))
     }
+}
+
+/// Validate an annotated `let` / `const` initializer against its declared type.
+///
+/// The binding-site counterpart of [`validate_user_call`]'s per-parameter
+/// assertion, and deliberately the same decision procedure: both project the
+/// value through `harn_kernel::type_contract::matches_type`. A declared type
+/// therefore accepts and rejects the same values whether it is written on a
+/// parameter or on a binding — which is the whole point of checking bindings
+/// at all (harn#6252).
+pub fn validate_binding_type(
+    value: &VmValue,
+    slot: &BindingTypeSlot,
+    span: Option<Span>,
+) -> Result<(), VmError> {
+    if matches_type_with_generics(value, &slot.type_expr, &[], &slot.nominal_type_names) {
+        return Ok(());
+    }
+    Err(VmError::BindingTypeMismatch(Box::new(
+        BindingTypeMismatchError {
+            binding: slot.name.clone(),
+            expected: format_type(&slot.type_expr),
+            got: value.type_name(),
+            span,
+        },
+    )))
 }
 
 fn user_param_for_arg(func: &CompiledFunction, index: usize) -> Option<&ParamSlot> {

@@ -27,8 +27,9 @@ pub use env::{
 };
 pub use error::{
     categorized_error, classify_error_message, error_to_category, ArgTypeMismatchError,
-    ArityExpect, ArityMismatchError, DeadlockError, ErrorCategory, ProviderStreamDeadline,
-    ProviderStreamFailure, ProviderStreamFailureReason, ProviderStreamPhase, VmError,
+    ArityExpect, ArityMismatchError, BindingTypeMismatchError, DeadlockError, ErrorCategory,
+    ProviderStreamDeadline, ProviderStreamFailure, ProviderStreamFailureReason,
+    ProviderStreamPhase, VmError,
 };
 pub use handles::{
     VmAtomicHandle, VmChannelCloseState, VmChannelHandle, VmGenerator, VmJoinHandle, VmRange,

@@ -141,3 +141,26 @@ fn runtime_type_name(value: &RuntimeValue) -> &'static str {
         _ => "unsupported portable value",
     }
 }
+
+/// Check an annotated `let` / `const` initializer against its declared type.
+///
+/// The binding-site counterpart of [`validate_call`], and the same decision
+/// procedure: both run the value through `type_contract::matches_type`. A
+/// declared type therefore accepts and rejects the same values wherever it is
+/// written (harn#6252).
+pub(super) fn validate_binding(
+    value: &RuntimeValue,
+    slot: &crate::BindingTypeSlot,
+) -> Result<(), Diagnostic> {
+    if type_contract::matches_type(value, &slot.type_expr, &[], &slot.nominal_type_names) {
+        return Ok(());
+    }
+    Err(diagnostic(
+        "binding_type",
+        format!(
+            "binding `{}` rejected {}",
+            slot.name,
+            runtime_type_name(value)
+        ),
+    ))
+}

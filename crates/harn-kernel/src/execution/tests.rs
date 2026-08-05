@@ -629,3 +629,55 @@ fn non_finite_values_round_trip_through_requests_and_snapshots() {
         }
     );
 }
+
+/// The binding check is versioned artifact behavior, not a native-only feature.
+/// The portable kernel must reach the same verdict the native VM does, or an
+/// artifact would mean different things depending on where it runs.
+#[test]
+fn the_portable_kernel_enforces_a_binding_annotation() {
+    let program = compile_program(
+        "fn reduce(input) {\n  const name: string = input.name\n  return name\n}",
+        "reduce",
+        EntryKind::Function,
+    )
+    .unwrap();
+
+    let good = DataValue::from_json(serde_json::json!({"name": "ada"})).unwrap();
+    assert_eq!(
+        start(&program, good, &GrantSet::pure()),
+        Execution::Completed {
+            value: DataValue::String("ada".to_string())
+        }
+    );
+
+    let bad = DataValue::from_json(serde_json::json!({"name": 12345})).unwrap();
+    let Execution::Failed { diagnostic } = start(&program, bad, &GrantSet::pure()) else {
+        panic!("an int must not satisfy a `string` binding")
+    };
+    assert_eq!(diagnostic.code, "binding_type");
+    assert!(
+        diagnostic.message.contains("binding `name`"),
+        "diagnostic must name the binding, got: {}",
+        diagnostic.message
+    );
+}
+
+/// An unannotated binding is unchecked, and `any` is the written opt-out. Both
+/// must stay free: gradual typing is the reason a binding annotation is worth
+/// enforcing at all.
+#[test]
+fn unannotated_and_any_bindings_stay_unchecked() {
+    let program = compile_program(
+        "fn reduce(input) {\n  const loose = input\n  const opted: any = input\n  return [loose, opted]\n}",
+        "reduce",
+        EntryKind::Function,
+    )
+    .unwrap();
+
+    assert_eq!(
+        start(&program, DataValue::Int(7), &GrantSet::pure()),
+        Execution::Completed {
+            value: DataValue::List(vec![DataValue::Int(7), DataValue::Int(7)])
+        }
+    );
+}
