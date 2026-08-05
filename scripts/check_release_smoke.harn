@@ -1,4 +1,38 @@
 import { help_requested, parse, parser } from "std/cli/argparse"
+import "std/schema"
+
+/**
+ * What this script requires of `gh repo view --json nameWithOwner`.
+ *
+ * `gh` is a boundary like any other: it can return an error document, an empty
+ * object, or a field of the wrong type, and the failure then surfaces as an
+ * empty repo name several calls later. Validating here names the requirement
+ * once, where the payload arrives.
+ */
+fn repo_schema() {
+  return schema_object(
+    {nameWithOwner: schema_field(schema_string())},
+    {additional_properties: true},
+  )
+}
+
+/** The run fields this script reads, matching the `--json` list it asks for. */
+fn runs_schema() {
+  return schema_list(
+    schema_object(
+      {
+        databaseId: schema_field(schema_int()),
+        conclusion: schema_field(schema_string(), false),
+        event: schema_field(schema_string(), false),
+        displayTitle: schema_field(schema_string(), false),
+        headBranch: schema_field(schema_string(), false),
+        url: schema_field(schema_string(), false),
+        createdAt: schema_field(schema_string(), false),
+      },
+      {additional_properties: true},
+    ),
+  )
+}
 
 pub fn release_smoke_run_covers(run, tag: string) -> bool {
   if to_string(run?.conclusion ?? "") != "success" {
@@ -110,37 +144,48 @@ fn main(harness: Harness) -> int {
   try {
     let repo = to_string(harness.env.get("GITHUB_REPOSITORY") ?? "")
     if repo == "" {
-      const repo_doc = json_parse(
-        gh(harness.process, gh_bin, ["repo", "view", "--json", "nameWithOwner"]),
+      const repo_result = schema_check(
+        json_parse(gh(harness.process, gh_bin, ["repo", "view", "--json", "nameWithOwner"])),
+        repo_schema(),
       )
-      repo = to_string(repo_doc?.nameWithOwner ?? "")
+      if is_err(repo_result) {
+        throw "gh repo view returned no usable nameWithOwner: "
+          + to_string(
+          unwrap_err(repo_result).message,
+        )
+      }
+      repo = unwrap(repo_result).nameWithOwner
       if repo == "" {
         throw "gh repo view returned no nameWithOwner"
       }
     }
-    const runs = json_parse(
-      gh(
-        harness.process,
-        gh_bin,
-        [
-          "run",
-          "list",
-          "--repo",
-          repo,
-          "--workflow",
-          "Release smoke",
-          "--limit",
-          "100",
-          "--json",
-          "databaseId,conclusion,event,displayTitle,headBranch,url,createdAt",
-        ],
+    const runs_result = schema_check(
+      json_parse(
+        gh(
+          harness.process,
+          gh_bin,
+          [
+            "run",
+            "list",
+            "--repo",
+            repo,
+            "--workflow",
+            "Release smoke",
+            "--limit",
+            "100",
+            "--json",
+            "databaseId,conclusion,event,displayTitle,headBranch,url,createdAt",
+          ],
+        ),
       ),
+      runs_schema(),
     )
-    if type_of(runs) != "list" {
-      throw "gh run list returned a non-list payload"
+    if is_err(runs_result) {
+      throw "gh run list returned an unusable payload: "
+        + to_string(unwrap_err(runs_result).message)
     }
     const best = select_release_smoke_run(
-      runs,
+      unwrap(runs_result),
       tag,
       { run_id ->
         const result = harness.process.run(

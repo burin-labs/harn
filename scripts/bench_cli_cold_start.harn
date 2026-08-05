@@ -1,4 +1,52 @@
 import { shell_quote } from "std/runtime"
+import "std/schema"
+
+/** TOML and JSON make no distinction the callers care about; both are numbers. */
+fn schema_number() {
+  return schema_union([schema_int(), schema_float()])
+}
+
+/**
+ * What the budgets file has to look like.
+ *
+ * Every field is optional because every one has a documented fallback, so the
+ * schema's job is not presence but type: a `cold_ms` written as a string used
+ * to reach `number_or`, silently take the fallback, and report a budget nobody
+ * set.
+ */
+fn budgets_schema() {
+  const entry = schema_object(
+    {
+      cold_ms: schema_field(schema_number(), false),
+      regression_x: schema_field(schema_number(), false),
+    },
+    {additional_properties: true},
+  )
+  return schema_object(
+    {defaults: schema_field(entry, false), commands: schema_field(schema_dict(entry), false)},
+    {additional_properties: true},
+  )
+}
+
+/** The subset of hyperfine's `--export-json` document this script reads. */
+fn hyperfine_schema() {
+  return schema_object(
+    {
+      results: schema_field(
+        schema_list(
+          schema_object(
+            {
+              median: schema_field(schema_number(), false),
+              times: schema_field(schema_list(schema_number()), false),
+            },
+            {additional_properties: true},
+          ),
+        ),
+      ),
+    },
+    {additional_properties: true},
+  )
+}
 
 const DEFAULT_COLD_MS = 250.0
 
@@ -54,9 +102,13 @@ fn number_or(value, fallback: float) -> float {
 }
 
 pub fn load_budgets_text(text: string) {
-  const raw = toml_parse(text)
-  const defaults = raw?.defaults ?? {}
-  const commands_table = raw?.commands ?? {}
+  const parsed = schema_check(toml_parse(text), budgets_schema())
+  if is_err(parsed) {
+    throw "cold-start budgets file is not usable: " + to_string(unwrap_err(parsed).message)
+  }
+  const raw = unwrap(parsed)
+  const defaults = raw.defaults ?? {}
+  const commands_table = raw.commands ?? {}
   const default_cold = number_or(defaults?.cold_ms, DEFAULT_COLD_MS)
   const default_ratio = number_or(defaults?.regression_x, DEFAULT_REGRESSION_X)
   let resolved = {}
@@ -250,8 +302,11 @@ fn measure_with_hyperfine(
     }
     throw "hyperfine failed (exit ${res.exit_code})"
   }
-  const payload = json_parse(harness.fs.read_text(result_path))
-  const results = payload?.results ?? []
+  const payload = schema_check(json_parse(harness.fs.read_text(result_path)), hyperfine_schema())
+  if is_err(payload) {
+    throw "hyperfine wrote an unusable result document: " + to_string(unwrap_err(payload).message)
+  }
+  const results = unwrap(payload).results
   if results.count == 0 {
     throw "hyperfine produced no results"
   }

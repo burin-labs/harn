@@ -1,3 +1,5 @@
+import "std/schema"
+
 fn run_matrix(fs: HarnessFs, process: HarnessProcess, args) {
   const root = dirname(dirname(fs.runtime_paths().asset_root))
   return process.shell_at(root, "bash scripts/release_runner_matrix.sh " + args)
@@ -119,8 +121,34 @@ pipeline test_release_runner_policy_rejects_unsafe_requests(harness: Harness, ta
     false,
   )
   const root = dirname(dirname(harness.fs.runtime_paths().asset_root))
-  const policy = json_parse(
-    harness.fs.read_text(path_join(root, ".github", "release-runner-policy.json")),
+  // The policy is consumed by scripts/release_runner_matrix.sh, so no Harn
+  // module owns its shape. This test spreads the real document to build
+  // deliberately-invalid variants, and each assertion below is only meaningful
+  // if the base it started from was actually valid.
+  const policy = schema_expect(
+    json_parse(harness.fs.read_text(path_join(root, ".github", "release-runner-policy.json"))),
+    schema_object(
+      {
+        schema_version: schema_field(schema_int()),
+        targets: schema_field(
+          schema_list(
+            schema_object(
+              {
+                target: schema_field(schema_string()),
+                release_codegen_units: schema_field(schema_int()),
+                // Stringly-typed: scripts/release_runner_matrix.sh compares it as text,
+                // so "false" here is the string, not a boolean.
+                use_sccache: schema_field(schema_enum(["true", "false"])),
+                runners: schema_field(schema_dict(schema_string())),
+              },
+              {additional_properties: true},
+            ),
+            {min_items: 1},
+          ),
+        ),
+      },
+      {additional_properties: true},
+    ),
   )
   assert_eq(
     run_matrix_with_policy(

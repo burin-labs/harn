@@ -17,6 +17,7 @@
 // classified in that table, so the tiers this script derives can never silently
 // omit a guard. Pure selection lives in `members_for_tier`; main does the read.
 import { parse, parser } from "std/cli/argparse"
+import "./generated_artifacts_schema.harn"
 
 const REGISTRY = "scripts/generated_artifacts.toml"
 
@@ -57,8 +58,15 @@ fn main(harness: Harness) {
     )
     harness.runtime.exit(2)
   }
-  const registry = toml_parse(harness.fs.read_text(REGISTRY))
-  const dispatch = registry?.preflight?.dispatch ?? {}
+  const registry = schema_check(
+    toml_parse(harness.fs.read_text(REGISTRY)),
+    generated_artifacts_schema(),
+  )
+  if is_err(registry) {
+    harness.stdio.eprintln("error: ${REGISTRY} is not usable: ${unwrap_err(registry).message}")
+    harness.runtime.exit(1)
+  }
+  const dispatch = unwrap(registry).preflight?.dispatch ?? {}
   const members = members_for_tier(dispatch, tier)
   if members.count == 0 {
     harness.stdio.eprintln(

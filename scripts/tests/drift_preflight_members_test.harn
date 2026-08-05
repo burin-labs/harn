@@ -1,6 +1,7 @@
 // Tests for scripts/drift_preflight_members.harn — exercise the pure
 // `members_for_tier` selector on synthetic dispatch tables (no filesystem).
 import "../drift_preflight_members.harn"
+import "../generated_artifacts_schema.harn"
 
 @test
 pipeline test_members_source_tier_sorted(harness: Harness, task) {
@@ -34,8 +35,11 @@ pipeline test_members_unknown_tier(harness: Harness, task) {
 
 @test
 pipeline test_real_registry_pins_binary_semantics_boundaries(harness: Harness, task) {
-  const registry = toml_parse(harness.fs.read_text("../generated_artifacts.toml"))
-  const dispatch = registry?.preflight?.dispatch ?? {}
+  const registry = schema_expect(
+    toml_parse(harness.fs.read_text("../generated_artifacts.toml")),
+    generated_artifacts_schema(),
+  )
+  const dispatch = registry.preflight?.dispatch ?? {}
   assert_eq(
     {
       "check-trigger-examples": dispatch?.["check-trigger-examples"],
