@@ -26,7 +26,7 @@ ort = { version = "2", default-features = false, features = ["download-binaries"
 """
   const violations = optional_dep_feature_contract_violations_from_text("bad/Cargo.toml", text)
   assert_eq(violations.count, 1)
-  assert(violations[0].contains("no TLS feature"))
+  assert((violations[0] ?? "").contains("no TLS feature"))
 }
 
 @test
@@ -37,5 +37,5 @@ ort = { version = "2", default-features = false, features = ["download-binaries"
 """
   const violations = optional_dep_feature_contract_violations_from_text("multi/Cargo.toml", text)
   assert_eq(violations.count, 1)
-  assert(violations[0].contains("multiple TLS features"))
+  assert((violations[0] ?? "").contains("multiple TLS features"))
 }

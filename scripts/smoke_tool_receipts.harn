@@ -60,7 +60,7 @@ pipeline default(harness: Harness) {
     tool_caller: caller,
   }
   const result = agent_loop(harness, "smoke tool receipts", nil, agent_options)
-  const records = read_jsonl(harness.fs, harness, receipt_path, {strict: true})
+  const records = read_jsonl(harness.fs, receipt_path, {strict: true})
   harness.stdio.println("status=" + result.status)
   harness.stdio.println("receipt_path=" + receipt_path)
   harness.stdio.println("records=" + to_string(len(records)))

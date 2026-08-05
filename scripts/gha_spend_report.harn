@@ -264,7 +264,7 @@ fn collect_run_timing_rows(
   return run_timing_rows(samples)
 }
 
-fn main(_harness: Harness) {
+fn main(harness: Harness) {
   if help_requested(argv) {
     harness.stdio.println(usage())
     return nil
@@ -286,9 +286,10 @@ fn main(_harness: Harness) {
   }
   const runs_per_repo = to_int(parsed?.runs_per_repo ?? DEFAULT_RUNS_PER_REPO)
     ?? DEFAULT_RUNS_PER_REPO
-  require_gh(harness, _harness)
-  const billing_path = "/orgs/${org}/settings/billing/usage?year=${current_utc_year(harness)}"
-  const billing = gh_api_json(harness.process, _harness, billing_path)
+  require_gh(harness)
+  const billing_path =
+    "/orgs/${org}/settings/billing/usage?year=${current_utc_year(harness.process)}"
+  const billing = gh_api_json(harness.process, billing_path)
   if parsed?.json ?? false {
     if has_billing_usage_items(billing) {
       harness.stdio.println(json_stringify_pretty(billing))
@@ -315,9 +316,7 @@ fn main(_harness: Harness) {
       "(billing usage endpoint unavailable or unauthorized; falling back to run /timing minutes)",
     )
     harness.stdio.println(
-      render_spend_table(
-        collect_run_timing_rows(harness.process, _harness, org, repos, runs_per_repo),
-      ),
+      render_spend_table(collect_run_timing_rows(harness.process, org, repos, runs_per_repo)),
     )
   }
   return nil

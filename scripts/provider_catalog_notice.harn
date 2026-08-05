@@ -120,7 +120,11 @@ fn __ensure_output_dir(fs: HarnessFs, root: string, relative: string) -> string 
   return path
 }
 
-fn __resolve_source(process: HarnessProcess, root: string, candidate: dict) -> string {
+fn __resolve_source(
+  process: HarnessProcess,
+  root: string,
+  candidate: ProviderCatalogCandidate,
+) -> string {
   const source_dir = if candidate.kind == "endpoint" {
     "crates/harn-vm/src/llm/catalog_sources/10-providers"
   } else if candidate.kind == "capability" {
@@ -206,7 +210,7 @@ fn __run_checks(process: HarnessProcess, root: string) -> list<string> {
   return passed
 }
 
-fn __proposal_markdown(notice: dict, receipt: dict, candidate: dict) -> string {
+fn __proposal_markdown(notice: dict, receipt: dict, candidate: ProviderCatalogCandidate) -> string {
   return """# Incomplete provider catalog proposal
 
 This proposal was produced from a trusted provider notice. It intentionally
@@ -353,9 +357,17 @@ pipeline main(harness: Harness, task) {
     }
     __switch_notice_branch(harness.process, root, branch)
   }
+  // A `patch` or `incomplete_add` disposition is only reachable when validation
+  // produced a candidate, so a missing one here is a broken receipt rather than
+  // an empty notice — say so instead of writing a patch from nothing.
+  const candidate = plan.candidate
   if plan.receipt.disposition == "patch" {
-    const source_path = __resolve_source(harness.process, root, plan.candidate)
-    const patched = apply_candidate_to_source(harness.fs.read_text(source_path), plan.candidate)
+    if candidate == nil {
+      harness.stdio.eprintln("receipt disposition is 'patch' but the plan carries no candidate")
+      return 1
+    }
+    const source_path = __resolve_source(harness.process, root, candidate)
+    const patched = apply_candidate_to_source(harness.fs.read_text(source_path), candidate)
     if is_err(patched) {
       harness.stdio.eprintln(unwrap_err(patched))
       return 1
@@ -363,15 +375,18 @@ pipeline main(harness: Harness, task) {
     harness.fs.write_text(source_path, unwrap(patched))
     plan.receipt = plan.receipt + {source_path: __relative_to_root(root, source_path)}
   } else if plan.receipt.disposition == "incomplete_add" {
+    if candidate == nil {
+      harness.stdio.eprintln(
+        "receipt disposition is 'incomplete_add' but the plan carries no candidate",
+      )
+      return 1
+    }
     const proposals = path_join(root, "provider-catalog-proposals")
     if !harness.fs.exists(proposals) {
       harness.fs.mkdir(proposals, true)
     }
     const proposal_path = path_join(proposals, plan.receipt.notice_id + ".md")
-    harness.fs.write_text(
-      proposal_path,
-      __proposal_markdown(notice_raw, plan.receipt, plan.candidate),
-    )
+    harness.fs.write_text(proposal_path, __proposal_markdown(notice_raw, plan.receipt, candidate))
     plan.receipt = plan.receipt + {source_path: __relative_to_root(root, proposal_path)}
   }
   const generated = __run(
