@@ -662,6 +662,38 @@ fn the_portable_kernel_enforces_a_binding_annotation() {
     );
 }
 
+/// Struct field annotations are versioned artifact behavior. The portable
+/// kernel must reject a bad field at construction the same way the native VM
+/// does (harn#6268).
+#[test]
+fn the_portable_kernel_enforces_a_struct_field_annotation() {
+    let program = compile_program(
+        "struct User { name: string }\nfn reduce(input) {\n  return User { name: input.name }\n}",
+        "reduce",
+        EntryKind::Function,
+    )
+    .unwrap();
+
+    let good = DataValue::from_json(serde_json::json!({"name": "ada"})).unwrap();
+    assert_eq!(
+        start(&program, good, &GrantSet::pure()),
+        Execution::Completed {
+            value: DataValue::from_json(serde_json::json!({"name": "ada"})).unwrap()
+        }
+    );
+
+    let bad = DataValue::from_json(serde_json::json!({"name": 12345})).unwrap();
+    let Execution::Failed { diagnostic } = start(&program, bad, &GrantSet::pure()) else {
+        panic!("an int must not satisfy a `string` struct field")
+    };
+    assert_eq!(diagnostic.code, "binding_type");
+    assert!(
+        diagnostic.message.contains("binding `User`"),
+        "diagnostic must name the struct, got: {}",
+        diagnostic.message
+    );
+}
+
 /// An unannotated binding is unchecked, and `any` is the written opt-out. Both
 /// must stay free: gradual typing is the reason a binding annotation is worth
 /// enforcing at all.

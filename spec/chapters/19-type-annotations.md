@@ -3,10 +3,9 @@
 Harn has an optional, gradual type system. Omitting annotations is always valid.
 
 A type annotation you *do* write is checked twice: statically at compile time, and
-again at runtime against the value it describes. Both binding sites behave the same
-way — a declared parameter type is checked against the argument at the call, and a
-declared `let` / `const` type is checked against the initializer at the binding. See
-[Runtime enforcement](#runtime-enforcement).
+again at runtime against the value it describes. Parameter, `let` / `const`, and
+struct-field sites behave the same way — a declared type is checked against the
+value where it is written. See [Runtime enforcement](#runtime-enforcement).
 
 ### Basic types
 
@@ -1146,11 +1145,13 @@ variable produces a compile-time warning (and a runtime error).
 ### Runtime enforcement
 
 A written type annotation is enforced at runtime at every binding site, not only
-at compile time. The two sites are:
+at compile time. The three sites are:
 
 - a **parameter**, checked against the argument when the function is called;
 - a **`let` / `const` binding**, checked against the initializer when the binding
-  is evaluated.
+  is evaluated;
+- a **struct field**, checked against the value supplied at construction
+  (`User { name: … }` or `User(fields)`).
 
 ```harn,ignore
 const doc: {name: string} = json_parse(text)
@@ -1167,7 +1168,16 @@ This is what makes an annotation on a boundary value load-bearing: the declared
 type is the validation. `json_parse`, `toml_parse`, `yaml_parse`, `llm_call`, and
 every other producer of untrusted data are checked where their result is bound.
 
-Unannotated bindings are not checked, and `any` is the written opt-out:
+Struct field annotations are checked the same way. Constructing
+`struct User { name: string }` with a non-string `name` fails at construction
+rather than producing a `User` whose `name` is an int:
+
+```text
+Type error: binding `User` expects {name: string}, got struct
+```
+
+Unannotated bindings and unannotated struct fields are not checked, and `any` is
+the written opt-out:
 
 ```harn,ignore
 const loose = json_parse(text)        // unchecked

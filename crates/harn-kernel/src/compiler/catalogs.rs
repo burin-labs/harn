@@ -155,14 +155,17 @@ impl Compiler {
 
     pub(super) fn collect_struct_layouts(
         nodes: &[SNode],
-        layouts: &mut std::collections::HashMap<String, Vec<String>>,
+        layouts: &mut std::collections::HashMap<String, Vec<super::StructFieldLayout>>,
     ) {
         for sn in nodes {
             match &sn.node {
                 Node::StructDecl { name, fields, .. } => {
                     layouts.insert(
                         name.clone(),
-                        fields.iter().map(|field| field.name.clone()).collect(),
+                        fields
+                            .iter()
+                            .map(super::StructFieldLayout::from_ast)
+                            .collect(),
                     );
                 }
                 Node::Pipeline { body, .. }
