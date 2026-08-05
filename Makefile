@@ -451,6 +451,13 @@ lint-harn:
 	@$(HARN_CMD) check $(EXPERIMENT_HARN_CHECK)
 	@echo "=== Linting Harn-authored scripts ==="
 	@$(HARN_CMD) lint --strict scripts/*.harn scripts/tests/*.harn
+# `lint --strict` does not typecheck: it reported no issues for scripts that
+# `harn run` refuses to execute. Whether a script was typed came down to
+# whether some other target happened to run that exact file, so a script only
+# ever imported by a test had no type gate at all. This is the runnability bar
+# — every file here must at least be able to run.
+	@echo "=== Type-checking Harn-authored scripts ==="
+	@$(HARN_CMD) check scripts/*.harn scripts/tests/*.harn
 	@echo "=== Linting bundled demo scenarios ==="
 	@$(HARN_CMD) lint --strict crates/harn-cli/assets/demo
 	@echo "=== Checking stdlib metadata contract (HARN-STD-101) ==="

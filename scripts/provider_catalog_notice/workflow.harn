@@ -655,7 +655,10 @@ fn __apply_capability(
  * Apply one already-validated candidate to the single owning TOML table.
  * This function does no model work and refuses missing or duplicate tables.
  */
-pub fn apply_candidate_to_source(source: string, candidate: dict) -> Result<string, string> {
+pub fn apply_candidate_to_source(
+  source: string,
+  candidate: ProviderCatalogCandidate,
+) -> Result<string, string> {
   const lines = source.split("\n")
   const bounds_result = if candidate.kind == "capability" {
     __capability_bounds(lines, candidate)

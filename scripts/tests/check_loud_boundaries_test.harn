@@ -229,9 +229,9 @@ pipeline test_rust_sites_map_variants_back_to_wire_ids(harness: Harness, task) {
     .join("\n")
   const sites = rust_sites(grep, wires())
   assert_eq(sites.count, 2)
-  assert_eq(sites[0].path, "a.rs")
-  assert_eq(sites[0].id, "alpha")
-  assert_eq(sites[1].id, "beta")
+  assert_eq(sites[0]?.path, "a.rs")
+  assert_eq(sites[0]?.id, "alpha")
+  assert_eq(sites[1]?.id, "beta")
 }
 
 @test
@@ -240,6 +240,6 @@ pipeline test_harn_sites_read_the_boundary_field(harness: Harness, task) {
     .join("\n")
   const sites = harn_sites(grep)
   assert_eq(sites.count, 1)
-  assert_eq(sites[0].path, "x.harn")
-  assert_eq(sites[0].id, "chat_turn_cap")
+  assert_eq(sites[0]?.path, "x.harn")
+  assert_eq(sites[0]?.id, "chat_turn_cap")
 }

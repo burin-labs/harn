@@ -45,9 +45,9 @@ pipeline test_executes_rust_tests_ignores_build_only_and_prose(harness: Harness,
 pipeline test_raw_runner_invocation_is_a_violation(harness: Harness, task) {
   const violations = step_violations("w.yml", "job", {run: RAW}, no_env(), no_env())
   assert_eq(len(violations), 1)
-  assert_eq(violations[0].workflow, "w.yml")
-  assert_eq(violations[0].job, "job")
-  assert_eq(violations[0].command, RAW)
+  assert_eq(violations[0]?.workflow, "w.yml")
+  assert_eq(violations[0]?.job, "job")
+  assert_eq(violations[0]?.command, RAW)
 }
 
 @test
@@ -82,7 +82,7 @@ pipeline test_workflow_violations_reports_the_offending_job(harness: Harness, ta
   }
   const violations = workflow_violations("ci.yml", document)
   assert_eq(len(violations), 1)
-  assert_eq(violations[0].job, "dirty")
+  assert_eq(violations[0]?.job, "dirty")
 }
 
 @test
