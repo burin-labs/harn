@@ -9,6 +9,293 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.56
+
+### Added
+
+- The provider catalog now publishes `tool_support.parity_source` next to
+  `tool_support.parity`, reporting whether a route's tool-mode parity verdict was
+  `declared` on a capability row or `derived` from `native_tools` /
+  `text_tool_wire_format_supported`. The two were previously indistinguishable,
+  so a consumer gating on the verdict could act on a fallback as if it were a
+  finding. Scripts see the same split as `tool_mode_parity_source` on the catalog
+  and model projections. Neither value is a measurement: forced-format sweep
+  results remain in `tool_support.empirical_parity`.
+- `@host_entry` declares that an embedding host, rather than any Harn call
+  site, supplies a function's arguments. Harn recognizes its own entrypoints
+  already — `main`, a `@job`, a trigger handler, a `handler:` callback, a
+  connector runtime export — but a function an embedding Rust host reaches
+  through the runtime's call-into-script path is registered only in that host's
+  source, which no Harn tool can read. With no declaration the body was the sole
+  evidence, so the `capability-attenuation` lint reported the parameter as
+  over-broad and `harn fix --capability-migrations-only` narrowed it to the
+  capabilities the body happened to touch. For a function using two capabilities
+  that meant a `{net: HarnessNet, postgres: HarnessPostgres}` record, which the
+  host has no way to construct — so every runtime bump rewrote the signature
+  into one that failed at dispatch rather than at `harn check`.
+
+  The attribute takes no arguments and emits no runtime registration. It makes
+  the boundary structural: a declared host entry's capability parameter is
+  neither narrowed nor renamed, and the capability-record carrier is never
+  proposed for one at any capability count. The ambient-capability migration is
+  a separate rewrite and still introduces a `harness: Harness` parameter for a
+  function that calls deprecated ambient builtins.
+- `harn package registry verify --remote` now reads `harn.toml` at each entry's
+  pinned `rev` and fails when the manifest declares a different package name or
+  version than the entry advertises. A registry entry makes two separate claims —
+  that a version exists, and that its bytes live at some commit — and nothing
+  structural tied them together: an entry could sell `0.1.0` while the manifest
+  at its own `rev` still said `0.0.0`, with uniqueness, provenance shape, and tag
+  identity all passing, because the tag really did resolve to that commit. The
+  public Harn index carried exactly that entry. Yanked versions are skipped,
+  since resolution already refuses them and the registry makes no live claim
+  about their source. Receipts gain `verified_manifests` alongside
+  `resolved_git_versions`.
+
+### Changed
+
+- CI now runs every Linux lane on GitHub-hosted `ubuntu-latest` as its single
+  execution policy. Harn is a public repository, so hosted minutes are free, and
+  the residential self-hosted and Blacksmith rungs had already been disabled
+  permanently by repository variables — every run still paid for the org runner
+  availability probe, three-rung `runs-on` expressions, tier-conditional cache
+  branches, and a fallback test job that nothing could reach. Those are removed,
+  along with the Blacksmith sticky-disk sccache action they existed to serve. The
+  structural CI policy gates now assert the one-runner policy instead of
+  preserving the inactive alternatives, so re-adding a runner ladder fails the
+  build rather than passing silently.
+- The release binary-size gate is now a two-level policy instead of a single
+  release-day byte cliff.
+
+  One number was answering two questions. "Is this artifact safe to distribute?"
+  wants a fail-closed absolute ceiling; "did this change grow the binary more than
+  we expect?" wants a relative signal with attribution and a decision. Collapsing
+  them made the ceiling hug the last measurement — the old contract required
+  between 1 MiB and 4 MiB of headroom above a ~222 MiB baseline — so the ceiling
+  moved 212 → 213 → 216 → 218 → 220 MiB inside one release line, each raise its
+  own PR and its own exact release build after the useful work was already
+  certified.
+
+  `.github/release-binary-size-policy.json` (schema 2) now carries a
+  `distribution_fuse_bytes` that must sit 10-15% above the baseline and changes
+  rarely, and a `growth` threshold pair that fires early. A growth crossing needs
+  both an absolute floor and a ratio, and is cleared only by an `accepted_growth`
+  entry with a written reason — scoped to the baseline it was measured against, so
+  refreshing the baseline drops every stale acceptance in the same change.
+
+  Raw bytes cannot classify causality, so the baseline also records the build
+  identity it was measured with. Between v0.10.52 candidates with identical source
+  and toolchain, moving x86_64 release codegen units from 16 to 8 shed 8,407,168
+  bytes of codegen duplication and layout, not eight megabytes of product. When
+  the profile, codegen units, LTO, strip, rustc, or AOT embedding differ from the
+  baseline, the report names the divergent fields and declines to draw a growth
+  conclusion; the fuse still fails closed.
+
+  The size report now carries the verdict — fuse state, baseline delta in bytes
+  and hundredths of a percent, comparability, and both build identities — so a
+  blocked release explains itself instead of costing a second exact release build.
+  Given a baseline `size -A -d` table, it also attributes per-section deltas as
+  codegen layout or product content.
+- `release_gate.sh prepare` now runs every Harn metadata and projection tool on
+  one immutable CLI, snapshotted before the workspace version is rewritten.
+  Each metadata mutation invalidates Cargo fingerprints, so resolving the CLI
+  through `cargo run` per tool recompiled the runtime graph several times inside
+  a single nominal shell step — `release_metadata current`, then the version
+  rewrite, then `sync_protocol_fixture_runtime_versions.harn` — with the repeated
+  compilation hidden from the top-level transcript. The semantics these tools
+  need are the exact pre-mutation candidate semantics, so one binary built once
+  is the correct input rather than a shortcut. The candidate under test is still
+  built from the post-mutation tree and audited separately.
+
+  When `release_gate.sh full` has already built and audited a binary from the
+  same tree, prepare reuses it instead of building a second one. Otherwise it
+  builds one bootstrap CLI. Ambient `HARN_BIN` is never used for prepare-time
+  tools, because prepare cannot prove its source identity; a caller that can
+  assert it passes the new `HARN_RELEASE_TOOLS_BIN` instead.
+
+### Fixed
+
+- An agent run's `result.trace` now describes the same run as `result.tools` and
+  its transcript. `tool_executions`, `tool_rejections`, `tools_used`, `status`,
+  and `iterations` were rolled up from trace events that nothing ever emitted, so
+  a run whose transcript held three tool calls still reported zero tool activity
+  and a status of `unknown`. Those counters now come from the session that
+  already owns `result.tools`, so the two projections cannot disagree.
+
+  `trace.loop_facts` reports whether the counters were read from a session
+  (`observed`) or no session was available (`unavailable`), so an absent
+  measurement is no longer indistinguishable from an agent that used no tools.
+  `trace.total_duration_ms` is null rather than zero when nothing measured the
+  loop's wall time.
+
+  The two token counts now name their own scope. `trace.token_scope` is
+  `every_provider_call` and covers schema retries, empty-completion retries, and
+  model-ladder advances; `llm.token_scope` is `accepted_turn_results` and counts
+  one accepted result per agent turn. They can differ by a large factor on a run
+  with retries, which previously read as a defect.
+
+  `AgentTraceSummary.interventions` and `AgentTraceSummary.total_tool_duration_ms`
+  are removed. Both were fed only by trace events that had no producer, so they
+  were always absent or zero.
+- A `std/ui` app no longer loses the click that follows a field edit. Changing a
+  text field and immediately pressing a button dropped the button press: a field
+  commits on `change`, `change` fires on blur, and pressing a button blurs the
+  field — so the update arrived between `mousedown` and `mouseup`. `render()`
+  rebuilt the whole document with `replaceChildren()`, which destroyed the button
+  node, so `mouseup` landed on a different element and the browser never
+  synthesized the `click`.
+
+  `render()` now reconciles by element id. A node is reused whenever the id keeps
+  its kind, only the properties that differ are written, and children are moved
+  into place rather than detached and re-appended — an unchanged document touches
+  the DOM not at all. Beyond the reported symptom this keeps focus, caret
+  position, and scroll position through an update, and a canvas keeps its node
+  and its stroke handlers, so a redraw can no longer interrupt a stroke in
+  progress.
+- `setup-harn` now installs a pinned Harn version as soon as either canonical
+  verification source exists. It still prefers `SHA256SUMS`, but that file appears
+  only when a release is finalized, so a downstream job pinning a just-published
+  version could spend its whole CI timeout waiting for it while the exact
+  platform archive had been uploaded and digested for minutes. When `SHA256SUMS`
+  is absent, the bootstrap now reads the release API's immutable `sha256:` digest
+  for the exact named asset and verifies the downloaded bytes against it. If
+  `SHA256SUMS` later disagrees with a digest that was already used, the install
+  fails rather than silently reinstalling.
+- `harn check` now reports an unknown method on a known capability handle.
+  `harness.fs.bogus_method()` was accepted at check time and failed only when the
+  expression executed, which for a branch that runs during a live release meant
+  discovering the typo tens of minutes in.
+
+  The parser could not tell a typo from a real method because it could only read
+  methods the VM installs into the builtin manifest at startup, and 280 capability
+  methods are declared by `#[harn_builtin]` inside `harn-vm`. Before installation,
+  `harness.runtime.shared_cell` was indistinguishable from a misspelling. Those
+  names are now projected into the dependency-leaf contracts crate by
+  `make gen-vm-exposures`, guarded by `make check-vm-exposures`, so the answer no
+  longer depends on VM startup order. The signature, effects, and documentation
+  stay with the `#[harn_builtin]` declaration, which remains their one owner.
+
+  A capability method can come from any of three registries — the static
+  contracts, the `harn-vm` declarations, and the host-bridged groups an embedder
+  serves through `host_call`. The check consults all three, so a host-served
+  method such as `harness.workspace.search` is still accepted.
+- `harn fix` now performs the alias widening its own refusal message describes,
+  instead of only naming the callable it declined to migrate.
+
+  A callable whose value is read as a first-class reference keeps its arity
+  (#6146), because the reference is dispatched through a call site no static pass
+  can see. When the only thing reading that value is a parameter default governed
+  by a local `type X = fn(...)` alias, the call site is not invisible at all — the
+  alias is what fixes the arity. The migration now moves the alias, the
+  definition, and every call dispatched through the alias-typed binding together.
+
+  Moving the alias alone would not have been enough: a value call's arity is not
+  checked statically, so a half-migration passes `harn check` and then fails at
+  run time with `Arity mismatch`. The pass therefore refuses the whole widening
+  unless it can account for every use of the alias — an exported alias, a second
+  alias use it did not reason about, a value read outside a parameter default, or
+  a dispatch with no `Harness` in scope all keep the original refusal, which is
+  still reported in the plan's frozen list.
+- `harn check` now checks calls to members of a namespace import
+  (`import * as alias from "..."`) against the target module's exported
+  signatures. Previously the alias bound every member to `any`, so
+  `alias.member(...)` was the only call form with no argument checking at all —
+  a consumer left on an outdated positional call shape after a package's
+  `refactor!` reported `ok`. The same call written as a named import was already
+  checked, and the gap was identical for a local module and a package.
+
+  Signatures are lowered against the module that defines them, with named types
+  inlined structurally, so a namespace import still does not flatten the
+  target's type names into the consumer and a consumer type of the same name
+  cannot collide with it. Members whose signatures cannot be lowered faithfully
+  (generic, rest parameter, row-polymorphic) stay gradual rather than being
+  checked against a guess. Arity is unchanged: missing required arguments are
+  still an error and surplus arguments are still tolerated.
+- Schema validation no longer rejects a value for being large. The `$ref`
+  expansion budget was spent across the whole document, so an array whose `items`
+  schema is a `$ref` failed from the 257th element onward — 300 valid integers
+  produced 44 errors reading "schema $ref expansion limit exceeded (256)", each
+  naming an element that was fine. The budget now applies to one value at a time,
+  which is where it was needed: `all_of` and `union` re-expand the *same* value,
+  so a schema that branches on every hop is still bounded, while sibling elements
+  each get their own allowance. This also unbreaks host tool calls whose response
+  carries a long `$ref` array, such as `run_command` on a machine with many
+  reaped child processes.
+- The release gate now keeps its Cargo cache on the same durable storage root as
+  every dev-setup profile instead of under `$TMPDIR`. macOS prunes
+  `/var/folders/.../T` by file age and removes individual files rather than whole
+  trees, so a maturing release cache decayed into intact directories and
+  fingerprints with missing build-script outputs — Cargo read the build script as
+  fresh and never regenerated them, failing the release on a defect with no
+  relationship to the change being released. The longer the cache survived, the
+  likelier that became.
+
+  `make clean-stale-targets` now collects those release caches too, keeping the
+  one belonging to a release root that still exists and removing the rest. Each
+  release root gets its own cache and release worktrees are ephemeral, so a
+  durable location needs a real garbage collector rather than the operating
+  system's file-age reaper.
+
+  Stale-build-script recovery no longer spends its whole budget on the first
+  package Cargo happened to report. Cargo stops at the first missing output, so
+  one classification can only ever name the packages that failed on that attempt;
+  recovery now cleans what each round reveals across several rounds, and clears
+  the target directory outright when a round names nothing it has not already
+  cleaned.
+- The ambient-capability migration no longer introduces a `harness` parameter on
+  a function declared `@host_entry`. Narrowing a host-entered signature was
+  already refused (#6193), but the migration changed the same contract from the
+  other direction: a `@host_entry` function calling deprecated ambient builtins
+  had `harness: Harness` prepended, which the embedding host was never asked to
+  pass, so the failure landed at dispatch rather than at `harn check`.
+
+  It is now reported rather than silently skipped, with a reason that names the
+  declaration and sends the reader to the host contract instead of to the closure
+  wrapper a value-referenced callable needs. Refusing one callable does not cost
+  its neighbours their repair: everything else in the same file still migrates.
+- The Dependabot group checker keyed its group map by `package-ecosystem` alone
+  and threw when a config declared one ecosystem twice, so a valid multi-directory
+  config — `npm` for a dashboard and `npm` for a published SDK — could not be
+  checked at all. The parsed unit is now the update entry, carrying its normalized
+  `directories` list from either the `directory:` or `directories:` spelling, and
+  only a real collision is rejected: two entries of one ecosystem claiming the
+  same directory. Every error names the directory it is about.
+- `make lint-harn` gated every file under `scripts/` with `harn lint --strict`,
+  which does not typecheck — it reported no issues for scripts that `harn run`
+  refuses to execute. Whether a script was typed came down to whether some other
+  target happened to run that exact file, so a module only ever imported by a
+  test had no type gate at all. The target now also runs `harn check` over the
+  same files, and the six that were failing it are repaired, including a spend
+  report whose parameter rename left every call site passing an extra argument.
+- Harn gated its own scripts below the bar `harn-bump-fleet` holds its harnesses
+  to: `make lint-harn` type-checked them without `--strict-types`, so nine
+  scripts read parsed TOML and JSON without validating it first. Each carried its
+  own assumption about the document's shape, and a malformed file surfaced as a
+  nil several calls downstream rather than as a rejection at the read. The twelve
+  parse boundaries now validate with `schema_check`/`schema_expect`, the shape of
+  `scripts/generated_artifacts.toml` has one owner instead of five readers
+  guessing, and the gate is raised to match the fleet.
+- A grammar version that Harn deliberately holds back can no longer be
+  re-proposed and quietly re-blessed. `tree-sitter-swift` is pinned at `=0.7.2`
+  because 0.7.3 regressed to a root missing-node on the optional-chain fixture in
+  the fitness corpus, but nothing carried that decision anywhere a bot or a later
+  reader would look: the pin had no comment, Dependabot cannot read one anyway,
+  and no open issue tracked undoing it. The bump has been proposed three times and
+  merged once.
+
+  `.github/dependabot.yml` now ignores exactly the known-bad version, so a future
+  release that fixes the regression still arrives as a normal update, and #6227
+  tracks the unpin.
+
+  `make check-grammar-fitness` also told operators the wrong thing in the case
+  that mattered. A stale receipt has two causes wanting opposite fixes: editing
+  the corpus moves the corpus digest and regenerating is the whole fix, while a
+  grammar package moving versions moves that language's artifact digest and
+  regenerating only re-stamps fitness onto an artifact nothing has re-proven. Both
+  produced one message recommending `make gen-grammar-fitness`. The check now
+  names each language whose grammar moved, with both versions and both artifact
+  digests, and says to revert or re-run the corpus test instead.
+
 ## v0.10.55
 
 ### Added

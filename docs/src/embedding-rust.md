@@ -11,7 +11,7 @@ against:
 
 ```toml
 [dependencies]
-harn-serve = { git = "https://github.com/burin-labs/harn", tag = "v0.10.55" }
+harn-serve = { git = "https://github.com/burin-labs/harn", tag = "v0.10.56" }
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "sync"] }
 ```
@@ -56,10 +56,10 @@ start.
 
 ```toml
 # Parity-critical eval harness
-harn-serve = { git = "...", tag = "v0.10.55", features = ["full"] }
+harn-serve = { git = "...", tag = "v0.10.56", features = ["full"] }
 
 # Lean smoke-test harness
-harn-serve = { git = "...", tag = "v0.10.55", features = ["hostlib"] }
+harn-serve = { git = "...", tag = "v0.10.56", features = ["hostlib"] }
 ```
 
 When either hostlib feature is enabled, dispatch the private process guardian
