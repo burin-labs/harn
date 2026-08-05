@@ -66,6 +66,11 @@ const POLICIES: dict<string, EcosystemPolicy> = {
         "opentelemetry-otlp",
         "tracing-opentelemetry",
       ],
+      // The parser runtime and the grammars it loads. Listed together because
+      // a runtime bump and a grammar bump change the same thing — how source
+      // parses — and both are answerable only by the corpus result, not by the
+      // version number.
+      "tree-sitter": ["tree-sitter", "tree-sitter-rust", "tree-sitter-swift"],
     },
     catch_all_update_types: ["minor", "patch"],
   },

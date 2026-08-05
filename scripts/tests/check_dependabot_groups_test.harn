@@ -59,6 +59,12 @@ pipeline test_actual_dependabot_document(harness: Harness, task) {
   // A named family stays reviewable on its own.
   assert_eq(matching_groups(groups_for(entries, "cargo"), "wasmtime-wasi"), ["wasmtime"])
   assert_eq(matching_groups(groups_for(entries, "npm"), "react-dom"), ["react-runtime"])
+  // Parser runtime and grammars leave the batch together: a bump to either is
+  // answerable only by the corpus result, and in the catch-all one grammar
+  // question blocks every unrelated crate in the same PR (#6205, #6240).
+  assert_eq(matching_groups(groups_for(entries, "cargo"), "tree-sitter"), ["tree-sitter"])
+  assert_eq(matching_groups(groups_for(entries, "cargo"), "tree-sitter-swift"), ["tree-sitter"])
+  assert_eq(matching_groups(groups_for(entries, "cargo"), "tree-sitter-kotlin-ng"), ["tree-sitter"])
   // The npm entry governs the nested package directories too, not just the root.
   assert_eq(
     matching_groups(groups_for(entries, "npm", "/editors/vscode"), "react-dom"),
