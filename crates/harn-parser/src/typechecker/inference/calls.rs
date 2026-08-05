@@ -778,10 +778,16 @@ impl TypeChecker {
         // the generated projection of those declarations, and therefore gives
         // the same answer whether or not a VM ever starts (#6101).
         let Some(sig) = builtin_signatures::lookup_capability_method(capability, method) else {
+            // A host registers its own operations at runtime, so no static
+            // contract in this workspace owns them. `[check].host_capabilities`
+            // is the project's declaration that they exist, and reporting one
+            // as undeclared would flag correct code that the embedder already
+            // vouched for.
             if !harn_capability_contracts::is_declared_capability_method(
                 capability.field_name(),
                 method,
-            ) {
+            ) && !crate::is_declared_host_operation(capability.field_name(), method)
+            {
                 self.report_unknown_capability_method(capability, method, span);
             }
             // The signature is still unavailable, so there is nothing to check

@@ -71,6 +71,50 @@ pub fn legacy_builtin_alias_target(name: &str) -> Option<&'static str> {
     }
 }
 
+/// Host operations the embedding project declared, as `(capability, method)`.
+///
+/// A host registers these at runtime, so no static contract in this workspace
+/// owns them and the capability-method check would otherwise report every one
+/// as undeclared. `[check].host_capabilities` / `host_capabilities_path` is
+/// exactly that declaration, so the command that resolves it installs it here
+/// and the checker treats the pair as known.
+static DECLARED_HOST_OPERATIONS: std::sync::RwLock<
+    Option<std::collections::HashSet<(String, String)>>,
+> = std::sync::RwLock::new(None);
+
+/// Install the resolved host-capability declaration for this process.
+///
+/// Entries accumulate rather than replace: one invocation may check files that
+/// resolve different manifests, and dropping the earlier set would make the
+/// diagnostic depend on file ordering.
+pub fn install_declared_host_operations<I, C, M>(operations: I)
+where
+    I: IntoIterator<Item = (C, M)>,
+    C: Into<String>,
+    M: Into<String>,
+{
+    let Ok(mut guard) = DECLARED_HOST_OPERATIONS.write() else {
+        return;
+    };
+    let declared = guard.get_or_insert_with(std::collections::HashSet::new);
+    for (capability, method) in operations {
+        declared.insert((capability.into(), method.into()));
+    }
+}
+
+/// Did the embedding project declare `capability.method` as a host operation?
+pub fn is_declared_host_operation(capability: &str, method: &str) -> bool {
+    DECLARED_HOST_OPERATIONS
+        .read()
+        .ok()
+        .and_then(|guard| {
+            guard
+                .as_ref()
+                .map(|declared| declared.contains(&(capability.to_string(), method.to_string())))
+        })
+        .unwrap_or(false)
+}
+
 /// Returns `true` if `name` is a builtin recognized by the parser's static analyzer.
 pub fn is_known_builtin(name: &str) -> bool {
     builtin_signatures::is_builtin(name)

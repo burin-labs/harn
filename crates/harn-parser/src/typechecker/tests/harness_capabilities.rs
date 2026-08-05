@@ -153,3 +153,31 @@ fn unknown_method_on_a_narrow_handle_is_error() {
         "got: {errs:?}"
     );
 }
+
+/// An embedder's own host operation is declared, not contracted.
+///
+/// The host registers it at runtime, so no static contract in this workspace
+/// owns it and the method check would otherwise report correct code as
+/// undeclared. Both assertions live in one test because the declaration is
+/// process-global: split across two tests, the "before" case would depend on
+/// which test ran first. The operation name is unique to this test so the
+/// installed entry cannot mask a real miss elsewhere.
+#[test]
+fn declared_host_operation_is_not_reported_as_unknown() {
+    let source =
+        "fn main(harness: Harness) {\n  log(harness.runtime.embedder_probe_operation())\n}";
+
+    let before = errors(source);
+    assert!(
+        has(&before, "has no method `embedder_probe_operation`"),
+        "an undeclared host operation must still be reported: {before:?}"
+    );
+
+    crate::install_declared_host_operations([("runtime", "embedder_probe_operation")]);
+
+    let after = errors(source);
+    assert!(
+        !has(&after, "embedder_probe_operation"),
+        "a declared host operation must be accepted: {after:?}"
+    );
+}
