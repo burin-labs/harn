@@ -9,6 +9,188 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.57
+
+### Added
+
+- Canonical delegated-worker join receipts now record when the parent began
+  waiting and when it began and finished collapsing the child's result.
+
+  Receipts previously carried only the child's terminal time and the parent's
+  collection time, so a run report could measure one interval and had to emit an
+  explicit null for the others: scheduler wait, collection lag, and
+  result-collapsing overhead were indistinguishable. `harn run report` now
+  publishes `observed_wait_ms`, `observed_join_ms`, and
+  `observed_result_processing_ms` as three separate numbers.
+
+  One typed contract, `DelegatedJoinBoundaries`, owns the four boundary points,
+  and the parent's result collapse now runs inside the wait so all four travel on
+  a single receipt rather than being rejoined by identity and ordering downstream.
+  The receipt is still emitted exactly once per worker, and is emitted even when
+  the collapse fails, so a failed collapse is a measured interval rather than a
+  missing one.
+
+  Absent boundaries stay null rather than defaulting to the join instant: a report
+  that cannot distinguish "the parent never waited" from "the parent waited zero
+  milliseconds" is worse than one that says it does not know. Receipts written
+  before this change decode with every new boundary absent, a duplicate receipt
+  poisons all three intervals rather than only the lag, and boundaries recorded
+  out of order are reported and excluded instead of being read as a fast parent.
+
+  The ACP `subagent_join` payload gains `waitStartedAtMs`, `waitMs`,
+  `resultProcessingStartedAtMs`, `resultProcessingCompletedAtMs`, and
+  `resultProcessingMs`. Its previous `waitMs` field reported the
+  terminal-to-collection subtraction rather than the parent's wait and is renamed
+  to `collectionLagMs`; `waitMs` is now the parent wait it always claimed to be.
+- A new `check-protocol-symbol-removals` guard fails any branch that removes an
+  exported symbol from `spec/protocol-artifacts/` without declaring it with an
+  `Allow-Protocol-Removal: <symbol>` commit trailer. These bindings are a
+  downstream contract — integrators compile against the exported names — but
+  `check-protocol-artifacts` could not see a removal: it regenerates the artifacts
+  and compares, so a constant the generator stops emitting disappears from both
+  sides and the check stays green. Replaying the guard over the stable-MCP cutover
+  reports the four MCP version constants that release removed, none of which any
+  release note named; the first report of that removal was a downstream Swift
+  compile error two days later. The guard also prints how many artifacts it
+  actually compared against the base ref, so a run that could not reach the base
+  is distinguishable from a run that found nothing removed.
+- `HarnessLlm` now exposes `mock_load_jsonl`, so a pipeline can install a
+  versioned JSONL mock fixture without a host round-trip.
+
+  The builtin behind it already described itself as a capability — it takes the
+  fixture TEXT precisely so every host shares one parser without granting ambient
+  reads to scripts — but it was only reachable as `runtime_internal`. Source that
+  needed it had no path at all: the bare call was refused as not-callable source
+  API, and `harness.llm.mock_load_jsonl` type-checked and then threw
+  `HarnessLlm has no method` at the call.
+
+### Changed
+
+- `build-release-binaries.yml` now records, at each of the three steps that
+  harn-bump-fleet's pre-tag gate matches by display name, that renaming them is
+  a cross-repo change. The Actions API exposes no stable step id, so the gate
+  has to match on the name; #6226 renamed one and the next release spent 43
+  minutes before reporting a step that had run and passed as unexecuted.
+- Tree-sitter crates now arrive as their own Dependabot group instead of riding
+  in the routine `cargo-minor-patch` batch. A grammar bump is not a routine
+  dependency bump — it changes how source parses, and it is answered by the
+  `harn-hostlib` parser-agreement corpus rather than by a version number.
+
+  In the catch-all it also held unrelated work hostage. Twice a single
+  `tree-sitter-swift` bump blocked seventeen other crates from merging, because
+  the group could not land until the grammar question was settled. Its own pull
+  request gets its own review and its own revert, which is why the `cranelift`,
+  `wasmtime`, and `opentelemetry` families are already carved out the same way.
+
+  The membership is checked rather than conventional: `scripts/check_dependabot_groups.harn`
+  now carries the family, so dropping the exclusion that keeps grammars out of the
+  catch-all fails the gate with the exact crates that became ambiguous.
+
+### Fixed
+
+- `HARN-OWN-004` no longer recommends a shape type annotation as a way to validate
+  a boundary value. An annotation clears the diagnostic without checking anything
+  at runtime, so the help steered toward the one remedy that removed the signal
+  without adding the safety. It now names `schema_expect()`, `schema_check()`, and
+  `schema_is()` in an if-condition, all of which validate.
+- `harn fix` accepts several target paths and `--workspace`, so a capability
+  migration can cover sibling trees without naming the directory above them. A
+  repo that checks in deliberately-invalid parse fixtures could not run the
+  migration at all before this: naming the common ancestor failed on the fixtures,
+  and naming each tree on its own could not converge, because the codemod
+  propagates capability requirements across resolved module imports.
+
+  `harn test` now reads `[check].trusted_host_dispatch` from `harn.toml`, matching
+  `harn check` and `harn lint`. A project that declared the authority in its
+  manifest previously still had every `host_call` refused under test.
+- The branch-comparison guards now fail when they cannot read the base revision,
+  instead of exiting clean, and CI can actually run git again. `actions/checkout`
+  with persisted credentials leaves an `include.path` in `.git/config` pointing at
+  a file under `$RUNNER_TEMP`; that path is outside the workspace and unreadable
+  inside the Harn sandbox, and git refuses to parse an unreadable include, so
+  every git invocation from a Harn script in the audit lane exited 128. The lane
+  now checks out with `persist-credentials: false` — it never pushes. Separately,
+  `git show <unfetched-commit>:<path>` reports the same "exists on disk, but not
+  in ..." wording as a path that genuinely was not in the tree, so an unreadable
+  base was indistinguishable from a branch that removed nothing. Both
+  `check-changelog-no-retroactive-edits` and the new
+  `check-protocol-symbol-removals` now resolve the base to a commit first, print a
+  scope line naming the resolved commit and what they compared, and exit non-zero
+  with git's own message when they could not compare.
+- Manual recovery of an existing release tag no longer fails for tags cut before
+  the binary-size policy contract existed. Recovery runs the policy from the
+  dispatch ref but the size script from the tag's own source, so the growth signal
+  was executing a script that predated `BINARY_SIZE_FUSE_BYTES` and falling back
+  to its hardcoded budget — failing a binary that had just cleared the current
+  distribution fuse. The growth signal is now skipped, with a notice and a
+  `growth_signal: not-evaluated` line in the report, when the checked-out source
+  has no `.github/release-binary-size-policy.json`. The fuse still applies.
+- `harn fix` no longer fails a run because a repository contains fixtures that
+  are *supposed* to be unparseable. A `.harn` with a sibling `.error` file — the
+  convention this repo's `conformance/tests/` and burin-code's
+  `conformance/errors/` already use — is recognized as declared-invalid: it is
+  still never rewritten, and it is reported rather than dropped silently, but it
+  does not fail the run.
+- A parse failure that *nothing* declares still fails, which is the distinction
+  that matters: an undeclared one is a corrupt file.
+- This unblocks runtime bumps for every consuming repo that tests its own parser
+  errors. The reusable bump workflow runs `harn fix --apply .` repo-wide under
+  `set -euo pipefail`, so four intentionally-broken fixtures had left burin-code
+  nine patch releases behind, with each bump discarding a run that had already
+  applied 4828 repairs successfully.
+- `HARN-LNT-029`, the lint face of the boundary-validation rule, offered
+  `types/add-shape-annotation` as its one-step repair. An annotation is erased
+  before the value exists, so applying that repair silenced the lint and left the
+  payload unchecked — the escape the rule exists to close, one keystroke away and
+  reachable without reading the help text that no longer mentions it. The repair
+  is now `types/validate-boundary-value`, which points at `schema_expect()` and
+  `schema_check()`. `HARN-LNT-060` keeps the annotation repair: it is about an
+  inline options dict bypassing the typed option constructors, where no untrusted
+  payload is involved.
+- The release-provenance gate no longer fails on a reviewed bump of the
+  attestation action. It asserted `actions/attest` at one exact commit SHA, so
+  every legitimate update to that action broke the gate until someone edited the
+  assertion to match — and an assertion that must be edited in lockstep with the
+  thing it asserts cannot fail for any reason except forgetting to edit it.
+
+  It now requires `actions/attest` pinned to a full-length commit SHA, which
+  rejects the failures that actually matter — a mutable tag such as `@v4`, or a
+  different action entirely — while letting a reviewed version change through.
+- `harn fix` no longer refuses a capability migration because some unrelated file
+  binds the callable's name.
+
+  The first-class-reference check collected every identifier in the program and
+  intersected that with the callable set. The set is whole-program on purpose, so
+  a registry in one module can freeze a handler defined in another, but that
+  reach also meant an ordinary `const repo_root = ...` anywhere in a corpus froze
+  every `repo_root` helper in it. Local `let`/`const` bindings, destructuring
+  patterns, and parameter names are now excluded, so only a real value read
+  freezes a signature.
+
+  On a corpus of 365 capability-migration errors this moved `harn fix
+  --capability-migrations-only` from 6 applied repairs to 362.
+- Repository guards that derive their scope from a glob now fail when the glob
+  matched nothing, instead of reporting a clean sweep. `check_ci_cache_policy`,
+  `check_rust_test_lane_policy`, and `check_receipt_struct_duplication` each drew
+  their entire finding set from a file walk; if that walk matched nothing — wrong
+  invocation root, a renamed directory — every policy held vacuously and the check
+  exited 0. `check_receipt_struct_duplication` printed nothing at all, so a scan of
+  2,621 files and a scan of none looked identical. Each now prints what it
+  inspected and treats an empty scope as a failure, with the message naming the
+  pattern that matched nothing.
+- The `Harn audit gates` CI lane can run git again, and two checks that read git
+  now fail instead of reporting a pass they never performed. Persisted checkout
+  credentials leave an `include.path` in `.git/config` pointing at a
+  `$RUNNER_TEMP` file the Harn sandbox cannot read, and git refuses to parse an
+  unreadable include — exiting 128 for every invocation. The lane checks out with
+  `persist-credentials: false` (it never pushes). The source file-length ratchet
+  reconciles its walk against `git ls-files`, so it lost that cross-check entirely
+  and still reported a pass; an unanswerable `git ls-files` is now a
+  `reconciliation_unavailable` finding carrying git's own message.
+  `verify_release_metadata` treated every failed git command as "no tag" and
+  returned clean, silently disabling the whole tag-state gate; it now resolves
+  HEAD first and fails with git's message when it cannot.
+
 ## v0.10.56
 
 ### Added
