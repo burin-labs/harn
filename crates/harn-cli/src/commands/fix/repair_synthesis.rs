@@ -17,7 +17,13 @@ pub(super) fn synthesize_ambient_capability_repair(
     escape: &mut ValueEscape<'_>,
 ) -> Option<(Repair, Vec<FixEdit>, RepairImpactWire)> {
     ambient_capability_handle(diag.code)?;
-    let infos = collect_callable_infos(program, source, exported_names, escape.referenced_by_value);
+    let infos = collect_callable_infos(
+        program,
+        source,
+        exported_names,
+        escape.referenced_by_value,
+        escape.manifest_handlers,
+    );
     let owner_idx = infos.iter().position(|info| {
         info.ambient_capability_calls.iter().any(|call| {
             call.code == diag.code
@@ -274,7 +280,13 @@ pub(super) fn synthesize_missing_harness_repair(
     context: &AmbientRepairContext,
     escape: &mut ValueEscape<'_>,
 ) -> Option<(Repair, Vec<FixEdit>, RepairImpactWire)> {
-    let infos = collect_callable_infos(program, source, exported_names, escape.referenced_by_value);
+    let infos = collect_callable_infos(
+        program,
+        source,
+        exported_names,
+        escape.referenced_by_value,
+        escape.manifest_handlers,
+    );
     let owner_idx = infos
         .iter()
         .enumerate()
@@ -330,7 +342,13 @@ pub(super) fn synthesize_missing_root_argument_repair(
     context: &AmbientRepairContext,
     escape: &mut ValueEscape<'_>,
 ) -> Option<(Repair, Vec<FixEdit>, RepairImpactWire)> {
-    let infos = collect_callable_infos(program, source, exported_names, escape.referenced_by_value);
+    let infos = collect_callable_infos(
+        program,
+        source,
+        exported_names,
+        escape.referenced_by_value,
+        escape.manifest_handlers,
+    );
     let owner_idx = infos
         .iter()
         .enumerate()

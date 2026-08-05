@@ -6,6 +6,9 @@
 //! call-into-script path has none of those, so the body was the only evidence
 //! and the migration narrowed the signature to whatever the body touched
 //! (#6193).
+//!
+//! The attribute is for that case only. A boundary the manifest already
+//! declares needs no attribute and gets none — see `manifest_handlers` (#6272).
 
 use super::*;
 

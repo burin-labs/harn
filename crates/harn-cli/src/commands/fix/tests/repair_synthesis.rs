@@ -203,6 +203,7 @@ fn missing_root_argument_threads_a_distinct_root_past_a_narrow_harness_binding()
             cross_module_importer_count: 0,
         },
         &mut ValueEscape {
+            manifest_handlers: &BTreeSet::new(),
             referenced_by_value: &BTreeSet::new(),
             frozen: &mut Vec::new(),
         },
@@ -260,6 +261,7 @@ fn missing_root_argument_repair_preserves_parenthesized_first_argument() {
             cross_module_importer_count: 0,
         },
         &mut ValueEscape {
+            manifest_handlers: &BTreeSet::new(),
             referenced_by_value: &BTreeSet::new(),
             frozen: &mut Vec::new(),
         },

@@ -1,13 +1,14 @@
 //! Frozen-signature facts for the capability migration.
 //!
-//! Two different callables must not have a `harness` parameter introduced, for
-//! the same underlying reason: something outside the fixer's view calls them at
-//! their declared arity. A callable whose value is read as a first-class
-//! reference is invoked through a call site no static pass can see (#6146); a
-//! callable declared `@host_entry` is entered by an embedding host whose only
-//! registration lives in that host's source (#6193). This module owns both
-//! halves of the decision: which names stay frozen, and the record of what
-//! freezing actually blocked.
+//! Some callables must not have a `harness` parameter introduced, for one
+//! underlying reason: something outside the fixer's view calls them at their
+//! declared arity. A callable whose value is read as a first-class reference is
+//! invoked through a call site no static pass can see (#6146); one declared
+//! `@host_entry` is entered by an embedding host whose only registration lives
+//! in that host's source (#6193); one named by a `harn.toml` hook or trigger is
+//! entered by the runtime through a registration that is written down but is
+//! not a call site (#6272). This module owns both halves of the decision: which
+//! names stay frozen, and the record of what freezing actually blocked.
 
 use std::collections::BTreeSet;
 
@@ -41,6 +42,9 @@ pub(super) enum FrozenCause {
     ValueReference,
     /// The callable is declared `@host_entry` (#6193).
     HostEntry,
+    /// A `harn.toml` block registers the callable as a runtime entry point
+    /// (#6272). Same contract as `@host_entry`, already written down.
+    ManifestHandler,
 }
 
 /// The value-escape facts one planning pass carries.
@@ -51,6 +55,9 @@ pub(super) enum FrozenCause {
 /// positional parameters threaded through every synthesizer.
 pub(super) struct ValueEscape<'a> {
     pub(super) referenced_by_value: &'a BTreeSet<String>,
+    /// Names this file's manifest registers as runtime handlers, already
+    /// resolved to this file — see `manifest_host_entries`.
+    pub(super) manifest_handlers: &'a BTreeSet<String>,
     pub(super) frozen: &'a mut Vec<FrozenCallable>,
 }
 
@@ -79,6 +86,9 @@ impl FrozenCallable {
             ),
             FrozenCause::HostEntry => format!(
                 "it is declared `@host_entry`, so an embedding host supplies its arguments at the arity it declares. It owns the ambient capability use, and a parameter the host was never asked to pass cannot be introduced — thread the capability through an existing parameter, or have the host pass it and drop `@host_entry` from `{name}`"
+            ),
+            FrozenCause::ManifestHandler => format!(
+                "`harn.toml` registers it as a runtime handler, so the runtime invokes it at the arity the registration fixes. It owns the ambient capability use, and a parameter the runtime was never asked to pass cannot be introduced — thread the capability through an existing parameter, or remove the `harn.toml` block that names `{name}`"
             ),
         };
         Self {

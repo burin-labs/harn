@@ -25,17 +25,26 @@ const HOST_ENTRY_ATTRIBUTE: &str = "host_entry";
 /// cannot. A value reference is checked first because it is the stronger
 /// statement: the call site is invisible, not merely external — unless the
 /// widening proved it visible after all, in which case the reference stops
-/// being a reason to freeze anything.
+/// being a reason to freeze anything. The remaining two both say an entry
+/// point was declared, and differ only in where: the source, or `harn.toml`.
 fn frozen_cause(
     name: &str,
     referenced_by_value: &BTreeSet<String>,
+    manifest_handlers: &BTreeSet<String>,
     host_entry: bool,
     widening: &AliasWidening,
 ) -> Option<FrozenCause> {
     if referenced_by_value.contains(name) && !widening.covers(name) {
         return Some(FrozenCause::ValueReference);
     }
-    host_entry.then_some(FrozenCause::HostEntry)
+    if host_entry {
+        return Some(FrozenCause::HostEntry);
+    }
+    // Checked last only because the attribute is the more specific statement
+    // when a callable carries both; the two are equally binding.
+    manifest_handlers
+        .contains(name)
+        .then_some(FrozenCause::ManifestHandler)
 }
 
 pub(super) fn collect_callable_infos(
@@ -43,6 +52,7 @@ pub(super) fn collect_callable_infos(
     source: &str,
     exported_names: &BTreeSet<String>,
     referenced_by_value: &BTreeSet<String>,
+    manifest_handlers: &BTreeSet<String>,
 ) -> Vec<CallableInfo> {
     // A value-referenced callable is frozen unless the alias that fixes its
     // arity moves with it (#6153). Deciding that needs the whole file, so it is
@@ -99,7 +109,13 @@ pub(super) fn collect_callable_infos(
                     has_params: has_params || !params.is_empty(),
                     bound_names,
                     harness_binding: harness_param_name(params).map(str::to_string),
-                    frozen_cause: frozen_cause(name, referenced_by_value, host_entry, &widening),
+                    frozen_cause: frozen_cause(
+                        name,
+                        referenced_by_value,
+                        manifest_handlers,
+                        host_entry,
+                        &widening,
+                    ),
                     alias_widening_edits: widening.edits_for(name).to_vec(),
                     calls,
                     ambient_capability_calls,
@@ -135,7 +151,13 @@ pub(super) fn collect_callable_infos(
                     has_params: has_params || !params.is_empty(),
                     bound_names,
                     harness_binding: harness_param_name(params).map(str::to_string),
-                    frozen_cause: frozen_cause(name, referenced_by_value, host_entry, &widening),
+                    frozen_cause: frozen_cause(
+                        name,
+                        referenced_by_value,
+                        manifest_handlers,
+                        host_entry,
+                        &widening,
+                    ),
                     alias_widening_edits: widening.edits_for(name).to_vec(),
                     calls,
                     ambient_capability_calls,
