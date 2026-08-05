@@ -279,7 +279,7 @@ Lints are not hard errors. The code compiles, but Harn flags the pattern as like
 | [`HARN-LNT-026`](#harn-lnt-026) | prompt injection risk lint | `prompts/escape-injection` | `scope-local` |
 | [`HARN-LNT-027`](#harn-lnt-027) | connector effect policy lint | — | — |
 | [`HARN-LNT-028`](#harn-lnt-028) | unnecessary cast lint | `casts/remove-redundant` | `behavior-preserving` |
-| [`HARN-LNT-029`](#harn-lnt-029) | untyped dict access lint | `types/add-shape-annotation` | `surface-changing` |
+| [`HARN-LNT-029`](#harn-lnt-029) | untyped dict access lint | `types/validate-boundary-value` | `scope-local` |
 | [`HARN-LNT-030`](#harn-lnt-030) | constant logical operand lint | `expressions/simplify` | `behavior-preserving` |
 | [`HARN-LNT-031`](#harn-lnt-031) | pointless comparison lint | `expressions/simplify` | `behavior-preserving` |
 | [`HARN-LNT-032`](#harn-lnt-032) | comparison to bool lint | `expressions/simplify` | `behavior-preserving` |
@@ -2757,8 +2757,8 @@ unnecessary cast lint
 
 untyped dict access lint
 
-- **Repair:** `types/add-shape-annotation` &nbsp;·&nbsp; **Safety:** `surface-changing`
-- Annotate the dict with a concrete shape type
+- **Repair:** `types/validate-boundary-value` &nbsp;·&nbsp; **Safety:** `scope-local`
+- Validate the parsed value with schema_expect() or schema_check() before reading it
 
 #### How to fix
 

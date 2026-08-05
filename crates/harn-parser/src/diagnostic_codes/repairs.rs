@@ -299,7 +299,12 @@ impl Code {
             Code::LintUnhandledApprovalResult => Some(&REPAIR_ERRORS_CHECK_OR_RESCUE),
             Code::LintMissingHarndoc => Some(&REPAIR_DOC_ADD_HARNDOC),
             Code::LintDuplicateMatchArm => Some(&REPAIR_MATCH_REMOVE_DUPLICATE_ARM),
-            Code::LintUntypedDictAccess => Some(&REPAIR_TYPES_ADD_SHAPE_ANNOTATION),
+            // HARN-LNT-029 is the lint face of the boundary-validation rule, so
+            // its repair has to validate. HARN-LNT-060 below is a different
+            // complaint — an inline options dict bypassing the typed option
+            // constructors — where naming the shape is the whole fix and no
+            // untrusted payload is involved.
+            Code::LintUntypedDictAccess => Some(&REPAIR_TYPES_VALIDATE_BOUNDARY_VALUE),
             Code::LintUnnormalizedOptions => Some(&REPAIR_TYPES_ADD_SHAPE_ANNOTATION),
             Code::LintMcpToolAnnotations => Some(&REPAIR_MANUAL_NEEDS_HUMAN),
             Code::LintTemplateVariantExplosion | Code::LintLongRunningWithoutCleanup => {
@@ -598,6 +603,19 @@ const REPAIR_TYPES_ADD_SHAPE_ANNOTATION: RepairTemplate = RepairTemplate {
     safety: RepairSafety::SurfaceChanging,
 };
 
+/// The repair for a boundary value read without validation.
+///
+/// Deliberately not `types/add-shape-annotation`. An annotation is erased
+/// before the value exists, so annotating a `json_parse` result changes
+/// nothing a payload can violate — it only removes the diagnostic. Offering it
+/// as the one-step fix for a rule about validation would auto-apply the escape
+/// the rule exists to close (harn#6234).
+const REPAIR_TYPES_VALIDATE_BOUNDARY_VALUE: RepairTemplate = RepairTemplate {
+    id: "types/validate-boundary-value",
+    summary: "Validate the parsed value with schema_expect() or schema_check() before reading it",
+    safety: RepairSafety::ScopeLocal,
+};
+
 const REPAIR_MANUAL_REVIEW_CAPABILITY: RepairTemplate = RepairTemplate {
     id: "manual/review-capability-binding",
     summary: "Review the capability binding; the fix is not mechanical",
@@ -664,6 +682,7 @@ pub const REPAIR_REGISTRY: &[&RepairTemplate] = &[
     &REPAIR_PROMPTS_ADD_TOOL_TO_SURFACE,
     &REPAIR_STYLE_RENAME_TO_CONVENTION,
     &REPAIR_TYPES_ADD_SHAPE_ANNOTATION,
+    &REPAIR_TYPES_VALIDATE_BOUNDARY_VALUE,
     &REPAIR_MANUAL_REVIEW_CAPABILITY,
     &REPAIR_MANUAL_NEEDS_HUMAN,
     &REPAIR_POLICY_NARROW_CHILD_EFFECTS,
@@ -923,6 +942,32 @@ mod tests {
             covered >= 20,
             "expected ≥20 codes with a repair template, found {covered}"
         );
+    }
+
+    /// A rule about validating a boundary value cannot be repaired by an
+    /// annotation.
+    ///
+    /// An annotation is erased before the value exists: annotating a
+    /// `json_parse` result reads an int out of a field declared `string` and
+    /// accepts an array as a record, with no diagnostic at either compile time
+    /// or run time. Offering it as the one-step repair for these codes would
+    /// auto-apply the escape the codes exist to close, and a repair is applied
+    /// more readily than help text is read (harn#6234).
+    ///
+    /// `LintUnnormalizedOptions` is deliberately not in this list. It is about
+    /// an inline options dict bypassing the typed option constructors, where no
+    /// untrusted payload is involved and naming the shape is the whole fix.
+    #[test]
+    fn boundary_validation_codes_are_not_repaired_by_an_annotation() {
+        for code in [Code::BoundaryValueUnvalidated, Code::LintUntypedDictAccess] {
+            let Some(template) = code.repair_template() else {
+                continue;
+            };
+            assert_ne!(
+                template.id, "types/add-shape-annotation",
+                "{code:?} is a boundary-validation rule; its repair must validate, not annotate"
+            );
+        }
     }
 
     #[test]
