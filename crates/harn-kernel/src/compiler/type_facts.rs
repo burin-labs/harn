@@ -32,6 +32,63 @@ impl Compiler {
             .collect()
     }
 
+    /// Emit the runtime check for an annotated `let` / `const`.
+    ///
+    /// Expects the initializer on top of the stack and leaves it there, so this
+    /// slots in between the initializer and `compile_destructuring`. A declared
+    /// type therefore means the same thing at a binding site as it does at a
+    /// parameter: it is checked. The annotation is alias-expanded first, for
+    /// the same reason parameter guards are — a cached or imported callable
+    /// must enforce `type Count = int` as `int`.
+    ///
+    /// For a destructuring pattern the annotation describes the whole
+    /// initializer, so the check runs before the pattern is taken apart.
+    pub(super) fn emit_binding_type_assertion(
+        &mut self,
+        pattern: &BindingPattern,
+        type_ann: Option<&TypeExpr>,
+    ) {
+        let Some(type_ann) = type_ann else {
+            return;
+        };
+        let expanded = self.expand_alias(type_ann);
+        // `any` / `unknown` are the declared opt-out and can never fail. Every
+        // other annotation is emitted even when the matcher will accept it
+        // unconditionally (an interface name, an unresolved generic parameter),
+        // because deciding that here would mean maintaining a second copy of
+        // `type_contract::matches_type`'s vocabulary.
+        if matches!(&expanded, TypeExpr::Named(name) if name == "any" || name == "unknown") {
+            return;
+        }
+        let name = binding_pattern_label(pattern);
+        let nominal = self.nominal_type_names_mentioned_by(&expanded);
+        let Some(index) = self.chunk.add_binding_type(&name, &expanded, &nominal) else {
+            // The table is u16-indexed. Overflowing it drops the check rather
+            // than failing the compile: an unenforced annotation is what every
+            // release before this one did, and it is the safe direction.
+            return;
+        };
+        self.chunk.emit_u16(Op::AssertBindingType, index, self.line);
+    }
+
+    /// Struct and enum names mentioned by `type_expr`, narrowed from every
+    /// nominal name in scope.
+    ///
+    /// The matcher only constrains a `Named` type it is told is nominal, so
+    /// carrying the rest would bloat every artifact without changing a verdict.
+    fn nominal_type_names_mentioned_by(&self, type_expr: &TypeExpr) -> Vec<String> {
+        let mut mentioned = Vec::new();
+        collect_named_types(type_expr, &mut mentioned);
+        let mut names: Vec<String> = self
+            .nominal_type_names()
+            .into_iter()
+            .filter(|name| mentioned.iter().any(|candidate| candidate == name))
+            .collect();
+        names.sort();
+        names.dedup();
+        names
+    }
+
     pub(super) fn record_param_types(&mut self, params: &[TypedParam]) {
         for param in params {
             if let Some(type_expr) = &param.type_expr {
@@ -820,5 +877,70 @@ impl Compiler {
             TypeExpr::LitString(_) => Some(PrimitiveType::String),
             _ => None,
         }
+    }
+}
+
+/// The name an `AssertBindingType` failure reports.
+///
+/// A destructuring pattern has no single name, so it renders as the source
+/// shape it was written with. The annotation constrains the whole initializer,
+/// which is what the reader needs to see named in the error.
+fn binding_pattern_label(pattern: &BindingPattern) -> String {
+    match pattern {
+        BindingPattern::Identifier(name) => name.clone(),
+        BindingPattern::Dict(fields) => {
+            let names: Vec<&str> = fields.iter().map(|field| field.key.as_str()).collect();
+            format!("{{{}}}", names.join(", "))
+        }
+        BindingPattern::List(elements) => {
+            let names: Vec<&str> = elements
+                .iter()
+                .map(|element| element.name.as_str())
+                .collect();
+            format!("[{}]", names.join(", "))
+        }
+        BindingPattern::Pair(first, second) => format!("({first}, {second})"),
+    }
+}
+
+/// Every `Named` / `Applied` type name reachable from `type_expr`.
+fn collect_named_types(type_expr: &TypeExpr, out: &mut Vec<String>) {
+    match type_expr {
+        TypeExpr::Named(name) => out.push(name.clone()),
+        TypeExpr::Applied { name, args } => {
+            out.push(name.clone());
+            for arg in args {
+                collect_named_types(arg, out);
+            }
+        }
+        TypeExpr::List(inner)
+        | TypeExpr::Iter(inner)
+        | TypeExpr::Generator(inner)
+        | TypeExpr::Stream(inner)
+        | TypeExpr::Owned(inner) => collect_named_types(inner, out),
+        TypeExpr::DictType(key, value) => {
+            collect_named_types(key, out);
+            collect_named_types(value, out);
+        }
+        TypeExpr::Union(members) | TypeExpr::Intersection(members) | TypeExpr::Tuple(members) => {
+            for member in members {
+                collect_named_types(member, out);
+            }
+        }
+        TypeExpr::Shape(fields) | TypeExpr::OpenShape { fields, .. } => {
+            for field in fields {
+                collect_named_types(&field.type_expr, out);
+            }
+        }
+        TypeExpr::FnType {
+            params,
+            return_type,
+        } => {
+            for param in params {
+                collect_named_types(param, out);
+            }
+            collect_named_types(return_type, out);
+        }
+        TypeExpr::Never | TypeExpr::LitString(_) | TypeExpr::LitInt(_) => {}
     }
 }

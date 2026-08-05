@@ -18,6 +18,10 @@ pub enum OperandKind {
     LocalU16,
     FunctionU16,
     JumpU16,
+    /// Index into the chunk's binding-type table. Distinct from `LocalU16`
+    /// because a binding assertion is emitted for module-level bindings too,
+    /// which have no local slot.
+    BindingTypeU16,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,7 +39,8 @@ impl OperandKind {
             | Self::StringConstantU16
             | Self::LocalU16
             | Self::FunctionU16
-            | Self::JumpU16 => 2,
+            | Self::JumpU16
+            | Self::BindingTypeU16 => 2,
             Self::BuiltinIdU64 => 8,
         }
     }
@@ -50,6 +55,7 @@ impl OperandKind {
             Self::FunctionU16 => 5,
             Self::JumpU16 => 6,
             Self::StringConstantU16 => 7,
+            Self::BindingTypeU16 => 8,
         }
     }
 }
@@ -208,6 +214,7 @@ define_opcodes! {
     SetLocalSlot = 111 => [LocalU16],
     ConcatAssignLocal = 112 => [LocalU16],
     NamespaceImportMembers = 113 => [StringConstantU16, StringConstantU16, StringConstantU16],
+    AssertBindingType = 114 => [BindingTypeU16],
 }
 
 impl Op {
@@ -309,7 +316,8 @@ impl Op {
             | Self::BuildEnum
             | Self::MatchEnum
             | Self::TryUnwrap
-            | Self::TryWrapOk => Portability::Executable,
+            | Self::TryWrapOk
+            | Self::AssertBindingType => Portability::Executable,
 
             Self::Pipe
             | Self::Parallel
@@ -340,15 +348,20 @@ impl Op {
 }
 
 /// Artifact format version whose golden opcode fingerprint is pinned below.
-pub const OPCODE_ABI_ARTIFACT_VERSION: u16 = 2;
+pub const OPCODE_ABI_ARTIFACT_VERSION: u16 = 3;
 
-/// Golden BLAKE3 digest of opcode bytes, names, and operand-role tags for v2.
+/// Golden BLAKE3 digest of opcode bytes, names, and operand-role tags for v3.
 ///
 /// Changing the schema requires an intentional artifact-version bump and a new
 /// named fingerprint rather than silently rewriting existing bytecode.
-pub const OPCODE_ABI_FINGERPRINT_V2: [u8; 32] = [
-    0xa6, 0xb2, 0x94, 0x00, 0xa9, 0x05, 0x0d, 0xf4, 0xbb, 0x67, 0xb7, 0xc3, 0x40, 0x62, 0x3c, 0xb2,
-    0x47, 0xc3, 0x75, 0xe6, 0xb6, 0x81, 0x78, 0x68, 0xaa, 0x4a, 0x12, 0x09, 0x5b, 0xd7, 0x5e, 0x56,
+///
+/// v3 adds [`Op::AssertBindingType`] and its [`OperandKind::BindingTypeU16`]
+/// operand role, so that a declared type on a `let` / `const` is checked at
+/// the binding site the same way a declared parameter type is checked at a
+/// call site.
+pub const OPCODE_ABI_FINGERPRINT_V3: [u8; 32] = [
+    0x8b, 0xbc, 0xdf, 0x24, 0x31, 0x39, 0x01, 0x8e, 0xc3, 0x48, 0xc3, 0x7d, 0xab, 0x00, 0x82, 0x9c,
+    0xa9, 0x34, 0x3d, 0xb6, 0xb2, 0xfe, 0x3d, 0x22, 0x45, 0x4a, 0xfa, 0x0a, 0xe8, 0x88, 0xa6, 0x79,
 ];
 
 /// Compute the fingerprint of the compiled opcode schema.
@@ -369,7 +382,7 @@ pub fn opcode_abi_fingerprint() -> [u8; 32] {
 #[cfg(test)]
 mod tests {
     use super::{
-        opcode_abi_fingerprint, Op, OPCODE_ABI_ARTIFACT_VERSION, OPCODE_ABI_FINGERPRINT_V2,
+        opcode_abi_fingerprint, Op, OPCODE_ABI_ARTIFACT_VERSION, OPCODE_ABI_FINGERPRINT_V3,
     };
 
     #[test]
@@ -382,8 +395,8 @@ mod tests {
     }
 
     #[test]
-    fn opcode_schema_matches_artifact_v2_golden() {
+    fn opcode_schema_matches_artifact_v3_golden() {
         assert_eq!(OPCODE_ABI_ARTIFACT_VERSION, crate::ARTIFACT_VERSION);
-        assert_eq!(opcode_abi_fingerprint(), OPCODE_ABI_FINGERPRINT_V2);
+        assert_eq!(opcode_abi_fingerprint(), OPCODE_ABI_FINGERPRINT_V3);
     }
 }

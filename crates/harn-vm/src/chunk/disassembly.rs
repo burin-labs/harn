@@ -186,3 +186,16 @@ pub(crate) fn disasm_method_call_spread(chunk: &Chunk, ip: &mut usize, label: &s
     *ip += 2;
     format!("{label} {idx:>4} ({})", chunk.constants[idx as usize])
 }
+
+pub(crate) fn disasm_binding_type_u16(chunk: &Chunk, ip: &mut usize, label: &str) -> String {
+    let slot = chunk.read_u16(*ip);
+    *ip += 2;
+    match chunk.binding_types.get(slot as usize) {
+        Some(info) => format!(
+            "{label} {slot:>4} ({}: {})",
+            info.name,
+            harn_parser::typechecker::format_type(&info.type_expr)
+        ),
+        None => format!("{label} {slot:>4}"),
+    }
+}

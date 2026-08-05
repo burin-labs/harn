@@ -37,6 +37,12 @@ pub(in crate::artifact) fn encode_wire_program(
             writer.boolean(slot.mutable);
             writer.u32(slot.scope_depth);
         }
+        writer.len(chunk.binding_types.len(), "binding types")?;
+        for slot in &chunk.binding_types {
+            writer.string(&slot.name)?;
+            writer.type_expr(&slot.type_expr)?;
+            writer.string_vec(&slot.nominal_type_names, "binding nominal type names")?;
+        }
         writer.boolean(chunk.references_outer_names);
     }
     for function in &program.functions {

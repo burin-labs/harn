@@ -398,6 +398,7 @@ pub(super) fn validate_code(
     constants: &[Constant],
     functions: usize,
     locals: usize,
+    binding_types: usize,
     chunk: usize,
 ) -> Result<(), Diagnostic> {
     let mut instruction_boundaries = vec![false; code.len()];
@@ -466,6 +467,18 @@ pub(super) fn validate_code(
                             "artifact_invalid_index",
                             format!(
                                 "chunk {chunk} {} at {ip} references missing local slot {index}",
+                                op.name()
+                            ),
+                        ));
+                    }
+                }
+                OperandKind::BindingTypeU16 => {
+                    let index = read_code_u16(code, operand_offset);
+                    if index >= binding_types {
+                        return Err(Diagnostic::artifact(
+                            "artifact_invalid_index",
+                            format!(
+                                "chunk {chunk} {} at {ip} references missing binding type {index}",
                                 op.name()
                             ),
                         ));

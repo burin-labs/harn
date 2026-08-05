@@ -21,14 +21,29 @@ fn test_mixed_arithmetic() {
 
 #[test]
 fn test_typed_opcode_drift_falls_back_to_generic() {
-    // A value that drifts from its declared type no longer makes the typed
-    // opcode hard-error with a specialization-internal message. The typed op
-    // guards its operands and falls back to generic semantics — which here, for
-    // genuinely incompatible `string + int`, still errors, but with the same
-    // generic message the unoptimized build produces (so opt and unopt agree).
-    // For a *compatible* drift (e.g. an `any` float into a declared int) the
-    // fallback yields the correct coerced result instead of throwing; that is
-    // covered in `vm::tests_typed_op_fallback`.
+    // A value that drifts from its declared type must never surface a
+    // specialization-internal error. Drift now enters through a parameter: since
+    // harn#6252 an annotated binding is checked where it is written, so
+    // `const x: int = "bad"` is rejected there instead of drifting into `x + 1`
+    // (see `typed_annotation_is_enforced_at_the_binding_site` below).
+    let err = run_vm_err(
+        r#"pipeline t(harness: Harness, task) {
+  fn add_one(n: int) { return n + 1 }
+  harness.stdio.log(add_one("bad"))
+}"#,
+    );
+    assert!(
+        !err.contains("Typed int"),
+        "typed opcodes must no longer surface specialization-internal errors: {err}"
+    );
+}
+
+#[test]
+fn typed_annotation_is_enforced_at_the_binding_site() {
+    // The counterpart: a declared type on a binding rejects its initializer
+    // rather than letting the wrong value flow into the rest of the body. The
+    // error names the binding, so the report points at the declaration the
+    // reader has to fix — not at whatever expression happened to consume it.
     let err = run_vm_err(
         r#"pipeline t(harness: Harness, task) {
   const x: int = "bad"
@@ -36,12 +51,8 @@ fn test_typed_opcode_drift_falls_back_to_generic() {
 }"#,
     );
     assert!(
-        err.contains("Cannot add") && err.contains("string"),
-        "expected the generic add error, got: {err}"
-    );
-    assert!(
-        !err.contains("Typed int"),
-        "typed opcodes must no longer surface specialization-internal errors: {err}"
+        err.contains("binding `x`") && err.contains("expects int"),
+        "expected the binding-site type error, got: {err}"
     );
 }
 

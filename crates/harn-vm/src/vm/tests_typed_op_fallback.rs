@@ -1,12 +1,18 @@
 //! Runtime guard / fallback behavior for typed fast-path opcodes.
 //!
 //! The compiler emits typed opcodes (`AddInt`, `LessInt`, `EqualString`, …)
-//! from a *static* type guess. A guess can be wrong at runtime — an `any`-typed
-//! value flowing through a typed parameter or an annotated binding initializer
-//! is not runtime-checked, so the operand may be a different primitive than the
-//! annotation claims. These opcodes therefore guard their operands and fall back
-//! to the exact generic result the unoptimized build produces, instead of
-//! hard-erroring. Every test asserts `optimized == unoptimized`.
+//! from a *static* type guess. A guess can be wrong at runtime, so these opcodes
+//! guard their operands and fall back to the exact generic result the
+//! unoptimized build produces instead of hard-erroring. Every test asserts
+//! `optimized == unoptimized`.
+//!
+//! Since harn#6252 an annotated `let` / `const` is checked at the binding site,
+//! so an annotation can no longer be the *source* of the drift: the initializer
+//! is rejected before any typed opcode sees it. Parameters remain a live drift
+//! route on the native VM, because the native parameter guard treats `int` and
+//! `float` as interchangeable (`numeric_compat`) while the binding guard and the
+//! portable kernel do not — see the note on
+//! `annotated_binding_initializer_is_rejected_not_absorbed`.
 
 use crate::compiler::{Compiler, CompilerOptions};
 use crate::stdlib::register_vm_stdlib;
@@ -68,9 +74,13 @@ fn typed_param_fed_dynamic_float_falls_back() {
 }
 
 #[test]
-fn annotated_let_initializer_from_dynamic_float_falls_back() {
-    // `let x: int = <any float>` — the annotation is not runtime-enforced, so
-    // the initializer is really a float. `x + 1` must fall back to generic add.
+fn annotated_binding_initializer_is_rejected_not_absorbed() {
+    // `const x: int = <dynamic float>` used to reach `x + 1` as a float and rely
+    // on `AddInt` falling back. The annotation is now checked where it is
+    // written, so the float never becomes an `int`-declared binding at all.
+    //
+    // Both builds must agree on the rejection: the optimizer must not be the
+    // difference between a caught and an uncaught type error.
     let result = assert_opt_matches_unopt(
         r#"pipeline default(harness: Harness, task) {
   const cell = harness.runtime.shared_cell("k", 2.5)
@@ -78,14 +88,19 @@ fn annotated_let_initializer_from_dynamic_float_falls_back() {
   harness.stdio.log("${x + 1}")
 }"#,
     );
-    assert_eq!(result.unwrap(), "[harn] 3.5");
+    let error = result.unwrap_err();
+    assert!(
+        error.contains("binding `x`") && error.contains("expects int"),
+        "expected the binding-site type error, got: {error}"
+    );
 }
 
 #[test]
-fn annotated_var_initializer_from_dynamic_float_falls_back() {
-    // The `let` analogue: an annotated, never-reassigned `let` whose initializer
-    // is a dynamic float. (The monomorphic-binding analysis trusts it because it
-    // is never reassigned; the runtime guard is what keeps it sound.)
+fn annotated_mutable_binding_is_checked_like_an_immutable_one() {
+    // `let` and `const` are the same binding site for this purpose. The
+    // monomorphic-binding analysis trusts an annotated, never-reassigned `let`
+    // for typed-opcode specialization; the binding check is what now makes that
+    // trust sound rather than merely convenient.
     let result = assert_opt_matches_unopt(
         r#"pipeline default(harness: Harness, task) {
   const cell = harness.runtime.shared_cell("k", 4.5)
@@ -93,18 +108,24 @@ fn annotated_var_initializer_from_dynamic_float_falls_back() {
   harness.stdio.log("${x - 1}")
 }"#,
     );
-    assert_eq!(result.unwrap(), "[harn] 3.5");
+    let error = result.unwrap_err();
+    assert!(
+        error.contains("binding `x`") && error.contains("expects int"),
+        "expected the binding-site type error, got: {error}"
+    );
 }
 
 #[test]
 fn typed_comparison_fed_dynamic_float_falls_back() {
     // A typed `LessInt` fed a float operand must fall back to the generic
-    // comparison rather than throwing.
+    // comparison rather than throwing. The drift is introduced through a
+    // parameter, the route that still reaches a typed opcode with an operand
+    // its static guess did not predict.
     let result = assert_opt_matches_unopt(
         r#"pipeline default(harness: Harness, task) {
+  fn under(n: int) { return n < 3 }
   const cell = harness.runtime.shared_cell("k", 2.5)
-  const x: int = harness.runtime.shared_get(cell)
-  harness.stdio.log("${x < 3}")
+  harness.stdio.log("${under(harness.runtime.shared_get(cell))}")
 }"#,
     );
     assert_eq!(result.unwrap(), "[harn] true");
@@ -112,12 +133,19 @@ fn typed_comparison_fed_dynamic_float_falls_back() {
 
 #[test]
 fn typed_string_equality_fed_dynamic_int_falls_back() {
-    // `EqualString` guarded: comparing a declared-string binding that actually
-    // holds an int against a string literal is `false` generically, not a throw.
+    // `EqualString` guarded: comparing a binding that the optimizer inferred as
+    // a string but that actually holds an int is `false` generically, not a
+    // throw.
+    //
+    // The drift enters through reassignment. Neither annotation site can produce
+    // it any more — a declared `string` binding rejects the int where it is
+    // written, and a declared `string` parameter rejects it at the call — but an
+    // *inferred* type fact is still only a guess, which is what this guards.
     let result = assert_opt_matches_unopt(
         r#"pipeline default(harness: Harness, task) {
   const cell = harness.runtime.shared_cell("k", 7)
-  const s: string = harness.runtime.shared_get(cell)
+  let s = "7"
+  s = harness.runtime.shared_get(cell)
   harness.stdio.log("${s == "7"}")
 }"#,
     );
@@ -126,9 +154,10 @@ fn typed_string_equality_fed_dynamic_int_falls_back() {
 
 #[test]
 fn genuinely_incompatible_operands_error_identically() {
-    // The fallback is to *generic* semantics, which still rejects truly
-    // incompatible operands (int + string) — and with the same error in both
-    // builds, so no optimized-only crash and no silent wrong answer.
+    // A declared `int` holding a string is now stopped at the binding rather
+    // than at `x + 1`, but the property under test is unchanged and is the one
+    // that matters: both builds fail, identically. No optimized-only crash and
+    // no silent wrong answer.
     let optimized = run(
         r#"pipeline default(harness: Harness, task) {
   const cell = harness.runtime.shared_cell("k", "hi")

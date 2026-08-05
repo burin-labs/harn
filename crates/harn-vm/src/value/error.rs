@@ -97,6 +97,21 @@ pub struct ArgTypeMismatchError {
     pub span: Option<Span>,
 }
 
+/// A value did not satisfy the type declared on the `let` / `const` it was
+/// being bound to.
+///
+/// Deliberately separate from [`ArgTypeMismatchError`]: both report a declared
+/// type rejecting a value, but the reader needs to know which binding site
+/// failed, and "parameter" is the wrong noun for half of them.
+#[derive(Debug, Clone)]
+pub struct BindingTypeMismatchError {
+    /// The declared name, or the rendered pattern for a destructuring binding.
+    pub binding: String,
+    pub expected: String,
+    pub got: &'static str,
+    pub span: Option<Span>,
+}
+
 #[derive(Debug, Clone)]
 pub enum VmError {
     StackUnderflow,
@@ -158,6 +173,10 @@ pub enum VmError {
     /// user-defined function parameters (with declared types) and
     /// registry-known builtin parameters.
     ArgTypeMismatch(Box<ArgTypeMismatchError>),
+    /// Initializer value did not satisfy the type declared on its binding.
+    /// The binding-site counterpart of [`VmError::ArgTypeMismatch`]; a
+    /// declared type is checked wherever it is written.
+    BindingTypeMismatch(Box<BindingTypeMismatchError>),
 }
 
 impl VmError {
@@ -731,6 +750,16 @@ impl std::fmt::Display for VmError {
                     "Type error: '{}' parameter `{}` expects {}, got {}{}",
                     err.callee,
                     err.param,
+                    err.expected,
+                    err.got,
+                    fmt_span_suffix(&err.span)
+                )
+            }
+            VmError::BindingTypeMismatch(err) => {
+                write!(
+                    f,
+                    "Type error: binding `{}` expects {}, got {}{}",
+                    err.binding,
                     err.expected,
                     err.got,
                     fmt_span_suffix(&err.span)

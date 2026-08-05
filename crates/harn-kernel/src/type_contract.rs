@@ -70,6 +70,10 @@ pub trait TypeContractValue: Sized {
     }
 }
 
+fn is_nominal(name: &str, nominal_type_names: &[String]) -> bool {
+    nominal_type_names.iter().any(|ty| ty == name)
+}
+
 pub fn matches_type<V: TypeContractValue>(
     value: &V,
     expected: &TypeExpr,
@@ -168,10 +172,20 @@ pub fn matches_type<V: TypeContractValue>(
                 value.runtime_type_kind() == Kind::Dict
                     && record_values_match(value, value_type, type_params, nominal_type_names)
             }
-            ("Option", [inner]) => {
+            // `Option<T>` is the nullable spelling *unless* the program declares
+            // its own nominal `Option`. A user-defined `enum Option<T>` produces
+            // an `EnumVariant`, which is neither nil nor a `T`, so the built-in
+            // reading rejects every value the user could construct.
+            ("Option", [inner]) if !is_nominal("Option", nominal_type_names) => {
                 value.runtime_type_kind() == Kind::Nil
                     || matches_type(value, inner, type_params, nominal_type_names)
             }
+            // An applied nominal type constrains identity but not its arguments:
+            // the VM does not monomorphize, so `Box<int>` and `Box<string>` are
+            // the same runtime shape. This mirrors the `Named` arm.
+            (name, _) if is_nominal(name, nominal_type_names) => value
+                .nominal_type_name()
+                .is_some_and(|actual| actual == name),
             _ => true,
         },
         TypeExpr::FnType { .. } => value.runtime_type_kind() == Kind::Closure,
@@ -481,5 +495,53 @@ mod tests {
             "dict",
             INT_KEYED_DICT_ARGS
         )));
+    }
+
+    /// A stand-in for a runtime that has nominal values (enum variants and
+    /// struct instances). `DataValue` deliberately has no such variant, so the
+    /// nominal arms of the matcher need a value type that reports one.
+    struct Nominal(&'static str);
+
+    impl TypeContractValue for Nominal {
+        fn runtime_type_kind(&self) -> RuntimeTypeKind {
+            RuntimeTypeKind::Enum
+        }
+
+        fn nominal_type_name(&self) -> Option<&str> {
+            Some(self.0)
+        }
+    }
+
+    /// A program that declares its own `enum Option<T>` means *that* type, not
+    /// the built-in nullable spelling. Before this was distinguished, the
+    /// built-in reading rejected every value the user could construct, because
+    /// an `Option.Some(1)` is an enum variant rather than nil or an int.
+    #[test]
+    fn a_user_declared_option_is_matched_nominally() {
+        let applied = TypeExpr::Applied {
+            name: "Option".to_string(),
+            args: vec![TypeExpr::Named("int".to_string())],
+        };
+        let user_declared = vec!["Option".to_string()];
+
+        assert!(
+            matches_type(&Nominal("Option"), &applied, &[], &user_declared),
+            "a user-declared Option enum must satisfy its own type"
+        );
+        assert!(
+            !matches_type(&Nominal("Result"), &applied, &[], &user_declared),
+            "and must still reject a different nominal type"
+        );
+
+        // With no such declaration in scope, `Option<int>` keeps its built-in
+        // nullable reading.
+        assert!(matches_type(&DataValue::Nil, &applied, &[], &[]));
+        assert!(matches_type(&DataValue::Int(1), &applied, &[], &[]));
+        assert!(!matches_type(
+            &DataValue::String("no".into()),
+            &applied,
+            &[],
+            &[]
+        ));
     }
 }

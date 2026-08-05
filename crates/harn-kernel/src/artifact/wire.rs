@@ -3,8 +3,10 @@ use std::sync::Arc;
 
 use harn_parser::TypeExpr;
 
+use crate::program::ChunkParts;
 use crate::{
-    Chunk, CompiledFunction, Constant, LocalSlotInfo, ParamSlot, PortableExportKind, PortableImport,
+    BindingTypeSlot, Chunk, CompiledFunction, Constant, LocalSlotInfo, ParamSlot,
+    PortableExportKind, PortableImport,
 };
 
 use super::validation::{semantic_abi_fingerprint, validate_code, MetadataBudget};
@@ -59,6 +61,7 @@ pub(super) struct WireChunk {
     pub(super) source_file: Option<String>,
     pub(super) functions: Vec<u32>,
     pub(super) local_slots: Vec<WireLocalSlot>,
+    pub(super) binding_types: Vec<WireBindingType>,
     pub(super) references_outer_names: bool,
 }
 
@@ -81,6 +84,13 @@ pub(super) struct WireParam {
     pub(super) name: String,
     pub(super) type_expr: Option<TypeExpr>,
     pub(super) has_default: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct WireBindingType {
+    pub(super) name: String,
+    pub(super) type_expr: TypeExpr,
+    pub(super) nominal_type_names: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -156,6 +166,15 @@ impl WireProgram {
                         })
                     })
                     .collect::<Result<_, Diagnostic>>()?,
+                binding_types: chunk
+                    .binding_types
+                    .iter()
+                    .map(|slot| WireBindingType {
+                        name: slot.name.clone(),
+                        type_expr: slot.type_expr.clone(),
+                        nominal_type_names: slot.nominal_type_names.clone(),
+                    })
+                    .collect(),
                 references_outer_names: chunk.references_outer_names,
             });
             cursor += 1;
@@ -277,6 +296,15 @@ impl WireProgram {
                     })
                 })
                 .collect::<Result<_, Diagnostic>>()?,
+            binding_types: chunk
+                .binding_types
+                .iter()
+                .map(|slot| WireBindingType {
+                    name: slot.name.clone(),
+                    type_expr: slot.type_expr.clone(),
+                    nominal_type_names: slot.nominal_type_names.clone(),
+                })
+                .collect(),
             references_outer_names: chunk.references_outer_names,
         })
     }
@@ -308,6 +336,7 @@ impl WireProgram {
             budget.constants(chunk.constants.len())?;
             budget.metadata(chunk.functions.len())?;
             budget.metadata(chunk.local_slots.len())?;
+            budget.metadata(chunk.binding_types.len())?;
             if let Some(source_file) = &chunk.source_file {
                 budget.string(source_file)?;
             }
@@ -318,6 +347,13 @@ impl WireProgram {
             }
             for local in &chunk.local_slots {
                 budget.string(&local.name)?;
+            }
+            for binding in &chunk.binding_types {
+                budget.string(&binding.name)?;
+                budget.type_expr(&binding.type_expr, 1)?;
+                for nominal in &binding.nominal_type_names {
+                    budget.string(nominal)?;
+                }
             }
         }
         for (function_id, function) in self.functions.iter().enumerate() {
@@ -510,6 +546,7 @@ impl WireProgram {
                 &chunk.constants,
                 chunk.functions.len(),
                 chunk.local_slots.len(),
+                chunk.binding_types.len(),
                 chunk_id,
             )?;
             for &function in &chunk.functions {
@@ -562,14 +599,15 @@ impl WireProgram {
                     has_runtime_type_checks: function.has_runtime_type_checks,
                 }));
             }
-            built[chunk_id] = Some(Arc::new(Chunk::from_artifact_parts(
-                wire.code.clone(),
-                wire.constants.clone(),
-                wire.lines.clone(),
-                wire.columns.clone(),
-                wire.source_file.clone(),
+            built[chunk_id] = Some(Arc::new(Chunk::from_artifact_parts(ChunkParts {
+                code: wire.code.clone(),
+                constants: wire.constants.clone(),
+                lines: wire.lines.clone(),
+                columns: wire.columns.clone(),
+                source_file: wire.source_file.clone(),
                 functions,
-                wire.local_slots
+                local_slots: wire
+                    .local_slots
                     .iter()
                     .map(|slot| LocalSlotInfo {
                         name: slot.name.clone(),
@@ -577,8 +615,17 @@ impl WireProgram {
                         scope_depth: slot.scope_depth as usize,
                     })
                     .collect(),
-                wire.references_outer_names,
-            )));
+                binding_types: wire
+                    .binding_types
+                    .iter()
+                    .map(|slot| BindingTypeSlot {
+                        name: slot.name.clone(),
+                        type_expr: slot.type_expr.clone(),
+                        nominal_type_names: slot.nominal_type_names.clone(),
+                    })
+                    .collect(),
+                references_outer_names: wire.references_outer_names,
+            })));
         }
         let root =
             Arc::try_unwrap(built[0].take().expect("root chunk constructed")).map_err(|_| {

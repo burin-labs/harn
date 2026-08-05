@@ -2,8 +2,13 @@
 
 ## Type annotations
 
-Harn has an optional, gradual type system. Type annotations are checked at compile time
-but do not affect runtime behavior. Omitting annotations is always valid.
+Harn has an optional, gradual type system. Omitting annotations is always valid.
+
+A type annotation you *do* write is checked twice: statically at compile time, and
+again at runtime against the value it describes. Both binding sites behave the same
+way — a declared parameter type is checked against the argument at the call, and a
+declared `let` / `const` type is checked against the initializer at the binding. See
+[Runtime enforcement](#runtime-enforcement).
 
 ### Basic types
 
@@ -1139,6 +1144,64 @@ the original declared type is restored.
 
 Variables declared with `let` are immutable.  Assigning to a `let`
 variable produces a compile-time warning (and a runtime error).
+
+### Runtime enforcement
+
+A written type annotation is enforced at runtime at every binding site, not only
+at compile time. The two sites are:
+
+- a **parameter**, checked against the argument when the function is called;
+- a **`let` / `const` binding**, checked against the initializer when the binding
+  is evaluated.
+
+```harn,ignore
+const doc: {name: string} = json_parse(text)
+```
+
+If `text` decodes to `{"name": 12345}`, the binding fails rather than producing a
+`doc` whose `name` is an int:
+
+```text
+Type error: binding `doc` expects {name: string}, got dict
+```
+
+This is what makes an annotation on a boundary value load-bearing: the declared
+type is the validation. `json_parse`, `toml_parse`, `yaml_parse`, `llm_call`, and
+every other producer of untrusted data are checked where their result is bound.
+
+Unannotated bindings are not checked, and `any` is the written opt-out:
+
+```harn,ignore
+const loose = json_parse(text)        // unchecked
+const opted: any = json_parse(text)   // unchecked, and says so
+```
+
+Destructuring bindings check the annotation against the whole initializer, before
+the pattern is taken apart.
+
+#### What an annotation still accepts
+
+Enforcement uses the same value/type matcher the portable kernel uses, so an
+artifact reaches the same verdict wherever it runs. That matcher is deliberately
+permissive in four ways:
+
+- **Records are open.** `{name: string}` means "at least `name`"; extra fields
+  are accepted (width subtyping), matching the shape rules above.
+- **Widening holds.** An `int` satisfies a declared `float` or `number`.
+- **Optional means optional.** `string?` accepts `nil`.
+- **Non-nominal names are unconstrained.** A type alias, an interface name, or a
+  generic type parameter accepts any value, because the runtime has no nominal
+  identity for them. Structs and enums *do* have nominal identity and are
+  checked by name.
+
+#### Known divergence
+
+A declared `int` **binding** requires an `int`. A declared `int` **parameter**
+also accepts a `float`, because the parameter guard shares its implementation
+with schema validation, where JSON's single number type makes that leniency
+load-bearing. The portable kernel is strict at both sites. This is a real
+inconsistency in the native runtime, tracked separately; it does not affect
+which values a binding accepts.
 
 ### Runtime parameter type enforcement
 

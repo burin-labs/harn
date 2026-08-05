@@ -418,15 +418,18 @@ impl Compiler {
                 }
                 self.emit_get_binding(name);
             }
-            Node::LetBinding { pattern, value, .. } => {
-                let binding_type = match &snode.node {
-                    Node::LetBinding {
-                        type_ann: Some(type_ann),
-                        ..
-                    } => Some(type_ann.clone()),
-                    _ => self.infer_expr_type(value),
+            Node::LetBinding {
+                pattern,
+                value,
+                type_ann,
+                ..
+            } => {
+                let binding_type = match type_ann {
+                    Some(type_ann) => Some(type_ann.clone()),
+                    None => self.infer_expr_type(value),
                 };
                 self.compile_node(value)?;
+                self.emit_binding_type_assertion(pattern, type_ann.as_ref());
                 self.compile_destructuring(pattern, true, snode.span)?;
                 // A `let` is reassignable, so its initializer-inferred primitive
                 // type is only safe for typed-opcode specialization when the
@@ -439,20 +442,23 @@ impl Compiler {
                 self.record_binding_type(pattern, binding_type.clone());
                 self.maybe_register_owned_drop(pattern, binding_type.as_ref(), snode.span);
             }
-            Node::ConstBinding { pattern, value, .. } => {
+            Node::ConstBinding {
+                pattern,
+                value,
+                type_ann,
+                ..
+            } => {
                 // `const` is an immutable binding. When its initializer is in
                 // the pure const-eval subset over a plain identifier, the
                 // typechecker has already folded it; either way the VM
                 // re-evaluates the same expression, producing the folded value
                 // byte-for-byte. Lowered immutable (destructuring allowed).
-                let binding_type = match &snode.node {
-                    Node::ConstBinding {
-                        type_ann: Some(type_ann),
-                        ..
-                    } => Some(type_ann.clone()),
-                    _ => self.infer_expr_type(value),
+                let binding_type = match type_ann {
+                    Some(type_ann) => Some(type_ann.clone()),
+                    None => self.infer_expr_type(value),
                 };
                 self.compile_node(value)?;
+                self.emit_binding_type_assertion(pattern, type_ann.as_ref());
                 self.compile_destructuring(pattern, false, snode.span)?;
                 self.record_binding_type(pattern, binding_type.clone());
                 self.maybe_register_owned_drop(pattern, binding_type.as_ref(), snode.span);

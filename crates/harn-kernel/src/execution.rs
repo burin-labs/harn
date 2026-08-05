@@ -1178,6 +1178,19 @@ impl<'a> Machine<'a> {
                     return Ok(OpStep::Return(value));
                 }
             }
+            Op::AssertBindingType => {
+                let index = read_u16(frame)?;
+                let Some(slot) = frame.chunk.binding_types.get(index) else {
+                    return Err(invalid_index("binding type", index));
+                };
+                let Some(value) = frame.stack.last() else {
+                    return Err(OpStep::Error(diagnostic(
+                        "stack_underflow",
+                        "AssertBindingType requires the bound value on the stack",
+                    )));
+                };
+                type_guard::validate_binding(value, slot).map_err(OpStep::Error)?;
+            }
             Op::CheckType => {
                 return Err(OpStep::Error(diagnostic(
                     "unsupported_portable_opcode",

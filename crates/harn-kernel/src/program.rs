@@ -37,6 +37,25 @@ pub struct LocalSlotInfo {
     pub scope_depth: usize,
 }
 
+/// One annotated `let` / `const` binding site of a chunk.
+///
+/// The counterpart of [`ParamSlot`] for the other binding site a declared type
+/// can appear at. `Op::AssertBindingType` indexes this table and validates the
+/// initializer against `type_expr` through the same
+/// `type_contract::matches_type` matcher that validates arguments against a
+/// parameter's declared type, so an annotation means one thing everywhere.
+///
+/// `nominal_type_names` is narrowed at compile time to the struct and enum
+/// names actually mentioned by `type_expr`. The matcher treats every other
+/// named type as unconstrained, which is what keeps aliases, interfaces, and
+/// generic type parameters permissive here exactly as they are on parameters.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BindingTypeSlot {
+    pub name: String,
+    pub type_expr: TypeExpr,
+    pub nominal_type_names: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParamSlot {
     pub name: String,
@@ -116,6 +135,8 @@ pub struct Chunk {
     #[doc(hidden)]
     pub local_slots: Vec<LocalSlotInfo>,
     #[doc(hidden)]
+    pub binding_types: Vec<BindingTypeSlot>,
+    #[doc(hidden)]
     pub references_outer_names: bool,
     #[cfg(debug_assertions)]
     #[serde(skip)]
@@ -137,6 +158,7 @@ impl Clone for Chunk {
             current_col: self.current_col,
             functions: self.functions.clone(),
             local_slots: self.local_slots.clone(),
+            binding_types: self.binding_types.clone(),
             references_outer_names: self.references_outer_names,
             #[cfg(debug_assertions)]
             balance_depth: self.balance_depth,
@@ -182,17 +204,36 @@ impl Default for Chunk {
     }
 }
 
+/// The decoded contents of one artifact chunk.
+///
+/// A named struct rather than a positional argument list: the fields are mostly
+/// `Vec`s and `Option`s that would otherwise be easy to transpose silently at
+/// the one call site that builds a chunk back out of a verified artifact.
+pub(crate) struct ChunkParts {
+    pub(crate) code: Vec<u8>,
+    pub(crate) constants: Vec<Constant>,
+    pub(crate) lines: Vec<u32>,
+    pub(crate) columns: Vec<u32>,
+    pub(crate) source_file: Option<String>,
+    pub(crate) functions: Vec<Arc<CompiledFunction>>,
+    pub(crate) local_slots: Vec<LocalSlotInfo>,
+    pub(crate) binding_types: Vec<BindingTypeSlot>,
+    pub(crate) references_outer_names: bool,
+}
+
 impl Chunk {
-    pub(crate) fn from_artifact_parts(
-        code: Vec<u8>,
-        constants: Vec<Constant>,
-        lines: Vec<u32>,
-        columns: Vec<u32>,
-        source_file: Option<String>,
-        functions: Vec<Arc<CompiledFunction>>,
-        local_slots: Vec<LocalSlotInfo>,
-        references_outer_names: bool,
-    ) -> Self {
+    pub(crate) fn from_artifact_parts(parts: ChunkParts) -> Self {
+        let ChunkParts {
+            code,
+            constants,
+            lines,
+            columns,
+            source_file,
+            functions,
+            local_slots,
+            binding_types,
+            references_outer_names,
+        } = parts;
         Self {
             code,
             constants,
@@ -203,6 +244,7 @@ impl Chunk {
             current_col: 0,
             functions,
             local_slots,
+            binding_types,
             references_outer_names,
             #[cfg(debug_assertions)]
             balance_depth: 0,
@@ -222,6 +264,7 @@ impl Chunk {
             current_col: 0,
             functions: Vec::new(),
             local_slots: Vec::new(),
+            binding_types: Vec::new(),
             references_outer_names: false,
             #[cfg(debug_assertions)]
             balance_depth: 0,
@@ -389,6 +432,33 @@ impl Chunk {
             scope_depth,
         });
         slot
+    }
+
+    /// Intern a binding-type slot and return its `AssertBindingType` operand.
+    ///
+    /// Identical slots are shared: a loop body that rebinds the same annotated
+    /// name on every iteration, or a repeated `const path: string`, contributes
+    /// one table entry rather than one per occurrence.
+    pub(crate) fn add_binding_type(
+        &mut self,
+        name: &str,
+        type_expr: &TypeExpr,
+        nominal_type_names: &[String],
+    ) -> Option<u16> {
+        if let Some(index) = self.binding_types.iter().position(|slot| {
+            slot.name == name
+                && &slot.type_expr == type_expr
+                && slot.nominal_type_names == nominal_type_names
+        }) {
+            return u16::try_from(index).ok();
+        }
+        let index = u16::try_from(self.binding_types.len()).ok()?;
+        self.binding_types.push(BindingTypeSlot {
+            name: name.to_string(),
+            type_expr: type_expr.clone(),
+            nominal_type_names: nominal_type_names.to_vec(),
+        });
+        Some(index)
     }
 
     #[cfg(debug_assertions)]
@@ -592,7 +662,7 @@ fn stack_delta(op: Op, count: u16) -> Option<i32> {
         DefLet | DefVar | DefCell | SetVar | DefLocalSlot | SetLocalSlot | SetProperty
         | SetLocalSlotProperty | ConcatAssignLocal | Pop => -1,
         Negate | Not | GetProperty | GetPropertyOpt | CheckType | TryUnwrap | TryWrapOk | Swap
-        | PushScope | PopScope | PopIterator | PopHandler => 0,
+        | PushScope | PopScope | PopIterator | PopHandler | AssertBindingType => 0,
         Add | Sub | Mul | Div | Mod | Pow | AddInt | SubInt | MulInt | DivInt | ModInt
         | AddFloat | SubFloat | MulFloat | DivFloat | ModFloat | Equal | NotEqual | Less
         | Greater | LessEqual | GreaterEqual | EqualInt | NotEqualInt | LessInt | GreaterInt

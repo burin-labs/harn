@@ -1,3 +1,4 @@
+use crate::chunk::Op;
 use crate::value::{VmError, VmValue};
 
 impl super::super::Vm {
@@ -28,6 +29,23 @@ impl super::super::Vm {
             }
         }
         Ok(())
+    }
+
+    /// Check an annotated `let` / `const` initializer against its declared
+    /// type. The value stays on the stack for the binding lowering that
+    /// follows, so this reads the top of the stack rather than popping it.
+    pub(super) fn execute_assert_binding_type(&mut self) -> Result<(), VmError> {
+        let (chunk, slot_idx) = {
+            let frame = self.frames.last_mut().unwrap();
+            let slot_idx = frame.chunk.read_u16(frame.ip) as usize;
+            frame.ip += 2;
+            (std::sync::Arc::clone(&frame.chunk), slot_idx)
+        };
+        let Some(slot) = chunk.binding_types.get(slot_idx) else {
+            return Err(VmError::InvalidInstruction(Op::AssertBindingType as u8));
+        };
+        let value = self.peek()?;
+        crate::typecheck::validate_binding_type(value, slot, None)
     }
 
     pub(super) async fn execute_yield(&mut self) -> Result<(), VmError> {
