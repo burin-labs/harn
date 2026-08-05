@@ -1,17 +1,14 @@
-//! Diagnostic-emitting binary-op checker plus the `string + expr` →
-//! interpolation auto-fix builder.
+//! Binary-op operand rule plus the `string + expr` → interpolation auto-fix
+//! builder.
 //!
-//! `check_binops` walks an expression tree and, for each `BinaryOp` whose
-//! operand types are known, verifies that the operator is defined for
-//! that type pair. The pure result-type rule (no diagnostics) lives in
+//! Binary-op diagnostics are emitted by `check_node` as it walks an
+//! expression. The pure result-type rule (no diagnostics) lives in
 //! `super::super::binary_ops::infer_binary_op_type`.
 
 use crate::ast::*;
-use crate::diagnostic_codes::Code;
 use harn_lexer::{FixEdit, Span};
 
-use super::super::scope::TypeScope;
-use super::super::{is_gradual_type_name, TypeChecker};
+use super::super::TypeChecker;
 
 /// Whether `l <op> r` is a valid numeric arithmetic pair. `int` promotes to
 /// either `float` or `decimal`, but `float` and `decimal` never mix (binary
@@ -24,105 +21,6 @@ pub(in crate::typechecker) fn numeric_binop_ok(l: &str, r: &str) -> bool {
 }
 
 impl TypeChecker {
-    /// Recursively validate binary operations in an expression tree.
-    /// Unlike `check_node`, this only checks BinaryOp type compatibility
-    /// without triggering other validations (e.g., function call arg checks).
-    pub(in crate::typechecker) fn check_binops(&mut self, snode: &SNode, scope: &mut TypeScope) {
-        match &snode.node {
-            Node::BinaryOp { op, left, right } => {
-                self.check_binops(left, scope);
-                self.check_binops(right, scope);
-                let lt = self.infer_type(left, scope);
-                let rt = self.infer_type(right, scope);
-                let named_pair = match (&lt, &rt) {
-                    // Gradual operands (`any`/`unknown`/`_`) are compatible with
-                    // every operator — adding/concatenating a value of unknown
-                    // static type is a runtime concern, not a static error.
-                    // `number` is the `int | float` alias, so treat it as a
-                    // union operand (falls through to the gradual arm) instead
-                    // of a concrete name — matching how an explicit
-                    // `int | float` operand is already handled.
-                    (Some(TypeExpr::Named(l)), Some(TypeExpr::Named(r)))
-                        if !is_gradual_type_name(l)
-                            && !is_gradual_type_name(r)
-                            && l != "number"
-                            && r != "number" =>
-                    {
-                        Some((l, r))
-                    }
-                    _ => None,
-                };
-                if let Some((l, r)) = named_pair {
-                    let span = snode.span;
-                    match op.as_str() {
-                        "+" => {
-                            let valid = numeric_binop_ok(l, r)
-                                || matches!(
-                                    (l.as_str(), r.as_str()),
-                                    ("string", "string") | ("list", "list") | ("dict", "dict")
-                                );
-                            if !valid {
-                                let msg = format!("can't add {l} and {r}");
-                                let fix = if l == "string" || r == "string" {
-                                    self.build_interpolation_fix(left, right, l == "string", span)
-                                } else {
-                                    None
-                                };
-                                if let Some(fix) = fix {
-                                    self.error_at_with_fix(
-                                        Code::StringInterpolationRewrite,
-                                        msg,
-                                        span,
-                                        fix,
-                                    );
-                                } else {
-                                    self.error_at(Code::InvalidBinaryOperator, msg, span);
-                                }
-                            }
-                        }
-                        "-" | "/" | "%" if !numeric_binop_ok(l, r) => {
-                            self.error_at(
-                                Code::InvalidBinaryOperator,
-                                format!("can't use '{op}' on {l} and {r} (needs numeric operands)"),
-                                span,
-                            );
-                        }
-                        "**" => {
-                            // Exponentiation is int/float only; `decimal` has no
-                            // `**` at runtime (convert explicitly if needed).
-                            let numeric = ["int", "float"];
-                            if !numeric.contains(&l.as_str()) || !numeric.contains(&r.as_str()) {
-                                self.error_at(
-                                    Code::InvalidBinaryOperator,
-                                    format!(
-                                        "can't use '{op}' on {l} and {r} (needs numeric operands)"
-                                    ),
-                                    span,
-                                );
-                            }
-                        }
-                        "*" => {
-                            let is_numeric = numeric_binop_ok(l, r);
-                            let is_string_repeat =
-                                (l == "string" && r == "int") || (l == "int" && r == "string");
-                            if !is_numeric && !is_string_repeat {
-                                self.error_at(
-                                    Code::InvalidBinaryOperator,
-                                    format!("can't multiply {l} and {r} (try string * int)"),
-                                    span,
-                                );
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            // Recurse into sub-expressions that might contain BinaryOps
-            Node::UnaryOp { operand, .. } => self.check_binops(operand, scope),
-            _ => {}
-        }
-    }
-
     /// Build a fix that converts `"str" + expr` or `expr + "str"` to string interpolation.
     pub(in crate::typechecker) fn build_interpolation_fix(
         &self,
