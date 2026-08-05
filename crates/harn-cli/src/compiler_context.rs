@@ -22,8 +22,33 @@ pub(crate) fn ensure_builtin_signatures_installed() {
 /// lowering, so every file-backed CLI compile must use the same export
 /// contract as typechecking and module-artifact compilation.
 pub(crate) fn compiler_for_source(path: &Path, source: &str) -> harn_vm::Compiler {
-    harn_vm::Compiler::new()
-        .with_imported_enum_candidates(imported_enum_candidates_for_source(path, source))
+    let base = if trusted_host_dispatch_for_source(path) {
+        harn_vm::Compiler::new_trusted_host_dispatch()
+    } else {
+        harn_vm::Compiler::new()
+    };
+    base.with_imported_enum_candidates(imported_enum_candidates_for_source(path, source))
+}
+
+/// Read the project's own `[check].trusted_host_dispatch` declaration for the
+/// manifest that owns `path`.
+///
+/// `harn check`, `harn lint`, and `harn test` all read this key. `harn run` did
+/// not, and it has no CLI flag to compensate, so a project that declared the
+/// authority in its manifest could still be refused every `host_call` the
+/// moment it ran a script — including the manifest's own trigger handlers,
+/// which install before the script body executes and fail the whole run. That
+/// left the key meaning one thing to three commands and nothing to the command
+/// most likely to execute the code.
+pub(crate) fn trusted_host_dispatch_for_source(path: &Path) -> bool {
+    // Walk up from the absolute path. `harn run scripts/main.harn` hands us a
+    // relative path whose ancestors run out at `scripts/`, so the repo-root
+    // manifest that declares the authority is never reached and the key reads
+    // as absent from exactly the invocation people actually type.
+    let absolute = path
+        .canonicalize()
+        .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default().join(path));
+    crate::package::load_check_config(Some(&absolute)).trusted_host_dispatch
 }
 
 pub(crate) fn imported_enum_candidates_for_source(path: &Path, source: &str) -> Vec<String> {
