@@ -154,12 +154,22 @@ pub struct RunReportCoordination {
     /// selected event evidence is missing, malformed, or truncated.
     pub unjoined: Option<usize>,
     pub max_concurrent_children: Option<usize>,
-    /// Parent wait duration is unavailable until a canonical wait-start event
-    /// exists. A join receipt alone cannot prove it.
+    /// Maximum observed parent wait, from the moment the parent began waiting
+    /// to the moment it collected the child (#6074). `None` when join evidence
+    /// is incomplete, or when no child was ever waited on — which is a real
+    /// state, not a gap, and is why this is not zero.
     pub observed_wait_ms: Option<u64>,
     /// Maximum observed child-terminal-to-parent-collection lag. `None` when
     /// join evidence is incomplete or no valid lag was observed.
     pub observed_join_ms: Option<u64>,
+    /// Maximum observed result-collapsing duration. `None` when join evidence
+    /// is incomplete, or when collection happened without collapsing a result.
+    ///
+    /// Kept apart from `observed_wait_ms` and `observed_join_ms` because these
+    /// are three different costs — scheduler wait, collection lag, and the
+    /// parent's own work — and one number covering all three cannot say which
+    /// one a slow run is paying.
+    pub observed_result_processing_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -608,17 +618,42 @@ fn assemble_report(
                 message: "one or more child intervals lack a parseable start or finish timestamp, so peak concurrency is unknown".to_string(),
             });
         }
-        checks.push(RunReportCheck {
-            code: "coordination_timing_unavailable".to_string(),
-            severity: "info".to_string(),
-            status: "unavailable".to_string(),
-            agent_id: Some(format!("run:{root_run_id}")),
-            message: if join_evidence.complete {
-                "join receipts measure terminal-to-collection lag, but no canonical wait-start event exists, so parent wait and result-processing time remain unknown".to_string()
-            } else {
-                "canonical join evidence is missing, malformed, or truncated, so unjoined children, parent wait, and terminal-to-collection lag remain unknown".to_string()
-            },
-        });
+        // Only claim an interval is unavailable when it actually is. Since
+        // #6074 the receipts carry wait and result-processing boundaries, so
+        // this check names the ones still missing rather than asserting a
+        // blanket gap that has been closed.
+        let unavailable: Vec<&str> = [
+            ("parent wait", coordination.observed_wait_ms.is_none()),
+            (
+                "terminal-to-collection lag",
+                coordination.observed_join_ms.is_none(),
+            ),
+            (
+                "result-processing time",
+                coordination.observed_result_processing_ms.is_none(),
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(label, missing)| missing.then_some(label))
+        .collect();
+        if !unavailable.is_empty() {
+            checks.push(RunReportCheck {
+                code: "coordination_timing_unavailable".to_string(),
+                severity: "info".to_string(),
+                status: "unavailable".to_string(),
+                agent_id: Some(format!("run:{root_run_id}")),
+                message: if join_evidence.complete {
+                    format!(
+                        "no canonical boundary was observed for {}, so {} remain{} unknown",
+                        unavailable.join(", "),
+                        if unavailable.len() == 1 { "it" } else { "they" },
+                        if unavailable.len() == 1 { "s" } else { "" },
+                    )
+                } else {
+                    "canonical join evidence is missing, malformed, or truncated, so unjoined children, parent wait, terminal-to-collection lag, and result-processing time remain unknown".to_string()
+                },
+            });
+        }
     }
 
     agents.sort_by(|left, right| left.agent_id.cmp(&right.agent_id));
@@ -919,9 +954,18 @@ fn coordination_summary(
                 .count()
         }),
         max_concurrent_children,
-        observed_wait_ms: None,
+        observed_wait_ms: if join_evidence.complete {
+            join_evidence.max_wait_ms
+        } else {
+            None
+        },
         observed_join_ms: if join_evidence.complete {
             join_evidence.max_terminal_to_collection_ms
+        } else {
+            None
+        },
+        observed_result_processing_ms: if join_evidence.complete {
+            join_evidence.max_result_processing_ms
         } else {
             None
         },

@@ -69,5 +69,6 @@ pub use tool::{
     ToolCallStatus, ToolDenial, ToolExecutor, ToolMutationStatus,
 };
 pub use worker::{
-    AgentRunRef, DelegatedRunLineage, FsWatchEvent, SubagentTerminalStatus, WorkerEvent,
+    AgentRunRef, DelegatedJoinBoundaries, DelegatedRunLineage, FsWatchEvent,
+    SubagentTerminalStatus, WorkerEvent,
 };

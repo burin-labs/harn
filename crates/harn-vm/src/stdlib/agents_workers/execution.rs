@@ -617,6 +617,7 @@ pub(in super::super) async fn execute_delegated_stage(
         started_at: uuid::Uuid::now_v7().to_string(),
         finished_at: None,
         joined_at_ms: None,
+        wait_started_at_ms: None,
         awaiting_started_at: None,
         awaiting_since: None,
         mode: "delegated_stage".to_string(),

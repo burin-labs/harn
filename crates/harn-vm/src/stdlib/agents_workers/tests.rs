@@ -54,6 +54,7 @@ fn minimal_worker_state(config: WorkerConfig, snapshot_path: String) -> WorkerSt
         started_at: "started".to_string(),
         finished_at: None,
         joined_at_ms: None,
+        wait_started_at_ms: None,
         awaiting_started_at: None,
         awaiting_since: None,
         mode: "workflow".to_string(),
@@ -308,6 +309,7 @@ fn worker_snapshot_round_trip_preserves_resume_fields() {
         started_at: "started".to_string(),
         finished_at: Some("finished".to_string()),
         joined_at_ms: None,
+        wait_started_at_ms: None,
         awaiting_started_at: None,
         awaiting_since: None,
         mode: "workflow".to_string(),
@@ -489,6 +491,7 @@ fn worker_summary_exposes_request_and_provenance() {
         started_at: started_at.clone(),
         finished_at: Some(finished_at.clone()),
         joined_at_ms: None,
+        wait_started_at_ms: None,
         awaiting_started_at: None,
         awaiting_since: None,
         mode: "sub_agent".to_string(),
@@ -1084,10 +1087,10 @@ async fn waiting_for_terminal_subagent_emits_one_typed_join_receipt() {
     worker.child_run_id = Some("agent_run_child_join".to_string());
     let state = Arc::new(parking_lot::Mutex::new(worker));
 
-    super::super::replay::wait_for_worker_terminal(state.clone(), "join test")
+    super::super::replay::wait_for_worker_terminal_with(state.clone(), "join test", |_| Ok(()))
         .await
         .unwrap();
-    super::super::replay::wait_for_worker_terminal(state.clone(), "join test")
+    super::super::replay::wait_for_worker_terminal_with(state.clone(), "join test", |_| Ok(()))
         .await
         .unwrap();
 
@@ -1100,8 +1103,15 @@ async fn waiting_for_terminal_subagent_emits_one_typed_join_receipt() {
                 worker_id,
                 completed_at_ms,
                 joined_at_ms,
+                boundaries,
                 ..
-            } => Some((lineage, worker_id, completed_at_ms, joined_at_ms)),
+            } => Some((
+                lineage,
+                worker_id,
+                completed_at_ms,
+                joined_at_ms,
+                *boundaries,
+            )),
             _ => None,
         })
         .collect();
@@ -1111,6 +1121,29 @@ async fn waiting_for_terminal_subagent_emits_one_typed_join_receipt() {
     assert_eq!(joins[0].1, "worker-join");
     assert!(joins[0].3 >= joins[0].2);
     assert!(state.lock().joined_at_ms.is_some());
+
+    // #6074: the one receipt carries every boundary, so a consumer never has
+    // to reassemble the intervals from separate events.
+    let boundaries = joins[0].4;
+    let wait_started_at_ms = boundaries
+        .wait_started_at_ms
+        .expect("the receipt must record when the parent began waiting");
+    assert!(
+        wait_started_at_ms <= *joins[0].3,
+        "the wait cannot start after the collection it precedes"
+    );
+    let processing_started_at_ms = boundaries
+        .result_processing_started_at_ms
+        .expect("the receipt must record when result processing began");
+    let processing_completed_at_ms = boundaries
+        .result_processing_completed_at_ms
+        .expect("the receipt must record when result processing ended");
+    assert!(processing_completed_at_ms >= processing_started_at_ms);
+    assert!(boundaries.wait_ms(*joins[0].3).is_some());
+    assert!(boundaries.result_processing_ms().is_some());
+    // The second wait above must not have rewritten the boundary the receipt
+    // already reported, or a re-joined worker would report a wait of zero.
+    assert_eq!(state.lock().wait_started_at_ms, Some(wait_started_at_ms));
     drop(events);
     clear_session_sinks(&parent_session);
     let _ = std::fs::remove_dir_all(dir);

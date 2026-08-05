@@ -34,6 +34,7 @@ fn worker_bridge_metadata(state: &WorkerState) -> serde_json::Value {
         "started_at": state.started_at,
         "finished_at": state.finished_at,
         "joined_at_ms": state.joined_at_ms,
+        "wait_started_at_ms": state.wait_started_at_ms,
         // Real wall-clock ms decoded from the UUIDv7 ids above, so a worker_update
         // consumer (TUI pane, ACP, dispatch receipt) gets a usable timestamp/
         // duration instead of an opaque id. See `worker_timestamp_unix_ms`.
@@ -184,6 +185,7 @@ pub(in super::super) fn emit_subagent_join(
     snapshot: &WorkerEventSnapshot,
     completed_at_ms: i64,
     joined_at_ms: i64,
+    boundaries: crate::agent_events::DelegatedJoinBoundaries,
 ) {
     let Some(spec) = snapshot.subagent_spec.as_ref() else {
         return;
@@ -197,6 +199,7 @@ pub(in super::super) fn emit_subagent_join(
         worker_id: snapshot.worker_id.clone(),
         completed_at_ms,
         joined_at_ms,
+        boundaries,
     });
 }
 

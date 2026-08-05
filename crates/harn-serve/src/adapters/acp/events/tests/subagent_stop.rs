@@ -1,5 +1,7 @@
 use super::*;
-use harn_vm::agent_events::{AgentRunRef, DelegatedRunLineage, SubagentTerminalStatus};
+use harn_vm::agent_events::{
+    AgentRunRef, DelegatedJoinBoundaries, DelegatedRunLineage, SubagentTerminalStatus,
+};
 
 #[tokio::test(flavor = "current_thread")]
 async fn emits_advertised_lineage_extension() {
@@ -60,6 +62,11 @@ async fn emits_advertised_join_receipt() {
         worker_id: "worker-1".to_string(),
         completed_at_ms: 1200,
         joined_at_ms: 1234,
+        boundaries: DelegatedJoinBoundaries {
+            wait_started_at_ms: Some(1000),
+            result_processing_started_at_ms: Some(1234),
+            result_processing_completed_at_ms: Some(1240),
+        },
     }])
     .await;
 
@@ -68,6 +75,10 @@ async fn emits_advertised_join_receipt() {
     assert_eq!(params["kind"], "subagent_join");
     assert_eq!(params["childRunId"], "child-run");
     assert_eq!(params["workerId"], "worker-1");
-    assert_eq!(params["waitMs"], 34);
+    // The three intervals are distinct numbers on the wire. Before #6074 the
+    // payload published only the middle one, under the name `waitMs`.
+    assert_eq!(params["collectionLagMs"], 34);
+    assert_eq!(params["waitMs"], 234);
+    assert_eq!(params["resultProcessingMs"], 6);
     assert!(HARN_AGENT_EVENT_KINDS.contains(&"subagent_join"));
 }

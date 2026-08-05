@@ -10,6 +10,7 @@ use super::agents_workers::{
     WorkerConfig, WorkerState,
 };
 use super::SubAgentRunSpec;
+use crate::agent_events::DelegatedJoinBoundaries;
 use crate::orchestration::ArtifactRecord;
 use crate::value::{VmError, VmValue};
 use crate::vm::AsyncBuiltinCtx;
@@ -312,10 +313,32 @@ pub(super) fn respawn_worker_task(
     Ok(())
 }
 
-pub(super) async fn wait_for_worker_terminal(
+/// Wait for a delegated worker to reach a terminal state, then collapse its
+/// result, and emit one canonical join receipt carrying every boundary.
+///
+/// The result collapse lives inside this function rather than at the call site
+/// so that all four boundaries — wait start, child terminal, collection, and
+/// result processing — are known in one place and travel on one receipt
+/// (#6074). Splitting them across two events would leave a consumer joining
+/// them by identity and ordering, which is the reconstruction this contract
+/// exists to remove.
+///
+/// The receipt is emitted exactly once per worker and is emitted even when the
+/// collapse fails, so a failed collapse is a measured interval rather than a
+/// missing one.
+pub(super) async fn wait_for_worker_terminal_with<T>(
     state: Arc<parking_lot::Mutex<WorkerState>>,
     context: &str,
-) -> Result<(), VmError> {
+    process_result: impl FnOnce(&WorkerState) -> Result<T, VmError>,
+) -> Result<T, VmError> {
+    {
+        let mut worker = state.lock();
+        // Set once. A second `wait_agent` on an already-collected worker must
+        // not rewrite the boundary the first receipt already reported.
+        if worker.wait_started_at_ms.is_none() {
+            worker.wait_started_at_ms = Some(crate::clock_mock::now_ms());
+        }
+    }
     let mut execution_error = None;
     loop {
         let handle = state.lock().handle.take();
@@ -349,16 +372,33 @@ pub(super) async fn wait_for_worker_terminal(
                         worker_event_snapshot(&worker),
                         completed_at_ms,
                         joined_at_ms,
+                        worker.wait_started_at_ms,
                     ))
                 }
             };
-            if let Some((snapshot, completed_at_ms, joined_at_ms)) = join_receipt {
-                emit_subagent_join(&snapshot, completed_at_ms, joined_at_ms);
+
+            let processing_started_at_ms = crate::clock_mock::now_ms();
+            let processed = process_result(&state.lock());
+            let processing_completed_at_ms = crate::clock_mock::now_ms();
+
+            if let Some((snapshot, completed_at_ms, joined_at_ms, wait_started_at_ms)) =
+                join_receipt
+            {
+                emit_subagent_join(
+                    &snapshot,
+                    completed_at_ms,
+                    joined_at_ms,
+                    DelegatedJoinBoundaries {
+                        wait_started_at_ms,
+                        result_processing_started_at_ms: Some(processing_started_at_ms),
+                        result_processing_completed_at_ms: Some(processing_completed_at_ms),
+                    },
+                );
             }
             if let Some(error) = execution_error {
                 return Err(error);
             }
-            return Ok(());
+            return processed;
         }
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
     }

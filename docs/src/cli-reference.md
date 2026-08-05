@@ -2642,11 +2642,20 @@ agent, checked parent/child links, LLM timing and cache/cost data recorded on
 trace spans, source hashes, redacted visible output, and structural checks.
 `--events-db` adds the redacted semantic timeline from a SQLite event log.
 Canonical `subagent_join` receipts let the report count terminal children that
-the parent has not collected and report the worst observed
-terminal-to-collection lag. These values remain `null`, not zero, when the
-event evidence is absent, malformed, or truncated. A join receipt does not
-record when the parent started waiting or how long result processing took, so
-`observed_wait_ms` remains `null` until Harn records that separate boundary.
+the parent has not collected and report three separate worst-case intervals:
+`observed_wait_ms` from the moment the parent began waiting to the moment it
+collected, `observed_join_ms` from the child's terminal state to that same
+collection, and `observed_result_processing_ms` for the parent's own result
+collapse. Keeping them apart is the point — a slow run pays one of scheduler
+wait, collection lag, or its own work, and one number cannot say which.
+
+All three remain `null`, not zero, when the event evidence is absent,
+malformed, or truncated, and any interval a receipt did not record stays `null`
+rather than being back-filled from the join instant. A report that cannot
+distinguish "the parent never waited" from "the parent waited zero
+milliseconds" is worse than one that says it does not know. The
+`coordination_timing_unavailable` check names only the intervals that are
+actually missing.
 
 Timeline snapshots use schema version 2 and carry a `coverage` object with
 `returned`, `available`, and `truncated`. `available` is exact when Harn read
