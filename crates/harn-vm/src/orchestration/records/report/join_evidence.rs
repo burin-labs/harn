@@ -28,6 +28,13 @@ impl DelegationKey {
 pub(super) struct JoinEvidenceProjection {
     pub(super) complete: bool,
     pub(super) max_terminal_to_collection_ms: Option<u64>,
+    /// Longest observed parent wait, from wait start to collection (#6074).
+    /// `None` when no receipt carried a wait boundary — which is the honest
+    /// answer for a run whose children were started and never waited on.
+    pub(super) max_wait_ms: Option<u64>,
+    /// Longest observed result collapse. `None` when no receipt carried both
+    /// processing boundaries.
+    pub(super) max_result_processing_ms: Option<u64>,
     pub(super) checks: Vec<RunReportCheck>,
     joined: BTreeSet<DelegationKey>,
 }
@@ -76,6 +83,10 @@ pub(super) fn project_join_evidence(
         ..JoinEvidenceProjection::default()
     };
     let mut receipt_lags = BTreeMap::<DelegationKey, Option<u64>>::new();
+    // Kept beside `receipt_lags` and poisoned by the same duplicate rule, so
+    // one bad receipt cannot make any of the three intervals look measured.
+    let mut receipt_waits = BTreeMap::<DelegationKey, Option<u64>>::new();
+    let mut receipt_processing = BTreeMap::<DelegationKey, Option<u64>>::new();
 
     for timeline in timelines {
         for node in &timeline.nodes {
@@ -94,6 +105,7 @@ pub(super) fn project_join_evidence(
                     worker_id,
                     completed_at_ms,
                     joined_at_ms,
+                    boundaries,
                 }) => {
                     if session_id != lineage.parent.session_id
                         || timeline.query.session_id.as_deref()
@@ -137,6 +149,7 @@ pub(super) fn project_join_evidence(
                         },
                         completed_at_ms,
                         joined_at_ms,
+                        boundaries,
                     )
                 }
                 Ok(_) => unreachable!("subagent_join type must decode to SubagentJoin"),
@@ -157,7 +170,7 @@ pub(super) fn project_join_evidence(
                 }
             };
 
-            let (key, completed_at_ms, joined_at_ms) = event;
+            let (key, completed_at_ms, joined_at_ms, boundaries) = event;
             if !expected.contains_key(&key) {
                 projection.checks.push(check(
                     "subagent_join_without_delegation",
@@ -182,8 +195,48 @@ pub(super) fn project_join_evidence(
                     "join receipt precedes the child's terminal timestamp".to_string(),
                 ));
             }
+            // A boundary the emitter never recorded is absent, not zero: an
+            // `agent_start` without `wait_for_terminal` genuinely never waited,
+            // and a wait that collected without collapsing a result genuinely
+            // has no processing interval. Both stay out of their map so the
+            // maximum is taken over measured intervals only.
+            let wait = boundaries.wait_started_at_ms.map(|_| {
+                let measured = boundaries.wait_ms(joined_at_ms);
+                if measured.is_none() {
+                    projection.checks.push(check(
+                        "subagent_join_wait_time_invalid",
+                        "error",
+                        &key.child_agent_id,
+                        "join receipt precedes the parent's recorded wait start".to_string(),
+                    ));
+                }
+                measured
+            });
+            let processing = boundaries
+                .result_processing_started_at_ms
+                .zip(boundaries.result_processing_completed_at_ms)
+                .map(|_| {
+                    let measured = boundaries.result_processing_ms();
+                    if measured.is_none() {
+                        projection.checks.push(check(
+                            "subagent_join_result_processing_time_invalid",
+                            "error",
+                            &key.child_agent_id,
+                            "result processing finished before it started".to_string(),
+                        ));
+                    }
+                    measured
+                });
+            if let Some(wait) = wait {
+                receipt_waits.insert(key.clone(), wait);
+            }
+            if let Some(processing) = processing {
+                receipt_processing.insert(key.clone(), processing);
+            }
             if receipt_lags.insert(key.clone(), lag).is_some() {
                 receipt_lags.insert(key.clone(), None);
+                receipt_waits.insert(key.clone(), None);
+                receipt_processing.insert(key.clone(), None);
                 projection.checks.push(check(
                     "subagent_join_duplicate",
                     "error",
@@ -214,6 +267,8 @@ pub(super) fn project_join_evidence(
             }
         }
         projection.max_terminal_to_collection_ms = receipt_lags.into_values().flatten().max();
+        projection.max_wait_ms = receipt_waits.into_values().flatten().max();
+        projection.max_result_processing_ms = receipt_processing.into_values().flatten().max();
     }
     projection
 }
@@ -221,7 +276,7 @@ pub(super) fn project_join_evidence(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent_events::{AgentRunRef, DelegatedRunLineage};
+    use crate::agent_events::{AgentRunRef, DelegatedJoinBoundaries, DelegatedRunLineage};
     use crate::session_timeline::{
         SessionTimelineCoverage, SessionTimelineCursor, SessionTimelineNode, SessionTimelineQuery,
     };
@@ -300,6 +355,7 @@ mod tests {
             worker_id: "worker-1".to_string(),
             completed_at_ms: 100,
             joined_at_ms: 125,
+            boundaries: DelegatedJoinBoundaries::default(),
         };
         let node = SessionTimelineNode {
             id: "join-1".to_string(),
@@ -349,5 +405,203 @@ mod tests {
             .checks
             .iter()
             .any(|check| check.code == "subagent_join_lineage_mismatch"));
+    }
+
+    fn delegation() -> RunReportDelegation {
+        RunReportDelegation {
+            parent_agent_id: "run:parent".to_string(),
+            child_agent_id: "run:child".to_string(),
+            worker_id: "worker-1".to_string(),
+            status: "completed".to_string(),
+            ..RunReportDelegation::default()
+        }
+    }
+
+    fn receipt(joined_at_ms: i64, boundaries: DelegatedJoinBoundaries) -> SessionTimelineNode {
+        let event = AgentEvent::SubagentJoin {
+            session_id: "parent-session".to_string(),
+            lineage: DelegatedRunLineage {
+                parent: AgentRunRef {
+                    session_id: "parent-session".to_string(),
+                    run_id: "parent".to_string(),
+                },
+                child: AgentRunRef {
+                    session_id: "child-session".to_string(),
+                    run_id: "child".to_string(),
+                },
+            },
+            worker_id: "worker-1".to_string(),
+            completed_at_ms: 100,
+            joined_at_ms,
+            boundaries,
+        };
+        SessionTimelineNode {
+            id: format!("join-{joined_at_ms}"),
+            parent_id: None,
+            children: Vec::new(),
+            category: "agent_event".to_string(),
+            kind: "subagent_join".to_string(),
+            name: "subagent_join".to_string(),
+            status: "observed".to_string(),
+            trace_id: None,
+            span_id: None,
+            occurred_at_ms: Some(joined_at_ms),
+            start_ms: None,
+            duration_ms: None,
+            attributes: serde_json::json!({"event": event}),
+            references: Vec::new(),
+            links: Vec::new(),
+            order: 1,
+        }
+    }
+
+    fn project(nodes: Vec<SessionTimelineNode>) -> JoinEvidenceProjection {
+        let complete = SessionTimelineCoverage {
+            returned: nodes.len(),
+            available: Some(nodes.len()),
+            truncated: false,
+        };
+        project_join_evidence(
+            &[delegation()],
+            &[
+                timeline("parent", "parent-session", complete, nodes),
+                timeline(
+                    "child",
+                    "child-session",
+                    SessionTimelineCoverage::default(),
+                    Vec::new(),
+                ),
+            ],
+            true,
+        )
+    }
+
+    fn full_boundaries() -> DelegatedJoinBoundaries {
+        DelegatedJoinBoundaries {
+            wait_started_at_ms: Some(60),
+            result_processing_started_at_ms: Some(125),
+            result_processing_completed_at_ms: Some(132),
+        }
+    }
+
+    /// The three intervals are separated, not one number wearing three names.
+    #[test]
+    fn one_receipt_yields_three_distinct_intervals() {
+        let evidence = project(vec![receipt(125, full_boundaries())]);
+
+        assert!(evidence.complete);
+        assert_eq!(evidence.max_terminal_to_collection_ms, Some(25));
+        assert_eq!(evidence.max_wait_ms, Some(65));
+        assert_eq!(evidence.max_result_processing_ms, Some(7));
+        assert!(evidence.checks.is_empty());
+    }
+
+    /// A receipt written before #6074 carries no boundaries. It must project
+    /// explicit nulls rather than being back-filled from the join instant,
+    /// which would report a zero wait for a parent that waited.
+    #[test]
+    fn a_receipt_without_boundaries_projects_nulls_not_zeroes() {
+        let evidence = project(vec![receipt(125, DelegatedJoinBoundaries::default())]);
+
+        assert!(evidence.complete);
+        assert_eq!(evidence.max_terminal_to_collection_ms, Some(25));
+        assert_eq!(evidence.max_wait_ms, None);
+        assert_eq!(evidence.max_result_processing_ms, None);
+    }
+
+    /// One boundary present and the other missing is not half an interval.
+    #[test]
+    fn a_half_recorded_processing_interval_is_not_measured() {
+        let evidence = project(vec![receipt(
+            125,
+            DelegatedJoinBoundaries {
+                result_processing_completed_at_ms: None,
+                ..full_boundaries()
+            },
+        )]);
+
+        assert_eq!(evidence.max_wait_ms, Some(65));
+        assert_eq!(evidence.max_result_processing_ms, None);
+    }
+
+    /// A duplicate receipt already poisoned the collection lag. It has to
+    /// poison the other two as well, or a second receipt could make an
+    /// unmeasurable run look measured on two of three axes.
+    #[test]
+    fn a_duplicate_receipt_poisons_every_interval() {
+        let evidence = project(vec![
+            receipt(125, full_boundaries()),
+            receipt(126, full_boundaries()),
+        ]);
+
+        assert!(evidence
+            .checks
+            .iter()
+            .any(|check| check.code == "subagent_join_duplicate"));
+        assert_eq!(evidence.max_terminal_to_collection_ms, None);
+        assert_eq!(evidence.max_wait_ms, None);
+        assert_eq!(evidence.max_result_processing_ms, None);
+    }
+
+    /// Boundaries out of order are a broken clock, not a fast parent.
+    #[test]
+    fn out_of_order_boundaries_are_reported_and_excluded() {
+        let evidence = project(vec![receipt(
+            125,
+            DelegatedJoinBoundaries {
+                wait_started_at_ms: Some(200),
+                result_processing_started_at_ms: Some(140),
+                result_processing_completed_at_ms: Some(130),
+            },
+        )]);
+
+        assert_eq!(evidence.max_wait_ms, None);
+        assert_eq!(evidence.max_result_processing_ms, None);
+        assert!(evidence
+            .checks
+            .iter()
+            .any(|check| check.code == "subagent_join_wait_time_invalid"));
+        assert!(evidence
+            .checks
+            .iter()
+            .any(|check| check.code == "subagent_join_result_processing_time_invalid"));
+        // The lag is independently measurable and must survive.
+        assert_eq!(evidence.max_terminal_to_collection_ms, Some(25));
+    }
+
+    /// A cancelled or failed child still produces a receipt, and its intervals
+    /// are as real as a completed child's: the parent waited and collapsed a
+    /// result either way.
+    #[test]
+    fn a_failed_child_still_measures_its_intervals() {
+        let complete = SessionTimelineCoverage {
+            returned: 1,
+            available: Some(1),
+            truncated: false,
+        };
+        let evidence = project_join_evidence(
+            &[RunReportDelegation {
+                status: "failed".to_string(),
+                ..delegation()
+            }],
+            &[
+                timeline(
+                    "parent",
+                    "parent-session",
+                    complete,
+                    vec![receipt(125, full_boundaries())],
+                ),
+                timeline(
+                    "child",
+                    "child-session",
+                    SessionTimelineCoverage::default(),
+                    Vec::new(),
+                ),
+            ],
+            true,
+        );
+
+        assert_eq!(evidence.max_wait_ms, Some(65));
+        assert_eq!(evidence.max_result_processing_ms, Some(7));
     }
 }

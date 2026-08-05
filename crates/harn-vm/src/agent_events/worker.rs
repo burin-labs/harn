@@ -27,6 +27,60 @@ pub struct DelegatedRunLineage {
     pub child: AgentRunRef,
 }
 
+/// The measurable boundaries of one parent/child join, in one place.
+///
+/// Three intervals fall out of these four points, and a run report that
+/// carries only `completed_at_ms` and `joined_at_ms` cannot separate them:
+///
+/// - scheduler wait: `joined_at_ms - wait_started_at_ms`;
+/// - collection lag: `joined_at_ms - completed_at_ms`;
+/// - result processing: `result_processing_completed_at_ms -
+///   result_processing_started_at_ms`.
+///
+/// The optional boundaries stay `Option` rather than defaulting to the join
+/// instant, because a report that cannot distinguish "the parent never waited"
+/// from "the parent waited zero milliseconds" is worse than one that says it
+/// does not know. A path that never waited (`agent_start` without
+/// `wait_for_terminal`) and a path that collected without collapsing a result
+/// both project explicit nulls.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct DelegatedJoinBoundaries {
+    /// When the parent began waiting on this child, if it ever did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_started_at_ms: Option<i64>,
+    /// When the parent began collapsing the child's result, if it did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_processing_started_at_ms: Option<i64>,
+    /// When that collapse finished. Recorded even when it failed, so a failed
+    /// collapse is a measured interval rather than a missing one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_processing_completed_at_ms: Option<i64>,
+}
+
+impl DelegatedJoinBoundaries {
+    /// How long the parent was blocked, from the moment it began waiting to the
+    /// moment it observed the child terminal.
+    ///
+    /// `None` when the parent never waited. Also `None` when the clock ran
+    /// backwards between the two reads, because a negative duration is a
+    /// broken measurement, not a fast one.
+    #[must_use]
+    pub fn wait_ms(&self, joined_at_ms: i64) -> Option<u64> {
+        u64::try_from(joined_at_ms.checked_sub(self.wait_started_at_ms?)?).ok()
+    }
+
+    /// How long the parent spent collapsing the child's result. `None` unless
+    /// both boundaries were recorded.
+    #[must_use]
+    pub fn result_processing_ms(&self) -> Option<u64> {
+        u64::try_from(
+            self.result_processing_completed_at_ms?
+                .checked_sub(self.result_processing_started_at_ms?)?,
+        )
+        .ok()
+    }
+}
+
 /// One coalesced filesystem notification from a hostlib `fs_watch`
 /// subscription.
 #[derive(Clone, Debug, Serialize, Deserialize)]

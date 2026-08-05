@@ -297,6 +297,7 @@ pub(in super::super) fn persist_worker_state_snapshot(state: &WorkerState) -> Re
         "started_at": state.started_at,
         "finished_at": state.finished_at,
         "joined_at_ms": state.joined_at_ms,
+        "wait_started_at_ms": state.wait_started_at_ms,
         "awaiting_started_at": state.awaiting_started_at,
         "mode": state.mode,
         "history": state.history,
@@ -441,6 +442,9 @@ pub(in super::super) fn load_worker_state_snapshot(target: &str) -> Result<Worke
             .map(|value| value.to_string()),
         joined_at_ms: payload
             .get("joined_at_ms")
+            .and_then(serde_json::Value::as_i64),
+        wait_started_at_ms: payload
+            .get("wait_started_at_ms")
             .and_then(serde_json::Value::as_i64),
         awaiting_started_at: payload
             .get("awaiting_started_at")

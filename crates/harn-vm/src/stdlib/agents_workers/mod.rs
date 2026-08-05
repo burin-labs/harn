@@ -186,6 +186,10 @@ pub(super) struct WorkerState {
     pub(super) started_at: String,
     pub(super) finished_at: Option<String>,
     pub(super) joined_at_ms: Option<i64>,
+    /// When the parent first began waiting on this worker (#6074). Set once,
+    /// on the first wait, so a second `wait_agent` on an already-collected
+    /// worker does not rewrite the boundary the receipt reported.
+    pub(super) wait_started_at_ms: Option<i64>,
     pub(super) awaiting_started_at: Option<String>,
     pub(super) awaiting_since: Option<Instant>,
     pub(super) mode: String,
@@ -485,6 +489,7 @@ pub(super) fn clone_worker_state(state: &WorkerState) -> serde_json::Value {
         "started_at": state.started_at,
         "finished_at": state.finished_at,
         "joined_at_ms": state.joined_at_ms,
+        "wait_started_at_ms": state.wait_started_at_ms,
         "created_at_ms": worker_timestamp_unix_ms(&state.created_at),
         "started_at_ms": worker_timestamp_unix_ms(&state.started_at),
         "finished_at_ms": state.finished_at.as_deref().and_then(worker_timestamp_unix_ms),

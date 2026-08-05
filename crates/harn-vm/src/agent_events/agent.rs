@@ -854,6 +854,11 @@ pub enum AgentEvent {
         worker_id: String,
         completed_at_ms: i64,
         joined_at_ms: i64,
+        /// Wait and result-processing boundaries (#6074). Flattened so a
+        /// receipt written before these existed still deserializes, with every
+        /// new boundary absent rather than guessed.
+        #[serde(default, flatten)]
+        boundaries: super::DelegatedJoinBoundaries,
     },
     /// A human-in-the-loop primitive (`ask_user`, `request_approval`,
     /// `dual_control`, `escalate`) has just suspended the script and is

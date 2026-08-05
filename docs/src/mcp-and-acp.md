@@ -802,8 +802,16 @@ Delegated work uses the same two identities. `_harn/agentEvent` notifications
 with `kind: "subagent_stop"` carry parent and child session/run references for
 terminal completion. A background child's first `wait_agent` observation emits
 `kind: "subagent_join"` with the same references plus `workerId`,
-`completedAtMs`, `joinedAtMs`, and `waitMs`. The stop event says when the child
-finished; the join event says when its parent collected that result.
+`completedAtMs`, `joinedAtMs`, `waitStartedAtMs`,
+`resultProcessingStartedAtMs`, and `resultProcessingCompletedAtMs`, together
+with the three intervals they define: `waitMs` (wait start to collection),
+`collectionLagMs` (child terminal to collection), and `resultProcessingMs`.
+
+The stop event says when the child finished; the join event says when its
+parent began waiting, when it collected that result, and how long collapsing it
+took. An interval whose boundaries the receipt did not record is `null`, never
+zero. Note that `waitMs` previously carried the terminal-to-collection
+subtraction now published as `collectionLagMs`; it is the parent's wait.
 
 ### Session timeline extension
 

@@ -3,7 +3,7 @@ use std::fs;
 
 use serde_json::Value;
 
-use crate::agent_events::{AgentEvent, AgentRunRef, DelegatedRunLineage};
+use crate::agent_events::{AgentEvent, AgentRunRef, DelegatedJoinBoundaries, DelegatedRunLineage};
 use crate::event_log::{EventLog, LogEvent, SqliteEventLog};
 use crate::orchestration::{save_run_record, RunChildRecord, RunRecord};
 
@@ -103,6 +103,17 @@ async fn report_projects_three_canonical_join_receipts() {
             worker_id: format!("worker-{child_number}"),
             completed_at_ms,
             joined_at_ms: completed_at_ms + lag_ms,
+            // Wait starts 200ms before the child finishes and the collapse
+            // costs 5ms more for each successive child, so the three intervals
+            // have distinct maxima and a projection that conflated them would
+            // report the wrong number rather than merely a plausible one.
+            boundaries: DelegatedJoinBoundaries {
+                wait_started_at_ms: Some(completed_at_ms - 200),
+                result_processing_started_at_ms: Some(completed_at_ms + lag_ms),
+                result_processing_completed_at_ms: Some(
+                    completed_at_ms + lag_ms + 5 + i64::try_from(index).unwrap() * 5,
+                ),
+            },
         };
         log.append(
             &topic,
@@ -131,20 +142,23 @@ async fn report_projects_three_canonical_join_receipts() {
     assert_eq!(report.coordination.spawned, 3);
     assert_eq!(report.coordination.terminal, 3);
     assert_eq!(report.coordination.unjoined, Some(0));
+    // Three different maxima from the same three receipts. A projection that
+    // conflated any two of these would land on a plausible number, so the
+    // fixture gives each interval a different winner: collection lag peaks on
+    // child 2 (75ms), the wait is that lag plus a fixed 200ms head start, and
+    // result processing grows 5ms per child so it peaks on child 3.
     assert_eq!(report.coordination.observed_join_ms, Some(75));
-    assert_eq!(report.coordination.observed_wait_ms, None);
+    assert_eq!(report.coordination.observed_wait_ms, Some(275));
+    assert_eq!(report.coordination.observed_result_processing_ms, Some(15));
     assert!(!report
         .checks
         .iter()
         .any(|check| check.code == "subagent_join_missing"));
-    let timing_check = report
+    // Every interval is measured, so the gap check must not fire at all.
+    assert!(!report
         .checks
         .iter()
-        .find(|check| check.code == "coordination_timing_unavailable")
-        .unwrap();
-    assert!(timing_check
-        .message
-        .contains("no canonical wait-start event"));
+        .any(|check| check.code == "coordination_timing_unavailable"));
     assert!(report
         .timelines
         .iter()

@@ -107,12 +107,13 @@ jq '.delegations, [.checks[] | select(.status != "passed")]' run-report.json
 The report follows each typed `child_runs[].run_path`, checks the child's
 back-pointer, and keeps the source hash beside the projected evidence. Add
 `--events-db <path>` when the run used a SQLite event log. Canonical join
-receipts make `coordination.unjoined` exact for terminal children and let
-`observed_join_ms` report the worst terminal-to-collection lag. Both remain
-`null` when event evidence is absent, malformed, or truncated. Parent wait and
-result-processing time remain unknown because a join receipt does not record a
-wait-start or processing boundary; the report never turns missing timing into
-zero.
+receipts make `coordination.unjoined` exact for terminal children and separate
+the three costs a slow delegation can be paying: `observed_wait_ms` for
+scheduler wait, `observed_join_ms` for terminal-to-collection lag, and
+`observed_result_processing_ms` for the parent collapsing the result. All remain
+`null` when event evidence is absent, malformed, or truncated, and a duplicate
+receipt clears all three rather than only the lag. The report never turns
+missing timing into zero.
 
 Each timeline includes `coverage.returned`, `coverage.available`, and
 `coverage.truncated`. Treat a missing event as evidence only when `truncated`

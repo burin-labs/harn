@@ -187,6 +187,7 @@ fn fresh_worker_state(
         started_at: created_at,
         finished_at: None,
         joined_at_ms: None,
+        wait_started_at_ms: None,
         awaiting_started_at: None,
         awaiting_since: None,
         mode,
@@ -232,7 +233,9 @@ async fn finalize_and_run_worker(
     });
     spawn_worker_task(state.clone(), ctx.child_ctx());
     if wait_for_terminal {
-        wait_for_worker_terminal(state.clone(), wait_context).await?;
+        // The summary is the parent's result collapse, so it runs inside the
+        // wait and its boundaries travel on the join receipt (#6074).
+        return wait_for_worker_terminal_with(state.clone(), wait_context, worker_summary).await;
     }
     worker_summary(&state.lock())
 }
@@ -795,6 +798,7 @@ async fn top_level_agent_suspend_builtin(
         started_at: now.clone(),
         finished_at: None,
         joined_at_ms: None,
+        wait_started_at_ms: None,
         awaiting_started_at: None,
         awaiting_since: None,
         mode: "top_level_agent".to_string(),
@@ -992,16 +996,15 @@ async fn wait_agent_builtin(
         for item in list.iter() {
             let worker_id = worker_id_from_value(item)?;
             let state = with_worker_state(&worker_id, Ok)?;
-            wait_for_worker_terminal(state.clone(), "wait_agent").await?;
-            results.push(worker_summary(&state.lock())?);
+            results.push(
+                wait_for_worker_terminal_with(state.clone(), "wait_agent", worker_summary).await?,
+            );
         }
         return Ok(VmValue::List(std::sync::Arc::new(results)));
     }
     let worker_id = worker_id_from_value(target)?;
     let state = with_worker_state(&worker_id, Ok)?;
-    wait_for_worker_terminal(state.clone(), "wait_agent").await?;
-    let summary = worker_summary(&state.lock())?;
-    Ok(summary)
+    wait_for_worker_terminal_with(state.clone(), "wait_agent", worker_summary).await
 }
 
 #[harn_builtin(

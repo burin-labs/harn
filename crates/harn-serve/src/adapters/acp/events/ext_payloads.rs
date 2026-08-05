@@ -49,6 +49,7 @@ pub(super) fn subagent_join(event: &AgentEvent) -> serde_json::Value {
         worker_id,
         completed_at_ms,
         joined_at_ms,
+        boundaries,
         ..
     } = event
     else {
@@ -62,7 +63,16 @@ pub(super) fn subagent_join(event: &AgentEvent) -> serde_json::Value {
         "workerId": worker_id,
         "completedAtMs": completed_at_ms,
         "joinedAtMs": joined_at_ms,
-        "waitMs": joined_at_ms.saturating_sub(*completed_at_ms),
+        // Renamed from `waitMs`, which reported this same subtraction (#6074).
+        // It is the collection lag, not the parent's wait: the parent may have
+        // been waiting long before the child reached a terminal state, and
+        // `waitMs` below is now that number.
+        "collectionLagMs": joined_at_ms.saturating_sub(*completed_at_ms),
+        "waitStartedAtMs": boundaries.wait_started_at_ms,
+        "waitMs": boundaries.wait_ms(*joined_at_ms),
+        "resultProcessingStartedAtMs": boundaries.result_processing_started_at_ms,
+        "resultProcessingCompletedAtMs": boundaries.result_processing_completed_at_ms,
+        "resultProcessingMs": boundaries.result_processing_ms(),
     })
 }
 
