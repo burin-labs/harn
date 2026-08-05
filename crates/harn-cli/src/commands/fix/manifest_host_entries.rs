@@ -16,11 +16,29 @@
 //! the manifest and the attribute two surfaces stating one fact, and the one
 //! that drifts is the one nothing checks. So the fixer reads the manifest.
 //!
-//! What this prevents is not a narrowing but an invention: `enforce_stage_tool_gate(event)`
-//! takes exactly the argument the hook engine passes it, and the migration
-//! wanted to rewrite it as `enforce_stage_tool_gate({agent, runtime}, event)` —
-//! a signature the engine has no way to call, on every hook in the package at
-//! once.
+//! # What the runtime actually supplies
+//!
+//! Not a fixed arity — the two dispatchers differ. A manifest tool hook goes
+//! through `invoke_vm_hook_handler`, which calls the closure with
+//! `[harness, event]`; a persona step hook goes through `call_lifecycle_hook`,
+//! which passes the payload alone. What they share is the part that matters
+//! here: when a capability argument is supplied at all it is the **root**
+//! `Harness`. So the migration's carrier ladder is the problem, exactly as in
+//! #6193 — it rewrote `enforce_stage_tool_gate(event)` to take
+//! `{agent: HarnessAgent, runtime: HarnessRuntime}`, and no dispatcher builds a
+//! record.
+//!
+//! # Why freeze rather than pin to root
+//!
+//! For a hook entered with `[harness, event]`, taking root `Harness` first is a
+//! legal shape, so freezing refuses one rewrite that would have been correct in
+//! order to refuse the several that are not. Choosing the conservative side
+//! keeps this identical to what `@host_entry` already does for an entry point
+//! with no capability parameter, and the refusal is reported as a frozen
+//! callable rather than applied silently. Promoting a registered handler to
+//! root `Harness` is a real improvement, but it is a migration with its own
+//! correctness argument — per hook event — and not something to infer from a
+//! body.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};

@@ -2,13 +2,15 @@
 //!
 //! `@host_entry` covers the boundary nothing can see. This covers the boundary
 //! everything can see and nothing read: `[[hooks]]` and `[[triggers]]` name the
-//! callables the runtime invokes, at the arity their declaration fixes.
+//! callables the runtime enters, and the runtime — not the migration — decides
+//! what capability argument they receive. When it supplies one it is the root
+//! `Harness`.
 //!
 //! Found in burin-code, whose five hook handlers all take `(event)`. The
-//! migration rewrote each to take a capability parameter first — including
-//! `enforce_stage_tool_gate({agent: HarnessAgent, runtime: HarnessRuntime}, event)`,
-//! a record no hook engine can construct — and would have landed all five in
-//! one auto-merged bump.
+//! migration rewrote each to take a capability parameter of its own choosing —
+//! including `enforce_stage_tool_gate({agent: HarnessAgent, runtime:
+//! HarnessRuntime}, event)`, a record no dispatcher constructs — and would have
+//! landed all five in one auto-merged bump.
 
 use super::*;
 
@@ -84,12 +86,12 @@ fn an_unregistered_handler_still_gains_a_capability_parameter() {
 }
 
 #[test]
-fn a_registered_hook_handler_keeps_the_arity_the_manifest_fixed() {
+fn a_registered_handlers_carrier_is_not_chosen_by_the_migration() {
     let migrated = migrate_package(&[("harn.toml", MANIFEST_WITH_HOOK), ("lib.harn", HOOKS)]);
     let lib = &migrated["lib.harn"];
     assert!(
         lib.contains("pub fn on_pre_tool_use(event) -> nil"),
-        "the hook engine calls this with exactly `event`: {lib}"
+        "the runtime supplies this argument; the migration does not pick it: {lib}"
     );
     assert!(
         !lib.contains("on_pre_tool_use(runtime"),

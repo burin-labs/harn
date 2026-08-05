@@ -1,14 +1,14 @@
 //! Frozen-signature facts for the capability migration.
 //!
-//! Some callables must not have a `harness` parameter introduced, for one
-//! underlying reason: something outside the fixer's view calls them at their
-//! declared arity. A callable whose value is read as a first-class reference is
-//! invoked through a call site no static pass can see (#6146); one declared
-//! `@host_entry` is entered by an embedding host whose only registration lives
-//! in that host's source (#6193); one named by a `harn.toml` hook or trigger is
-//! entered by the runtime through a registration that is written down but is
-//! not a call site (#6272). This module owns both halves of the decision: which
-//! names stay frozen, and the record of what freezing actually blocked.
+//! Some callables must not have their capability parameter chosen by the
+//! migration, for one underlying reason: something outside the fixer's view
+//! decides how they are called. A callable whose value is read as a first-class
+//! reference is invoked through a call site no static pass can see (#6146); one
+//! declared `@host_entry` is entered by an embedding host whose registration
+//! lives in that host's source (#6193); one named by a `harn.toml` hook or
+//! trigger is entered by the runtime through a registration that is written
+//! down but is not a call site (#6272). This module owns both halves of the
+//! decision: which names stay frozen, and the record of what freezing blocked.
 
 use std::collections::BTreeSet;
 
@@ -32,10 +32,11 @@ pub(super) struct FrozenCallable {
 
 /// Why one callable's signature is frozen.
 ///
-/// The two causes are equally final but not equally explicable, and an
-/// operator's next move differs: a value reference can be wrapped in a closure,
-/// while a host contract has to change on the host's side. Collapsing them to
-/// one message would send the reader to the wrong fix.
+/// The causes are equally final but not equally explicable, and an operator's
+/// next move differs: a value reference can be wrapped in a closure, a host
+/// contract has to change on the host's side, and a manifest handler is a
+/// registration to edit. Collapsing them to one message would send the reader
+/// to the wrong fix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum FrozenCause {
     /// The callable's value is read as a first-class reference (#6146).
@@ -88,7 +89,7 @@ impl FrozenCallable {
                 "it is declared `@host_entry`, so an embedding host supplies its arguments at the arity it declares. It owns the ambient capability use, and a parameter the host was never asked to pass cannot be introduced — thread the capability through an existing parameter, or have the host pass it and drop `@host_entry` from `{name}`"
             ),
             FrozenCause::ManifestHandler => format!(
-                "`harn.toml` registers it as a runtime handler, so the runtime invokes it at the arity the registration fixes. It owns the ambient capability use, and a parameter the runtime was never asked to pass cannot be introduced — thread the capability through an existing parameter, or remove the `harn.toml` block that names `{name}`"
+                "`harn.toml` registers it as a runtime handler, so the runtime supplies its capability argument — and it supplies the root `Harness`, which a narrowed or record carrier cannot receive. Thread the capability through an existing parameter, declare the root handle yourself, or remove the `harn.toml` block that names `{name}`"
             ),
         };
         Self {
