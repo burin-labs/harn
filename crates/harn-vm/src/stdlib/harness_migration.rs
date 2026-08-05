@@ -460,7 +460,6 @@ mod registered_capability_migration_tests {
         "host_tool_list",
         "invalidate_facts",
         "llm_mock_known_scopes",
-        "llm_mock_load_jsonl",
         "llm_mock_receipts",
         "render",
     ];

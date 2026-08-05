@@ -93,6 +93,7 @@ pub static VM_DECLARED_CAPABILITY_METHODS: &[(&str, &str)] = &[
     ("llm", "infer_provider"),
     ("llm", "known_models"),
     ("llm", "list_providers_native"),
+    ("llm", "mock_load_jsonl"),
     ("llm", "model_defaults"),
     ("llm", "model_info"),
     ("llm", "model_tier"),

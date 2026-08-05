@@ -194,6 +194,7 @@ pub(super) const HARNESS_MIGRATIONS: &[(&str, &str)] = &[
     ("llm_mock", "harness.llm.mock_enqueue"),
     ("llm_mock_calls", "harness.llm.mock_calls"),
     ("llm_mock_clear", "harness.llm.mock_clear"),
+    ("llm_mock_load_jsonl", "harness.llm.mock_load_jsonl"),
     ("llm_mock_pop_scope", "harness.llm.mock_pop_scope"),
     ("llm_mock_push_scope", "harness.llm.mock_push_scope"),
     ("llm_mock_snapshot", "harness.llm.mock_snapshot"),

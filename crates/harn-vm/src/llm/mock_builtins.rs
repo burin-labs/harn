@@ -48,8 +48,13 @@ fn llm_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
 /// Atomically load a complete JSONL fixture document into the builtin mock
 /// store. The caller owns filesystem access; this capability accepts text so
 /// all hosts share the same parser without granting ambient reads to scripts.
+///
+/// Reached from source as `HarnessLlm.mock_load_jsonl`: a script that already
+/// holds the llm capability and read the fixture through its own fs grant has
+/// the authority this needs, and routing it through the handle is what lets a
+/// pipeline install a versioned fixture without a host round-trip.
 #[harn_builtin(
-    exposure = "runtime_internal",
+    exposure = "harness.llm.mock_load_jsonl",
     effects = [],
     sig = "llm_mock_load_jsonl(text: string) -> dict",
     category = "llm.mock"
