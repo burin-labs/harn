@@ -34,7 +34,7 @@ fn capability_apply_keeps_the_arity_of_a_handler_referenced_by_value() {
     )
     .unwrap();
 
-    apply_repairs_with_options(
+    apply_repairs_with_options_at(
         temp.path(),
         RepairSafety::SurfaceChanging,
         false,
@@ -97,7 +97,7 @@ fn capability_apply_keeps_the_arity_of_a_handler_registered_in_another_file() {
     )
     .unwrap();
 
-    apply_repairs_with_options(
+    apply_repairs_with_options_at(
         temp.path(),
         RepairSafety::SurfaceChanging,
         false,
@@ -133,7 +133,7 @@ fn capability_apply_still_threads_a_callable_that_never_escapes() {
     )
     .unwrap();
 
-    apply_repairs_with_options(
+    apply_repairs_with_options_at(
         temp.path(),
         RepairSafety::SurfaceChanging,
         false,
@@ -190,7 +190,7 @@ fn capability_plan_names_the_frozen_callable_that_blocked_the_migration() {
     )
     .unwrap();
 
-    let plan = build_plan_with_options(temp.path(), None, &FixOptions::capability_migrations())
+    let plan = build_plan_with_options_at(temp.path(), None, &FixOptions::capability_migrations())
         .expect("plan");
 
     let frozen = plan
@@ -234,7 +234,7 @@ fn capability_plan_reports_no_frozen_callable_when_the_migration_proceeds() {
     )
     .unwrap();
 
-    let plan = build_plan_with_options(temp.path(), None, &FixOptions::capability_migrations())
+    let plan = build_plan_with_options_at(temp.path(), None, &FixOptions::capability_migrations())
         .expect("plan");
 
     assert!(

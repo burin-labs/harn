@@ -191,7 +191,7 @@ fn apply_single(source: &str) -> (ApplyResult, String) {
     let temp = tempfile::TempDir::new().unwrap();
     let script = temp.path().join("main.harn");
     fs::write(&script, source).unwrap();
-    let result = apply_repairs_with_options(
+    let result = apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -268,7 +268,7 @@ fn capability_apply_preserves_an_existing_handle_for_an_imported_bundle() {
     )
     .unwrap();
 
-    let result = apply_repairs_with_options(
+    let result = apply_repairs_with_options_at(
         temp.path(),
         RepairSafety::SurfaceChanging,
         false,
@@ -594,7 +594,7 @@ fn capability_only_plan_excludes_unrelated_preflight_repairs_at_fixed_point() {
     )
     .unwrap();
 
-    let result = apply_repairs_with_options(
+    let result = apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -603,7 +603,7 @@ fn capability_only_plan_excludes_unrelated_preflight_repairs_at_fixed_point() {
     .unwrap();
     assert!(!result.applied.is_empty(), "{result:#?}");
 
-    let second_plan = build_plan_with_options(
+    let second_plan = build_plan_with_options_at(
         &script,
         Some(RepairSafety::SurfaceChanging),
         &FixOptions::capability_migrations(),
@@ -625,7 +625,7 @@ fn capability_apply_keeps_the_burin_peer_coordination_fixture_parse_safe() {
     )
     .unwrap();
 
-    let result = apply_repairs_with_options(
+    let result = apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -697,7 +697,7 @@ fn capability_apply_recognizes_an_imported_named_capability_bundle() {
     )
     .unwrap();
 
-    let result = apply_repairs_with_options(
+    let result = apply_repairs_with_options_at(
         temp.path(),
         RepairSafety::SurfaceChanging,
         false,
@@ -733,7 +733,7 @@ fn capability_apply_keeps_exported_definition_and_imported_call_arity_equal() {
     )
     .unwrap();
 
-    let result = apply_repairs_with_options(
+    let result = apply_repairs_with_options_at(
         temp.path(),
         RepairSafety::SurfaceChanging,
         false,
@@ -778,7 +778,7 @@ fn capability_apply_widens_cross_module_carrier_without_duplicate_arguments() {
     )
     .unwrap();
 
-    let result = apply_repairs_with_options(
+    let result = apply_repairs_with_options_at(
         temp.path(),
         RepairSafety::SurfaceChanging,
         false,
@@ -903,7 +903,7 @@ fn capability_apply_formats_with_the_owning_project_config() {
     )
     .unwrap();
 
-    let result = apply_repairs_with_options(
+    let result = apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -949,7 +949,7 @@ fn capability_apply_rejects_non_ast_authority_at_flow_predicate_boundary() {
     )
     .unwrap();
 
-    let error = apply_repairs_with_options(
+    let error = apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -1144,7 +1144,7 @@ fn capability_apply_does_not_double_insert_a_multi_capability_imported_prefix() 
     )
     .unwrap();
 
-    let result = apply_repairs_with_options(
+    let result = apply_repairs_with_options_at(
         temp.path(),
         RepairSafety::SurfaceChanging,
         false,
@@ -1196,7 +1196,7 @@ fn capability_apply_follows_selective_re_exports_to_the_definition() {
     )
     .unwrap();
 
-    let result = apply_repairs_with_options(
+    let result = apply_repairs_with_options_at(
         temp.path(),
         RepairSafety::SurfaceChanging,
         false,

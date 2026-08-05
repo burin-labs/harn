@@ -17,7 +17,7 @@ fn capability_apply_does_not_shift_an_imported_call_with_an_untyped_leading_argu
     )
     .unwrap();
 
-    let result = apply_repairs_with_options(
+    let result = apply_repairs_with_options_at(
         temp.path(),
         RepairSafety::SurfaceChanging,
         false,
@@ -52,7 +52,7 @@ fn capability_apply_still_extends_an_established_capability_prefix() {
     )
     .unwrap();
 
-    apply_repairs_with_options(
+    apply_repairs_with_options_at(
         temp.path(),
         RepairSafety::SurfaceChanging,
         false,

@@ -27,7 +27,7 @@ fn migrate(source: &str) -> String {
     let temp = tempfile::TempDir::new().unwrap();
     let script = temp.path().join("app.harn");
     fs::write(&script, source).unwrap();
-    apply_repairs_with_options(
+    apply_repairs_with_options_at(
         temp.path(),
         RepairSafety::CapabilityChanging,
         false,
@@ -115,7 +115,7 @@ fn a_refused_widening_is_still_reported_as_frozen() {
     )
     .unwrap();
 
-    let plan = super::build_plan_with_options(
+    let plan = super::build_plan_with_options_at(
         temp.path(),
         None,
         &super::FixOptions::capability_migrations(),
@@ -138,7 +138,7 @@ fn a_widened_callable_is_not_reported_as_frozen() {
     let temp = tempfile::TempDir::new().unwrap();
     fs::write(temp.path().join("app.harn"), PROVABLE).unwrap();
 
-    let plan = super::build_plan_with_options(
+    let plan = super::build_plan_with_options_at(
         temp.path(),
         None,
         &super::FixOptions::capability_migrations(),

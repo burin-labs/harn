@@ -50,7 +50,7 @@ fn capability_plan_counts_uses_inside_string_interpolation() {
         // `--apply` is a different entry from `build_plan`; only this one
         // reaches the repair that broke. Apply for real and read the file back,
         // so the assertion is on emitted code rather than on a plan.
-        super::apply_repairs_with_options(
+        super::apply_repairs_with_options_at(
             temp.path(),
             RepairSafety::SurfaceChanging,
             false,

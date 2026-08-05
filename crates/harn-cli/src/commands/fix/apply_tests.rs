@@ -21,7 +21,7 @@ fn code_selector_narrows_the_plan_to_the_named_diagnostic() {
     )
     .unwrap();
 
-    let everything = build_plan_with_options(&script, None, &FixOptions::default()).unwrap();
+    let everything = build_plan_with_options_at(&script, None, &FixOptions::default()).unwrap();
     let codes = everything
         .repairs
         .iter()
@@ -34,7 +34,7 @@ fn code_selector_narrows_the_plan_to_the_named_diagnostic() {
     let wanted = Code::LintMutableNeverReassigned;
     assert!(codes.contains(wanted.as_str()), "{codes:?}");
 
-    let narrowed = build_plan_with_options(
+    let narrowed = build_plan_with_options_at(
         &script,
         None,
         &FixOptions {
@@ -93,7 +93,7 @@ fn code_selector_does_not_defer_to_an_unselected_whole_program_pass() {
     .unwrap();
 
     let rename = Code::LintCapabilityParameterName;
-    let unselected = build_plan_with_options(
+    let unselected = build_plan_with_options_at(
         &script,
         Some(RepairSafety::SurfaceChanging),
         &FixOptions::default(),
@@ -108,7 +108,7 @@ fn code_selector_does_not_defer_to_an_unselected_whole_program_pass() {
         unselected.diagnostics
     );
 
-    let narrowed = build_plan_with_options(
+    let narrowed = build_plan_with_options_at(
         &script,
         Some(RepairSafety::SurfaceChanging),
         &FixOptions {

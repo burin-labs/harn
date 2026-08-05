@@ -8,7 +8,7 @@ fn apply_preserves_separate_narrow_capability_parameters() {
     fs::write(&script, source).unwrap();
 
     for pass in 1..=2 {
-        let result = apply_repairs_with_options(
+        let result = apply_repairs_with_options_at(
             &script,
             RepairSafety::SurfaceChanging,
             false,
@@ -34,7 +34,7 @@ fn apply_rewrites_ambient_call_through_root_first_split_boundary() {
     )
     .unwrap();
 
-    let result = apply_repairs_with_options(
+    let result = apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -68,7 +68,7 @@ fn apply_extends_narrow_first_split_boundary_with_missing_handle() {
     )
     .unwrap();
 
-    let first = apply_repairs_with_options(
+    let first = apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -93,7 +93,7 @@ fn apply_extends_narrow_first_split_boundary_with_missing_handle() {
         "the caller should project the added handle at the matching position: {updated}"
     );
 
-    let second = apply_repairs_with_options(
+    let second = apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -113,7 +113,7 @@ fn apply_preserves_lone_narrow_handle_when_adding_another_capability() {
     )
     .unwrap();
 
-    let first = apply_repairs_with_options(
+    let first = apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -128,7 +128,7 @@ fn apply_preserves_lone_narrow_handle_when_adding_another_capability() {
         "fn helper(clock: HarnessClock, secrets: HarnessSecrets, value) {\n  const day = clock.date_iso()\n  const token = secrets.get(\"token\")\n  return [day, token, value]\n}\n\nfn main(harness: Harness) {\n  helper(harness.clock, harness.secrets, \"input\")\n}\n",
     );
 
-    let second = apply_repairs_with_options(
+    let second = apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -148,7 +148,7 @@ fn apply_does_not_guess_domain_argument_after_lone_narrow_handle() {
     )
     .unwrap();
 
-    let result = apply_repairs_with_options(
+    let result = apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -174,7 +174,7 @@ fn apply_completes_split_capability_prefix_before_extension() {
     )
     .unwrap();
 
-    let first = apply_repairs_with_options(
+    let first = apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -194,7 +194,7 @@ fn apply_completes_split_capability_prefix_before_extension() {
         "the partial call should converge in parameter order: {updated}"
     );
 
-    let second = apply_repairs_with_options(
+    let second = apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -214,7 +214,7 @@ fn apply_defers_extension_across_missing_ordinary_parameter() {
     )
     .unwrap();
 
-    let result = apply_repairs_with_options(
+    let result = apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -238,7 +238,7 @@ fn apply_does_not_widen_narrow_caller_of_split_boundary() {
     let source = "fn mint(clock: HarnessClock, secrets: HarnessSecrets) {\n  return {time: clock.now_ms(), key: secrets.read(\"key\", nil)}\n}\n\nfn wrap(clock: HarnessClock, secrets) {\n  mint(clock, secrets)\n}\n\nfn main(harness: Harness) {\n  wrap(harness.clock, harness.secrets)\n}\n";
     fs::write(&script, source).unwrap();
 
-    let result = apply_repairs_with_options(
+    let result = apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,

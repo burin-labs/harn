@@ -28,7 +28,7 @@ fn migrate(source: &str) -> String {
     let temp = tempfile::TempDir::new().unwrap();
     let script = temp.path().join("audit_export.harn");
     fs::write(&script, source).unwrap();
-    apply_repairs_with_options(
+    apply_repairs_with_options_at(
         temp.path(),
         RepairSafety::SurfaceChanging,
         false,
@@ -117,7 +117,7 @@ fn write_and_migrate(source: &str) -> String {
     let temp = tempfile::TempDir::new().unwrap();
     let script = temp.path().join("main.harn");
     fs::write(&script, source).unwrap();
-    apply_repairs_with_options(
+    apply_repairs_with_options_at(
         temp.path(),
         RepairSafety::SurfaceChanging,
         false,
@@ -168,7 +168,7 @@ fn a_frozen_host_entry_is_reported_with_its_own_reason() {
     let temp = tempfile::TempDir::new().unwrap();
     fs::write(temp.path().join("main.harn"), AMBIENT_HOST_ENTRY).unwrap();
 
-    let plan = super::build_plan_with_options(
+    let plan = super::build_plan_with_options_at(
         temp.path(),
         None,
         &super::FixOptions::capability_migrations(),

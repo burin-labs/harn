@@ -309,7 +309,8 @@ fn run_returns_error_after_reporting_skipped_files() {
         capability_migrations_only: false,
         codes: Vec::new(),
         json: false,
-        path: temp.path().to_path_buf(),
+        workspace: false,
+        paths: vec![temp.path().to_path_buf()],
     };
 
     let error = run(&args).unwrap_err();
@@ -319,6 +320,67 @@ fn run_returns_error_after_reporting_skipped_files() {
         error.message().contains("skipped 1 file")
             && error.message().contains("read, lex, or parse errors"),
         "unexpected error: {error}"
+    );
+}
+
+/// Two sibling trees migrate in one pass without their common ancestor.
+///
+/// A capability migration propagates requirements across resolved module
+/// imports, so a declaration and its cross-module callers have to be planned
+/// together or the callers are left stale. When this accepted one path, the
+/// only way to reach two sibling trees was to name the directory above them --
+/// which also sweeps in whatever else lives there. A repo that checks in
+/// deliberately-invalid parse fixtures (Harn's own `conformance/errors/` is
+/// exactly this) could therefore never run the migration at all: naming the
+/// ancestor failed on the fixtures, and naming each tree separately could not
+/// converge.
+#[test]
+fn plan_accepts_sibling_targets_without_their_common_ancestor() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let lib = temp.path().join("lib");
+    let app = temp.path().join("app");
+    fs::create_dir(&lib).unwrap();
+    fs::create_dir(&app).unwrap();
+    fs::write(
+        lib.join("greet.harn"),
+        "pub fn greet() -> nil { __io_println(\"hi\") }\n",
+    )
+    .unwrap();
+    fs::write(
+        app.join("main.harn"),
+        "import { greet } from \"../lib/greet\"\npipeline main(harness: Harness) { greet() }\n",
+    )
+    .unwrap();
+    // The negative fixture that made the ancestor unusable. It sits beside both
+    // targets and must not be reached.
+    fs::write(temp.path().join("unparseable.harn"), "fn bad() {\n").unwrap();
+
+    let plan = build_plan_with_options(&[lib, app], None, &FixOptions::default()).unwrap();
+
+    assert!(
+        plan.skipped_files.is_empty(),
+        "a sibling fixture outside the named targets must not be collected: {:?}",
+        plan.skipped_files
+    );
+    assert!(
+        plan.path.contains("lib") && plan.path.contains("app"),
+        "the plan must name both targets, got {:?}",
+        plan.path
+    );
+
+    // Falsifier: the ancestor still fails, so the test above is measuring the
+    // target list and not some unrelated change in how fixtures are read.
+    let ancestor = build_plan_with_options(
+        std::slice::from_ref(&temp.path().to_path_buf()),
+        None,
+        &FixOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        ancestor.skipped_files.len(),
+        1,
+        "naming the common ancestor must still collect the unparseable fixture: {:?}",
+        ancestor.skipped_files
     );
 }
 
@@ -353,7 +415,8 @@ fn apply_rejects_needs_human_safety_ceiling() {
         capability_migrations_only: false,
         codes: Vec::new(),
         json: false,
-        path: PathBuf::from("repair_demo.harn"),
+        workspace: false,
+        paths: vec![PathBuf::from("repair_demo.harn")],
     };
 
     let error = run(&args).unwrap_err();
@@ -407,7 +470,7 @@ fn plan_marks_stdio_repairs_surface_changing_when_harness_is_unreachable() {
     let script = temp.path().join("stdio_needs_param.harn");
     fs::write(&script, "pub fn helper() {\n  println(\"hi\")\n}\n").unwrap();
 
-    let plan = build_plan_with_options(&script, None, &FixOptions::default()).unwrap();
+    let plan = build_plan_with_options_at(&script, None, &FixOptions::default()).unwrap();
     let repair = plan
         .repairs
         .iter()
@@ -653,7 +716,7 @@ fn capability_only_plan_excludes_unrelated_repairs() {
     )
     .unwrap();
     let plan =
-        build_plan_with_options(&script, None, &FixOptions::capability_migrations()).unwrap();
+        build_plan_with_options_at(&script, None, &FixOptions::capability_migrations()).unwrap();
     assert!(!plan.repairs.is_empty());
     assert!(plan
         .repairs
@@ -786,7 +849,7 @@ fn plan_json_reports_cross_module_public_signature_impact() {
         )
         .unwrap();
 
-    let plan = build_plan_with_options(temp.path(), None, &FixOptions::default()).unwrap();
+    let plan = build_plan_with_options_at(temp.path(), None, &FixOptions::default()).unwrap();
     let repair_index = plan
         .repairs
         .iter()
@@ -834,7 +897,7 @@ fn apply_thread_params_threads_harness_for_stdio_migration() {
     )
     .unwrap();
 
-    let result = apply_repairs_with_options(
+    let result = apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -923,7 +986,7 @@ fn apply_thread_params_threads_harness_for_non_stdio_capabilities() {
             )
             .unwrap();
 
-        let result = apply_repairs_with_options(
+        let result = apply_repairs_with_options_at(
             &script,
             RepairSafety::SurfaceChanging,
             false,
@@ -994,7 +1057,7 @@ fn apply_threads_missing_harness_into_pipeline_boundary() {
     let script = temp.path().join("pipeline_missing_harness.harn");
     fs::write(&script, "pipeline default(task) {\n  println(task)\n}\n").unwrap();
 
-    let result = apply_repairs_with_options(
+    let result = apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -1030,7 +1093,7 @@ fn apply_threads_registry_owned_harness_method_through_helper() {
     )
     .unwrap();
 
-    let result = apply_repairs_with_options(
+    let result = apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -1064,7 +1127,7 @@ fn apply_thread_params_threads_harness_from_pipeline_to_helper() {
     )
     .unwrap();
 
-    let result = apply_repairs_with_options(
+    let result = apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -1164,7 +1227,7 @@ fn apply_surface_changing_threads_non_stdlib_public_api() {
         )
         .unwrap();
 
-    let result = apply_repairs_with_options(
+    let result = apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -1212,7 +1275,7 @@ fn apply_threads_ambient_capability_from_default_parameter() {
     )
     .unwrap();
 
-    let result = apply_repairs_with_options(
+    let result = apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -1248,7 +1311,7 @@ fn apply_rewrites_positional_metadata_builtin_to_typed_request() {
     )
     .unwrap();
 
-    let result = apply_repairs_with_options(
+    let result = apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -1284,7 +1347,7 @@ fn apply_rewrites_zero_and_optional_metadata_arguments_to_named_requests() {
     )
     .unwrap();
 
-    apply_repairs_with_options(
+    apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -1317,7 +1380,7 @@ fn apply_rewrites_legacy_host_projections_to_typed_snapshots() {
     )
     .unwrap();
 
-    apply_repairs_with_options(
+    apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -1354,7 +1417,7 @@ fn apply_rewrites_ambient_calls_inside_interpolation() {
     )
     .unwrap();
 
-    apply_repairs_with_options(
+    apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -1383,7 +1446,7 @@ fn apply_dedupes_shared_stdio_threading_edits() {
         )
         .unwrap();
 
-    let result = apply_repairs_with_options(
+    let result = apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,

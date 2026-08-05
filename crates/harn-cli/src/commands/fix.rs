@@ -1,7 +1,7 @@
 //! `harn fix`: propose or apply repair-bearing diagnostics.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::cli::FixArgs;
 use crate::commands;
@@ -204,7 +204,54 @@ impl RepairImpactWire {
     }
 }
 
+/// Resolve the target list the same way `harn check` does.
+///
+/// A capability migration propagates requirements across resolved module
+/// imports, so a declaration and its cross-module callers have to be planned in
+/// one pass or the callers are left stale. Before this accepted more than one
+/// path, reaching two sibling trees meant naming their common ancestor — which
+/// pulls in everything else under it, including deliberately-invalid parse
+/// fixtures that then fail the whole run.
+fn resolve_targets(args: &FixArgs) -> Result<Vec<PathBuf>, String> {
+    let mut targets = args.paths.clone();
+    if args.workspace {
+        let anchor = targets.first().map(PathBuf::as_path);
+        match package::load_workspace_config(anchor) {
+            Some((workspace, manifest_dir)) if !workspace.pipelines.is_empty() => {
+                for pipeline in workspace.pipelines {
+                    let candidate = Path::new(&pipeline);
+                    targets.push(if candidate.is_absolute() {
+                        candidate.to_path_buf()
+                    } else {
+                        manifest_dir.join(candidate)
+                    });
+                }
+            }
+            Some(_) => {
+                return Err(
+                    "--workspace requires `[workspace].pipelines` in the nearest harn.toml"
+                        .to_string(),
+                );
+            }
+            None => {
+                return Err(
+                    "--workspace could not find a harn.toml walking up from the target(s)"
+                        .to_string(),
+                );
+            }
+        }
+    }
+    if targets.is_empty() {
+        return Err(
+            "`harn fix` requires at least one target path, or `--workspace` with `[workspace].pipelines`"
+                .to_string(),
+        );
+    }
+    Ok(targets)
+}
+
 pub(crate) fn run(args: &FixArgs) -> Result<(), FixRunError> {
+    let targets = resolve_targets(args)?;
     if args.apply {
         let safety = args.safety.ok_or_else(|| {
             "`harn fix --apply` requires `--safety <format-only|behavior-preserving|scope-local|surface-changing|capability-changing>`"
@@ -218,7 +265,7 @@ pub(crate) fn run(args: &FixArgs) -> Result<(), FixRunError> {
             );
         }
         let result = apply_repairs_with_options(
-            &args.path,
+            &targets,
             safety,
             args.dry_run,
             FixOptions {
@@ -249,7 +296,7 @@ pub(crate) fn run(args: &FixArgs) -> Result<(), FixRunError> {
     }
 
     let plan = build_plan_with_options(
-        &args.path,
+        &targets,
         args.safety,
         &FixOptions {
             capability_migrations_only: args.capability_migrations_only,
@@ -273,28 +320,67 @@ pub(crate) fn run(args: &FixArgs) -> Result<(), FixRunError> {
     Ok(())
 }
 
+/// Single-path wrappers for the test suite.
+///
+/// Production callers pass a target list because a capability migration has to
+/// see a declaration and its cross-module callers in one pass. Almost every
+/// test drives one temporary script, so wrapping the slice here keeps that
+/// detail out of ~45 call sites.
+#[cfg(test)]
+fn build_plan_with_options_at(
+    target: &Path,
+    safety_ceiling: Option<RepairSafety>,
+    options: &FixOptions,
+) -> Result<RepairPlan, String> {
+    build_plan_with_options(
+        std::slice::from_ref(&target.to_path_buf()),
+        safety_ceiling,
+        options,
+    )
+}
+
+#[cfg(test)]
+fn apply_repairs_with_options_at(
+    target: &Path,
+    safety_ceiling: RepairSafety,
+    dry_run: bool,
+    options: FixOptions,
+) -> Result<ApplyResult, String> {
+    apply_repairs_with_options(
+        std::slice::from_ref(&target.to_path_buf()),
+        safety_ceiling,
+        dry_run,
+        options,
+    )
+}
+
 #[cfg(test)]
 pub(crate) fn build_plan(
     target: &Path,
     safety_ceiling: Option<RepairSafety>,
 ) -> Result<RepairPlan, String> {
-    build_plan_with_options(target, safety_ceiling, &FixOptions::default())
+    build_plan_with_options_at(target, safety_ceiling, &FixOptions::default())
 }
 
 fn build_plan_with_options(
-    target: &Path,
+    targets: &[PathBuf],
     safety_ceiling: Option<RepairSafety>,
     options: &FixOptions,
 ) -> Result<RepairPlan, String> {
-    if let Err(error) = package::validate_runtime_manifest_extensions(target) {
-        return Err(format!("manifest extension validation failed: {error}"));
+    for target in targets {
+        if let Err(error) = package::validate_runtime_manifest_extensions(target) {
+            return Err(format!("manifest extension validation failed: {error}"));
+        }
     }
 
-    let target_string = target.to_string_lossy().into_owned();
-    let target_refs = [target_string.as_str()];
+    let target_strings: Vec<String> = targets
+        .iter()
+        .map(|target| target.to_string_lossy().into_owned())
+        .collect();
+    let target_refs: Vec<&str> = target_strings.iter().map(String::as_str).collect();
     let files = commands::check::collect_harn_targets(&target_refs);
     if files.is_empty() {
-        return Err("no .harn files found under the given target".to_string());
+        return Err("no .harn files found under the given target(s)".to_string());
     }
 
     let module_graph = commands::check::build_module_graph(&files);
@@ -459,7 +545,7 @@ fn build_plan_with_options(
 
     Ok(RepairPlan {
         schema_version: FIX_PLAN_SCHEMA_VERSION,
-        path: target_string,
+        path: target_strings.join(" "),
         diagnostics,
         repairs,
         skipped_files,
