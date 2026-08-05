@@ -13,7 +13,26 @@ use harn_parser::{
 };
 
 use super::capability_migrations::collect_callable_node_calls;
+use super::value_escape::FrozenCause;
 use super::CallableInfo;
+
+/// The attribute that declares an embedding host supplies the arguments.
+/// The type checker owns the vocabulary; `harn-lint` keeps the boundary policy.
+const HOST_ENTRY_ATTRIBUTE: &str = "host_entry";
+
+/// Why this callable's signature cannot gain a `harness` parameter, if it
+/// cannot. A value reference is checked first because it is the stronger
+/// statement: the call site is invisible, not merely external.
+fn frozen_cause(
+    name: &str,
+    referenced_by_value: &BTreeSet<String>,
+    host_entry: bool,
+) -> Option<FrozenCause> {
+    if referenced_by_value.contains(name) {
+        return Some(FrozenCause::ValueReference);
+    }
+    host_entry.then_some(FrozenCause::HostEntry)
+}
 
 pub(super) fn collect_callable_infos(
     program: &[SNode],
@@ -23,10 +42,17 @@ pub(super) fn collect_callable_infos(
 ) -> Vec<CallableInfo> {
     let mut infos = Vec::new();
     for node in program {
-        let inner = match &node.node {
-            Node::AttributedDecl { inner, .. } => inner.as_ref(),
-            _ => node,
+        let (attributes, inner) = match &node.node {
+            Node::AttributedDecl { attributes, inner } => (attributes.as_slice(), inner.as_ref()),
+            _ => (&[][..], node),
         };
+        // `@host_entry` declares that an embedding host supplies the arguments
+        // (#6193). Narrowing that signature was already refused; introducing a
+        // parameter is the same contract change from the other direction, and
+        // the host has no way to pass it.
+        let host_entry = attributes
+            .iter()
+            .any(|attribute| attribute.name == HOST_ENTRY_ATTRIBUTE);
         match &inner.node {
             Node::FnDecl {
                 name,
@@ -65,7 +91,7 @@ pub(super) fn collect_callable_infos(
                     has_params: has_params || !params.is_empty(),
                     bound_names,
                     harness_binding: harness_param_name(params).map(str::to_string),
-                    can_add_harness_param: !referenced_by_value.contains(name),
+                    frozen_cause: frozen_cause(name, referenced_by_value, host_entry),
                     calls,
                     ambient_capability_calls,
                 });
@@ -100,7 +126,7 @@ pub(super) fn collect_callable_infos(
                     has_params: has_params || !params.is_empty(),
                     bound_names,
                     harness_binding: harness_param_name(params).map(str::to_string),
-                    can_add_harness_param: !referenced_by_value.contains(name),
+                    frozen_cause: frozen_cause(name, referenced_by_value, host_entry),
                     calls,
                     ambient_capability_calls,
                 });
@@ -271,7 +297,7 @@ pub(super) fn propagate_harness_requirements(
         for callee_idx in snapshot {
             for &(caller_idx, _) in &reverse_callers[callee_idx] {
                 if infos[caller_idx].harness_binding.is_none()
-                    && infos[caller_idx].can_add_harness_param
+                    && infos[caller_idx].frozen_cause.is_none()
                     && needed.insert(caller_idx)
                 {
                     changed = true;
@@ -322,7 +348,7 @@ pub(super) fn collect_value_references(program: &[SNode], names: &mut BTreeSet<S
 }
 
 pub(super) fn add_harness_param_edit(source: &str, info: &CallableInfo) -> Option<FixEdit> {
-    if !info.can_add_harness_param {
+    if info.frozen_cause.is_some() {
         // Adding a leading parameter would move the first argument of every
         // reference-dispatched call into the capability slot, with no static
         // call site for the type checker to report. Leave it for a human, who

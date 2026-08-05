@@ -97,3 +97,102 @@ fn capability_migration_never_proposes_a_record_carrier_for_a_host_entry() {
         );
     }
 }
+
+/// The other half of the same contract. Narrowing a host-entered signature was
+/// already refused; the ambient-capability migration changes it from the other
+/// direction by *introducing* a parameter, and the host was never asked to
+/// pass one (#6221).
+const AMBIENT_HOST_ENTRY: &str = concat!(
+    "@host_entry\n",
+    "pub fn dispatch(args: dict) -> string {\n",
+    "  return read_text(args.path)\n",
+    "}\n",
+    "\n",
+    "pub fn summarize(path: string) -> string {\n",
+    "  return read_text(path)\n",
+    "}\n",
+);
+
+fn write_and_migrate(source: &str) -> String {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("main.harn");
+    fs::write(&script, source).unwrap();
+    apply_repairs_with_options(
+        temp.path(),
+        RepairSafety::SurfaceChanging,
+        false,
+        super::FixOptions::capability_migrations(),
+    )
+    .unwrap();
+    fs::read_to_string(&script).unwrap()
+}
+
+/// The falsifier: without the declaration the migration threads `dispatch` too.
+#[test]
+fn ambient_migration_threads_an_undeclared_entry_point() {
+    let migrated = write_and_migrate(&AMBIENT_HOST_ENTRY.replace("@host_entry\n", ""));
+    assert!(
+        migrated.contains("pub fn dispatch(fs: HarnessFs, args: dict)"),
+        "an undeclared entry point should still be threaded: {migrated}"
+    );
+}
+
+#[test]
+fn ambient_migration_leaves_a_declared_host_entry_signature_alone() {
+    let migrated = write_and_migrate(AMBIENT_HOST_ENTRY);
+    assert!(
+        migrated.contains("pub fn dispatch(args: dict) -> string"),
+        "a host-entered signature must not gain a parameter: {migrated}"
+    );
+}
+
+/// Refusing one callable must not cost its neighbours their repair. The
+/// migration is per-callable, so a file with one frozen entry point still
+/// migrates everything else in it.
+#[test]
+fn ambient_migration_still_repairs_a_sibling_of_a_frozen_host_entry() {
+    let migrated = write_and_migrate(AMBIENT_HOST_ENTRY);
+    assert!(
+        migrated.contains("pub fn summarize(fs: HarnessFs, path: string)"),
+        "the sibling must still be migrated: {migrated}"
+    );
+    assert!(
+        migrated.contains("fs.read_text(path)"),
+        "the sibling's body must still be rewritten: {migrated}"
+    );
+}
+
+/// The reason has to send the reader to the host, not to a closure wrapper.
+#[test]
+fn a_frozen_host_entry_is_reported_with_its_own_reason() {
+    let temp = tempfile::TempDir::new().unwrap();
+    fs::write(temp.path().join("main.harn"), AMBIENT_HOST_ENTRY).unwrap();
+
+    let plan = super::build_plan_with_options(
+        temp.path(),
+        None,
+        &super::FixOptions::capability_migrations(),
+    )
+    .expect("plan");
+
+    let frozen = plan
+        .frozen_callables
+        .iter()
+        .find(|frozen| frozen.name == "dispatch")
+        .unwrap_or_else(|| {
+            panic!(
+                "the frozen host entry must be named; got {:?}",
+                plan.frozen_callables
+            )
+        });
+    assert!(
+        frozen.reason.contains("`@host_entry`"),
+        "the reason must name the declaration: {}",
+        frozen.reason
+    );
+    assert!(
+        !frozen.reason.contains("first-class reference"),
+        "a host entry must not be explained as a value escape: {}",
+        frozen.reason
+    );
+}
