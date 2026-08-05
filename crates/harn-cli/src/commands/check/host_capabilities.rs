@@ -33,6 +33,15 @@ impl HostCapabilities {
         self.operations
     }
 
+    /// Every declared `(capability, operation)` pair.
+    pub(super) fn operation_pairs(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.operations.iter().flat_map(|(capability, operations)| {
+            operations
+                .iter()
+                .map(move |operation| (capability.as_str(), operation.as_str()))
+        })
+    }
+
     pub(super) fn param_discriminators(
         &self,
         capability: &str,

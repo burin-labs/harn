@@ -424,6 +424,15 @@ fn build_check_contexts_with(
             config.preflight_severity = Some(severity.to_string());
         }
         let host_capabilities = resolve(&config);
+        // Hand the project's declaration to the typechecker. Host operations
+        // exist only at runtime, so without this the capability-method check
+        // reports every one of them as undeclared.
+        harn_parser::install_declared_host_operations(
+            host_capabilities
+                .capabilities
+                .operation_pairs()
+                .map(|(capability, operation)| (capability.to_string(), operation.to_string())),
+        );
         contexts.insert(
             key,
             EffectiveCheckConfig {
