@@ -1036,10 +1036,22 @@ fn synthesize_missing_capability_argument_repair(
             return;
         };
         for candidate in args {
-            if candidate.span.start == span.start && candidate.span.end == span.end {
-                if let Node::Identifier(binding) = &candidate.node {
-                    matched_argument = Some((candidate.span, binding.clone()));
-                }
+            if candidate.span.start != span.start || candidate.span.end != span.end {
+                continue;
+            }
+            // A root grant reaches a call as a bare binding (`harness`) or as a
+            // field of one (`request.harness`, `self.deps.harness`). Both are
+            // paths with no side effect, so appending the sub-grant is the same
+            // structural edit; taking the argument's own source keeps whichever
+            // one the caller wrote. Anything else — a call, an index, a
+            // conditional — is not safely re-rootable and is left alone.
+            if matches!(
+                &candidate.node,
+                Node::Identifier(_) | Node::PropertyAccess { .. }
+            ) {
+                matched_argument = source
+                    .get(candidate.span.start..candidate.span.end)
+                    .map(|text| (candidate.span, text.to_string()));
             }
         }
     });

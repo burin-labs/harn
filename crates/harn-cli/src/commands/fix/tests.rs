@@ -557,6 +557,62 @@ fn attenuated_capability_argument_repair_projects_existing_root_grant() {
     assert_eq!(edits[0].replacement, "harness.fs");
 }
 
+/// A root grant reached through a field attenuates the same way a bare one does.
+///
+/// The attenuation repair only matched a bare identifier, so a call that passed
+/// `request.harness` got no repair at all. That is not a rare shape: a request
+/// record carrying its own `harness` field is the ordinary way to hand a
+/// capability through a typed boundary, and it is exactly what harn#6138 hit.
+/// The migration would attenuate the callee's parameter and leave every such
+/// caller passing a full `Harness`, so the tree it produced did not type-check.
+#[test]
+fn attenuated_capability_argument_repair_projects_a_root_grant_reached_through_a_field() {
+    let source = "fn main(request: Request) {\n  helper(request.harness, \"old\")\n}\n";
+    let program = harn_parser::parse_source(source).unwrap();
+    let start = source.find("request.harness, \"").unwrap();
+    let span = harn_lexer::Span::with_offsets(start, start + "request.harness".len(), 2, 10);
+    let (repair, edits, _) = synthesize_missing_capability_argument_repair(
+        span,
+        &named_type("HarnessObs"),
+        &named_type("Harness"),
+        source,
+        &program,
+    )
+    .expect("attenuation repair for a field-reached root grant");
+    assert_eq!(repair.id.as_str(), "bindings/attenuate-capability-argument");
+    assert_eq!(edits.len(), 1);
+    assert_eq!(edits[0].span, span);
+    assert_eq!(edits[0].replacement, "request.harness.obs");
+    assert_eq!(
+        FixEdit::apply_all(source, &edits),
+        "fn main(request: Request) {\n  helper(request.harness.obs, \"old\")\n}\n"
+    );
+}
+
+/// An argument that is not a plain path is left alone.
+///
+/// Appending a sub-grant to a path is structural. Appending it to a call would
+/// change what runs, and appending it to anything the fixer cannot re-root is a
+/// guess. Those sites belong to a human.
+#[test]
+fn attenuated_capability_argument_repair_declines_a_non_path_argument() {
+    let source = "fn main(harness: Harness) {\n  helper(pick(harness), \"old\")\n}\n";
+    let program = harn_parser::parse_source(source).unwrap();
+    let start = source.find("pick(harness)").unwrap();
+    let span = harn_lexer::Span::with_offsets(start, start + "pick(harness)".len(), 2, 10);
+    assert!(
+        synthesize_missing_capability_argument_repair(
+            span,
+            &named_type("HarnessObs"),
+            &named_type("Harness"),
+            source,
+            &program,
+        )
+        .is_none(),
+        "a call expression must not be re-rooted"
+    );
+}
+
 #[test]
 fn attenuated_capability_bundle_repair_projects_existing_root_grant() {
     let source = "fn main(harness: Harness) {\n  helper(harness, \"old\")\n}\n";
