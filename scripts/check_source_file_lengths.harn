@@ -48,7 +48,8 @@ pub type SourceLengthFindingKind = "malformed_baseline" \
   | "new_oversized_source" \
   | "growth" \
   | "stale_baseline" \
-  | "unscanned_source"
+  | "unscanned_source" \
+  | "reconciliation_unavailable"
 
 pub type SourceLengthFinding = {
   kind: SourceLengthFindingKind,
@@ -466,13 +467,31 @@ pub fn apply_baseline_edits(harness: Harness, root: string, edits: list<Baseline
   return nil
 }
 
-/** In-scope, present source paths git tracks under `root`, empty when git cannot answer. */
-fn git_tracked_sources(fs: HarnessFs, process: HarnessProcess, root: string) -> list<string> {
+/**
+ * In-scope, present source paths git tracks under `root`, plus whether git
+ * could answer.
+ *
+ * Returning a bare empty list on failure made the reconciliation vanish: no
+ * tracked paths means nothing can be reported unreachable, which is exactly the
+ * output a fully-covered repository produces. That is not academic — the audit
+ * lane ran with an unreadable git config for weeks and this cross-check was
+ * silently off the whole time.
+ */
+fn git_tracked_sources(fs: HarnessFs, process: HarnessProcess, root: string) -> dict {
   const res = process.run(
     {program: "git", args: ["-C", root, "ls-files", "*.rs", STDLIB_SOURCE_DIR + "/*.harn"]},
   )
   if !res.success {
-    return []
+    const detail = res.stderr.trim()
+    return {
+      ok: false,
+      paths: [],
+      error: if detail == "" {
+        "git ls-files exited " + to_string(res.exit_code)
+      } else {
+        detail
+      },
+    }
   }
   let out: list<string> = []
   for line in res.stdout.lines() {
@@ -481,7 +500,7 @@ fn git_tracked_sources(fs: HarnessFs, process: HarnessProcess, root: string) -> 
       out = out.appending(normalize_source_path(path))
     }
   }
-  return out
+  return {ok: true, paths: out, error: ""}
 }
 
 /**
@@ -517,15 +536,25 @@ pub fn check_source_file_lengths(harness: Harness, root: string = "") -> SourceL
   // Reuses the inventory walk that just ran, so the reconciliation costs one
   // `git ls-files`. Under a synthetic root nothing is tracked, so this is a
   // no-op for fixture tests rather than something they have to opt out of.
-  for path in unscanned_sources(
-    sources.map({ source -> source.path }).to_list(),
-    git_tracked_sources(harness.fs, harness.process, resolved_root),
-  ) {
+  const tracked = git_tracked_sources(harness.fs, harness.process, resolved_root)
+  for path in unscanned_sources(sources.map({ source -> source.path }).to_list(), tracked.paths) {
     findings = findings.appending(
       {
         kind: "unscanned_source",
         path: path,
         message: "tracked source is unreachable by the inventory walk, so its length is ungoverned",
+      },
+    )
+  }
+  if !tracked.ok {
+    findings = findings.appending(
+      {
+        kind: "reconciliation_unavailable",
+        path: resolved_root,
+        message: "git could not list tracked sources, so the walk was not reconciled against it: "
+          + to_string(
+          tracked?.error ?? "",
+        ),
       },
     )
   }
