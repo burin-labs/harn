@@ -8,6 +8,8 @@
 // Ported from scripts/check_receipt_struct_duplication.py. The Harn
 // version is behavior-identical: same skip set, same canonical-dir
 // exclusion, same field trio, same `path:line: pub struct Name` output.
+import { empty_scope_failure } from "./guard_scope.harn"
+
 const CANONICAL_DIR = "crates/harn-vm/src/receipts"
 
 // The trio that, taken together, identifies a receipt-envelope copy.
@@ -128,6 +130,7 @@ pub fn rel_path(path: string) -> string {
 
 pipeline main(harness: Harness, task) {
   let violations: list<string> = []
+  let scanned = 0
   for path in harness.fs.glob("**/*.rs") {
     const rel = rel_path(path)
     if is_skipped(rel) {
@@ -136,8 +139,19 @@ pipeline main(harness: Harness, task) {
     if rel.starts_with(CANONICAL_DIR) {
       continue
     }
+    scanned = scanned + 1
     const text = harness.fs.read_text(path)
     violations = violations + violations_in_text(rel, text)
+  }
+  harness.stdio.println(
+    "check_receipt_struct_duplication: scanned=" + to_string(scanned)
+      + " violations="
+      + to_string(violations.count),
+  )
+  const empty = empty_scope_failure("check_receipt_struct_duplication", scanned, "**/*.rs")
+  if empty != "" {
+    harness.stdio.eprintln(empty)
+    return 1
   }
   if violations.count == 0 {
     return 0
