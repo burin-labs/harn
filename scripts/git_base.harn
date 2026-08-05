@@ -1,0 +1,130 @@
+/**
+ * Shared plumbing for guards that compare this branch against a base ref.
+ *
+ * Two checks now need the same four things — run git, resolve the base, read
+ * the commit messages between base and HEAD, and decide whether a named
+ * `Allow-...:` trailer appears in them. Keeping one copy means the shallow-clone
+ * fallback and the trailer semantics cannot drift between guards, which is
+ * exactly the kind of divergence that makes one guard quietly weaker than its
+ * sibling.
+ */
+pub fn git_run(process: HarnessProcess, args: list<string>) {
+  return process.run({program: "git", args: args})
+}
+
+/**
+ * Resolve the base ref: explicit value, then the named environment variable,
+ * then merge-base with origin/main (falling back to main, then HEAD~1).
+ *
+ * The merge-base — not `origin/main` itself — is what makes these guards judge
+ * only what the branch introduced. Comparing against the moving branch tip
+ * would blame a branch for removals that landed on main beside it.
+ */
+pub fn resolve_base_ref(
+  env: HarnessEnv,
+  process: HarnessProcess,
+  base: string?,
+  env_var: string = "",
+) -> string {
+  if base != nil && base != "" {
+    return base ?? ""
+  }
+  if env_var != "" {
+    const env_base = env.get(env_var)
+    if env_base != nil && env_base != "" {
+      return env_base ?? ""
+    }
+  }
+  for candidate in ["origin/main", "main"] {
+    const result = git_run(process, ["merge-base", "HEAD", candidate])
+    if result.success {
+      return result.stdout.trim()
+    }
+  }
+  return "HEAD~1"
+}
+
+/**
+ * Concatenate commit messages between base and HEAD.
+ *
+ * Falls back to the last 50 commits when the range is empty, which is what a
+ * shallow CI clone produces. Without the fallback a guard reads "no commits"
+ * as "no declarations" and rejects a change that did declare itself.
+ */
+pub fn commit_messages_since(process: HarnessProcess, base: string) -> string {
+  const result = git_run(process, ["log", "--format=%B%x00", base + "..HEAD"])
+  if result.success && result.stdout.trim() != "" {
+    return result.stdout
+  }
+  const fallback = git_run(process, ["log", "-50", "--format=%B%x00", "HEAD"])
+  if fallback.success {
+    return fallback.stdout
+  }
+  return ""
+}
+
+/**
+ * True when some line of `messages` begins with `prefix` and carries a
+ * non-whitespace remainder.
+ *
+ * The remainder may continue past the line, because git wraps long trailers
+ * and a reason written on the next line is still a reason.
+ */
+pub fn has_trailer(messages: string, prefix: string) -> bool {
+  const lines = messages.split("\n")
+  for item in lines.enumerate() {
+    if item.value.starts_with(prefix) {
+      let rest = item.value.substring(prefix.len(), item.value.len())
+      let k = item.index + 1
+      while k < lines.count {
+        rest = rest + "\n" + lines[k]
+        k = k + 1
+      }
+      if rest.trim() != "" {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+/**
+ * Every value declared by a `prefix` trailer, whitespace-split.
+ *
+ * A declaration names what it permits, so `Allow-Protocol-Removal: A B` and two
+ * separate trailers mean the same thing.
+ */
+pub fn trailer_values(messages: string, prefix: string) -> list<string> {
+  let values: list<string> = []
+  for line in messages.split("\n") {
+    if !line.starts_with(prefix) {
+      continue
+    }
+    const rest = line.substring(prefix.len(), line.len())
+    for token in rest.split(" ") {
+      const name = token.trim()
+      if name != "" {
+        values = values + [name]
+      }
+    }
+  }
+  return values.sorted()
+}
+
+/**
+ * Read `--flag value` or `--flag=value` style options out of argv.
+ * Returns nil when the flag is absent.
+ */
+pub fn flag_value(args: list<string>, name: string) -> string? {
+  const prefix = name + "="
+  for item in args.enumerate() {
+    const a = item.value
+    if a == name && item.index + 1 < args.count {
+      return args[item.index + 1]
+    }
+    if a.starts_with(prefix) {
+      return a.substring(prefix.len(), a.len())
+    }
+  }
+  return nil
+}

@@ -55,6 +55,7 @@ exempt_checks = [
   "check-site-snippets",            # validates website Harn fixtures parse, not a mirror
   "check-app-host",                 # validates readable browser-host sources with Prettier, ESLint, TypeScript, and Node
   "check-crate-sibling-versions",   # validates publish-time intra-workspace crate pins, not a mirror
+  "check-protocol-symbol-removals", # declares removals from the published protocol bindings, not a mirror
   "check-dependabot-groups",        # validates Cargo compatibility-family update policy, not a mirror
   "check-grammar-keywords",         # validates spec grammar keyword literals vs the lexer, not a mirror
   "check-stdlib-strict-types",      # strict-types boundary ratchet over the stdlib, not a mirror
@@ -536,6 +537,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 [preflight.dispatch]
 # --- source: fast, reads committed files (check-drift) ---
 "check-crate-sibling-versions" = "source"
+"check-protocol-symbol-removals" = "source"
 "check-dependabot-groups" = "source"
 "check-language-spec" = "source"
 "check-openapi-snapshot" = "source"

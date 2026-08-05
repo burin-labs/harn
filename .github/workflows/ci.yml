@@ -946,6 +946,14 @@ jobs:
         # HEAD^1 is the current base, while the event payload's PR-open base
         # SHA can become stale as main advances.
         run: '"${HARN_BIN:?HARN_BIN not set}" run scripts/check_changelog_no_retroactive_edits.harn -- --base HEAD^1'
+      - name: Check no undeclared protocol symbol removals
+        # spec/protocol-artifacts/ is a downstream contract: integrators compile
+        # against the exported names. check-protocol-artifacts regenerates and
+        # compares, so a symbol the generator stops emitting vanishes from both
+        # sides and stays green. Same HEAD^1 base as the CHANGELOG guard above.
+        env:
+          PROTOCOL_SYMBOL_GUARD_BASE: HEAD^1
+        run: make check-protocol-symbol-removals
 
   windows-plan:
     name: Windows CI routing
