@@ -304,11 +304,27 @@ require_workflow_text() {
     exit 1
   fi
 }
+require_workflow_pattern() {
+  local pattern="$1"
+  local description="$2"
+  if ! grep -Eq -- "$pattern" "$workflow"; then
+    echo "FAIL: release workflow is missing: $description" >&2
+    exit 1
+  fi
+}
 workflow_line() {
   grep -nF -- "$1" "$workflow" | cut -d: -f1 | head -n1
 }
 
-require_workflow_text "actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6"
+# Provenance must be produced by `actions/attest` at an immutable ref. The
+# invariant is the pinning, not one particular commit: asserting the exact SHA
+# made every reviewed bump of the attestation action fail this gate, and an
+# assertion that has to be edited in lockstep with the thing it asserts is a
+# tautology rather than a check — it can only fail when someone forgets to
+# update it. This still rejects the failures that matter, a mutable tag like
+# `@v4` or a different action entirely.
+require_workflow_pattern 'uses: actions/attest@[0-9a-f]{40}([[:space:]]|$)' \
+  'actions/attest pinned to a full-length commit SHA'
 require_workflow_text "predicate-type: https://harnlang.com/attestations/release-archive/v1"
 require_workflow_text "attestations: write"
 require_workflow_text "attestations: read"
