@@ -28,7 +28,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@redocly/cli": "^2.41.0",
+    "@redocly/cli": "^2.41.1",
     "concurrently": "^10.0.4",
     "eslint": "^10.8.0",
     "markdownlint-cli2": "^0.23.2",
