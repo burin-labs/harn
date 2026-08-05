@@ -102,6 +102,64 @@ fn corpus_digest(fs: HarnessFs, corpus_text: string, rows: list) -> string {
   return "sha256:" + sha256(material)
 }
 
+/** One language whose resolved grammar artifact moved between two receipts. */
+pub type GrammarDrift = {language: string, from: string, to: string}
+
+/** What a drift report compares: the resolved version and the exact artifact. */
+fn grammar_identity(row) -> string {
+  const package = row?.package
+  return "${package?.version ?? "?"} (${package?.artifact_digest ?? "?"})"
+}
+
+/**
+ * A receipt's language rows, read defensively.
+ *
+ * This runs against the committed file, which may predate the current schema or
+ * have been hand-edited. A drift report is an explanation of a failure that has
+ * already been decided, so it degrades to "no drift found" rather than throwing
+ * over the check it exists to clarify.
+ */
+fn receipt_languages(text: string) -> list {
+  const receipt = try {
+    json_parse(text)
+  } catch (error) {
+    nil
+  }
+  return receipt?.languages ?? []
+}
+
+/**
+ * Languages whose grammar artifact differs between the committed and candidate
+ * receipts.
+ *
+ * A stale receipt has two causes that want opposite fixes. Editing the corpus
+ * or a fixture moves the corpus digest, and regenerating is the whole fix: the
+ * evidence moved because the questions did. A grammar package moving to a new
+ * version moves that language's artifact digest, and regenerating is precisely
+ * the wrong fix — it re-stamps fitness onto an artifact nothing has re-proven.
+ * That is how `tree-sitter-swift` 0.7.3 reached main once already (#5127),
+ * carrying the root missing-node regression #5008 had pinned away from.
+ *
+ * Reporting the moved languages by name is what separates the two cases at the
+ * moment a reader decides what to do, rather than leaving it to be found in a
+ * diff of a several-hundred-line JSON document.
+ */
+pub fn grammar_drift(committed_text: string, candidate_text: string) -> list<GrammarDrift> {
+  const before = receipt_languages(committed_text)
+  let drift: list<GrammarDrift> = []
+  for row in receipt_languages(candidate_text) {
+    const language = row?.language ?? ""
+    const prior = before.filter({ earlier -> earlier?.language == language })
+    if prior.count == 1 && grammar_identity(prior[0]) != grammar_identity(row) {
+      drift = drift
+        + [
+        {language: language, from: grammar_identity(prior[0]), to: grammar_identity(row)},
+      ]
+    }
+  }
+  return drift
+}
+
 fn render_receipt(fs: HarnessFs) -> string {
   const corpus_text = fs.read_text(CORPUS)
   const corpus = json_parse(corpus_text)
@@ -150,9 +208,24 @@ fn main(harness: Harness) -> int {
       harness.stdio.println("grammar fitness receipt is current")
       return 0
     }
-    harness.stdio.eprintln(
-      "grammar fitness receipt is stale; run `make gen-grammar-fitness`, review the artifact/corpus diff, and rerun the corpus tests",
-    )
+    const drift = grammar_drift(committed, candidate)
+    if drift.count > 0 {
+      harness.stdio.eprintln(
+        "grammar fitness receipt is stale because a grammar artifact moved, not because the corpus changed:",
+      )
+      for moved in drift {
+        harness.stdio.eprintln("  ${moved.language}: ${moved.from} -> ${moved.to}")
+      }
+      harness.stdio.eprintln(
+        "Regenerating would re-stamp fitness onto an artifact nothing has re-proven. Either revert the version"
+          + " change, or run the harn-hostlib parser-agreement corpus test against the new grammar and regenerate"
+          + " once it passes.",
+      )
+    } else {
+      harness.stdio.eprintln(
+        "grammar fitness receipt is stale; run `make gen-grammar-fitness`, review the artifact/corpus diff, and rerun the corpus tests",
+      )
+    }
     harness.stdio.eprintln(
       unified_diff(
         committed,
