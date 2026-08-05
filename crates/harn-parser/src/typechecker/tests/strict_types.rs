@@ -73,6 +73,39 @@ log(data.name)
     );
 }
 
+/// The annotation remedy is the only one that is not enforced at runtime, so
+/// the help has to say so.
+///
+/// `const d: {name: string} = json_parse(text)` clears this diagnostic and
+/// still reads an int out of `name`, and still accepts a JSON array as the
+/// record. A reader who takes the help at face value would believe the
+/// boundary is validated. Whether an annotation should clear the rule at all
+/// is harn#6234; until that is decided, the caveat is what keeps the advice
+/// honest, and it must not quietly disappear.
+#[test]
+fn test_strict_types_help_marks_the_annotation_as_unchecked() {
+    let help = check_source_strict(
+        r#"pipeline t(task) {
+  const data = json_parse("{}")
+  log(data.name)
+}"#,
+    )
+    .into_iter()
+    .find(|d| d.code == Code::BoundaryValueUnvalidated)
+    .and_then(|d| d.help)
+    .expect("expected HARN-OWN-004 with help");
+    assert!(
+        help.contains("not checked at runtime"),
+        "help must mark the annotation remedy as unenforced, got: {help}"
+    );
+    for validating in ["schema_expect()", "schema_check()", "schema_is()"] {
+        assert!(
+            help.contains(validating),
+            "help must offer {validating}, got: {help}"
+        );
+    }
+}
+
 #[test]
 fn test_strict_types_shape_annotation_clears() {
     let errs = strict_errors(

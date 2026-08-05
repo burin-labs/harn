@@ -639,7 +639,7 @@ impl TypeChecker {
                     self.error_at_with_help(Code::BoundaryValueUnvalidated,
                         format!("{} on unvalidated `{}()` result", kind.direct_label(), name),
                         span,
-                        "assign to a variable and validate with schema_expect() or a type annotation first".to_string(),
+                        "assign to a variable and validate with schema_expect() or schema_check() first".to_string(),
                     );
                 }
             }
@@ -654,7 +654,15 @@ impl TypeChecker {
                         source
                     ),
                     span,
-                    "validate with schema_expect(), schema_is() in an if-condition, or add a shape type annotation".to_string(),
+                    // A shape type annotation also clears this check (see
+                    // `test_strict_types_shape_annotation_clears`) but is
+                    // listed last and marked, because it is the only listed
+                    // remedy that does not enforce anything at runtime:
+                    // `const d: {f?: string} = json_parse(...)` accepts an int
+                    // in `f` and accepts a JSON array as the record. Whether it
+                    // should clear the rule at all is harn#6234.
+                    "validate with schema_expect(), schema_check(), or schema_is() in an if-condition; a shape type annotation also silences this but is not checked at runtime"
+                        .to_string(),
                 );
             }
         }
