@@ -793,6 +793,13 @@ jobs:
           # The changelog-history audit runs in audit-scripts; this lane only
           # needs the checked-out tree and the exact producer artifact.
           fetch-depth: 1
+          # Persisted credentials leave an `include.path` in .git/config pointing
+          # at $RUNNER_TEMP, which the Harn sandbox cannot read — and git refuses
+          # to parse an unreadable include, exiting 128 for every invocation. The
+          # source file-length ratchet reconciles its walk against `git
+          # ls-files`, so it lost that cross-check entirely and still reported a
+          # pass. Nothing in this lane pushes. See audit-scripts for the sibling.
+          persist-credentials: false
       # This lane only executes Harn scripts. Download the small CLI artifact,
       # not the multi-gigabyte nextest archive consumed in workspace-test archive mode.
       - name: Download portable Harn CLI

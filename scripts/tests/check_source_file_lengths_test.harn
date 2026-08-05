@@ -363,3 +363,30 @@ pipeline test_deleted_source_leaves_stale_shard_until_update(harness: Harness, t
     },
   )
 }
+
+@test
+pipeline test_an_unusable_git_is_reported_not_silently_skipped(harness: Harness, task) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      // A git repository whose config includes a file it cannot read. Git
+      // refuses to parse an unreadable include and exits 128 for every
+      // invocation — exactly what the CI audit lane hit, where the checkout
+      // action points `include.path` at a $RUNNER_TEMP credentials file the
+      // Harn sandbox denies. `git ls-files` then returns nothing, and a walk
+      // reconciled against nothing reports full coverage.
+      const cred = path_join(root, "cred.config")
+      harness.fs.write_text(cred, "")
+      harness.process.run({program: "git", args: ["-C", root, "init", "-q", "."]})
+      harness.process.run(
+        {program: "git", args: ["-C", root, "config", "--local", "--add", "include.path", cred]},
+      )
+      harness.process.run({program: "chmod", args: ["000", cred]})
+      const report = check_source_file_lengths(harness, root)
+      assert_eq(finding_kinds(report.findings), ["reconciliation_unavailable"])
+      // The message has to carry git's own words, or the next reader cannot
+      // tell an unreadable config from a missing repository.
+      assert_eq(report.findings[0]?.message?.contains("git could not list") ?? false, true)
+    },
+  )
+}
