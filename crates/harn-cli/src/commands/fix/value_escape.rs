@@ -1,10 +1,13 @@
-//! Value-escape facts for the capability migration.
+//! Frozen-signature facts for the capability migration.
 //!
-//! A callable whose value is read as a first-class reference is invoked at its
-//! declared arity through a call site no static pass can see, so its signature
-//! must not move (#6146). This module owns both halves of that decision: the
-//! set of names that must stay frozen, and the record of what freezing
-//! actually blocked.
+//! Two different callables must not have a `harness` parameter introduced, for
+//! the same underlying reason: something outside the fixer's view calls them at
+//! their declared arity. A callable whose value is read as a first-class
+//! reference is invoked through a call site no static pass can see (#6146); a
+//! callable declared `@host_entry` is entered by an embedding host whose only
+//! registration lives in that host's source (#6193). This module owns both
+//! halves of the decision: which names stay frozen, and the record of what
+//! freezing actually blocked.
 
 use std::collections::BTreeSet;
 
@@ -26,6 +29,20 @@ pub(super) struct FrozenCallable {
     pub(super) reason: String,
 }
 
+/// Why one callable's signature is frozen.
+///
+/// The two causes are equally final but not equally explicable, and an
+/// operator's next move differs: a value reference can be wrapped in a closure,
+/// while a host contract has to change on the host's side. Collapsing them to
+/// one message would send the reader to the wrong fix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum FrozenCause {
+    /// The callable's value is read as a first-class reference (#6146).
+    ValueReference,
+    /// The callable is declared `@host_entry` (#6193).
+    HostEntry,
+}
+
 /// The value-escape facts one planning pass carries.
 ///
 /// `referenced_by_value` names what must not be re-signed;
@@ -44,23 +61,29 @@ impl ValueEscape<'_> {
     /// caller's `?` then discards the whole repair, so this must run BEFORE it
     /// or the reason is lost along with the candidate.
     pub(super) fn record(&mut self, info: &CallableInfo) {
-        if info.can_add_harness_param {
+        let Some(cause) = info.frozen_cause else {
             return;
-        }
+        };
         if self.frozen.iter().any(|entry| entry.name == info.name) {
             return;
         }
-        self.frozen.push(FrozenCallable::new(&info.name));
+        self.frozen.push(FrozenCallable::new(&info.name, cause));
     }
 }
 
 impl FrozenCallable {
-    pub(super) fn new(name: &str) -> Self {
-        Self {
-            name: name.to_string(),
-            reason: format!(
+    pub(super) fn new(name: &str, cause: FrozenCause) -> Self {
+        let reason = match cause {
+            FrozenCause::ValueReference => format!(
                 "its value is read as a first-class reference, so it is invoked at its declared arity through a call site the fixer cannot see. It owns the ambient capability use, and a capability it cannot receive cannot be threaded into its body — pass the capability through an existing parameter, or wrap the reference as `{{ args -> {name}(harness, args) }}`"
             ),
+            FrozenCause::HostEntry => format!(
+                "it is declared `@host_entry`, so an embedding host supplies its arguments at the arity it declares. It owns the ambient capability use, and a parameter the host was never asked to pass cannot be introduced — thread the capability through an existing parameter, or have the host pass it and drop `@host_entry` from `{name}`"
+            ),
+        };
+        Self {
+            name: name.to_string(),
+            reason,
         }
     }
 }

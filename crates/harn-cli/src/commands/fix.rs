@@ -29,7 +29,7 @@ use repair_classes::{
     is_whole_program_superseded_repair,
 };
 mod value_escape;
-use value_escape::{FrozenCallable, ValueEscape};
+use value_escape::{FrozenCallable, FrozenCause, ValueEscape};
 #[path = "fix/retired_testing.rs"]
 mod retired_testing;
 #[path = "fix/signature_threading.rs"]
@@ -87,7 +87,10 @@ struct CallableInfo {
     has_params: bool,
     bound_names: BTreeSet<String>,
     harness_binding: Option<String>,
-    can_add_harness_param: bool,
+    /// Set when something outside the fixer's view calls this at its declared
+    /// arity, so a `harness` parameter must not be introduced. `None` is the
+    /// ordinary case.
+    frozen_cause: Option<FrozenCause>,
     calls: Vec<CallSite>,
     ambient_capability_calls: Vec<AmbientCapabilityCall>,
 }
