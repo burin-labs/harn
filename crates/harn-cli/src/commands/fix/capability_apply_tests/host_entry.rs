@@ -6,6 +6,9 @@
 //! call-into-script path has none of those, so the body was the only evidence
 //! and the migration narrowed the signature to whatever the body touched
 //! (#6193).
+//!
+//! The attribute is for that case only. A boundary the manifest already
+//! declares needs no attribute and gets none — see `manifest_handlers` (#6272).
 
 use super::*;
 
@@ -159,6 +162,37 @@ fn ambient_migration_still_repairs_a_sibling_of_a_frozen_host_entry() {
     assert!(
         migrated.contains("fs.read_text(path)"),
         "the sibling's body must still be rewritten: {migrated}"
+    );
+}
+
+/// The whole-program pass reached the attribute too.
+///
+/// It decided which signatures were fixed from outside by reading
+/// `referenced_by_value` directly rather than the combined frozen decision, so
+/// `@host_entry` stopped a *narrowing* (#6193) but not an *introduction*: an
+/// entry point calling a helper that needs a capability had `harness: Harness`
+/// propagated into it, with the attribute sitting right above the declaration
+/// and nothing reported (#6272).
+#[test]
+fn a_declared_host_entry_does_not_get_a_parameter_propagated_into_it() {
+    const CALLS_A_HELPER: &str = concat!(
+        "@host_entry\n",
+        "pub fn dispatch(args: dict) -> string {\n",
+        "  return summarize(args.path)\n",
+        "}\n",
+        "\n",
+        "fn summarize(path: string) -> string {\n",
+        "  return read_text(path)\n",
+        "}\n",
+    );
+    let migrated = write_and_migrate(CALLS_A_HELPER);
+    assert!(
+        migrated.contains("pub fn dispatch(args: dict) -> string"),
+        "propagation must stop at the declared entry point: {migrated}"
+    );
+    assert!(
+        !migrated.contains("dispatch(harness"),
+        "no capability parameter may be propagated in: {migrated}"
     );
 }
 

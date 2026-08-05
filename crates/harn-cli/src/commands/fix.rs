@@ -23,6 +23,7 @@ mod capability_arguments;
 mod capability_migrations;
 #[path = "fix/lint_context.rs"]
 mod lint_context;
+mod manifest_host_entries;
 mod repair_classes;
 #[path = "fix/reporting.rs"]
 mod reporting;
@@ -409,6 +410,10 @@ fn build_plan_with_options(
         collect_value_references(&program, &mut referenced_by_value);
     }
     let referenced_by_value = &referenced_by_value;
+    // The same fact as a value reference, arrived at from the opposite
+    // direction: `harn.toml` names the callables the runtime enters, so the
+    // registration is visible — it just is not a call site (#6272).
+    let manifest_host_entries = manifest_host_entries::ManifestHostEntries::load(targets);
 
     let mut candidates = Vec::new();
     let mut skipped_files = Vec::new();
@@ -430,6 +435,7 @@ fn build_plan_with_options(
             &mut candidates,
             &mut ValueEscape {
                 referenced_by_value,
+                manifest_handlers: manifest_host_entries.names_for(file),
                 frozen: &mut frozen_callables,
             },
         ) {
@@ -465,6 +471,7 @@ fn build_plan_with_options(
         &module_graph,
         &candidates,
         referenced_by_value,
+        &manifest_host_entries,
     )?;
     if !whole_program_repairs.is_empty() {
         // `--code` narrows what this pass *does*, not what it *saw*: the plan
@@ -630,6 +637,7 @@ fn collect_file_candidates(
             &source,
             &exported_names,
             escape.referenced_by_value,
+            escape.manifest_handlers,
         )
     } else {
         BTreeSet::new()
@@ -816,11 +824,18 @@ fn deferred_capability_mismatch_spans(
     source: &str,
     exported_names: &BTreeSet<String>,
     referenced_by_value: &BTreeSet<String>,
+    manifest_handlers: &BTreeSet<String>,
 ) -> BTreeSet<(usize, usize)> {
-    let calls = collect_callable_infos(program, source, exported_names, referenced_by_value)
-        .into_iter()
-        .flat_map(|callable| callable.calls)
-        .collect::<Vec<_>>();
+    let calls = collect_callable_infos(
+        program,
+        source,
+        exported_names,
+        referenced_by_value,
+        manifest_handlers,
+    )
+    .into_iter()
+    .flat_map(|callable| callable.calls)
+    .collect::<Vec<_>>();
     let mut by_call = BTreeMap::<(usize, usize), Vec<(usize, Span)>>::new();
     for diagnostic in diagnostics {
         if diagnostic.code != Code::ArgumentTypeMismatch {
@@ -942,11 +957,11 @@ fn lint_candidate_repair(
     module_graph: &harn_modules::ModuleGraph,
     escape: &mut ValueEscape<'_>,
 ) -> Option<(Repair, Vec<FixEdit>, RepairImpactWire)> {
+    let exported_names = module_graph
+        .exports_for_module(file)
+        .into_iter()
+        .collect::<BTreeSet<_>>();
     if ambient_capability_handle(diag.code).is_some() {
-        let exported_names = module_graph
-            .exports_for_module(file)
-            .into_iter()
-            .collect::<BTreeSet<_>>();
         let context = AmbientRepairContext {
             cross_module_importer_count: module_graph.importers_of(file).len(),
         };

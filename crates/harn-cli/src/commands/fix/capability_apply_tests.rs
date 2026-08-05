@@ -1173,6 +1173,8 @@ mod alias_widening;
 mod expected_invalid;
 #[path = "capability_apply_tests/host_entry.rs"]
 mod host_entry;
+#[path = "capability_apply_tests/manifest_handlers.rs"]
+mod manifest_handlers;
 #[path = "capability_apply_tests/plan.rs"]
 mod plan;
 #[path = "capability_apply_tests/value_escape.rs"]

@@ -127,6 +127,7 @@ pub(super) fn plan(
     module_graph: &harn_modules::ModuleGraph,
     diagnostics: &[RepairCandidate],
     referenced_by_value: &BTreeSet<String>,
+    manifest_host_entries: &super::manifest_host_entries::ManifestHostEntries,
 ) -> Result<Vec<RepairCandidate>, String> {
     let mut program_files = Vec::new();
     let mut callables = Vec::new();
@@ -167,7 +168,13 @@ pub(super) fn plan(
             &program,
             crate::package::is_declared_connector_module(file),
         );
-        let infos = collect_callable_infos(&program, &source, &exported, referenced_by_value);
+        let infos = collect_callable_infos(
+            &program,
+            &source,
+            &exported,
+            referenced_by_value,
+            manifest_host_entries.names_for(file),
+        );
         let imported_capability_signatures = imported_signatures(file, module_graph, &type_aliases);
         for info in infos {
             let Some((params, body, boundary, flow_predicate)) =
@@ -319,9 +326,21 @@ pub(super) fn plan(
     // site exists for the type checker to report. Freeze the signature and
     // leave the site for a human, who can wrap it — `{ args -> f(harness,
     // args) }` — where the fixer cannot.
+    //
+    // A value reference is one way a caller becomes invisible; a declared entry
+    // point is the other. `@host_entry` and a `harn.toml` handler both fix the
+    // arity from outside this program, and this pass reached neither: it read
+    // `referenced_by_value` directly instead of the decision that combines all
+    // three. So `@host_entry` stopped a *narrowing* (#6193) but not an
+    // *introduction* — `enforce_stage_tool_gate(event)` still became
+    // `(harness: Harness, event)` here, with the attribute sitting right above
+    // it and no frozen-callable report to say so.
     let arity_observable = callables
         .iter()
-        .map(|callable| referenced_by_value.contains(&callable.info.name))
+        .map(|callable| {
+            referenced_by_value.contains(&callable.info.name)
+                || callable.info.frozen_cause.is_some()
+        })
         .collect::<Vec<_>>();
     let desired = callables
         .iter()

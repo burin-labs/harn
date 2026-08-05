@@ -17,7 +17,13 @@ pub(super) fn synthesize_ambient_capability_repair(
     escape: &mut ValueEscape<'_>,
 ) -> Option<(Repair, Vec<FixEdit>, RepairImpactWire)> {
     ambient_capability_handle(diag.code)?;
-    let infos = collect_callable_infos(program, source, exported_names, escape.referenced_by_value);
+    let infos = collect_callable_infos(
+        program,
+        source,
+        exported_names,
+        escape.referenced_by_value,
+        escape.manifest_handlers,
+    );
     let owner_idx = infos.iter().position(|info| {
         info.ambient_capability_calls.iter().any(|call| {
             call.code == diag.code
@@ -56,6 +62,15 @@ pub(super) fn synthesize_ambient_capability_repair(
         .min()
         .unwrap_or(diag.span.start);
     if diag.span.start != primary_call_start {
+        // Only the primary call's repair carries the signature edits; a
+        // secondary site rewrites its body and leans on that repair to bind the
+        // receiver. When the owner is frozen the primary repair is refused, and
+        // this rewrite lands alone — `harness.runtime.store_get(...)` inside a
+        // declaration that never gains a `harness` (#6272).
+        if owner.frozen_cause.is_some() {
+            escape.record(owner);
+            return None;
+        }
         return Some((
             repair_for_ambient_capability_plan(diag.code, &infos, &reverse_callers, &needed)?,
             edits,
@@ -274,7 +289,13 @@ pub(super) fn synthesize_missing_harness_repair(
     context: &AmbientRepairContext,
     escape: &mut ValueEscape<'_>,
 ) -> Option<(Repair, Vec<FixEdit>, RepairImpactWire)> {
-    let infos = collect_callable_infos(program, source, exported_names, escape.referenced_by_value);
+    let infos = collect_callable_infos(
+        program,
+        source,
+        exported_names,
+        escape.referenced_by_value,
+        escape.manifest_handlers,
+    );
     let owner_idx = infos
         .iter()
         .enumerate()
@@ -330,7 +351,13 @@ pub(super) fn synthesize_missing_root_argument_repair(
     context: &AmbientRepairContext,
     escape: &mut ValueEscape<'_>,
 ) -> Option<(Repair, Vec<FixEdit>, RepairImpactWire)> {
-    let infos = collect_callable_infos(program, source, exported_names, escape.referenced_by_value);
+    let infos = collect_callable_infos(
+        program,
+        source,
+        exported_names,
+        escape.referenced_by_value,
+        escape.manifest_handlers,
+    );
     let owner_idx = infos
         .iter()
         .enumerate()
