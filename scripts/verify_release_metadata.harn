@@ -9,6 +9,7 @@
 // Exits 0 on success (prints a `verified release metadata ...` line);
 // exits non-zero with an `error: ...` message on any failed check.
 import { parse } from "std/semver"
+import { git_error_detail, resolve_commit } from "./git_base.harn"
 import {
   ReleaseWithdrawal,
   load_release_withdrawals,
@@ -353,14 +354,34 @@ fn verify_tag_state(
   version: string,
 ) -> nil {
   const tag = "v" + version
+  // Establish that git works before reading anything from it. Every check
+  // below treats a failed command as "no tag" and returns clean, so an
+  // unusable git turned the whole tag-state gate into a no-op that still
+  // reported success.
+  const head_commit = resolve_commit(process, "HEAD")
+  if head_commit.error != "" {
+    throw "error: cannot verify release tag state — git could not resolve HEAD: "
+      + head_commit.error
+  }
   const tag_lookup = process.run(
     {program: "git", args: ["rev-parse", "-q", "--verify", "refs/tags/" + tag]},
   )
   if !tag_lookup.success {
+    // With HEAD resolvable, `rev-parse -q --verify` failing means the tag is
+    // genuinely absent: nothing has been released at this version yet.
     return
   }
-  const head = process.run({program: "git", args: ["rev-parse", "HEAD"]}).stdout.trim()
-  const tag_commit = process.run({program: "git", args: ["rev-list", "-n", "1", tag]}).stdout.trim()
+  const head = head_commit.sha
+  const tag_rev = process.run({program: "git", args: ["rev-list", "-n", "1", tag]})
+  if !tag_rev.success {
+    throw "error: cannot verify release tag state — " + tag
+      + " resolves but git could not read its commit: "
+      + git_error_detail(
+      tag_rev.stderr,
+      tag_rev.exit_code,
+    )
+  }
+  const tag_commit = tag_rev.stdout.trim()
   if head == tag_commit {
     return
   }
