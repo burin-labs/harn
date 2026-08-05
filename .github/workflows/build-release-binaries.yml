@@ -713,6 +713,9 @@ jobs:
         with:
           ref: ${{ needs.setup.outputs.ref }}
 
+      # Renaming this step is a cross-repo change: harn-bump-fleet's pre-tag
+      # gate matches it by display name (`PRE_TAG_BINARY_SOURCE_STEP`). See the
+      # note on `Evaluate the binary-size growth signal`.
       - name: Verify benchmark source revision
         if: needs.setup.outputs.build_mode == 'benchmark' && inputs.benchmark_source_sha != ''
         shell: bash
@@ -799,6 +802,9 @@ jobs:
         shell: bash
         run: echo "HARN_BUILD_REVISION=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
 
+      # Renaming this step is a cross-repo change: harn-bump-fleet's pre-tag
+      # gate matches it by display name (`PRE_TAG_BINARY_SOURCE_STEP`). See the
+      # note on `Evaluate the binary-size growth signal`.
       - name: Verify benchmark source revision
         if: needs.setup.outputs.build_mode == 'benchmark' && inputs.benchmark_source_sha != ''
         shell: bash
@@ -1254,6 +1260,14 @@ jobs:
       # build crosses both growth thresholds with no accepted_growth entry.
       # A build that is not comparable to the baseline reports that and does not
       # invent a growth conclusion from it.
+      #
+      # RENAMING THIS STEP IS A CROSS-REPO CHANGE. harn-bump-fleet's pre-tag
+      # gate identifies it by display name (`PRE_TAG_BINARY_SIZE_STEP` in
+      # `lib/release_execution.harn`) because the Actions API exposes no stable
+      # step id. #6226 renamed it and the next release burned 43 minutes before
+      # reporting this step — which had run and passed — as unexecuted. The
+      # fleet now refuses to dispatch when the name does not resolve, so the
+      # failure is fast, but the fix still has to land there.
       - name: Evaluate the binary-size growth signal
         id: binary_size_growth
         if: always() && matrix.target == 'x86_64-unknown-linux-gnu' && steps.binary_size_fuse.outcome == 'success'
