@@ -21,6 +21,7 @@
  * HARN_RUST_TEST_ENV already owns the same contract.
  */
 import { read_yaml } from "std/fs"
+import { empty_scope_failure } from "./guard_scope.harn"
 
 const WORKFLOW_GLOB = ".github/workflows/*.yml"
 
@@ -145,6 +146,11 @@ pub fn main(harness: Harness) {
     }
     scanned = scanned + 1
     violations = violations + workflow_violations(workflow_name(path), document)
+  }
+  const empty = empty_scope_failure("Rust test lane stack contract", scanned, WORKFLOW_GLOB)
+  if empty != "" {
+    harness.stdio.eprintln(empty)
+    harness.runtime.exit(1)
   }
   if len(violations) > 0 {
     harness.stdio.eprintln("Rust test lane stack contract violated:")

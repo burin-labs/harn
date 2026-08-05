@@ -7,6 +7,7 @@ import {
   schema_string,
   schema_validator,
 } from "std/schema"
+import { empty_scope_failure } from "./guard_scope.harn"
 
 pub type CiCacheWriter = {workflow: string, job: string, shared_key: string}
 
@@ -1447,6 +1448,11 @@ fn main(harness: Harness) {
   let workflows = {}
   for path in harness.fs.glob(WORKFLOW_GLOB).sorted() {
     workflows[workflow_name(path)] = read_yaml(harness.fs, path, nil)
+  }
+  const empty = empty_scope_failure("CI cache policy", len(workflows.keys()), WORKFLOW_GLOB)
+  if empty != "" {
+    harness.stdio.eprintln(empty)
+    harness.runtime.exit(1)
   }
   const error_groups: list<list<string>> = [
     ci_cache_policy_errors(policy, action, node_action, workflows),
