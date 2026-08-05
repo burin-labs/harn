@@ -4,6 +4,25 @@ fn group(patterns: list<string>, excludes: list<string> = [], updates: list<stri
   return {patterns: patterns, exclude_patterns: excludes, update_types: updates}
 }
 
+/** One update entry, the unit `ecosystem_errors` checks. */
+fn entry(ecosystem: string, groups, directories: list<string> = ["/"]) -> EcosystemGroups {
+  return {ecosystem: ecosystem, directories: directories, groups: groups}
+}
+
+fn yaml(lines: list<string>) -> string {
+  return lines.join("\n") + "\n"
+}
+
+/** The groups of the entry covering `directory`, so a test can name one. */
+fn groups_for(entries: list<EcosystemGroups>, ecosystem: string, directory: string = "/") {
+  for candidate in entries {
+    if candidate.ecosystem == ecosystem && candidate.directories.contains(directory) {
+      return candidate.groups
+    }
+  }
+  throw "no ${ecosystem} entry covers ${directory}"
+}
+
 fn cargo_policy() {
   return {
     families: {
@@ -32,14 +51,19 @@ fn valid_groups() {
 @test
 pipeline test_actual_dependabot_document(harness: Harness, task) {
   const text = harness.fs.read_text("../../.github/dependabot.yml")
-  const ecosystems = groups_from_text(text)
-  assert_eq(group_errors(ecosystems), [])
+  const entries = groups_from_text(text)
+  assert_eq(group_errors(entries), [])
   // A routine dependency lands in the batch rather than opening its own PR.
-  assert_eq(matching_groups(ecosystems.cargo, "serde"), ["cargo-minor-patch"])
-  assert_eq(matching_groups(ecosystems.npm, "vite"), ["npm-minor-patch"])
+  assert_eq(matching_groups(groups_for(entries, "cargo"), "serde"), ["cargo-minor-patch"])
+  assert_eq(matching_groups(groups_for(entries, "npm"), "vite"), ["npm-minor-patch"])
   // A named family stays reviewable on its own.
-  assert_eq(matching_groups(ecosystems.cargo, "wasmtime-wasi"), ["wasmtime"])
-  assert_eq(matching_groups(ecosystems.npm, "react-dom"), ["react-runtime"])
+  assert_eq(matching_groups(groups_for(entries, "cargo"), "wasmtime-wasi"), ["wasmtime"])
+  assert_eq(matching_groups(groups_for(entries, "npm"), "react-dom"), ["react-runtime"])
+  // The npm entry governs the nested package directories too, not just the root.
+  assert_eq(
+    matching_groups(groups_for(entries, "npm", "/editors/vscode"), "react-dom"),
+    ["react-runtime"],
+  )
 }
 
 @test
@@ -53,13 +77,14 @@ pipeline test_wildcard_positions(harness: Harness, task) {
 @test
 pipeline test_overlap_is_rejected(harness: Harness, task) {
   const groups = valid_groups() + {wasi: group(["*-wasi"])}
-  const errors = ecosystem_errors("cargo", groups, cargo_policy())
+  const errors = ecosystem_errors(entry("cargo", groups), cargo_policy())
   assert_eq(
     errors.filter({ error -> error.kind == "ambiguous_membership" }),
     [
       {
         kind: "ambiguous_membership",
         ecosystem: "cargo",
+        directories: ["/"],
         group: "wasmtime",
         dependency: "wasmtime-wasi",
         matches: ["wasi", "wasmtime"],
@@ -70,7 +95,10 @@ pipeline test_overlap_is_rejected(harness: Harness, task) {
 
 @test
 pipeline test_missing_group_is_rejected(harness: Harness, task) {
-  const errors = ecosystem_errors("cargo", {cranelift: valid_groups().cranelift}, cargo_policy())
+  const errors = ecosystem_errors(
+    entry("cargo", {cranelift: valid_groups().cranelift}),
+    cargo_policy(),
+  )
   assert_eq(
     errors.filter({ error -> error.kind == "missing_group" }).map({ error -> error.group }),
     ["opentelemetry", "wasmtime"],
@@ -90,10 +118,19 @@ pipeline test_a_missing_catch_all_is_rejected(harness: Harness, task) {
     wasmtime: all.wasmtime,
     opentelemetry: all.opentelemetry,
   }
-  const errors = ecosystem_errors("cargo", groups, cargo_policy())
+  const errors = ecosystem_errors(entry("cargo", groups), cargo_policy())
   assert_eq(
     errors,
-    [{kind: "missing_catch_all", ecosystem: "cargo", group: "", dependency: "", matches: []}],
+    [
+      {
+        kind: "missing_catch_all",
+        ecosystem: "cargo",
+        directories: ["/"],
+        group: "",
+        dependency: "",
+        matches: [],
+      },
+    ],
   )
 }
 
@@ -105,7 +142,7 @@ pipeline test_a_missing_catch_all_is_rejected(harness: Harness, task) {
 pipeline test_a_catch_all_that_takes_majors_is_rejected(harness: Harness, task) {
   const groups = valid_groups()
     + {"cargo-minor-patch": group(["*"], [], ["major", "minor", "patch"])}
-  const errors = ecosystem_errors("cargo", groups, cargo_policy())
+  const errors = ecosystem_errors(entry("cargo", groups), cargo_policy())
   assert_eq(
     errors.filter({ error -> error.kind == "catch_all_update_types" }).map(
       { error -> error.matches },
@@ -123,7 +160,7 @@ pipeline test_a_catch_all_that_takes_majors_is_rejected(harness: Harness, task) 
 @test
 pipeline test_a_catch_all_without_excludes_is_rejected(harness: Harness, task) {
   const groups = valid_groups() + {"cargo-minor-patch": group(["*"], [], ["minor", "patch"])}
-  const errors = ecosystem_errors("cargo", groups, cargo_policy())
+  const errors = ecosystem_errors(entry("cargo", groups), cargo_policy())
   assert_eq(
     errors.filter({ error -> error.kind == "ambiguous_membership" }).map(
       { error -> error.dependency },
@@ -135,10 +172,19 @@ pipeline test_a_catch_all_without_excludes_is_rejected(harness: Harness, task) {
 /** A new ecosystem must declare its policy rather than inherit silence. */
 @test
 pipeline test_an_undeclared_ecosystem_is_rejected(harness: Harness, task) {
-  const errors = group_errors({pip: {}}, {cargo: cargo_policy()})
+  const errors = group_errors([entry("pip", {})], {cargo: cargo_policy()})
   assert_eq(
     errors,
-    [{kind: "unknown_ecosystem", ecosystem: "pip", group: "", dependency: "", matches: []}],
+    [
+      {
+        kind: "unknown_ecosystem",
+        ecosystem: "pip",
+        directories: ["/"],
+        group: "",
+        dependency: "",
+        matches: [],
+      },
+    ],
   )
 }
 
@@ -146,9 +192,9 @@ pipeline test_an_undeclared_ecosystem_is_rejected(harness: Harness, task) {
 @test
 pipeline test_github_actions_groups_majors_too(harness: Harness, task) {
   const policy = {families: {}, catch_all_update_types: []}
-  assert_eq(ecosystem_errors("github-actions", {actions: group(["*"])}, policy), [])
+  assert_eq(ecosystem_errors(entry("github-actions", {actions: group(["*"])}), policy), [])
   assert_eq(
-    ecosystem_errors("github-actions", {actions: group(["*"], [], ["minor"])}, policy).map(
+    ecosystem_errors(entry("github-actions", {actions: group(["*"], [], ["minor"])}), policy).map(
       { error -> error.kind },
     ),
     ["catch_all_update_types"],
@@ -157,8 +203,17 @@ pipeline test_github_actions_groups_majors_too(harness: Harness, task) {
 
 @test
 pipeline test_yaml_boundary_rejects_malformed_groups(harness: Harness, task) {
-  const invalid =
-    "version: 2\nupdates:\n  - package-ecosystem: cargo\n    groups:\n      wasmtime:\n        patterns: wasmtime*\n"
+  const invalid = yaml(
+    [
+      "version: 2",
+      "updates:",
+      "  - package-ecosystem: cargo",
+      "    directory: \"/\"",
+      "    groups:",
+      "      wasmtime:",
+      "        patterns: wasmtime*",
+    ],
+  )
   assert_eq(
     is_err(
       try {
@@ -169,15 +224,127 @@ pipeline test_yaml_boundary_rejects_malformed_groups(harness: Harness, task) {
   )
 }
 
-/** Two entries for one ecosystem make "the catch-all for cargo" ambiguous. */
+/**
+ * One ecosystem may appear once per package directory. A monorepo publishing a
+ * dashboard and an SDK wants different families and different reviewers for
+ * each, and collapsing them onto `package-ecosystem` alone made that
+ * unrepresentable.
+ */
 @test
-pipeline test_duplicate_ecosystem_entries_are_rejected(harness: Harness, task) {
-  const duplicated =
-    "version: 2\nupdates:\n  - package-ecosystem: cargo\n    groups:\n      a:\n        patterns:\n          - \"x\"\n  - package-ecosystem: cargo\n    groups:\n      b:\n        patterns:\n          - \"y\"\n"
+pipeline test_one_ecosystem_may_repeat_across_directories(harness: Harness, task) {
+  const text = yaml(
+    [
+      "version: 2",
+      "updates:",
+      "  - package-ecosystem: npm",
+      "    directory: \"/dashboard\"",
+      "    groups:",
+      "      react-runtime:",
+      "        patterns:",
+      "          - \"react\"",
+      "          - \"react-dom\"",
+      "      npm-minor-patch:",
+      "        patterns:",
+      "          - \"*\"",
+      "        exclude-patterns:",
+      "          - \"react\"",
+      "          - \"react-dom\"",
+      "        update-types:",
+      "          - \"minor\"",
+      "          - \"patch\"",
+      "  - package-ecosystem: npm",
+      "    directory: \"/sdks/typescript\"",
+      "    groups:",
+      "      npm-minor-patch:",
+      "        patterns:",
+      "          - \"*\"",
+      "        update-types:",
+      "          - \"minor\"",
+      "          - \"patch\"",
+    ],
+  )
+  const entries = groups_from_text(text)
+  assert_eq(
+    entries.map({ candidate -> candidate.directories }),
+    [["/dashboard"], ["/sdks/typescript"]],
+  )
+  // Each entry is checked against the policy on its own terms: the SDK has no
+  // React to keep separate, so its missing family is the only complaint.
+  const policy = {
+    families: {"react-runtime": ["react", "react-dom"]},
+    catch_all_update_types: ["minor", "patch"],
+  }
+  assert_eq(
+    group_errors(entries, {npm: policy}).map(
+      { error -> "${group_error_scope(error)} ${error.kind}" },
+    ),
+    [
+      "npm (/sdks/typescript) missing_group",
+      "npm (/sdks/typescript) ambiguous_membership",
+      "npm (/sdks/typescript) ambiguous_membership",
+    ],
+  )
+}
+
+/** Two entries claiming one directory leave no answer for who governs it. */
+@test
+pipeline test_two_entries_for_one_directory_are_rejected(harness: Harness, task) {
+  const duplicated = yaml(
+    [
+      "version: 2",
+      "updates:",
+      "  - package-ecosystem: cargo",
+      "    directories:",
+      "      - \"/\"",
+      "      - \"/crates\"",
+      "    groups:",
+      "      a:",
+      "        patterns:",
+      "          - \"x\"",
+      "  - package-ecosystem: cargo",
+      "    directory: \"/crates\"",
+      "    groups:",
+      "      b:",
+      "        patterns:",
+      "          - \"y\"",
+    ],
+  )
   assert_eq(
     is_err(
       try {
         groups_from_text(duplicated)
+      },
+    ),
+    true,
+  )
+}
+
+/** An entry has to say what it covers, in exactly one of the two spellings. */
+@test
+pipeline test_an_entry_must_name_its_directories(harness: Harness, task) {
+  const missing = yaml(["version: 2", "updates:", "  - package-ecosystem: cargo"])
+  assert_eq(
+    is_err(
+      try {
+        groups_from_text(missing)
+      },
+    ),
+    true,
+  )
+  const both = yaml(
+    [
+      "version: 2",
+      "updates:",
+      "  - package-ecosystem: cargo",
+      "    directory: \"/\"",
+      "    directories:",
+      "      - \"/crates\"",
+    ],
+  )
+  assert_eq(
+    is_err(
+      try {
+        groups_from_text(both)
       },
     ),
     true,
