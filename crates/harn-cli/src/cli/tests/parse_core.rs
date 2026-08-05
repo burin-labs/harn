@@ -184,7 +184,7 @@ fn test_parses_fix_plan_json_args() {
         args.safety.map(|safety| safety.as_str()),
         Some("behavior-preserving")
     );
-    assert_eq!(args.path, PathBuf::from("main.harn"));
+    assert_eq!(args.paths, vec![PathBuf::from("main.harn")]);
 }
 
 #[test]
@@ -210,7 +210,7 @@ fn test_parses_fix_apply_dry_run_args() {
         args.safety.map(|safety| safety.as_str()),
         Some("scope-local")
     );
-    assert_eq!(args.path, PathBuf::from("src/"));
+    assert_eq!(args.paths, vec![PathBuf::from("src/")]);
 }
 
 #[test]

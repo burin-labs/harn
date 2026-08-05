@@ -9,6 +9,7 @@ use std::thread;
 use std::time::Instant;
 
 use crate::env_guard::ScopedEnvVar;
+use crate::package;
 use crate::test_timing::DurationSummary;
 use crate::CLI_RUNTIME_STACK_SIZE;
 use harn_parser::SNode;
@@ -351,8 +352,18 @@ async fn run_tests_with_session_impl(
         .unwrap_or_default();
 
     let mut discovery = discover_test_cases(&files, options.filter.as_deref(), workers);
+    // `[check].trusted_host_dispatch` is the project's declaration that it is a
+    // privileged embedder. `harn check` and `harn lint` both read it and OR the
+    // CLI flag on top; `harn test` used to read only the flag, so a project
+    // that declared the authority in its manifest still had every host_call
+    // refused under test. That split made the manifest key mean one thing to
+    // two commands and nothing to a third.
+    let mut declared_dispatch: BTreeMap<PathBuf, bool> = BTreeMap::new();
     for case in &mut discovery.cases {
-        case.trusted_host_dispatch = options.trusted_host_dispatch;
+        let declared = *declared_dispatch
+            .entry(case.file.clone())
+            .or_insert_with(|| package::load_check_config(Some(&case.file)).trusted_host_dispatch);
+        case.trusted_host_dispatch = options.trusted_host_dispatch || declared;
     }
     if let Some(shard) = options.shard {
         discovery.cases = select_shard_cases(discovery.cases, &timings, shard);

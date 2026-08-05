@@ -309,7 +309,8 @@ fn run_returns_error_after_reporting_skipped_files() {
         capability_migrations_only: false,
         codes: Vec::new(),
         json: false,
-        path: temp.path().to_path_buf(),
+        workspace: false,
+        paths: vec![temp.path().to_path_buf()],
     };
 
     let error = run(&args).unwrap_err();
@@ -319,6 +320,67 @@ fn run_returns_error_after_reporting_skipped_files() {
         error.message().contains("skipped 1 file")
             && error.message().contains("read, lex, or parse errors"),
         "unexpected error: {error}"
+    );
+}
+
+/// Two sibling trees migrate in one pass without their common ancestor.
+///
+/// A capability migration propagates requirements across resolved module
+/// imports, so a declaration and its cross-module callers have to be planned
+/// together or the callers are left stale. When this accepted one path, the
+/// only way to reach two sibling trees was to name the directory above them --
+/// which also sweeps in whatever else lives there. A repo that checks in
+/// deliberately-invalid parse fixtures (Harn's own `conformance/errors/` is
+/// exactly this) could therefore never run the migration at all: naming the
+/// ancestor failed on the fixtures, and naming each tree separately could not
+/// converge.
+#[test]
+fn plan_accepts_sibling_targets_without_their_common_ancestor() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let lib = temp.path().join("lib");
+    let app = temp.path().join("app");
+    fs::create_dir(&lib).unwrap();
+    fs::create_dir(&app).unwrap();
+    fs::write(
+        lib.join("greet.harn"),
+        "pub fn greet() -> nil { __io_println(\"hi\") }\n",
+    )
+    .unwrap();
+    fs::write(
+        app.join("main.harn"),
+        "import { greet } from \"../lib/greet\"\npipeline main(harness: Harness) { greet() }\n",
+    )
+    .unwrap();
+    // The negative fixture that made the ancestor unusable. It sits beside both
+    // targets and must not be reached.
+    fs::write(temp.path().join("unparseable.harn"), "fn bad() {\n").unwrap();
+
+    let plan = build_plan_with_options(&[lib, app], None, &FixOptions::default()).unwrap();
+
+    assert!(
+        plan.skipped_files.is_empty(),
+        "a sibling fixture outside the named targets must not be collected: {:?}",
+        plan.skipped_files
+    );
+    assert!(
+        plan.path.contains("lib") && plan.path.contains("app"),
+        "the plan must name both targets, got {:?}",
+        plan.path
+    );
+
+    // Falsifier: the ancestor still fails, so the test above is measuring the
+    // target list and not some unrelated change in how fixtures are read.
+    let ancestor = build_plan_with_options(
+        std::slice::from_ref(&temp.path().to_path_buf()),
+        None,
+        &FixOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        ancestor.skipped_files.len(),
+        1,
+        "naming the common ancestor must still collect the unparseable fixture: {:?}",
+        ancestor.skipped_files
     );
 }
 
@@ -353,7 +415,8 @@ fn apply_rejects_needs_human_safety_ceiling() {
         capability_migrations_only: false,
         codes: Vec::new(),
         json: false,
-        path: PathBuf::from("repair_demo.harn"),
+        workspace: false,
+        paths: vec![PathBuf::from("repair_demo.harn")],
     };
 
     let error = run(&args).unwrap_err();
@@ -407,7 +470,7 @@ fn plan_marks_stdio_repairs_surface_changing_when_harness_is_unreachable() {
     let script = temp.path().join("stdio_needs_param.harn");
     fs::write(&script, "pub fn helper() {\n  println(\"hi\")\n}\n").unwrap();
 
-    let plan = build_plan_with_options(&script, None, &FixOptions::default()).unwrap();
+    let plan = build_plan_with_options_at(&script, None, &FixOptions::default()).unwrap();
     let repair = plan
         .repairs
         .iter()
@@ -417,220 +480,6 @@ fn plan_marks_stdio_repairs_surface_changing_when_harness_is_unreachable() {
     assert_eq!(repair.repair.id, "bindings/thread-harness-whole-program");
     assert_eq!(repair.repair.safety, "surface-changing");
     assert_eq!(repair.impact.classification, "public-signature-change");
-}
-
-#[test]
-fn callable_param_insert_handles_dict_defaults_before_body() {
-    let source = "pub fn poll(check, options: dict = {}) -> any {\n  harness.clock.now_ms()\n}\n";
-    let (offset, has_params) = super::signature_threading::callable_param_insert(
-        source,
-        harn_lexer::Span::with_offsets(0, source.len(), 1, 1),
-    )
-    .expect("callable header");
-    assert!(has_params);
-    assert_eq!(&source[offset..offset + 5], "check");
-}
-
-#[test]
-fn missing_capability_argument_repair_uses_typed_root_field() {
-    let source = "fn main(harness: Harness) {\n  helper(\"old\")\n}\n";
-    let program = harn_parser::parse_source(source).unwrap();
-    let span = source.find("\"old\"").unwrap();
-    let span = harn_lexer::Span::with_offsets(span, span + 5, 2, 10);
-    let (_, edits, _) = synthesize_missing_capability_argument_repair(
-        span,
-        &named_type("HarnessFs"),
-        &named_type("string"),
-        source,
-        &program,
-    )
-    .expect("capability migration repair");
-    assert_eq!(edits.len(), 1);
-    let insert_at = source.find("(\"old\")").unwrap() + 1;
-    assert_eq!(edits[0].span.start, insert_at);
-    assert_eq!(edits[0].span.end, insert_at);
-    assert_eq!(edits[0].replacement, "harness.fs, ");
-}
-
-#[test]
-fn missing_capability_argument_is_inserted_at_the_diagnosed_position() {
-    let source = "fn main(harness: Harness) {\n  helper(harness.fs, \"old\")\n}\n";
-    let program = harn_parser::parse_source(source).unwrap();
-    let start = source.find("\"old\"").unwrap();
-    let span = harn_lexer::Span::with_offsets(start, start + 5, 2, 22);
-    let (_, edits, _) = synthesize_missing_capability_argument_repair(
-        span,
-        &named_type("HarnessSystem"),
-        &named_type("string"),
-        source,
-        &program,
-    )
-    .expect("positioned capability repair");
-    assert_eq!(edits.len(), 1);
-    assert_eq!(edits[0].replacement, ", harness.system");
-    assert_eq!(
-        FixEdit::apply_all(source, &edits),
-        "fn main(harness: Harness) {\n  helper(harness.fs, harness.system, \"old\")\n}\n"
-    );
-}
-
-#[test]
-fn attenuated_capability_argument_repair_projects_existing_root_grant() {
-    let source = "fn main(harness: Harness) {\n  helper(harness, \"old\")\n}\n";
-    let program = harn_parser::parse_source(source).unwrap();
-    let start = source.find("harness, \"").unwrap();
-    let span = harn_lexer::Span::with_offsets(start, start + "harness".len(), 2, 10);
-    let (repair, edits, _) = synthesize_missing_capability_argument_repair(
-        span,
-        &named_type("HarnessFs"),
-        &named_type("Harness"),
-        source,
-        &program,
-    )
-    .expect("attenuation repair");
-    assert_eq!(repair.id.as_str(), "bindings/attenuate-capability-argument");
-    assert_eq!(edits.len(), 1);
-    assert_eq!(edits[0].span, span);
-    assert_eq!(edits[0].replacement, "harness.fs");
-}
-
-#[test]
-fn attenuated_capability_bundle_repair_projects_existing_root_grant() {
-    let source = "fn main(harness: Harness) {\n  helper(harness, \"old\")\n}\n";
-    let program = harn_parser::parse_source(source).unwrap();
-    let start = source.find("harness, \"").unwrap();
-    let span = harn_lexer::Span::with_offsets(start, start + "harness".len(), 2, 10);
-    let (repair, edits, _) = synthesize_missing_capability_argument_repair(
-        span,
-        &capability_shape(&[("fs", "HarnessFs"), ("tools", "HarnessTools")]),
-        &named_type("Harness"),
-        source,
-        &program,
-    )
-    .expect("capability bundle repair");
-    assert_eq!(
-        repair.id.as_str(),
-        "bindings/attenuate-capability-bundle-argument"
-    );
-    assert_eq!(edits.len(), 1);
-    assert_eq!(edits[0].span, span);
-    assert_eq!(
-        edits[0].replacement,
-        "{fs: harness.fs, tools: harness.tools}"
-    );
-}
-
-#[test]
-fn missing_capability_argument_repair_inserts_before_parenthesized_expression() {
-    let source = "fn main(harness: Harness) {\n  helper((params ?? {}) + {path: \"src\"})\n}\n";
-    let program = harn_parser::parse_source(source).unwrap();
-    let mut span = None;
-    visit::walk_program(&program, &mut |node| {
-        if let Node::FunctionCall { name, args, .. } = &node.node {
-            if name == "helper" {
-                span = args.first().map(|arg| arg.span);
-            }
-        }
-    });
-    let span = span.expect("helper first argument");
-
-    let (_, edits, _) = synthesize_missing_capability_argument_repair(
-        span,
-        &named_type("HarnessFs"),
-        &named_type("dict"),
-        source,
-        &program,
-    )
-    .expect("capability migration repair");
-    let insert_at = source.find("((params").unwrap() + 1;
-    assert_eq!(edits[0].span.start, insert_at);
-    assert_eq!(edits[0].replacement, "harness.fs, ");
-}
-
-#[test]
-fn missing_root_argument_threads_a_distinct_root_past_a_narrow_harness_binding() {
-    let source = "fn leaf(harness: HarnessFs, path: string) {\n  needs_root(harness, path)\n}\n\nfn main(harness: Harness) {\n  leaf(harness.fs, \"old\")\n}\n";
-    let program = harn_parser::parse_source(source).unwrap();
-    let start = source.find("harness, path").unwrap();
-    let span = harn_lexer::Span::with_offsets(start, start + "harness".len(), 2, 14);
-    let (_, edits, _) = synthesize_missing_root_argument_repair(
-        span,
-        source,
-        &program,
-        &BTreeSet::new(),
-        &AmbientRepairContext {
-            cross_module_importer_count: 0,
-        },
-        &mut ValueEscape {
-            referenced_by_value: &BTreeSet::new(),
-            frozen: &mut Vec::new(),
-        },
-    )
-    .expect("root threading repair");
-    let fixed = FixEdit::apply_all(source, &edits);
-    assert_eq!(
-        fixed,
-        "fn leaf(_harness: Harness, harness: HarnessFs, path: string) {\n  needs_root(_harness, harness, path)\n}\n\nfn main(harness: Harness) {\n  leaf(harness, harness.fs, \"old\")\n}\n"
-    );
-}
-
-#[test]
-fn missing_capability_argument_repair_rejects_non_call_spans() {
-    let source = "import { helper } from \"./lib\"\n\nfn main(harness: Harness) {}\n";
-    let program = harn_parser::parse_source(source).unwrap();
-    let start = source.find("helper").unwrap();
-    let import_span = harn_lexer::Span::with_offsets(start, start + "helper".len(), 1, 10);
-
-    assert!(
-        synthesize_missing_capability_argument_repair(
-            import_span,
-            &named_type("HarnessAst"),
-            &named_type("string"),
-            source,
-            &program,
-        )
-        .is_none(),
-        "an imported-declaration diagnostic must never edit the importer"
-    );
-}
-
-#[test]
-fn missing_root_argument_repair_preserves_parenthesized_first_argument() {
-    // An expression span excludes its grouping parentheses, so a repair that
-    // inserted at the diagnosed offset would produce `((harness, params ...`.
-    let source = "pipeline test(harness: Harness, params: dict) {\n  host_search_request((params ?? {}) + {path: \"root\"})\n}\n";
-    let program = harn_parser::parse_source(source).expect("source parses");
-    let mut span = None;
-    visit::walk_program(&program, &mut |node| {
-        if let Node::FunctionCall { name, args, .. } = &node.node {
-            if name == "host_search_request" {
-                span = args.first().map(|arg| arg.span);
-            }
-        }
-    });
-    let span = span.expect("host_search_request first argument");
-
-    let (_, edits, _) = synthesize_missing_root_argument_repair(
-        span,
-        source,
-        &program,
-        &BTreeSet::new(),
-        &AmbientRepairContext {
-            cross_module_importer_count: 0,
-        },
-        &mut ValueEscape {
-            referenced_by_value: &BTreeSet::new(),
-            frozen: &mut Vec::new(),
-        },
-    )
-    .expect("root argument repair");
-
-    let applied = FixEdit::apply_all(source, &edits);
-    assert!(
-        applied.contains("host_search_request(harness, (params ?? {}) + {path: \"root\"})"),
-        "capability must be inserted at the call boundary: {applied}"
-    );
-    harn_parser::parse_source(&applied).expect("repair must remain parse-safe");
 }
 
 #[test]
@@ -653,7 +502,7 @@ fn capability_only_plan_excludes_unrelated_repairs() {
     )
     .unwrap();
     let plan =
-        build_plan_with_options(&script, None, &FixOptions::capability_migrations()).unwrap();
+        build_plan_with_options_at(&script, None, &FixOptions::capability_migrations()).unwrap();
     assert!(!plan.repairs.is_empty());
     assert!(plan
         .repairs
@@ -786,7 +635,7 @@ fn plan_json_reports_cross_module_public_signature_impact() {
         )
         .unwrap();
 
-    let plan = build_plan_with_options(temp.path(), None, &FixOptions::default()).unwrap();
+    let plan = build_plan_with_options_at(temp.path(), None, &FixOptions::default()).unwrap();
     let repair_index = plan
         .repairs
         .iter()
@@ -834,7 +683,7 @@ fn apply_thread_params_threads_harness_for_stdio_migration() {
     )
     .unwrap();
 
-    let result = apply_repairs_with_options(
+    let result = apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -864,6 +713,7 @@ fn apply_thread_params_threads_harness_for_stdio_migration() {
     );
 }
 
+mod repair_synthesis;
 mod split_capabilities;
 
 #[test]
@@ -923,7 +773,7 @@ fn apply_thread_params_threads_harness_for_non_stdio_capabilities() {
             )
             .unwrap();
 
-        let result = apply_repairs_with_options(
+        let result = apply_repairs_with_options_at(
             &script,
             RepairSafety::SurfaceChanging,
             false,
@@ -994,7 +844,7 @@ fn apply_threads_missing_harness_into_pipeline_boundary() {
     let script = temp.path().join("pipeline_missing_harness.harn");
     fs::write(&script, "pipeline default(task) {\n  println(task)\n}\n").unwrap();
 
-    let result = apply_repairs_with_options(
+    let result = apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -1030,7 +880,7 @@ fn apply_threads_registry_owned_harness_method_through_helper() {
     )
     .unwrap();
 
-    let result = apply_repairs_with_options(
+    let result = apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -1064,7 +914,7 @@ fn apply_thread_params_threads_harness_from_pipeline_to_helper() {
     )
     .unwrap();
 
-    let result = apply_repairs_with_options(
+    let result = apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -1164,7 +1014,7 @@ fn apply_surface_changing_threads_non_stdlib_public_api() {
         )
         .unwrap();
 
-    let result = apply_repairs_with_options(
+    let result = apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -1212,7 +1062,7 @@ fn apply_threads_ambient_capability_from_default_parameter() {
     )
     .unwrap();
 
-    let result = apply_repairs_with_options(
+    let result = apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -1248,7 +1098,7 @@ fn apply_rewrites_positional_metadata_builtin_to_typed_request() {
     )
     .unwrap();
 
-    let result = apply_repairs_with_options(
+    let result = apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -1284,7 +1134,7 @@ fn apply_rewrites_zero_and_optional_metadata_arguments_to_named_requests() {
     )
     .unwrap();
 
-    apply_repairs_with_options(
+    apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -1317,7 +1167,7 @@ fn apply_rewrites_legacy_host_projections_to_typed_snapshots() {
     )
     .unwrap();
 
-    apply_repairs_with_options(
+    apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -1354,7 +1204,7 @@ fn apply_rewrites_ambient_calls_inside_interpolation() {
     )
     .unwrap();
 
-    apply_repairs_with_options(
+    apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,
@@ -1383,7 +1233,7 @@ fn apply_dedupes_shared_stdio_threading_edits() {
         )
         .unwrap();
 
-    let result = apply_repairs_with_options(
+    let result = apply_repairs_with_options_at(
         &script,
         RepairSafety::SurfaceChanging,
         false,

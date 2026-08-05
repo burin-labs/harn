@@ -27,9 +27,13 @@ pub(crate) struct FixArgs {
     /// Emit the machine-readable RepairPlan JSON.
     #[arg(long)]
     pub json: bool,
-    /// .harn file or directory to inspect.
-    #[arg(required = true)]
-    pub path: PathBuf,
+    /// Add every `[workspace].pipelines` path from the nearest harn.toml.
+    #[arg(long)]
+    pub workspace: bool,
+    /// .harn files or directories to inspect. Repeatable: a capability
+    /// migration propagates requirements across module imports, so a
+    /// declaration and its cross-module callers must be planned in one pass.
+    pub paths: Vec<PathBuf>,
 }
 
 fn parse_diagnostic_code(value: &str) -> Result<DiagnosticCode, String> {

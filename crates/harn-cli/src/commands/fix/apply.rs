@@ -6,18 +6,23 @@ pub(super) fn apply_repairs(
     safety_ceiling: RepairSafety,
     dry_run: bool,
 ) -> Result<ApplyResult, String> {
-    apply_repairs_with_options(target, safety_ceiling, dry_run, FixOptions::default())
+    apply_repairs_with_options(
+        std::slice::from_ref(&target.to_path_buf()),
+        safety_ceiling,
+        dry_run,
+        FixOptions::default(),
+    )
 }
 
 pub(super) fn apply_repairs_with_options(
-    target: &Path,
+    targets: &[PathBuf],
     safety_ceiling: RepairSafety,
     dry_run: bool,
     options: FixOptions,
 ) -> Result<ApplyResult, String> {
     let mut original_files = BTreeMap::new();
     let result = apply_repairs_with_options_inner(
-        target,
+        targets,
         safety_ceiling,
         dry_run,
         &options,
@@ -27,7 +32,7 @@ pub(super) fn apply_repairs_with_options(
 }
 
 fn apply_repairs_with_options_inner(
-    target: &Path,
+    targets: &[PathBuf],
     safety_ceiling: RepairSafety,
     dry_run: bool,
     options: &FixOptions,
@@ -46,7 +51,7 @@ fn apply_repairs_with_options_inner(
     let mut frozen_callables = Vec::new();
 
     for _ in 0..max_passes {
-        let plan = build_plan_with_options(target, None, options)?;
+        let plan = build_plan_with_options(targets, None, options)?;
         frozen_callables = plan.frozen_callables.clone();
         let retired_testing_prerequisite = plan.repairs.iter().any(|repair| {
             repair.repair.id == "imports/remove-retired-testing-helper"
@@ -140,7 +145,7 @@ fn apply_repairs_with_options_inner(
         ));
     }
 
-    let remaining = count_remaining_diagnostics(target)?;
+    let remaining = count_remaining_diagnostics(targets)?;
     Ok(ApplyResult {
         schema_version: FIX_APPLY_SCHEMA_VERSION,
         applied,
@@ -464,13 +469,18 @@ struct RemainingDiagnostics {
     skipped_files: Vec<SkippedFileWire>,
 }
 
-fn count_remaining_diagnostics(target: &Path) -> Result<RemainingDiagnostics, String> {
-    if let Err(error) = package::validate_runtime_manifest_extensions(target) {
-        return Err(format!("manifest extension validation failed: {error}"));
+fn count_remaining_diagnostics(targets: &[PathBuf]) -> Result<RemainingDiagnostics, String> {
+    for target in targets {
+        if let Err(error) = package::validate_runtime_manifest_extensions(target) {
+            return Err(format!("manifest extension validation failed: {error}"));
+        }
     }
 
-    let target_string = target.to_string_lossy().into_owned();
-    let target_refs = [target_string.as_str()];
+    let target_strings: Vec<String> = targets
+        .iter()
+        .map(|target| target.to_string_lossy().into_owned())
+        .collect();
+    let target_refs: Vec<&str> = target_strings.iter().map(String::as_str).collect();
     let files = commands::check::collect_harn_targets(&target_refs);
     let module_graph = commands::check::build_module_graph(&files);
     let cross_file_imports = commands::check::collect_cross_file_imports(&module_graph);
