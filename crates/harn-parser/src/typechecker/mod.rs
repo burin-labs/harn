@@ -544,6 +544,31 @@ impl TypeChecker {
     /// Check whether a function call value is a boundary source that produces
     /// unvalidated data.  Returns `None` if the value is type-safe
     /// (e.g. llm_call with a schema option, or a non-boundary function).
+    /// Mark a binding whose initializer came from a boundary API as
+    /// unvalidated, so a later property or subscript access reports
+    /// `HARN-OWN-004` until something actually validates it.
+    ///
+    /// A type annotation deliberately does not exempt the binding (#6234). It
+    /// is erased before the value exists, so
+    /// `const d: {n?: string} = json_parse("{\"n\": 1}")` reads an `int` out
+    /// of a field declared `string`, and a JSON array satisfies a record
+    /// annotation — neither diagnosed at compile time or at run time. Only
+    /// `schema_expect` and `schema_is`/`is_type` clear the mark, because only
+    /// they check anything.
+    pub(in crate::typechecker) fn mark_boundary_binding(
+        &self,
+        name: &str,
+        value: &SNode,
+        scope: &mut TypeScope,
+    ) {
+        if !self.strict_types {
+            return;
+        }
+        if let Some(boundary) = Self::detect_boundary_source(value, scope) {
+            scope.mark_untyped_source(name, &boundary);
+        }
+    }
+
     pub(in crate::typechecker) fn detect_boundary_source(
         value: &SNode,
         scope: &TypeScope,
@@ -588,22 +613,6 @@ impl TypeChecker {
             };
             key == "output" && output_schema_type_expr_from_node(&entry.value, scope).is_some()
         })
-    }
-
-    /// Check whether a type annotation is a concrete shape/struct type
-    /// (as opposed to bare `dict` or no annotation).
-    pub(in crate::typechecker) fn is_concrete_type(ty: &TypeExpr) -> bool {
-        matches!(
-            ty,
-            TypeExpr::Shape(_)
-                | TypeExpr::Applied { .. }
-                | TypeExpr::FnType { .. }
-                | TypeExpr::List(_)
-                | TypeExpr::Iter(_)
-                | TypeExpr::Generator(_)
-                | TypeExpr::Stream(_)
-                | TypeExpr::DictType(_, _)
-        ) || matches!(ty, TypeExpr::Named(n) if n != "dict" && n != "any" && n != "_")
     }
 
     /// Check a program and return both diagnostics and inlay hints.

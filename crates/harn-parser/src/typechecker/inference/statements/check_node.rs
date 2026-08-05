@@ -62,15 +62,7 @@ impl TypeChecker {
                     scope.clear_nil_widenable(name);
                     scope.define_schema_binding(name, schema_type_expr_from_node(value, scope));
                     // Strict types: mark variables assigned from boundary APIs
-                    if self.strict_types {
-                        if let Some(boundary) = Self::detect_boundary_source(value, scope) {
-                            let has_concrete_ann =
-                                type_ann.as_ref().is_some_and(Self::is_concrete_type);
-                            if !has_concrete_ann {
-                                scope.mark_untyped_source(name, &boundary);
-                            }
-                        }
-                    }
+                    self.mark_boundary_binding(name, value, scope);
                     // Fold when the initializer is in the pure const-eval subset
                     // (registered for later const initializers in this module).
                     // An impure initializer is simply not folded — not an error.
@@ -146,15 +138,7 @@ impl TypeChecker {
                     }
                     scope.define_schema_binding(name, schema_type_expr_from_node(value, scope));
                     // Strict types: mark variables assigned from boundary APIs
-                    if self.strict_types {
-                        if let Some(boundary) = Self::detect_boundary_source(value, scope) {
-                            let has_concrete_ann =
-                                type_ann.as_ref().is_some_and(Self::is_concrete_type);
-                            if !has_concrete_ann {
-                                scope.mark_untyped_source(name, &boundary);
-                            }
-                        }
-                    }
+                    self.mark_boundary_binding(name, value, scope);
                 } else {
                     self.check_pattern_defaults(pattern, scope);
                     self.define_pattern_vars_typed(pattern, &inferred, scope, true);

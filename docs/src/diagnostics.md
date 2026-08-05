@@ -4165,8 +4165,12 @@ unvalidated boundary value is used directly
 - Prefer a typed result schema at the call site when the boundary supports it,
   or pass the value through `schema_expect()` / guard it with `schema_is()`
   before property or subscript access.
-- Add a shape annotation when the producer is intentionally dynamic but the
-  consumer needs a fixed contract.
+- A type annotation is not a substitute. It is erased before the value exists,
+  so `const doc: {name?: string} = json_parse(text)` reads whatever the payload
+  actually contains — an `int` out of a field declared `string`, or a JSON array
+  where a record was declared — with no diagnostic at compile time or run time.
+  Annotating a boundary value states a contract nothing enforces, so it no
+  longer clears this diagnostic.
 
 ### `HARN-RCV-001`
 

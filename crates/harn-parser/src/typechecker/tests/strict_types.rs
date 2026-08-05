@@ -73,8 +73,17 @@ log(data.name)
     );
 }
 
+/// A shape annotation does not validate a boundary value, so it must not
+/// silence the rule that says one has to be validated (#6234).
+///
+/// The annotation is erased before the value exists. At run time
+/// `const d: {n?: string} = json_parse("{\"n\": 1}")` reads an int out of a
+/// field declared `string`, and `json_parse("[1,2,3]")` satisfies a record
+/// annotation — both without a diagnostic at any stage. Accepting it here was
+/// the cheapest way to satisfy the checker and the only one that added no
+/// safety, which made it the remedy the help steered readers toward.
 #[test]
-fn test_strict_types_shape_annotation_clears() {
+fn test_strict_types_shape_annotation_does_not_validate() {
     let errs = strict_errors(
         r#"pipeline t(task) {
   const data: {name: string, age: int} = json_parse("{}")
@@ -82,8 +91,43 @@ fn test_strict_types_shape_annotation_clears() {
 }"#,
     );
     assert!(
-        !errs.iter().any(|w| w.contains("unvalidated")),
-        "expected no error with shape annotation, got: {errs:?}"
+        errs.iter().any(|w| w.contains("unvalidated")),
+        "a shape annotation checks nothing at run time, so it must not clear the boundary mark: {errs:?}"
+    );
+    assert!(
+        !errs
+            .iter()
+            .any(|w| w.contains("annotation") && w.contains("add a shape")),
+        "the help must not offer the remedy that validates nothing: {errs:?}"
+    );
+}
+
+/// The two remedies that do check something still clear the mark.
+#[test]
+fn test_strict_types_schema_expect_and_schema_is_still_clear() {
+    let expected = strict_errors(
+        r#"pipeline t(task) {
+  const data = json_parse("{}")
+  schema_expect(data, schema_object({name: schema_field(schema_string())}))
+  log(data.name)
+}"#,
+    );
+    assert!(
+        !expected.iter().any(|w| w.contains("unvalidated")),
+        "schema_expect validates, so it must clear the mark: {expected:?}"
+    );
+
+    let tested = strict_errors(
+        r#"pipeline t(task) {
+  const data = json_parse("{}")
+  if schema_is(data, schema_object({name: schema_field(schema_string())})) {
+    log(data.name)
+  }
+}"#,
+    );
+    assert!(
+        !tested.iter().any(|w| w.contains("unvalidated")),
+        "schema_is in an if-condition validates, so it must clear the mark: {tested:?}"
     );
 }
 
