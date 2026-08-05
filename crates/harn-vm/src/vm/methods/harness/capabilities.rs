@@ -378,6 +378,10 @@ impl crate::vm::Vm {
                     .await
             }
             "mock_enqueue" => self.call_capability_builtin("llm_mock", args.to_vec()).await,
+            "mock_load_jsonl" => {
+                self.call_capability_builtin("llm_mock_load_jsonl", args.to_vec())
+                    .await
+            }
             "mock_calls" => {
                 self.call_capability_builtin("llm_mock_calls", args.to_vec())
                     .await
