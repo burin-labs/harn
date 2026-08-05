@@ -147,7 +147,7 @@ jobs:
       build_matrix: ${{ steps.resolve.outputs.build_matrix }}
       build_mode: ${{ steps.resolve.outputs.build_mode }}
       runner_profile: ${{ steps.resolve.outputs.runner_profile }}
-      binary_size_budget_bytes: ${{ steps.binary-size-policy.outputs.budget_bytes }}
+      binary_size_fuse_bytes: ${{ steps.binary-size-policy.outputs.fuse_bytes }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -186,7 +186,7 @@ jobs:
           BINARY_SIZE_TARGET: x86_64-unknown-linux-gnu
         run: |
           set -euo pipefail
-          if ! budget_bytes="$(
+          if ! fuse_bytes="$(
             jq -er \
               --arg target "$BINARY_SIZE_TARGET" \
               -f .github/release-binary-size-policy.jq \
@@ -195,7 +195,7 @@ jobs:
             echo "::error::.github/release-binary-size-policy.json violates the closed release binary-size policy contract" >&2
             exit 2
           fi
-          echo "budget_bytes=$budget_bytes" >> "$GITHUB_OUTPUT"
+          echo "fuse_bytes=$fuse_bytes" >> "$GITHUB_OUTPUT"
 
       - name: Resolve release context
         id: resolve
@@ -1201,13 +1201,18 @@ jobs:
             echo "| Duration | ${duration}s |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Check binary size budget
-        id: binary_size_budget
+      # The fail-closed distribution fuse. Deliberately pure bash and pure
+      # arithmetic: it must hold even if the binary it just measured cannot run.
+      # The growth signal is a separate step below, because it needs a working
+      # harn and because a fuse that also carried the growth policy is exactly
+      # the collapsed gate #6020 replaced.
+      - name: Check the distribution fuse
+        id: binary_size_fuse
         if: matrix.target == 'x86_64-unknown-linux-gnu'
         shell: bash
         env:
           BINARY_SIZE_REPORT_DIR: dist/binary-size-${{ matrix.target }}
-          BINARY_SIZE_BUDGET_BYTES: ${{ needs.setup.outputs.binary_size_budget_bytes }}
+          BINARY_SIZE_FUSE_BYTES: ${{ needs.setup.outputs.binary_size_fuse_bytes }}
           HARN_RELEASE_TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
@@ -1216,11 +1221,11 @@ jobs:
             echo "::error::harn binary not found at $harn_bin"
             exit 1
           fi
-          if [[ ! "${BINARY_SIZE_BUDGET_BYTES}" =~ ^[0-9]+$ ]] || (( BINARY_SIZE_BUDGET_BYTES <= 0 )); then
-            echo "::error::BINARY_SIZE_BUDGET_BYTES must be a positive integer, got '${BINARY_SIZE_BUDGET_BYTES}'"
+          if [[ ! "${BINARY_SIZE_FUSE_BYTES}" =~ ^[0-9]+$ ]] || (( BINARY_SIZE_FUSE_BYTES <= 0 )); then
+            echo "::error::BINARY_SIZE_FUSE_BYTES must be a positive integer, got '${BINARY_SIZE_FUSE_BYTES}'"
             exit 2
           fi
-          budget_bytes="$BINARY_SIZE_BUDGET_BYTES"
+          fuse_bytes="$BINARY_SIZE_FUSE_BYTES"
           actual_bytes="$(wc -c < "$harn_bin" | tr -d '[:space:]')"
           format_mib() {
             awk -v bytes="$1" 'BEGIN { printf "%.2f", bytes / 1024 / 1024 }'
@@ -1233,22 +1238,51 @@ jobs:
             echo "target: $HARN_RELEASE_TARGET"
             echo "bytes: $actual_bytes"
             echo "mib: $(format_mib "$actual_bytes")"
-            echo "budget_bytes: $budget_bytes"
-            echo "budget_mib: $(format_mib "$budget_bytes")"
+            echo "distribution_fuse_bytes: $fuse_bytes"
+            echo "distribution_fuse_mib: $(format_mib "$fuse_bytes")"
             echo "cargo-bloat report: skipped"
           } | tee "$BINARY_SIZE_REPORT_DIR/binary-size.txt"
           size -A -d "$harn_bin" | tee "$BINARY_SIZE_REPORT_DIR/elf-sections.txt"
-          if (( actual_bytes > budget_bytes )); then
-            echo "::error::harn binary is $(format_mib "$actual_bytes") MiB, above budget $(format_mib "$budget_bytes") MiB"
+          if (( actual_bytes > fuse_bytes )); then
+            echo "::error::harn binary is $(format_mib "$actual_bytes") MiB, above the $(format_mib "$fuse_bytes") MiB distribution fuse"
             exit 1
           fi
 
-      # A failed byte gate is exactly when the attribution is needed, and the
+      # The early complexity signal. It rewrites binary-size.txt with the full
+      # verdict — fuse state, baseline delta, comparability, and the build
+      # identity both sides were measured with — and fails when a comparable
+      # build crosses both growth thresholds with no accepted_growth entry.
+      # A build that is not comparable to the baseline reports that and does not
+      # invent a growth conclusion from it.
+      - name: Evaluate the binary-size growth signal
+        id: binary_size_growth
+        if: always() && matrix.target == 'x86_64-unknown-linux-gnu' && steps.binary_size_fuse.outcome == 'success'
+        shell: bash
+        env:
+          BINARY_SIZE_REPORT_DIR: dist/binary-size-${{ matrix.target }}
+          BINARY_SIZE_FUSE_BYTES: ${{ needs.setup.outputs.binary_size_fuse_bytes }}
+          BINARY_SIZE_SOURCE_REF: ${{ needs.setup.outputs.ref }}
+          HARN_RELEASE_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          # The attested checked-out revision, so the report names the commit
+          # that was measured rather than the tag that asked for it.
+          export BINARY_SIZE_SOURCE_SHA="${HARN_BUILD_REVISION:-$BINARY_SIZE_SOURCE_REF}"
+          # Named explicitly rather than resolved through CARGO_TARGET_DIR: the
+          # build writes to ./target regardless of the ambient value this
+          # workflow exports.
+          harn_bin="./target/${HARN_RELEASE_TARGET}/release/harn"
+          "$harn_bin" run scripts/check_binary_size.harn -- \
+            --no-build --skip-bloat \
+            --target "$HARN_RELEASE_TARGET" --bin "$harn_bin" \
+            --report-dir "$BINARY_SIZE_REPORT_DIR"
+
+      # A failed size gate is exactly when the attribution is needed, and the
       # expensive build has already been paid for by the time it fires. Run the
       # report for warm builds, for an opt-in benchmark, and unconditionally
-      # whenever the budget step failed.
+      # whenever either size gate failed.
       - name: Generate cargo-bloat report
-        if: always() && matrix.target == 'x86_64-unknown-linux-gnu' && (needs.setup.outputs.build_mode == 'warm' || (needs.setup.outputs.build_mode == 'benchmark' && inputs.benchmark_cargo_bloat) || steps.binary_size_budget.outcome == 'failure')
+        if: always() && matrix.target == 'x86_64-unknown-linux-gnu' && (needs.setup.outputs.build_mode == 'warm' || (needs.setup.outputs.build_mode == 'benchmark' && inputs.benchmark_cargo_bloat) || steps.binary_size_fuse.outcome == 'failure' || steps.binary_size_growth.outcome == 'failure')
         shell: bash
         continue-on-error: true
         env:
@@ -1263,8 +1297,13 @@ jobs:
           # `continue-on-error` — silently skipped `cargo bloat` entirely, so a
           # blocked release shipped no attribution at all.
           harn_bin="./target/${HARN_RELEASE_TARGET}/release/harn"
+          # `|| true` because this invocation is here for the cargo-bloat report,
+          # not to gate: the fuse and the growth signal already ran in their own
+          # steps, and this step is reached precisely when one of them failed.
+          # Without it, `set -e` would abandon the `--filter deserialize` report
+          # below exactly when the attribution is most needed.
           "$harn_bin" run scripts/check_binary_size.harn -- \
-            --no-build --target "$HARN_RELEASE_TARGET" --bin "$harn_bin"
+            --no-build --target "$HARN_RELEASE_TARGET" --bin "$harn_bin" || true
           cargo bloat --release -p harn-cli --bin harn --target "$HARN_RELEASE_TARGET" --filter deserialize -n 100 \
             | tee "$BINARY_SIZE_REPORT_DIR/cargo-bloat-deserialize.txt"
 
