@@ -1,0 +1,155 @@
+// std/os - environment and host information helpers.
+import { command_run } from "std/command"
+
+/**
+ * Return a compact host/runtime information dict for diagnostics.
+ *
+ * @effects: [host]
+ * @errors: []
+ */
+pub fn os_info(harness: Harness) -> dict {
+  return {
+    platform: harness.system.platform().os,
+    arch: harness.system.platform().arch,
+    cwd: harness.fs.cwd(),
+    home_dir: harness.fs.home_dir(),
+    temp_dir: harness.fs.temp_dir(),
+    username: harness.system.identity().username,
+    hostname: harness.system.identity().hostname,
+    pid: harness.system.identity().pid,
+    runtime_paths: harness.fs.runtime_paths(),
+    stdin_tty: harness.term.is_tty("stdin"),
+    stdout_tty: harness.term.is_tty("stdout"),
+    stderr_tty: harness.term.is_tty("stderr"),
+  }
+}
+
+/**
+ * Read an environment variable as a bool, accepting common CLI spellings.
+ *
+ * @effects: [env]
+ * @errors: []
+ */
+pub fn env_bool(env: HarnessEnv, name: string, fallback: bool = false) -> bool {
+  const value = env.get(name)
+  if value == nil {
+    return fallback
+  }
+  const normalized = lowercase(trim(value))
+  if normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "y"
+    || normalized
+    == "on" {
+    return true
+  }
+  if normalized == "0" || normalized == "false" || normalized == "no" || normalized == "n"
+    || normalized
+    == "off" {
+    return false
+  }
+  return fallback
+}
+
+/**
+ * Read an environment variable as an int, returning fallback on absence or parse failure.
+ *
+ * @effects: [env]
+ * @errors: []
+ */
+pub fn env_int(env: HarnessEnv, name: string, fallback = nil) {
+  const value = env.get(name)
+  if value == nil {
+    return fallback
+  }
+  return to_int(value) ?? fallback
+}
+
+/**
+ * Split a path/list-style environment variable, dropping empty entries.
+ *
+ * @effects: [env, host]
+ * @errors: []
+ */
+pub fn env_list(
+  env: HarnessEnv,
+  system: HarnessSystem,
+  name: string,
+  separator = nil,
+) -> list<string> {
+  const value = env.get(name)
+  if value == nil || value == "" {
+    return []
+  }
+  let sep = separator
+  if sep == nil {
+    sep = if system.platform().os == "windows" {
+      ";"
+    } else {
+      ":"
+    }
+  }
+  let out = []
+  for item in split(value, sep) {
+    const trimmed = trim(item)
+    if trimmed != "" {
+      out = out.appending(trimmed)
+    }
+  }
+  return out
+}
+
+/**
+ * Read a required environment variable or throw a clear error.
+ *
+ * @effects: [env]
+ * @errors: []
+ */
+pub fn require_env(env: HarnessEnv, name: string) -> string {
+  const value = env.get(name)
+  if value == nil || value == "" {
+    throw "required environment variable is not set: " + name
+  }
+  return value
+}
+
+/**
+ * Resolve an executable on PATH, returning nil when not found.
+ *
+ * @effects: [process]
+ * @errors: []
+ */
+pub fn which(tools: HarnessTools, system: HarnessSystem, binary: string) {
+  const executable = trim(binary ?? "")
+  if executable == "" {
+    return nil
+  }
+  const argv = if system.platform().os == "windows" {
+    ["where", executable]
+  } else {
+    ["which", executable]
+  }
+  const result = try {
+    command_run(tools, {argv: argv}, {capture: {max_inline_bytes: 4096}})
+  }
+  if !is_ok(result) {
+    return nil
+  }
+  const out = unwrap(result)
+  if !(out?.success ?? false) {
+    return nil
+  }
+  const lines = split(trim(out?.stdout ?? ""), "\n").filter({ line -> trim(line) != "" })
+  if len(lines) == 0 {
+    return nil
+  }
+  return trim(lines[0])
+}
+
+/**
+ * Return whether an executable is visible on PATH.
+ *
+ * @effects: [process]
+ * @errors: []
+ */
+pub fn command_exists(tools: HarnessTools, system: HarnessSystem, binary: string) -> bool {
+  return which(tools, system, binary) != nil
+}

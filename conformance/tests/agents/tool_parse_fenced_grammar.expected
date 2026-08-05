@@ -1,0 +1,120 @@
+# single clean call
+  calls=1 errors=0 violations=0 stray=0
+  call read_file {"path":"a.rs"}
+  prose=""
+  answer=null
+  done=null
+# tool/arguments dialect aliases
+  calls=1 errors=0 violations=0 stray=0
+  call read_file {"path":"a.rs"}
+  prose=""
+  answer=null
+  done=null
+# canonical keys win over aliases
+  calls=1 errors=0 violations=0 stray=0
+  call canonical {"k":1}
+  prose=""
+  answer=null
+  done=null
+# generic tool wrapper unwraps
+  calls=1 errors=0 violations=0 stray=0
+  call look {"file":"src/lib.rs","intent":"read"}
+  prose=""
+  answer=null
+  done=null
+# harmony channel suffix strips from the name
+  calls=1 errors=0 violations=0 stray=0
+  call run {"command":"cargo test"}
+  prose=""
+  answer=null
+  done=null
+# content with backticks, heredoc, brace, and close tag
+  calls=1 errors=0 violations=0 stray=0
+  call write_file {"content":"```\nx := `raw`\n<<EOF\n}\n</tool>\n```","path":"f.go"}
+  prose=""
+  answer=null
+  done=null
+# content starting with a heredoc opener is just a string
+  calls=1 errors=0 violations=0 stray=0
+  call write_file {"content":"<<EOF\npackage main\n"}
+  prose=""
+  answer=null
+  done=null
+# embedded fence does not close early
+  calls=1 errors=0 violations=0 stray=0
+  call w {"c":"before\n```\nafter"}
+  prose=""
+  answer=null
+  done=null
+# content containing a close tool tag
+  calls=1 errors=0 violations=0 stray=0
+  call w {"c":"x </tool> y"}
+  prose=""
+  answer=null
+  done=null
+# two fences yield two calls
+  calls=2 errors=0 violations=0 stray=0
+  call a {}
+  call b {"k":1}
+  prose="some prose"
+  answer=null
+  done=null
+# absent args is an empty object
+  calls=1 errors=0 violations=0 stray=0
+  call list_dir {}
+  prose=""
+  answer=null
+  done=null
+# array body is rejected as a non-object
+  calls=0 errors=1 violations=0 stray=0
+  err "A ```tool block must contain one or more JSON objects `{ \"name\": ..., \"args\": { ... } }`, one per tool call (several calls in a turn may share one block or use several blocks). Arrays, scalars, and other non-object entries are rejected."
+  prose=""
+  answer=null
+  done=null
+# missing name
+  calls=0 errors=1 violations=0 stray=0
+  err "The ```tool JSON object is missing a non-empty string `name`. Shape: `{ \"name\": \"edit\", \"args\": { ... } }`."
+  prose=""
+  answer=null
+  done=null
+# empty name
+  calls=0 errors=1 violations=0 stray=0
+  err "The ```tool JSON object is missing a non-empty string `name`. Shape: `{ \"name\": \"edit\", \"args\": { ... } }`."
+  prose=""
+  answer=null
+  done=null
+# args is not an object
+  calls=0 errors=1 violations=0 stray=0
+  err "The `args` field of a ```tool object must be a JSON object (`{ ... }`), or omitted when the tool takes no arguments."
+  prose=""
+  answer=null
+  done=null
+# trailing bytes after the object
+  calls=1 errors=1 violations=0 stray=0
+  call a {}
+  err "The ```tool block is not valid JSON: expected ident at line 1 column 29 (near `{\"name\": \"a\", \"args\": {}} trailing`). Pass multi-line or code-bearing fields as ordinary JSON string values (escape newlines as \\n, quotes as \\\", backslashes as \\\\); backticks need no escaping."
+  prose=""
+  answer=null
+  done=null
+# truncated string is unterminated
+  calls=0 errors=1 violations=0 stray=0
+  err "Unterminated ```tool fence opened on line 1 (1-based): the block reached end-of-output with an incomplete JSON object. Re-emit the whole call inside a ```tool ... ``` block and close it with a line that is exactly ```."
+  prose=""
+  answer=null
+  done=null
+# complete object without a close fence
+  calls=1 errors=0 violations=0 stray=0
+  call a {"k":1}
+  prose=""
+  answer=null
+  done=null
+# unrelated backtick fence stays prose
+  calls=0 errors=0 violations=0 stray=0
+  prose="```python\nprint('hi')\n```"
+  answer=null
+  done=null
+# unrelated tilde fence stays prose
+  calls=0 errors=0 violations=0 stray=0
+  prose="~~~python\nprint('hi')\n~~~"
+  answer=null
+  done=null

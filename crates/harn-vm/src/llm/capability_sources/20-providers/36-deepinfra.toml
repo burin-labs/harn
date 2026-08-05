@@ -1,0 +1,159 @@
+# ---------- DeepInfra — open-weight OpenAI-compatible host -------------------
+# DeepInfra serves open weights (DeepSeek, Qwen, Llama, Kimi, GPT-OSS) on a
+# standard OpenAI chat-completions surface with native tool calls. Reasoning
+# families expose an inline thinking trace; DeepSeek routes honor prompt
+# caching. Catalog keys are `deepinfra/<hf-id>`, so patterns match the
+# family substring.
+
+[[provider.deepinfra]]
+model_match = "*deepseek*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.deepinfra]]
+model_match = "*glm-5*"
+native_tools = true
+preferred_tool_format = "json"
+tool_mode_parity = "native_unreliable"
+tool_mode_parity_notes = "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted a malformed native call whose function name was the whole JSON payload; fenced JSON text-channel tools completed the loop."
+structured_output = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.deepinfra]]
+model_match = "*qwen3.7*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+# probed 2026-06-24 (docs/eval/provider-tool-mode-sweep-2026-06-24.md, N=5,
+# forced-format single-tool authoring of a backslash-heavy Zig body): native
+# 1/5 fidelity (bills empty completions), json 2/5 (flaky parse), text 5/5
+# byte-clean. The provider-native channel cannot carry backslash-heavy code, so
+# steer to the escape-free heredoc text channel.
+[[provider.deepinfra]]
+model_match = "*qwen3.6*"
+native_tools = true
+preferred_tool_format = "text"
+tool_mode_parity = "native_unreliable"
+tool_mode_parity_notes = "2026-06-24 forced-format sweep (N=5): DeepInfra Qwen3.6-35B-A3B native bills empty completions (1/5) and fenced-JSON is flaky (2/5); heredoc text carried a backslash-heavy Zig body byte-clean 5/5."
+structured_output = "native"
+thinking_modes = ["enabled"]
+vision = true
+vision_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.deepinfra]]
+model_match = "*kimi-*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+vision = true
+vision_supported = true
+video_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+# DeepInfra-hosted GPT-OSS is the same Harmony model as cerebras/fireworks
+# gpt-oss-120b. Placed BEFORE the catch-all `*` rule (first match wins) so it
+# does not fall through to the non-reasoning default — without it
+# `reasoning_required_for_tools` resolves OFF and the eval loop bills a
+# noncommittal because gpt-oss calls tools INSIDE the chain-of-thought channel.
+# Reasoning-effort thinking {low, medium, high}, `reasoning_required_for_tools =
+# true`. Must NOT carry a Qwen-style `auto_reasoning_overrides = "off"`.
+#
+# TOOL CHANNEL — PINNED TO TEXT (matches the Fireworks #3505 gpt-oss precedent).
+# DeepInfra's gpt-oss native channel is a Harmony footgun: a 2026-06-24 Harn
+# agent-loop run (gpt-oss-120b, zig-feat, tool grounding present) saw DeepInfra
+# native bill a non-empty completion (completion_tokens=86) with NO dispatchable
+# tool call and NO answer — the action was serialized only in the private
+# reasoning/commentary channel of the Harmony format, never emitted as a
+# provider-native `tool_calls` entry. Repeated ~10x -> the run was unusable. This
+# is the same class of defect reported across the open-source engines DeepInfra
+# runs: vLLM #22578 (chat-completions tool_calls empty / missing arguments),
+# vLLM #44216 (tool_choice="required" ignored, empty tool_calls + finish_reason
+# stop), SGLang #8976 (commentary-channel crash) and #10738 (tool parser not
+# working), openai/harmony #68 (tool intent stuck in commentary, never
+# dispatched), and HuggingFace openai/gpt-oss-20b discussion #80 (function in
+# reasoning_content with no tool_call structure). The clean+reliable channel on
+# pay-per-token gpt-oss routes is TEXT (heredoc). `tool_mode_parity =
+# "native_unreliable"` makes a `native` pin auto-correct to `text` via
+# `validate_tool_format` with an explanatory `correction`, so no alias pin or
+# `--tool-format native` can silently re-introduce the empty tool stream.
+[[provider.deepinfra]]
+model_match = "*gpt-oss*"
+native_tools = false
+preferred_tool_format = "text"
+tool_mode_parity = "native_unreliable"
+tool_mode_parity_notes = "2026-06-24 Harn agent-loop (gpt-oss-120b, zig-feat, tool grounding present): DeepInfra native billed completion_tokens=86 with no dispatchable tool call or answer (Harmony reasoning-channel-only / upstream contract violation), repeated ~10x -> run unusable. Text/heredoc is the clean pay-per-token channel. See vLLM #22578/#44216, SGLang #8976/#10738, openai/harmony #68."
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high"]
+reasoning_required_for_tools = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
+[[provider.deepinfra]]
+model_match = "*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"

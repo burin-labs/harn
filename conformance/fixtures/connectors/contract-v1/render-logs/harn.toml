@@ -1,0 +1,45 @@
+[package]
+name = "harn-render-logs-connector"
+version = "0.1.0"
+repository = "https://github.com/burin-labs/harn-render-logs-connector"
+
+[[providers]]
+id = "render-logs"
+connector = { harn = "./lib.harn" }
+capabilities = ["webhook", "rate_limit", "streaming"]
+
+[providers.setup]
+auth_type = "api-key"
+flow = "api-key"
+required_secrets = ["render/api-key"]
+setup_command = ["harn", "connect", "api-key", "--connector", "render-logs", "--secret-id", "render/api-key"]
+validation_command = ["harn", "connect", "status", "--connector", "render-logs", "--json"]
+
+[[providers.setup.health_checks]]
+id = "api-key"
+kind = "secret"
+secret = "render/api-key"
+
+[providers.setup.recovery]
+missing_auth = "Store a Render API key as render/api-key before enabling log ingestion."
+expired_credentials = "Rotate the Render API key and update render/api-key."
+revoked_credentials = "Replace the revoked Render API key in render/api-key."
+missing_scopes = "Create a Render API key with read access to the services whose logs Harn ingests."
+inaccessible_resource = "Confirm the API key can read the target Render service or log stream."
+transient_provider_outage = "Retry after Render or the local credential backend is reachable."
+
+[connector_contract]
+version = 1
+
+[[connector_contract.fixtures]]
+provider = "render-logs"
+name = "deploy log line"
+kind = "webhook"
+headers = { "content-type" = "application/json", "x-render-delivery" = "delivery-render-1" }
+body_json = { id = "log-1", service_id = "srv-1", deploy_id = "dep-1", stream = "stdout", line = "build completed", timestamp = "2026-05-09T00:00:00Z" }
+expect_type = "event"
+expect_kind = "log.line"
+expect_dedupe_key = "delivery-render-1"
+expect_signature_state = "unsigned"
+expect_payload_contains = { provider = "render-logs", raw = { provider = "render-logs", event = "log.line", service_id = "srv-1", deploy_id = "dep-1", stream = "stdout", line = "build completed" } }
+expect_event_count = 1

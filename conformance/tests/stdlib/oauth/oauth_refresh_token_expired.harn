@@ -1,0 +1,96 @@
+// std/oauth/client: refresh token also expired -> HARN-OAU-002.
+//
+// Seeds an expired access token whose refresh token has also been
+// invalidated by the server (the canonical "invalid_grant" response
+// from the token endpoint per RFC 6749 §5.2). Asserts that `token(cli)`
+// raises an error tagged with the dedicated `HARN-OAU-002` diagnostic
+// so scripts can pattern-match on it and re-run authorization rather
+// than retrying. Also asserts the stored TokenSet is left unchanged
+// (a failed refresh must not stomp the credential we already have on
+// disk) and no `token_refreshed` audit event is emitted on the
+// failed path.
+import { client, token } from "std/oauth/client"
+import { custom } from "std/oauth/providers"
+import { memory } from "std/oauth/storage"
+
+pipeline test(harness: Harness, task) {
+  const topic = "oauth.client.audit"
+  const cursor = harness.obs.event_log_latest(topic) ?? 0
+  const _ = harness.testing.clock_set(1700000000000)
+  const store = memory(harness.auth)
+  const provider = custom(
+    {
+      id: "mockExpiredRefresh",
+      auth_url: "https://idp.example/authorize",
+      token_url: "https://idp.example/token",
+      default_scopes: ["read"],
+    },
+  )
+  const now = to_int(harness.clock.timestamp())
+  const stored = {
+    access_token: "ACCESS-STALE",
+    refresh_token: "REFRESH-DEAD",
+    issued_at_unix: now - 3600,
+    expires_at_unix: now - 1800,
+    token_type: "Bearer",
+  }
+  store.set("mockExpiredRefresh", stored)
+  const cli = client(
+    harness,
+    provider,
+    {client_id: "cli-id", redirect_uri: "http://127.0.0.1:9999/cb", storage: store},
+  )
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
+    "POST",
+    "https://idp.example/token",
+    {
+      status: 400,
+      body: "{\"error\":\"invalid_grant\",\"error_description\":\"refresh token expired\"}",
+      headers: {"content-type": "application/json"},
+    },
+  )
+  let threw = false
+  let caught_message = ""
+  try {
+    const _ = token(cli)
+  } catch (err) {
+    caught_message = to_string(err)
+    threw = true
+  }
+  assert(threw, "expired refresh token should have thrown")
+  assert(
+    contains(caught_message, "HARN-OAU-002"),
+    "error message must carry HARN-OAU-002 diagnostic, got: " + caught_message,
+  )
+  assert(
+    contains(caught_message, "invalid_grant") || contains(caught_message, "refresh token expired"),
+    "underlying server error_description should be threaded through, got: " + caught_message,
+  )
+  // Storage MUST NOT be wiped on a failed refresh — the caller still
+  // owns the (now-useless) previous credential and can re-run
+  // authorization without losing scope/expiry metadata for audit.
+  const after = store.get("mockExpiredRefresh")
+  assert_eq(
+    after.access_token,
+    "ACCESS-STALE",
+    "storage access token unchanged after failed refresh",
+  )
+  assert_eq(
+    after.refresh_token,
+    "REFRESH-DEAD",
+    "storage refresh token unchanged after failed refresh",
+  )
+  // Confirm we did try to refresh exactly once — no silent retry.
+  const calls = harness.testing.http_mock_calls({include_sensitive: true})
+  assert_eq(len(calls), 1, "exactly one POST to the token endpoint")
+  assert(contains(calls[0].body, "grant_type=refresh_token"), "refresh grant used")
+  assert(contains(calls[0].body, "refresh_token=REFRESH-DEAD"), "old refresh token sent")
+  // No token_refreshed audit should fire because the refresh failed:
+  // harness.obs.event_log_latest() on the topic must not have advanced past the
+  // cursor captured before the call.
+  const latest_after = harness.obs.event_log_latest(topic) ?? 0
+  assert_eq(latest_after, cursor, "no audit events emitted on failed refresh")
+  const _ = harness.testing.clock_reset()
+  harness.stdio.log("oauth refresh token expired ok")
+}

@@ -1,0 +1,1 @@
+../../../.codex/skills/write-developer-docs/SKILL.md

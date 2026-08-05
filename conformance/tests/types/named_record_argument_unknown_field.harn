@@ -1,0 +1,9 @@
+type BranchRequest = {owner: string, repo: string, branch: string}
+
+fn view(request: BranchRequest) -> nil {
+  return nil
+}
+
+pipeline default(harness: Harness) {
+  view({owner: "octo", repo: "demo", branch: "main", force: true})
+}

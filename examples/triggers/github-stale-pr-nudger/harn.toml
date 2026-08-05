@@ -1,0 +1,15 @@
+[package]
+name = "github-stale-pr-nudger"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "github-stale-pr-nudger"
+kind = "cron"
+provider = "cron"
+match = { events = ["cron.tick"] }
+handler = "handlers::nudge_stale_prs"
+schedule = "0 15 * * 1-5"
+timezone = "America/Los_Angeles"
+budget = { daily_cost_usd = 2.00, max_concurrent = 1 }

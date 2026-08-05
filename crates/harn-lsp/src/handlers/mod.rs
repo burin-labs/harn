@@ -1,0 +1,200 @@
+//! LSP request handlers, split by concern.
+//!
+//! `tower_lsp::LanguageServer` must be implemented in a single `impl`
+//! block, so this module's job is to define one trait impl that delegates
+//! each method to an inherent `handle_*` method on `HarnLsp` defined in a
+//! topic-specific submodule.
+
+mod call_hierarchy;
+mod commands;
+mod completion;
+mod definition;
+mod folding;
+mod formatting;
+pub(crate) mod hover;
+mod lifecycle;
+mod symbols;
+
+pub(crate) use commands::APPLY_REPAIR_COMMAND;
+
+use tower_lsp::jsonrpc::Result;
+use tower_lsp::lsp_types::request::{
+    GotoDeclarationParams, GotoDeclarationResponse, GotoImplementationParams,
+    GotoImplementationResponse, GotoTypeDefinitionParams, GotoTypeDefinitionResponse,
+};
+use tower_lsp::lsp_types::*;
+
+use crate::HarnLsp;
+
+#[tower_lsp::async_trait]
+impl tower_lsp::LanguageServer for HarnLsp {
+    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        self.handle_initialize(params).await
+    }
+
+    async fn initialized(&self, params: InitializedParams) {
+        self.handle_initialized(params).await;
+    }
+
+    async fn shutdown(&self) -> Result<()> {
+        self.handle_shutdown().await
+    }
+
+    async fn did_open(&self, params: DidOpenTextDocumentParams) {
+        self.handle_did_open(params).await;
+    }
+
+    async fn did_change(&self, params: DidChangeTextDocumentParams) {
+        self.handle_did_change(params).await;
+    }
+
+    async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        self.handle_did_close(params).await;
+    }
+
+    async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
+        self.handle_did_change_configuration(params).await;
+    }
+
+    async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+        self.handle_did_change_watched_files(params).await;
+    }
+
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        self.handle_completion(params).await
+    }
+
+    async fn completion_resolve(&self, params: CompletionItem) -> Result<CompletionItem> {
+        self.handle_completion_resolve(params).await
+    }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        self.handle_goto_definition(params).await
+    }
+
+    async fn goto_declaration(
+        &self,
+        params: GotoDeclarationParams,
+    ) -> Result<Option<GotoDeclarationResponse>> {
+        self.handle_goto_declaration(params).await
+    }
+
+    async fn goto_type_definition(
+        &self,
+        params: GotoTypeDefinitionParams,
+    ) -> Result<Option<GotoTypeDefinitionResponse>> {
+        self.handle_goto_type_definition(params).await
+    }
+
+    async fn goto_implementation(
+        &self,
+        params: GotoImplementationParams,
+    ) -> Result<Option<GotoImplementationResponse>> {
+        self.handle_goto_implementation(params).await
+    }
+
+    async fn document_highlight(
+        &self,
+        params: DocumentHighlightParams,
+    ) -> Result<Option<Vec<DocumentHighlight>>> {
+        self.handle_document_highlight(params).await
+    }
+
+    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        self.handle_references(params).await
+    }
+
+    async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+        self.handle_rename(params).await
+    }
+
+    async fn document_symbol(
+        &self,
+        params: DocumentSymbolParams,
+    ) -> Result<Option<DocumentSymbolResponse>> {
+        self.handle_document_symbol(params).await
+    }
+
+    async fn symbol(
+        &self,
+        params: WorkspaceSymbolParams,
+    ) -> Result<Option<Vec<SymbolInformation>>> {
+        self.handle_workspace_symbol(params).await
+    }
+
+    async fn semantic_tokens_full(
+        &self,
+        params: SemanticTokensParams,
+    ) -> Result<Option<SemanticTokensResult>> {
+        self.handle_semantic_tokens_full(params).await
+    }
+
+    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        self.handle_hover(params).await
+    }
+
+    async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
+        self.handle_signature_help(params).await
+    }
+
+    async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
+        self.handle_inlay_hint(params).await
+    }
+
+    async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
+        self.handle_code_action(params).await
+    }
+
+    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+        self.handle_formatting(params).await
+    }
+
+    async fn range_formatting(
+        &self,
+        params: DocumentRangeFormattingParams,
+    ) -> Result<Option<Vec<TextEdit>>> {
+        self.handle_range_formatting(params).await
+    }
+
+    async fn execute_command(
+        &self,
+        params: ExecuteCommandParams,
+    ) -> Result<Option<serde_json::Value>> {
+        self.handle_execute_command(params).await
+    }
+
+    async fn on_type_formatting(
+        &self,
+        params: DocumentOnTypeFormattingParams,
+    ) -> Result<Option<Vec<TextEdit>>> {
+        self.handle_on_type_formatting(params).await
+    }
+
+    async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
+        self.handle_folding_range(params).await
+    }
+
+    async fn prepare_call_hierarchy(
+        &self,
+        params: CallHierarchyPrepareParams,
+    ) -> Result<Option<Vec<CallHierarchyItem>>> {
+        self.handle_prepare_call_hierarchy(params).await
+    }
+
+    async fn incoming_calls(
+        &self,
+        params: CallHierarchyIncomingCallsParams,
+    ) -> Result<Option<Vec<CallHierarchyIncomingCall>>> {
+        self.handle_incoming_calls(params).await
+    }
+
+    async fn outgoing_calls(
+        &self,
+        params: CallHierarchyOutgoingCallsParams,
+    ) -> Result<Option<Vec<CallHierarchyOutgoingCall>>> {
+        self.handle_outgoing_calls(params).await
+    }
+}

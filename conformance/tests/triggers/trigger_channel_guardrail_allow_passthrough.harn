@@ -1,0 +1,28 @@
+import { prompt_injection_scanner } from "std/channel_guardrails"
+
+/**
+ * CH-11 (#1911): an `allow` verdict passes through silently — no
+ * audit row is written and the receipt looks identical to an emit
+ * without any guardrails registered.
+ */
+pipeline default(harness: Harness) {
+  harness.obs.pipeline_lifecycle_audit_log_take()
+  harness.channels.guardrail_clear()
+  const _ = prompt_injection_scanner(harness.channels, {})
+  const receipt = harness.channels.append("ch.guardrail.allow", {value: 42})
+  harness.stdio.println(receipt?.inserted)
+  harness.stdio.println(receipt?.blocked ?? false)
+  harness.stdio.println(receipt?.duplicate)
+  /* Confirm the durable journal has the entry. */
+  const history = harness.channels.events("ch.guardrail.allow")
+  harness.stdio.println(len(history))
+  harness.stdio.println(history[0].payload.value)
+  /* No guardrail audit fired. */
+  const audit = harness.obs.pipeline_lifecycle_audit_log_take()
+  harness.stdio.println(len(audit))
+  /* Listing returns the registered guardrail id. */
+  const ids = harness.channels.guardrail_list()
+  harness.stdio.println(len(ids))
+  harness.stdio.println(harness.channels.guardrail_unregister(ids[0]))
+  harness.stdio.println(len(harness.channels.guardrail_list()))
+}

@@ -1,0 +1,17 @@
+pipeline test(harness: Harness, task) {
+  gen fn numbers(start: int, end: int) -> Stream<int> {
+    let n = start
+    while n < end {
+      emit n
+      n = n + 1
+    }
+  }
+  const stream = numbers(1, 4)
+  harness.stdio.println(type_of(stream))
+  const first = stream.next()
+  harness.stdio.println(first.value)
+  harness.stdio.println(first.done)
+  for n in numbers(10, 13) {
+    harness.stdio.println(n)
+  }
+}

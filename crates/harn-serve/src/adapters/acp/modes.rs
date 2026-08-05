@@ -1,0 +1,988 @@
+//! ACP session modes (<https://agentclientprotocol.com/protocol/session-modes>).
+//!
+//! A session mode is the ACP-facing name for Harn's runtime autonomy tier.
+//! The catalog is fixed and is rendered both as legacy ACP `modes` and as
+//! the newer `configOptions` mode selector.
+
+use harn_vm::{orchestration::CapabilityPolicy, AutonomyTier};
+
+use super::AcpSandboxConfig;
+
+/// Default mode id assigned to newly created sessions. `ask` is the
+/// conservative ACP default: the agent can inspect context, but side effects
+/// are held behind the approval-oriented autonomy tier until a client or user
+/// explicitly switches to `code`.
+pub(super) const DEFAULT_MODE_ID: &str = "ask";
+
+pub(super) struct ModeDefinition {
+    pub(super) id: &'static str,
+    pub(super) name: &'static str,
+    pub(super) description: &'static str,
+    autonomy_tier: AutonomyTier,
+}
+
+/// The static catalog of modes Harn advertises over ACP. Order is preserved on
+/// the wire so clients render a stable selector.
+pub(super) const MODE_CATALOG: &[ModeDefinition] = &[
+    ModeDefinition {
+        id: "ask",
+        name: "Ask",
+        description: "Request permission before making changes.",
+        autonomy_tier: AutonomyTier::ActWithApproval,
+    },
+    ModeDefinition {
+        id: "architect",
+        name: "Architect",
+        description: "Design and plan without modifying the workspace.",
+        autonomy_tier: AutonomyTier::Suggest,
+    },
+    ModeDefinition {
+        id: "code",
+        name: "Code",
+        description: "Read, write, execute processes, and call external services.",
+        autonomy_tier: AutonomyTier::ActAuto,
+    },
+    ModeDefinition {
+        id: "shadow",
+        name: "Shadow",
+        description: "Evaluate the request and emit proposals without side effects.",
+        autonomy_tier: AutonomyTier::Shadow,
+    },
+];
+
+pub(super) fn is_known(mode_id: &str) -> bool {
+    definition(mode_id).is_some()
+}
+
+pub(super) fn known_mode_ids() -> Vec<&'static str> {
+    MODE_CATALOG.iter().map(|m| m.id).collect()
+}
+
+fn definition(mode_id: &str) -> Option<&'static ModeDefinition> {
+    MODE_CATALOG.iter().find(|m| m.id == mode_id)
+}
+
+/// Render the spec-shaped `SessionModeState`:
+/// `{ currentModeId, availableModes: [{ id, name, description }] }`.
+pub(super) fn session_mode_state(current_mode_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "currentModeId": current_mode_id,
+        "availableModes": mode_entries("id"),
+    })
+}
+
+/// Render the preferred ACP `configOptions` representation for the
+/// per-session knobs Harn exposes today: session mode, pinned LLM
+/// model, and a provider-aware thought level. Entries follow the `select` shape (the only `type` the
+/// current spec defines, per
+/// <https://agentclientprotocol.com/protocol/session-config-options>).
+///
+/// New knobs (temperature, permissions, …) plug in here by appending
+/// another entry rather than introducing a new wire surface; ACP keeps
+/// `configId` open-ended so clients can ignore unknown ids without
+/// breaking.
+pub(super) fn config_options_state(
+    current_mode_id: &str,
+    pinned_model: Option<&str>,
+    pinned_reasoning_policy: Option<&str>,
+    budget_value: Option<&str>,
+) -> serde_json::Value {
+    serde_json::json!([
+        {
+            "id": "mode",
+            "name": "Session Mode",
+            "description": "Controls Harn autonomy and side-effect policy.",
+            "category": "mode",
+            "type": "select",
+            "currentValue": current_mode_id,
+            "options": mode_entries("value"),
+        },
+        model_config_option(pinned_model),
+        reasoning_policy_config_option(pinned_reasoning_policy),
+        budget_config_option(budget_value),
+    ])
+}
+
+fn mode_entries(id_key: &str) -> Vec<serde_json::Value> {
+    MODE_CATALOG
+        .iter()
+        .map(|mode| {
+            let mut entry = serde_json::Map::new();
+            entry.insert(id_key.to_string(), serde_json::json!(mode.id));
+            entry.insert("name".to_string(), serde_json::json!(mode.name));
+            entry.insert(
+                "description".to_string(),
+                serde_json::json!(mode.description),
+            );
+            serde_json::Value::Object(entry)
+        })
+        .collect()
+}
+
+/// Sentinel option value rendered on the model selector when no
+/// session-level pin is active. Picking it through
+/// `session/set_config_option` clears any prior pin and reverts the
+/// session to the ambient default (env / providers.toml).
+///
+/// Spec note: the ACP `ConfigOption.currentValue` field has
+/// `minLength: 1`, so an empty string can't represent "unpinned".
+/// `@inherit` is a stable sentinel that satisfies the schema and
+/// clearly signals "fall through to the ambient default" instead of
+/// being mistaken for a real model id.
+pub(super) const MODEL_INHERIT_VALUE: &str = "@inherit";
+pub(super) const BUDGET_INHERIT_VALUE: &str = "@inherit";
+pub(super) const BUDGET_OFF_VALUE: &str = "off";
+
+fn model_config_option(pinned_model: Option<&str>) -> serde_json::Value {
+    serde_json::json!({
+        "id": "model",
+        "name": "LLM Model",
+        "description": "Pinned model for subsequent prompts. llm_call invocations without an \
+                        explicit `model:` option resolve to this selector. Aliases and \
+                        `provider:model` selectors are both accepted; pick `@inherit` to clear \
+                        the pin and revert to the ambient default.",
+        "category": "model",
+        "type": "select",
+        "currentValue": pinned_model.unwrap_or(MODEL_INHERIT_VALUE),
+        "options": model_select_options(pinned_model),
+    })
+}
+
+/// Curated list of model values the spec-mandated `select` renders.
+/// Anything that resolves through `harn_vm::llm_config::resolve_model_info`
+/// to a registered provider is accepted by the handler — the dropdown is
+/// a UI hint, not the enforcement boundary.
+fn model_select_options(pinned_model: Option<&str>) -> Vec<serde_json::Value> {
+    let mut entries: Vec<serde_json::Value> = Vec::new();
+    entries.push(serde_json::json!({
+        "value": MODEL_INHERIT_VALUE,
+        "name": "Inherit ambient default",
+        "description": "Clear any session-level pin and use HARN_LLM_MODEL / providers.toml.",
+    }));
+    let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for alias in harn_vm::llm_config::known_model_names() {
+        let resolved = harn_vm::llm_config::resolve_model_info(&alias);
+        let label = format!("{alias} ({}/{})", resolved.provider, resolved.id);
+        if seen.insert(alias.clone()) {
+            let description = if resolved.tier.is_empty() {
+                resolved.provider.clone()
+            } else {
+                format!("tier: {}", resolved.tier)
+            };
+            entries.push(serde_json::json!({
+                "value": alias,
+                "name": label,
+                "description": description,
+            }));
+        }
+    }
+    for (model_id, model) in harn_vm::llm_config::model_catalog_entries() {
+        if seen.insert(model_id.clone()) {
+            let description = model
+                .tier
+                .as_deref()
+                .filter(|tier| !tier.is_empty())
+                .map(|tier| format!("tier: {tier}"))
+                .unwrap_or_else(|| model.provider.clone());
+            entries.push(serde_json::json!({
+                "value": model_id,
+                "name": format!("{} ({})", model.name, model.provider),
+                "description": description,
+            }));
+        }
+    }
+    // The currently pinned selector may be a free-form id outside the
+    // alias catalog. Surface it so the dropdown reflects the real
+    // state instead of showing a stale "(none)" entry.
+    if let Some(pinned) = pinned_model.filter(|value| !value.is_empty()) {
+        if seen.insert(pinned.to_string()) {
+            entries.push(serde_json::json!({
+                "value": pinned,
+                "name": pinned,
+                "description": "Currently pinned (not in alias catalog).",
+            }));
+        }
+    }
+    entries
+}
+
+fn reasoning_policy_config_option(pinned_policy: Option<&str>) -> serde_json::Value {
+    serde_json::json!({
+        "id": "thought_level",
+        "name": "Thought Level",
+        "description": "Provider-aware reasoning policy for subsequent prompts. Harn lowers this \
+                        to the route's native thinking shape (`reasoning_effort`, thinking budgets, \
+                        adaptive thinking, or Qwen `/no_think`). Per-call `thinking` and \
+                        `reasoning_effort` options still win; pick `@inherit` to clear the pin.",
+        "category": "model",
+        "type": "select",
+        "currentValue": pinned_policy.unwrap_or(harn_vm::llm::reasoning_policy::INHERIT_POLICY_VALUE),
+        "options": reasoning_policy_select_options(),
+    })
+}
+
+fn budget_config_option(budget_value: Option<&str>) -> serde_json::Value {
+    let current_value = budget_value.unwrap_or(BUDGET_INHERIT_VALUE);
+    serde_json::json!({
+        "id": "budget",
+        "name": "Call Budget",
+        "description": "Per-prompt resource ceiling installed before Harn runs the next ACP turn. \
+                        Values are compact JSON objects such as \
+                        {\"llm_cost_usd\":0.05,\"llm_tokens\":200000}; pick `@inherit` to use \
+                        the server default or `off` to disable the session override.",
+        "category": "_harn_budget",
+        "type": "select",
+        "currentValue": current_value,
+        "options": budget_select_options(current_value),
+    })
+}
+
+fn budget_select_options(current_value: &str) -> Vec<serde_json::Value> {
+    let mut entries = vec![
+        serde_json::json!({
+            "value": BUDGET_INHERIT_VALUE,
+            "name": "Inherit server default",
+            "description": "Use the budget configured by the ACP server embedder.",
+        }),
+        serde_json::json!({
+            "value": BUDGET_OFF_VALUE,
+            "name": "No session budget",
+            "description": "Do not install an ACP session budget for subsequent prompt turns.",
+        }),
+        serde_json::json!({
+            "value": "{\"llm_cost_usd\":0.01}",
+            "name": "$0.01 per prompt",
+            "description": "Stop the prompt after roughly one cent of model spend.",
+        }),
+        serde_json::json!({
+            "value": "{\"llm_cost_usd\":0.05,\"llm_tokens\":200000}",
+            "name": "$0.05 and 200k tokens",
+            "description": "Cap both model spend and input+output tokens for the prompt.",
+        }),
+        serde_json::json!({
+            "value": "{\"llm_tokens\":50000}",
+            "name": "50k tokens",
+            "description": "Token-only ceiling for local or unknown-price providers.",
+        }),
+    ];
+    if !entries
+        .iter()
+        .any(|entry| entry["value"].as_str() == Some(current_value))
+    {
+        entries.push(serde_json::json!({
+            "value": current_value,
+            "name": "Current custom budget",
+            "description": "Session budget supplied by the client.",
+        }));
+    }
+    entries
+}
+
+fn reasoning_policy_select_options() -> Vec<serde_json::Value> {
+    let mut entries = vec![serde_json::json!({
+        "value": harn_vm::llm::reasoning_policy::INHERIT_POLICY_VALUE,
+        "name": "Inherit script default",
+        "description": "Clear the session-level thought policy pin.",
+    })];
+    entries.extend(
+        [
+            (
+                "auto",
+                "Auto",
+                "Let Harn choose from task, scale, provider, and model capabilities.",
+            ),
+            (
+                "off",
+                "Off",
+                "Disable model thinking when possible, including Qwen no-think directives.",
+            ),
+            (
+                "minimal",
+                "Minimal",
+                "Use the lowest provider-supported reasoning floor.",
+            ),
+            (
+                "low",
+                "Low",
+                "Light extra reasoning for verification or small tasks.",
+            ),
+            (
+                "medium",
+                "Medium",
+                "Balanced reasoning for general agent work.",
+            ),
+            (
+                "high",
+                "High",
+                "More reasoning for difficult planning or code changes.",
+            ),
+            (
+                "xhigh",
+                "Extra High",
+                "Extended reasoning for routes that expose it.",
+            ),
+            (
+                "max",
+                "Maximum",
+                "Maximum reasoning for routes that expose it.",
+            ),
+        ]
+        .into_iter()
+        .map(|(value, name, description)| {
+            serde_json::json!({
+                "value": value,
+                "name": name,
+                "description": description,
+            })
+        }),
+    );
+    entries
+}
+
+pub(super) fn validate_reasoning_policy_selector(raw: &str) -> Result<Option<String>, String> {
+    harn_vm::llm::reasoning_policy::normalize_policy_selector(raw)
+}
+
+/// Validate a model selector for `session/set_config_option(configId="model")`.
+/// Returns the normalized selector (trimmed; aliases are kept verbatim so
+/// the session pin tracks the user's chosen handle) or a descriptive
+/// error suitable for surfacing as `invalid_model`.
+///
+/// The wire surface is intentionally curated: scripts that need ad-hoc
+/// selectors should pass `model:` directly to `llm_call`. Accepted forms:
+///
+/// - empty / whitespace → `Ok(None)` (clear pin sentinel)
+/// - `provider:model` / `provider/model` where provider is in `providers.toml`
+/// - an alias from `known_model_names()`
+/// - a model id present in `model_catalog_entries()`
+pub(super) fn validate_model_selector(raw: &str) -> Result<Option<String>, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed == MODEL_INHERIT_VALUE {
+        return Ok(None);
+    }
+    if let Some((provider, _model)) = split_provider_prefix(trimmed)
+        .filter(|(provider, model)| !provider.trim().is_empty() && !model.trim().is_empty())
+    {
+        if provider == "mock" || harn_vm::llm_config::provider_config(provider).is_some() {
+            return Ok(Some(trimmed.to_string()));
+        }
+        return Err(format!(
+            "invalid_model: provider '{provider}' is not registered. Available: {}",
+            harn_vm::llm_config::provider_names().join(", ")
+        ));
+    }
+    if harn_vm::llm_config::known_model_names()
+        .iter()
+        .any(|name| name == trimmed)
+    {
+        return Ok(Some(trimmed.to_string()));
+    }
+    if harn_vm::llm_config::model_catalog_entry(trimmed).is_some() {
+        return Ok(Some(trimmed.to_string()));
+    }
+    Err(format!(
+        "invalid_model: '{trimmed}' is not a known alias, catalog model id, or 'provider:model' form."
+    ))
+}
+
+/// Split a selector on the first provider-form separator. Both `:` and
+/// `/` are recognized because the two appear in the wild — Anthropic /
+/// OpenAI route paths use `/` (e.g. `anthropic/claude-opus-4-7`), while
+/// Ollama tag selectors use `:` (e.g. `ollama:llama3.2:latest`).
+fn split_provider_prefix(value: &str) -> Option<(&str, &str)> {
+    let position = value.find([':', '/'])?;
+    let (provider, rest) = value.split_at(position);
+    Some((provider, &rest[1..]))
+}
+
+/// Capability ceiling enforced while a prompt runs in this mode. Harn's
+/// autonomy-tier policy remains authoritative; ACP modes only select the tier.
+///
+/// The ACP embedder contributes sandbox config for host-owned assets and
+/// process-only filesystem presets. Read-only roots widen Harn file reads;
+/// process roots/presets are carried only into OS child-process sandboxes.
+pub(super) fn policy_for_mode(
+    mode_id: &str,
+    sandbox: &AcpSandboxConfig,
+) -> Option<CapabilityPolicy> {
+    let mode = definition(mode_id)?;
+    if mode.autonomy_tier == AutonomyTier::ActAuto {
+        // ActAuto is the "no human approval gate" tier — but that is an
+        // *approval* decision, decoupled from *OS confinement*. When the
+        // embedder said nothing about sandboxing, preserve the historical
+        // behavior exactly: no per-turn policy, ambient host/runtime policy
+        // remains the authority (installing a no-op ceiling would make legacy
+        // bridge fallbacks look policy-governed and block them).
+        if !sandbox.is_configured() {
+            return None;
+        }
+        // Preserve every configured filesystem axis in code mode. Read-only
+        // roots by themselves are a Harn file-read grant, not an instruction
+        // to confine child processes. Only explicit process config selects the
+        // Worktree OS sandbox and its network backstop.
+        let mut policy = harn_vm::policy_for_autonomy_tier(AutonomyTier::ActAuto);
+        if sandbox.has_process_confinement() {
+            policy.sandbox_profile = harn_vm::orchestration::SandboxProfile::Worktree;
+        }
+        apply_sandbox_config(&mut policy, sandbox);
+        return Some(policy);
+    }
+    let mut policy = harn_vm::policy_for_autonomy_tier(mode.autonomy_tier);
+    apply_sandbox_config(&mut policy, sandbox);
+    Some(policy)
+}
+
+/// Add embedder sandbox config to the per-turn policy, skipping duplicate
+/// Harn read roots and delegating process-only merging to the VM policy type.
+fn apply_sandbox_config(policy: &mut CapabilityPolicy, sandbox: &AcpSandboxConfig) {
+    for root in &sandbox.read_only_roots {
+        if !policy
+            .read_only_roots
+            .iter()
+            .any(|existing| existing == root)
+        {
+            policy.read_only_roots.push(root.clone());
+        }
+    }
+    policy.process_sandbox.extend(&sandbox.process);
+}
+
+/// RAII guard that pushes a CapabilityPolicy on construction and pops it on
+/// drop. Explicit process confinement also installs the SSRF private-address
+/// egress guard for the turn. Read-only roots retain their file policy without
+/// changing process or network behavior.
+///
+/// The serve adapter runs the whole prompt turn — including the agent's model
+/// HTTP calls — on a single current-thread `LocalSet` runtime (see
+/// `crates/harn-serve/src/adapter.rs`), so a thread-local egress guard held for
+/// the turn's lifetime covers every outbound request made during that turn,
+/// the same way the thread-local execution-policy stack already does.
+pub(super) struct ModePolicyGuard {
+    pushed: bool,
+    // Held for the turn so the SSRF private-address backstop stays installed
+    // until the guard drops. `None` when the embedder supplied no sandbox
+    // config (the no-config default path).
+    _ssrf_guard: Option<harn_vm::egress::SsrfGuardScope>,
+}
+
+impl ModePolicyGuard {
+    pub(super) fn enter(mode_id: &str, sandbox: &AcpSandboxConfig) -> Self {
+        // Install the SSRF guard only with explicit process confinement.
+        // It blocks PRIVATE/loopback/link-local/metadata egress while leaving
+        // public traffic (model APIs, web_search/web_fetch to public hosts)
+        // ALLOWED. Local model servers on loopback are reached via the
+        // documented `HARN_EGRESS_ALLOW_LOOPBACK=1` /
+        // `harness.net.egress_policy({block_private:"off"})` hatch; the metadata endpoint
+        // stays blocked regardless. With no sandbox config we install nothing,
+        // so egress is byte-identical to today's default.
+        let ssrf_guard = sandbox
+            .has_process_confinement()
+            .then(harn_vm::egress::require_ssrf_guard_for_host);
+        match policy_for_mode(mode_id, sandbox) {
+            Some(policy) => {
+                harn_vm::orchestration::push_execution_policy(policy);
+                Self {
+                    pushed: true,
+                    _ssrf_guard: ssrf_guard,
+                }
+            }
+            None => Self {
+                pushed: false,
+                _ssrf_guard: ssrf_guard,
+            },
+        }
+    }
+}
+
+impl Drop for ModePolicyGuard {
+    fn drop(&mut self) {
+        if self.pushed {
+            harn_vm::orchestration::pop_execution_policy();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::adapters::acp::AcpSandboxConfig;
+
+    #[test]
+    fn catalog_contains_expected_modes() {
+        let ids = known_mode_ids();
+        assert!(ids.contains(&"ask"));
+        assert!(ids.contains(&"architect"));
+        assert!(ids.contains(&"code"));
+        assert!(ids.contains(&"shadow"));
+    }
+
+    #[test]
+    fn default_mode_matches_first_catalog_entry() {
+        assert_eq!(MODE_CATALOG.first().map(|m| m.id), Some(DEFAULT_MODE_ID));
+    }
+
+    #[test]
+    fn session_mode_state_contains_current_and_available() {
+        let state = session_mode_state("architect");
+        assert_eq!(state["currentModeId"], "architect");
+        let available = state["availableModes"].as_array().expect("array");
+        assert_eq!(available.len(), MODE_CATALOG.len());
+        assert!(available
+            .iter()
+            .any(|m| m["id"] == "architect" && m["name"] == "Architect"));
+    }
+
+    #[test]
+    fn config_options_state_contains_mode_selector() {
+        let state = config_options_state("code", None, None, None);
+        let options = state.as_array().expect("config options array");
+        assert_eq!(options.len(), 4);
+        assert_eq!(options[0]["id"], "mode");
+        assert_eq!(options[0]["currentValue"], "code");
+        assert!(options[0]["options"]
+            .as_array()
+            .expect("mode options")
+            .iter()
+            .any(|m| m["value"] == "ask"));
+    }
+
+    #[test]
+    fn config_options_state_includes_model_selector_with_pin_clear_sentinel() {
+        let state = config_options_state("code", None, None, None);
+        let options = state.as_array().expect("config options array");
+        let model_option = options
+            .iter()
+            .find(|entry| entry["id"] == "model")
+            .expect("model config option");
+        assert_eq!(model_option["category"], "model");
+        assert_eq!(model_option["type"], "select");
+        assert_eq!(model_option["currentValue"], MODEL_INHERIT_VALUE);
+        let values: Vec<&str> = model_option["options"]
+            .as_array()
+            .expect("model options")
+            .iter()
+            .map(|entry| entry["value"].as_str().expect("value string"))
+            .collect();
+        assert!(
+            values.contains(&MODEL_INHERIT_VALUE),
+            "options must include the inherit sentinel: {values:?}"
+        );
+    }
+
+    #[test]
+    fn config_options_state_surfaces_free_form_pinned_model() {
+        let state = config_options_state("code", Some("custom-model-not-in-catalog"), None, None);
+        let model_option = state
+            .as_array()
+            .expect("config options array")
+            .iter()
+            .find(|entry| entry["id"] == "model")
+            .cloned()
+            .expect("model config option");
+        assert_eq!(model_option["currentValue"], "custom-model-not-in-catalog");
+        let has_entry = model_option["options"]
+            .as_array()
+            .expect("model options")
+            .iter()
+            .any(|entry| entry["value"] == "custom-model-not-in-catalog");
+        assert!(
+            has_entry,
+            "free-form pinned model must appear in select options"
+        );
+    }
+
+    #[test]
+    fn validate_model_selector_accepts_empty_as_clear_pin() {
+        assert!(validate_model_selector("").unwrap().is_none());
+        assert!(validate_model_selector("   ").unwrap().is_none());
+        assert!(validate_model_selector("@inherit").unwrap().is_none());
+    }
+
+    #[test]
+    fn config_options_state_includes_thought_level_selector() {
+        let state = config_options_state("code", None, Some("high"), None);
+        let thought_option = state
+            .as_array()
+            .expect("config options array")
+            .iter()
+            .find(|entry| entry["id"] == "thought_level")
+            .cloned()
+            .expect("thought level config option");
+        assert_eq!(thought_option["category"], "model");
+        assert_eq!(thought_option["type"], "select");
+        assert_eq!(thought_option["currentValue"], "high");
+        let values: Vec<&str> = thought_option["options"]
+            .as_array()
+            .expect("thought options")
+            .iter()
+            .map(|entry| entry["value"].as_str().expect("value string"))
+            .collect();
+        let expected: Vec<&str> =
+            std::iter::once(harn_vm::llm::reasoning_policy::INHERIT_POLICY_VALUE)
+                .chain(
+                    harn_vm::llm::reasoning_policy::policy_values()
+                        .iter()
+                        .copied(),
+                )
+                .collect();
+        assert_eq!(values, expected);
+    }
+
+    #[test]
+    fn config_options_state_includes_budget_selector_with_custom_value() {
+        let custom = "{\"llm_tokens\":123}";
+        let state = config_options_state("code", None, None, Some(custom));
+        let budget_option = state
+            .as_array()
+            .expect("config options array")
+            .iter()
+            .find(|entry| entry["id"] == "budget")
+            .cloned()
+            .expect("budget config option");
+        assert_eq!(budget_option["category"], "_harn_budget");
+        assert_eq!(budget_option["type"], "select");
+        assert_eq!(budget_option["currentValue"], custom);
+        assert!(budget_option["options"]
+            .as_array()
+            .expect("budget options")
+            .iter()
+            .any(|entry| entry["value"] == custom));
+    }
+
+    #[test]
+    fn validate_reasoning_policy_selector_normalizes_aliases() {
+        assert!(validate_reasoning_policy_selector("").unwrap().is_none());
+        assert!(validate_reasoning_policy_selector("@inherit")
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            validate_reasoning_policy_selector("NO_THINK")
+                .unwrap()
+                .as_deref(),
+            Some("off"),
+        );
+        assert_eq!(
+            validate_reasoning_policy_selector(" high ")
+                .unwrap()
+                .as_deref(),
+            Some("high"),
+        );
+        assert!(validate_reasoning_policy_selector("slow").is_err());
+    }
+
+    #[test]
+    fn validate_model_selector_accepts_known_alias() {
+        // `claude-sonnet-4-6` is the catalog default; any registered
+        // alias works for this check.
+        let resolved = validate_model_selector("claude-sonnet-4-6")
+            .expect("known alias should validate")
+            .expect("known alias should produce a Some(...) selector");
+        assert_eq!(resolved, "claude-sonnet-4-6");
+    }
+
+    #[test]
+    fn validate_model_selector_rejects_unknown_provider_form() {
+        let error = validate_model_selector("nosuchprovider:nosuchmodel")
+            .expect_err("unknown provider must error");
+        assert!(
+            error.contains("invalid_model"),
+            "error should be tagged invalid_model: {error}"
+        );
+    }
+
+    #[test]
+    fn policy_for_code_with_no_config_is_none() {
+        // No-config default MUST be byte-identical to historical behavior:
+        // ActAuto `code` mode installs no per-turn policy, leaving the ambient
+        // (unrestricted) host/runtime policy as the authority.
+        assert!(policy_for_mode("code", &AcpSandboxConfig::default()).is_none());
+        // The default config is, by definition, not "configured".
+        assert!(!AcpSandboxConfig::default().is_configured());
+    }
+
+    #[test]
+    fn policy_for_code_with_only_read_only_roots_preserves_file_policy_without_process_confinement()
+    {
+        let roots = vec!["/work/project".to_string()];
+        let sandbox = AcpSandboxConfig::with_read_only_roots(roots.clone());
+        assert!(sandbox.is_configured());
+        assert!(!sandbox.has_process_confinement());
+        let policy = policy_for_mode("code", &sandbox)
+            .expect("read-only roots must survive the code-mode policy boundary");
+        assert_eq!(policy.read_only_roots, roots);
+        assert_eq!(
+            policy.sandbox_profile,
+            harn_vm::orchestration::SandboxProfile::Unrestricted,
+            "read-only roots alone must not arm process confinement"
+        );
+    }
+
+    #[test]
+    fn policy_for_code_with_process_config_applies_worktree_confinement() {
+        // Real process-sandbox config (presets/read_roots/write_roots) is the
+        // only opt-in signal for Worktree confinement. When present, any
+        // read_only_roots the embedder also configured still ride along via
+        // `apply_sandbox_config`.
+        let mut sandbox =
+            AcpSandboxConfig::with_process(harn_vm::orchestration::ProcessSandboxPolicy {
+                presets: Some(vec![
+                    harn_vm::orchestration::ProcessSandboxPreset::DeveloperToolchains,
+                ]),
+                read_roots: Vec::new(),
+                write_roots: Vec::new(),
+            });
+        sandbox.read_only_roots = vec!["/work/project".to_string()];
+        assert!(sandbox.is_configured());
+        let policy = policy_for_mode("code", &sandbox)
+            .expect("process-configured code mode must install a confinement policy");
+        // Worktree-level OS confinement is engaged...
+        assert_eq!(
+            policy.sandbox_profile,
+            harn_vm::orchestration::SandboxProfile::Worktree
+        );
+        // ...the embedder's read-only roots are still carried through...
+        assert_eq!(policy.read_only_roots, vec!["/work/project".to_string()]);
+        // ...and ActAuto approval semantics are preserved (no approval gate ->
+        // the current maximum side-effect ceiling, no recursion clamp).
+        assert_eq!(policy.side_effect_level.as_deref(), Some("desktop_control"));
+        assert_eq!(policy.recursion_limit, None);
+    }
+
+    #[test]
+    fn policy_for_code_with_process_config_applies_confinement() {
+        let process = harn_vm::orchestration::ProcessSandboxPolicy {
+            presets: Some(vec![
+                harn_vm::orchestration::ProcessSandboxPreset::DeveloperToolchains,
+            ]),
+            read_roots: vec!["/opt/sdk".to_string()],
+            write_roots: Vec::new(),
+        };
+        let sandbox = AcpSandboxConfig::with_process(process);
+        assert!(sandbox.is_configured());
+        let policy = policy_for_mode("code", &sandbox)
+            .expect("process-config code mode must install a confinement policy");
+        assert_eq!(
+            policy.sandbox_profile,
+            harn_vm::orchestration::SandboxProfile::Worktree
+        );
+        assert_eq!(
+            policy.process_sandbox.read_roots,
+            vec!["/opt/sdk".to_string()]
+        );
+        assert_eq!(policy.side_effect_level.as_deref(), Some("desktop_control"));
+    }
+
+    #[test]
+    fn policy_for_architect_clamps_to_read_only() {
+        let policy = policy_for_mode("architect", &AcpSandboxConfig::default())
+            .expect("architect has policy");
+        assert_eq!(policy.side_effect_level.as_deref(), Some("read_only"));
+    }
+
+    #[test]
+    fn policy_for_ask_clamps_to_read_only() {
+        let policy = policy_for_mode("ask", &AcpSandboxConfig::default()).expect("ask has policy");
+        assert_eq!(policy.side_effect_level.as_deref(), Some("read_only"));
+    }
+
+    #[test]
+    fn policy_for_shadow_blocks_side_effects() {
+        let policy =
+            policy_for_mode("shadow", &AcpSandboxConfig::default()).expect("shadow has policy");
+        assert_eq!(policy.side_effect_level.as_deref(), Some("read_only"));
+        assert_eq!(policy.recursion_limit, Some(0));
+    }
+
+    #[test]
+    fn policy_for_unknown_mode_is_none() {
+        assert!(policy_for_mode("not-a-real-mode", &AcpSandboxConfig::default()).is_none());
+    }
+
+    #[test]
+    fn embedder_read_only_roots_union_into_per_turn_policy() {
+        let roots = vec![
+            "/opt/burin/pipelines".to_string(),
+            "/opt/burin/pipelines/partials".to_string(),
+        ];
+        let sandbox = AcpSandboxConfig::with_read_only_roots(roots.clone());
+        let policy = policy_for_mode("architect", &sandbox).expect("architect has policy");
+        // Embedder roots survive the per-turn push as read-only entries...
+        assert_eq!(policy.read_only_roots, roots);
+        // ...without widening the writable workspace or relaxing the side
+        // effect ceiling (reads only).
+        assert!(policy.workspace_roots.is_empty());
+        assert_eq!(policy.side_effect_level.as_deref(), Some("read_only"));
+    }
+
+    #[test]
+    fn embedder_read_only_roots_dedupe_on_union() {
+        let roots = vec![
+            "/opt/burin/pipelines".to_string(),
+            "/opt/burin/pipelines".to_string(),
+        ];
+        let sandbox = AcpSandboxConfig::with_read_only_roots(roots);
+        let policy = policy_for_mode("ask", &sandbox).expect("ask has policy");
+        assert_eq!(
+            policy.read_only_roots,
+            vec!["/opt/burin/pipelines".to_string()]
+        );
+    }
+
+    #[test]
+    fn embedder_process_sandbox_config_unions_into_per_turn_policy() {
+        let process = harn_vm::orchestration::ProcessSandboxPolicy {
+            presets: Some(vec![
+                harn_vm::orchestration::ProcessSandboxPreset::SystemRuntime,
+            ]),
+            read_roots: vec!["/opt/vendor-sdk".to_string()],
+            write_roots: vec!["/opt/vendor-cache".to_string()],
+        };
+        let sandbox = AcpSandboxConfig::with_process(process);
+        let policy = policy_for_mode("architect", &sandbox).expect("architect has policy");
+
+        assert_eq!(
+            policy.process_sandbox.presets,
+            Some(vec![
+                harn_vm::orchestration::ProcessSandboxPreset::SystemRuntime
+            ])
+        );
+        assert_eq!(
+            policy.process_sandbox.read_roots,
+            vec!["/opt/vendor-sdk".to_string()]
+        );
+        assert_eq!(
+            policy.process_sandbox.write_roots,
+            vec!["/opt/vendor-cache".to_string()]
+        );
+        assert!(policy.read_only_roots.is_empty());
+    }
+
+    #[test]
+    fn code_mode_honors_embedder_read_only_roots_when_process_sandbox_is_configured() {
+        // A process-sandbox-configured embedder gets Worktree confinement
+        // with its declared read-only roots still applied, even in
+        // full-access ACP code mode. `read_only_roots` alone (no process
+        // config) is covered by the read-only-roots-only regression above.
+        let mut sandbox =
+            AcpSandboxConfig::with_process(harn_vm::orchestration::ProcessSandboxPolicy {
+                presets: Some(vec![
+                    harn_vm::orchestration::ProcessSandboxPreset::DeveloperToolchains,
+                ]),
+                read_roots: Vec::new(),
+                write_roots: Vec::new(),
+            });
+        sandbox.read_only_roots = vec!["/opt/burin/pipelines".to_string()];
+        let policy = policy_for_mode("code", &sandbox).expect("configured code mode has policy");
+        assert_eq!(
+            policy.read_only_roots,
+            vec!["/opt/burin/pipelines".to_string()]
+        );
+        assert_eq!(
+            policy.sandbox_profile,
+            harn_vm::orchestration::SandboxProfile::Worktree
+        );
+    }
+
+    #[test]
+    fn default_embedder_run_policy_keeps_system_runtime_preset() {
+        use harn_vm::orchestration::{
+            CapabilityPolicy, ProcessSandboxPolicy, ProcessSandboxPreset,
+        };
+        // Regression for the 2026-07-18 Burin dogfood repro: the default
+        // embedder config (bundled pipelines + dependency roots as read-only,
+        // process read roots, and NO `presets` — i.e. no ~/.burin/sandbox.json)
+        // must NOT narrow the process-sandbox presets. The full run policy — the
+        // ModePolicyGuard policy intersected with the agent-loop's tools-only
+        // policy — must still carry SystemRuntime so child spawns can read
+        // `/opt/homebrew` (Homebrew-installed toolchain roots such as GOROOT).
+        let mut sandbox =
+            AcpSandboxConfig::with_read_only_roots(vec!["/opt/burin/pipelines".to_string()]);
+        sandbox.process = ProcessSandboxPolicy {
+            presets: None,
+            read_roots: vec!["/dep/sdk".to_string()],
+            write_roots: Vec::new(),
+        };
+        let outer = policy_for_mode("code", &sandbox).expect("configured code mode has policy");
+        let requested = CapabilityPolicy {
+            tools: vec!["look".to_string(), "run".to_string(), "edit".to_string()],
+            ..CapabilityPolicy::default()
+        };
+        let effective = outer.intersect(&requested).expect("intersect ok");
+        assert!(
+            effective
+                .process_sandbox
+                .effective_presets()
+                .contains(&ProcessSandboxPreset::SystemRuntime),
+            "default embedder run policy must keep SystemRuntime (grants /opt/homebrew): {:?}",
+            effective.process_sandbox.effective_presets()
+        );
+    }
+
+    #[test]
+    fn is_known_rejects_unknown_mode() {
+        assert!(is_known("ask"));
+        assert!(!is_known(""));
+        assert!(!is_known("plan"));
+    }
+
+    #[test]
+    fn no_config_code_mode_installs_no_ssrf_guard() {
+        // The default (no-config) path must not change egress behavior at all:
+        // the SSRF private-address guard is NOT installed. Assert ownership
+        // directly so a legitimate ambient HARN_EGRESS_* policy cannot change
+        // this unit test's premise.
+        let guard = ModePolicyGuard::enter("code", &AcpSandboxConfig::default());
+        assert!(
+            guard._ssrf_guard.is_none(),
+            "no-config code mode must not install an SSRF guard scope"
+        );
+    }
+
+    #[test]
+    fn read_only_roots_code_mode_installs_policy_without_ssrf_guard() {
+        let sandbox =
+            AcpSandboxConfig::with_read_only_roots(vec!["/opt/shared/prompts".to_string()]);
+        let guard = ModePolicyGuard::enter("code", &sandbox);
+        assert!(guard.pushed, "read-only roots must install a turn policy");
+        assert!(
+            guard._ssrf_guard.is_none(),
+            "read-only roots must not change network behavior"
+        );
+        let effective = harn_vm::orchestration::current_execution_policy()
+            .expect("turn policy must be visible");
+        assert_eq!(
+            effective.read_only_roots,
+            vec!["/opt/shared/prompts".to_string()]
+        );
+        assert_eq!(
+            effective.sandbox_profile,
+            harn_vm::orchestration::SandboxProfile::Unrestricted
+        );
+    }
+
+    #[test]
+    fn configured_code_mode_installs_ssrf_guard() {
+        // A process-sandbox-configured embedder gets the SSRF private-address
+        // backstop for the turn: block_private becomes active. Public hosts
+        // stay reachable (the guard only blocks
+        // private/loopback/link-local/metadata addresses). `read_only_roots`
+        // alone (Burin's ambient bundled-pipeline roots) must NOT arm this.
+        // Harn VM owns the scope's effective-policy and drop semantics; this
+        // adapter test proves that configured ACP mode retains such a scope.
+        // Inspecting effective settings here would inherit the parent process's
+        // documented HARN_EGRESS_* overrides and make the test non-hermetic.
+        let sandbox =
+            AcpSandboxConfig::with_process(harn_vm::orchestration::ProcessSandboxPolicy {
+                presets: Some(vec![
+                    harn_vm::orchestration::ProcessSandboxPreset::DeveloperToolchains,
+                ]),
+                read_roots: Vec::new(),
+                write_roots: Vec::new(),
+            });
+        let guard = ModePolicyGuard::enter("code", &sandbox);
+        assert!(
+            guard._ssrf_guard.is_some(),
+            "configured code mode must retain an SSRF guard scope"
+        );
+    }
+}

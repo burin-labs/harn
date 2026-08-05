@@ -1,0 +1,38 @@
+/**
+ * Data Pipeline Example
+ *
+ * Run with:
+ *   cargo run --bin harn -- run examples/data-pipeline.harn
+ *
+ * Demonstrates a small data transformation pipeline with parallel fan-out
+ * and a machine-readable summary report.
+ */
+pipeline default(harness: Harness, task) {
+  harness.stdio.log("Starting data pipeline")
+  const raw = """
+[
+  {"id": "a1", "name": "Alpha", "score": 91, "team": "red"},
+  {"id": "b2", "name": "Beta", "score": 78, "team": "blue"},
+  {"id": "c3", "name": "Gamma", "score": 88, "team": "red"}
+]
+"""
+  const rows = json_parse(raw)
+  const normalized = parallel each rows { row ->
+    {id: row.id, name: row.name, team: row.team, score: row.score, passed: row.score >= 80}
+  }
+  let passed = 0
+  for row in normalized {
+    if row.passed {
+      passed = passed + 1
+    }
+  }
+  const report = {
+    run_id: harness.random.uuid(),
+    generated_at: harness.clock.timestamp(),
+    input_rows: rows.count,
+    passed_rows: passed,
+    failed_rows: rows.count - passed,
+    rows: normalized,
+  }
+  harness.stdio.println(json_stringify(report))
+}

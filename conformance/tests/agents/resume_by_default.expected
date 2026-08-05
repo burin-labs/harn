@@ -1,0 +1,8 @@
+parent_mechanism=ResumeBy.parent_llm
+parent_audit_kind=resume_by_dispatched
+local_mechanism=ResumeBy.local_runtime
+local_audit_kind=resume_by_dispatched
+parent_verify_mechanism=ResumeBy.parent_llm
+parent_verify_kind=resume_by_dispatched
+local_verify_mechanism=ResumeBy.local_runtime
+local_verify_kind=resume_by_dispatched

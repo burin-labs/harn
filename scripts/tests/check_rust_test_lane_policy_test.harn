@@ -1,0 +1,92 @@
+// Tests for scripts/check_rust_test_lane_policy.harn — which shell commands
+// count as running Rust tests, and which of the three ways to satisfy the
+// 16 MiB stack contract a step is allowed to use.
+import "../check_rust_test_lane_policy.harn"
+
+const WRAPPED = "scripts/ci/run_rust_test_lane.sh cargo nextest run --workspace"
+
+const RAW = "cargo nextest run --workspace --test-threads=8"
+
+fn no_env() -> dict {
+  return {}
+}
+
+fn pinned_env() -> dict {
+  return {RUST_MIN_STACK: "16777216"}
+}
+
+@test
+pipeline test_logical_commands_folds_backslash_continuations(harness: Harness, task) {
+  const commands = logical_commands("cargo nextest run \\\n  --workspace \\\n  --profile ci")
+  assert_eq(len(commands), 1)
+  assert_eq(commands[0], "cargo nextest run --workspace --profile ci")
+}
+
+@test
+pipeline test_logical_commands_keeps_separate_lines_separate(harness: Harness, task) {
+  assert_eq(len(logical_commands("echo one\ncargo test --no-run\necho two")), 3)
+}
+
+@test
+pipeline test_executes_rust_tests_recognizes_both_runners(harness: Harness, task) {
+  assert_eq(executes_rust_tests("cargo nextest run --workspace"), true)
+  assert_eq(executes_rust_tests("cargo test -p harn-modules some_case"), true)
+}
+
+@test
+pipeline test_executes_rust_tests_ignores_build_only_and_prose(harness: Harness, task) {
+  assert_eq(executes_rust_tests("cargo test --no-run --workspace"), false)
+  assert_eq(executes_rust_tests("# cargo nextest run --workspace"), false)
+  assert_eq(executes_rust_tests("make test"), false)
+  assert_eq(executes_rust_tests("cargo build -p harn-cli"), false)
+}
+
+@test
+pipeline test_raw_runner_invocation_is_a_violation(harness: Harness, task) {
+  const violations = step_violations("w.yml", "job", {run: RAW}, no_env(), no_env())
+  assert_eq(len(violations), 1)
+  assert_eq(violations[0]?.workflow, "w.yml")
+  assert_eq(violations[0]?.job, "job")
+  assert_eq(violations[0]?.command, RAW)
+}
+
+@test
+pipeline test_lane_wrapper_satisfies_the_contract(harness: Harness, task) {
+  assert_eq(len(step_violations("w.yml", "job", {run: WRAPPED}, no_env(), no_env())), 0)
+}
+
+@test
+pipeline test_explicit_stack_pin_satisfies_every_scope(harness: Harness, task) {
+  const step = {run: RAW, env: {RUST_MIN_STACK: "16777216"}}
+  assert_eq(len(step_violations("w.yml", "job", step, no_env(), no_env())), 0)
+  assert_eq(len(step_violations("w.yml", "job", {run: RAW}, pinned_env(), no_env())), 0)
+  assert_eq(len(step_violations("w.yml", "job", {run: RAW}, no_env(), pinned_env())), 0)
+}
+
+@test
+pipeline test_wrong_stack_value_does_not_satisfy_the_contract(harness: Harness, task) {
+  const step = {run: RAW, env: {RUST_MIN_STACK: "4194304"}}
+  assert_eq(len(step_violations("w.yml", "job", step, no_env(), no_env())), 1)
+}
+
+@test
+pipeline test_steps_without_a_run_block_are_ignored(harness: Harness, task) {
+  const step = {uses: "actions/checkout@v7"}
+  assert_eq(len(step_violations("w.yml", "job", step, no_env(), no_env())), 0)
+}
+
+@test
+pipeline test_workflow_violations_reports_the_offending_job(harness: Harness, task) {
+  const document = {
+    jobs: {clean: {steps: [{run: WRAPPED}]}, dirty: {steps: [{run: "echo hi"}, {run: RAW}]}},
+  }
+  const violations = workflow_violations("ci.yml", document)
+  assert_eq(len(violations), 1)
+  assert_eq(violations[0]?.job, "dirty")
+}
+
+@test
+pipeline test_workflow_level_pin_covers_every_job(harness: Harness, task) {
+  const document = {env: {RUST_MIN_STACK: "16777216"}, jobs: {dirty: {steps: [{run: RAW}]}}}
+  assert_eq(len(workflow_violations("ci.yml", document)), 0)
+}

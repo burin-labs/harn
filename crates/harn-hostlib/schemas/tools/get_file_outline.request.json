@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/get_file_outline.request.json",
+  "title": "tools.get_file_outline request",
+  "description": "Convenience wrapper around `ast.outline` for hosts that expose a file-outline tool surface.",
+  "type": "object",
+  "properties": {
+    "path": { "type": "string" },
+    "max_depth": { "type": "integer", "minimum": 0 },
+    "session_id": {
+      "type": "string",
+      "description": "Optional hostlib session whose staged filesystem overlay should be consulted before disk."
+    }
+  },
+  "required": ["path"],
+  "additionalProperties": false
+}

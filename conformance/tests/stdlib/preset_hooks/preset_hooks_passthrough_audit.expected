@@ -1,0 +1,9 @@
+passthrough
+python.find_versus_rg
+find . -name '*.py'
+find . -name '*.py'
+find . -name '*.py'
+1
+tool_rule_warning
+python.find_versus_rg
+info

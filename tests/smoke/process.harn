@@ -1,0 +1,66 @@
+/**
+ * Process-tool smoke: spawns one short-lived child through the
+ * std/command runner, asserts it succeeds, and prints a deterministic
+ * marker. Uses platform-appropriate argv (cmd.exe on Windows, /bin/sh
+ * elsewhere) per the host-boundary rule that the runtime, not the
+ * script, picks the shell. Mirrors the conformance pattern in
+ * conformance/tests/stdlib/command_step_basic.harn.
+ */
+import { command_run } from "std/command"
+
+fn echo_argv(system: HarnessSystem, text) {
+  if system.platform().os == "windows" {
+    return ["cmd", "/C", "echo " + text]
+  }
+  return ["printf", "%s", text]
+}
+
+fn file_capture_shell_spec(system: HarnessSystem) {
+  if system.platform().os == "windows" {
+    return {
+      mode: "shell",
+      shell_id: "cmd",
+      command: "echo file-stdout && echo file-stderr 1>&2 && exit /b 7",
+    }
+  }
+  return {
+    mode: "shell",
+    shell_id: "sh",
+    command: "printf 'file-stdout\\n'; printf 'file-stderr\\n' >&2; exit 7",
+  }
+}
+
+pipeline default(harness: Harness) {
+  const result = command_run(
+    harness.tools,
+    echo_argv(harness.system, "smoke"),
+    {capture: {max_inline_bytes: 64}},
+  )
+  if !result.success {
+    throw "process smoke failed: success=${result.success} exit_code=${result.exit_code} stderr=${result.stderr}"
+  }
+  if result.exit_code != 0 {
+    throw "process smoke failed: non-zero exit_code ${result.exit_code}"
+  }
+  if !contains(result.stdout, "smoke") {
+    throw "process smoke failed: stdout did not contain expected marker (got ${result.stdout})"
+  }
+  const file_result = command_run(
+    harness.tools,
+    file_capture_shell_spec(harness.system),
+    {capture: {transport: "file", max_inline_bytes: 128}},
+  )
+  if file_result.success {
+    throw "process file-capture smoke failed: nonzero shell command unexpectedly succeeded"
+  }
+  if file_result.exit_code != 7 {
+    throw "process file-capture smoke failed: expected exit 7, got ${file_result.exit_code}"
+  }
+  if !contains(file_result.stdout, "file-stdout") {
+    throw "process file-capture smoke failed: stdout missing marker (got ${file_result.stdout})"
+  }
+  if !contains(file_result.stderr, "file-stderr") {
+    throw "process file-capture smoke failed: stderr missing marker (got ${file_result.stderr})"
+  }
+  harness.stdio.println("process ok on " + harness.system.platform().os)
+}

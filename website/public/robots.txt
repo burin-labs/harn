@@ -1,0 +1,5 @@
+# https://harnlang.com — the Harn language site.
+User-agent: *
+Allow: /
+
+Sitemap: https://harnlang.com/sitemap.xml

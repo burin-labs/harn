@@ -1,0 +1,178 @@
+# Orchestrator secrets
+
+Reactive Harn features need a single way to fetch secrets without
+sprinkling provider-specific code across connectors, OAuth flows, and
+future orchestrator runtime surfaces. The secret layer lives in
+`harn_vm::secrets` and currently ships with two concrete providers:
+
+- `EnvSecretProvider`
+- `KeyringSecretProvider`
+
+The default chain is:
+
+```text
+env -> keyring
+```
+
+Use `harn doctor` to inspect the active chain and to verify that the keyring
+backend is reachable on the current machine.
+
+## Secret model
+
+Secrets are addressed by a structured `SecretId`:
+
+```rust
+use harn_vm::secrets::{SecretId, SecretVersion};
+
+let id = SecretId::new(
+    "harn.orchestrator.github",
+    "installation-12345/private-key",
+)
+.with_version(SecretVersion::Latest);
+```
+
+Secret values are held in `SecretBytes`:
+
+- bytes are zeroized on drop
+- `Debug` is redacted
+- `Display` is intentionally absent
+- explicit duplication requires `reborrow()`
+- callers expose bytes via `with_exposed(|bytes| ...)`
+
+Successful `get()` calls also emit a structured audit event through the
+existing VM event sink with the secret id, provider name, caller span,
+mutation session id when present, and a timestamp. The event payload never
+contains the secret bytes.
+
+## Harness primitive
+
+Hosts can attach a managed provider to `Harness::real()` with
+`with_secret_provider(...)`. That enables scripts to use the typed
+`harness.secrets` sub-handle:
+
+```harn
+// Canonical connector/runtime secret ids are first-class.
+const google = harness.secrets.read("google_workspace/access-token")
+
+// Application secrets may be scoped when they belong to a tenant/workspace.
+const scope = {kind: "workspace", id: "workspace-123"}
+const receipt = harness.secrets.write("github.token", "token-v1", scope, 3600000)
+const token = harness.secrets.read("github.token", scope)
+const rotated = harness.secrets.rotate(
+  "github.token",
+  { -> "token-v2" },
+  scope,
+  {grace_ms: 300000, ttl_ms: 3600000},
+)
+const lease = harness.secrets.lease("github.token", 60000, scope)
+```
+
+Methods:
+
+- `read(name, scope?) -> string`
+- `read_bytes(name, scope?) -> bytes`
+- `write(name, value, scope?, ttl_ms?) -> dict`
+- `rotate(name, generator_or_value, scope?, options?) -> dict`
+- `lease(name, duration_ms, scope?) -> dict`
+- `lease_bytes(name, duration_ms, scope?) -> dict`
+
+`scope` may be `nil`, `"tenant"`, `"tenant:<id>"`, `"system"`,
+`"workspace:<id>"`, `"<custom-kind>:<id>"`, or a dict with `{kind, id}`.
+Omitted tenant scope uses the ambient `harness.tenant` id when the host bound
+one. The VM passes the ambient request id and authenticated principal facts to
+the provider for audit, but the provider owns policy, encryption, rotation,
+lease persistence, and any external KMS or vault adapter.
+
+Secret names in `namespace/name` or `harn-secret://namespace/name[@version]`
+form are treated as canonical secret ids and are not rewritten into the
+ambient tenant or workspace scope. Use this form for connector credentials
+registered by `harn connect`, package manifests, and runtime integration
+secrets. Use scoped names for tenant/workspace application data.
+
+`harness.secrets` is for agent- and harness-authored application secrets.
+Runtime-owned namespaces `provenance`, `harn.provenance`, and
+`harn.provenance.<...>` are reserved for Harn internals and cannot be read,
+written, rotated, or leased through the scoped harness API. In particular,
+signed run-receipt Ed25519 seeds are loaded through trusted runtime provider
+access and are never exposed to Harn scripts.
+
+When `harn run` executes a package script, the default `harness.secrets`
+provider is scoped from the nearest `harn.toml`, matching the namespace used by
+`harn connect`. This lets package scripts read canonical connector ids such as
+`google_workspace/access-token` without knowing the host keyring namespace.
+
+Automated tests and CI should not touch the OS credential store. Use
+`HARN_SECRET_PROVIDERS=env` plus test-only `HARN_SECRET_*` variables for
+secret-dependent smokes, or inject a mock `Harness`. On macOS, Keychain
+“Always Allow” grants are tied to a stable application identity; unsigned debug
+binaries rebuilt in different worktrees can still prompt again. Long-running
+automation should use a stable signed helper, broker, or external vault instead
+of relying on per-build Keychain prompts.
+
+## Provider chain configuration
+
+The provider order is controlled with `HARN_SECRET_PROVIDERS`:
+
+```bash
+export HARN_SECRET_PROVIDERS=env,keyring
+```
+
+The doctor output also reports a namespace used for backend grouping. By
+default Harn derives it as `harn/<current-directory-name>`. Override it
+with:
+
+```bash
+export HARN_SECRET_NAMESPACE="harn/my-workspace"
+```
+
+## Environment provider
+
+`EnvSecretProvider` is first in the chain so CI, local shells, and
+containers can override secrets without touching the OS credential store.
+
+Environment variable names use:
+
+```text
+HARN_SECRET_<NAMESPACE>_<NAME>
+```
+
+For example:
+
+```bash
+export HARN_SECRET_HARN_ORCHESTRATOR_GITHUB_INSTALLATION_12345_PRIVATE_KEY="$(cat github-app.pem)"
+```
+
+Non-alphanumeric characters are normalized to underscores and multiple
+separators collapse.
+
+## Keyring provider
+
+`KeyringSecretProvider` uses the [`keyring`](https://crates.io/crates/keyring)
+crate so the same code path works against:
+
+- macOS Keychain
+- Linux native keyring / Secret Service backends supported by `keyring`
+- Windows Credential Manager
+
+This is the default local-first provider. The CLI already uses it for MCP
+OAuth token storage, and `harn doctor` probes it directly.
+
+## Recommended setups
+
+Laptop development:
+
+```bash
+export HARN_SECRET_PROVIDERS=env,keyring
+```
+
+CI or containers:
+
+```bash
+export HARN_SECRET_PROVIDERS=env
+```
+
+Cloud deployments:
+
+Today, use `env` for injected platform secrets. The `SecretProvider`
+surface is intentionally ready for Vault / AWS / GCP implementations, but
+those provider backends are not wired in yet.

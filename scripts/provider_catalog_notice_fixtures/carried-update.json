@@ -1,0 +1,23 @@
+{
+  "notice": {
+    "source_id": "anthropic-pricing-2026-08",
+    "retrieved_at": "2026-07-28T12:00:00Z",
+    "provider": "anthropic",
+    "text": "Claude Haiku input pricing changes from $1 to $0.80 per million tokens on 2026-08-01.",
+    "source_url": "https://docs.anthropic.com/pricing#haiku-2026-08",
+    "provenance": "verified_link"
+  },
+  "extraction": {
+    "classification": "candidate",
+    "candidate": {
+      "kind": "price",
+      "provider": "anthropic",
+      "model_id": "claude-haiku-4-5-20251001",
+      "effective_date": "2026-08-01",
+      "field": "input_per_mtok",
+      "old_value": 1.0,
+      "new_value": 0.8,
+      "evidence": "Claude Haiku input pricing changes from $1 to $0.80 per million tokens."
+    }
+  }
+}

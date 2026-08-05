@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/search.request.json",
+  "title": "ast.search request",
+  "description": "Read-only structural search: run a Tree-Sitter query against a file (`path`) or inline `source` and return every match with every capture bound. Exactly one of `path` or `source` is required; `source` has no extension, so it requires `language`.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "Absolute or workspace-relative path to the source file. The grammar is inferred from its extension unless `language` is supplied. Mutually exclusive with `source`."
+    },
+    "source": {
+      "type": "string",
+      "description": "Inline source text to search instead of reading a file. Requires `language` since there is no extension to infer from. Mutually exclusive with `path`."
+    },
+    "query": {
+      "type": "string",
+      "description": "Tree-Sitter S-expression query. Must declare at least one capture (`@name`); search binds and returns every capture by name."
+    },
+    "language": {
+      "type": "string",
+      "description": "Optional grammar override (e.g. \"rust\", \"typescript\", \"python\"). Required when `source` is used."
+    },
+    "max_matches": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Cap on the number of matches returned, in document order; 0 (default) is unlimited. When the cap truncates results the response sets `truncated: true`."
+    }
+  },
+  "required": ["query"],
+  "additionalProperties": false
+}

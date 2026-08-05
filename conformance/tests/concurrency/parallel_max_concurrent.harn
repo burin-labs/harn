@@ -1,0 +1,47 @@
+pipeline default(harness: Harness) {
+  // Baseline: no `with { max_concurrent }` — existing behavior, all
+  // tasks run concurrently. Each task returns its index.
+  const nums = [0, 1, 2, 3, 4]
+  const doubled = parallel each nums { n ->
+    return n * 2
+  }
+  harness.stdio.println(doubled)
+  // With a cap of 2: same result (order preserved), lower peak
+  // in-flight count. We can't directly observe peak here but we can
+  // assert ordering and total length.
+  const capped = parallel each nums with { max_concurrent: 2 } { n ->
+    return n + 10
+  }
+  harness.stdio.println(capped)
+  // settle variant also accepts max_concurrent.
+  const settled = parallel settle nums with { max_concurrent: 3 } { n ->
+    return n
+  }
+  harness.stdio.println(settled.succeeded)
+  harness.stdio.println(settled.failed)
+  // count mode: `parallel N with { ... } { i -> ... }`.
+  const counted = parallel 4 with { max_concurrent: 1 } { i ->
+    return i
+  }
+  harness.stdio.println(counted)
+  // Cap larger than the list — still runs correctly.
+  const big_cap = parallel each nums with { max_concurrent: 999 } { n ->
+    return n * 3
+  }
+  harness.stdio.println(big_cap)
+  // Observable cap: track peak in-flight count via atomics. With 8
+  // tasks each sleeping briefly and a cap of 2, peak must be <= 2.
+  const in_flight = harness.runtime.atomic(0)
+  const peak = harness.runtime.atomic(0)
+  const work = [1, 2, 3, 4, 5, 6, 7, 8]
+  parallel each work with { max_concurrent: 2 } { _ ->
+    const now = harness.runtime.atomic_add(in_flight, 1) + 1
+    if now > harness.runtime.atomic_get(peak) {
+      harness.runtime.atomic_set(peak, now)
+    }
+    harness.clock.sleep_ms(25ms)
+    harness.runtime.atomic_add(in_flight, -1)
+  }
+  harness.stdio.println(harness.runtime.atomic_get(peak) <= 2)
+  harness.stdio.println(harness.runtime.atomic_get(peak) == 2)
+}

@@ -1,0 +1,32 @@
+import "std/personas/prelude"
+
+@persona(output_style: "concise")
+fn styled_reviewer(stdio: HarnessStdio) {
+  stdio.log("reviewing")
+}
+
+@persona(output_style: {name: "friendly", instructions: "Be warm."})
+fn styled_helper(stdio: HarnessStdio) {
+  stdio.log("helping")
+}
+
+@persona(name: "styled_plain")
+fn styled_plain(stdio: HarnessStdio) {
+  stdio.log("plain")
+}
+
+/**
+ * Reads persona-declared output styles (string form + { name, instructions }
+ * table form) back via persona_output_style(), and confirms personas without
+ * a declared style — and unknown personas — return nil.
+ */
+pipeline default(harness: Harness) {
+  const a = persona_output_style("styled_reviewer")
+  harness.stdio.println(a.name)
+  harness.stdio.println(a.instructions == nil)
+  const b = persona_output_style("styled_helper")
+  harness.stdio.println(b.name)
+  harness.stdio.println(b.instructions)
+  harness.stdio.println(persona_output_style("styled_plain") == nil)
+  harness.stdio.println(persona_output_style("unknown") == nil)
+}

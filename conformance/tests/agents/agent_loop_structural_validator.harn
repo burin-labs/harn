@@ -1,0 +1,568 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { with_structural_validator } from "std/llm/structural_validator"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn events_of(events, kind) {
+  return events.filter({ event -> event.type == kind })
+}
+
+fn error_contains(result, fragment) {
+  return is_err(result) && contains(to_string(unwrap_err(result)), fragment)
+}
+
+fn write_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "write_note",
+    "Write a note",
+    {
+      handler: { args -> "wrote " + args.path },
+      parameters: {path: {type: "string", description: "Path to write"}},
+      returns: {type: "string"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+  return tools
+}
+
+pipeline default(harness: Harness) {
+  const tool_text = "<tool_call>\nwrite_note({ path: \"notes.txt\" })\n</tool_call>"
+  const malformed_tool_text = "<tool_call>\nwrite_note({ path: })\n</tool_call>"
+  const mixed_malformed_tool_text = "<notes>bad wrapper</notes>\n" + malformed_tool_text
+  // Leading narration emitted as bare prose (NOT wrapped in
+  // <assistant_prose>) ahead of a well-formed wrapped call. The parser
+  // recovers the call AND flags the stray prose as a protocol violation.
+  // The turn did real work, so `tool_calls_well_formed` must NOT veto it —
+  // vetoing here drops the recovered call and strands the model in a
+  // re-emit loop until the stall detector fires (the create-heavy failure).
+  const stray_prose_with_call_text = "I'll create notes.txt now.\n" + tool_text
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("I fixed it already."),
+      {tool_calls: [{id: "write_1", name: "write_note", arguments: {path: "notes.txt"}}]},
+      llm_text("<done>##DONE##</done>"),
+    ],
+    { ->
+      const session = "structural-validator-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Update notes.txt and then finish.",
+          nil,
+          {
+            provider: "mock",
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 4,
+            session_id: session,
+            tools: write_tools(),
+            structural_validator: with_structural_validator(harness.agent),
+          },
+        ) },
+      )
+      const decisions = events_of(captured.events, "structural_validator_decision")
+      require len(decisions) == 1, "validator should emit exactly one decision"
+      harness.stdio.println(captured.result.status)
+      harness.stdio.println(captured.result.tools.successful[0] == "write_note")
+      harness.stdio.println(len(decisions))
+      harness.stdio.println(decisions[0].rule)
+      harness.stdio.println(decisions[0].vetoed)
+      harness.stdio.println(decisions[0].recommended_action.contains("tool call"))
+      const regen_call = harness.llm.mock_calls()[1]
+      const regen_messages = json_stringify(regen_call.messages)
+      const regen_directives = regen_call.messages[len(regen_call.messages) - 1].content
+      harness.stdio.println(!regen_messages.contains("I fixed it already."))
+      harness.stdio.println(regen_directives.contains("<directive authority=\"corrective\">"))
+      harness.stdio.println(regen_messages.contains("non_empty_when_writes_expected"))
+      require !regen_messages.contains("structural_validator"),
+        "provider-visible regeneration guidance omits its internal kind"
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text("Still done without tools.")],
+    { ->
+      try {
+        agent_loop(
+          harness,
+          "Update notes.txt and then finish.",
+          nil,
+          {
+            provider: "mock",
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 2,
+            tools: write_tools(),
+            structural_validator: with_structural_validator(harness.agent, {on_failure: "raise"}),
+          },
+        )
+        harness.stdio.println("no-throw")
+      } catch (e) {
+        harness.stdio.println("caught")
+        harness.stdio.println(contains(to_string(e), "Assistant emitted no tool calls"))
+      }
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text("I fixed it already.")],
+    { ->
+      const phantom_session = "structural-validator-phantom-" + harness.random.uuid()
+      const phantom = agent_capture_events(
+        harness.agent,
+        phantom_session,
+        fn() { return try {
+          agent_loop(
+            harness,
+            "Update notes.txt and then finish.",
+            nil,
+            {
+              provider: "mock",
+              tool_format: "native",
+              loop_until_done: true,
+              max_iterations: 2,
+              tools: write_tools(),
+              session_id: phantom_session,
+              structural_validator: with_structural_validator(
+                harness.agent,
+                {on_failure: "raise", rules: ["no_phantom_completion"]},
+              ),
+            },
+          )
+          "no-throw"
+        } catch (_e) {
+          "caught"
+        } },
+      )
+      const phantom_decisions = events_of(phantom.events, "structural_validator_decision")
+      harness.stdio.println(phantom.result == "caught")
+      harness.stdio.println(len(phantom_decisions) == 1)
+      harness.stdio.println(phantom_decisions[0].rule == "no_phantom_completion")
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      {text: "", tool_calls: [{id: "write_1", name: "write_note", arguments: {path: "notes.txt"}}]},
+      llm_text("I fixed it already.<done>##DONE##</done>"),
+    ],
+    { ->
+      const post_write_session = "structural-validator-post-write-" + harness.random.uuid()
+      const post_write = agent_capture_events(
+        harness.agent,
+        post_write_session,
+        fn() { return agent_loop(
+          harness,
+          "Update notes.txt and then finish.",
+          nil,
+          {
+            provider: "mock",
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 3,
+            tools: write_tools(),
+            session_id: post_write_session,
+            structural_validator: with_structural_validator(
+              harness.agent,
+              {rules: ["no_phantom_completion"]},
+            ),
+          },
+        ) },
+      )
+      const post_write_decisions = events_of(post_write.events, "structural_validator_decision")
+      harness.stdio.println(post_write.result.status == "done")
+      harness.stdio.println(len(post_write_decisions) == 0)
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      {text: "", tool_calls: [{id: "write_1", name: "write_note", arguments: {path: "notes.txt"}}]},
+      llm_text("I fixed it already."),
+    ],
+    { ->
+      const post_write_non_empty_session = "structural-validator-post-write-non-empty-"
+        + harness
+        .random
+        .uuid()
+      const post_write_non_empty = agent_capture_events(
+        harness.agent,
+        post_write_non_empty_session,
+        fn() { return agent_loop(
+          harness,
+          "Update notes.txt and then summarize.",
+          nil,
+          {
+            provider: "mock",
+            tool_format: "native",
+            max_iterations: 3,
+            tools: write_tools(),
+            session_id: post_write_non_empty_session,
+            structural_validator: with_structural_validator(harness.agent),
+          },
+        ) },
+      )
+      const post_write_non_empty_decisions = events_of(
+        post_write_non_empty.events,
+        "structural_validator_decision",
+      )
+      harness.stdio.println(post_write_non_empty.result.status == "done")
+      harness.stdio.println(len(post_write_non_empty_decisions) == 0)
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text("The PATCH_HINT is:\n\n```python\ndef add(a, b): return a + b\n```")],
+    { ->
+      const lifecycle_only_session = "structural-validator-lifecycle-only-" + harness.random.uuid()
+      const lifecycle_only = agent_capture_events(
+        harness.agent,
+        lifecycle_only_session,
+        fn() { return agent_loop(
+          harness,
+          "No tools are available. State the smallest code change.",
+          nil,
+          {
+            provider: "mock",
+            tool_format: "text",
+            max_iterations: 1,
+            session_id: lifecycle_only_session,
+            structural_validator: with_structural_validator(harness.agent),
+          },
+        ) },
+      )
+      const lifecycle_only_decisions = events_of(
+        lifecycle_only.events,
+        "structural_validator_decision",
+      )
+      harness.stdio.println(lifecycle_only.result.status == "done")
+      harness.stdio.println(len(lifecycle_only_decisions) == 0)
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text(malformed_tool_text)],
+    { ->
+      const malformed_session = "structural-validator-malformed-" + harness.random.uuid()
+      const malformed = agent_capture_events(
+        harness.agent,
+        malformed_session,
+        fn() { return try {
+          agent_loop(
+            harness,
+            "Update notes.txt and then finish.",
+            nil,
+            {
+              provider: "mock",
+              tool_format: "text",
+              loop_until_done: true,
+              max_iterations: 2,
+              tools: write_tools(),
+              session_id: malformed_session,
+              structural_validator: with_structural_validator(
+                harness.agent,
+                {on_failure: "raise", rules: ["tool_calls_well_formed"]},
+              ),
+            },
+          )
+          "no-throw"
+        } catch (_e) {
+          "caught"
+        } },
+      )
+      const malformed_decisions = events_of(malformed.events, "structural_validator_decision")
+      harness.stdio.println(malformed.result == "caught")
+      harness.stdio.println(len(malformed_decisions) == 1)
+      harness.stdio.println(malformed_decisions[0].rule == "tool_calls_well_formed")
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text(mixed_malformed_tool_text)],
+    { ->
+      const mixed_malformed_session = "structural-validator-mixed-malformed-"
+        + harness.random.uuid()
+      const mixed_malformed = agent_capture_events(
+        harness.agent,
+        mixed_malformed_session,
+        fn() { return try {
+          agent_loop(
+            harness,
+            "Update notes.txt and then finish.",
+            nil,
+            {
+              provider: "mock",
+              tool_format: "text",
+              loop_until_done: true,
+              max_iterations: 2,
+              tools: write_tools(),
+              session_id: mixed_malformed_session,
+              structural_validator: with_structural_validator(
+                harness.agent,
+                {on_failure: "raise", rules: ["tool_calls_well_formed"]},
+              ),
+            },
+          )
+          "no-throw"
+        } catch (_e) {
+          "caught"
+        } },
+      )
+      const mixed_malformed_decisions = events_of(
+        mixed_malformed.events,
+        "structural_validator_decision",
+      )
+      const mixed_diagnostic = mixed_malformed_decisions[0].diagnostic
+      const parse_idx = mixed_diagnostic.index_of("TOOL CALL PARSE ERROR")
+      const wrapper_idx = mixed_diagnostic.index_of("Unknown top-level tag")
+      harness.stdio.println(mixed_malformed.result == "caught")
+      harness.stdio.println(len(mixed_malformed_decisions) == 1)
+      harness.stdio.println(parse_idx >= 0)
+      harness.stdio.println(wrapper_idx >= 0)
+      harness.stdio.println(parse_idx < wrapper_idx)
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text(tool_text), llm_text("<done>##DONE##</done>")],
+    { ->
+      const well_formed_session = "structural-validator-well-formed-" + harness.random.uuid()
+      const well_formed = agent_capture_events(
+        harness.agent,
+        well_formed_session,
+        fn() { return agent_loop(
+          harness,
+          "Update notes.txt and then finish.",
+          nil,
+          {
+            provider: "mock",
+            tool_format: "text",
+            loop_until_done: true,
+            max_iterations: 3,
+            tools: write_tools(),
+            session_id: well_formed_session,
+            structural_validator: with_structural_validator(
+              harness.agent,
+              {rules: ["tool_calls_well_formed"]},
+            ),
+          },
+        ) },
+      )
+      const well_formed_decisions = events_of(well_formed.events, "structural_validator_decision")
+      harness.stdio.println(well_formed.result.status == "done")
+      harness.stdio.println(len(well_formed_decisions) == 0)
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text(stray_prose_with_call_text), llm_text("<done>##DONE##</done>")],
+    { ->
+      const stray_call_session = "structural-validator-stray-prose-call-" + harness.random.uuid()
+      const stray_call = agent_capture_events(
+        harness.agent,
+        stray_call_session,
+        fn() { return agent_loop(
+          harness,
+          "Update notes.txt and then finish.",
+          nil,
+          {
+            provider: "mock",
+            tool_format: "text",
+            loop_until_done: true,
+            max_iterations: 3,
+            tools: write_tools(),
+            session_id: stray_call_session,
+            structural_validator: with_structural_validator(
+              harness.agent,
+              {rules: ["tool_calls_well_formed"]},
+            ),
+          },
+        ) },
+      )
+      const stray_call_decisions = events_of(stray_call.events, "structural_validator_decision")
+      harness.stdio.println(stray_call.result.status == "done")
+      harness.stdio.println(stray_call.result.tools.successful[0] == "write_note")
+      harness.stdio.println(len(stray_call_decisions) == 0)
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      {text: "", tool_calls: [{id: "write_missing", name: "write_note", arguments: {}}]},
+      {text: "", tool_calls: [{id: "write_2", name: "write_note", arguments: {path: "notes.txt"}}]},
+      llm_text("<done>##DONE##</done>"),
+    ],
+    { ->
+      const missing_arg_session = "structural-validator-native-missing-arg-" + harness.random.uuid()
+      const missing_arg = agent_capture_events(
+        harness.agent,
+        missing_arg_session,
+        fn() { return agent_loop(
+          harness,
+          "Update notes.txt and then finish.",
+          nil,
+          {
+            provider: "mock",
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 3,
+            tools: write_tools(),
+            session_id: missing_arg_session,
+            structural_validator: with_structural_validator(
+              harness.agent,
+              {rules: ["tool_calls_well_formed"]},
+            ),
+          },
+        ) },
+      )
+      const missing_arg_decisions = events_of(missing_arg.events, "structural_validator_decision")
+      const missing_arg_regen_messages = json_stringify(harness.llm.mock_calls()[1].messages)
+      harness.stdio.println(missing_arg.result.status == "done")
+      harness.stdio.println(missing_arg.result.tools.successful[0] == "write_note")
+      harness.stdio.println(len(missing_arg_decisions) == 1)
+      harness.stdio.println(
+        missing_arg_decisions[0].diagnostic.contains("missing required parameter"),
+      )
+      harness.stdio.println(missing_arg_regen_messages.contains("missing required parameter"))
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [{text: "Working on it.", output_tokens: 95}],
+    { ->
+      const capped_session = "structural-validator-output-cap-" + harness.random.uuid()
+      const capped = agent_capture_events(
+        harness.agent,
+        capped_session,
+        fn() { return try {
+          agent_loop(
+            harness,
+            "Update notes.txt and then finish.",
+            nil,
+            {
+              provider: "mock",
+              tool_format: "native",
+              loop_until_done: true,
+              max_iterations: 2,
+              max_tokens: 100,
+              tools: write_tools(),
+              session_id: capped_session,
+              structural_validator: with_structural_validator(
+                harness.agent,
+                {on_failure: "raise", rules: ["output_token_cap_with_zero_calls"]},
+              ),
+            },
+          )
+          "no-throw"
+        } catch (_e) {
+          "caught"
+        } },
+      )
+      const capped_decisions = events_of(capped.events, "structural_validator_decision")
+      harness.stdio.println(capped.result == "caught")
+      harness.stdio.println(len(capped_decisions) == 1)
+      harness.stdio.println(capped_decisions[0].rule == "output_token_cap_with_zero_calls")
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      {text: "Brief update.", output_tokens: 94},
+      {text: "<done>##DONE##</done>", output_tokens: 10},
+    ],
+    { ->
+      const under_cap_session = "structural-validator-output-under-cap-" + harness.random.uuid()
+      const under_cap = agent_capture_events(
+        harness.agent,
+        under_cap_session,
+        fn() { return agent_loop(
+          harness,
+          "Update notes.txt and then finish.",
+          nil,
+          {
+            provider: "mock",
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 3,
+            max_tokens: 100,
+            tools: write_tools(),
+            session_id: under_cap_session,
+            structural_validator: with_structural_validator(
+              harness.agent,
+              {rules: ["output_token_cap_with_zero_calls"]},
+            ),
+          },
+        ) },
+      )
+      const under_cap_decisions = events_of(under_cap.events, "structural_validator_decision")
+      harness.stdio.println(under_cap.result.status == "done")
+      harness.stdio.println(len(under_cap_decisions) == 0)
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text(malformed_tool_text), llm_text(tool_text), llm_text("<done>##DONE##</done>")],
+    { ->
+      const warn_only_session = "structural-validator-warn-only-" + harness.random.uuid()
+      const warn_only = agent_capture_events(
+        harness.agent,
+        warn_only_session,
+        fn() { return agent_loop(
+          harness,
+          "Update notes.txt and then finish.",
+          nil,
+          {
+            provider: "mock",
+            tool_format: "text",
+            loop_until_done: true,
+            max_iterations: 4,
+            tools: write_tools(),
+            session_id: warn_only_session,
+            structural_validator: with_structural_validator(
+              harness.agent,
+              {rules: [{name: "tool_calls_well_formed", warn_only: true}]},
+            ),
+          },
+        ) },
+      )
+      const warn_only_decisions = events_of(warn_only.events, "structural_validator_decision")
+      const warn_only_messages = json_stringify(harness.llm.mock_calls()[1].messages)
+      harness.stdio.println(warn_only.result.status == "done")
+      harness.stdio.println(len(warn_only_decisions) == 1)
+      harness.stdio.println(warn_only_decisions[0].rule == "tool_calls_well_formed")
+      harness.stdio.println(!(warn_only_decisions[0].vetoed ?? true))
+      harness.stdio.println(warn_only_decisions[0].reason == "warn_only")
+      harness.stdio.println(!warn_only_messages.contains("structural_validator"))
+    },
+  )
+  // Option validation is schema-backed: malformed public options fail at
+  // construction time before any validator turn can run.
+  const bad_options_type = try {
+    with_structural_validator(harness.agent, "invalid")
+  }
+  harness.stdio.println(error_contains(bad_options_type, "dict"))
+  const bad_on_failure = try {
+    with_structural_validator(harness.agent, {on_failure: "passthrough"})
+  }
+  harness.stdio.println(error_contains(bad_on_failure, "on_failure"))
+  const bad_max_attempts = try {
+    with_structural_validator(harness.agent, {max_attempts: 0})
+  }
+  harness.stdio.println(error_contains(bad_max_attempts, "max_attempts"))
+  const bad_catalog = try {
+    with_structural_validator(harness.agent, {no_phantom_completion_catalog: {en: "done"}})
+  }
+  harness.stdio.println(error_contains(bad_catalog, "no_phantom_completion_catalog"))
+  const bad_warn_only = try {
+    with_structural_validator(
+      harness.agent,
+      {rules: [{name: "tool_calls_well_formed", warn_only: "yes"}]},
+    )
+  }
+  harness.stdio.println(error_contains(bad_warn_only, "rules[0]"))
+}

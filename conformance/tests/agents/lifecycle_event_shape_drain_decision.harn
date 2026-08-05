@@ -1,0 +1,29 @@
+pipeline main(harness: Harness) {
+  const evt = transcript_drain_decision_event(
+    {
+      pipeline_id: "pipeline-1",
+      item: {
+        category: "suspended_subagent",
+        id: "worker://triage/42",
+        summary: "worker is suspended",
+      },
+      action: "resume",
+      reason: "settlement agent selected continuation",
+      decided_at_turn: 7,
+      settlement_agent_session_id: "settlement-session-1",
+    },
+  )
+  harness.stdio.println(evt?.kind == "drain_decision")
+  harness.stdio.println(evt?.role == "system")
+  harness.stdio.println(evt?.visibility == "public")
+  harness.stdio.println(evt?.text == "settlement agent selected continuation")
+  harness.stdio.println(evt?.drain?.pipeline_id == "pipeline-1")
+  harness.stdio.println(evt?.drain?.item?.category == "suspended_subagent")
+  harness.stdio.println(evt?.drain?.item?.id == "worker://triage/42")
+  harness.stdio.println(evt?.drain?.item?.summary == "worker is suspended")
+  harness.stdio.println(evt?.drain?.action == "resume")
+  harness.stdio.println(evt?.drain?.reason == "settlement agent selected continuation")
+  harness.stdio.println(evt?.drain?.decided_at_turn == 7)
+  harness.stdio.println(evt?.drain?.settlement_agent_session_id == "settlement-session-1")
+  harness.stdio.println(evt?.metadata?.pipeline_id == "pipeline-1")
+}

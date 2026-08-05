@@ -1,0 +1,1238 @@
+/**
+ * std/personas/prelude — small orchestration primitives for persona scripts.
+ *
+ * The helpers return explicit envelopes so callers can persist, render, or
+ * compose them without depending on ambient host state.
+ */
+import { settle_with_abort } from "std/abort"
+
+fn __prelude_is_callable(value) -> bool {
+  const kind = type_of(value)
+  return kind == "function" || kind == "closure" || kind == "fn"
+}
+
+fn __prelude_digest(value) {
+  if value == nil {
+    return nil
+  }
+  return "sha256:" + sha256(json_stringify(value))
+}
+
+fn __prelude_error_object(error) {
+  if error == nil {
+    return nil
+  }
+  if type_of(error) == "dict" {
+    return error
+  }
+  return {message: to_string(error)}
+}
+
+fn __prelude_error_message(error) -> string {
+  if error == nil {
+    return ""
+  }
+  if type_of(error) == "dict" {
+    return error?.message ?? json_stringify(error)
+  }
+  return to_string(error)
+}
+
+fn __prelude_as_result(value) {
+  const ok_probe = try {
+    is_ok(value)
+  }
+  if is_ok(ok_probe) && unwrap(ok_probe) {
+    return {ok: true, value: unwrap(value), error: nil}
+  }
+  const err_probe = try {
+    is_err(value)
+  }
+  if is_ok(err_probe) && unwrap(err_probe) {
+    return {ok: false, value: nil, error: unwrap_err(value)}
+  }
+  if type_of(value) == "dict" && value?.ok != nil {
+    return {ok: value.ok, value: value?.value ?? value?.result, error: value?.error}
+  }
+  if type_of(value) == "dict" && value?.status != nil {
+    const status = lowercase(to_string(value.status))
+    const ok = contains(["ok", "pass", "passed", "success", "succeeded"], status)
+    return {
+      ok: ok,
+      value: value,
+      error: if ok {
+        nil
+      } else {
+        value
+      },
+    }
+  }
+  if type_of(value) == "bool" {
+    return {
+      ok: value,
+      value: value,
+      error: if value {
+        nil
+      } else {
+        {message: "predicate returned false"}
+      },
+    }
+  }
+  return {
+    ok: value != nil,
+    value: value,
+    error: if value == nil {
+      {message: "predicate returned nil"}
+    } else {
+      nil
+    },
+  }
+}
+
+fn __prelude_receipt_id(opts, status, calls) -> string {
+  if opts?.id != nil {
+    return opts.id
+  }
+  const seed = {
+    persona: opts?.persona ?? "persona_prelude",
+    step: opts?.step,
+    trace_id: opts?.trace_id ?? "",
+    started_at: opts?.started_at ?? "",
+    status: status,
+    inputs_digest: opts?.inputs_digest ?? __prelude_digest(opts?.input),
+    calls: calls,
+  }
+  return "receipt-" + substring(sha256(json_stringify(seed)), 0, 16)
+}
+
+fn __prelude_receipt(opts, status, result, error, calls, approvals, side_effects) {
+  const options = opts ?? {}
+  const {started_at = harness.clock.date_iso(), completed_at = started_at, persona = "persona_prelude"} =
+    options
+    ?? {}
+  const input_digest = options?.inputs_digest ?? __prelude_digest(options?.input)
+  const output_digest = options?.outputs_digest ?? __prelude_digest(result)
+  return {
+    schema: "harn.receipt.v1",
+    id: __prelude_receipt_id(options + {started_at: started_at}, status, calls),
+    parent_run_id: options?.parent_run_id,
+    persona: persona,
+    step: options?.step,
+    trace_id: options?.trace_id
+      ?? ("trace-" + substring(sha256(started_at + ":" + persona), 0, 16)),
+    started_at: started_at,
+    completed_at: completed_at,
+    status: status,
+    inputs_digest: input_digest,
+    outputs_digest: output_digest,
+    model_calls: options?.model_calls ?? [],
+    tool_calls: calls ?? [],
+    cost_usd: options?.cost_usd ?? 0.0,
+    approvals: approvals ?? [],
+    handoffs: options?.handoffs ?? [],
+    side_effects: side_effects ?? [],
+    error: __prelude_error_object(error),
+    redaction_class: options?.redaction_class ?? "internal",
+    metadata: options?.metadata ?? {},
+  }
+}
+
+fn __prelude_call_record(name, status, value, error) {
+  return {
+    name: name,
+    status: status,
+    outputs_digest: __prelude_digest(value),
+    error: __prelude_error_object(error),
+  }
+}
+
+/**
+ * Run a deterministic verifier, then run actor only when the verifier
+ * returns an ok-shaped value.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn verify_then_act(verifier, actor, options = nil) {
+  const opts = options ?? {}
+  const {started_at = harness.clock.date_iso(), verifier_name = "verifier", actor_name = "actor"} =
+    opts
+    ?? {}
+  const verified_raw = try {
+    verifier()
+  }
+  if is_err(verified_raw) {
+    const error = unwrap_err(verified_raw)
+    const calls = [__prelude_call_record(verifier_name, "failure", nil, error)]
+    return {
+      ok: false,
+      status: "verification_error",
+      verified: false,
+      acted: false,
+      result: nil,
+      error: __prelude_error_object(error),
+      receipt: __prelude_receipt(
+        opts + {started_at: started_at},
+        "failure",
+        nil,
+        error,
+        calls,
+        [],
+        [],
+      ),
+    }
+  }
+  const verified = __prelude_as_result(unwrap(verified_raw))
+  let calls = [
+    __prelude_call_record(
+      verifier_name,
+      if verified.ok {
+        "success"
+      } else {
+        "denied"
+      },
+      verified.value,
+      verified.error,
+    ),
+  ]
+  if !verified.ok {
+    return {
+      ok: false,
+      status: "verification_failed",
+      verified: false,
+      acted: false,
+      result: nil,
+      error: __prelude_error_object(verified.error),
+      receipt: __prelude_receipt(
+        opts + {started_at: started_at},
+        "denied",
+        nil,
+        verified.error,
+        calls,
+        [],
+        [],
+      ),
+    }
+  }
+  const acted = try {
+    actor()
+  }
+  if is_err(acted) {
+    const error = unwrap_err(acted)
+    calls = calls + [__prelude_call_record(actor_name, "failure", nil, error)]
+    return {
+      ok: false,
+      status: "actor_error",
+      verified: true,
+      acted: true,
+      result: nil,
+      error: __prelude_error_object(error),
+      receipt: __prelude_receipt(
+        opts + {started_at: started_at},
+        "failure",
+        nil,
+        error,
+        calls,
+        [],
+        [],
+      ),
+    }
+  }
+  const result = unwrap(acted)
+  calls = calls + [__prelude_call_record(actor_name, "success", result, nil)]
+  return {
+    ok: true,
+    status: "success",
+    verified: true,
+    acted: true,
+    result: result,
+    error: nil,
+    receipt: __prelude_receipt(
+      opts + {started_at: started_at},
+      "success",
+      result,
+      nil,
+      calls,
+      [],
+      [],
+    ),
+  }
+}
+
+/**
+ * Run step_fn(state) until it reports done, makes no progress, or exhausts
+ * the supplied iteration/time budget.
+ *
+ * @effects: [time]
+ * @errors: []
+ */
+pub fn bounded_loop(clock: HarnessClock, state_init, step_fn, options = nil) {
+  const opts = options ?? {}
+  const started_at = opts?.started_at ?? clock.date_iso()
+  const started_ms = clock.timestamp() * 1000
+  const {max_iterations = 10, max_duration_ms = opts?.max_duration, progress_required = false} =
+    opts
+    ?? {}
+  let state = nil
+  if __prelude_is_callable(state_init) {
+    const init_outcome = try {
+      state_init()
+    }
+    if is_err(init_outcome) {
+      const error = unwrap_err(init_outcome)
+      const calls = [__prelude_call_record("state_init", "failure", nil, error)]
+      return {
+        ok: false,
+        status: "failure",
+        state: nil,
+        iterations: 0,
+        stopped_reason: "state_init_error",
+        history: [],
+        error: __prelude_error_object(error),
+        receipt: __prelude_receipt(
+          opts + {started_at: started_at},
+          "failure",
+          nil,
+          error,
+          calls,
+          [],
+          [],
+        ),
+      }
+    }
+    state = unwrap(init_outcome)
+  } else {
+    state = state_init
+  }
+  let history = []
+  let iterations = 0
+  let stopped_reason = "max_iterations"
+  while iterations < max_iterations {
+    if max_duration_ms != nil && clock.timestamp() * 1000 - started_ms >= max_duration_ms {
+      stopped_reason = "max_duration"
+      break
+    }
+    const before_digest = __prelude_digest(state)
+    const step_outcome = try {
+      step_fn(state)
+    }
+    iterations += 1
+    if is_err(step_outcome) {
+      const error = unwrap_err(step_outcome)
+      const calls = [__prelude_call_record("loop_step", "failure", nil, error)]
+      return {
+        ok: false,
+        status: "failure",
+        state: state,
+        iterations: iterations,
+        stopped_reason: "error",
+        history: history,
+        error: __prelude_error_object(error),
+        receipt: __prelude_receipt(
+          opts + {started_at: started_at},
+          "failure",
+          state,
+          error,
+          calls,
+          [],
+          [],
+        ),
+      }
+    }
+    const step_value = unwrap(step_outcome)
+    const is_envelope = type_of(step_value) == "dict"
+      && (step_value?.state != nil
+      || step_value?.done != nil
+      || step_value?.progress != nil
+      || step_value?.progress_made != nil)
+    const next_state = if is_envelope && step_value?.state != nil {
+      step_value.state
+    } else {
+      step_value
+    }
+    const next_digest = __prelude_digest(next_state)
+    const progressed = if is_envelope && step_value?.progress != nil {
+      step_value.progress
+    } else if is_envelope && step_value?.progress_made != nil {
+      step_value.progress_made
+    } else {
+      next_digest != before_digest
+    }
+    const done = is_envelope && (step_value?.done ?? false)
+    history = history + [{iteration: iterations, progress: progressed, done: done}]
+    state = next_state
+    if done {
+      stopped_reason = "done"
+      break
+    }
+    if progress_required && !progressed {
+      stopped_reason = "no_progress"
+      break
+    }
+  }
+  const status = if stopped_reason == "done" {
+    "completed"
+  } else {
+    "stopped"
+  }
+  const calls = [__prelude_call_record("bounded_loop", status, state, nil)]
+  return {
+    ok: status == "completed" || stopped_reason == "max_iterations"
+      || stopped_reason == "no_progress",
+    status: status,
+    state: state,
+    iterations: iterations,
+    stopped_reason: stopped_reason,
+    history: history,
+    receipt: __prelude_receipt(
+      opts + {started_at: started_at},
+      if status == "completed" {
+        "success"
+      } else {
+        "noop"
+      },
+      state,
+      nil,
+      calls,
+      [],
+      [],
+    ),
+  }
+}
+
+fn __prelude_invoke_model(llm: HarnessLlm, input, model_spec, options) {
+  const opts = options ?? {}
+  if __prelude_is_callable(model_spec) {
+    return model_spec(input)
+  }
+  if type_of(model_spec) == "dict" {
+    const prompt = to_string(model_spec?.prompt ?? input)
+    const system = model_spec?.system ?? opts?.system
+    return llm.call(prompt, system, opts + model_spec)
+  }
+  return llm.call(to_string(input), opts?.system, opts + {model: model_spec})
+}
+
+fn __prelude_confidence(value) {
+  if type_of(value) == "dict" && value?.confidence != nil {
+    return value.confidence
+  }
+  return 1.0
+}
+
+/**
+ * Classify with a cheap route first, then escalate when confidence is low
+ * or the caller-supplied predicate returns true.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn cheap_classify_then_escalate(
+  clock: HarnessClock,
+  llm: HarnessLlm,
+  input,
+  cheap_model,
+  escalate_model,
+  escalation_predicate,
+  options = nil,
+) {
+  const opts = options ?? {}
+  const {started_at = clock.date_iso(), min_confidence = 0.7} = opts ?? {}
+  const cheap_result = try {
+    __prelude_invoke_model(llm, input, cheap_model, opts?.cheap_options ?? {})
+  }
+  let calls = []
+  if is_err(cheap_result) {
+    const cheap_error = unwrap_err(cheap_result)
+    calls = calls + [__prelude_call_record("cheap_classify", "failure", nil, cheap_error)]
+    const escalated_after_error = try {
+      __prelude_invoke_model(llm, input, escalate_model, opts?.escalate_options ?? {})
+    }
+    if is_err(escalated_after_error) {
+      const error = unwrap_err(escalated_after_error)
+      calls = calls + [__prelude_call_record("escalate_classify", "failure", nil, error)]
+      return {
+        ok: false,
+        status: "failure",
+        escalated: true,
+        result: nil,
+        cheap: nil,
+        error: __prelude_error_object(error),
+        receipt: __prelude_receipt(
+          opts + {started_at: started_at},
+          "failure",
+          nil,
+          error,
+          calls,
+          [],
+          [],
+        ),
+      }
+    }
+    const result = unwrap(escalated_after_error)
+    calls = calls + [__prelude_call_record("escalate_classify", "success", result, nil)]
+    return {
+      ok: true,
+      status: "escalated",
+      escalated: true,
+      result: result,
+      cheap: nil,
+      error: nil,
+      receipt: __prelude_receipt(
+        opts + {started_at: started_at},
+        "success",
+        result,
+        nil,
+        calls,
+        [],
+        [],
+      ),
+    }
+  }
+  const cheap = unwrap(cheap_result)
+  calls = calls + [__prelude_call_record("cheap_classify", "success", cheap, nil)]
+  let should_escalate = __prelude_confidence(cheap) < min_confidence
+  if __prelude_is_callable(escalation_predicate) {
+    const predicate_outcome = try {
+      escalation_predicate(cheap)
+    }
+    if is_err(predicate_outcome) {
+      const predicate_error = unwrap_err(predicate_outcome)
+      calls = calls
+        + [__prelude_call_record("escalation_predicate", "failure", nil, predicate_error)]
+      should_escalate = true
+    } else if unwrap(predicate_outcome) {
+      should_escalate = true
+    }
+  }
+  if !should_escalate {
+    return {
+      ok: true,
+      status: "cheap",
+      escalated: false,
+      result: cheap,
+      cheap: cheap,
+      error: nil,
+      receipt: __prelude_receipt(
+        opts + {started_at: started_at},
+        "success",
+        cheap,
+        nil,
+        calls,
+        [],
+        [],
+      ),
+    }
+  }
+  const escalated = try {
+    __prelude_invoke_model(llm, input, escalate_model, opts?.escalate_options ?? {})
+  }
+  if is_err(escalated) {
+    const error = unwrap_err(escalated)
+    calls = calls + [__prelude_call_record("escalate_classify", "failure", nil, error)]
+    return {
+      ok: false,
+      status: "failure",
+      escalated: true,
+      result: nil,
+      cheap: cheap,
+      error: __prelude_error_object(error),
+      receipt: __prelude_receipt(
+        opts + {started_at: started_at},
+        "failure",
+        nil,
+        error,
+        calls,
+        [],
+        [],
+      ),
+    }
+  }
+  const result = unwrap(escalated)
+  calls = calls + [__prelude_call_record("escalate_classify", "success", result, nil)]
+  return {
+    ok: true,
+    status: "escalated",
+    escalated: true,
+    result: result,
+    cheap: cheap,
+    error: nil,
+    receipt: __prelude_receipt(
+      opts + {started_at: started_at},
+      "success",
+      result,
+      nil,
+      calls,
+      [],
+      [],
+    ),
+  }
+}
+
+/**
+ * Execute items in bounded parallel batches and stop scheduling new work when
+ * failures reach the circuit-breaker threshold.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn parallel_sweep_with_circuit_breaker(harness: Harness, items, step_fn, options = nil) {
+  const opts = options ?? {}
+  const started_at = opts?.started_at ?? harness.clock.date_iso()
+  let max_concurrent = opts?.max_concurrent ?? 4
+  if max_concurrent < 1 {
+    max_concurrent = 1
+  }
+  const max_failures = opts?.max_failures ?? 1
+  // One cooperative-abort settle replaces the old batch-at-a-time loop. The
+  // batching existed only to give the sweep somewhere to check the failure
+  // count — `parallel settle` alone never stops — and it cost real pipelining:
+  // one slow item stalled its whole chunk, and a failure could not stop the
+  // chunk it was in. `settle_with_abort` checks the threshold as each branch
+  // settles, so items that have not started yet are dropped immediately.
+  const outcome = settle_with_abort(
+    harness.random,
+    harness.runtime,
+    items,
+    { item -> step_fn(item) },
+    {max_concurrent: max_concurrent, max_failures: max_failures},
+  )
+  let succeeded = 0
+  let failed = 0
+  let results = []
+  let position = 0
+  let abandoned_cursor = 0
+  for item_result in outcome.results {
+    // Abandoned branches never ran; they are `skipped`, not results.
+    // `abandoned_indexes` is ascending, so one cursor keeps this O(n).
+    if abandoned_cursor < len(outcome.abandoned_indexes)
+      && outcome.abandoned_indexes[abandoned_cursor]
+      == position {
+      abandoned_cursor += 1
+      position += 1
+      continue
+    }
+    if is_ok(item_result) {
+      succeeded += 1
+      results = results + [{ok: true, value: unwrap(item_result), error: nil}]
+    } else {
+      const error = unwrap_err(item_result)
+      failed += 1
+      results = results + [{ok: false, value: nil, error: __prelude_error_object(error)}]
+    }
+    position += 1
+  }
+  const broken = outcome.aborted
+  const skipped = outcome.abandoned
+  if broken && __prelude_is_callable(opts?.on_break) {
+    opts.on_break({failed: failed, skipped: skipped, succeeded: succeeded})
+  }
+  const status = if broken {
+    "circuit_open"
+  } else {
+    "completed"
+  }
+  const calls = [
+    __prelude_call_record(
+      "parallel_sweep",
+      status,
+      {succeeded: succeeded, failed: failed, skipped: skipped},
+      nil,
+    ),
+  ]
+  return {
+    ok: !broken,
+    status: status,
+    circuit_open: broken,
+    succeeded: succeeded,
+    failed: failed,
+    skipped: skipped,
+    results: results,
+    receipt: __prelude_receipt(
+      opts + {started_at: started_at},
+      if broken {
+        "failure"
+      } else {
+        "success"
+      },
+      results,
+      nil,
+      calls,
+      [],
+      [],
+    ),
+  }
+}
+
+/**
+ * Return a wrapper that runs a step and attaches a canonical receipt envelope.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn with_audit_receipt(clock: HarnessClock, step_fn, options = nil) {
+  const opts = options ?? {}
+  return fn() {
+    const started_at = opts?.started_at ?? clock.date_iso()
+    const outcome = try {
+      step_fn()
+    }
+    if is_err(outcome) {
+      const error = unwrap_err(outcome)
+      const calls = [__prelude_call_record(opts?.step ?? "step", "failure", nil, error)]
+      return {
+        ok: false,
+        status: "failure",
+        result: nil,
+        error: __prelude_error_object(error),
+        receipt: __prelude_receipt(
+          opts + {started_at: started_at},
+          "failure",
+          nil,
+          error,
+          calls,
+          [],
+          [],
+        ),
+      }
+    }
+    const result = unwrap(outcome)
+    const calls = [__prelude_call_record(opts?.step ?? "step", "success", result, nil)]
+    return {
+      ok: true,
+      status: "success",
+      result: result,
+      error: nil,
+      receipt: __prelude_receipt(
+        opts + {started_at: started_at},
+        "success",
+        result,
+        nil,
+        calls,
+        [],
+        [],
+      ),
+    }
+  }
+}
+
+/**
+ * Return a wrapper that requires an approval record before running a step.
+ * Without an approval record or `request_approval: true`, the wrapper returns
+ * a suspended envelope instead of blocking indefinitely.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn with_approval_gate(
+  clock: HarnessClock,
+  interaction: HarnessInteraction,
+  approval_kind,
+  step_fn,
+  options = nil,
+) {
+  const opts = options ?? {}
+  return fn() {
+    const started_at = opts?.started_at ?? clock.date_iso()
+    let approval = opts?.approval
+    if approval == nil && (opts?.request_approval ?? false) {
+      const requested = try {
+        interaction.request_approval(to_string(approval_kind), opts?.approval_options ?? {})
+      }
+      if is_err(requested) {
+        const error = unwrap_err(requested)
+        const status = if __prelude_error_message(error).contains("timeout") {
+          "suspended"
+        } else {
+          "denied"
+        }
+        const calls = [__prelude_call_record("approval_gate", status, nil, error)]
+        return {
+          ok: false,
+          status: status,
+          approval_required: true,
+          approval_kind: approval_kind,
+          result: nil,
+          error: __prelude_error_object(error),
+          receipt: __prelude_receipt(
+            opts + {started_at: started_at, step: opts?.step ?? to_string(approval_kind)},
+            if status == "denied" {
+              "denied"
+            } else {
+              "running"
+            },
+            nil,
+            error,
+            calls,
+            [],
+            [],
+          ),
+        }
+      }
+      approval = unwrap(requested)
+    }
+    if approval == nil {
+      const calls = [__prelude_call_record("approval_gate", "suspended", nil, nil)]
+      return {
+        ok: false,
+        status: "suspended",
+        approval_required: true,
+        approval_kind: approval_kind,
+        result: nil,
+        error: nil,
+        receipt: __prelude_receipt(
+          opts + {started_at: started_at, step: opts?.step ?? to_string(approval_kind)},
+          "running",
+          nil,
+          nil,
+          calls,
+          [],
+          [],
+        ),
+      }
+    }
+    if !(approval?.approved ?? false) {
+      const error = {message: approval?.reason ?? "approval denied"}
+      const calls = [__prelude_call_record("approval_gate", "denied", nil, error)]
+      return {
+        ok: false,
+        status: "denied",
+        approval_required: true,
+        approval_kind: approval_kind,
+        result: nil,
+        error: error,
+        receipt: __prelude_receipt(
+          opts + {started_at: started_at, step: opts?.step ?? to_string(approval_kind)},
+          "denied",
+          nil,
+          error,
+          calls,
+          [approval],
+          [],
+        ),
+      }
+    }
+    const outcome = try {
+      step_fn()
+    }
+    if is_err(outcome) {
+      const error = unwrap_err(outcome)
+      const calls = [
+        __prelude_call_record("approval_gate", "success", approval, nil),
+        __prelude_call_record(opts?.step ?? "approved_step", "failure", nil, error),
+      ]
+      return {
+        ok: false,
+        status: "failure",
+        approval_required: false,
+        approval_kind: approval_kind,
+        result: nil,
+        error: __prelude_error_object(error),
+        receipt: __prelude_receipt(
+          opts + {started_at: started_at, step: opts?.step ?? to_string(approval_kind)},
+          "failure",
+          nil,
+          error,
+          calls,
+          [approval],
+          [],
+        ),
+      }
+    }
+    const result = unwrap(outcome)
+    const calls = [
+      __prelude_call_record("approval_gate", "success", approval, nil),
+      __prelude_call_record(opts?.step ?? "approved_step", "success", result, nil),
+    ]
+    return {
+      ok: true,
+      status: "success",
+      approval_required: false,
+      approval_kind: approval_kind,
+      result: result,
+      error: nil,
+      receipt: __prelude_receipt(
+        opts + {started_at: started_at, step: opts?.step ?? to_string(approval_kind)},
+        "success",
+        result,
+        nil,
+        calls,
+        [approval],
+        [],
+      ),
+    }
+  }
+}
+
+fn __prelude_persona_repair_record(entry) {
+  return entry?.repair_run ?? entry
+}
+
+fn __prelude_persona_repair_status(record) -> string {
+  return lowercase(to_string(record?.status ?? ""))
+}
+
+fn __prelude_persona_repair_succeeded(record) -> bool {
+  const status = __prelude_persona_repair_status(record)
+  const validation_errors = record?.validation_errors ?? []
+  return (status == "completed" || status == "success") && len(validation_errors) == 0
+}
+
+fn __prelude_persona_repair_persona(record, opts) -> string {
+  return to_string(
+    record?.persona
+      ?? record?.parent_receipt_ref?.persona
+      ?? record?.bundle?.persona
+      ?? opts?.persona
+      ?? "persona",
+  )
+}
+
+fn __prelude_persona_downstream_action(record) -> string {
+  return to_string(
+    record?.downstream_action
+      ?? record?.next_action
+      ?? record?.merge_receipt?.action
+      ?? record?.receipt?.action
+      ?? record?.parent_receipt_ref?.next_action
+      ?? "unknown",
+  )
+}
+
+fn __prelude_persona_input_shape(record) {
+  const bundle = record?.bundle ?? {}
+  return {
+    kind: bundle?.kind ?? record?.kind ?? "repair",
+    repo: bundle?.repo ?? record?.repo ?? "",
+    conflict_paths: bundle?.conflict_paths ?? [],
+    failing_checks: bundle?.failing_checks ?? [],
+    allowed_write_scope: bundle?.allowed_write_scope ?? [],
+    required_verification: bundle?.required_verification ?? [],
+    release_facts: bundle?.release_facts,
+    extra_context: bundle?.extra_context ?? {},
+  }
+}
+
+fn __prelude_persona_output_shape(record) {
+  const output = record?.output ?? {}
+  const push = output?.push_result
+  return {
+    diagnosis: output?.diagnosis ?? "",
+    files_changed: output?.files_changed ?? [],
+    tests_run: output?.tests_run ?? [],
+    commits_created: (output?.commits_created ?? []).map(
+      { commit -> return {subject: commit?.subject ?? ""} },
+    ),
+    push_result: if push == nil {
+      nil
+    } else {
+      {
+        pushed: push?.pushed ?? false,
+        ref: push?.ref ?? "",
+        force_with_lease: push?.force_with_lease,
+      }
+    },
+    residual_risk: output?.residual_risk ?? "",
+    release_outputs: output?.release_outputs,
+  }
+}
+
+fn __prelude_persona_pattern_key(record, opts) -> string {
+  const seed = {
+    persona: __prelude_persona_repair_persona(record, opts),
+    worker: record?.worker ?? record?.agent ?? "repair_worker",
+    input_digest: __prelude_digest(__prelude_persona_input_shape(record)),
+    output_digest: __prelude_digest(__prelude_persona_output_shape(record)),
+    downstream_action: __prelude_persona_downstream_action(record),
+  }
+  return "persona-pattern-" + substring(sha256(json_stringify(seed)), 0, 16)
+}
+
+fn __prelude_persona_pattern_example(record, index, opts) {
+  const trace_id = record?.trace_id
+    ?? record?.parent_receipt_ref?.sweep_id
+    ?? record?.bundle?.parent?.sweep_id
+    ?? ("repair-trace-" + to_string(index + 1))
+  return {
+    trace_id: to_string(trace_id),
+    source_hash: record?.source_hash ?? __prelude_digest(record),
+    receipt_id: record?.id ?? record?.receipt_id,
+    persona: __prelude_persona_repair_persona(record, opts),
+    repair_kind: __prelude_persona_input_shape(record).kind,
+    downstream_action: __prelude_persona_downstream_action(record),
+    input_digest: __prelude_digest(__prelude_persona_input_shape(record)),
+    output_digest: __prelude_digest(__prelude_persona_output_shape(record)),
+  }
+}
+
+fn __prelude_persona_identifier(value) -> string {
+  let clean = regex_replace("[^A-Za-z0-9_]+", "_", lowercase(trim(to_string(value ?? "repair"))))
+  clean = regex_replace("^_+|_+$", "", clean)
+  if clean == "" {
+    return "repair"
+  }
+  if regex_match("^[0-9]", clean) != nil {
+    clean = "step_" + clean
+  }
+  return clean
+}
+
+fn __prelude_persona_patch_for_group(group, opts) -> string {
+  const persona = __prelude_persona_identifier(group.persona)
+  const kind = __prelude_persona_identifier(group.repair_kind)
+  const downstream = __prelude_persona_identifier(group.downstream_action)
+  const {step_name = "crystallized_${persona}_${kind}_${downstream}", function_name = step_name + "_step"} =
+    opts
+    ?? {}
+  const key = group.key
+  const input_digest = group.input_digest
+  const output_digest = group.output_digest
+  const action = group.downstream_action
+  const anchor_step = opts?.anchor_step ?? "dispatch_repair_workers"
+  return "// Insert after persona step: ${anchor_step}\n@step(name: \"${step_name}\", receipt: audit, error_boundary: fail)\nfn ${function_name}(ctx) {\n  return {\n    _type: \"harn.persona.crystallized_repair.v1\",\n    pattern_key: \"${key}\",\n    status: \"matched\",\n    input_digest: \"${input_digest}\",\n    output_digest: \"${output_digest}\",\n    downstream_action: \"${action}\",\n    context: ctx,\n  }\n}"
+}
+
+fn __prelude_persona_candidate(group, opts) {
+  const step_name = opts?.step_name
+    ?? "crystallized_${__prelude_persona_identifier(group.persona)}_${__prelude_persona_identifier(group.repair_kind)}_${__prelude_persona_identifier(group.downstream_action)}"
+  const package_name = opts?.package_name
+    ?? "${__prelude_persona_identifier(group.persona)}-workflows"
+  const model_calls = group.model_calls
+  const input_tokens = group.input_tokens
+  const output_tokens = group.output_tokens
+  const cost_usd = group.cost_usd
+  const wall_ms = group.wall_ms
+  const patch = __prelude_persona_patch_for_group(group, opts + {step_name: step_name})
+  return {
+    id: "candidate-" + substring(sha256(group.key), 0, 16),
+    name: step_name,
+    confidence: 0.9,
+    examples: group.examples,
+    repair_kind: group.repair_kind,
+    downstream_action: group.downstream_action,
+    deterministic_step: {
+      name: step_name,
+      anchor_step: opts?.anchor_step ?? "dispatch_repair_workers",
+      patch: patch,
+      input_digest: group.input_digest,
+      output_digest: group.output_digest,
+    },
+    savings: {
+      model_calls_avoided: model_calls,
+      input_tokens_avoided: input_tokens,
+      output_tokens_avoided: output_tokens,
+      estimated_cost_usd_avoided: cost_usd,
+      wall_ms_avoided: wall_ms,
+      cpu_runtime_cost_usd: 0.0,
+      remaining_model_calls: 0,
+    },
+    shadow: {
+      pass: true,
+      compared_traces: group.count,
+      failures: [],
+      traces: group.examples.map(
+        { example ->
+          return {
+            trace_id: example.trace_id,
+            pass: true,
+            details: ["exact input/output/downstream recurrence"],
+          }
+        },
+      ),
+    },
+    promotion: {
+      package_name: package_name,
+      workflow_version: opts?.workflow_version ?? "0.1.0",
+      rollout_policy: opts?.rollout_policy ?? "shadow_then_canary",
+      rollback_target: "remove the promoted @step and fall back to repair_worker",
+      approver: opts?.approver,
+      author: opts?.author,
+    },
+  }
+}
+
+/**
+ * Mine successful repair-worker records for exact repeated
+ * input/output/downstream patterns that are safe to propose as a
+ * deterministic persona `@step`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn persona_crystallization_candidates(history, options = nil) {
+  const opts = options ?? {}
+  const min_examples = opts?.min_examples ?? 3
+  const hosted_history_days = opts?.hosted_history_days ?? 0
+  const min_hosted_history_days = opts?.min_hosted_history_days ?? 90
+  if hosted_history_days < min_hosted_history_days {
+    return {
+      ok: false,
+      status: "gated",
+      candidates: [],
+      rejected: [],
+      observed_records: len(history ?? []),
+      min_examples: min_examples,
+      hosted_history_days: hosted_history_days,
+      min_hosted_history_days: min_hosted_history_days,
+      warnings: ["persona crystallization requires hosted-run history before promotion"],
+    }
+  }
+  let groups = {}
+  let order = []
+  let rejected = []
+  let index = 0
+  for entry in history ?? [] {
+    const record = __prelude_persona_repair_record(entry)
+    if !__prelude_persona_repair_succeeded(record) {
+      rejected = rejected + [{index: index, reason: "repair run did not complete cleanly"}]
+      index += 1
+      continue
+    }
+    const key = __prelude_persona_pattern_key(record, opts)
+    if groups[key] == nil {
+      const input_shape = __prelude_persona_input_shape(record)
+      groups[key] = {
+        key: key,
+        count: 0,
+        examples: [],
+        persona: __prelude_persona_repair_persona(record, opts),
+        repair_kind: input_shape.kind,
+        downstream_action: __prelude_persona_downstream_action(record),
+        input_digest: __prelude_digest(input_shape),
+        output_digest: __prelude_digest(__prelude_persona_output_shape(record)),
+        model_calls: 0,
+        input_tokens: 0,
+        output_tokens: 0,
+        cost_usd: 0.0,
+        wall_ms: 0,
+      }
+      order = order + [key]
+    }
+    const group = groups[key]
+    const model_calls_inc = record?.agent_loop?.model_calls ?? record?.agent_loop?.llm?.iterations
+      ?? 1
+    const input_tokens_inc = record?.agent_loop?.input_tokens
+      ?? record?.agent_loop?.llm?.input_tokens
+      ?? 0
+    const output_tokens_inc = record?.agent_loop?.output_tokens
+      ?? record?.agent_loop?.llm
+      ?.output_tokens
+      ?? 0
+    const cost_usd_inc = record?.agent_loop?.cost_usd ?? 0.0
+    const wall_ms_inc = record?.agent_loop?.wall_ms ?? record?.duration_ms ?? 0
+    groups[key] = group
+      + {
+      count: group.count + 1,
+      examples: group.examples + [__prelude_persona_pattern_example(record, index, opts)],
+      model_calls: group.model_calls + model_calls_inc,
+      input_tokens: group.input_tokens + input_tokens_inc,
+      output_tokens: group.output_tokens + output_tokens_inc,
+      cost_usd: group.cost_usd + cost_usd_inc,
+      wall_ms: group.wall_ms + wall_ms_inc,
+    }
+    index += 1
+  }
+  let candidates = []
+  for key in order {
+    const group = groups[key]
+    if group.count >= min_examples {
+      candidates = candidates + [__prelude_persona_candidate(group, opts)]
+    } else {
+      rejected = rejected
+        + [
+        {pattern_key: key, reason: "fewer than min_examples", examples: group.count},
+      ]
+    }
+  }
+  return {
+    ok: len(candidates) > 0,
+    status: if len(candidates) > 0 {
+      "candidate"
+    } else {
+      "no_candidate"
+    },
+    candidates: candidates,
+    rejected: rejected,
+    observed_records: len(history ?? []),
+    min_examples: min_examples,
+    hosted_history_days: hosted_history_days,
+    min_hosted_history_days: min_hosted_history_days,
+    warnings: [],
+  }
+}
+
+/**
+ * Return a `harn.crystallization.candidate.bundle`-shaped proposal for
+ * the strongest persona recurrence candidate. The patch is Harn source
+ * that reviewers can apply to the persona package after shadow/eval review.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn persona_crystallization_bundle(history, options = nil) {
+  const opts = options ?? {}
+  const report = persona_crystallization_candidates(history, opts)
+  if !report.ok {
+    return {
+      schema: "harn.crystallization.candidate.bundle",
+      schema_version: 1,
+      kind: "rejected",
+      candidate_id: nil,
+      title: "persona crystallization candidate",
+      report: report,
+      warnings: report.warnings,
+    }
+  }
+  let candidate = report.candidates[0]
+  for current in report.candidates {
+    if len(current.examples) > len(candidate.examples)
+      || (len(current.examples)
+      == len(candidate.examples)
+      && current.savings.model_calls_avoided
+      > candidate.savings
+      .model_calls_avoided) {
+      candidate = current
+    }
+  }
+  return {
+    schema: "harn.crystallization.candidate.bundle",
+    schema_version: 1,
+    kind: "candidate",
+    candidate_id: candidate.id,
+    title: candidate.name,
+    workflow: {
+      path: "workflow.harn",
+      name: candidate.name,
+      package_name: candidate.promotion.package_name,
+      package_version: candidate.promotion.workflow_version,
+    },
+    source_traces: candidate.examples,
+    deterministic_steps: [candidate.deterministic_step],
+    fuzzy_steps: [],
+    side_effects: [],
+    capabilities: [],
+    required_secrets: [],
+    savings: candidate.savings,
+    shadow: candidate.shadow,
+    eval_pack: {path: "harn.eval.toml", link: opts?.eval_pack_link},
+    promotion: candidate.promotion,
+    patch: candidate.deterministic_step.patch,
+    report: report,
+    warnings: [],
+  }
+}
+
+/**
+ * Return the declared output style of a persona as `{name, instructions}`, or
+ * nil when none is declared.
+ *
+ * With no argument, reads the currently-active persona (the one whose `@step`
+ * is executing). Pass a persona function name to read that persona from the
+ * registry regardless of what is active.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn persona_output_style(function = nil) {
+  return __persona_output_style(function)
+}

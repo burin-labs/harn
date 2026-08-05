@@ -1,0 +1,153 @@
+import { agent_loop } from "std/agent/loop"
+/**
+ * Captain-shaped middleware stack: composes audit + telemetry + summary
+ * + required-reason + handoff + rate-limit + dry-run over a registry of
+ * read/edit/escalate tools. Exercises the steel thread of the persona
+ * governance promise — every tool dispatch produces a structured audit
+ * record, callers above the budget short-circuit, and handoff payloads
+ * surface as typed records on `audit.handoff`.
+ */
+import {
+  compose_tool_callers,
+  with_audit_log,
+  with_dry_run,
+  with_handoff_artifact,
+  with_rate_limit,
+  with_required_reason,
+  with_summary,
+  with_telemetry,
+} from "std/llm/tool_middleware"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Tool schemas omit `reason` deliberately. with_required_reason adds it
+ * to the registry via `schema_transform` and strips it back out before
+ * the runtime validates dispatch args, so leaving it out of the natural
+ * tool definition is the canonical pattern (echoes the existing
+ * `agent_loop_tool_caller_observes` test).
+ */
+fn tools() {
+  let r = tool_registry()
+  r = tool_define(
+    r,
+    "read",
+    "Read a file",
+    {
+      handler: { args -> "contents of " + to_string(args?.path ?? "") },
+      parameters: {path: {type: "string"}},
+    },
+  )
+  r = tool_define(
+    r,
+    "edit",
+    "Edit a file",
+    {
+      handler: { args -> "edited " + to_string(args?.path ?? "") },
+      parameters: {path: {type: "string"}, body: {type: "string"}},
+    },
+  )
+  r = tool_define(
+    r,
+    "escalate",
+    "Hand off to another captain",
+    {
+      handler: { args ->
+        return json_stringify(
+          {
+            __handoff: {
+              source_persona: "merge_captain",
+              target_persona_or_human: {
+                kind: "persona",
+                id: "review_captain",
+                label: "review_captain",
+              },
+              task: to_string(args?.task ?? ""),
+              reason: "needs human eyes",
+              requested_capabilities: ["review"],
+            },
+          },
+        )
+      },
+      parameters: {task: {type: "string"}},
+    },
+  )
+  return r
+}
+
+pipeline default(harness: Harness) {
+  const audit_records = harness.runtime.atomic(0)
+  const telemetry_records = harness.runtime.atomic(0)
+  const handoff_records = harness.runtime.atomic(0)
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        tool_calls: [
+          {id: "t1", name: "read", arguments: {path: "/tmp/a", reason: "inspect target file"}},
+          {id: "t2", name: "edit", arguments: {path: "/tmp/a", body: "x", reason: "fix typo"}},
+          {id: "t3", name: "escalate", arguments: {task: "Review fix", reason: "needs human eyes"}},
+        ],
+      },
+      llm_text("Done. ##DONE##"),
+    ],
+    { ->
+      const reason_mw = with_required_reason()
+      const stack = compose_tool_callers(
+        harness.clock,
+        [
+          with_audit_log(
+            harness.clock,
+            harness.fs,
+            { _record ->
+              let _ = harness.runtime.atomic_add(audit_records, 1)
+            },
+          ),
+          with_telemetry(
+            harness,
+            { _record ->
+              let _ = harness.runtime.atomic_add(telemetry_records, 1)
+            },
+          ),
+          with_summary({ call, _result -> return call.tool_name + " ran" }),
+          reason_mw.caller,
+          with_handoff_artifact(
+            {
+              sink: { _record, _call ->
+                let _ = harness.runtime.atomic_add(handoff_records, 1)
+              },
+            },
+          ),
+          with_rate_limit(harness.runtime, {max_calls: 10}),
+          with_dry_run({only: ["edit"], message: "preview"}),
+        ],
+      )
+      const registry = tools()
+      const result = agent_loop(
+        harness,
+        "polish + handoff",
+        nil,
+        {
+          provider: "mock",
+          tools: registry,
+          tool_format: "native",
+          max_iterations: 3,
+          loop_until_done: true,
+          tool_caller: stack,
+        },
+      )
+      harness.stdio.println(result.status)
+      harness.stdio.println(harness.runtime.atomic_get(audit_records))
+      harness.stdio.println(harness.runtime.atomic_get(telemetry_records))
+      harness.stdio.println(harness.runtime.atomic_get(handoff_records))
+      harness.stdio.println(len(result.tools.successful))
+      harness.stdio.println(contains(result.tools.successful, "read"))
+      harness.stdio.println(contains(result.tools.successful, "edit"))
+      harness.stdio.println(contains(result.tools.successful, "escalate"))
+    },
+  )
+}
+// Three tool dispatches: each fired audit + telemetry sinks once.
+// Exactly one handoff was emitted (the third call).
+// All three calls succeeded as far as the agent loop is concerned —
+// the dry-run layer returns ok=true with status="dry_run" instead of
+// dispatching the underlying handler.

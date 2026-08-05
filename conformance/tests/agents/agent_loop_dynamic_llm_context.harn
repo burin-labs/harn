@@ -1,0 +1,121 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+
+fn iteration_events(events) {
+  return events.filter({ event -> event.type == "iteration_start" })
+}
+
+pipeline test(harness: Harness, task) {
+  const call_count = harness.runtime.atomic(0)
+  const first_context_ok = harness.runtime.atomic(0)
+  const second_context_ok = harness.runtime.atomic(0)
+  const second_call_options_ok = harness.runtime.atomic(0)
+  const first_thinking_kept = harness.runtime.atomic(0)
+  const second_thinking_stripped = harness.runtime.atomic(0)
+  const caller = { call ->
+    let index = harness.runtime.atomic_add(call_count, 1) + 1
+    if index == 1
+      && contains(call?.system ?? "", "ctx provider=anthropic model=claude-sonnet-4-6") {
+      harness.runtime.atomic_set(first_context_ok, 1)
+    }
+    if index == 2
+      && contains(
+      call?.system ?? "",
+      "ctx provider=openrouter model=anthropic/claude-sonnet-4-6",
+    ) {
+      harness.runtime.atomic_set(second_context_ok, 1)
+    }
+    if index == 1
+      && call?.opts?.thinking?.mode == "enabled" {
+      harness.runtime.atomic_set(first_thinking_kept, 1)
+    }
+    if index == 2
+      && call?.opts?.provider == "openrouter"
+      && call?.opts?.model == "anthropic/claude-sonnet-4-6" {
+      harness.runtime.atomic_set(second_call_options_ok, 1)
+    }
+    if index == 2
+      && call?.opts?.thinking == nil {
+      harness.runtime.atomic_set(second_thinking_stripped, 1)
+    }
+    let text = if index == 1 {
+      "still working"
+    } else {
+      "<user_response>done</user_response>\n<done>##DONE##</done>"
+    }
+    return {
+      ok: true,
+      value: {
+        text: text,
+        provider: call?.opts?.provider ?? "",
+        model: call?.opts?.model ?? "",
+        input_tokens: 0,
+        output_tokens: 0,
+      },
+    }
+  }
+  const session = "agent-loop-dynamic-llm-context-" + harness.random.uuid()
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    fn() { return agent_loop(
+      harness,
+      "finish",
+      nil,
+      {
+        provider: "anthropic",
+        model: "claude-sonnet-4-6",
+        thinking: {mode: "enabled", budget_tokens: 4096},
+        session_id: session,
+        llm_caller: caller,
+        loop_until_done: true,
+        done_judge: false,
+        max_iterations: 2,
+        prompts: {
+          "agent.loop_contract": {
+            text:
+              "ctx provider={{ llm.provider }} model={{ llm.model }} sentinel={{ done_sentinel }}",
+          },
+        },
+        post_turn_callback: { info ->
+          if info?.iteration == 0 {
+            return {
+              message: "escalating after first turn",
+              llm_options: {provider: "openrouter", model: "anthropic/claude-sonnet-4-6"},
+            }
+          }
+          return nil
+        },
+      },
+    ) },
+  )
+  const starts = iteration_events(captured.events)
+  assert(captured.result.status == "done", "loop completed after dynamic model switch")
+  assert(harness.runtime.atomic_get(call_count) == 2, "two LLM calls were made")
+  assert(
+    harness.runtime.atomic_get(first_context_ok) == 1,
+    "first turn rendered primary model context",
+  )
+  assert(
+    harness.runtime.atomic_get(second_context_ok) == 1,
+    "second turn rendered escalated model context",
+  )
+  assert(
+    harness.runtime.atomic_get(first_thinking_kept) == 1,
+    "direct Anthropic route kept supported thinking",
+  )
+  assert(
+    harness.runtime.atomic_get(second_call_options_ok) == 1,
+    "second call used escalated options",
+  )
+  assert(
+    harness.runtime.atomic_get(second_thinking_stripped) == 1,
+    "OpenRouter route stripped unsupported thinking",
+  )
+  assert(starts[1].provider == "openrouter", "iteration telemetry used escalated provider")
+  assert(
+    starts[1].model == "anthropic/claude-sonnet-4-6",
+    "iteration telemetry used escalated model",
+  )
+  harness.stdio.println("dynamic llm context ok")
+}

@@ -1,0 +1,47 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Hook invocations capture deterministic tape entries on the transcript:
+ * `hook_call` before the closure runs, `hook_returned` after, and a
+ * `hook_vetoed` entry when the hook blocks the operation. Replay
+ * tooling consumes these so the same tape reproduces the same control
+ * flow.
+ */
+fn count_kind(events, kind) {
+  let n = 0
+  for ev in events {
+    if to_string(ev?.kind ?? "") == kind {
+      n = n + 1
+    }
+  }
+  return n
+}
+
+pipeline default(harness: Harness) {
+  harness.agent.clear_session_hooks()
+  harness.agent.register_session_hook(
+    "user_prompt_submit",
+    { _hook_harness, event ->
+      const prompt = to_string(event?.prompt ?? "")
+      if prompt.contains("vetome") {
+        return {block: true, reason: "captured by tape"}
+      }
+      return nil
+    },
+  )
+  harness.agent.register_session_hook("session_start", { _hook_harness, _event -> return nil })
+  with_llm_script(
+    harness.llm,
+    [llm_text("ok")],
+    { ->
+      const result = agent_loop(harness, "hello vetome please", nil, {provider: "mock"})
+      const events = transcript_events(result?.transcript)
+      harness.stdio.println(result.status)
+      harness.stdio.println(count_kind(events, "hook_call") > 0)
+      harness.stdio.println(count_kind(events, "hook_returned") > 0)
+      harness.stdio.println(count_kind(events, "hook_vetoed") > 0)
+      harness.agent.clear_session_hooks()
+    },
+  )
+}

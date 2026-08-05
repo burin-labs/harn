@@ -1,0 +1,44 @@
+{
+  "name": "mcp.stable_2026_07_28.missing_metadata",
+  "protocol": "mcp",
+  "schema": "schemas/mcp-2026-07-28.schema.json",
+  "expect": "invalid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "tools/list",
+      "params": {
+        "cursor": "page-2"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "resultType": "input_required",
+        "requestState": 7
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "error": {
+        "code": -32022,
+        "message": "version unsupported",
+        "data": {
+          "requested": "2026-01-01"
+        }
+      }
+    }
+  ],
+  "matrix": {
+    "version": "2026-07-28",
+    "family": "stable-core",
+    "case": "invalid-required-metadata-continuation-and-error-data",
+    "source": {
+      "kind": "hand_authored",
+      "description": "Negative coverage for required per-request metadata, typed input-required continuation state, and required unsupported-version error data in the stable profile."
+    }
+  }
+}

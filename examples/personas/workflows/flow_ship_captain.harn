@@ -1,0 +1,4 @@
+/** Return the shadow-mode Ship Captain action envelope for a Flow event. */
+pub fn run(event) {
+  {persona: "ship_captain", mode: "shadow_pr", event: event, action: "derive_candidate_slice"}
+}

@@ -1,0 +1,6 @@
+object
+[low, med, high]
+[1, 2, 3, 5, 8]
+true
+false
+false

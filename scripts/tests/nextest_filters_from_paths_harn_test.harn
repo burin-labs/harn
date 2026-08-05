@@ -1,0 +1,150 @@
+import { with_temp_dir } from "std/testing"
+import "../nextest_filters_from_paths.harn"
+
+const PACKAGES = [
+  {dir: "crates/harn-cli", name: "harn-cli"},
+  {dir: "crates/harn-vm", name: "harn-vm"},
+]
+
+fn mkdirs(fs: HarnessFs, path: string) -> nil {
+  const parts = split(path_normalize(path), "/")
+  let current = if path.starts_with("/") {
+    "/"
+  } else {
+    ""
+  }
+  for part in parts {
+    if part == "" {
+      continue
+    }
+    current = if current == "" || current == "/" {
+      current + part
+    } else {
+      path_join(current, part)
+    }
+    if !fs.exists(current) {
+      fs.mkdir(current)
+    }
+  }
+  return nil
+}
+
+fn write_text(fs: HarnessFs, root: string, rel: string, text: string) -> nil {
+  const path = path_join(root, rel)
+  mkdirs(fs, dirname(path) ?? root)
+  fs.write_text(path, text)
+  return nil
+}
+
+@test
+pipeline test_workspace_packages_from_metadata_uses_cargo_workspace_members(
+  harness: Harness,
+  task,
+) {
+  const meta = {
+    workspace_members: ["id-cli", "id-vm"],
+    packages: [
+      {id: "id-cli", name: "harn-cli", manifest_path: "/repo/crates/harn-cli/Cargo.toml"},
+      {id: "id-vm", name: "harn-vm", manifest_path: "/repo/crates/harn-vm/Cargo.toml"},
+      {id: "id-excluded", name: "xtask", manifest_path: "/repo/xtask/Cargo.toml"},
+    ],
+  }
+  assert_eq(
+    workspace_packages_from_metadata(meta, "/repo"),
+    [{dir: "crates/harn-cli", name: "harn-cli"}, {dir: "crates/harn-vm", name: "harn-vm"}],
+  )
+}
+
+@test
+pipeline test_filter_for_paths_preserves_binary_and_package_mapping(harness: Harness, task) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      write_text(harness.fs, root, "crates/harn-cli/tests/orchestrator_http.rs", "")
+      assert_eq(
+        filter_for_path(
+          harness.fs,
+          "crates/harn-cli/tests/orchestrator_http/admin.rs",
+          PACKAGES,
+          root,
+        ),
+        "binary(orchestrator_http)",
+      )
+      assert_eq(
+        filter_for_path(harness.fs, "crates/harn-cli/tests/test_util/process.rs", PACKAGES, root),
+        "package(harn-cli)",
+      )
+      assert_eq(
+        filter_for_path(harness.fs, "crates/harn-cli/tests/orchestrator_http.rs", PACKAGES, root),
+        "binary(orchestrator_http)",
+      )
+      assert_eq(
+        filter_for_path(harness.fs, "./crates/harn-vm/src/lib.rs", PACKAGES, root),
+        "package(harn-vm)",
+      )
+      assert_eq(filter_for_path(harness.fs, "README.md", PACKAGES, root), nil)
+      assert_eq(filter_for_path(harness.fs, "crates/excluded/src/lib.rs", PACKAGES, root), nil)
+    },
+  )
+}
+
+// Consolidated layout: many former per-file test binaries merged into one whose
+// root is `tests/<dir>/main.rs` (e.g. `harn_cli_fast`, `harn_cli_e2e`,
+// `harn_vm`). A change to any submodule under `<dir>/` — including a nested
+// companion dir — maps to `binary(<dir>)`; a shared helper dir with no `main.rs`
+// falls back to the package.
+@test
+pipeline test_filter_for_consolidated_main_rs_binary(harness: Harness, task) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      write_text(harness.fs, root, "crates/harn-cli/tests/harn_cli_fast/main.rs", "")
+      assert_eq(
+        filter_for_path(
+          harness.fs,
+          "crates/harn-cli/tests/harn_cli_fast/check_cli.rs",
+          PACKAGES,
+          root,
+        ),
+        "binary(harn_cli_fast)",
+      )
+      assert_eq(
+        filter_for_path(
+          harness.fs,
+          "crates/harn-cli/tests/harn_cli_fast/orchestrator_http/slack.rs",
+          PACKAGES,
+          root,
+        ),
+        "binary(harn_cli_fast)",
+      )
+      assert_eq(
+        filter_for_path(harness.fs, "crates/harn-cli/tests/test_util/process.rs", PACKAGES, root),
+        "package(harn-cli)",
+      )
+    },
+  )
+}
+
+@test
+pipeline test_nextest_filter_for_paths_dedupes_in_order(harness: Harness, task) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      write_text(harness.fs, root, "crates/harn-cli/tests/orchestrator_http.rs", "")
+      assert_eq(
+        nextest_filter_for_paths(
+          harness.fs,
+          [
+            "crates/harn-cli/tests/orchestrator_http/admin.rs",
+            "crates/harn-cli/tests/test_util/process.rs",
+            "crates/harn-vm/src/flow/slice.rs",
+            "./crates/harn-vm/src/lib.rs",
+          ],
+          PACKAGES,
+          root,
+        ),
+        "binary(orchestrator_http) or package(harn-cli) or package(harn-vm)",
+      )
+    },
+  )
+}

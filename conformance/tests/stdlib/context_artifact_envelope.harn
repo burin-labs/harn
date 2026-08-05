@@ -1,0 +1,162 @@
+import "std/context"
+
+pipeline default(harness: Harness) {
+  const primary = context_artifact(
+    {
+      id: "parser-conventions",
+      kind: "convention_fact",
+      title: "Parser conventions",
+      path: "crates/harn-parser/src/lib.rs",
+      language: "rust",
+      role: "implementer",
+      task: "parser fix",
+      freshness: "fresh",
+      confidence: 0.91,
+      provenance: {
+        source: "burin:typed-evidence",
+        authority: "tier1_scan",
+        explanation: "Source spans were inspected.",
+      },
+      source_hashes: ["sha256:parser"],
+      token_estimate: 8,
+      body: "Parser diagnostics should preserve source spans.",
+      redaction: {sensitivity: "internal", redacted: true},
+    },
+  )
+  const duplicate = context_artifact(
+    {
+      id: "parser-conventions-old",
+      kind: "convention_fact",
+      title: "Old parser conventions",
+      path: "crates/harn-parser/src/lib.rs",
+      language: "rust",
+      freshness: "stale",
+      confidence: 0.2,
+      provenance: {source: "burin:typed-evidence", authority: "tier3_heuristic"},
+      source_hashes: ["sha256:parser"],
+      token_estimate: 8,
+      body: "Stale duplicate body.",
+    },
+  )
+  const digest = context_artifact_from_burin_digest(
+    ".burin/context-digests/parser.md",
+    "# Parser digest\nUse Pratt parsing for expressions.",
+    {
+      title: "Parser digest",
+      confidence: 0.75,
+      source_hashes: ["sha256:digest"],
+      metadata: {legacy_source: "scan"},
+    },
+  )
+  const merged = context_artifact_merge(
+    primary,
+    context_artifact(
+      {
+        id: "parser-conventions-extra",
+        kind: "convention_fact",
+        path: "crates/harn-parser/src/lib.rs",
+        freshness: "fresh",
+        confidence: 0.8,
+        provenance: {source: "manual-review", authority: "tier1_scan"},
+        source_hashes: ["sha256:other"],
+        token_estimate: 2,
+        body: "Additional span evidence.",
+      },
+    ),
+    {merge_body: true},
+  )
+  const secret = context_artifact(
+    {id: "api-key", kind: "secret", body: "TOKEN<abc>", sensitivity: "secret"},
+  )
+  const redaction_override = context_artifact(
+    {id: "secret-option", kind: "secret", body: "TOKEN<option>", sensitivity: "internal"},
+    {redaction: {sensitivity: "secret", redacted: false}},
+  )
+  const xml_escape = context_artifact({id: "xml", kind: "note", body: "Use <span> tags."})
+  const ctx_with_artifact = context_add_artifact(context([], {artifacts: []}), primary)
+  const same_body_a = context_artifact({kind: "note", path: "a.md", body: "shared body"})
+  const same_body_b = context_artifact({kind: "note", path: "b.md", body: "shared body"})
+  const overlap_hash_a = context_artifact(
+    {kind: "note", body: "left", source_hashes: ["sha256:left", "sha256:shared"]},
+  )
+  const overlap_hash_b = context_artifact(
+    {kind: "note", body: "right", source_hashes: ["sha256:right", "sha256:shared"]},
+  )
+  const budgeted = context_artifact_budget(
+    [duplicate, primary, digest],
+    {
+      role: "implementer",
+      task: "parser fix",
+      language: "rust",
+      max_tokens: 40,
+      pinned_ids: ["parser-conventions"],
+    },
+  )
+  harness.stdio.println(len(budgeted.artifacts))
+  harness.stdio.println(budgeted.artifacts[0].id)
+  harness.stdio.println(len(context_artifact_dedupe([primary, duplicate])))
+  harness.stdio.println(digest.metadata.burin_legacy_context_digest)
+  harness.stdio.println(digest.metadata.legacy_source)
+  harness.stdio.println(join(merged.source_hashes, ","))
+  harness.stdio.println(merged.token_estimate > primary.token_estimate)
+  harness.stdio.println(
+    contains(
+      context_render_artifacts(harness.llm, [secret], {variant: "xml", skip_budget: true}),
+      "[sensitive context withheld: secret]",
+    ),
+  )
+  harness.stdio.println(
+    contains(
+      context_render_artifacts(
+        harness.llm,
+        [redaction_override],
+        {variant: "plain", skip_budget: true},
+      ),
+      "[sensitive context withheld: secret]",
+    ),
+  )
+  harness.stdio.println(
+    contains(
+      context_render_artifacts(harness.llm, [xml_escape], {variant: "xml", skip_budget: true}),
+      "Use &lt;span&gt; tags.",
+    ),
+  )
+  harness.stdio.println(ctx_with_artifact.artifacts[0].id)
+  harness.stdio.println(len(context_artifact_dedupe([same_body_a, same_body_b])))
+  harness.stdio.println(len(context_artifact_dedupe([overlap_hash_a, overlap_hash_b])))
+  harness.stdio.println(
+    contains(
+      context_render_artifacts(harness.llm, [primary], {variant: "plain"}),
+      "Context Artifacts:",
+    ),
+  )
+  const packed = assemble_context(
+    {
+      artifacts: budgeted.artifacts,
+      budget_tokens: 40,
+      dedup: "chunked",
+      strategy: "relevance",
+      query: "parser spans",
+    },
+  )
+  harness.stdio.println(packed.chunks[0].artifact_id)
+  harness.stdio.println(context_render_artifacts(harness.llm, [primary], {variant: "markdown"}))
+  harness.stdio.println(
+    context_render_artifacts(
+      harness.llm,
+      [primary],
+      {capabilities: {prefers_xml_scaffolding: true}},
+    ),
+  )
+  harness.stdio.println(
+    context_render_artifacts(harness.llm, [primary, digest], {variant: "compact", max_tokens: 100}),
+  )
+  const prompt = prompt_compose(
+    harness.llm,
+    "Fix parser spans.",
+    context([], {artifacts: [primary]}),
+    {capabilities: {prefers_markdown_scaffolding: true}, task_label: "Parser Task"},
+  )
+  harness.stdio.println(contains(prompt.prompt, "## Parser Task"))
+  harness.stdio.println(contains(prompt.rendered_context, "## Context Artifacts"))
+}

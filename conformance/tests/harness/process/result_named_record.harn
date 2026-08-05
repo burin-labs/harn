@@ -1,0 +1,6 @@
+type ProcessResult = {success: bool, stderr: string}
+
+fn main(harness: Harness) {
+  const result: ProcessResult = harness.process.run({program: "printf", args: ["typed"]})
+  harness.stdio.println(result.success)
+}

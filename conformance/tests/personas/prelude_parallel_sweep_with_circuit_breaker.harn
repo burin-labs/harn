@@ -1,0 +1,32 @@
+import { parallel_sweep_with_circuit_breaker } from "std/personas/prelude"
+
+pipeline test(harness: Harness, task) {
+  const result = parallel_sweep_with_circuit_breaker(
+    harness,
+    [1, 2, 3, 4],
+    fn(item) {
+      if item == 2 {
+        throw "boom"
+      }
+      return item * 10
+    },
+    {
+      persona: "sweep_captain",
+      step: "sweep_prs",
+      trace_id: "trace-sweep",
+      started_at: "2026-05-03T00:00:00Z",
+      completed_at: "2026-05-03T00:00:00Z",
+      max_concurrent: 2,
+      max_failures: 1,
+    },
+  )
+  harness.stdio.println(result.status)
+  harness.stdio.println(result.circuit_open)
+  harness.stdio.println(result.succeeded)
+  harness.stdio.println(result.failed)
+  harness.stdio.println(result.skipped)
+  harness.stdio.println(len(result.results))
+  harness.stdio.println(result.results[0].value)
+  harness.stdio.println(result.results[1].ok)
+  harness.stdio.println(result.receipt.status)
+}

@@ -1,0 +1,6 @@
+import { helper } from "cyclic_reexport_error_b"
+import { x_render } from "cyclic_reexport_error_x"
+
+pipeline default(harness: Harness) {
+  harness.stdio.println(x_render())
+}

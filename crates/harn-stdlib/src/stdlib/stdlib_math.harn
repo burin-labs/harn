@@ -1,0 +1,951 @@
+/**
+ * std/math — Extended math utilities
+ *
+ * Import with: import "std/math"
+ */
+type KMeansResult = {
+  centroids: list,
+  assignments: list,
+  counts: list,
+  iterations: int,
+  converged: bool,
+  inertia: float,
+}
+
+fn _is_number(value) -> bool {
+  const t = type_of(value)
+  return t == "int" || t == "float"
+}
+
+fn _require_number(value, label) {
+  require _is_number(value), "${label} must be numeric"
+  return value
+}
+
+fn _require_numeric_list(items, label = "items") -> list {
+  require type_of(items) == "list", "${label} must be a list"
+  for item in items {
+    require _is_number(item), "${label} must contain only numbers"
+  }
+  return items
+}
+
+fn _require_non_empty_numeric_list(items, label = "items") -> list {
+  _require_numeric_list(items, label)
+  require len(items) > 0, "${label} must not be empty"
+  return items
+}
+
+fn _require_probability(prob, label = "probability") {
+  _require_number(prob, label)
+  require prob > 0 && prob < 1, "${label} must be between 0 and 1"
+  return prob
+}
+
+fn _require_positive_number(value, label) {
+  _require_number(value, label)
+  require value > 0, "${label} must be greater than 0"
+  return value
+}
+
+fn _require_positive_int(value, label) {
+  _require_number(value, label)
+  require floor(value) == value, "${label} must be an integer"
+  require value > 0, "${label} must be at least 1"
+  return value
+}
+
+fn _require_non_negative_int(value, label) {
+  _require_number(value, label)
+  require floor(value) == value, "${label} must be an integer"
+  require value >= 0, "${label} must be non-negative"
+  return value
+}
+
+fn _require_vector(vec, label = "vector") -> list {
+  _require_numeric_list(vec, label)
+  return vec
+}
+
+fn _require_same_vector_dimensions(a, b) {
+  _require_vector(a, "a")
+  _require_vector(b, "b")
+  require len(a) == len(b), "vectors must have the same length"
+}
+
+fn _sum_squared_deltas(a, b) -> float {
+  _require_same_vector_dimensions(a, b)
+  let total = 0.0
+  let idx = 0
+  while idx < len(a) {
+    const delta = a[idx] - b[idx]
+    total = total + delta * delta
+    idx = idx + 1
+  }
+  return total
+}
+
+fn _require_points(points) -> int {
+  require type_of(points) == "list", "points must be a list"
+  require len(points) > 0, "points must not be empty"
+  const dims = len(_require_vector(points[0], "point"))
+  require dims > 0, "points must have at least one dimension"
+  for point in points {
+    _require_vector(point, "point")
+    require len(point) == dims, "all points must have the same dimension"
+  }
+  return dims
+}
+
+fn _copy_list(items) -> list {
+  let out = []
+  for item in items {
+    out = out.appending(item)
+  }
+  return out
+}
+
+fn _weight_list(weights, label = "weights") -> list {
+  const ws = _require_non_empty_numeric_list(weights, label)
+  for weight in ws {
+    require weight >= 0, "${label} must contain only non-negative numbers"
+  }
+  return ws
+}
+
+fn _require_parallel_numeric_lists(xs, ys, x_label = "xs", y_label = "ys") {
+  _require_non_empty_numeric_list(xs, x_label)
+  _require_non_empty_numeric_list(ys, y_label)
+  require len(xs) == len(ys), "${x_label} and ${y_label} must have the same length"
+}
+
+fn _score_item(item, score_fn = nil) {
+  if score_fn == nil {
+    return item
+  }
+  return score_fn(item)
+}
+
+fn _insert_ranked(ranked, entry, descending = false) -> list {
+  let out = []
+  let inserted = false
+  for existing in ranked {
+    if !inserted {
+      const better = if descending {
+        entry.score > existing.score
+      } else {
+        entry.score < existing.score
+      }
+      if better {
+        out = out.appending(entry)
+        inserted = true
+      }
+    }
+    out = out.appending(existing)
+  }
+  if !inserted {
+    out = out.appending(entry)
+  }
+  return out
+}
+
+fn _rank_items(items, score_fn = nil, descending = false) -> list {
+  require type_of(items) == "list", "items must be a list"
+  let ranked = []
+  let idx = 0
+  while idx < len(items) {
+    const entry = {index: idx, item: items[idx], score: _score_item(items[idx], score_fn)}
+    ranked = _insert_ranked(ranked, entry, descending)
+    idx = idx + 1
+  }
+  return ranked
+}
+
+fn _zero_vector(size) -> list {
+  let out = []
+  let idx = 0
+  while idx < size {
+    out = out.appending(0.0)
+    idx = idx + 1
+  }
+  return out
+}
+
+fn _nearest_centroid(point, centroids) -> {index: int, distance: float} {
+  let best_index = 0
+  let best_distance = _sum_squared_deltas(point, centroids[0])
+  let idx = 1
+  while idx < len(centroids) {
+    const distance = _sum_squared_deltas(point, centroids[idx])
+    if distance < best_distance {
+      best_distance = distance
+      best_index = idx
+    }
+    idx = idx + 1
+  }
+  return {index: best_index, distance: best_distance}
+}
+
+fn _farthest_point(points, centroids) -> int {
+  let best_index = 0
+  let best_distance = _nearest_centroid(points[0], centroids).distance
+  let idx = 1
+  while idx < len(points) {
+    const distance = _nearest_centroid(points[idx], centroids).distance
+    if distance > best_distance {
+      best_distance = distance
+      best_index = idx
+    }
+    idx = idx + 1
+  }
+  return best_index
+}
+
+fn _init_kmeans_centroids(points, k) -> list {
+  let centroids = [_copy_list(points[0])]
+  while len(centroids) < k {
+    const next_index = _farthest_point(points, centroids)
+    centroids = centroids.appending(_copy_list(points[next_index]))
+  }
+  return centroids
+}
+
+fn _assign_points(points, centroids) -> {assignments: list, errors: list} {
+  let assignments = []
+  let errors = []
+  for point in points {
+    const nearest = _nearest_centroid(point, centroids)
+    assignments = assignments.appending(nearest.index)
+    errors = errors.appending(nearest.distance)
+  }
+  return {assignments: assignments, errors: errors}
+}
+
+fn _largest_error_point(errors) -> int {
+  let best_index = 0
+  let best_error = errors[0]
+  let idx = 1
+  while idx < len(errors) {
+    if errors[idx] > best_error {
+      best_error = errors[idx]
+      best_index = idx
+    }
+    idx = idx + 1
+  }
+  return best_index
+}
+
+fn _recompute_centroids(points, assignments, k, dims, errors) -> {centroids: list, counts: list} {
+  let sums = []
+  let counts = []
+  let idx = 0
+  while idx < k {
+    sums = sums.appending(_zero_vector(dims))
+    counts = counts.appending(0)
+    idx = idx + 1
+  }
+  idx = 0
+  while idx < len(points) {
+    const cluster = assignments[idx]
+    counts[cluster] = counts[cluster] + 1
+    let dim = 0
+    while dim < dims {
+      let row = sums[cluster]
+      row[dim] = row[dim] + points[idx][dim]
+      sums[cluster] = row
+      dim = dim + 1
+    }
+    idx = idx + 1
+  }
+  let centroids = []
+  idx = 0
+  while idx < k {
+    if counts[idx] == 0 {
+      const reseed = _largest_error_point(errors)
+      centroids = centroids.appending(_copy_list(points[reseed]))
+    } else {
+      let centroid = []
+      let dim = 0
+      while dim < dims {
+        centroid = centroid.appending(sums[idx][dim] / counts[idx])
+        dim = dim + 1
+      }
+      centroids = centroids.appending(centroid)
+    }
+    idx = idx + 1
+  }
+  return {centroids: centroids, counts: counts}
+}
+
+/**
+ * Clamp a value between min and max.
+ * Clamp `value` to the inclusive range [`lo`, `hi`].
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn clamp(value, lo, hi) {
+  if value < lo {
+    return lo
+  }
+  if value > hi {
+    return hi
+  }
+  return value
+}
+
+/**
+ * Linear interpolation between a and b by t (0..1).
+ * Linearly interpolate between `a` and `b` by fraction `t`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn lerp(a, b, t) {
+  return a + (b - a) * t
+}
+
+/**
+ * Map a value from one range to another.
+ * Remap `value` from the input range to the output range.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn map_range(value, in_lo, in_hi, out_lo, out_hi) -> float {
+  const t = (value - in_lo) / (in_hi - in_lo)
+  return lerp(out_lo, out_hi, t)
+}
+
+/**
+ * Convert degrees to radians.
+ * Convert an angle in degrees to radians.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn deg_to_rad(degrees) -> float {
+  return degrees * pi / 180
+}
+
+/**
+ * Convert radians to degrees.
+ * Convert an angle in radians to degrees.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn rad_to_deg(radians) -> float {
+  return radians * 180 / pi
+}
+
+/**
+ * Sum a list of numbers, skipping nil elements.
+ * Returns zero when `items` is empty or contains only nil values.
+ *
+ * @effects: []
+ * @errors: [TypeError]
+ */
+pub fn sum(items) -> int | float {
+  require type_of(items) == "list", "items must be a list"
+  let total = 0
+  for item in items {
+    if item != nil {
+      require _is_number(item), "items must contain only numbers or nil"
+      total = total + item
+    }
+  }
+  return total
+}
+
+/**
+ * Average of a list of numbers.
+ * Arithmetic mean of `items` (alias of `mean`).
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn avg(items) {
+  _require_numeric_list(items)
+  if len(items) == 0 {
+    return 0
+  }
+  return sum(items) / (len(items) * 1.0)
+}
+
+/**
+ * Alias for avg(items).
+ * Arithmetic mean of `items`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn mean(items) {
+  return avg(items)
+}
+
+/**
+ * Median of a list of numbers.
+ * Median of `items`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn median(items) {
+  const sorted = _require_non_empty_numeric_list(items).sorted()
+  const n = len(sorted)
+  const mid = floor(n / 2)
+  if n % 2 == 1 {
+    return sorted[mid]
+  }
+  return (sorted[mid - 1] + sorted[mid]) / 2.0
+}
+
+/**
+ * R-7 percentile interpolation with p in [0, 100].
+ * The `p`-th percentile of `items`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn percentile(items, p) {
+  const sorted = _require_non_empty_numeric_list(items).sorted()
+  _require_number(p, "percentile")
+  require p >= 0 && p <= 100, "percentile must be between 0 and 100"
+  if len(sorted) == 1 {
+    return sorted[0]
+  }
+  const n = len(sorted)
+  const h = 1 + (n - 1) * (p / 100.0)
+  const lower = floor(h)
+  const upper = ceil(h)
+  if lower == upper {
+    return sorted[lower - 1]
+  }
+  const weight = h - lower
+  return sorted[lower - 1] + weight * (sorted[upper - 1] - sorted[lower - 1])
+}
+
+/**
+ * Return indices that would sort items ascending.
+ * Indices that would sort `items` (optionally by `score_fn`).
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn argsort(items, score_fn = nil) -> list {
+  const ranked = _rank_items(items, score_fn)
+  return ranked.map({ entry -> entry.index }).to_list()
+}
+
+/**
+ * Return the top k items by score, descending.
+ * The `k` highest-scoring items (optionally by `score_fn`).
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn top_k(items, k, score_fn = nil) -> list {
+  const ranked = _rank_items(items, score_fn, true)
+  const limit = _require_non_negative_int(k, "k")
+  return ranked.take(limit).map({ entry -> entry.item }).to_list()
+}
+
+/**
+ * Population or sample variance.
+ * Variance of `items` (population, or sample when `sample` is true).
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn variance(items, sample = false) -> float {
+  const xs = _require_non_empty_numeric_list(items)
+  if sample {
+    require len(xs) >= 2, "sample variance requires at least 2 values"
+  }
+  const mu = mean(xs)
+  let total = 0.0
+  for x in xs {
+    const delta = x - mu
+    total = total + delta * delta
+  }
+  const denom = if sample {
+    len(xs) - 1
+  } else {
+    len(xs)
+  }
+  return total / denom
+}
+
+/**
+ * Population or sample standard deviation.
+ * Standard deviation of `items` (population, or sample when `sample` is true).
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn stddev(items, sample = false) -> float {
+  return sqrt(variance(items, sample))
+}
+
+/**
+ * Scale a numeric list to [0, 1].
+ * Scale `items` into the [0, 1] range by their min and max.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn minmax_scale(items) -> list {
+  const xs = _require_non_empty_numeric_list(items)
+  const lo = xs.min()
+  const hi = xs.max()
+  if hi == lo {
+    return xs.map({ _x -> 0.0 }).to_list()
+  }
+  const span = (hi - lo) * 1.0
+  return xs.map({ x -> (x - lo) / span }).to_list()
+}
+
+/**
+ * Standardize a numeric list to zero mean and unit variance.
+ * Standardize `items` to zero mean and unit variance.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn zscore(items, sample = false) -> list {
+  const xs = _require_non_empty_numeric_list(items)
+  const mu = mean(xs)
+  const sigma = stddev(xs, sample)
+  if sigma == 0 {
+    return xs.map({ _x -> 0.0 }).to_list()
+  }
+  return xs.map({ x -> (x - mu) / sigma }).to_list()
+}
+
+/**
+ * Weighted arithmetic mean.
+ * Weighted arithmetic mean of `items` with `weights`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn weighted_mean(items, weights) -> float {
+  const xs = _require_non_empty_numeric_list(items)
+  const ws = _weight_list(weights)
+  require len(xs) == len(ws), "items and weights must have the same length"
+  const total_weight = sum(ws)
+  require total_weight > 0, "weights must sum to a positive value"
+  let total = 0.0
+  let idx = 0
+  while idx < len(xs) {
+    total = total + xs[idx] * ws[idx]
+    idx = idx + 1
+  }
+  return total / total_weight
+}
+
+/**
+ * Draw one item according to non-negative weights.
+ * Pick an index from `items` with probability proportional to `weights`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn weighted_choice(random: HarnessRandom, items, weights = nil) {
+  require type_of(items) == "list", "items must be a list"
+  require len(items) > 0, "items must not be empty"
+  const ws = if weights == nil {
+    items.map({ _item -> 1.0 })
+  } else {
+    _weight_list(weights)
+  }
+  require len(items) == len(ws), "items and weights must have the same length"
+  const total_weight = sum(ws)
+  require total_weight > 0, "weights must sum to a positive value"
+  const target = random.f64() * total_weight
+  let cumulative = 0.0
+  let idx = 0
+  while idx < len(items) {
+    cumulative = cumulative + ws[idx]
+    if target < cumulative {
+      return items[idx]
+    }
+    idx = idx + 1
+  }
+  return items[len(items) - 1]
+}
+
+/**
+ * Convert scores into probabilities.
+ * Softmax of `items` with optional `temperature`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn softmax(items, temperature = 1.0) -> list {
+  const xs = _require_non_empty_numeric_list(items)
+  _require_positive_number(temperature, "temperature")
+  const max_x = xs.max()
+  const exps = xs.map({ x -> exp((x - max_x) / temperature) })
+  const total = sum(exps)
+  require total > 0, "softmax total must be positive"
+  return exps.map({ x -> x / total }).to_list()
+}
+
+/**
+ * Standard normal probability density.
+ * Normal-distribution probability density at `x`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn normal_pdf(x, mu = 0, sigma = 1) -> float {
+  _require_number(x, "x")
+  _require_number(mu, "mean")
+  _require_positive_number(sigma, "stddev")
+  const z = (x - mu) / sigma
+  return exp(-0.5 * z * z) / (sigma * sqrt(2 * pi))
+}
+
+/**
+ * Standard normal cumulative distribution.
+ * Normal-distribution cumulative probability at `x`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn normal_cdf(x, mu = 0, sigma = 1) -> float {
+  _require_number(x, "x")
+  _require_number(mu, "mean")
+  _require_positive_number(sigma, "stddev")
+  const z = (x - mu) / sigma
+  const sign = if z < 0 {
+    -1
+  } else {
+    1
+  }
+  const az = abs(z) / sqrt(2)
+  const t = 1 / (1 + 0.3275911 * az)
+  const a1 = 0.254829592
+  const a2 = -0.284496736
+  const a3 = 1.421413741
+  const a4 = -1.453152027
+  const a5 = 1.061405429
+  const erf = sign * (1 - ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * exp(-az * az))
+  return 0.5 * (1 + erf)
+}
+
+/**
+ * Inverse normal CDF using Acklam's approximation.
+ * Inverse normal CDF (quantile) for probability `prob`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn normal_quantile(prob, mu = 0, sigma = 1) -> float {
+  const p = _require_probability(prob)
+  _require_number(mu, "mean")
+  _require_positive_number(sigma, "stddev")
+  const a1 = -39.69683028665376
+  const a2 = 220.9460984245205
+  const a3 = -275.9285104469687
+  const a4 = 138.357751867269
+  const a5 = -30.66479806614716
+  const a6 = 2.506628277459239
+  const b1 = -54.47609879822406
+  const b2 = 161.5858368580409
+  const b3 = -155.6989798598866
+  const b4 = 66.80131188771972
+  const b5 = -13.28068155288572
+  const c1 = -0.007784894002430293
+  const c2 = -0.3223964580411365
+  const c3 = -2.400758277161838
+  const c4 = -2.549732539343734
+  const c5 = 4.374664141464968
+  const c6 = 2.938163982698783
+  const d1 = 0.007784695709041462
+  const d2 = 0.3224671290700398
+  const d3 = 2.445134137142996
+  const d4 = 3.754408661907416
+  const plow = 0.02425
+  const phigh = 1 - plow
+  let x = 0.0
+  if p < plow {
+    const q = sqrt(-2 * ln(p))
+    const num = ((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6
+    const den = (((d1 * q + d2) * q + d3) * q + d4) * q + 1
+    x = num / den
+  } else if p <= phigh {
+    const q = p - 0.5
+    const r = q * q
+    const num = (((((a1 * r + a2) * r + a3) * r + a4) * r + a5) * r + a6) * q
+    const den = ((((b1 * r + b2) * r + b3) * r + b4) * r + b5) * r + 1
+    x = num / den
+  } else {
+    const q = sqrt(-2 * ln(1 - p))
+    const num = ((((c1 * q + c2) * q + c3) * q + c4) * q + c5) * q + c6
+    const den = (((d1 * q + d2) * q + d3) * q + d4) * q + 1
+    x = -(num / den)
+  }
+  return mu + sigma * x
+}
+
+/**
+ * Dot product of two vectors.
+ * Dot product of vectors `a` and `b`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn dot(a, b) -> float {
+  _require_same_vector_dimensions(a, b)
+  let total = 0.0
+  let idx = 0
+  while idx < len(a) {
+    total = total + a[idx] * b[idx]
+    idx = idx + 1
+  }
+  return total
+}
+
+/**
+ * Euclidean vector norm.
+ * Euclidean (L2) norm of vector `v`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn vector_norm(v) -> float {
+  _require_vector(v)
+  return sqrt(dot(v, v))
+}
+
+/**
+ * Normalize a vector to unit length.
+ * Unit vector in the direction of `v`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn vector_normalize(v) -> list {
+  _require_vector(v)
+  const norm = vector_norm(v)
+  require norm > 0, "cannot normalize a zero vector"
+  return v.map({ x -> x / norm }).to_list()
+}
+
+/**
+ * Cosine similarity between two vectors.
+ * Cosine similarity between vectors `a` and `b`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn cosine_similarity(a, b) -> float {
+  const an = vector_norm(a)
+  const bn = vector_norm(b)
+  require an > 0 && bn > 0, "cosine similarity requires non-zero vectors"
+  return dot(a, b) / (an * bn)
+}
+
+/**
+ * Euclidean distance between two vectors.
+ * Euclidean (L2) distance between `a` and `b`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn euclidean_distance(a, b) -> float {
+  return sqrt(_sum_squared_deltas(a, b))
+}
+
+/**
+ * Manhattan distance between two vectors.
+ * Manhattan (L1) distance between `a` and `b`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn manhattan_distance(a, b) -> float {
+  _require_same_vector_dimensions(a, b)
+  let total = 0.0
+  let idx = 0
+  while idx < len(a) {
+    total = total + abs(a[idx] - b[idx])
+    idx = idx + 1
+  }
+  return total
+}
+
+/**
+ * Chebyshev distance between two vectors.
+ * Chebyshev (L-infinity) distance between `a` and `b`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn chebyshev_distance(a, b) -> float {
+  _require_same_vector_dimensions(a, b)
+  let best = 0.0
+  let idx = 0
+  while idx < len(a) {
+    const delta = abs(a[idx] - b[idx])
+    if delta > best {
+      best = delta
+    }
+    idx = idx + 1
+  }
+  return best
+}
+
+/**
+ * Population or sample covariance between two numeric lists.
+ * Covariance of paired samples `xs` and `ys`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn covariance(xs, ys, sample = false) -> float {
+  _require_parallel_numeric_lists(xs, ys)
+  if sample {
+    require len(xs) >= 2, "sample covariance requires at least 2 values"
+  }
+  const mu_x = mean(xs)
+  const mu_y = mean(ys)
+  let total = 0.0
+  let idx = 0
+  while idx < len(xs) {
+    total = total + (xs[idx] - mu_x) * (ys[idx] - mu_y)
+    idx = idx + 1
+  }
+  const denom = if sample {
+    len(xs) - 1
+  } else {
+    len(xs)
+  }
+  return total / denom
+}
+
+/**
+ * Pearson correlation between two numeric lists.
+ * Pearson correlation of paired samples `xs` and `ys`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn correlation(xs, ys, sample = false) -> float {
+  _require_parallel_numeric_lists(xs, ys)
+  if sample {
+    require len(xs) >= 2, "sample correlation requires at least 2 values"
+  }
+  const sigma_x = stddev(xs, sample)
+  const sigma_y = stddev(ys, sample)
+  require sigma_x > 0 && sigma_y > 0, "correlation requires non-constant inputs"
+  return covariance(xs, ys, sample) / (sigma_x * sigma_y)
+}
+
+/**
+ * Sliding-window moving average.
+ * Simple moving average of `items` over `window`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn moving_avg(items, window) -> list {
+  const xs = _require_non_empty_numeric_list(items)
+  const size = _require_positive_int(window, "window")
+  require size <= len(xs), "window must not exceed the number of items"
+  let out = []
+  let idx = 0
+  while idx + size <= len(xs) {
+    out = out.appending(mean(xs.slice(idx, idx + size)))
+    idx = idx + 1
+  }
+  return out
+}
+
+/**
+ * Exponential moving average, returning one value per input.
+ * Exponential moving average of `items` with smoothing factor `alpha`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ema(items, alpha) -> list {
+  const xs = _require_non_empty_numeric_list(items)
+  const a = _require_probability(alpha, "alpha")
+  let out = [xs[0] * 1.0]
+  let prev = xs[0] * 1.0
+  let idx = 1
+  while idx < len(xs) {
+    prev = a * xs[idx] + (1 - a) * prev
+    out = out.appending(prev)
+    idx = idx + 1
+  }
+  return out
+}
+
+/**
+ * Deterministic k-means clustering.
+ * k-means clustering of `points` into `k` clusters.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn kmeans(points, k, options = nil) -> KMeansResult {
+  const dims = _require_points(points)
+  _require_non_negative_int(k, "k")
+  require k >= 1, "k must be at least 1"
+  require k <= len(points), "k must not exceed the number of points"
+  const max_iterations = if options != nil && options.max_iterations != nil {
+    options.max_iterations
+  } else {
+    100
+  }
+  _require_positive_int(max_iterations, "max_iterations")
+  let centroids = _init_kmeans_centroids(points, k)
+  let assignments = []
+  let counts = []
+  let iterations = 0
+  let converged = false
+  let inertia = 0.0
+  while iterations < max_iterations {
+    const assigned = _assign_points(points, centroids)
+    const next_assignments = assigned.assignments
+    inertia = sum(assigned.errors)
+    const updated = _recompute_centroids(points, next_assignments, k, dims, assigned.errors)
+    centroids = updated.centroids
+    counts = updated.counts
+    iterations = iterations + 1
+    if next_assignments == assignments {
+      assignments = next_assignments
+      converged = true
+      break
+    }
+    assignments = next_assignments
+  }
+  if !converged {
+    const assigned = _assign_points(points, centroids)
+    assignments = assigned.assignments
+    inertia = sum(assigned.errors)
+    let final_counts = []
+    let idx = 0
+    while idx < k {
+      final_counts = final_counts.appending(0)
+      idx = idx + 1
+    }
+    for cluster in assignments {
+      final_counts[cluster] = final_counts[cluster] + 1
+    }
+    counts = final_counts
+  }
+  return {
+    centroids: centroids,
+    assignments: assignments,
+    counts: counts,
+    iterations: iterations,
+    converged: converged,
+    inertia: inertia,
+  }
+}

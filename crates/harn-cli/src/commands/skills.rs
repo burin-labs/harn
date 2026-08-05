@@ -1,0 +1,1322 @@
+//! `harn skill` CLI subcommands.
+//!
+//! Two complementary surfaces share this namespace:
+//!
+//! - `list` / `get` / `dump` operate on the **canonical corpus** from
+//!   [`harn_skills`]. By default this is the embedded corpus shipped
+//!   inside the `harn` binary; `HARN_SKILLS_DIR` can point at a
+//!   recursive `SKILL.md` tree while iterating locally.
+//! - `resolved` / `inspect` / `match` / `install` / `new` operate on
+//!   the **layered FS discovery** implemented in `harn_vm::skills`, so
+//!   what the user sees there is byte-for-byte what `harn run` /
+//!   `harn test` / `harn check` hand to the VM.
+//!
+//! Install resolves a git URL or local path into
+//! `.harn/skills-cache/<namespace?>/<name>/` — mirroring
+//! the current package generation so the filesystem package walker finds it on
+//! the next run. `new` scaffolds a SKILL.md + skills directory with
+//! sensible defaults.
+
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
+use std::{fs, process};
+
+use serde::Serialize;
+
+use harn_skills::{
+    resolve_skill_corpus_from_env, DiskSkill, DiskSkillFrontmatter, EmbeddedSkill, SkillCorpus,
+    SkillFrontmatter,
+};
+use harn_vm::skills::{
+    build_fs_discovery, default_system_dirs, default_user_dir, parse_env_skills_path,
+    validate_skill_bundle, DiscoveryOptions, FsLayerConfig, Layer, LayeredDiscovery,
+    ManifestSource, Skill, SkillManifestRef,
+};
+use harn_vm::text::truncate_end;
+
+use crate::cli::{
+    SkillsDumpArgs, SkillsGetArgs, SkillsInspectArgs, SkillsInstallArgs, SkillsListArgs,
+    SkillsMatchArgs, SkillsNewArgs, SkillsResolvedArgs, SkillsValidateArgs,
+};
+use crate::json_envelope::{self, JsonEnvelope, JsonOutput};
+use crate::package::{load_skills_config, resolve_skills_paths, SkillSourceEntry};
+use crate::skill_loader::canonicalize_cli_dirs;
+
+const SKILLS_CACHE_DIR: &str = ".harn/skills-cache";
+
+/// `JsonEnvelope` schemaVersion for `harn skill list --json`.
+pub(crate) const SKILLS_LIST_SCHEMA_VERSION: u32 = 1;
+/// `JsonEnvelope` schemaVersion for `harn skill get --json`.
+pub(crate) const SKILLS_GET_SCHEMA_VERSION: u32 = 1;
+/// `JsonEnvelope` schemaVersion for `harn skill validate --json`.
+pub(crate) const SKILLS_VALIDATE_SCHEMA_VERSION: u32 = 1;
+
+/// One row in the `skills list --json` payload — frontmatter only,
+/// no body, to keep `list` cheap to consume.
+#[derive(Debug, Clone, Serialize)]
+pub struct ListedSkill {
+    pub name: String,
+    pub short: String,
+    pub description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub when_to_use: Option<String>,
+}
+
+impl ListedSkill {
+    fn from_embedded(skill: &EmbeddedSkill) -> Self {
+        Self {
+            name: skill.name.to_string(),
+            short: skill.frontmatter.short.to_string(),
+            description: skill.frontmatter.description.to_string(),
+            when_to_use: skill.frontmatter.when_to_use.map(str::to_string),
+        }
+    }
+
+    fn from_disk(skill: &DiskSkill) -> Self {
+        Self {
+            name: skill.name.clone(),
+            short: skill.frontmatter.short.clone(),
+            description: skill.frontmatter.description.clone(),
+            when_to_use: skill.frontmatter.when_to_use.clone(),
+        }
+    }
+}
+
+/// Top-level payload for `skills list --json`. A struct (not a bare
+/// array) lets the envelope carry top-level metadata (resolution
+/// source, total counts, etc.) without a breaking schema bump.
+#[derive(Debug, Clone, Serialize)]
+pub struct SkillsListPayload {
+    pub skills: Vec<ListedSkill>,
+}
+
+impl JsonOutput for SkillsListPayload {
+    const SCHEMA_VERSION: u32 = SKILLS_LIST_SCHEMA_VERSION;
+    type Data = Self;
+
+    fn into_envelope(self) -> JsonEnvelope<Self::Data> {
+        JsonEnvelope::ok(Self::SCHEMA_VERSION, self)
+    }
+}
+
+/// Payload for `skills get --json`. `body` is only present when the
+/// caller passed `--full` — `Option` rather than empty string so the
+/// JSON shape encodes the distinction unambiguously.
+#[derive(Debug, Clone, Serialize)]
+pub struct SkillsGetPayload {
+    pub name: String,
+    pub short: String,
+    pub description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub when_to_use: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+}
+
+impl SkillsGetPayload {
+    fn from_embedded(skill: &EmbeddedSkill, include_body: bool) -> Self {
+        Self {
+            name: skill.name.to_string(),
+            short: skill.frontmatter.short.to_string(),
+            description: skill.frontmatter.description.to_string(),
+            when_to_use: skill.frontmatter.when_to_use.map(str::to_string),
+            body: include_body.then(|| skill.body.to_string()),
+        }
+    }
+
+    fn from_disk(skill: &DiskSkill, include_body: bool) -> Self {
+        Self {
+            name: skill.name.clone(),
+            short: skill.frontmatter.short.clone(),
+            description: skill.frontmatter.description.clone(),
+            when_to_use: skill.frontmatter.when_to_use.clone(),
+            body: include_body.then(|| skill.body.clone()),
+        }
+    }
+}
+
+impl JsonOutput for SkillsGetPayload {
+    const SCHEMA_VERSION: u32 = SKILLS_GET_SCHEMA_VERSION;
+    type Data = Self;
+
+    fn into_envelope(self) -> JsonEnvelope<Self::Data> {
+        JsonEnvelope::ok(Self::SCHEMA_VERSION, self)
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SkillsValidatePayload {
+    pub path: String,
+    pub id: String,
+    pub short: String,
+    pub unknown_fields: Vec<String>,
+    pub bundled_files: Vec<String>,
+}
+
+impl JsonOutput for SkillsValidatePayload {
+    const SCHEMA_VERSION: u32 = SKILLS_VALIDATE_SCHEMA_VERSION;
+    type Data = Self;
+
+    fn into_envelope(self) -> JsonEnvelope<Self::Data> {
+        JsonEnvelope::ok(Self::SCHEMA_VERSION, self)
+    }
+}
+
+/// `harn skill list` — surfaces the active canonical Harn skill
+/// corpus. FS-discovered skills live under `harn skill resolved`.
+pub(crate) fn run_list(args: &SkillsListArgs) {
+    let corpus = resolve_skill_corpus_or_exit();
+
+    if args.json {
+        let payload = SkillsListPayload {
+            skills: list_payload_entries(&corpus),
+        };
+        println!(
+            "{}",
+            json_envelope::to_string_pretty(&payload.into_envelope())
+        );
+        return;
+    }
+
+    if corpus.is_empty() {
+        println!("No canonical skills available for this `harn` build.");
+        return;
+    }
+
+    if corpus.is_disk() {
+        println!("Disk canonical skills ({}):", corpus.len());
+    } else {
+        println!("Embedded canonical skills ({}):", corpus.len());
+    }
+    let entries = list_payload_entries(&corpus);
+    let name_width = entries.iter().map(|s| s.name.len()).max().unwrap_or(4);
+    for skill in entries {
+        let short = if skill.short.is_empty() {
+            "(no short description)"
+        } else {
+            &skill.short
+        };
+        println!(
+            "  {:<name_width$}  {}",
+            skill.name,
+            truncate_end(short, 72),
+            name_width = name_width
+        );
+    }
+    println!();
+    println!("Run `harn skill get <name>` for one entry's frontmatter.");
+    println!("Run `harn skill get <name> --full` to include the body.");
+}
+
+/// `harn skill get <name>` — canonical skill frontmatter, or full
+/// SKILL.md body when `--full` is passed.
+pub(crate) fn run_get(args: &SkillsGetArgs) {
+    let corpus = resolve_skill_corpus_or_exit();
+
+    match &corpus {
+        SkillCorpus::Embedded(skills) => {
+            let Some(skill) = skills.iter().find(|skill| skill.name == args.name) else {
+                emit_get_not_found(&args.name, args.json, &corpus);
+                process::exit(1);
+            };
+            if args.json {
+                let payload = SkillsGetPayload::from_embedded(skill, args.full);
+                println!(
+                    "{}",
+                    json_envelope::to_string_pretty(&payload.into_envelope())
+                );
+                return;
+            }
+            print_skill_frontmatter(&skill.frontmatter);
+            if args.full {
+                println!();
+                println!("---- SKILL.md body ----");
+                print!("{}", skill.body);
+                if !skill.body.ends_with('\n') {
+                    println!();
+                }
+            }
+        }
+        SkillCorpus::Disk(skills) => {
+            let Some(skill) = skills.iter().find(|skill| skill.name == args.name) else {
+                emit_get_not_found(&args.name, args.json, &corpus);
+                process::exit(1);
+            };
+            if args.json {
+                let payload = SkillsGetPayload::from_disk(skill, args.full);
+                println!(
+                    "{}",
+                    json_envelope::to_string_pretty(&payload.into_envelope())
+                );
+                return;
+            }
+            print_disk_skill_frontmatter(&skill.frontmatter);
+            if args.full {
+                println!();
+                println!("---- SKILL.md body ----");
+                print!("{}", skill.body);
+                if !skill.body.ends_with('\n') {
+                    println!();
+                }
+            }
+        }
+    }
+}
+
+/// `harn skill dump --all` — write every canonical skill to disk so
+/// agents and CI can review the active corpus offline.
+pub(crate) fn run_dump(args: &SkillsDumpArgs) {
+    if !args.all {
+        eprintln!(
+            "error: `harn skill dump` requires `--all`. \
+             Pass `--all` to write every canonical skill."
+        );
+        process::exit(2);
+    }
+
+    let out_dir = args
+        .out
+        .as_deref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("skills"));
+
+    if let Err(error) = fs::create_dir_all(&out_dir) {
+        eprintln!("error: failed to create {}: {error}", out_dir.display());
+        process::exit(1);
+    }
+
+    let corpus = resolve_skill_corpus_or_exit();
+    let skills = dump_entries(&corpus);
+    let mut written = Vec::with_capacity(skills.len());
+    for skill in skills {
+        let skill_dir = out_dir.join(skill.name);
+        if let Err(error) = fs::create_dir_all(&skill_dir) {
+            eprintln!("error: failed to create {}: {error}", skill_dir.display());
+            process::exit(1);
+        }
+
+        let dest = skill_dir.join("SKILL.md");
+        if dest.exists() && !args.force {
+            eprintln!(
+                "error: {} already exists. Pass --force to overwrite.",
+                dest.display()
+            );
+            process::exit(1);
+        }
+
+        // Byte-for-byte mirror the active canonical source so dumped
+        // copies stay diff-stable against their origin.
+        if let Err(error) = fs::write(&dest, skill.source) {
+            eprintln!("error: failed to write {}: {error}", dest.display());
+            process::exit(1);
+        }
+        written.push(dest);
+    }
+
+    println!("Wrote {} skill(s) to {}", written.len(), out_dir.display());
+    for path in &written {
+        println!("  {}", path.display());
+    }
+}
+
+fn resolve_skill_corpus_or_exit() -> SkillCorpus {
+    match resolve_skill_corpus_from_env() {
+        Ok(corpus) => corpus,
+        Err(error) => {
+            eprintln!("error: failed to load HARN_SKILLS_DIR: {error}");
+            process::exit(1);
+        }
+    }
+}
+
+fn print_skill_frontmatter(frontmatter: &SkillFrontmatter) {
+    println!("name:        {}", frontmatter.name);
+    if !frontmatter.short.is_empty() {
+        println!("short:       {}", frontmatter.short);
+    }
+    if !frontmatter.description.is_empty() {
+        println!("description: {}", frontmatter.description);
+    }
+    if let Some(when) = frontmatter.when_to_use {
+        println!("when_to_use: {when}");
+    }
+}
+
+fn print_disk_skill_frontmatter(frontmatter: &DiskSkillFrontmatter) {
+    println!("name:        {}", frontmatter.name);
+    if !frontmatter.short.is_empty() {
+        println!("short:       {}", frontmatter.short);
+    }
+    if !frontmatter.description.is_empty() {
+        println!("description: {}", frontmatter.description);
+    }
+    if let Some(when) = &frontmatter.when_to_use {
+        println!("when_to_use: {when}");
+    }
+}
+
+fn list_payload_entries(corpus: &SkillCorpus) -> Vec<ListedSkill> {
+    match corpus {
+        SkillCorpus::Embedded(skills) => skills.iter().map(ListedSkill::from_embedded).collect(),
+        SkillCorpus::Disk(skills) => skills.iter().map(ListedSkill::from_disk).collect(),
+    }
+}
+
+fn available_skill_names(corpus: &SkillCorpus) -> Vec<String> {
+    match corpus {
+        SkillCorpus::Embedded(skills) => {
+            skills.iter().map(|skill| skill.name.to_string()).collect()
+        }
+        SkillCorpus::Disk(skills) => skills.iter().map(|skill| skill.name.clone()).collect(),
+    }
+}
+
+struct DumpEntry<'a> {
+    name: &'a str,
+    source: &'a str,
+}
+
+fn dump_entries(corpus: &SkillCorpus) -> Vec<DumpEntry<'_>> {
+    match corpus {
+        SkillCorpus::Embedded(skills) => skills
+            .iter()
+            .map(|skill| DumpEntry {
+                name: skill.name,
+                source: skill.source,
+            })
+            .collect(),
+        SkillCorpus::Disk(skills) => skills
+            .iter()
+            .map(|skill| DumpEntry {
+                name: skill.name.as_str(),
+                source: skill.source.as_str(),
+            })
+            .collect(),
+    }
+}
+
+fn emit_get_not_found(name: &str, json: bool, corpus: &SkillCorpus) {
+    if json {
+        let envelope: JsonEnvelope<SkillsGetPayload> = JsonEnvelope::err(
+            SKILLS_GET_SCHEMA_VERSION,
+            "skill_not_found",
+            format!("no skill named `{name}`"),
+        )
+        .with_details(serde_json::json!({
+            "requested": name,
+            "available": available_skill_names(corpus),
+        }));
+        println!("{}", json_envelope::to_string_pretty(&envelope));
+    } else {
+        eprintln!("error: no skill named `{name}`.");
+        eprintln!("hint: run `harn skill list` to see what ships with this binary.");
+    }
+}
+
+/// `harn skill resolved` — FS-layered discovery view. The
+/// counterpart to the embedded `list`/`get`/`dump` surface: walks the
+/// project, manifest, user, package, and host layers the same way the
+/// VM does, and reports collisions and shadowing.
+pub(crate) fn run_resolved(args: &SkillsResolvedArgs) {
+    let (discovery, _package_snapshot) = build_discovery(&args.skill_dir, args.from.as_deref());
+    let report = discovery.build_report();
+
+    if args.json {
+        let mut entries = Vec::new();
+        for winner in &report.winners {
+            entries.push(serde_json::json!({
+                "id": winner.id,
+                "layer": winner.layer.label(),
+                "description": winner.manifest.description,
+                "when_to_use": winner.manifest.when_to_use,
+                "origin": winner.origin,
+                "shadowed": false,
+            }));
+        }
+        if args.all {
+            for shadowed in &report.shadowed {
+                entries.push(serde_json::json!({
+                    "id": shadowed.id,
+                    "layer": shadowed.loser.label(),
+                    "winner_layer": shadowed.winner.label(),
+                    "origin": shadowed.loser_origin,
+                    "shadowed": true,
+                }));
+            }
+        }
+        for entry in &entries {
+            println!("{entry}");
+        }
+        return;
+    }
+
+    if report.winners.is_empty() {
+        println!("No skills resolved.");
+        println!(
+            "Hint: add skills via --skill-dir, HARN_SKILLS_PATH, .harn/skills/, or harn.toml."
+        );
+    } else {
+        println!("Resolved skills ({}):", report.winners.len());
+        let id_width = report.winners.iter().map(|w| w.id.len()).max().unwrap_or(4);
+        for winner in &report.winners {
+            let desc = if winner.manifest.short.is_empty() {
+                &winner.manifest.description
+            } else {
+                &winner.manifest.short
+            };
+            let short = if desc.is_empty() {
+                "(no description)".to_string()
+            } else {
+                truncate_end(desc, 60)
+            };
+            println!(
+                "  {:<id_width$}  [{}]  {}",
+                winner.id,
+                winner.layer.label(),
+                short,
+                id_width = id_width
+            );
+        }
+    }
+
+    if !report.shadowed.is_empty() {
+        println!();
+        println!("Shadowed skills ({}):", report.shadowed.len());
+        for entry in &report.shadowed {
+            println!(
+                "  {:<12} winner=[{}] hidden=[{}] origin={}",
+                entry.id,
+                entry.winner.label(),
+                entry.loser.label(),
+                entry.loser_origin
+            );
+        }
+    }
+
+    if !report.disabled_layers.is_empty() {
+        println!();
+        print!("Disabled layers: ");
+        let labels: Vec<&str> = report.disabled_layers.iter().map(|l| l.label()).collect();
+        println!("{}", labels.join(", "));
+    }
+
+    if !report.unknown_fields.is_empty() {
+        println!();
+        println!("Unknown frontmatter fields:");
+        for (id, fields) in &report.unknown_fields {
+            println!("  {id}: {}", fields.join(", "));
+        }
+    }
+}
+
+pub(crate) fn run_inspect(args: &SkillsInspectArgs) {
+    let (discovery, _package_snapshot) = build_discovery(&args.skill_dir, args.from.as_deref());
+    let skill = match discovery.fetch(&args.name) {
+        Ok(skill) => skill,
+        Err(err) => {
+            eprintln!("error: {err}");
+            process::exit(1);
+        }
+    };
+
+    if args.json {
+        let json = skill_to_json(&skill);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json).unwrap_or_else(|error| {
+                eprintln!("error: failed to serialize skill: {error}");
+                process::exit(1);
+            })
+        );
+        return;
+    }
+
+    println!("id:          {}", skill.id());
+    println!("name:        {}", skill.manifest.name);
+    println!("layer:       {}", skill.layer.label());
+    if let Some(ns) = &skill.namespace {
+        println!("namespace:   {ns}");
+    }
+    if !skill.manifest.short.is_empty() {
+        println!("short:       {}", skill.manifest.short);
+    }
+    if !skill.manifest.description.is_empty() {
+        println!("description: {}", skill.manifest.description);
+    }
+    if let Some(when) = &skill.manifest.when_to_use {
+        println!("when_to_use: {when}");
+    }
+    if let Some(dir) = &skill.skill_dir {
+        println!("skill_dir:   {}", dir.display());
+    }
+    if !skill.manifest.allowed_tools.is_empty() {
+        println!("allowed:     {}", skill.manifest.allowed_tools.join(", "));
+    }
+    if !skill.manifest.paths.is_empty() {
+        println!("paths:       {}", skill.manifest.paths.join(", "));
+    }
+    if let Some(model) = &skill.manifest.model {
+        println!("model:       {model}");
+    }
+    if let Some(effort) = &skill.manifest.effort {
+        println!("effort:      {effort}");
+    }
+    if !skill.unknown_fields.is_empty() {
+        println!("unknown:     {}", skill.unknown_fields.join(", "));
+    }
+
+    if let Some(dir) = &skill.skill_dir {
+        let bundled = collect_bundled_files(dir);
+        if !bundled.is_empty() {
+            println!();
+            println!("Bundled files:");
+            for file in &bundled {
+                println!("  {}", file.display());
+            }
+        }
+    }
+
+    println!();
+    println!("---- SKILL.md body ----");
+    print!("{}", skill.body);
+    if !skill.body.ends_with('\n') {
+        println!();
+    }
+}
+
+pub(crate) fn run_match(args: &SkillsMatchArgs) {
+    let (discovery, _package_snapshot) = build_discovery(&args.skill_dir, args.from.as_deref());
+    let report = discovery.build_report();
+    let mut skills: Vec<Skill> = Vec::new();
+    for winner in &report.winners {
+        if let Ok(skill) = discovery.fetch(&winner.id) {
+            skills.push(skill);
+        }
+    }
+
+    let ranked = rank_skills(&skills, &args.query, &args.working_files);
+    let top: Vec<&RankedSkill> = ranked.iter().take(args.top_n.max(1)).collect();
+
+    if args.json {
+        let out: Vec<serde_json::Value> = top
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "id": r.id,
+                    "layer": r.layer.label(),
+                    "score": r.score,
+                    "reason": r.reason,
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&out).unwrap_or_else(|error| {
+                eprintln!("error: failed to serialize match results: {error}");
+                process::exit(1);
+            })
+        );
+        return;
+    }
+
+    if top.is_empty() {
+        println!("No skills matched '{}'.", args.query);
+        return;
+    }
+
+    println!("Match results for: {}", args.query);
+    for (idx, cand) in top.iter().enumerate() {
+        println!(
+            "  {:>2}. {:<20}  score={:.3}  [{}]  {}",
+            idx + 1,
+            cand.id,
+            cand.score,
+            cand.layer.label(),
+            cand.reason
+        );
+    }
+}
+
+pub(crate) fn run_install(args: &SkillsInstallArgs) {
+    let cache_root = PathBuf::from(SKILLS_CACHE_DIR);
+    if let Err(error) = fs::create_dir_all(&cache_root) {
+        eprintln!("error: failed to create {SKILLS_CACHE_DIR}: {error}");
+        process::exit(1);
+    }
+
+    let spec = args.spec.trim();
+    let local_candidate = PathBuf::from(spec);
+    let is_local = local_candidate.exists();
+
+    let (dest_name, dest_dir) = if let Some(namespace) = args.namespace.as_deref() {
+        let dir = cache_root.join(namespace);
+        if let Err(error) = fs::create_dir_all(&dir) {
+            eprintln!("error: failed to create {}: {error}", dir.display());
+            process::exit(1);
+        }
+        (namespace.to_string(), dir)
+    } else {
+        (String::new(), cache_root)
+    };
+
+    let default_name = args
+        .name
+        .clone()
+        .or_else(|| derive_name_from_spec(spec))
+        .unwrap_or_else(|| "skill".to_string());
+    let install_dir = dest_dir.join(&default_name);
+
+    if install_dir.exists() {
+        println!(
+            "refreshing {}",
+            install_dir
+                .strip_prefix(".")
+                .unwrap_or(&install_dir)
+                .display()
+        );
+        let _ = fs::remove_dir_all(&install_dir);
+    } else {
+        println!(
+            "installing {} to {}",
+            spec,
+            install_dir
+                .strip_prefix(".")
+                .unwrap_or(&install_dir)
+                .display()
+        );
+    }
+
+    if is_local {
+        if let Err(error) = copy_dir_all(&local_candidate, &install_dir) {
+            eprintln!("error: failed to copy from {spec}: {error}");
+            process::exit(1);
+        }
+    } else {
+        let url = resolve_git_url(spec);
+        let mut cmd = process::Command::new("git");
+        cmd.args(["clone", "--depth", "1"]);
+        if let Some(tag) = args.tag.as_deref() {
+            cmd.args(["--branch", tag]);
+        }
+        cmd.arg(&url);
+        cmd.arg(&install_dir);
+        cmd.stdout(process::Stdio::null());
+        cmd.stderr(process::Stdio::piped());
+        match cmd.output() {
+            Ok(output) if output.status.success() => {
+                let _ = fs::remove_dir_all(install_dir.join(".git"));
+            }
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                eprintln!("error: git clone failed: {stderr}");
+                process::exit(1);
+            }
+            Err(error) => {
+                eprintln!("error: failed to run git: {error}");
+                eprintln!("hint: make sure git is installed and in PATH.");
+                process::exit(1);
+            }
+        }
+    }
+
+    update_skills_lock(
+        &dest_name,
+        &install_dir,
+        spec,
+        args.tag.as_deref(),
+        is_local,
+    );
+
+    let namespace_note = if let Some(ns) = args.namespace.as_deref() {
+        format!(" (namespace={ns})")
+    } else {
+        String::new()
+    };
+    println!(
+        "installed{} — layer=package, path={}",
+        namespace_note,
+        install_dir.display()
+    );
+}
+
+pub(crate) fn run_new(args: &SkillsNewArgs) {
+    let dest = if let Some(dir) = args.dir.as_deref() {
+        PathBuf::from(dir)
+    } else {
+        PathBuf::from(".harn/skills").join(&args.name)
+    };
+    if dest.exists() {
+        if args.force {
+            if let Err(error) = fs::remove_dir_all(&dest) {
+                eprintln!(
+                    "error: failed to clear existing skill at {}: {error}",
+                    dest.display()
+                );
+                process::exit(1);
+            }
+        } else {
+            eprintln!(
+                "error: {} already exists. Pass --force to overwrite.",
+                dest.display()
+            );
+            process::exit(1);
+        }
+    }
+    if let Err(error) = fs::create_dir_all(&dest) {
+        eprintln!("error: failed to create {}: {error}", dest.display());
+        process::exit(1);
+    }
+
+    let short = args
+        .description
+        .clone()
+        .unwrap_or_else(|| format!("Use the {} skill when this task is relevant.", args.name));
+    let skill_md = format!(
+        "---\n\
+name: {name}\n\
+short: {short}\n\
+# description: <optional longer summary>\n\
+# when_to_use: <one-line trigger hint for the matcher>\n\
+# allowed_tools: []\n\
+# paths: []\n\
+---\n\
+\n\
+# {name}\n\
+\n\
+Write the skill body here. This is the content the agent sees when\n\
+this skill activates. You can include:\n\
+\n\
+- Step-by-step playbooks\n\
+- Example tool invocations\n\
+- Context-specific reminders\n\
+\n\
+Substitutions like `$ARGUMENTS`, `$1`, and `${{HARN_SKILL_DIR}}` are\n\
+expanded when the skill is activated. See docs/src/skills.md for\n\
+the full reference.\n",
+        name = args.name,
+        short = short,
+    );
+    let skill_path = dest.join("SKILL.md");
+    if let Err(error) = fs::write(&skill_path, skill_md) {
+        eprintln!("error: failed to write {}: {error}", skill_path.display());
+        process::exit(1);
+    }
+
+    let bundled_dir = dest.join("files");
+    let _ = fs::create_dir_all(&bundled_dir);
+    let readme = bundled_dir.join("README.md");
+    let _ = fs::write(
+        &readme,
+        format!(
+            "# {} bundled files\n\n\
+Drop supporting documents, templates, or scripts into this folder.\n\
+They are accessible to the skill body via `${{HARN_SKILL_DIR}}/files/<name>`.\n",
+            args.name
+        ),
+    );
+
+    println!("Scaffolded skill '{}' at {}", args.name, dest.display());
+    println!("  SKILL.md");
+    println!("  files/README.md");
+    println!();
+    println!(
+        "Edit the SKILL.md, run `harn skill validate {}` and then `harn skill resolved`.",
+        dest.display(),
+    );
+}
+
+/// Validate one filesystem skill through the same parser and required-field
+/// checks used by `harn run`, `harn check`, and layered discovery.
+pub(crate) fn run_validate(args: &SkillsValidateArgs) {
+    let path = PathBuf::from(&args.path);
+    let skill = match validate_skill_bundle(&path) {
+        Ok(skill) => skill,
+        Err(error) => {
+            if args.json {
+                let envelope: JsonEnvelope<SkillsValidatePayload> =
+                    JsonEnvelope::err(SKILLS_VALIDATE_SCHEMA_VERSION, "skill_invalid", error)
+                        .with_details(serde_json::json!({"path": path}));
+                println!("{}", json_envelope::to_string_pretty(&envelope));
+            } else {
+                eprintln!("error: {error}");
+            }
+            process::exit(1);
+        }
+    };
+    if args.strict && !skill.unknown_fields.is_empty() {
+        let message = format!(
+            "unknown frontmatter field(s): {}",
+            skill.unknown_fields.join(", "),
+        );
+        if args.json {
+            let envelope: JsonEnvelope<SkillsValidatePayload> = JsonEnvelope::err(
+                SKILLS_VALIDATE_SCHEMA_VERSION,
+                "skill_unknown_fields",
+                &message,
+            )
+            .with_details(serde_json::json!({
+                "path": path,
+                "unknown_fields": skill.unknown_fields,
+            }));
+            println!("{}", json_envelope::to_string_pretty(&envelope));
+        } else {
+            eprintln!("error: {message}");
+        }
+        process::exit(1);
+    }
+
+    let skill_dir = skill.skill_dir.as_deref().unwrap_or(&path);
+    let bundled_files: Vec<String> = collect_bundled_files(skill_dir)
+        .into_iter()
+        .map(|file| file.display().to_string())
+        .collect();
+    let payload = SkillsValidatePayload {
+        path: skill_dir.display().to_string(),
+        id: skill.id(),
+        short: skill.manifest.short.clone(),
+        unknown_fields: skill.unknown_fields.clone(),
+        bundled_files,
+    };
+    if args.json {
+        let mut envelope = payload.into_envelope();
+        if !skill.unknown_fields.is_empty() {
+            envelope = envelope.with_warning(
+                "skill.unknown_frontmatter",
+                format!(
+                    "unknown frontmatter field(s): {}",
+                    skill.unknown_fields.join(", "),
+                ),
+            );
+        }
+        println!("{}", json_envelope::to_string_pretty(&envelope));
+        return;
+    }
+
+    println!("valid: {}", skill_dir.display());
+    println!("id:    {}", payload.id);
+    println!("short: {}", payload.short);
+    println!("files: {} bundled file(s)", payload.bundled_files.len());
+    if !skill.unknown_fields.is_empty() {
+        eprintln!(
+            "warning: unknown frontmatter field(s): {}",
+            skill.unknown_fields.join(", "),
+        );
+    }
+}
+
+// --- shared helpers --------------------------------------------------------
+
+struct RankedSkill {
+    id: String,
+    layer: Layer,
+    score: f64,
+    reason: String,
+}
+
+fn build_discovery(
+    cli_dirs: &[String],
+    from: Option<&str>,
+) -> (
+    LayeredDiscovery,
+    Option<harn_modules::package_snapshot::PackageSnapshot>,
+) {
+    let anchor = from
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+
+    let cli_dirs = canonicalize_cli_dirs(cli_dirs, Some(&anchor));
+
+    let mut cfg = FsLayerConfig {
+        cli_dirs,
+        ..FsLayerConfig::default()
+    };
+
+    if let Ok(raw) = std::env::var("HARN_SKILLS_PATH") {
+        if !raw.is_empty() {
+            cfg.env_dirs = parse_env_skills_path(&raw);
+        }
+    }
+
+    let package_snapshot =
+        harn_vm::stdlib::process::find_project_root(&anchor).and_then(|project_root| {
+            harn_modules::package_snapshot::PackageSnapshot::acquire(&project_root)
+                .ok()
+                .flatten()
+        });
+    if let Some(snapshot) = package_snapshot.as_ref() {
+        cfg.project_root = Some(snapshot.project_root().to_path_buf());
+        cfg.packages_dir = Some(snapshot.packages_root().to_path_buf());
+    }
+
+    let resolved = load_skills_config(Some(&anchor));
+    let mut options = DiscoveryOptions::default();
+    if let Some(resolved) = resolved.as_ref() {
+        cfg.manifest_paths.extend(resolve_skills_paths(resolved));
+        cfg.manifest_sources
+            .extend(resolved.sources.iter().filter_map(manifest_source_to_vm));
+        for label in &resolved.config.disable {
+            if let Some(layer) = Layer::from_label(label) {
+                options.disabled_layers.push(layer);
+            }
+        }
+        if !resolved.config.lookup_order.is_empty() {
+            let ordered: Vec<Layer> = resolved
+                .config
+                .lookup_order
+                .iter()
+                .filter_map(|s| Layer::from_label(s))
+                .collect();
+            if !ordered.is_empty() {
+                options.lookup_order = Some(ordered);
+            }
+        }
+    }
+
+    cfg.user_dir = default_user_dir();
+    cfg.system_dirs = default_system_dirs();
+
+    // Pull skills-cache entries (populated by `harn skill install`) into
+    // the package layer so installed skills show up without asking users
+    // to also run `harn install`.
+    if let Some(project_root) = cfg.project_root.as_ref() {
+        let cache = project_root.join(SKILLS_CACHE_DIR);
+        if cache.is_dir() {
+            walk_install_cache(&cache, &mut cfg.manifest_paths);
+        }
+    }
+
+    (build_fs_discovery(&cfg, options), package_snapshot)
+}
+
+fn manifest_source_to_vm(entry: &SkillSourceEntry) -> Option<ManifestSource> {
+    match entry {
+        SkillSourceEntry::Fs { path, namespace } => Some(ManifestSource::Fs {
+            path: PathBuf::from(path),
+            namespace: namespace.clone(),
+        }),
+        SkillSourceEntry::Git { namespace, .. } => {
+            namespace.as_ref().map(|ns| ManifestSource::Git {
+                path: PathBuf::new(),
+                namespace: Some(ns.clone()),
+            })
+        }
+        SkillSourceEntry::Registry { .. } => None,
+    }
+}
+
+fn walk_install_cache(cache_root: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(cache_root) else {
+        return;
+    };
+    let mut stack: Vec<PathBuf> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .map(|e| e.path())
+        .collect();
+    let mut seen: BTreeSet<PathBuf> = BTreeSet::new();
+    while let Some(dir) = stack.pop() {
+        if !seen.insert(dir.clone()) {
+            continue;
+        }
+        if dir.join("SKILL.md").is_file() {
+            if let Some(parent) = dir.parent() {
+                out.push(parent.to_path_buf());
+            } else {
+                out.push(dir.clone());
+            }
+            continue;
+        }
+        let Ok(children) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for child in children.flatten() {
+            let path = child.path();
+            if path.is_dir() {
+                stack.push(path);
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+}
+
+fn skill_to_json(skill: &Skill) -> serde_json::Value {
+    serde_json::json!({
+        "id": skill.id(),
+        "name": skill.manifest.name,
+        "short": skill.manifest.short,
+        "description": skill.manifest.description,
+        "when_to_use": skill.manifest.when_to_use,
+        "layer": skill.layer.label(),
+        "namespace": skill.namespace,
+        "skill_dir": skill.skill_dir.as_ref().map(|p| p.display().to_string()),
+        "allowed_tools": skill.manifest.allowed_tools,
+        "paths": skill.manifest.paths,
+        "model": skill.manifest.model,
+        "effort": skill.manifest.effort,
+        "shell": skill.manifest.shell,
+        "agent": skill.manifest.agent,
+        "context": skill.manifest.context,
+        "user_invocable": skill.manifest.user_invocable,
+        "disable_model_invocation": skill.manifest.disable_model_invocation,
+        "unknown_fields": skill.unknown_fields,
+        "body": skill.body,
+    })
+}
+
+fn collect_bundled_files(skill_dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    collect_bundled_files_inner(skill_dir, skill_dir, &mut out);
+    out.sort();
+    out
+}
+
+fn collect_bundled_files_inner(root: &Path, cursor: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(cursor) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let rel = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
+        if path.is_dir() {
+            collect_bundled_files_inner(root, &path, out);
+        } else if rel.file_name().and_then(|f| f.to_str()) != Some("SKILL.md") {
+            out.push(rel);
+        }
+    }
+}
+
+fn derive_name_from_spec(spec: &str) -> Option<String> {
+    let trimmed = spec
+        .trim_end_matches('/')
+        .trim_end_matches(".git")
+        .trim_end_matches(|c: char| c.is_whitespace());
+    let last = trimmed
+        .rsplit(['/', ':', '\\'])
+        .find(|s| !s.is_empty())?
+        .to_string();
+    if last.is_empty() {
+        None
+    } else {
+        Some(last)
+    }
+}
+
+fn resolve_git_url(spec: &str) -> String {
+    // `owner/repo` shorthand expands to github.com — matches cargo-install UX.
+    if !spec.contains("://")
+        && !spec.starts_with("git@")
+        && spec.matches('/').count() == 1
+        && !spec.starts_with('.')
+        && !spec.starts_with('/')
+    {
+        return format!("https://github.com/{spec}.git");
+    }
+    spec.to_string()
+}
+
+fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let dest_path = dst.join(entry.file_name());
+        if ty.is_dir() {
+            copy_dir_all(&entry.path(), &dest_path)?;
+        } else {
+            fs::copy(entry.path(), &dest_path)?;
+        }
+    }
+    Ok(())
+}
+
+fn update_skills_lock(
+    name: &str,
+    install_dir: &Path,
+    spec: &str,
+    tag: Option<&str>,
+    is_local: bool,
+) {
+    let lock_path = PathBuf::from(".harn/skills-cache/skills.lock");
+    if let Some(parent) = lock_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let prior = fs::read_to_string(&lock_path).unwrap_or_default();
+    let mut sections: Vec<String> = Vec::new();
+    let mut current: Vec<String> = Vec::new();
+    for line in prior.lines() {
+        if line.starts_with("[[skill]]") {
+            if !current.is_empty() {
+                sections.push(current.join("\n"));
+            }
+            current = Vec::new();
+            current.push(line.to_string());
+        } else if !current.is_empty() {
+            current.push(line.to_string());
+        }
+    }
+    if !current.is_empty() {
+        sections.push(current.join("\n"));
+    }
+    let mut filtered: Vec<String> = sections
+        .into_iter()
+        .filter(|section| !section.contains(&format!("name = \"{name}\"")))
+        .collect();
+
+    let mut entry = String::new();
+    entry.push_str("[[skill]]\n");
+    entry.push_str(&format!("name = \"{name}\"\n"));
+    entry.push_str(&format!(
+        "path = \"{}\"\n",
+        install_dir.display().to_string().replace('"', "\\\"")
+    ));
+    if is_local {
+        entry.push_str(&format!(
+            "source = \"path://{}\"\n",
+            spec.replace('"', "\\\"")
+        ));
+    } else {
+        entry.push_str(&format!(
+            "source = \"{}\"\n",
+            resolve_git_url(spec).replace('"', "\\\"")
+        ));
+        if let Some(tag) = tag {
+            entry.push_str(&format!("tag = \"{tag}\"\n"));
+        }
+    }
+    filtered.push(entry);
+
+    let mut out =
+        String::from("# Auto-generated by `harn skill install`. Safe to commit or ignore.\n\n");
+    for section in filtered {
+        out.push_str(section.trim_end_matches('\n'));
+        out.push_str("\n\n");
+    }
+    if let Err(error) = fs::write(&lock_path, out) {
+        eprintln!("warning: failed to update {}: {error}", lock_path.display());
+    }
+}
+
+/// Minimal scorer that mirrors the metadata strategy used by the agent
+/// loop (BM25-ish keyword hits + path-glob matches + prompt-mention
+/// boost). Kept self-contained here so the CLI doesn't depend on the
+/// agent-loop internals, and so the output stays stable even if the
+/// runtime matcher changes.
+fn rank_skills(skills: &[Skill], prompt: &str, working_files: &[String]) -> Vec<RankedSkill> {
+    let tokens: Vec<String> = prompt
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|t| t.len() > 2)
+        .map(|t| t.to_lowercase())
+        .collect();
+    let prompt_lower = prompt.to_lowercase();
+    let mut out = Vec::new();
+    for skill in skills {
+        let mut score = 0.0_f64;
+        let mut reasons: Vec<String> = Vec::new();
+        let description = if skill.manifest.short.is_empty() {
+            skill.manifest.description.as_str()
+        } else {
+            skill.manifest.short.as_str()
+        };
+        let when = skill.manifest.when_to_use.as_deref().unwrap_or("");
+        let keyword_hits = count_hits(&tokens, description) + count_hits(&tokens, when);
+        if keyword_hits > 0 {
+            let bm25 = (keyword_hits as f64) / (keyword_hits as f64 + 1.5);
+            score += bm25;
+            reasons.push(format!("{keyword_hits} keyword hit(s)"));
+        }
+        if !skill.manifest.name.is_empty()
+            && prompt_lower.contains(&skill.manifest.name.to_lowercase())
+        {
+            score += 2.0;
+            reasons.push(format!("prompt mentions '{}'", skill.manifest.name));
+        }
+        let path_hits = count_path_hits(&skill.manifest.paths, working_files);
+        if path_hits > 0 {
+            score += 1.5 * (path_hits as f64);
+            reasons.push(format!("{path_hits} path glob(s) matched"));
+        }
+        if score > 0.0 {
+            out.push(RankedSkill {
+                id: skill.id(),
+                layer: skill.layer,
+                score,
+                reason: if reasons.is_empty() {
+                    "matched".to_string()
+                } else {
+                    reasons.join("; ")
+                },
+            });
+        }
+    }
+    out.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    out
+}
+
+fn count_hits(terms: &[String], haystack: &str) -> usize {
+    if terms.is_empty() || haystack.is_empty() {
+        return 0;
+    }
+    let lower = haystack.to_lowercase();
+    terms.iter().filter(|t| lower.contains(t.as_str())).count()
+}
+
+fn count_path_hits(patterns: &[String], files: &[String]) -> usize {
+    let mut hits = 0;
+    for pat in patterns {
+        for file in files {
+            if glob_match(pat, file) {
+                hits += 1;
+                break;
+            }
+        }
+    }
+    hits
+}
+
+use harn_glob::match_path as glob_match;
+
+// Silence an unused-import warning when the public aliases aren't used.
+#[allow(dead_code)]
+fn _types(_: SkillManifestRef) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn derive_name_extracts_repo_segment() {
+        assert_eq!(
+            derive_name_from_spec("https://github.com/acme/harn-skills.git"),
+            Some("harn-skills".to_string())
+        );
+        assert_eq!(
+            derive_name_from_spec("./local/path/deploy"),
+            Some("deploy".to_string())
+        );
+        assert_eq!(derive_name_from_spec("acme/ops"), Some("ops".to_string()));
+    }
+
+    #[test]
+    fn resolve_git_url_expands_shorthand() {
+        assert_eq!(
+            resolve_git_url("acme/ops"),
+            "https://github.com/acme/ops.git"
+        );
+        assert_eq!(
+            resolve_git_url("https://example.com/x.git"),
+            "https://example.com/x.git"
+        );
+    }
+
+    #[test]
+    fn glob_matches_expected() {
+        assert!(glob_match("src/*.rs", "src/main.rs"));
+        assert!(!glob_match("src/*.rs", "src/sub/main.rs"));
+        assert!(glob_match("infra/**", "infra/terraform/main.tf"));
+    }
+}

@@ -1,0 +1,13 @@
+// Library exporting `pub const` / `pub let` values alongside a `pub fn`.
+// Only `pub` names are importable; `PRIVATE_LIMIT` stays module-private.
+pub const MAX_RETRIES = 3
+
+pub const GREETING = "hi"
+
+pub let MUTABLE_SEED = 7
+
+const PRIVATE_LIMIT = 99
+
+pub fn scaled() {
+  return MAX_RETRIES * PRIVATE_LIMIT
+}

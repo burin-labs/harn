@@ -1,0 +1,11 @@
+# HARN-IMP-001 — import target cannot be resolved
+
+## What it means
+
+Import resolution failed at a deeper layer than `MOD` — the file, symbol, or
+module graph cannot be constructed. Compilation cannot proceed.
+
+## How to fix
+
+- Add the missing module or symbol, or update the import path.
+- Break import cycles by extracting the shared definitions into a third module.

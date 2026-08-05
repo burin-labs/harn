@@ -1,0 +1,71 @@
+pipeline test(harness: Harness, task) {
+  // Defer is block-scoped: runs at end of its enclosing { ... } block,
+  // not at end of the surrounding function.
+  fn block_scoped() {
+    harness.stdio.log("before block")
+    if true {
+      defer {
+        harness.stdio.log("if-block exit")
+      }
+      harness.stdio.log("inside if")
+    }
+    harness.stdio.log("after block")
+  }
+  block_scoped()
+  // Block-scoped defer + LIFO order inside the same block.
+  fn lifo_in_block() {
+    if true {
+      defer {
+        harness.stdio.log("first")
+      }
+      defer {
+        harness.stdio.log("second")
+      }
+      defer {
+        harness.stdio.log("third")
+      }
+      harness.stdio.log("body")
+    }
+    harness.stdio.log("outside")
+  }
+  lifo_in_block()
+  // Defer inside a for-body runs at each iteration's end (block-scope).
+  fn loop_per_iteration() {
+    for i in [1, 2, 3] {
+      defer {
+        harness.stdio.log("end iter")
+      }
+      harness.stdio.log(i)
+    }
+    harness.stdio.log("loop done")
+  }
+  loop_per_iteration()
+  // Break still runs pending defers in the loop body before exiting.
+  fn break_runs_defers() {
+    for i in [1, 2, 3] {
+      defer {
+        harness.stdio.log("iter cleanup")
+      }
+      if i == 2 {
+        break
+      }
+      harness.stdio.log(i)
+    }
+    harness.stdio.log("after break")
+  }
+  break_runs_defers()
+  // Continue runs pending defers in the loop body before continuing.
+  fn continue_runs_defers() {
+    for i in [1, 2, 3] {
+      defer {
+        harness.stdio.log("iter cleanup")
+      }
+      if i == 2 {
+        continue
+      }
+      harness.stdio.log(i)
+    }
+    harness.stdio.log("after continue")
+  }
+  continue_runs_defers()
+}

@@ -1,0 +1,255 @@
+# cargo-nextest configuration for the Harn workspace.
+#
+# Run with `cargo nextest run --workspace` after `cargo install cargo-nextest --locked`.
+# Nextest is optional; plain `cargo test` also works but does not enforce
+# the slow-test timeouts below. The goal of this file is to guarantee that
+# no single test can wedge the suite indefinitely (historically, tests that
+# bound a `TcpListener` in blocking mode have hung CI for many minutes).
+#
+# Custom profiles inherit `[[profile.default.overrides]]` per setting: for a
+# test T and setting S, nextest applies the first override in the *running*
+# profile that matches T and configures S, and otherwise the first override in
+# `default` that matches T and configures S. So a profile only needs to restate
+# an override when its value genuinely differs from `default`. (An earlier
+# revision of this file asserted the opposite and duplicated every override into
+# `ci` and `flake-detection`; `cargo nextest show-config test-groups --profile
+# <name>` reports the inherited entries as "override for default profile".)
+
+[profile.default]
+# Fast suite. Excludes the subprocess-spawning `harn-cli` integration tests
+# (they spawn the built `harn` binary and need the cold-cache prewarm + longer
+# timeouts the `e2e` profile gives them — see `make test-e2e`).
+#
+# In-process harn-cli integration tests (they call `execute_run`, `build_pack`,
+# etc. directly in the test binary) stay in the PR suite — they're seconds-fast
+# and would otherwise leak runtime regressions to nightly. Add a new file here
+# when it lands rather than letting it default into the e2e tier.
+default-filter = "not (package(harn-cli) and kind(test)) or (package(harn-cli) and binary(harn_cli_fast))"
+# Any test that runs longer than 15s is considered "slow"; if it exceeds
+# the 60s hard cap three times it is terminated so the suite keeps moving.
+slow-timeout = { period = "15s", terminate-after = 4, grace-period = "5s" }
+# Leak detection: see the "Leaked-handle detection" section below for why the
+# period is 10s and why the verdict is only enforced off macOS.
+leak-timeout = { period = "10s", result = "fail" }
+# Terminate runaway tests after 60 seconds by default. Tests that legitimately
+# need more time must opt in via an override below.
+fail-fast = false
+
+# CI profile is stricter: one warning at 30s, hard kill at 120s.
+# Inherits the same default-filter as the default profile (fast suite only).
+[profile.ci]
+default-filter = "not (package(harn-cli) and kind(test)) or (package(harn-cli) and binary(harn_cli_fast))"
+slow-timeout = { period = "30s", terminate-after = 4, grace-period = "10s" }
+leak-timeout = { period = "10s", result = "fail" }
+fail-fast = false
+failure-output = "immediate-final"
+success-output = "never"
+
+# E2E profile: subprocess-spawning integration tests — CLI invocation, signal
+# handling, MCP server launch, real ProcessHandle, real process tools.
+# Run with `make test-e2e` or
+# `cargo nextest run --profile e2e --run-ignored all`.
+# Triggered by the nightly schedule, `workflow_dispatch`, and the `e2e` PR
+# label — see `.github/workflows/e2e.yml`. NOT on `merge_group`, and the
+# `CI status` aggregate that branch protection requires does not include this
+# job. Nothing here gates a merge: a change can break every test this profile
+# runs, pass all required checks, and ship. #5602 did, and #5642 covers that
+# specific class from the harn-cli lib suite instead. Add coverage that has to
+# hold before merge to a required lane, not here.
+[profile.e2e]
+default-filter = "package(harn-cli) and kind(test)"
+slow-timeout = { period = "60s", terminate-after = 3, grace-period = "15s" }
+leak-timeout = { period = "15s", result = "pass" }
+fail-fast = false
+failure-output = "immediate-final"
+success-output = "never"
+
+# Flake-detection profile: zero retries, no fail-fast, tighter slow-test
+# threshold. Used by the flake-detection CI workflow which runs touched
+# test binaries 50x at --test-threads=8.
+[profile.flake-detection]
+retries = 0
+slow-timeout = { period = "15s", terminate-after = 4, grace-period = "5s" }
+leak-timeout = { period = "10s", result = "fail" }
+fail-fast = false
+failure-output = "immediate-final"
+success-output = "never"
+
+# ---------------------------------------------------------------------------
+# Leaked-handle detection
+# ---------------------------------------------------------------------------
+# Nextest's leak check is narrow and specific: after a test process exits it
+# waits `leak-timeout` for that process's captured stdout/stderr pipes to reach
+# EOF. The only thing that can hold them open is a *subprocess that inherited
+# one of those two streams*. Upstream is explicit that this is the whole
+# mechanism — children spawned with piped or null stdio are not detectable.
+#
+# That mechanism does not explain the verdicts this workspace has collected on
+# macOS. The tests flagged over time include pure in-process harn-fmt layout
+# tests and `stdlib::sandbox::workspace_env_integration::
+# os_sandbox_still_denies_writes_outside_the_workspace` (#6115), which spawns
+# only through `op_interrupt::capture_output_interruptible` — and that helper
+# sets stdout and stderr to `Stdio::piped()` and stdin to `Stdio::null()`
+# *before* spawning. Neither test can hand an inheritable stream to anything,
+# so neither can produce a real leaked handle. The verdicts were false.
+#
+# The period was raised three times chasing this (200ms upstream default -> 2s
+# -> 5s -> 10s), each time after a loaded full-suite macOS run, and each bump
+# only moved the next false verdict further out. It never converged because the
+# holder is not the blamed test: under full workspace fan-out on macOS, nextest
+# reports leaks against processes that provably spawned nothing. Raising the
+# period a fourth time makes the gate decorative, and a per-test
+# `result = "pass"` exemption for a *sandbox* test would suppress exactly the
+# escaped-child class that test exists to catch.
+#
+# So the verdict is scoped to the platform where it is trustworthy instead of
+# being tuned globally or exempted test by test. Off macOS it stays strict for
+# the whole workspace — which is a real tightening, because the previous
+# per-package `result = "pass"` exemptions (all of harn-cli, one harn-hostlib
+# test) were justified by this same macOS fan-out behavior yet disabled the
+# gate on Linux and Windows too. Harn's inherited-stdio spawn paths are
+# cross-platform (`mcp/connect.rs` inherits child stderr;
+# `hostlib/process/real.rs` honors `OutputCapture::Inherit`), so a genuine
+# escaped child still fails the Linux and Windows lanes.
+#
+# Known blind spot: a leaked child of a macOS-only spawn path — `sandbox-exec`
+# above all — is now reported as `PASS (leaky)` rather than failing the run.
+# Nothing else observes that today.
+[[profile.default.overrides]]
+platform = { host = 'cfg(target_os = "macos")' }
+leak-timeout = { period = "10s", result = "pass" }
+
+# ---------------------------------------------------------------------------
+# Concurrency groups
+# ---------------------------------------------------------------------------
+# Tests that spawn the `harn` debug binary as a subprocess used to need a
+# bounded `max-threads = 4` cap to avoid macOS dyld + AMFI cold-cache
+# scheduler starvation: when N tests simultaneously cold-spawn the
+# freshly-built binary, the kernel page-ins, dyld closure construction,
+# and AMFI signature validation contend on the same shared resources, and
+# every individual subprocess startup balloons from ~300 ms to several
+# seconds — the tail of that cohort then trips the 60 s slow-test ceiling.
+#
+# That cap was a workaround, not a fix. As of harn#949 the architectural
+# fix is in place: every harn-cli E2E subprocess test spawns through
+# `crates/harn-cli/tests/test_util/process.rs::harn_e2e_command()`, which
+# pre-warms the binary's dyld page cache and AMFI signature with a single
+# synchronous `harn --version` invocation on first call within each test
+# binary process. Subsequent spawns short-circuit the cold-cache path
+# entirely, so wall-clock parallelism is no longer bounded by
+# shared-OS-resource contention.
+#
+# That fix lifts the cold-cache wall but does not remove the second,
+# softer constraint: several orchestrator integration tests (e.g.
+# `bounded_pump_drain_truncates_and_replays_remaining_backlog_after_restart`)
+# spawn an orchestrator subprocess and then assert that 60+ events
+# dispatch within a tight fail-fast timeout. Under nextest's full workspace fan-out
+# every additional concurrent subprocess steals CPU from the in-flight
+# dispatcher, so at high concurrency the dispatch budget itself starts
+# tipping over.
+#
+# 8 is the sweet spot empirically: double the previous ceiling, no
+# regression in 5x stress runs (`scripts/stress_subprocess_tests.sh`),
+# and leaves enough CPU headroom for the time-sensitive dispatcher
+# assertions to stay well within budget. Push higher only after relaxing
+# those event budgets — the limiter becomes the test, not the scheduler.
+[test-groups]
+harn-subprocess = { max-threads = 8 }
+harn-cli-bin = { max-threads = 8 }
+# harn-dap's unit tests are short, but several construct debugger VMs, Tokio
+# runtimes, and host-bridge state. Serializing the binary keeps the leak
+# verdict meaningful on the platforms that still enforce it rather than
+# trading it away for concurrency.
+harn-dap = { max-threads = 1 }
+# Windows AppContainer process launches and `icacls` grants exercise shared
+# OS resources. Keep these tests serialized under nextest so a valid sandbox
+# spawn is not forced to contend with several sibling AppContainer launches.
+harn-windows-sandbox = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = "package(harn-cli) and kind(test)"
+test-group = "harn-subprocess"
+
+[[profile.default.overrides]]
+filter = 'package(harn-vm) and test(/process_options_cross_platform|session_environment_leak|sandbox_exec_profile_allows_swiftpm_manifest_evaluation|installed_toolchains_use_the_workspace_owned_state|operator_meta_collects_workflows_hooks_manifests_and_merge_policy/)'
+test-group = "harn-subprocess"
+
+[[profile.default.overrides]]
+filter = "package(harn-cli) and binary(harn)"
+test-group = "harn-cli-bin"
+
+[[profile.default.overrides]]
+filter = 'package(harn-dap) and binary(stdio_smoke) and test(dap_stdio_hits_breakpoint_and_reads_a_local_variable)'
+test-group = "harn-dap"
+slow-timeout = { period = "60s", terminate-after = 4, grace-period = "10s" }
+
+[[profile.default.overrides]]
+filter = "package(harn-dap)"
+test-group = "harn-dap"
+
+[[profile.default.overrides]]
+filter = 'package(harn-vm) and test(/windows_process_sandbox|replay_dispatch_scopes_harn_replay_per_dispatch_and_child_process/)'
+test-group = "harn-windows-sandbox"
+
+# ---------------------------------------------------------------------------
+# Slow-test budgets
+# ---------------------------------------------------------------------------
+# Transport-layer LLM tests do real localhost TCP with a 3s accept deadline.
+# They're bounded internally but give them a bit more room than the default
+# slow-test threshold to reduce false-positive flags on cold CI workers.
+[[profile.default.overrides]]
+filter = 'package(harn-vm) and test(/llm::api::tests/)'
+slow-timeout = { period = "30s", terminate-after = 3, grace-period = "5s" }
+
+# CI workers are slower than a developer machine; the same transport tests need
+# a wider ceiling there. This is the one budget that genuinely differs from
+# `default`, so it is the one override `ci` has to restate.
+[[profile.ci.overrides]]
+filter = 'package(harn-vm) and test(/llm::api::tests/)'
+slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
+
+# request_catalog_audit_validates_every_catalog_route_in_process validates every
+# LLM provider route in-process (route_count x probe_cases x request_profiles x
+# modes). It is a heavy CPU-bound test whose wall-time is dominated by runner
+# contention, not its own work: observed 15s-80s on Linux workers under full
+# workspace fan-out. On the slower Windows runner it sits right on the default
+# 120s hard-kill cliff, so a loaded run tips it over and terminates a correct
+# test. Give it more room than the default slow ceiling, same rationale as the
+# llm::api transport override above.
+#
+# Scope is anchored to this single test on purpose: its fast fixture siblings in
+# the same module keep the default ceiling so a real slow-test regression in one
+# of them still trips immediately. The durable root fix is the O(1) immutable
+# provider-catalog snapshot (harn#5105), which takes this exact test from ~40s
+# to <1s; this override is the immediate Windows belt-and-suspenders until that
+# lands.
+[[profile.default.overrides]]
+filter = 'package(harn-vm) and test(/request_catalog_audit_validates_every_catalog_route_in_process/)'
+slow-timeout = { period = "60s", terminate-after = 3, grace-period = "10s" }
+
+# ---------------------------------------------------------------------------
+# Wall-clock budget tests: reserve the runner while they measure
+# ---------------------------------------------------------------------------
+# This is an explicit 10,000-event wall-clock budget, not merely a functional
+# test. Reserve the runner while it measures so the result describes the FTS
+# query rather than whichever CPU-heavy workspace tests happen to overlap it.
+[[profile.default.overrides]]
+filter = 'package(harn-session-store) and test(sqlite_10k_event_fts_query_completes_under_500ms)'
+threads-required = "num-cpus"
+
+# Timeline projection has the same absolute 10,000-event wall-clock contract.
+# Reserve the runner so SQLite decoding and semantic node construction are not
+# timed while unrelated workspace tests consume the available CPU.
+[[profile.default.overrides]]
+filter = 'package(harn-vm) and test(persisted_10k_event_tool_timeline_opens_under_500ms)'
+threads-required = "num-cpus"
+
+# ---------------------------------------------------------------------------
+# E2E profile overrides
+# ---------------------------------------------------------------------------
+# The e2e suite spawns a real `harn` binary for essentially every test, so its
+# leak window is wider and stays advisory on every platform. `default` supplies
+# the `harn-subprocess` group; only the leak budget differs here.
+[[profile.e2e.overrides]]
+filter = "package(harn-cli) and kind(test)"
+leak-timeout = { period = "15s", result = "pass" }

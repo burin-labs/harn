@@ -1,0 +1,15 @@
+pipeline test(harness: Harness, task) {
+  let cleanup_ran = false
+  try {
+    try {
+      throw "inner"
+    } catch (e) {
+      throw "rethrown"
+    } finally {
+      cleanup_ran = true
+    }
+  } catch (e2) {
+    harness.stdio.log("outer: ${e2}")
+  }
+  harness.stdio.log("cleanup_ran: ${cleanup_ran}")
+}

@@ -1,0 +1,7 @@
+pipeline test(harness: Harness, task) {
+  mutex("resource") {
+    mutex("resource") {
+      harness.stdio.log("unreachable: re-acquiring the same keyed mutex self-deadlocks")
+    }
+  }
+}

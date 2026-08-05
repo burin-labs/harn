@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/terminal_session/capture.response.json",
+  "title": "terminal_session.capture response",
+  "type": "object",
+  "properties": {
+    "session_id": { "type": "string" },
+    "schema_version": { "const": 1 },
+    "rows": { "type": "integer", "minimum": 1, "maximum": 512 },
+    "columns": { "type": "integer", "minimum": 1, "maximum": 512 },
+    "text_rows": { "type": "array", "maxItems": 512, "items": { "type": "string" } },
+    "cursor_row": { "type": "integer", "minimum": 0 },
+    "cursor_column": { "type": "integer", "minimum": 0 },
+    "cursor_visible": { "type": "boolean" },
+    "alternate_screen": { "type": "boolean" },
+    "revision": { "type": "integer", "minimum": 0 },
+    "bytes_received": { "type": "integer", "minimum": 0 },
+    "raw_truncated": { "type": "boolean" },
+    "parser_errors": { "type": "integer", "minimum": 0 },
+    "reader_error": { "type": ["string", "null"] },
+    "status": { "$ref": "#/$defs/status" },
+    "cells": {
+      "type": ["array", "null"],
+      "maxItems": 16384,
+      "items": { "$ref": "#/$defs/cell" }
+    }
+  },
+  "required": ["session_id", "schema_version", "rows", "columns", "text_rows", "cursor_row", "cursor_column", "cursor_visible", "alternate_screen", "revision", "bytes_received", "raw_truncated", "parser_errors", "reader_error", "status", "cells"],
+  "additionalProperties": false,
+  "$defs": {
+    "status": {
+      "oneOf": [
+        { "type": "object", "properties": { "state": { "const": "running" } }, "required": ["state"], "additionalProperties": false },
+        { "type": "object", "properties": { "state": { "const": "exited" }, "code": { "type": ["integer", "null"] }, "signal": { "type": ["string", "null"] } }, "required": ["state", "code", "signal"], "additionalProperties": false },
+        { "type": "object", "properties": { "state": { "const": "failed" }, "message": { "type": "string" } }, "required": ["state", "message"], "additionalProperties": false }
+      ]
+    },
+    "color": {
+      "oneOf": [
+        { "type": "object", "properties": { "kind": { "const": "default" } }, "required": ["kind"], "additionalProperties": false },
+        { "type": "object", "properties": { "kind": { "const": "indexed" }, "index": { "type": "integer", "minimum": 0, "maximum": 255 } }, "required": ["kind", "index"], "additionalProperties": false },
+        { "type": "object", "properties": { "kind": { "const": "rgb" }, "red": { "type": "integer", "minimum": 0, "maximum": 255 }, "green": { "type": "integer", "minimum": 0, "maximum": 255 }, "blue": { "type": "integer", "minimum": 0, "maximum": 255 } }, "required": ["kind", "red", "green", "blue"], "additionalProperties": false }
+      ]
+    },
+    "cell": {
+      "type": "object",
+      "properties": {
+        "row": { "type": "integer", "minimum": 0 },
+        "column": { "type": "integer", "minimum": 0 },
+        "text": { "type": "string" },
+        "foreground": { "$ref": "#/$defs/color" },
+        "background": { "$ref": "#/$defs/color" },
+        "bold": { "type": "boolean" },
+        "italic": { "type": "boolean" },
+        "underline": { "type": "boolean" },
+        "inverse": { "type": "boolean" },
+        "wide": { "type": "boolean" },
+        "wide_continuation": { "type": "boolean" }
+      },
+      "required": ["row", "column", "text", "foreground", "background", "bold", "italic", "underline", "inverse", "wide", "wide_continuation"],
+      "additionalProperties": false
+    }
+  }
+}

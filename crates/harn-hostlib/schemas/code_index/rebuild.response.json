@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/rebuild.response.json",
+  "title": "code_index.rebuild response",
+  "type": "object",
+  "properties": {
+    "files_indexed": { "type": "integer", "minimum": 0 },
+    "files_skipped": { "type": "integer", "minimum": 0 },
+    "elapsed_ms": { "type": "integer", "minimum": 0 }
+  },
+  "required": ["files_indexed", "files_skipped", "elapsed_ms"],
+  "additionalProperties": false
+}

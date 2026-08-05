@@ -1,0 +1,575 @@
+/**
+ * Anytime-valid sequential statistics for bounded eval measurements.
+ *
+ * Unlike fixed-sample confidence intervals, confidence sequences remain valid
+ * after repeated looks and at data-dependent stopping times. The ladder helpers
+ * only schedule spend; `arm_decision` makes every prune and declaration from the
+ * confidence sequences.
+ */
+import { paired_case_deltas } from "std/eval/stats"
+
+pub type ConfidenceSequence = {mean: float, lo: float, hi: float, halfwidth: float, n: int}
+
+pub type SequentialArm = {id: string, deltas: list<float>, complexity: int}
+
+pub type ArmInterval = {id: string, mean: float, lo: float, hi: float, halfwidth: float, n: int}
+
+pub type SequentialVerdict = "RUNNING" | "WINNER" | "BASELINE" | "TIED_CONFIRMED" | "UNRESOLVED"
+
+pub type ArmDecision = {
+  intervals: dict<string, ArmInterval>,
+  leader: string?,
+  runner_up: string?,
+  killed: list<string>,
+  kept: list<string>,
+  winner: string?,
+  verdict: SequentialVerdict,
+  no_decision: bool,
+}
+
+pub type SequentialSavings = {
+  sequential_per_case: int,
+  fixed_grid_per_case: int,
+  deepest_n: int,
+  factor: float,
+}
+
+type ArmRanking = {intervals: dict<string, ArmInterval>, leader: string, runner_up: string?}
+
+fn __mean(values: list<float>) -> float {
+  if len(values) == 0 {
+    return 0.0
+  }
+  let total = 0.0
+  for value in values {
+    total = total + value
+  }
+  return total / to_float(len(values))
+}
+
+fn __require_delta(delta: float) {
+  if delta <= 0.0 || delta >= 1.0 {
+    throw "std/eval/sequential: delta must be in (0, 1)"
+  }
+}
+
+fn __require_bounds(values: list<float>, lo: float, hi: float) {
+  if !(lo < hi) {
+    throw "std/eval/sequential: lo must be less than hi"
+  }
+  for value in values {
+    if value < lo || value > hi {
+      throw "std/eval/sequential: observed value is outside the declared bounds"
+    }
+  }
+}
+
+/**
+ * Predictable variance-adaptive betting fraction for sample `i`.
+ *
+ * The inputs summarize samples strictly before `i`, so the bet never observes
+ * the sample it is about to score.
+ */
+fn __predictable_lambda(i: int, previous_variance: float, delta: float, cap: float) -> float {
+  const index = max(i, 1)
+  const prior_weight = 1.0 / (to_float(index) + 1.0)
+  const variance = max((1.0 - prior_weight) * previous_variance + prior_weight * 0.25, 0.0001)
+  const denominator = max(variance * to_float(index) * ln(to_float(index) + 1.0), 0.0001)
+  return min(sqrt(2.0 * ln(2.0 / delta) / denominator), cap)
+}
+
+fn __betting_fractions(values: list<float>, delta: float) -> list<float> {
+  let fractions: list<float> = []
+  let sum = 0.0
+  let sum_squares = 0.0
+  let index = 1
+  for value in values {
+    const prior_n = to_float(index - 1)
+    const prior_mean = if prior_n > 0.0 {
+      sum / prior_n
+    } else {
+      0.5
+    }
+    const prior_variance = if prior_n > 0.0 {
+      max(sum_squares / prior_n - prior_mean * prior_mean, 0.0)
+    } else {
+      0.25
+    }
+    fractions = fractions + [__predictable_lambda(index, prior_variance, delta, 0.75)]
+    sum = sum + value
+    sum_squares = sum_squares + value * value
+    index = index + 1
+  }
+  return fractions
+}
+
+/**
+ * Hedged capital at candidate mean `candidate` for observations in `[0, 1]`.
+ *
+ * The two nonnegative capital processes bet in opposite directions and are
+ * averaged into one two-sided test martingale.
+ */
+fn __hedged_capital(values: list<float>, fractions: list<float>, candidate: float) -> float {
+  const mean = min(max(candidate, 0.0005), 0.9995)
+  const plus_cap = 0.5 / mean
+  const minus_cap = 0.5 / (1.0 - mean)
+  let plus = 1.0
+  let minus = 1.0
+  let index = 0
+  while index < len(values) {
+    const fraction = fractions[index] ?? 0.0
+    const deviation = (values[index] ?? 0.0) - mean
+    plus = plus * (1.0 + min(fraction, plus_cap) * deviation)
+    minus = minus * (1.0 - min(fraction, minus_cap) * deviation)
+    index = index + 1
+  }
+  return 0.5 * plus + 0.5 * minus
+}
+
+/**
+ * Confidence sequence for a mean in `[0, 1]`.
+ *
+ * Boundaries are found from an accepted interior point and padded outward by
+ * half a reporting-grid step, so discretization can only widen the interval.
+ */
+fn __unit_cs(values: list<float>, delta: float) -> {lo: float, hi: float} {
+  if len(values) == 0 {
+    return {lo: 0.0, hi: 1.0}
+  }
+  const threshold = 1.0 / delta
+  const fractions = __betting_fractions(values, delta)
+  const center = min(max(__mean(values), 0.0005), 0.9995)
+  if !(__hedged_capital(values, fractions, center) < threshold) {
+    return {lo: 0.0, hi: 1.0}
+  }
+  let lower = 0.0
+  if !(__hedged_capital(values, fractions, 0.0) < threshold) {
+    let rejected = 0.0
+    let accepted = center
+    let iteration = 0
+    while iteration < 16 {
+      const midpoint = 0.5 * (rejected + accepted)
+      if __hedged_capital(values, fractions, midpoint) < threshold {
+        accepted = midpoint
+      } else {
+        rejected = midpoint
+      }
+      iteration = iteration + 1
+    }
+    lower = accepted
+  }
+  let upper = 1.0
+  if !(__hedged_capital(values, fractions, 1.0) < threshold) {
+    let accepted = center
+    let rejected = 1.0
+    let iteration = 0
+    while iteration < 16 {
+      const midpoint = 0.5 * (accepted + rejected)
+      if __hedged_capital(values, fractions, midpoint) < threshold {
+        accepted = midpoint
+      } else {
+        rejected = midpoint
+      }
+      iteration = iteration + 1
+    }
+    upper = accepted
+  }
+  const outward_pad = 0.0025
+  return {lo: max(lower - outward_pad, 0.0), hi: min(upper + outward_pad, 1.0)}
+}
+
+/**
+ * Anytime-valid confidence sequence for a bounded mean.
+ *
+ * `delta` is the simultaneous error probability across every look. Observations
+ * outside the declared support are rejected rather than clamped.
+ *
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn bounded_cs(
+  values: list<float>,
+  delta: float,
+  lo_bound: float,
+  hi_bound: float,
+) -> ConfidenceSequence {
+  __require_delta(delta)
+  __require_bounds(values, lo_bound, hi_bound)
+  const n = len(values)
+  if n == 0 {
+    return {
+      mean: 0.5 * (lo_bound + hi_bound),
+      lo: lo_bound,
+      hi: hi_bound,
+      halfwidth: 0.5 * (hi_bound - lo_bound),
+      n: 0,
+    }
+  }
+  const width = hi_bound - lo_bound
+  let unit_values: list<float> = []
+  for value in values {
+    unit_values = unit_values + [(value - lo_bound) / width]
+  }
+  const unit = __unit_cs(unit_values, delta)
+  const lo = lo_bound + width * unit.lo
+  const hi = lo_bound + width * unit.hi
+  return {mean: __mean(values), lo: lo, hi: hi, halfwidth: 0.5 * (hi - lo), n: n}
+}
+
+/**
+ * Anytime-valid confidence sequence for paired current-minus-baseline deltas.
+ *
+ * Pairing and fingerprint compatibility reuse `std/eval/stats`; only the
+ * sequential interval is new. Across repeated calls, rows must add immutable
+ * paired units without revising earlier values. Project mutable case aggregates
+ * into stable case/trial rows first.
+ *
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn paired_delta_cs(
+  baseline_rows: list,
+  current_rows: list,
+  delta: float,
+) -> ConfidenceSequence {
+  return bounded_cs(paired_case_deltas(baseline_rows, current_rows), delta, -1.0, 1.0)
+}
+
+/**
+ * Default cumulative trials-per-case schedule.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn default_ladder() -> list<int> {
+  return [1, 2, 3, 5]
+}
+
+/**
+ * Cumulative trials per case at a one-based ladder round.
+ *
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn n_at_ladder_round(ladder: list<int>, round: int) -> int {
+  if len(ladder) == 0 {
+    throw "std/eval/sequential: ladder must not be empty"
+  }
+  let previous = 0
+  for value in ladder {
+    if value < 1 || value < previous {
+      throw "std/eval/sequential: ladder must contain monotone positive integers"
+    }
+    previous = value
+  }
+  const index = min(max(round, 1), len(ladder)) - 1
+  return ladder[index] ?? 1
+}
+
+/**
+ * Fresh trials needed to reach a one-based cumulative ladder round.
+ *
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn incremental_ladder_trials(ladder: list<int>, round: int) -> int {
+  const current = n_at_ladder_round(ladder, round)
+  if round <= 1 {
+    return current
+  }
+  return current - n_at_ladder_round(ladder, round - 1)
+}
+
+/**
+ * Realized sequential trial cost versus running every registered arm and the
+ * shared baseline to the deepest rung.
+ *
+ * `alive_per_round` records the actual number of candidate arms entering each
+ * look. It may stop early but cannot exceed `k_frozen`.
+ *
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn savings_report(
+  k_frozen: int,
+  ladder: list<int>,
+  alive_per_round: list<int>,
+) -> SequentialSavings {
+  if k_frozen < 1 {
+    throw "std/eval/sequential: k_frozen must be positive"
+  }
+  if len(alive_per_round) == 0 || len(alive_per_round) > len(ladder) {
+    throw "std/eval/sequential: alive_per_round must cover one or more ladder rounds"
+  }
+  let arm_trials = 0
+  let previous_alive = k_frozen
+  let round = 1
+  for alive in alive_per_round {
+    if alive < 1 || alive > k_frozen {
+      throw "std/eval/sequential: realized survivor count is outside [1, k_frozen]"
+    }
+    if (round == 1 && alive != k_frozen) || alive > previous_alive {
+      throw "std/eval/sequential: realized survivors must start at k_frozen and never increase"
+    }
+    arm_trials = arm_trials + alive * incremental_ladder_trials(ladder, round)
+    previous_alive = alive
+    round = round + 1
+  }
+  const deepest = n_at_ladder_round(ladder, len(alive_per_round))
+  const sequential = arm_trials + deepest
+  const fixed = (k_frozen + 1) * deepest
+  return {
+    sequential_per_case: sequential,
+    fixed_grid_per_case: fixed,
+    deepest_n: deepest,
+    factor: to_float(fixed) / to_float(sequential),
+  }
+}
+
+fn __gap(a: ArmInterval, b: ArmInterval) -> {mean: float, lo: float, hi: float} {
+  return {mean: a.mean - b.mean, lo: a.lo - b.hi, hi: a.hi - b.lo}
+}
+
+fn __simplest(arms: list<SequentialArm>, kept: list<string>) -> string? {
+  let selected: string? = nil
+  let complexity = 2147483647
+  for arm in arms {
+    if kept.contains(arm.id) && arm.complexity < complexity {
+      selected = arm.id
+      complexity = arm.complexity
+    }
+  }
+  return selected
+}
+
+fn __validate_arms(
+  arms: list<SequentialArm>,
+  k_frozen: int,
+  epsilon: float,
+  lo_bound: float,
+  hi_bound: float,
+) {
+  if k_frozen < 1 || len(arms) > k_frozen {
+    throw "std/eval/sequential: k_frozen must cover every registered arm"
+  }
+  if !(lo_bound < hi_bound) {
+    throw "std/eval/sequential: lo_bound must be less than hi_bound"
+  }
+  if epsilon <= 0.0 || epsilon >= hi_bound - lo_bound {
+    throw "std/eval/sequential: epsilon must be positive and smaller than the support width"
+  }
+  let seen: dict<string, bool> = {}
+  for arm in arms {
+    if trim(arm.id) == "" || (seen[arm.id] ?? false) {
+      throw "std/eval/sequential: arm ids must be non-empty and unique"
+    }
+    if arm.complexity < 0 {
+      throw "std/eval/sequential: arm complexity must be non-negative"
+    }
+    __require_bounds(arm.deltas, lo_bound, hi_bound)
+    seen = seen + {[arm.id]: true}
+  }
+}
+
+fn __rank_arms(
+  arms: list<SequentialArm>,
+  per_arm_delta: float,
+  lo_bound: float,
+  hi_bound: float,
+) -> ArmRanking {
+  const first = arms[0]
+  if first == nil {
+    throw "std/eval/sequential: cannot rank an empty arm list"
+  }
+  let intervals: dict<string, ArmInterval> = {}
+  let leader = first.id
+  let leader_mean = lo_bound - (hi_bound - lo_bound)
+  for arm in arms {
+    const interval = bounded_cs(arm.deltas, per_arm_delta, lo_bound, hi_bound)
+    const named: ArmInterval = interval + {id: arm.id}
+    intervals = intervals + {[arm.id]: named}
+    if named.mean > leader_mean {
+      leader = arm.id
+      leader_mean = named.mean
+    }
+  }
+  let runner_up: string? = nil
+  let runner_mean = lo_bound - (hi_bound - lo_bound)
+  for arm in arms {
+    const interval = intervals[arm.id]
+    if interval == nil {
+      throw "std/eval/sequential: interval projection omitted a registered arm"
+    }
+    if arm.id != leader && interval.mean > runner_mean {
+      runner_up = arm.id
+      runner_mean = interval.mean
+    }
+  }
+  return {intervals: intervals, leader: leader, runner_up: runner_up}
+}
+
+/**
+ * One anytime-valid best-arm decision.
+ *
+ * The family budget is permanently split by registered `k_frozen`; removed arms
+ * never refund error budget. No arm can be pruned or crowned below
+ * `min_trials_per_case`. Input complexity is the caller-owned Occam ordering.
+ * `lo_bound` and `hi_bound` describe the common support of every arm's
+ * observations; the defaults preserve the paired-rate-delta `[-1, 1]` API.
+ *
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn arm_decision(
+  alive_arms: list<SequentialArm>,
+  k_frozen: int,
+  delta: float,
+  epsilon: float,
+  n_per_case: int,
+  budget_spent: bool,
+  min_trials_per_case: int = 3,
+  lo_bound: float = -1.0,
+  hi_bound: float = 1.0,
+) -> ArmDecision {
+  __require_delta(delta)
+  __validate_arms(alive_arms, k_frozen, epsilon, lo_bound, hi_bound)
+  if n_per_case < 0 || min_trials_per_case < 1 {
+    throw "std/eval/sequential: trial counts must be non-negative with a positive floor"
+  }
+  if len(alive_arms) == 0 {
+    const result: ArmDecision = {
+      intervals: {},
+      leader: nil,
+      runner_up: nil,
+      killed: [],
+      kept: [],
+      winner: nil,
+      verdict: "UNRESOLVED",
+      no_decision: true,
+    }
+    return result
+  }
+  const ranking = __rank_arms(alive_arms, delta / to_float(k_frozen), lo_bound, hi_bound)
+  const intervals = ranking.intervals
+  const leader = ranking.leader
+  const runner_up = ranking.runner_up
+  const can_decide = n_per_case >= min_trials_per_case
+  const leader_interval = intervals[leader]
+  if leader_interval == nil {
+    throw "std/eval/sequential: interval projection omitted the leader"
+  }
+  let killed: list<string> = []
+  let kept: list<string> = []
+  let separated = true
+  for arm in alive_arms {
+    const interval = intervals[arm.id]
+    if interval == nil {
+      throw "std/eval/sequential: interval projection omitted a registered arm"
+    }
+    if can_decide && interval.hi < 0.0 - epsilon {
+      killed = killed + [arm.id]
+      continue
+    }
+    if arm.id == leader {
+      kept = kept + [arm.id]
+      continue
+    }
+    const gap = __gap(leader_interval, interval)
+    if can_decide && gap.lo > epsilon {
+      killed = killed + [arm.id]
+    } else {
+      kept = kept + [arm.id]
+    }
+    if !(gap.lo > epsilon) {
+      separated = false
+    }
+  }
+  if can_decide && len(killed) == len(alive_arms) {
+    const verdict: SequentialVerdict = "BASELINE"
+    return {
+      intervals: intervals,
+      leader: leader,
+      runner_up: runner_up,
+      killed: killed,
+      kept: [],
+      winner: nil,
+      verdict: verdict,
+      no_decision: false,
+    }
+  }
+  if can_decide && leader_interval.lo > epsilon && separated {
+    const verdict: SequentialVerdict = "WINNER"
+    const result: ArmDecision = {
+      intervals: intervals,
+      leader: leader,
+      runner_up: runner_up,
+      killed: killed,
+      kept: kept,
+      winner: leader,
+      verdict: verdict,
+      no_decision: false,
+    }
+    return result
+  }
+  if !budget_spent {
+    const verdict: SequentialVerdict = "RUNNING"
+    const result: ArmDecision = {
+      intervals: intervals,
+      leader: leader,
+      runner_up: runner_up,
+      killed: killed,
+      kept: kept,
+      winner: nil,
+      verdict: verdict,
+      no_decision: false,
+    }
+    return result
+  }
+  let equivalent = len(kept) > 0
+  for arm_id in kept {
+    const interval = intervals[arm_id]
+    if interval == nil
+      || !(interval.lo > 0.0 - epsilon && interval.hi < epsilon) {
+      equivalent = false
+    }
+  }
+  for arm in alive_arms {
+    if arm.id == leader || !kept.contains(arm.id) {
+      continue
+    }
+    const interval = intervals[arm.id]
+    if interval == nil {
+      throw "std/eval/sequential: interval projection omitted a registered arm"
+    }
+    const gap = __gap(leader_interval, interval)
+    if !(gap.lo > 0.0 - epsilon && gap.hi < epsilon) {
+      equivalent = false
+    }
+  }
+  if equivalent {
+    const verdict: SequentialVerdict = "TIED_CONFIRMED"
+    const result: ArmDecision = {
+      intervals: intervals,
+      leader: leader,
+      runner_up: runner_up,
+      killed: killed,
+      kept: kept,
+      winner: __simplest(alive_arms, kept),
+      verdict: verdict,
+      no_decision: false,
+    }
+    return result
+  }
+  const verdict: SequentialVerdict = "UNRESOLVED"
+  const result: ArmDecision = {
+    intervals: intervals,
+    leader: leader,
+    runner_up: runner_up,
+    killed: killed,
+    kept: kept,
+    winner: nil,
+    verdict: verdict,
+    no_decision: true,
+  }
+  return result
+}

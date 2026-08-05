@@ -1,0 +1,36 @@
+use crate::test_util::process::run_harn_e2e;
+
+#[test]
+fn cli_rejects_unknown_harn_environment_name_before_dispatch() {
+    let output = run_harn_e2e(&["--version"], &[("HARN_LLM_TIMOUT", "30")]);
+
+    assert_eq!(output.exit_code, 2);
+    assert!(output.stdout.is_empty());
+    assert!(output.stderr.contains("HARN-ENV-001"), "{}", output.stderr);
+    assert!(
+        output.stderr.contains("HARN_LLM_TIMOUT"),
+        "{}",
+        output.stderr
+    );
+    assert!(
+        output.stderr.contains("HARN_LLM_TIMEOUT"),
+        "{}",
+        output.stderr
+    );
+    assert!(!output.stderr.contains("=30"), "{}", output.stderr);
+}
+
+#[test]
+fn cli_rejects_invalid_registered_value_without_rendering_it() {
+    let invalid_value = "not-a-duration";
+    let output = run_harn_e2e(&["--version"], &[("HARN_LLM_TIMEOUT", invalid_value)]);
+
+    assert_eq!(output.exit_code, 2);
+    assert!(output.stderr.contains("HARN-ENV-002"), "{}", output.stderr);
+    assert!(
+        output.stderr.contains("HARN_LLM_TIMEOUT"),
+        "{}",
+        output.stderr
+    );
+    assert!(!output.stderr.contains(invalid_value), "{}", output.stderr);
+}

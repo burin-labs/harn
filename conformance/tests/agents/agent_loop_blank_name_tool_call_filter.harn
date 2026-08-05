@@ -1,0 +1,106 @@
+import { agent_loop } from "std/agent/loop"
+// A provider can emit a malformed tool call with an EMPTY/whitespace name
+// alongside valid sibling calls in the same turn (observed live on go/rust
+// eval runs: a turn carrying `[look, "", look]`). Dispatching the nameless
+// call resolves no tool and used to terminate the agent loop SILENTLY — a pure
+// harness failure that read as a model give-up (result=INCOMPLETE,
+// outcome_kind=null). The loop must instead drop ONLY the empty-name call,
+// keep the valid siblings (they dispatch), inject parse-guidance so the model
+// re-emits a named call, and KEEP RUNNING.
+import { llm_text, with_llm_script } from "std/testing"
+
+fn look_tools() {
+  let registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "look",
+    "Read a file window.",
+    {
+      handler: { _args -> "looked" },
+      parameters: {file: {type: "string", description: "File to read"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return registry
+}
+
+pipeline main(harness: Harness) {
+  // Sibling-survival: [look, "", look] -> both look calls dispatch, the
+  // empty-name call is dropped with parse_guidance, and the loop continues to
+  // the terminal done turn rather than stopping on the malformed sibling.
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        text: "",
+        tool_calls: [
+          {id: "look_a", name: "look", arguments: {file: "a.go"}},
+          {id: "blank", name: "", arguments: {}},
+          {id: "look_b", name: "look", arguments: {file: "b.go"}},
+        ],
+      },
+      llm_text("##DONE##"),
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Read the files, then finish.",
+        nil,
+        {
+          provider: "mock",
+          tools: look_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          done_judge: nil,
+          max_iterations: 5,
+          max_nudges: 3,
+        },
+      )
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.tools.successful[0])
+      harness.stdio.println(len(result.tools.successful))
+      const calls = harness.llm.mock_calls()
+      const retry_messages = json_stringify(calls[1].messages)
+      const retry_directives = calls[1].messages[len(calls[1].messages) - 1].content
+      harness.stdio.println(contains(retry_directives, "<directive authority=\"corrective\">"))
+      harness.stdio.println(contains(retry_messages, "empty/blank name"))
+      harness.stdio.println(result.llm.iterations >= 2)
+      require !contains(retry_messages, "parse_guidance"),
+        "blank-name guidance omits its internal kind"
+    },
+  )
+  // All-blank: a turn whose ONLY tool call has an empty name. Nothing
+  // dispatches, but the loop still injects parse-guidance and keeps running
+  // (does not silently terminate as INCOMPLETE).
+  with_llm_script(
+    harness.llm,
+    [{text: "", tool_calls: [{id: "blank_only", name: "  ", arguments: {}}]}, llm_text("##DONE##")],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Do the task, then finish.",
+        nil,
+        {
+          provider: "mock",
+          tools: look_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          done_judge: nil,
+          max_iterations: 5,
+          max_nudges: 3,
+        },
+      )
+      harness.stdio.println(result.status)
+      const calls = harness.llm.mock_calls()
+      const retry_messages = json_stringify(calls[1].messages)
+      const retry_directives = calls[1].messages[len(calls[1].messages) - 1].content
+      harness.stdio.println(contains(retry_directives, "<directive authority=\"corrective\">"))
+      harness.stdio.println(result.llm.iterations >= 2)
+      require !contains(retry_messages, "parse_guidance"),
+        "all-blank guidance omits its internal kind"
+    },
+  )
+}

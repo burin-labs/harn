@@ -1,0 +1,73 @@
+{
+  "config": {
+    // Allow longer lines — 80 is too strict for docs with tables and URLs
+    "MD013": {
+      "line_length": 120,
+      "code_blocks": false,
+      "tables": false,
+      "headings": false
+    },
+    // Allow bare URLs (common in docs)
+    "MD034": false,
+    // Allow duplicate headings in siblings (needed for CHANGELOG.md)
+    "MD024": { "siblings_only": true },
+    // Tables: don't enforce padding style
+    "MD060": false
+  },
+  "ignores": [
+    "node_modules",
+    "**/node_modules",
+    "target",
+    ".target-inspect",
+    // Stray out-of-tree Cargo target dirs (gitignored as `.target-*/`, plus a
+    // bare `.target`). Their vendored crate READMEs are build output, not docs.
+    ".target/**",
+    ".target-*/**",
+    // Isolated toolchain builds are generated output, including vendored crate
+    // READMEs copied by build scripts.
+    ".harn-toolchain-cache/**",
+    "docs/dist",
+    ".worktrees",
+    ".burin",
+    ".claude",
+    ".harn-runs",
+    "meta_scratch",
+    "docs/src/SUMMARY.md",
+    // Per-chapter spec sources are assembled into spec/HARN_SPEC.md, which IS
+    // linted. Individually they can't satisfy MD041 (each section starts at
+    // H2) or MD012 (the inter-section trailing blank) without breaking the
+    // byte-identical reassembly into the single-file spec.
+    "spec/chapters/**/*.md",
+    // Generated per-chapter docs pages: header-prefixed copies of the
+    // spec/chapters sources above (same H2-start / blank-line shape), mirrored
+    // into docs/src so the hosted site is navigable chapter-by-chapter. The
+    // assembled docs/src/language-spec.md landing page IS linted.
+    "docs/src/spec/language/**/*.md",
+    "conformance/tests/**/.harn/**/*.md",
+    // Generated drift report fixture for the provider catalog refresh
+    // workflow. Adapter run rows can exceed 120 cols when a URL and a
+    // skip reason both fit on one line; keep the report rendering
+    // straight-line readable rather than wrapping.
+    "scripts/provider_catalog_fixtures/expected_drift_report.md",
+    // qmode experiment writes synthetic profile bullets here during eval runs;
+    // these are not docs and shouldn't be linted as such.
+    "experiments/**/.harn/**/*.md",
+    "experiments/**/USER_PROFILE.md",
+    // GitHub PR/issue templates are forms, not prose docs — they lead with
+    // an HTML comment and h2 sections, which trips MD041 (first-line-h1).
+    ".github/pull_request_template.md",
+    ".github/ISSUE_TEMPLATE/**/*.md",
+    // CHANGELOG.md (and the pre-0.x archives) is machine-assembled by the
+    // release tooling from `changelog.d/*` fragments and is append-only
+    // published history. Linting the assembled file for MD013 line-length
+    // flagged long lines in already-published `## vX.Y.Z` sections, which drove
+    // the release recovery agent to rewrap them — tripping
+    // `scripts/check_changelog_no_retroactive_edits.harn` ("sections for
+    // already-published versions were modified"). The fragments themselves are
+    // still linted as `*.md`, so line-length is enforced at the source; the
+    // assembled history must not be reflowed. (harn-bump-fleet release_harn.harn
+    // runs `make lint-md` post-assembly.)
+    "CHANGELOG.md",
+    "changelog/archive/CHANGELOG-pre-*.md"
+  ]
+}

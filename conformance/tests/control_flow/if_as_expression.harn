@@ -1,0 +1,35 @@
+pipeline default(harness: Harness) {
+  // `if` / `else` is an expression: the block that runs produces a
+  // value that can flow into `let`, a function call argument, or a
+  // `return`. Friction logs kept reporting this as missing — it
+  // works, but a test under a searchable name helps people find it.
+  const x = if true {
+    1
+  } else {
+    2
+  }
+  harness.stdio.println(x)
+  const label = if 3 > 2 {
+    "bigger"
+  } else {
+    "smaller"
+  }
+  harness.stdio.println(label)
+  // Nested in function call args.
+  harness.stdio.println(
+    if false {
+      "a"
+    } else {
+      "b"
+    },
+  )
+  // Multiple branches via chained else-if still work.
+  const grade = if 75 >= 90 {
+    "A"
+  } else if 75 >= 80 {
+    "B"
+  } else {
+    "C"
+  }
+  harness.stdio.println(grade)
+}

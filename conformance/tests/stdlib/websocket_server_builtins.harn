@@ -1,0 +1,77 @@
+pipeline test(harness: Harness, task) {
+  harness.testing.transport_mock_clear()
+  const server = harness.net.websocket_server("127.0.0.1:0", {})
+  // 10s instead of 2s gives the WebSocket handshake enough headroom when the
+  // conformance suite runs alongside release-harn's other cargo audit lanes;
+  // local solo runs still complete in milliseconds.
+  const ws_timeout_ms = 10000
+  assert(harness.net.websocket_route(server, "/acp", {idle_timeout_ms: 1000}))
+  assert(harness.net.websocket_route(server, "/secure", {auth: {bearer: "secret"}}))
+  assert(harness.net.websocket_route(server, "/limited", {max_message_bytes: 3}))
+  assert(harness.net.websocket_route(server, "/backpressure", {send_buffer_messages: 0}))
+  const missing = try {
+    harness.net.websocket_connect(server.url + "/missing", {timeout_ms: ws_timeout_ms})
+  }
+  assert(is_err(missing), "unregistered routes reject upgrades")
+  const unauthorized = try {
+    harness.net.websocket_connect(server.url + "/secure", {timeout_ms: ws_timeout_ms})
+  }
+  assert(is_err(unauthorized), "bearer route rejects missing auth")
+  const secure_client = harness.net.websocket_connect(
+    server.url + "/secure",
+    {timeout_ms: ws_timeout_ms, auth: {bearer: "secret"}},
+  )
+  const secure_server = harness.net.websocket_accept(server, ws_timeout_ms) ?? {}
+  assert_eq(secure_server.path, "/secure")
+  assert(harness.net.websocket_close(secure_client))
+  assert(harness.net.websocket_close(secure_server))
+  const client = harness.net.websocket_connect(server.url + "/acp", {timeout_ms: ws_timeout_ms})
+  const conn = harness.net.websocket_accept(server, ws_timeout_ms) ?? {}
+  assert_eq(conn.path, "/acp")
+  assert(conn.headers["sec-websocket-key"] != nil)
+  assert(harness.net.websocket_send(client, "hello", {}))
+  const text = harness.net.websocket_receive(conn, ws_timeout_ms)
+  assert_eq(text.type, "text")
+  assert_eq(text.data, "hello")
+  assert(harness.net.websocket_send(conn, bytes_from_string("bin"), {}))
+  const binary = harness.net.websocket_receive(client, ws_timeout_ms)
+  assert_eq(binary.type, "binary")
+  assert_eq(binary.data_base64, "Ymlu")
+  assert(harness.net.websocket_send(client, "p", {type: "ping"}))
+  const ping = harness.net.websocket_receive(conn, ws_timeout_ms)
+  assert_eq(ping.type, "ping")
+  const auto_pong = harness.net.websocket_receive(client, ws_timeout_ms)
+  assert_eq(auto_pong.type, "pong")
+  assert(harness.net.websocket_send(client, "q", {type: "pong"}))
+  const pong = harness.net.websocket_receive(conn, ws_timeout_ms)
+  assert_eq(pong.type, "pong")
+  assert(harness.net.websocket_send(conn, "", {type: "close", code: 1000, reason: "done"}))
+  const closed = harness.net.websocket_receive(client, ws_timeout_ms)
+  assert_eq(closed.type, "close")
+  assert_eq(closed.code, 1000)
+  assert_eq(closed.reason, "done")
+  const limited_client = harness.net.websocket_connect(
+    server.url + "/limited",
+    {timeout_ms: ws_timeout_ms},
+  )
+  const limited_conn = harness.net.websocket_accept(server, ws_timeout_ms) ?? {}
+  assert(harness.net.websocket_send(limited_client, "toolong", {}))
+  const limited = try {
+    harness.net.websocket_receive(limited_conn, ws_timeout_ms)
+  }
+  assert(is_err(limited), "server max_message_bytes rejects large frames")
+  assert(harness.net.websocket_close(limited_client))
+  const backpressure_client = harness.net.websocket_connect(
+    server.url + "/backpressure",
+    {timeout_ms: ws_timeout_ms},
+  )
+  const backpressure_conn = harness.net.websocket_accept(server, ws_timeout_ms) ?? {}
+  const saturated = try {
+    harness.net.websocket_send(backpressure_conn, "blocked", {})
+  }
+  assert(is_err(saturated), "full outbound buffers reject sends")
+  assert(harness.net.websocket_close(backpressure_client))
+  assert(harness.net.websocket_close(backpressure_conn))
+  assert(harness.net.websocket_server_close(server))
+  harness.stdio.println("websocket_server_builtins_ok")
+}

@@ -1,0 +1,10 @@
+pipeline default(harness: Harness) {
+  harness.stdio.println(harness.fs.render_prompt("fixtures/template/for_else.prompt", {xs: []}))
+  harness.stdio.println("---")
+  harness.stdio.println(
+    harness.fs.render_prompt(
+      "fixtures/template/for_dict.prompt",
+      {m: {alpha: 1, beta: 2, gamma: 3}},
+    ),
+  )
+}

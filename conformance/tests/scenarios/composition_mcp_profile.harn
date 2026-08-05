@@ -1,0 +1,33 @@
+import { composition_crystallization_input, composition_mcp_tools } from "std/composition"
+
+pipeline main(harness: Harness) {
+  const tools = composition_mcp_tools(harness)
+  harness.stdio.println(tool_count(tools))
+  const search = tool_find(tools, "harn.code.search_examples")
+  const examples = search.handler({query: "read", limit: 1})
+  harness.stdio.println(examples[0].language)
+  const source_tools = [
+    {
+      name: "read_file",
+      parameters: {type: "object", required: ["path"]},
+      annotations: {kind: "read", side_effect_level: "read_only"},
+      metadata: {mock_output: {text: "profile ok"}},
+    },
+  ]
+  const manifest = composition_binding_manifest(source_tools)
+  const execute = tool_find(tools, "harn.code.execute_composition")
+  const report = execute.handler(
+    {
+      snippet: "return read_file({path: \"README.md\"}).text",
+      manifest: manifest,
+      run_id: "profile-run",
+    },
+  )
+  harness.stdio.println(report.ok)
+  harness.stdio.println(report.child_calls[0].tool_name)
+  const trace = composition_crystallization_input(report, {id: "profile-trace"})
+  harness.stdio.println(trace.source)
+  harness.stdio.println(trace.actions.count())
+  harness.stdio.println(trace.actions[0].name)
+  harness.stdio.println(trace.actions[1].name)
+}

@@ -1,0 +1,78 @@
+import { lifecycle_audit_log_take } from "std/lifecycle"
+import "std/triggers"
+
+/**
+ * CH-08 (#1879): ReminderInject (#1876) with `target: "current"` resolves
+ * against the active agent-session stack at dispatch time. When the trigger
+ * fires *outside* any agent session (e.g. ambient channel emit with no
+ * agent_loop on the stack), `current_session_id()` returns `None` and the
+ * dispatcher drops the inject with a `target_missing` audit entry — the
+ * same graceful drop semantics as a concrete-but-unknown target. This is
+ * the failure-mode contract for the "current" target form: it never
+ * crashes the dispatcher, even when there is no session to inject into.
+ * Successful current-session injection is exercised at the integration
+ * layer (via agent_loop, which pushes onto the current-session stack).
+ */
+pipeline test(harness: Harness, task) {
+  const _ = lifecycle_audit_log_take(harness.obs)
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(
+    harness.random.range(100000, 999999),
+  )
+  const handle: TriggerHandle = harness.runtime.trigger_register(
+    {
+      id: "trigger-channel-reminder-current-" + unique,
+      kind: "channel.emit",
+      provider: "channel",
+      autonomy_tier: "act_auto",
+      handler: ReminderInject(
+        {
+          target: "current",
+          body: "Heads up: {{ event.provider_payload.name }} just fired.",
+          tags: ["channel_reminder"],
+        },
+      ),
+      when: nil,
+      retry: nil,
+      match: {events: ["channel:ch.reminder.current.input"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  const dispatch = harness.runtime.trigger_fire(
+    handle,
+    {
+      provider: "channel",
+      kind: "channel.emit",
+      headers: {x_delivery: "evt-" + unique},
+      payload: {name: "ch.reminder.current.input"},
+    },
+  )
+  // Dispatch itself succeeds (no crash); the inject is dropped with a
+  // structured `target_missing` outcome and a matching lifecycle audit.
+  harness.stdio.println(dispatch.status == "dispatched")
+  harness.stdio.println(dispatch.result?.status == "dropped")
+  harness.stdio.println(dispatch.result?.reason == "target_missing")
+  harness.stdio.println(dispatch.result?.target_kind == "current")
+  const audits = lifecycle_audit_log_take(harness.obs)
+  let inject_audit_count = 0
+  let outcome = ""
+  let reason = ""
+  let target_kind = ""
+  for audit in audits {
+    if audit.kind == "triggers.reminder_inject.audit" {
+      inject_audit_count = inject_audit_count + 1
+      outcome = audit.payload.outcome
+      reason = audit.payload.reason
+      target_kind = audit.payload.target_kind
+    }
+  }
+  harness.stdio.println(inject_audit_count)
+  harness.stdio.println(outcome)
+  harness.stdio.println(reason)
+  harness.stdio.println(target_kind)
+}

@@ -1,0 +1,26 @@
+{
+  "rootSource": "import { increment } from \"package-reducer-math\"\n\ntype ReducerState = {count: int, history: list<int>, label: string}\n\ntype ReducerEvent = {kind: string, amount: int}\n\ntype ReducerInput = {state: ReducerState, event: ReducerEvent}\n\npub fn reduce(input: ReducerInput) -> ReducerState {\n  if input.event.kind == \"reset\" {\n    return {count: 0, history: input.state.history + [0], label: input.state.label}\n  }\n  const next = input.state.count + increment(input.event.amount)\n  return {count: next, history: input.state.history + [next], label: input.state.label}\n}\n",
+  "rootImports": [
+    {
+      "path": "package-reducer-math",
+      "target": "module/0",
+      "selectedNames": [
+        "increment"
+      ],
+      "namespaceAlias": null,
+      "isPub": false
+    }
+  ],
+  "modules": [
+    {
+      "id": "module/0",
+      "source": "pub fn increment(amount) {\n  return amount\n}\n",
+      "imports": [],
+      "exports": {
+        "increment": "function"
+      },
+      "importedEnumCandidates": [],
+      "sourceFile": "module/0"
+    }
+  ]
+}

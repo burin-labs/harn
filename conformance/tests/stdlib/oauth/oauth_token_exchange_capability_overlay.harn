@@ -1,0 +1,249 @@
+// std/oauth/token_exchange: provider capability rows are overlayable data.
+import { client, token_exchange } from "std/oauth/client"
+import { custom } from "std/oauth/providers"
+import { memory } from "std/oauth/storage"
+import {
+  token_exchange_capability,
+  token_exchange_catalog,
+  token_type,
+} from "std/oauth/token_exchange"
+
+fn catches_message(label, fn_call, needle) {
+  let matched = false
+  try {
+    const _ = fn_call()
+  } catch (err) {
+    matched = contains(to_string(err), needle)
+  }
+  require matched, label
+}
+
+pipeline test(harness: Harness, task) {
+  const subject_type = token_type("access_token")
+  const actor_type = token_type("jwt")
+  const requested_type = token_type("access_token")
+  const overlay_row = {
+    id: "enterprise-as",
+    supported: true,
+    token_url: "https://idp.example/exchange",
+    subject_token_types: [subject_type],
+    actor_token_types: [actor_type],
+    requested_token_types: [requested_type],
+    issued_token_types: [requested_type],
+    delegation: true,
+    impersonation: false,
+    notes: ["test overlay"],
+  }
+  const catalog = token_exchange_catalog([overlay_row])
+  assert_eq(
+    catalog["enterprise-as"].token_url,
+    "https://idp.example/exchange",
+    "overlay row installed",
+  )
+  assert_eq(
+    token_type("id-jag"),
+    "urn:ietf:params:oauth:token-type:id-jag",
+    "ID-JAG token alias normalized",
+  )
+  assert_eq(
+    token_type("txn_token"),
+    "urn:ietf:params:oauth:token-type:txn_token",
+    "transaction-token alias normalized",
+  )
+  assert_eq(
+    catalog["id-jag"].requested_token_types,
+    ["urn:ietf:params:oauth:token-type:id-jag"],
+    "ID-JAG requested token type pinned",
+  )
+  assert(
+    catalog["id-jag"].provider_metadata_fields.contains(
+      "identity_chaining_requested_token_types_supported",
+    ),
+    "ID-JAG metadata detection field recorded",
+  )
+  assert_eq(
+    catalog["id-jag"].tracking.drafts[0].name,
+    "draft-ietf-oauth-identity-assertion-authz-grant-04",
+    "ID-JAG draft revision pinned",
+  )
+  assert_eq(
+    catalog["txn-token"].requested_token_types,
+    ["urn:ietf:params:oauth:token-type:txn_token"],
+    "transaction-token requested token type pinned",
+  )
+  assert_eq(
+    catalog["txn-token"].tracking.drafts[0].name,
+    "draft-ietf-oauth-transaction-tokens-08",
+    "transaction-token draft revision pinned",
+  )
+  assert_eq(catalog["wimse-wit-wpt"].supported, false, "WIMSE row is tracking-only")
+  assert(
+    catalog["wimse-wit-wpt"].provider_metadata_fields.contains("Workload-Proof-Token"),
+    "WIMSE WPT detection field recorded",
+  )
+  assert_eq(
+    catalog["wimse-wit-wpt"].tracking.drafts[0].name,
+    "draft-ietf-wimse-workload-creds-01",
+    "WIMSE workload credential draft revision pinned",
+  )
+  catches_message(
+    "malformed overlay entries fail closed",
+    { -> token_exchange_catalog({broken: true}) },
+    "must be a dict",
+  )
+  const overlay_capability = token_exchange_capability("enterprise-as", [overlay_row])
+  assert(overlay_capability != nil, "overlay capability should exist")
+  assert_eq(overlay_capability?.actor_token_types, [actor_type], "overlay lookup by id")
+  const bare_provider = custom(
+    {
+      id: "enterprise-as",
+      auth_url: "https://idp.example/authorize",
+      token_url: "https://idp.example/token",
+      default_scopes: [],
+    },
+  )
+  const bare_cli = client(
+    harness,
+    bare_provider,
+    {client_id: "cli-id", storage: memory(harness.auth)},
+  )
+  catches_message(
+    "unsupported provider should fail closed",
+    { ->
+      token_exchange(
+        bare_cli,
+        {
+          subject_token: "subject",
+          subject_token_type: subject_type,
+          requested_token_type: requested_type,
+        },
+      )
+    },
+    "not supported",
+  )
+  const incomplete_provider = custom(
+    {
+      id: "incomplete-as",
+      auth_url: "https://idp.example/authorize",
+      token_url: "https://idp.example/token",
+      default_scopes: [],
+      token_exchange: {supported: true},
+    },
+  )
+  const incomplete_cli = client(
+    harness,
+    incomplete_provider,
+    {client_id: "cli-id", storage: memory(harness.auth)},
+  )
+  catches_message(
+    "capability rows without token types fail closed",
+    { ->
+      token_exchange(
+        incomplete_cli,
+        {
+          subject_token: "subject",
+          subject_token_type: subject_type,
+          requested_token_type: requested_type,
+        },
+      )
+    },
+    "subject_token_type",
+  )
+  const provider = custom(
+    {
+      id: "enterprise-as",
+      auth_url: "https://idp.example/authorize",
+      token_url: "https://idp.example/token",
+      default_scopes: [],
+      token_exchange: overlay_row,
+    },
+  )
+  const cli = client(harness, provider, {client_id: "cli-id", storage: memory(harness.auth)})
+  catches_message(
+    "overlay can disable impersonation",
+    { ->
+      token_exchange(
+        cli,
+        {
+          subject_token: "subject",
+          subject_token_type: subject_type,
+          requested_token_type: requested_type,
+        },
+      )
+    },
+    "impersonation",
+  )
+  catches_message(
+    "actor_token_type without actor_token is rejected",
+    { ->
+      token_exchange(
+        cli,
+        {
+          subject_token: "subject",
+          subject_token_type: subject_type,
+          actor_token_type: actor_type,
+          requested_token_type: requested_type,
+        },
+      )
+    },
+    "without actor_token",
+  )
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
+    "POST",
+    "https://idp.example/exchange",
+    {
+      status: 200,
+      body:
+        "{\"access_token\":\"bad-issued\",\"issued_token_type\":\"urn:ietf:params:oauth:token-type:jwt\",\"token_type\":\"Bearer\",\"expires_in\":60}",
+      headers: {"content-type": "application/json"},
+    },
+  )
+  catches_message(
+    "overlay constrains issued token type",
+    { ->
+      token_exchange(
+        cli,
+        {
+          subject_token: "subject",
+          subject_token_type: subject_type,
+          actor_token: "actor",
+          actor_token_type: actor_type,
+          requested_token_type: requested_type,
+        },
+      )
+    },
+    "issued_token_type",
+  )
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
+    "POST",
+    "https://idp.example/exchange",
+    {
+      status: 200,
+      body:
+        "{\"access_token\":\"delegated-access\",\"issued_token_type\":\"urn:ietf:params:oauth:token-type:access_token\",\"token_type\":\"Bearer\",\"expires_in\":60}",
+      headers: {"content-type": "application/json"},
+    },
+  )
+  const exchanged = token_exchange(
+    cli,
+    {
+      subject_token: "subject",
+      subject_token_type: subject_type,
+      actor_token: "actor",
+      actor_token_type: actor_type,
+      requested_token_type: requested_type,
+      store: true,
+      storage_key: "delegated/hr",
+    },
+  )
+  assert_eq(exchanged.access_token, "delegated-access", "overlay exchange returned token")
+  assert_eq(exchanged.token_exchange_mode, "delegation", "overlay exchange mode")
+  const calls = harness.testing.http_mock_calls({include_sensitive: true})
+  assert_eq(len(calls), 1, "one overlay token exchange call")
+  assert_eq(calls[0].url, "https://idp.example/exchange", "overlay token_url used")
+  assert(contains(calls[0].body, "actor_token=actor"), "actor token sent")
+  assert_eq(cli.current_token(), nil, "token exchange does not overwrite client access token")
+  harness.stdio.log("oauth token exchange capability overlay ok")
+}

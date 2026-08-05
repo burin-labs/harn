@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/file_ids.response.json",
+  "title": "code_index.file_ids response",
+  "description": "Sorted ascending list of every indexed file id.",
+  "type": "array",
+  "items": { "type": "integer", "minimum": 1 }
+}

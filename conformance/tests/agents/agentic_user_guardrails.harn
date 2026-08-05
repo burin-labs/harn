@@ -1,0 +1,14 @@
+import { scripted_user, simulated_user_respond, simulated_user_status } from "std/agent/user"
+
+pipeline main(harness: Harness) {
+  const answerer = scripted_user(harness, ["First answer."], {max_replies: 1})
+  const first = simulated_user_respond(answerer, {question: "One?"})
+  const second = simulated_user_respond(answerer, {question: "Two?"})
+  const status = simulated_user_status(harness.runtime, answerer)
+  harness.stdio.println(first.action)
+  harness.stdio.println(first.message)
+  harness.stdio.println(second.action)
+  harness.stdio.println(second.reason)
+  harness.stdio.println(status.state.replies)
+  harness.stdio.println(status.state.stopped)
+}

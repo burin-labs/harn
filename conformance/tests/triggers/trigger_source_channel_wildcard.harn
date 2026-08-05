@@ -1,0 +1,41 @@
+import "std/triggers"
+
+/**
+ * CH-02 (#1872): tenant wildcard selector (`channel:tenant:*:foo`) matches
+ * emits within the trigger's entitled tenant boundary.
+ */
+fn handle_any_tenant(harness: Harness, event) {
+  const payload = event.provider_payload
+  harness.channels.append("ch.wild.fired", {scope: payload.scope, scope_id: payload.scope_id})
+}
+
+pipeline test(harness: Harness, task) {
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(
+    harness.random.range(100000, 999999),
+  )
+  const _ = harness.runtime.trigger_register(
+    {
+      id: "channel-wild-" + unique,
+      kind: "channel.emit",
+      provider: "channel",
+      autonomy_tier: "act_auto",
+      handler: handle_any_tenant,
+      when: nil,
+      retry: nil,
+      match: {events: ["channel:tenant:*:wild.input"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  const _ = harness.channels.append("wild.input", {n: 1})
+  const fired = harness.channels.events("ch.wild.fired")
+  harness.stdio.println(len(fired))
+  harness.stdio.println(fired[0].payload.scope)
+  // Default tenant id is `default` when no tenant is set on the runtime.
+  harness.stdio.println(fired[0].payload.scope_id)
+}

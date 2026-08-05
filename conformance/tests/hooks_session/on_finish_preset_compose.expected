@@ -1,0 +1,6 @@
+audit_count=1
+audit_kind_0=settlement_timeout
+result_status=queued
+envelope_target=nightly-drain
+envelopes=2
+abandon_kind=pipeline_abandoned_unsettled

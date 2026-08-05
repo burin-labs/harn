@@ -1,0 +1,297 @@
+// Tests for scripts/verify_release_metadata.harn — exercise the pure
+// content checks against synthetic Cargo.toml / CHANGELOG.md text without
+// touching the filesystem, subprocesses, or git.
+import {
+  acp_agent_manifest_archive_versions,
+  acp_agent_manifest_version,
+  changelog_section_body,
+  changelog_versions,
+  check_acp_agent_manifest,
+  check_metadata,
+  current_version,
+  detect_misformatted_headings,
+  has_duplicates,
+  is_bump_ahead,
+  is_descending,
+  protocol_artifact_version,
+  success_message,
+} from "../verify_release_metadata.harn"
+
+const CARGO =
+  "[workspace]\nresolver = \"2\"\n\n[workspace.package]\nversion = \"0.8.71\"\nedition = \"2021\"\n"
+
+const CHANGELOG =
+  "# Changelog\n\nintro text\n\n## v0.8.71\n\n- Added a thing.\n\n## v0.8.70\n\n- Fixed a thing.\n"
+
+const ACP_MANIFEST = "{\n"
+  + "  \"id\": \"harn\",\n"
+  + "  \"version\": \"0.8.71\",\n"
+  + "  \"distribution\": {\n"
+  + "    \"binary\": {\n"
+  + "      \"linux-x86_64\": {\n"
+  + "        \"archive\": \"https://github.com/burin-labs/harn/releases/download/v0.8.71/harn-x86_64-unknown-linux-gnu.tar.gz\"\n"
+  + "      },\n"
+  + "      \"windows-x86_64\": {\n"
+  + "        \"archive\": \"https://github.com/burin-labs/harn/releases/download/v0.8.71/harn-x86_64-pc-windows-msvc.zip\"\n"
+  + "      }\n"
+  + "    }\n"
+  + "  }\n"
+  + "}\n"
+
+@test
+pipeline test_current_version(harness: Harness, task) {
+  assert_eq(current_version(CARGO), "0.8.71")
+}
+
+@test
+pipeline test_protocol_artifact_version(harness: Harness, task) {
+  const manifest =
+    "{\n  \"protocolVersion\": \"0.3.0\",\n  \"artifactVersion\": \"0.8.71\",\n  \"x\": 1\n}\n"
+  assert_eq(protocol_artifact_version(manifest), "0.8.71")
+}
+
+@test
+pipeline test_protocol_artifact_version_missing(harness: Harness, task) {
+  const r = try {
+    protocol_artifact_version("{\n  \"protocolVersion\": \"0.3.0\"\n}\n")
+  } catch (e) {
+    e
+  }
+  assert_eq(r, "error: missing artifactVersion in spec/protocol-artifacts/manifest.json")
+}
+
+@test
+pipeline test_acp_agent_manifest_version(harness: Harness, task) {
+  assert_eq(acp_agent_manifest_version(ACP_MANIFEST), "0.8.71")
+}
+
+@test
+pipeline test_acp_agent_manifest_archive_versions(harness: Harness, task) {
+  const versions = acp_agent_manifest_archive_versions(ACP_MANIFEST)
+  assert_eq(versions[0]?.version, "0.8.71")
+  assert_eq(
+    versions[0]?.archive,
+    "https://github.com/burin-labs/harn/releases/download/v0.8.71/harn-x86_64-unknown-linux-gnu.tar.gz",
+  )
+}
+
+@test
+pipeline test_check_acp_agent_manifest_ok(harness: Harness, task) {
+  check_acp_agent_manifest(ACP_MANIFEST, "0.8.71")
+}
+
+@test
+pipeline test_check_acp_agent_manifest_rejects_stale_version(harness: Harness, task) {
+  const manifest = regex_replace(
+    r#""version": "0\.8\.71""#,
+    "\"version\": \"0.8.70\"",
+    ACP_MANIFEST,
+  )
+  const r = try {
+    check_acp_agent_manifest(manifest, "0.8.71")
+  } catch (e) {
+    e
+  }
+  assert_eq(
+    r,
+    "error: spec/acp-registry/harn/agent.json version 0.8.70 does not match expected release projection version 0.8.71",
+  )
+}
+
+@test
+pipeline test_check_acp_agent_manifest_rejects_stale_archive(harness: Harness, task) {
+  const manifest = regex_replace(
+    "releases/download/v0\\.8\\.71/harn-x86_64-unknown-linux-gnu",
+    "releases/download/v0.8.70/harn-x86_64-unknown-linux-gnu",
+    ACP_MANIFEST,
+  )
+  const r = try {
+    check_acp_agent_manifest(manifest, "0.8.71")
+  } catch (e) {
+    e
+  }
+  assert_eq(
+    r,
+    "error: spec/acp-registry/harn/agent.json archive "
+      + "https://github.com/burin-labs/harn/releases/download/v0.8.70/harn-x86_64-unknown-linux-gnu.tar.gz "
+      + "points at v0.8.70 instead of expected release projection v0.8.71",
+  )
+}
+
+@test
+pipeline test_current_version_missing(harness: Harness, task) {
+  const r = try {
+    current_version("[workspace]\nname = \"x\"\n")
+  } catch (e) {
+    e
+  }
+  assert_eq(r, "error: missing workspace version in Cargo.toml")
+}
+
+@test
+pipeline test_changelog_versions(harness: Harness, task) {
+  assert_eq(changelog_versions(CHANGELOG), ["0.8.71", "0.8.70"])
+}
+
+@test
+pipeline test_changelog_versions_ignores_two_component(harness: Harness, task) {
+  const text = "## v0.5 series (0.5.0)\n\n## v1.2.3\n"
+  assert_eq(changelog_versions(text), ["1.2.3"])
+}
+
+@test
+pipeline test_section_body(harness: Harness, task) {
+  assert_eq(changelog_section_body(CHANGELOG, "0.8.71"), "- Added a thing.")
+  assert_eq(changelog_section_body(CHANGELOG, "0.8.70"), "- Fixed a thing.")
+}
+
+@test
+pipeline test_section_body_missing(harness: Harness, task) {
+  assert_eq(changelog_section_body(CHANGELOG, "9.9.9"), "")
+}
+
+@test
+pipeline test_section_body_empty(harness: Harness, task) {
+  const text = "## v1.0.0\n\n## v0.9.0\n\n- prior\n"
+  assert_eq(changelog_section_body(text, "1.0.0"), "")
+}
+
+@test
+pipeline test_detect_misformatted(harness: Harness, task) {
+  assert_eq(detect_misformatted_headings("## v0.7.41 "), ["## v0.7.41 "])
+  assert_eq(detect_misformatted_headings("## v0.7.41-rc1"), ["## v0.7.41-rc1"])
+}
+
+@test
+pipeline test_detect_misformatted_clean(harness: Harness, task) {
+  assert_eq(detect_misformatted_headings(CHANGELOG), [])
+  assert_eq(detect_misformatted_headings("## v0.5 series (0.5.0)"), [])
+}
+
+@test
+pipeline test_is_bump_ahead(harness: Harness, task) {
+  assert_eq(is_bump_ahead("0.8.71", "0.8.72"), true)
+  assert_eq(is_bump_ahead("0.8.71", "0.9.0"), true)
+  assert_eq(is_bump_ahead("0.8.71", "1.0.0"), true)
+}
+
+@test
+pipeline test_is_bump_ahead_rejects(harness: Harness, task) {
+  assert_eq(is_bump_ahead("0.8.71", "0.8.71"), false)
+  assert_eq(is_bump_ahead("0.8.71", "0.8.70"), false)
+  assert_eq(is_bump_ahead("0.8.71", "0.8.73"), false)
+  assert_eq(is_bump_ahead("0.8.71", "0.10.0"), false)
+  assert_eq(is_bump_ahead("0.8.71", "0.9.1"), false)
+}
+
+@test
+pipeline test_has_duplicates(harness: Harness, task) {
+  assert_eq(has_duplicates(["1.0.1", "1.0.0"]), false)
+  assert_eq(has_duplicates(["1.0.1", "1.0.1"]), true)
+}
+
+@test
+pipeline test_is_descending(harness: Harness, task) {
+  assert_eq(is_descending(["1.0.1", "1.0.0", "0.9.9"]), true)
+  assert_eq(is_descending(["1.0.0", "1.0.1"]), false)
+  assert_eq(is_descending(["1.0.0"]), true)
+}
+
+@test
+pipeline test_check_metadata_ok(harness: Harness, task) {
+  assert_eq(check_metadata(CARGO, CHANGELOG), "0.8.71")
+}
+
+@test
+pipeline test_check_metadata_bump_ahead(harness: Harness, task) {
+  const changelog = "# Changelog\n\n## v0.8.72\n\n- Next release.\n\n## v0.8.71\n\n- Prior.\n"
+  assert_eq(check_metadata(CARGO, changelog), "0.8.72")
+}
+
+@test
+pipeline test_check_metadata_no_versions(harness: Harness, task) {
+  const r = try {
+    check_metadata(CARGO, "# Changelog\n\nno versions here\n")
+  } catch (e) {
+    e
+  }
+  assert_eq(r, "error: CHANGELOG.md does not contain any version headings")
+}
+
+@test
+pipeline test_check_metadata_empty_body(harness: Harness, task) {
+  const changelog = "# Changelog\n\n## v0.8.71\n\n## v0.8.70\n\n- Prior.\n"
+  const r = try {
+    check_metadata(CARGO, changelog)
+  } catch (e) {
+    e
+  }
+  assert_eq(
+    r,
+    "error: CHANGELOG.md '## v0.8.71' section has no body content; release "
+      + "notes would be empty. Add bullet points describing the release.",
+  )
+}
+
+@test
+pipeline test_check_metadata_version_mismatch(harness: Harness, task) {
+  const changelog = "# Changelog\n\n## v0.9.5\n\n- Far ahead.\n\n## v0.8.70\n\n- Prior.\n"
+  const r = try {
+    check_metadata(CARGO, changelog)
+  } catch (e) {
+    e
+  }
+  assert_eq(
+    r,
+    "error: Cargo.toml version 0.8.71 does not match top changelog entry 0.9.5 "
+      + "(and the delta is not a single patch/minor/major bump)",
+  )
+}
+
+@test
+pipeline test_check_metadata_duplicate(harness: Harness, task) {
+  const changelog = "# Changelog\n\n## v0.8.71\n\n- A.\n\n## v0.8.71\n\n- B.\n"
+  const r = try {
+    check_metadata(CARGO, changelog)
+  } catch (e) {
+    e
+  }
+  assert_eq(r, "error: CHANGELOG.md contains duplicate version headings")
+}
+
+@test
+pipeline test_check_metadata_misformatted(harness: Harness, task) {
+  const changelog = "# Changelog\n\n## v0.8.71 \n\n- A.\n"
+  const r = try {
+    check_metadata(CARGO, changelog)
+  } catch (e) {
+    e
+  }
+  assert_eq(
+    r,
+    "error: CHANGELOG.md has heading(s) that look like version markers but "
+      + "don't match the canonical `## vX.Y.Z` regex (no trailing whitespace, "
+      + "no suffix):\n  ## v0.8.71 ",
+  )
+}
+
+@test
+pipeline test_check_metadata_unsorted(harness: Harness, task) {
+  const cargo = "[workspace.package]\nversion = \"0.8.70\"\n"
+  const changelog = "# Changelog\n\n## v0.8.70\n\n- A.\n\n## v0.8.71\n\n- B.\n"
+  const r = try {
+    check_metadata(cargo, changelog)
+  } catch (e) {
+    e
+  }
+  assert_eq(r, "error: CHANGELOG.md versions are not in descending semver order")
+}
+
+@test
+pipeline test_success_message(harness: Harness, task) {
+  assert_eq(success_message("0.8.71", "0.8.71"), "verified release metadata for v0.8.71")
+  assert_eq(
+    success_message("0.8.71", "0.8.72"),
+    "verified release metadata for v0.8.72 (Cargo.toml still at v0.8.71; bump pending)",
+  )
+}

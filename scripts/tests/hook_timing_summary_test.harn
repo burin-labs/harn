@@ -1,0 +1,178 @@
+import "../hook_timing_summary.harn"
+
+const SAMPLE_LOG = """
+{"ts":"2026-07-15T05:31:25Z","repository":"burin-labs/harn","repo":"harn4745-recap-fixture-codex0","hook":"pre-push","profile":"fast","duration_ms":405030,"phases":{"setup-and-guards":30000,"fast-validation":375030},"exit_code":0,"commit_sha":"4f8387","host":"mac"}
+not json
+{"ts":"2026-07-15T05:24:28Z","repo":"harn4745-recap-fixture-codex0","hook":"pre-commit","duration_ms":1054,"exit_code":0}
+{"ts":"2026-07-15T05:13:57Z","repo":"harn-affected-global-fastpath-codex1","hook":"pre-push","duration_ms":848,"exit_code":0}
+{"repo":"missing-duration","hook":"pre-push"}
+{"repository":"burin-labs/harn","repo":"invalid-profile","hook":"pre-push","profile":"turbo","duration_ms":10}
+{"repository":"burin-labs/harn","repo":"invalid-phase","hook":"pre-push","profile":"fast","duration_ms":10,"phases":{"fast-validation":-1}}
+{"repository":"burin-labs/harn","repo":"overflow-phase","hook":"pre-push","profile":"fast","duration_ms":10,"phases":{"fast-validation":11}}
+"""
+
+@test
+pipeline test_default_hook_timing_path(harness: Harness, task) {
+  assert_eq(default_hook_timing_path("/Users/example"), "/Users/example/.burin/hook-timings.ndjson")
+  assert_eq(default_hook_timing_path(""), ".burin/hook-timings.ndjson")
+}
+
+@test
+pipeline test_parse_hook_timing_text_skips_invalid_rows(harness: Harness, task) {
+  const report = parse_hook_timing_text(SAMPLE_LOG)
+  assert_eq(report.events.count, 3)
+  assert_eq(report.invalid_lines, 5)
+  assert_eq(report.events[0]?.repo, "harn4745-recap-fixture-codex0")
+  assert_eq(report.events[0]?.repository, "burin-labs/harn")
+  assert_eq(report.events[0]?.profile, "fast")
+  assert_eq(report.events[0]?.duration_ms, 405030)
+  assert_eq(report.events[0]?.exit_code, 0)
+  assert_eq(report.events[0]?.phases?.["setup-and-guards"], 30000)
+  assert_eq(report.events[1]?.phases, {})
+}
+
+@test
+pipeline test_phase_summary_aggregates_each_top_level_phase(harness: Harness, task) {
+  const parsed = parse_hook_timing_text(
+    """
+{"repository":"burin-labs/harn","repo":"one","hook":"pre-push","profile":"fast","duration_ms":100,"phases":{"setup-and-guards":30,"fast-validation":70}}
+{"repository":"burin-labs/harn","repo":"two","hook":"pre-push","profile":"fast","duration_ms":200,"phases":{"setup-and-guards":50,"fast-validation":150}}
+{"repo":"legacy","hook":"pre-push","duration_ms":300}
+""",
+  )
+  const groups = summarize_hook_timing_phases(parsed.events)
+  assert_eq(groups.count, 2)
+  assert_eq(groups[0]?.phase, "fast-validation")
+  assert_eq(groups[0]?.count, 2)
+  assert_eq(groups[0]?.total_ms, 220)
+  assert_eq(groups[0]?.p50_ms, 70)
+  assert_eq(groups[0]?.p95_ms, 150)
+  assert_eq(groups[1]?.phase, "setup-and-guards")
+  assert_eq(groups[1]?.total_ms, 80)
+}
+
+@test
+pipeline test_worktree_summary_keeps_checkout_identity(harness: Harness, task) {
+  const parsed = parse_hook_timing_text(
+    """
+{"repository":"burin-labs/harn","repo":"one","hook":"pre-commit","profile":"fast","duration_ms":100,"exit_code":0}
+{"repository":"burin-labs/harn","repo":"one","hook":"pre-commit","profile":"fast","duration_ms":200,"exit_code":1}
+{"repository":"burin-labs/harn","repo":"two","hook":"pre-commit","profile":"fast","duration_ms":50,"exit_code":0}
+""",
+  )
+  const groups = summarize_hook_timing_worktrees(parsed.events)
+  assert_eq(groups.count, 2)
+  assert_eq(groups[0]?.repository, "burin-labs/harn")
+  assert_eq(groups[0]?.repo, "one")
+  assert_eq(groups[0]?.count, 2)
+  assert_eq(groups[0]?.failures, 1)
+  assert_eq(groups[0]?.p50_ms, 100)
+  assert_eq(groups[0]?.p95_ms, 200)
+  assert_eq(groups[1]?.repo, "two")
+}
+
+@test
+pipeline test_summarize_hook_timings_aggregates_and_sorts_by_total(harness: Harness, task) {
+  const parsed = parse_hook_timing_text(
+    """
+{"repo":"slow","hook":"pre-push","duration_ms":100}
+{"repo":"slow","hook":"pre-push","duration_ms":300}
+{"repo":"fast","hook":"pre-commit","duration_ms":250}
+""",
+  )
+  const groups = summarize_hook_timings(parsed.events)
+  assert_eq(groups.count, 2)
+  assert_eq(groups[0]?.repository, "slow")
+  assert_eq(groups[0]?.profile, "legacy")
+  assert_eq(groups[0]?.hook, "pre-push")
+  assert_eq(groups[0]?.count, 2)
+  assert_eq(groups[0]?.failures, 0)
+  assert_eq(groups[0]?.total_ms, 400)
+  assert_eq(groups[0]?.max_ms, 300)
+  assert_eq(groups[0]?.avg_ms, 200)
+  assert_eq(groups[0]?.p50_ms, 100)
+  assert_eq(groups[0]?.p95_ms, 300)
+  assert_eq(groups[1]?.repository, "fast")
+}
+
+@test
+pipeline test_slowest_hook_timings_honors_limit(harness: Harness, task) {
+  const parsed = parse_hook_timing_text(SAMPLE_LOG)
+  const slowest = slowest_hook_timings(parsed.events, 2)
+  assert_eq(slowest.map({ event -> event.duration_ms }).to_list(), [405030, 1054])
+}
+
+@test
+pipeline test_filter_hook_timings_combines_repo_hook_and_min_duration(harness: Harness, task) {
+  const parsed = parse_hook_timing_text(SAMPLE_LOG)
+  const filtered = filter_hook_timings(
+    parsed.events,
+    {repo: "harn4745", hook: "pre-push", min_ms: 1000},
+  )
+  assert_eq(filtered.count, 1)
+  assert_eq(filtered[0]?.duration_ms, 405030)
+}
+
+@test
+pipeline test_render_hook_timing_report_contains_actionable_sections(harness: Harness, task) {
+  const parsed = parse_hook_timing_text(SAMPLE_LOG)
+  const rendered = render_hook_timing_report(
+    {
+      input: "fixture.ndjson",
+      filters: {repo: "harn4745", hook: "pre-push", min_ms: 1000},
+      events: parsed.events,
+      groups: summarize_hook_timings(parsed.events),
+      phase_groups: summarize_hook_timing_phases(parsed.events),
+      worktree_groups: summarize_hook_timing_worktrees(parsed.events),
+      invalid_lines: parsed.invalid_lines,
+    },
+    1,
+  )
+  assert_eq(rendered.contains("slowest invocations:"), true)
+  assert_eq(rendered.contains("aggregate by repository/profile/hook:"), true)
+  assert_eq(rendered.contains("burin-labs/harn fast pre-push: 405030ms"), true)
+  assert_eq(rendered.contains("aggregate phases by repository/profile/hook:"), true)
+  assert_eq(rendered.contains("burin-labs/harn fast pre-push/fast-validation"), true)
+  assert_eq(rendered.contains("worktree drilldown:"), true)
+  assert_eq(rendered.contains("harn4745-recap-fixture-codex0 fast pre-push"), true)
+  assert_eq(rendered.contains("invalid_lines: 5"), true)
+}
+
+@test
+pipeline test_budget_projection_separates_profiles_and_excludes_failures(harness: Harness, task) {
+  const parsed = parse_hook_timing_text(
+    """
+{"ts":"2026-07-16T01:00:00Z","repository":"burin-labs/harn","repo":"one","hook":"pre-push","profile":"fast","duration_ms":100,"exit_code":0}
+{"ts":"2026-07-16T02:00:00Z","repository":"burin-labs/harn","repo":"two","hook":"pre-push","profile":"fast","duration_ms":200,"exit_code":0}
+{"ts":"2026-07-16T03:00:00Z","repository":"burin-labs/harn","repo":"three","hook":"pre-push","profile":"fast","duration_ms":300,"exit_code":0}
+{"ts":"2026-07-16T04:00:00Z","repository":"burin-labs/harn","repo":"four","hook":"pre-push","profile":"fast","duration_ms":400,"exit_code":0}
+{"ts":"2026-07-16T05:00:00Z","repository":"burin-labs/harn","repo":"failed","hook":"pre-push","profile":"fast","duration_ms":9999,"exit_code":1}
+{"repository":"burin-labs/harn","repo":"full","hook":"pre-push","profile":"full","duration_ms":800,"exit_code":0}
+{"repo":"old","hook":"pre-push","duration_ms":900,"exit_code":0}
+""",
+  )
+  const report = derive_hook_timing_budgets(parsed.events)
+  assert_eq(report.schemaVersion, 1)
+  assert_eq(report.limits.keys().to_list().count, 1)
+  const budget = report.limits["hook/burin-labs/harn/fast/pre-push"]
+  assert_eq(budget?.intent, "budget")
+  assert_eq(budget?.valueMs, 480)
+  assert_eq(budget?.source, "derived")
+  assert_eq(budget?.rule, "p95*1.2")
+  assert_eq(
+    budget?.observed,
+    {p50: 200, p95: 400, max: 400, n: 4, window: "2026-07-16T01:00:00Z/2026-07-16T04:00:00Z"},
+  )
+}
+
+@test
+pipeline test_budget_projection_refuses_thin_samples(harness: Harness, task) {
+  const parsed = parse_hook_timing_text(
+    """
+{"repository":"burin-labs/harn","repo":"one","hook":"pre-commit","profile":"fast","duration_ms":100}
+{"repository":"burin-labs/harn","repo":"two","hook":"pre-commit","profile":"fast","duration_ms":200}
+{"repository":"burin-labs/harn","repo":"three","hook":"pre-commit","profile":"fast","duration_ms":300}
+""",
+  )
+  assert_eq(derive_hook_timing_budgets(parsed.events).limits.keys().to_list().count, 0)
+}

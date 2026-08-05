@@ -1,0 +1,14 @@
+pipeline default(harness: Harness, task) {
+  let found = 0
+  for i in [1, 2, 3, 4, 5] {
+    try {
+      if i == 3 {
+        break
+      }
+      found = i
+    } catch (e) {
+      harness.stdio.log(e)
+    }
+  }
+  harness.stdio.log(found)
+}

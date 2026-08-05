@@ -1,0 +1,57 @@
+/**
+ * with_dry_run — never invokes `next`; returns a synthetic OK result
+ * tagged status: "dry_run". Tools listed in `except` run normally.
+ */
+import { with_dry_run } from "std/llm/tool_middleware"
+
+fn next_marker() {
+  return { call ->
+    return {
+      ok: true,
+      status: "ok",
+      tool_name: call.tool_name,
+      tool_call_id: call.call_id,
+      arguments: call.tool_args,
+      result: "REAL",
+      rendered_result: "REAL",
+      observation: "",
+      error: nil,
+      error_category: nil,
+      executor: "harn",
+    }
+  }
+}
+
+fn envelope(name) {
+  return {
+    tool_name: name,
+    tool_args: {},
+    call_id: "c-" + name,
+    declared_executor: "harn",
+    schema: nil,
+    description: "",
+    turn: {iteration: 0, session_id: ""},
+  }
+}
+
+pipeline default(harness: Harness) {
+  const next = next_marker()
+  // (1) dry-run everything.
+  const dry = with_dry_run()
+  const r1 = dry(envelope("write"), next)
+  harness.stdio.println(r1.ok)
+  harness.stdio.println(r1.status)
+  harness.stdio.println(r1.result.dry_run)
+  // (2) `except` allows specific tools to actually run.
+  const dry_except_read = with_dry_run({except: ["read"]})
+  const r2 = dry_except_read(envelope("read"), next)
+  const r3 = dry_except_read(envelope("write"), next)
+  harness.stdio.println(r2.result)
+  harness.stdio.println(r3.status)
+  // (3) `only` runs dry-run only for listed tools.
+  const dry_only_write = with_dry_run({only: ["write"]})
+  const r4 = dry_only_write(envelope("read"), next)
+  const r5 = dry_only_write(envelope("write"), next)
+  harness.stdio.println(r4.result)
+  harness.stdio.println(r5.status)
+}

@@ -1,0 +1,13 @@
+sub_agent_request
+note-reader
+Stay terse.
+true
+mock
+true
+true
+1
+read_note
+true
+true
+read_note
+object

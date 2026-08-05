@@ -1,0 +1,260 @@
+[provider_defaults.anthropic]
+message_wire_format = "anthropic"
+native_tool_wire_format = "anthropic"
+file_upload_wire_format = "anthropic"
+files_api_supported = true
+batch_wire_format = "anthropic_messages"
+batch_input_mode = "inline_requests"
+batch_discount_percent = 50
+batch_turnaround_hours = 24
+batch_max_requests = 100000
+batch_max_input_bytes = 268435456
+batch_result_retention_days = 29
+batch_result_ordering = "custom_id_rejoin"
+batch_partial_failure = "per_request"
+batch_cancellation = "supported"
+batch_security_notes = [
+  "Message Batches are not eligible for Zero Data Retention.",
+  "Batch data is scoped to the workspace that owns the API key.",
+  "Request and response data is retained for up to 29 days unless deleted after processing.",
+]
+batch_operational_notes = [
+  "Most Message Batches complete within an hour, but callers must still budget for the published 24-hour window.",
+  "Prompt caching can be used with Message Batches, but cache hits are best effort because asynchronous requests may be processed concurrently and out of order.",
+  "Use a 1-hour prompt-cache duration for shared batch context when batches may run longer than the 5-minute default cache lifetime.",
+  "Message Batches do not support stream, speed, Threads state, routing hints, or max_tokens=0 cache prewarm requests.",
+]
+seed_supported = false
+frequency_penalty_supported = false
+presence_penalty_supported = false
+prompt_cache_ttls = ["5m", "1h"]
+
+[provider_defaults.openai]
+batch_wire_format = "openai"
+batch_input_mode = "jsonl_file"
+batch_discount_percent = 50
+batch_turnaround_hours = 24
+batch_max_requests = 50000
+batch_max_input_bytes = 209715200
+batch_result_retention_days = 30
+batch_result_ordering = "custom_id_rejoin"
+batch_partial_failure = "per_request"
+batch_cancellation = "supported"
+batch_security_notes = [
+  "Batch rate limits use a separate provider pool from synchronous model calls.",
+  "Output and error files can use a configurable expiration between 1 hour and 30 days.",
+]
+batch_operational_notes = [
+  "Input files must group requests for one model; Harn manifests group by provider, model, wire format, and tool format.",
+  "Use stable custom_id values to rejoin unordered output and error rows.",
+]
+top_k_supported = false
+
+[provider_defaults.bedrock]
+batch_wire_format = "bedrock"
+batch_input_mode = "jsonl_file"
+batch_result_ordering = "custom_id_rejoin"
+batch_partial_failure = "per_request"
+batch_cancellation = "supported"
+batch_security_notes = [
+  "Batch input and output artifacts are stored in caller-owned Amazon S3 locations.",
+  "Harn resolves AWS credentials through the maintained AWS SDK credential chain and never persists credential values in receipts.",
+]
+batch_operational_notes = [
+  "A Bedrock batch job requires a service role ARN plus typed input and output S3 URIs in the same region as the selected model.",
+  "Harn derives clientRequestToken from the durable operation identity so an ambiguous create response can be retried safely.",
+]
+
+[provider_defaults.azure_openai]
+batch_wire_format = "openai"
+batch_input_mode = "jsonl_file"
+batch_discount_percent = 50
+batch_turnaround_hours = 24
+batch_result_ordering = "custom_id_rejoin"
+batch_partial_failure = "per_request"
+batch_cancellation = "supported"
+batch_security_notes = [
+  "Global Batch and Data Zone Batch use a separate enqueued-token quota from online workloads.",
+  "Batch input bodies must name the Azure deployment, not the base model id.",
+]
+batch_operational_notes = [
+  "Azure OpenAI documents a 24-hour target turnaround and 50% lower cost than Global Standard, but jobs that run longer do not expire automatically.",
+  "Output expiration is configurable between 14 and 30 days; Harn does not encode a fixed retention day for Azure.",
+  "Fine-tuned models, Assistants, and On Your Data are not supported by Azure OpenAI Batch.",
+  "No fixed request-count cap is documented; capacity is governed by enqueued-token quota.",
+]
+
+[provider_defaults.openrouter]
+reasoning_wire_format = "openrouter"
+top_k_supported = false
+
+[provider_defaults.huggingface]
+top_k_supported = false
+
+[provider_defaults.local]
+top_k_supported = false
+
+[provider_defaults.together]
+batch_wire_format = "openai"
+batch_input_mode = "jsonl_file"
+batch_discount_percent = 50
+batch_turnaround_hours = 24
+batch_result_ordering = "custom_id_rejoin"
+batch_partial_failure = "per_request"
+batch_cancellation = "unknown"
+reasoning_wire_format = "enabled"
+
+[provider_defaults.ollama]
+message_wire_format = "ollama"
+image_url_input_supported = false
+frequency_penalty_supported = false
+presence_penalty_supported = false
+
+[provider_defaults.gemini]
+message_wire_format = "gemini"
+# Live synchronous traffic defaults to the legacy `:generateContent` endpoint.
+# `gemini_interactions` is the second family Harn can speak (see
+# `live_endpoint_family` in 00-base.toml); it is opt-in per model row or per
+# project so an existing route's wire bytes never change underneath it.
+# Independent of `batch_wire_format`: Gemini Batch stays `generateContent`-only
+# whichever live family a route selects.
+live_endpoint_family = "gemini_generate_content"
+file_upload_wire_format = "gemini"
+files_api_supported = true
+batch_wire_format = "gemini"
+batch_input_mode = "jsonl_or_inline"
+batch_discount_percent = 50
+batch_turnaround_hours = 24
+batch_max_input_bytes = 2147483648
+batch_result_ordering = "custom_id_rejoin"
+batch_partial_failure = "per_request"
+batch_cancellation = "supported"
+batch_operational_notes = [
+  "Batch creation is not idempotent; persist Harn manifests and receipts before retrying provider create requests.",
+  "Context caching can apply to batch requests, but Gemini cache and batch discounts do not stack; cache-hit discounts take precedence where documented.",
+  "Use File API JSONL input for large gauntlets; inline requests have a smaller provider body-size cap.",
+]
+
+[provider_defaults.mistral]
+batch_wire_format = "mistral"
+batch_input_mode = "jsonl_or_inline"
+batch_discount_percent = 50
+batch_max_requests = 100000
+batch_max_input_bytes = 536870912
+batch_result_retention_days = 1
+batch_result_ordering = "custom_id_rejoin"
+batch_partial_failure = "unknown"
+batch_cancellation = "unknown"
+batch_operational_notes = [
+  "Batch jobs support chat completions, embeddings, FIM, moderation, OCR, classifications, conversations, and audio transcription endpoints.",
+  "Batch jobs use separate accounting from real-time rate limits.",
+  "The default timeout is 24 hours; results are downloadable for 24 hours after completion.",
+]
+top_k_supported = false
+
+[provider_defaults.cohere]
+top_k_supported = false
+
+[provider_defaults.xai]
+batch_wire_format = "xai"
+batch_input_mode = "jsonl_or_inline"
+batch_turnaround_hours = 24
+batch_result_ordering = "custom_id_rejoin"
+batch_partial_failure = "unknown"
+batch_cancellation = "unknown"
+batch_operational_notes = [
+  "Most text batch jobs complete within 24 hours, but completion time is best effort and not guaranteed.",
+  "Batch discounts vary by model; do not assume a global 50% discount for xAI.",
+  "Official pricing distinguishes text/language batch discounts from image/video paths that may bill at standard rates.",
+]
+top_k_supported = false
+
+[provider_defaults.groq]
+batch_wire_format = "openai"
+batch_input_mode = "jsonl_file"
+batch_discount_percent = 50
+batch_turnaround_hours = 24
+batch_result_ordering = "custom_id_rejoin"
+batch_partial_failure = "per_request"
+batch_cancellation = "unknown"
+
+[provider_defaults.fireworks]
+batch_wire_format = "fireworks"
+batch_input_mode = "jsonl_file"
+batch_discount_percent = 50
+batch_max_input_bytes = 1073741824
+batch_turnaround_hours = 24
+batch_result_ordering = "custom_id_rejoin"
+batch_partial_failure = "unknown"
+batch_cancellation = "unknown"
+batch_operational_notes = [
+  "Batch support is model-specific; Harn only marks catalog rows that advertise provider batch capability.",
+  "Prompt caching can combine with eligible batch jobs for additional savings.",
+  "Provider docs currently mention selectable 12/24/48/72 hour expiration windows and also say expired jobs expire after 24h; Harn treats the exact expiration as provider-ambiguous.",
+]
+
+[provider_defaults.moonshot]
+top_k_supported = false
+
+[provider_defaults.zai]
+reasoning_wire_format = "zai"
+
+[provider_defaults.baseten]
+top_k_supported = false
+top_p_supported = false
+
+[provider_defaults.deepinfra]
+top_k_supported = false
+
+[provider_defaults.sambanova]
+top_k_supported = false
+
+[provider_defaults.nvidia]
+top_k_supported = false
+
+[provider_defaults.nebius]
+top_k_supported = false
+
+[provider_defaults.flexai]
+top_k_supported = false
+
+[provider_defaults.hyperbolic]
+top_k_supported = false
+
+[provider_defaults.siliconflow]
+top_k_supported = false
+
+[provider_defaults.parasail]
+batch_wire_format = "openai"
+batch_input_mode = "jsonl_file"
+batch_result_ordering = "custom_id_rejoin"
+batch_partial_failure = "unknown"
+batch_cancellation = "unknown"
+top_k_supported = false
+
+[provider_defaults.atlas]
+top_k_supported = false
+
+[provider_defaults.github_models]
+top_k_supported = false
+
+[provider_defaults.vercel_ai_gateway]
+top_k_supported = false
+
+[provider_defaults.cloudflare_ai_gateway]
+top_k_supported = false
+
+[provider_defaults.inception]
+top_k_supported = false
+
+[provider_defaults.friendli]
+top_k_supported = false
+
+[provider_defaults.volcengine_ark]
+top_k_supported = false
+
+[provider_defaults.hunyuan]
+top_k_supported = false
+
+[provider_defaults.qianfan]
+top_k_supported = false

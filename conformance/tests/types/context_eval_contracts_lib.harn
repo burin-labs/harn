@@ -1,0 +1,131 @@
+import { ContextEvalManifest, ContextEvalReport } from "std/context/eval"
+
+/** Package boundary that names the manifest contract instead of `dict`. */
+pub fn accept_manifest(manifest: ContextEvalManifest) -> string {
+  return manifest.id
+}
+
+/**
+ * Package boundary that names the report contract and reads a deterministic
+ * score off the typed aggregate — no local schema copy.
+ */
+pub fn accept_report(report: ContextEvalReport) -> float {
+  return report.aggregate.mean_final_correctness
+}
+
+/** The deterministic aggregate shared by the report fixtures. */
+pub fn sample_aggregate() -> dict {
+  return {
+    mean_final_correctness: 1.0,
+    mean_tool_call_quality: 1.0,
+    total_latency_ms: 12,
+    total_input_tokens: 100,
+    total_output_tokens: 40,
+    total_cost_usd: 0.0,
+    total_compaction_count: 0,
+    total_error_recovery_count: 0,
+  }
+}
+
+fn sample_run() -> dict {
+  return {
+    run_id: "incident::pack",
+    task_id: "incident",
+    mode_id: "pack",
+    mode_kind: "hud_pack",
+    status: "passed",
+    passed: true,
+    final_correctness: {
+      passed: true,
+      score: 1.0,
+      required_terms_present: ["pagerduty"],
+      required_terms_missing: [],
+      expected_artifact_ids_present: [],
+      expected_artifact_ids_missing: [],
+      source: "deterministic",
+    },
+    reads_before_first_edit: 0,
+    tool_call_quality: {
+      score: 1.0,
+      expected_tools: [],
+      observed_tools: [],
+      matched_tools: [],
+      missing_tools: [],
+      unnecessary_tools: [],
+    },
+    latency_ms: 12,
+    input_tokens: 100,
+    output_tokens: 40,
+    cost_usd: 0.0,
+    compaction_count: 0,
+    projection: {
+      policy: "keep_all",
+      source_message_count: 3,
+      retained_message_count: 3,
+      retained_tokens: 90,
+    },
+    context: {
+      projection_policy: "keep_all",
+      tool_disclosure: "named",
+      artifact_count: 0,
+      selected_artifact_ids: [],
+      dropped_artifact_ids: [],
+      rendered_bytes: 100,
+      rendered_tokens: 25,
+      budget_tokens: 1600,
+      assemble_strategy: "concat",
+      dedup: "none",
+      exposed_tools: [],
+    },
+    cache: {
+      namespace: "ns",
+      key: "k",
+      stable_input_hash: "h",
+      deterministic_order: true,
+      hit: false,
+    },
+    error_recovery_count: 0,
+    preprocessing: {mode: "deterministic", llm_enabled: false},
+    failures: [],
+  }
+}
+
+/**
+ * A valid `ContextEvalReport`, minus the `manifest_id` identity field so the
+ * fixtures can add it (valid), omit it (missing identity), or layer other
+ * overrides on top. Returned as a plain `dict` so fixtures can shape it
+ * before it crosses a typed boundary.
+ */
+pub fn sample_report_core() -> dict {
+  return {
+    _type: "harn.context_eval.report.v1",
+    schema_version: 1,
+    pass: true,
+    total_runs: 1,
+    passed_runs: 1,
+    failed_runs: 0,
+    total_tasks: 1,
+    total_modes: 1,
+    aggregate: sample_aggregate(),
+    modes: [
+      {
+        id: "pack",
+        kind: "hud_pack",
+        projection_policy: "keep_all",
+        tool_disclosure: "named",
+        preprocessing: {mode: "deterministic", llm_enabled: false},
+      },
+    ],
+    tasks: [
+      {
+        id: "incident",
+        name: "Incident",
+        required_terms: ["pagerduty"],
+        expected_artifact_ids: [],
+        expected_tools: [],
+      },
+    ],
+    runs: [sample_run()],
+    metadata: {},
+  }
+}

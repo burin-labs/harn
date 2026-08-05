@@ -1,0 +1,596 @@
+/**
+ * Pure experiment driver over immutable paired observations.
+ *
+ * The family error budget is split once across every registered
+ * candidate × (primary + guardrails) cell. Removed arms never refund it.
+ */
+import { VersionedContract, versioned_contract, versioned_descriptor } from "std/artifacts/typed"
+import { RealizedAssignment } from "std/eval/experiment/assignment"
+import {
+  ExperimentArm,
+  ExperimentGuardrail,
+  ExperimentMetric,
+  ExperimentRegistration,
+  MetricBounds,
+} from "std/eval/experiment/contracts"
+import { ArmInterval, SequentialArm, arm_decision, bounded_cs } from "std/eval/sequential"
+import { ArtifactDescriptor } from "std/run_artifacts"
+import { schema_contract } from "std/schema"
+
+pub type MetricPair = {id: string, baseline: float, treatment: float}
+
+pub type PairedObservation = {
+  arm_id: string,
+  case_id: string,
+  trial_index: int,
+  metrics: list<MetricPair>,
+  baseline_assignment: RealizedAssignment,
+  candidate_assignment: RealizedAssignment,
+}
+
+pub type ExperimentDecisionInput = {
+  observations: list<PairedObservation>,
+  phase_spend_usd: float,
+  budget_spent: bool,
+}
+
+pub type GuardrailOutcome = {
+  arm_id: string,
+  metric_id: string,
+  mean_excess_harm: float,
+  lo: float,
+  hi: float,
+  breached: bool,
+  n: int,
+}
+
+pub type CandidateStatus = "running" \
+  | "promoted" \
+  | "not_selected" \
+  | "regressed_on_primary" \
+  | "measured_no_difference" \
+  | "regressed_on_guardrail" \
+  | "unresolved"
+
+pub type CandidateOutcome = {
+  arm_id: string,
+  status: CandidateStatus,
+  primary?: ArmInterval,
+  breached_guardrails: list<string>,
+}
+
+pub type ExperimentVerdict = "RUNNING" \
+  | "ITERATE_WINNER" \
+  | "PROMOTED" \
+  | "BASELINE" \
+  | "MEASURED_NO_DIFFERENCE" \
+  | "GUARDRAIL_VETO" \
+  | "UNRESOLVED"
+
+pub type ExperimentDecision = {
+  schema: "harn.experiment.decision.v1",
+  schema_version: int,
+  decision_id: string,
+  registration_id: string,
+  experiment_id: string,
+  phase: "iterate" | "gate",
+  verdict: ExperimentVerdict,
+  winner: string?,
+  leader: string?,
+  primary_metric: string,
+  primary_effect: ArmInterval?,
+  primary_intervals: dict<string, ArmInterval>,
+  guardrails: list<GuardrailOutcome>,
+  candidates: list<CandidateOutcome>,
+  trials: int,
+  phase_spend_usd: float,
+  spend_usd: float,
+  realized_assignments: list<RealizedAssignment>,
+  promotion_required: bool,
+  no_decision: bool,
+}
+
+fn __find_arm(registration: ExperimentRegistration, arm_id: string) -> ExperimentArm? {
+  for arm in registration.candidates {
+    if arm.id == arm_id {
+      return arm
+    }
+  }
+  return nil
+}
+
+fn __metric_pair(observation: PairedObservation, metric_id: string) -> MetricPair? {
+  for pair in observation.metrics {
+    if pair.id == metric_id {
+      return pair
+    }
+  }
+  return nil
+}
+
+fn __metric_ids(registration: ExperimentRegistration) -> list<string> {
+  let ids: list<string> = [registration.metrics.primary.id]
+  for guardrail in registration.metrics.guardrails {
+    ids = ids + [guardrail.id]
+  }
+  return ids
+}
+
+fn __check_assignment(
+  assignment: RealizedAssignment,
+  registration: ExperimentRegistration,
+  observation: PairedObservation,
+  expected_arm: string,
+) {
+  if assignment.registration_id != registration.registration_id
+    || assignment.phase
+    != registration.phase
+    || assignment.case_id != observation.case_id
+    || assignment.trial_index != observation.trial_index
+    || assignment.arm_id != expected_arm {
+    throw "std/eval/experiment: realized assignment does not match its observation"
+  }
+}
+
+fn __check_pair_bounds(pair: MetricPair, metric: ExperimentMetric) {
+  if pair.baseline < metric.bounds.lo
+    || pair.baseline > metric.bounds.hi
+    || pair.treatment < metric.bounds.lo
+    || pair.treatment > metric.bounds.hi {
+    throw "std/eval/experiment: observation is outside metric bounds for '" + metric.id + "'"
+  }
+}
+
+fn __find_guardrail(
+  registration: ExperimentRegistration,
+  metric_id: string,
+) -> ExperimentGuardrail? {
+  for guardrail in registration.metrics.guardrails {
+    if guardrail.id == metric_id {
+      return guardrail
+    }
+  }
+  return nil
+}
+
+fn __validate_observations(
+  registration: ExperimentRegistration,
+  observations: list<PairedObservation>,
+) {
+  let seen: dict<string, bool> = {}
+  const metric_ids = __metric_ids(registration)
+  for observation in observations {
+    const arm = __find_arm(registration, observation.arm_id)
+    if arm == nil {
+      throw "std/eval/experiment: observation names an unregistered candidate"
+    }
+    if !registration.case_set.cases.contains(observation.case_id) {
+      throw "std/eval/experiment: observation is outside the frozen case set"
+    }
+    if observation.trial_index < 0
+      || observation.trial_index
+      >= registration.budget.max_trials_per_case {
+      throw "std/eval/experiment: observation exceeds the trial ceiling"
+    }
+    const cell = observation.arm_id
+      + "\n"
+      + observation.case_id
+      + "\n"
+      + to_string(observation.trial_index)
+    if seen[cell] ?? false {
+      throw "std/eval/experiment: duplicate immutable arm/case/trial observation"
+    }
+    seen = seen + {[cell]: true}
+    if observation.baseline_assignment.plan_id != observation.candidate_assignment.plan_id {
+      throw "std/eval/experiment: paired observations must share one assignment block"
+    }
+    __check_assignment(
+      observation.baseline_assignment,
+      registration,
+      observation,
+      registration.baseline.id,
+    )
+    __check_assignment(
+      observation.candidate_assignment,
+      registration,
+      observation,
+      observation.arm_id,
+    )
+    if len(observation.metrics) != len(metric_ids) {
+      throw "std/eval/experiment: every observation must carry primary and guardrail metrics"
+    }
+    let seen_metrics: dict<string, bool> = {}
+    for pair in observation.metrics {
+      if seen_metrics[pair.id] ?? false {
+        throw "std/eval/experiment: duplicate metric in paired observation"
+      }
+      seen_metrics = seen_metrics + {[pair.id]: true}
+      if pair.id == registration.metrics.primary.id {
+        __check_pair_bounds(pair, registration.metrics.primary)
+      } else {
+        const guardrail = __find_guardrail(registration, pair.id)
+        if guardrail == nil {
+          throw "std/eval/experiment: observation names an unregistered metric"
+        }
+        const metric: ExperimentMetric = {
+          id: guardrail.id,
+          direction: guardrail.direction,
+          bounds: guardrail.bounds,
+        }
+        __check_pair_bounds(pair, metric)
+      }
+    }
+    for metric_id in metric_ids {
+      if !(seen_metrics[metric_id] ?? false) {
+        throw "std/eval/experiment: observation omits metric '" + metric_id + "'"
+      }
+    }
+  }
+}
+
+fn __signed_effect(pair: MetricPair, direction: "up" | "down") -> float {
+  const raw = pair.treatment - pair.baseline
+  if direction == "down" {
+    return 0.0 - raw
+  }
+  return raw
+}
+
+fn __primary_arms(
+  registration: ExperimentRegistration,
+  observations: list<PairedObservation>,
+  excluded: list<string>,
+) -> list<SequentialArm> {
+  let arms: list<SequentialArm> = []
+  for arm in registration.candidates {
+    if excluded.contains(arm.id) {
+      continue
+    }
+    let deltas: list<float> = []
+    for observation in observations {
+      if observation.arm_id != arm.id {
+        continue
+      }
+      const pair = __metric_pair(observation, registration.metrics.primary.id)
+      if pair == nil {
+        throw "std/eval/experiment: primary metric vanished after validation"
+      }
+      deltas = deltas
+        + [__signed_effect(pair, registration.metrics.primary.direction)]
+    }
+    arms = arms + [{id: arm.id, deltas: deltas, complexity: arm.complexity}]
+  }
+  return arms
+}
+
+fn __guardrail_values(
+  observations: list<PairedObservation>,
+  arm_id: string,
+  guardrail: ExperimentGuardrail,
+) -> list<float> {
+  let values: list<float> = []
+  for observation in observations {
+    if observation.arm_id != arm_id {
+      continue
+    }
+    const pair = __metric_pair(observation, guardrail.id)
+    if pair == nil {
+      throw "std/eval/experiment: guardrail metric vanished after validation"
+    }
+    const harmful_change = 0.0 - __signed_effect(pair, guardrail.direction)
+    const threshold = if guardrail.alarm.kind == "percentage" {
+      abs(pair.baseline) * guardrail.alarm.threshold / 100.0
+    } else {
+      guardrail.alarm.threshold
+    }
+    values = values + [harmful_change - threshold]
+  }
+  return values
+}
+
+fn __guardrail_bounds(guardrail: ExperimentGuardrail) -> MetricBounds {
+  const width = guardrail.bounds.hi - guardrail.bounds.lo
+  if guardrail.alarm.kind == "absolute" {
+    return {lo: 0.0 - width - guardrail.alarm.threshold, hi: width - guardrail.alarm.threshold}
+  }
+  const max_baseline = max(abs(guardrail.bounds.lo), abs(guardrail.bounds.hi))
+  return {lo: 0.0 - width - max_baseline * guardrail.alarm.threshold / 100.0, hi: width}
+}
+
+fn __guardrail_outcomes(
+  registration: ExperimentRegistration,
+  observations: list<PairedObservation>,
+) -> list<GuardrailOutcome> {
+  const cells = len(registration.candidates)
+    * (1 + len(registration.metrics.guardrails))
+  const cell_delta = registration.decision.delta / to_float(cells)
+  let outcomes: list<GuardrailOutcome> = []
+  for arm in registration.candidates {
+    for guardrail in registration.metrics.guardrails {
+      const values = __guardrail_values(observations, arm.id, guardrail)
+      const bounds = __guardrail_bounds(guardrail)
+      const interval = bounded_cs(values, cell_delta, bounds.lo, bounds.hi)
+      outcomes = outcomes
+        + [
+        {
+          arm_id: arm.id,
+          metric_id: guardrail.id,
+          mean_excess_harm: interval.mean,
+          lo: interval.lo,
+          hi: interval.hi,
+          breached: interval.lo > 0.0,
+          n: interval.n,
+        },
+      ]
+    }
+  }
+  return outcomes
+}
+
+fn __breached_ids(outcomes: list<GuardrailOutcome>) -> list<string> {
+  let ids: list<string> = []
+  for outcome in outcomes {
+    if outcome.breached && !ids.contains(outcome.arm_id) {
+      ids = ids + [outcome.arm_id]
+    }
+  }
+  return ids
+}
+
+fn __breached_metrics(outcomes: list<GuardrailOutcome>, arm_id: string) -> list<string> {
+  let ids: list<string> = []
+  for outcome in outcomes {
+    if outcome.arm_id == arm_id && outcome.breached {
+      ids = ids + [outcome.metric_id]
+    }
+  }
+  return ids
+}
+
+fn __min_depth(registration: ExperimentRegistration, observations: list<PairedObservation>) -> int {
+  let depth = registration.budget.max_trials_per_case
+  for arm in registration.candidates {
+    for case_id in registration.case_set.cases {
+      let count = 0
+      for observation in observations {
+        if observation.arm_id == arm.id && observation.case_id == case_id {
+          count = count + 1
+        }
+      }
+      depth = min(depth, count)
+    }
+  }
+  return depth
+}
+
+fn __assignments(observations: list<PairedObservation>) -> list<RealizedAssignment> {
+  let assignments: list<RealizedAssignment> = []
+  let seen: dict<string, bool> = {}
+  for observation in observations {
+    for assignment in [observation.baseline_assignment, observation.candidate_assignment] {
+      if !(seen[assignment.assignment_id] ?? false) {
+        assignments = assignments + [assignment]
+        seen = seen + {[assignment.assignment_id]: true}
+      }
+    }
+  }
+  return assignments
+}
+
+fn __candidate_outcomes(
+  registration: ExperimentRegistration,
+  intervals: dict<string, ArmInterval>,
+  guardrails: list<GuardrailOutcome>,
+  primary_killed: list<string>,
+  verdict: ExperimentVerdict,
+  winner: string?,
+) -> list<CandidateOutcome> {
+  let outcomes: list<CandidateOutcome> = []
+  for arm in registration.candidates {
+    const breaches = __breached_metrics(guardrails, arm.id)
+    let status: CandidateStatus = "running"
+    if len(breaches) > 0 {
+      status = "regressed_on_guardrail"
+    } else if primary_killed.contains(arm.id) {
+      status = "regressed_on_primary"
+    } else if winner == arm.id && (verdict == "ITERATE_WINNER" || verdict == "PROMOTED") {
+      status = "promoted"
+    } else if verdict == "ITERATE_WINNER" || verdict == "PROMOTED" {
+      status = "not_selected"
+    } else if verdict == "MEASURED_NO_DIFFERENCE" {
+      status = "measured_no_difference"
+    } else if verdict == "UNRESOLVED" || verdict == "GUARDRAIL_VETO" {
+      status = "unresolved"
+    }
+    let outcome: CandidateOutcome = {arm_id: arm.id, status: status, breached_guardrails: breaches}
+    if intervals[arm.id] != nil {
+      outcome = outcome + {primary: intervals[arm.id]}
+    }
+    outcomes = outcomes + [outcome]
+  }
+  return outcomes
+}
+
+fn __all_equivalent(
+  intervals: dict<string, ArmInterval>,
+  arm_ids: list<string>,
+  epsilon: float,
+) -> bool {
+  if len(arm_ids) == 0 {
+    return false
+  }
+  for arm_id in arm_ids {
+    const interval = intervals[arm_id]
+    if interval == nil || !(interval.lo > 0.0 - epsilon && interval.hi < epsilon) {
+      return false
+    }
+  }
+  return true
+}
+
+fn __decision_id(record: dict) -> string {
+  return "expdec-" + to_string(hash_value(record))
+}
+
+/**
+ * Produce one typed anytime-valid decision from append-only paired evidence.
+ *
+ * A tune winner requires explicit promotion before gate data can be consumed.
+ * A proven harmful guardrail breach removes the arm; if it is the primary
+ * leader, the distinct `GUARDRAIL_VETO` verdict prevents promotion.
+ *
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn decide_experiment(
+  registration: ExperimentRegistration,
+  input: ExperimentDecisionInput,
+) -> ExperimentDecision {
+  __validate_observations(registration, input.observations)
+  if input.phase_spend_usd < 0.0 {
+    throw "std/eval/experiment: phase spend cannot be negative"
+  }
+  const phase_spend = input.phase_spend_usd
+  const spend = registration.prior_spend_usd + phase_spend
+  if spend > registration.budget.max_spend_usd {
+    throw "std/eval/experiment: observations exceed the frozen spend ceiling"
+  }
+  const guardrails = __guardrail_outcomes(registration, input.observations)
+  const breached = __breached_ids(guardrails)
+  const all_primary = __primary_arms(registration, input.observations, [])
+  const width = registration.metrics.primary.bounds.hi
+  -registration.metrics.primary.bounds.lo
+  const depth = __min_depth(registration, input.observations)
+  const spent = input.budget_spent
+    || spend >= registration.budget.max_spend_usd
+    || depth >= registration.budget.max_trials_per_case
+  const primary_delta = registration.decision.delta
+    / to_float(
+    1 + len(registration.metrics.guardrails),
+  )
+  const preliminary = arm_decision(
+    all_primary,
+    len(registration.candidates),
+    primary_delta,
+    registration.decision.epsilon,
+    depth,
+    spent,
+    registration.min_trials_per_case,
+    0.0 - width,
+    width,
+  )
+  const leader_breached = preliminary.leader != nil && breached.contains(preliminary.leader)
+  const safe_primary = __primary_arms(registration, input.observations, breached)
+  const safe = arm_decision(
+    safe_primary,
+    len(registration.candidates),
+    primary_delta,
+    registration.decision.epsilon,
+    depth,
+    spent,
+    registration.min_trials_per_case,
+    0.0 - width,
+    width,
+  )
+  let verdict: ExperimentVerdict = "RUNNING"
+  let winner: string? = nil
+  if leader_breached {
+    verdict = "GUARDRAIL_VETO"
+  } else if safe.verdict == "WINNER" {
+    winner = safe.winner
+    verdict = if registration.phase == "iterate" {
+      "ITERATE_WINNER"
+    } else {
+      "PROMOTED"
+    }
+  } else if safe.verdict == "BASELINE" {
+    verdict = "BASELINE"
+  } else if spent && __all_equivalent(safe.intervals, safe.kept, registration.decision.epsilon) {
+    verdict = "MEASURED_NO_DIFFERENCE"
+  } else if spent || safe.verdict == "UNRESOLVED" {
+    verdict = "UNRESOLVED"
+  }
+  const focus = winner ?? safe.leader
+  let primary_effect: ArmInterval? = nil
+  if focus != nil {
+    primary_effect = safe.intervals[focus]
+  }
+  const base = {
+    schema: "harn.experiment.decision.v1",
+    schema_version: 1,
+    registration_id: registration.registration_id,
+    experiment_id: registration.experiment_id,
+    phase: registration.phase,
+    verdict: verdict,
+    winner: winner,
+    leader: safe.leader,
+    primary_metric: registration.metrics.primary.id,
+    primary_effect: primary_effect,
+    primary_intervals: safe.intervals,
+    guardrails: guardrails,
+    trials: len(input.observations),
+    phase_spend_usd: phase_spend,
+    spend_usd: spend,
+    realized_assignments: __assignments(input.observations),
+    promotion_required: verdict == "ITERATE_WINNER",
+    no_decision: verdict == "RUNNING" || verdict == "UNRESOLVED",
+  }
+  const candidates = __candidate_outcomes(
+    registration,
+    safe.intervals,
+    guardrails,
+    safe.killed,
+    verdict,
+    winner,
+  )
+  const schema_id: "harn.experiment.decision.v1" = "harn.experiment.decision.v1"
+  const record: ExperimentDecision = {
+    schema: schema_id,
+    schema_version: 1,
+    decision_id: __decision_id(base),
+    registration_id: registration.registration_id,
+    experiment_id: registration.experiment_id,
+    phase: registration.phase,
+    verdict: verdict,
+    winner: winner,
+    leader: safe.leader,
+    primary_metric: registration.metrics.primary.id,
+    primary_effect: primary_effect,
+    primary_intervals: safe.intervals,
+    guardrails: guardrails,
+    candidates: candidates,
+    trials: len(input.observations),
+    phase_spend_usd: phase_spend,
+    spend_usd: spend,
+    realized_assignments: __assignments(input.observations),
+    promotion_required: verdict == "ITERATE_WINNER",
+    no_decision: verdict == "RUNNING" || verdict == "UNRESOLVED",
+  }
+  return record
+}
+
+/**
+ * Durable typed contract for experiment decisions.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn experiment_decision_contract() -> VersionedContract<ExperimentDecision> {
+  return versioned_contract(
+    "harn.experiment.decision",
+    1,
+    schema_contract(schema_of(ExperimentDecision), []),
+  )
+}
+
+/**
+ * Reusable descriptor for a decision artifact.
+ *
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn experiment_decision_descriptor(
+  name: string = "experiment-decision.json",
+) -> ArtifactDescriptor<ExperimentDecision> {
+  return versioned_descriptor(name, experiment_decision_contract())
+}

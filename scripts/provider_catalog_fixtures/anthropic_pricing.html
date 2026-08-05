@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>Anthropic — Model Pricing (fixture)</title>
+    <meta name="description" content="Pricing fixture for the Harn provider catalog refresh workflow.">
+  </head>
+  <body>
+    <h1>Claude model pricing</h1>
+    <p>
+      This fixture mirrors the shape of <code>https://www.anthropic.com/pricing</code>
+      so the provider catalog refresh workflow has a deterministic source to ingest.
+    </p>
+    <table>
+      <caption>Claude pricing per million tokens</caption>
+      <tr>
+        <th>Model</th>
+        <th>Input ($/MTok)</th>
+        <th>Output ($/MTok)</th>
+        <th>Cache read ($/MTok)</th>
+        <th>Cache write ($/MTok)</th>
+        <th>Context</th>
+      </tr>
+      <tr>
+        <td>claude-haiku-4-5-20251001</td>
+        <td>1.00</td>
+        <td>5.00</td>
+        <td>0.10</td>
+        <td>1.25</td>
+        <td>200000</td>
+      </tr>
+      <tr>
+        <td>claude-opus-4-7-20260301</td>
+        <td>20.00</td>
+        <td>100.00</td>
+        <td>2.00</td>
+        <td>25.00</td>
+        <td>200000</td>
+      </tr>
+      <tr>
+        <td>claude-haiku-5-20260601</td>
+        <td>0.50</td>
+        <td>2.50</td>
+        <td>0.05</td>
+        <td>0.625</td>
+        <td>250000</td>
+      </tr>
+    </table>
+  </body>
+</html>

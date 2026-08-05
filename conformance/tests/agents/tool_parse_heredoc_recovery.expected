@@ -1,0 +1,90 @@
+# missing tag with a structural close recovers
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"package main\n// no closing EOF tag","path":"main.go"}
+  prose=""
+  answer=null
+  done=null
+# truncated mid body errors
+  calls=0 errors=1 violations=0 stray=0
+  err "TOOL CALL PARSE ERROR: `edit(...)` — unexpected end of input. Tool arguments must be a TypeScript object literal: `{ key: value, key: value }`. Raw: {\n    action: \"create\",\n    path: \"main.go\",\n    content:"
+  prose="<<EOF\n\npackage main\n\nfunc main() {\n    fmt.Println(\"hello"
+  answer=null
+  done=null
+# bare brace close stays ambiguous
+  calls=0 errors=1 violations=0 stray=0
+  err "TOOL CALL PARSE ERROR: `edit(...)` — unexpected end of input. Tool arguments must be a TypeScript object literal: `{ key: value, key: value }`. Raw: {\n    action: \"create\",\n    path: \"main.go\",\n    content:"
+  prose="<<EOF\n\nfunc main() {\n    return\n}"
+  answer=null
+  done=null
+# missing heredoc tag
+  calls=0 errors=1 violations=0 stray=0
+  err "TOOL CALL PARSE ERROR: `edit(...)` — unexpected end of input. Tool arguments must be a TypeScript object literal: `{ key: value, key: value }`. Raw: {\n    action: \"create\",\n    path: \"main.go\",\n    content:"
+  prose="<<\n\npackage main\nEOF\n})"
+  answer=null
+  done=null
+# heredoc opener at end of input
+  calls=0 errors=1 violations=0 stray=0
+  err "TOOL CALL PARSE ERROR: `edit(...)` — unexpected end of input. Tool arguments must be a TypeScript object literal: `{ key: value, key: value }`. Raw: { path: \"x.go\", content:"
+  prose="<<EOF"
+  answer=null
+  done=null
+# quoted heredoc value without a closing quote
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"replace_range","content":"import pytest\n\ndef test_create_experiment():\n    assert \"ok\" == \"ok\"","path":"tests/unit/test_experiment_service.py","range_end":4,"range_start":1}
+  prose=""
+  answer=null
+  done=null
+# json escaped literal newline body
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"content":"package manifest\n\nimport (\n\t\"strings\"\n\t\"testing\"\n)\n\nfunc TestX(t *testing.T) {\n\tif 1 != 1 {\n\t\tt.Fatal(\"bad\")\n\t}\n}","path":"parser_test.go"}
+  prose=""
+  answer=null
+  done=null
+# real newline body is not unescaped
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"content":"package main\nimport \"fmt\"\nfunc main() { fmt.Printf(\"%d\\n\", 1) }","path":"main.go"}
+  prose=""
+  answer=null
+  done=null
+# escaped backslash n is not a line break
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"content":"package main\nvar s = \"x\\n\"","path":"m.go"}
+  prose=""
+  answer=null
+  done=null
+# unterminated escaped heredoc
+  calls=0 errors=1 violations=0 stray=0
+  err "TOOL CALL PARSE ERROR: `edit(...)` — unexpected end of input. Tool arguments must be a TypeScript object literal: `{ key: value, key: value }`. Raw: { path: \"x.go\", content:"
+  prose="<<EOF\\npackage main\\nfunc main() {}"
+  answer=null
+  done=null
+# thinking tags inside arguments, wrapped
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"create","content":"Models emit <think>reasoning</think> on the thinking channel.\nKeep the </think> close tag intact in docs.","path":"doc.md","title":"use <think> and </think> markers"}
+  prose=""
+  answer=null
+  done=null
+# thinking tags inside arguments, bare
+  calls=0 errors=1 violations=0 stray=0
+  err "TOOL CALL PARSE ERROR: `edit(...)` — unterminated string literal. Tool arguments must be a TypeScript object literal: `{ key: value, key: value }`. Raw: {\n    action: \"create\",\n    path: \"doc.md\",\n    title: \"use"
+  prose="<think> and </think> markers\",\n\ncontent: <<EOF\nModels emit <think>reasoning</think> on the thinking channel.\nKeep the </think> close tag intact in docs.\nEOF\n})"
+  answer=null
+  done=null
+# over-closed object string recovers an embedded raw string
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"create","content":"let q = parse_query(r#\"sel\"#);","path":"t.rs"}
+  prose=""
+  answer=null
+  done=null
+# over-closed recovery stops at the true boundary
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"create","content":"x=r#\"a\"#y","path":"t.rs"}
+  prose=""
+  answer=null
+  done=null
+# well formed escaped string untouched by recovery
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"create","content":"line1\nline2","path":"t.rs"}
+  prose=""
+  answer=null
+  done=null

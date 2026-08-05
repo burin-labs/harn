@@ -1,0 +1,9 @@
+# ---------- Mock --------------------------------------------------------------
+#
+# Mock spoofs either Anthropic or OpenAI shape depending on the model ID.
+# Handled specially in the loader (see `capabilities::lookup`): Claude-
+# shape model strings route to the `anthropic` rule list first, otherwise
+# fall through to the `openai` rule list.
+
+# ---------- provider_family aliases ------------------------------------------
+

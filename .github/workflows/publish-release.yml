@@ -1,0 +1,466 @@
+name: Publish release
+
+# Fires on three triggers:
+#
+#   1. push to a `vX.Y.Z` tag — the canonical "tag is truth" path. The
+#      bump-fleet `release_harn.harn` harness pushes the tag at the
+#      pinned release commit BEFORE the Release PR merges; this trigger
+#      ships crates.io from that exact commit while the binary workflow
+#      creates the GitHub release with artifacts from the same tag,
+#      independent of whatever lands on main between PR-open and merge.
+#      The tag push (under the harn-release-bot App identity) also
+#      cascades to build-release-binaries.yml for tarballs + container.
+#
+#   2. push to main — no-op/self-heal only. A release whose Cargo.toml
+#      version is ahead of the latest `vX.Y.Z` tag must already have a
+#      matching `vX.Y.Z` tag at the bumping commit. The one EXPECTED
+#      exception is the release-commit transient: the `Release vX.Y.Z`
+#      commit lands on main a few seconds before the signed `vX.Y.Z` tag
+#      is pushed at that same commit, so for that brief window the version
+#      is ahead with no matching tag yet. When HEAD is the genuine
+#      `Release vX.Y.Z` commit for the current version, this run is a
+#      clean no-op (drift=false, exit 0) and waits for the tag push to
+#      publish — it does NOT turn main red. If the version is ahead with
+#      no matching tag and HEAD is NOT that release commit, the workflow
+#      still fails loudly instead of tagging main HEAD. That keeps
+#      tag-first publishing mandatory: concurrent merge-queue entries
+#      cannot leak into the published artifact, and a stray version bump
+#      without a tag is still caught.
+#
+#   3. workflow_dispatch — manual recovery for the partial-failure case
+#      (tag pushed but crates.io publish was incomplete). With no
+#      drift, dispatch checks out the existing release tag so crates.io,
+#      release notes, and the git tag stay tied to the same commit.
+#      release_ship.sh's per-crate publish skips already-published
+#      crates so manual re-fire is idempotent.
+#
+# Runs ./scripts/release_ship.sh --finalize, which dry-run publishes,
+# tags (no-op if already at HEAD), and publishes to crates.io. The
+# build-release-binaries.yml cascade creates/updates the GitHub release
+# only after the binary assets are ready, so a failed binary build cannot
+# leave a visible release page with zero artifacts.
+#
+# Audit is skipped by default (RELEASE_FINALIZE_REAUDIT=0): the
+# merge-queue CI of the just-landed Release PR ran the same gates a
+# few minutes ago. Set the env var or pass `--reaudit` (workflow input
+# `reaudit: true`) to opt back in for paranoid local runs.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      bootstrap_new_crates:
+        description: >-
+          First-release bootstrap for a new workspace crate that an
+          already-published crate now depends on. Sets
+          HARN_BOOTSTRAP_NEW_CRATES=1, which skips the publish dry-run
+          and audit package checks for downstream crates that need it
+          on crates.io. The real publish resumes the remaining
+          dependency DAG and waits for newly uploaded dependencies to
+          become selectable. See harn#609.
+        type: boolean
+        default: false
+      skip_dry_run:
+        description: >-
+          Skip only the publish dry-run gate. Useful if the dry-run is
+          flaky for an unrelated reason and you've already validated
+          the release content elsewhere.
+        type: boolean
+        default: false
+      reaudit:
+        description: >-
+          Re-run the full release-gate audit before finalizing. Defaults
+          off — merge-queue CI of the just-landed Release PR already
+          ran the same gates a few minutes ago.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  # Scope by ref so a tag-push run does not contend with concurrent
+  # main-push runs from the same release commit (or vice versa). Without
+  # the ref scope a queued tag-push run could sit behind a long main-push
+  # detect-drift and be silently skipped if the GHA queue policy decides
+  # the queued run is stale — see harn#2547 for the v0.8.47 incident
+  # where the tag-push run was cancelled before reaching the publish
+  # step. Different `group` values run concurrently; crates.io
+  # publication is already idempotent (release_ship.sh skips
+  # already-published crates), and the tag-push and main-push paths can
+  # only ever publish the same version once anyway (the tag-push branch
+  # publishes from the pinned tag commit; the main-push branch only
+  # publishes when Cargo.toml is *ahead* of the latest tag, which by
+  # definition is a different version).
+  group: publish-release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  detect-drift:
+    name: Detect tag drift
+    runs-on: ubuntu-latest
+    outputs:
+      drift: ${{ steps.check.outputs.drift }}
+      cargo_version: ${{ steps.check.outputs.cargo_version }}
+      latest_tag: ${{ steps.check.outputs.latest_tag }}
+      publish_ref: ${{ steps.check.outputs.publish_ref }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Need full history so all `vX.Y.Z` tags are present locally;
+          # the default shallow clone omits tags.
+          fetch-depth: 0
+          ref: main
+
+      - name: Compare Cargo.toml workspace version to latest vX.Y.Z tag
+        id: check
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          # Used by `gh release view` in the no-drift branch below to
+          # confirm the existing release artifact actually shipped.
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          CARGO_VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
+          LATEST_TAG="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)"
+          LATEST_VERSION="${LATEST_TAG#v}"
+          HEAD_SHA="$(git rev-parse HEAD)"
+          MATCHING_TAG="v$CARGO_VERSION"
+          MAIN_DRIFT_PUBLISH_REF=""
+          version_gt() {
+            local left="$1"
+            local right="$2"
+            [[ "$left" != "$right" ]] && [[ "$(printf '%s\n%s\n' "$right" "$left" | sort -V | tail -n 1)" == "$left" ]]
+          }
+          resolve_tag_commit() {
+            git rev-list -n 1 "$1" 2>/dev/null || true
+          }
+          # True when HEAD is the legitimate "Release vX.Y.Z" commit for the
+          # current Cargo.toml version, i.e. the merge-queue squash commit
+          # whose subject is `Release v$CARGO_VERSION` (with optional
+          # ` (#N)` squash suffix) AND which is the commit that actually
+          # bumped the workspace version to $CARGO_VERSION. The version-bump
+          # confirmation is what keeps this from rubber-stamping any commit
+          # someone titles "Release …": a forged subject that did not touch
+          # the `version =` line still fails the strict guard below.
+          head_is_release_commit_for_cargo_version() {
+            local subject
+            subject="$(git log -1 --format='%s' HEAD)"
+            if [[ ! "$subject" =~ ^Release\ v"$CARGO_VERSION"([[:space:]].*)?$ ]]; then
+              return 1
+            fi
+            # Confirm this very commit introduced the current version. The
+            # release commit is the one that changes the workspace
+            # `version = "X.Y.Z"` line in the root Cargo.toml.
+            git show HEAD -- Cargo.toml \
+              | grep -Eq "^\+version = \"$CARGO_VERSION\"" || return 1
+            return 0
+          }
+          # Return codes:
+          #   0  -> proceed (tag already at HEAD; recovery can use the tag)
+          #  10  -> expected transient (release commit landed, tag imminent):
+          #         caller should treat as no-op and exit 0
+          #  exit 1 -> genuine drift: hard-fail (preserved protection)
+          require_tag_first_main_publish() {
+            if [[ "$EVENT_NAME" != "push" || "$REF_TYPE" != "branch" || "$REF_NAME" != "main" ]]; then
+              return 0
+            fi
+            local matching_tag_commit
+            matching_tag_commit="$(resolve_tag_commit "$MATCHING_TAG")"
+            if [[ -z "$matching_tag_commit" ]]; then
+              # Tag-first publishing is deliberately racy on the main-push
+              # side: the `Release vX.Y.Z` commit lands on main a few seconds
+              # before the signed `vX.Y.Z` tag is pushed at that same commit.
+              # During that window Cargo.toml is ahead of the latest tag with
+              # no matching tag yet. That transient is EXPECTED and must not
+              # turn main red — the tag push is the real publish trigger.
+              # Only tolerate it when HEAD is the genuine release commit for
+              # this exact version; otherwise a non-release commit bumped the
+              # version without a tag and we still fail loudly.
+              if head_is_release_commit_for_cargo_version; then
+                echo "::notice::Release commit for $CARGO_VERSION detected on main; $MATCHING_TAG not pushed yet. Waiting for the tag push to publish — this main-push run is a no-op, not a failure."
+                return 10
+              fi
+              echo "::error::Cargo.toml=$CARGO_VERSION is ahead of latest tag ${LATEST_TAG:-<none>}, but $MATCHING_TAG does not exist and HEAD is not a 'Release v$CARGO_VERSION' commit. Push $MATCHING_TAG at the release commit before merging; publish-release.yml will not tag main HEAD."
+              exit 1
+            fi
+            if [[ "$matching_tag_commit" != "$HEAD_SHA" ]]; then
+              echo "::error::$MATCHING_TAG points at $matching_tag_commit, but main push is $HEAD_SHA. Refusing to publish from main HEAD; re-run the tag-first release flow from the intended commit."
+              exit 1
+            fi
+            MAIN_DRIFT_PUBLISH_REF="$MATCHING_TAG"
+            echo "::notice::$MATCHING_TAG already points at this main commit; any publish recovery will use the tag, not main HEAD."
+          }
+          # Wrapper that converts the "expected transient" return code (10)
+          # into a clean no-op: emit drift=false outputs and exit 0 so the
+          # publish job skips and main CI stays green until the tag push
+          # fires the real publish run.
+          guard_tag_first_or_skip() {
+            local rc=0
+            require_tag_first_main_publish || rc=$?
+            if [[ "$rc" -eq 10 ]]; then
+              {
+                echo "drift=false"
+                echo "cargo_version=$CARGO_VERSION"
+                echo "latest_tag=$LATEST_TAG"
+                echo "publish_ref=main"
+              } >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            return "$rc"
+          }
+
+          # Tag-push trigger ("tag is truth"). The release harness pushed
+          # vX.Y.Z at the pinned commit before the Release PR merged.
+          # Skip drift detection — we know what we're publishing — and
+          # check out the tag in the publish job.
+          if [[ "$EVENT_NAME" == "push" && "$REF_TYPE" == "tag" ]]; then
+            if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Tag push for non-vX.Y.Z tag: $REF_NAME"
+              exit 1
+            fi
+            PUBLISH_REF="$REF_NAME"
+            DRIFT=true
+            echo "::notice::Tag push: publishing from $PUBLISH_REF (skipping drift detection)."
+            {
+              echo "drift=$DRIFT"
+              echo "cargo_version=${REF_NAME#v}"
+              echo "latest_tag=$REF_NAME"
+              echo "publish_ref=$PUBLISH_REF"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ -z "$LATEST_TAG" ]]; then
+            guard_tag_first_or_skip
+            DRIFT=true
+            echo "::notice::No vX.Y.Z tags exist yet; treating Cargo.toml=$CARGO_VERSION as drift (first release)."
+          elif version_gt "$CARGO_VERSION" "$LATEST_VERSION"; then
+            guard_tag_first_or_skip
+            DRIFT=true
+            echo "::notice::Cargo.toml=$CARGO_VERSION ahead of latest tag $LATEST_TAG → finalize needed."
+          elif [[ "$CARGO_VERSION" != "$LATEST_VERSION" ]]; then
+            DRIFT=false
+            echo "::notice::Cargo.toml=$CARGO_VERSION is behind latest tag $LATEST_TAG → publish job will skip."
+          else
+            DRIFT=false
+            # No version drift on push-to-main: tag was already published
+            # by the tag-push trigger of this workflow (or by the
+            # build-release-binaries.yml tag trigger for the binaries).
+            # Observe release assets for operator diagnostics, but do
+            # not treat missing binary assets as Cargo publish drift.
+            # The tag-triggered build-release-binaries workflow owns
+            # archives, checksum sidecars, GitHub release finalization,
+            # and container publication. During a healthy tag-first
+            # release, main can advance while that binary workflow is
+            # still uploading assets; re-running release_ship.sh from a
+            # main-push publish-release job cannot build those assets and
+            # only creates redundant release retries.
+            if [[ "$EVENT_NAME" == "push" ]]; then
+              # Distinguish a genuine incomplete asset set (warn) from a
+              # transient or eventually-consistent query failure. The old
+              # `|| echo 0` collapsed "gh could not answer" into "0 assets", forcing
+              # DRIFT=true → a doomed `release_ship.sh --finalize` from main HEAD
+              # when the tag is an older (squash-orphaned) commit. That produced
+              # a spurious red X on a routine main push right after the tag-first
+              # publish (harn#2964: a `gh release view` raced the release becoming
+              # visible). Retry briefly; if assets are still missing, leave DRIFT
+              # false and let build-release-binaries or the release harness recover.
+              RELEASE_ASSETS="__query_failed__"
+              for _ in 1 2 3; do
+                if RELEASE_ASSETS="$(gh release view "$LATEST_TAG" --json assets --jq '.assets[].name' 2>/dev/null)"; then
+                  break
+                fi
+                RELEASE_ASSETS="__query_failed__"
+                sleep 5
+              done
+              if [[ "$RELEASE_ASSETS" == "__query_failed__" ]]; then
+                echo "::notice::Could not read $LATEST_TAG release assets after retries; assuming the tag-first publish already shipped and skipping (avoids a spurious finalize from main HEAD)."
+              else
+                EXPECTED_ASSETS=(
+                  "harn-aarch64-apple-darwin.tar.gz"
+                  "harn-aarch64-unknown-linux-gnu.tar.gz"
+                  "harn-x86_64-apple-darwin.tar.gz"
+                  "harn-x86_64-pc-windows-msvc.zip"
+                  "harn-x86_64-unknown-linux-gnu.tar.gz"
+                  "SHA256SUMS"
+                  "release-assets.json"
+                )
+                MISSING_ASSETS=()
+                for ASSET in "${EXPECTED_ASSETS[@]}"; do
+                  if ! grep -Fxq "$ASSET" <<<"$RELEASE_ASSETS"; then
+                    MISSING_ASSETS+=("$ASSET")
+                  fi
+                done
+
+                if (( ${#MISSING_ASSETS[@]} == 0 )); then
+                  echo "::notice::$LATEST_TAG already published with all expected assets on https://github.com/$GITHUB_REPOSITORY/releases/tag/$LATEST_TAG. Publish job will skip; this is the intended behavior under tag-first publishing."
+                else
+                  printf '::warning::%s is missing release assets: %s. Publish job will skip because build-release-binaries owns binary asset recovery; if this is not an active tag build, dispatch build-release-binaries.yml for %s.\n' "$LATEST_TAG" "${MISSING_ASSETS[*]}" "$LATEST_TAG"
+                fi
+              fi
+            else
+              echo "::notice::Cargo.toml=$CARGO_VERSION matches latest tag $LATEST_TAG → no-op."
+            fi
+          fi
+          PUBLISH_REF=main
+          if [[ -n "$MAIN_DRIFT_PUBLISH_REF" ]]; then
+            PUBLISH_REF="$MAIN_DRIFT_PUBLISH_REF"
+            echo "::notice::Tag-first main-push recovery: publishing from $PUBLISH_REF instead of main."
+          fi
+          if [[ "$EVENT_NAME" == "workflow_dispatch" && "$DRIFT" == "false" && -n "$LATEST_TAG" ]]; then
+            PUBLISH_REF="$LATEST_TAG"
+            echo "::notice::Manual recovery has no tag drift; publishing from existing tag $LATEST_TAG instead of current main."
+          fi
+          # Self-heal recovery on push-to-main: when DRIFT was forced
+          # true above because the tag exists but the release is
+          # missing assets, the workspace at main may have advanced
+          # past the release commit. Pin the publish to the tag so
+          # crates.io content stays tied to the tagged commit, even if
+          # main moved.
+          if [[ "$EVENT_NAME" == "push" && "$REF_TYPE" == "branch" && "$DRIFT" == "true" && "$CARGO_VERSION" == "$LATEST_VERSION" && -n "$LATEST_TAG" ]]; then
+            PUBLISH_REF="$LATEST_TAG"
+            echo "::notice::Self-heal recovery: publishing from existing tag $LATEST_TAG instead of current main so the release content stays tied to the tagged commit."
+          fi
+          {
+            echo "drift=$DRIFT"
+            echo "cargo_version=$CARGO_VERSION"
+            echo "latest_tag=$LATEST_TAG"
+            echo "publish_ref=$PUBLISH_REF"
+          } >> "$GITHUB_OUTPUT"
+
+  publish:
+    name: Publish release
+    needs: detect-drift
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || needs.detect-drift.outputs.drift == 'true'
+    steps:
+      # Mint a short-lived GitHub App installation token so the tag push
+      # below comes from the harn-release-bot identity instead of
+      # GITHUB_TOKEN. GHA suppresses workflow chains triggered by
+      # GITHUB_TOKEN-authenticated pushes, so a tag pushed under the
+      # default token would NOT fire build-release-binaries.yml — and
+      # we'd ship to crates.io without binaries or a container image.
+      # An App token bypasses that suppression cleanly.
+      - name: Mint GitHub App installation token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: main
+          # Persist the App token in .git/config so the later `git push`
+          # in release_ship.sh --finalize uses it for the tag push.
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Select publish ref
+        run: |
+          set -euo pipefail
+          scripts/stage_release_tools.sh "$RUNNER_TEMP/release-tools"
+          publish_ref="${{ needs.detect-drift.outputs.publish_ref }}"
+          if [[ "$publish_ref" != "main" ]]; then
+            git fetch --force --tags origin
+            git switch --detach "$publish_ref"
+          fi
+          echo "Publishing from $(git rev-parse --short HEAD) ($publish_ref)"
+
+      - uses: ./.github/actions/rust-toolchain
+        with:
+          components: clippy, rustfmt
+
+      - uses: ./.github/actions/sccache-install
+        # sccache is a build-cache optimization, not a build requirement. The
+        # upstream action sometimes fails on merge_group / restricted-token
+        # events with "Bad credentials" when api.github.com gates the release
+        # lookup; a cold build is a fine fallback, but the job shouldn't fail.
+        continue-on-error: true
+
+      - name: Configure Cargo to use sccache
+        if: env.SCCACHE_PATH != ''
+        run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
+
+      - uses: ./.github/actions/rust-cache
+        with:
+          shared-key: workspace
+          cache-bin: false
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@065d6a08a14e61e89fb0a4c10eecdbdef39c7d8e # v2.85.4
+        continue-on-error: true
+        with:
+          tool: nextest@0.9.132
+
+      - uses: ./.github/actions/node-cache
+        with:
+          node-version: "22"
+          cache-dependency-path: crates/harn-cli/portal/package-lock.json
+
+      - name: Install portal dependencies
+        working-directory: crates/harn-cli/portal
+        run: npm ci
+
+      - name: Install ripgrep
+        # security-audit lane (only runs under --reaudit) greps the
+        # repo via `rg` — install it explicitly so the runner matches
+        # the local dev expectation when reaudit is on.
+        if: inputs.reaudit
+        uses: ./.github/actions/apt-install
+        with:
+          packages: ripgrep
+          check-command: rg
+
+      - name: Build tree-sitter grammar
+        # Only needed when --reaudit re-runs the grammar-audit lane
+        # (which loads tree-sitter-harn/harn.{so,dylib} via
+        # verify_tree_sitter_parse.harn). The default no-audit finalize
+        # doesn't touch tree-sitter.
+        if: inputs.reaudit
+        working-directory: tree-sitter-harn
+        run: |
+          npm ci
+          npm run build
+
+      - name: Configure git identity
+        run: |
+          git config --global user.name "harn-release-bot[bot]"
+          git config --global user.email "harn-release-bot[bot]@users.noreply.github.com"
+
+      - name: Publish release
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          # gh CLI inside release_ship.sh uses GH_TOKEN for `gh release`.
+          # Use the App token so the GitHub release author is the bot,
+          # consistent with the tag pusher.
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          # First-release bootstrap recovery path. See harn#609.
+          # release_ship.sh + verify_crate_packages.sh both honor the
+          # env var: skip the publish dry-run and downstream package
+          # checks that fail when a path-dep crate isn't on crates.io yet.
+          # Defaults to "0" on push events.
+          HARN_BOOTSTRAP_NEW_CRATES: ${{ inputs.bootstrap_new_crates && '1' || '0' }}
+          # Default off — merge-queue CI of the just-landed Release PR
+          # already proved the same gates a few minutes ago. The
+          # `reaudit: true` workflow input opts back in for paranoid
+          # local recovery runs.
+          RELEASE_FINALIZE_REAUDIT: ${{ inputs.reaudit && '1' || '0' }}
+        run: |
+          args=(--finalize --skip-github-release)
+          if [[ "${{ inputs.skip_dry_run }}" == "true" ]]; then
+            args+=(--skip-dry-run)
+          fi
+          HARN_RELEASE_ROOT="$PWD" \
+            HARN_RELEASE_GATE_SCRIPT="$RUNNER_TEMP/release-tools/release_gate.sh" \
+            HARN_PUBLISH_SCRIPT="$RUNNER_TEMP/release-tools/publish.sh" \
+            bash "$RUNNER_TEMP/release-tools/release_ship.sh" "${args[@]}"

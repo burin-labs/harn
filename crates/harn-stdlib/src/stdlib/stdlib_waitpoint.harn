@@ -1,0 +1,118 @@
+/**
+ * std/waitpoint — durable waitpoints for fan-in, fan-out, and long waits.
+ *
+ * Import with: `import "std/waitpoint"`.
+ */
+type WaitpointId = string
+
+type WaitpointStatus = "open" | "completed" | "cancelled"
+
+type Waitpoint = {
+  id: WaitpointId,
+  status: WaitpointStatus,
+  created_at: string,
+  completed_at: string?,
+  cancelled_at: string?,
+  completed_by: string?,
+  cancelled_by: string?,
+  value: any?,
+  reason: string?,
+  metadata: dict?,
+}
+
+type WaitpointCreateOptions = {id?: WaitpointId, metadata?: dict}
+
+type WaitpointCreateInput = WaitpointId | WaitpointCreateOptions | nil
+
+type WaitpointHandle = WaitpointId | dict
+
+type WaitpointWaitOptions = {timeout?: duration}?
+
+type WaitpointTerminalOptions = {by?: string, reason?: string, metadata?: dict}?
+
+type WaitpointTimeoutError = {
+  name: "WaitpointTimeoutError",
+  category: "timeout",
+  message: string,
+  wait_id: string,
+}
+
+type WaitpointCancelledError = {
+  name: "WaitpointCancelledError",
+  category: "cancelled",
+  message: string,
+  wait_id: string,
+  waitpoint_ids: list<WaitpointId>,
+  reason: string?,
+}
+
+/**
+ * create.
+ *
+ * @effects: [state.mutate]
+ * @errors: []
+ */
+pub fn create(runtime: HarnessRuntime, id_or_options: WaitpointCreateInput = nil) -> Waitpoint {
+  if id_or_options == nil {
+    return runtime.waitpoint_create()
+  }
+  return runtime.waitpoint_create(id_or_options)
+}
+
+/**
+ * wait.
+ *
+ * @effects: [state.observe]
+ * @errors: []
+ */
+pub fn wait(
+  runtime: HarnessRuntime,
+  waitpoints: string | dict | list,
+  options: WaitpointWaitOptions = nil,
+) -> Waitpoint | list<Waitpoint> {
+  if type_of(waitpoints) == "list" {
+    if options == nil {
+      return runtime.waitpoint_wait(waitpoints)
+    }
+    return runtime.waitpoint_wait(waitpoints, options ?? {})
+  }
+  if options == nil {
+    return runtime.waitpoint_wait(waitpoints)
+  }
+  return runtime.waitpoint_wait(waitpoints, options ?? {})
+}
+
+/**
+ * complete.
+ *
+ * @effects: [state.mutate]
+ * @errors: []
+ */
+pub fn complete(
+  runtime: HarnessRuntime,
+  waitpoint: WaitpointHandle,
+  value,
+  options: WaitpointTerminalOptions = nil,
+) -> Waitpoint {
+  if options == nil {
+    return runtime.waitpoint_complete(waitpoint, value)
+  }
+  return runtime.waitpoint_complete(waitpoint, value, options ?? {})
+}
+
+/**
+ * cancel.
+ *
+ * @effects: [state.mutate]
+ * @errors: []
+ */
+pub fn cancel(
+  runtime: HarnessRuntime,
+  waitpoint: WaitpointHandle,
+  options: WaitpointTerminalOptions = nil,
+) -> Waitpoint {
+  if options == nil {
+    return runtime.waitpoint_cancel(waitpoint)
+  }
+  return runtime.waitpoint_cancel(waitpoint, options ?? {})
+}

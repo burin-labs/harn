@@ -1,0 +1,21 @@
+import { timed } from "std/timing"
+
+pipeline default(harness: Harness) {
+  // Pin the wall clock so wall-start aligns with our fixture.
+  harness.testing.clock_set(1700000000000)
+  const outcome = timed(
+    harness.clock,
+    "clocked",
+    {tier: "test"},
+    { ->
+      harness.testing.clock_advance(250)
+      return "ok"
+    },
+  )
+  harness.stdio.println(outcome.result)
+  harness.stdio.println(outcome.timing.started_at_ms)
+  harness.stdio.println(outcome.timing.attributes.tier)
+  // Duration is monotonic-derived; advance_time also advances monotonic.
+  harness.stdio.println(outcome.timing.duration_ms >= 250)
+  harness.testing.clock_reset()
+}

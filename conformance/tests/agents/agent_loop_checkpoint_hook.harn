@@ -1,0 +1,43 @@
+import { agent_loop } from "std/agent/loop"
+
+/**
+ * Verifies `harness.agent.register_checkpoint_hook(kinds, handler)` fires for every
+ * agent-loop seam declared in the kinds list and ignores seams outside
+ * the list (#2211). Uses an llm_caller stub so the run is deterministic
+ * and offline.
+ */
+pipeline main(harness: Harness) {
+  harness.agent.clear_session_hooks()
+  const observed = harness.runtime.shared_cell(
+    {scope: "task_group", key: "checkpoint-kinds", initial: ""},
+  )
+  harness.agent.register_checkpoint_hook(
+    ["iteration_start", "pre_tool_dispatch", "loop_exit"],
+    { _hook_harness, event ->
+      const snap = harness.runtime.shared_snapshot(observed)
+      harness.runtime.shared_set(observed, snap.value + event.kind + ",")
+      return nil
+    },
+  )
+  const one_shot_caller = { _call ->
+    return {
+      ok: true,
+      value: {text: "ack ##DONE##", tool_calls: [], provider: "mock", model: "mock"},
+    }
+  }
+  const result = agent_loop(
+    harness,
+    "hi",
+    nil,
+    {
+      provider: "mock",
+      max_iterations: 2,
+      loop_until_done: true,
+      session_id: "checkpoint-hook-conformance",
+      llm_caller: one_shot_caller,
+    },
+  )
+  harness.stdio.println(result.status)
+  harness.stdio.println(harness.runtime.shared_get(observed))
+  harness.agent.clear_session_hooks()
+}

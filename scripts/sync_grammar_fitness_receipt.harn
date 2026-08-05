@@ -1,0 +1,301 @@
+// Generate the build-stable grammar provenance and fitness receipt consumed by
+// harn-hostlib. The receipt keys fitness to resolved package artifacts and the
+// exact corpus bytes; semantic fitness is enforced by the Rust corpus test.
+import { unified_diff } from "std/diff"
+import "std/schema"
+
+/**
+ * The corpus fields this script reads.
+ *
+ * The receipt it generates is consumed by ParserHealth, so a row missing
+ * `operations` or `authority` would otherwise be written into a committed
+ * artifact as `nil` and only surface wherever that artifact is trusted.
+ */
+fn corpus_schema() {
+  return schema_object(
+    {
+      schema_version: schema_field(schema_int()),
+      rows: schema_field(
+        schema_list(
+          schema_object(
+            {
+              language: schema_field(schema_string()),
+              fixture: schema_field(schema_string()),
+              operations: schema_field(schema_any()),
+              authority: schema_field(schema_any()),
+            },
+            {additional_properties: true},
+          ),
+        ),
+      ),
+    },
+    {additional_properties: true},
+  )
+}
+
+/** The `Cargo.lock` fields the package lookups need. */
+fn lock_schema() {
+  return schema_object(
+    {
+      package: schema_field(
+        schema_list(
+          schema_object(
+            {
+              name: schema_field(schema_string()),
+              version: schema_field(schema_string()),
+              source: schema_field(schema_string(), false),
+              checksum: schema_field(schema_string(), false),
+            },
+            {additional_properties: true},
+          ),
+        ),
+        false,
+      ),
+    },
+    {additional_properties: true},
+  )
+}
+
+const CORPUS = "crates/harn-hostlib/data/grammar-fitness/corpus.v1.json"
+
+const CORPUS_SCHEMA = "crates/harn-hostlib/data/grammar-fitness/corpus.schema.json"
+
+const CORPUS_DIR = "crates/harn-hostlib/data/grammar-fitness"
+
+const LOCKFILE = "Cargo.lock"
+
+const OUTPUT = "crates/harn-hostlib/data/grammar-fitness/receipt.v1.json"
+
+const LANGUAGE_PACKAGES = [
+  {language: "harn", package: "tree-sitter-harn"},
+  {language: "typescript", package: "tree-sitter-typescript"},
+  {language: "tsx", package: "tree-sitter-typescript"},
+  {language: "javascript", package: "tree-sitter-javascript"},
+  {language: "jsx", package: "tree-sitter-javascript"},
+  {language: "python", package: "tree-sitter-python"},
+  {language: "go", package: "tree-sitter-go"},
+  {language: "rust", package: "tree-sitter-rust"},
+  {language: "java", package: "tree-sitter-java"},
+  {language: "c", package: "tree-sitter-c"},
+  {language: "cpp", package: "tree-sitter-cpp"},
+  {language: "csharp", package: "tree-sitter-c-sharp"},
+  {language: "ruby", package: "tree-sitter-ruby"},
+  {language: "kotlin", package: "tree-sitter-kotlin-ng"},
+  {language: "php", package: "tree-sitter-php"},
+  {language: "scala", package: "tree-sitter-scala"},
+  {language: "bash", package: "tree-sitter-bash"},
+  {language: "swift", package: "tree-sitter-swift"},
+  {language: "zig", package: "tree-sitter-zig"},
+  {language: "elixir", package: "tree-sitter-elixir"},
+  {language: "lua", package: "tree-sitter-lua"},
+  {language: "haskell", package: "tree-sitter-haskell"},
+  {language: "r", package: "tree-sitter-r"},
+  {language: "json", package: "tree-sitter-json"},
+  {language: "yaml", package: "tree-sitter-yaml"},
+  {language: "toml", package: "tree-sitter-toml-ng"},
+  {language: "css", package: "tree-sitter-css"},
+  {language: "html", package: "tree-sitter-html"},
+  {language: "sql", package: "tree-sitter-sequel"},
+  {language: "markdown", package: "tree-sitter-md"},
+]
+
+fn package_by_name(packages: list, name: string) {
+  const matches = packages.filter({ pkg -> pkg?.name == name })
+  if matches.count != 1 {
+    throw "expected one resolved Cargo package named `${name}`, found ${matches.count}"
+  }
+  return matches[0]
+}
+
+fn corpus_row_by_language(rows: list, language: string) {
+  const matches = rows.filter({ row -> row?.language == language })
+  if matches.count != 1 {
+    throw "expected one fitness row for `${language}`, found ${matches.count}"
+  }
+  return matches[0]
+}
+
+fn path_artifact_digest(fs: HarnessFs, package_name: string) -> string {
+  if package_name != "tree-sitter-harn" {
+    throw "path dependency `${package_name}` needs an explicit artifact digest rule"
+  }
+  const inputs = [
+    "tree-sitter-harn/src/parser.c",
+    "tree-sitter-harn/src/scanner.c",
+    "tree-sitter-harn/src/grammar.json",
+  ]
+  let joined = ""
+  for path in inputs {
+    joined = joined + path + "\n" + sha256(fs.read_bytes(path)) + "\n"
+  }
+  return "sha256:" + sha256(joined)
+}
+
+fn artifact_digest(fs: HarnessFs, package) -> string {
+  const checksum = package?.checksum ?? ""
+  if checksum != "" {
+    return "sha256:" + checksum
+  }
+  return path_artifact_digest(fs, package.name)
+}
+
+fn corpus_digest(fs: HarnessFs, corpus_text: string, rows: list) -> string {
+  let material = CORPUS_SCHEMA + "\n"
+    + sha256(fs.read_bytes(CORPUS_SCHEMA))
+    + "\n"
+    + CORPUS
+    + "\n"
+    + sha256(corpus_text)
+    + "\n"
+  for row in rows {
+    const fixture = CORPUS_DIR + "/" + row.fixture
+    const fixture_digest = sha256(fs.read_bytes(fixture))
+    material = material + row.language + "\n" + row.fixture + "\n" + fixture_digest + "\n"
+  }
+  return "sha256:" + sha256(material)
+}
+
+/** One language whose resolved grammar artifact moved between two receipts. */
+pub type GrammarDrift = {language: string, from: string, to: string}
+
+/** What a drift report compares: the resolved version and the exact artifact. */
+fn grammar_identity(row) -> string {
+  const package = row?.package
+  return "${package?.version ?? "?"} (${package?.artifact_digest ?? "?"})"
+}
+
+/**
+ * A receipt's language rows, read defensively.
+ *
+ * This runs against the committed file, which may predate the current schema or
+ * have been hand-edited. A drift report is an explanation of a failure that has
+ * already been decided, so it degrades to "no drift found" rather than throwing
+ * over the check it exists to clarify.
+ */
+fn receipt_languages(text: string) -> list {
+  const receipt = try {
+    json_parse(text)
+  } catch (error) {
+    nil
+  }
+  return receipt?.languages ?? []
+}
+
+/**
+ * Languages whose grammar artifact differs between the committed and candidate
+ * receipts.
+ *
+ * A stale receipt has two causes that want opposite fixes. Editing the corpus
+ * or a fixture moves the corpus digest, and regenerating is the whole fix: the
+ * evidence moved because the questions did. A grammar package moving to a new
+ * version moves that language's artifact digest, and regenerating is precisely
+ * the wrong fix — it re-stamps fitness onto an artifact nothing has re-proven.
+ * That is how `tree-sitter-swift` 0.7.3 reached main once already (#5127),
+ * carrying the root missing-node regression #5008 had pinned away from.
+ *
+ * Reporting the moved languages by name is what separates the two cases at the
+ * moment a reader decides what to do, rather than leaving it to be found in a
+ * diff of a several-hundred-line JSON document.
+ */
+pub fn grammar_drift(committed_text: string, candidate_text: string) -> list<GrammarDrift> {
+  const before = receipt_languages(committed_text)
+  let drift: list<GrammarDrift> = []
+  for row in receipt_languages(candidate_text) {
+    const language = row?.language ?? ""
+    const prior = before.filter({ earlier -> earlier?.language == language })
+    if prior.count == 1 && grammar_identity(prior[0]) != grammar_identity(row) {
+      drift = drift
+        + [
+        {language: language, from: grammar_identity(prior[0]), to: grammar_identity(row)},
+      ]
+    }
+  }
+  return drift
+}
+
+fn render_receipt(fs: HarnessFs) -> string {
+  const corpus_text = fs.read_text(CORPUS)
+  const corpus_result = schema_check(json_parse(corpus_text), corpus_schema())
+  if is_err(corpus_result) {
+    throw "grammar fitness corpus is malformed: ${unwrap_err(corpus_result).message}"
+  }
+  const corpus = unwrap(corpus_result)
+  if corpus.schema_version != 1 {
+    throw "unsupported grammar fitness corpus schema version"
+  }
+  const lock_result = schema_check(toml_parse(fs.read_text(LOCKFILE)), lock_schema())
+  if is_err(lock_result) {
+    throw "${LOCKFILE} is malformed: ${unwrap_err(lock_result).message}"
+  }
+  const packages = unwrap(lock_result).package ?? []
+  let languages = []
+  for mapping in LANGUAGE_PACKAGES {
+    const package = package_by_name(packages, mapping.package)
+    const row = corpus_row_by_language(corpus.rows, mapping.language)
+    languages = languages
+      + [
+      {
+        language: mapping.language,
+        package: {
+          name: mapping.package,
+          version: package.version,
+          source: package?.source ?? "workspace-path",
+          checksum: package?.checksum,
+          artifact_digest: artifact_digest(fs, package),
+        },
+        operations: row.operations,
+        authority: row.authority,
+      },
+    ]
+  }
+  const receipt = {
+    schema_version: 1,
+    corpus: {
+      schema_version: corpus.schema_version,
+      digest: corpus_digest(fs, corpus_text, corpus.rows),
+    },
+    tree_sitter_runtime: package_by_name(packages, "tree-sitter").version,
+    languages: languages,
+  }
+  return json_stringify_pretty(receipt) + "\n"
+}
+
+fn main(harness: Harness) -> int {
+  const candidate = render_receipt(harness.fs)
+  if argv.contains("--check") {
+    const committed = harness.fs.read_text(OUTPUT)
+    if committed == candidate {
+      harness.stdio.println("grammar fitness receipt is current")
+      return 0
+    }
+    const drift = grammar_drift(committed, candidate)
+    if drift.count > 0 {
+      harness.stdio.eprintln(
+        "grammar fitness receipt is stale because a grammar artifact moved, not because the corpus changed:",
+      )
+      for moved in drift {
+        harness.stdio.eprintln("  ${moved.language}: ${moved.from} -> ${moved.to}")
+      }
+      harness.stdio.eprintln(
+        "Regenerating would re-stamp fitness onto an artifact nothing has re-proven. Either revert the version"
+          + " change, or run the harn-hostlib parser-agreement corpus test against the new grammar and regenerate"
+          + " once it passes.",
+      )
+    } else {
+      harness.stdio.eprintln(
+        "grammar fitness receipt is stale; run `make gen-grammar-fitness`, review the artifact/corpus diff, and rerun the corpus tests",
+      )
+    }
+    harness.stdio.eprintln(
+      unified_diff(
+        committed,
+        candidate,
+        {from_label: OUTPUT + " (committed)", to_label: OUTPUT + " (candidate)"},
+      ),
+    )
+    return 1
+  }
+  harness.fs.write_text(OUTPUT, candidate)
+  harness.stdio.println("wrote " + OUTPUT)
+  return 0
+}

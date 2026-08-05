@@ -1,0 +1,22 @@
+# ── QC defaults ──────────────────────────────────────────────────────────────
+# Default low-cost model per provider for cheap quality-check / repair
+# passes. Scripts read these via `qc_default_model(provider)`.
+
+[qc_defaults]
+anthropic = "claude-haiku-4-5-20251001"
+openai = "gpt-5.6-luna"
+openrouter = "google/gemini-2.5-flash"
+ollama = "llama3.2"
+# `local` previously pointed at gpt-4o — a hosted (and now sunset)
+# OpenAI model that no local OpenAI-compat server would serve. Use the
+# bundled vLLM Gemma 4 route instead.
+local = "gemma-4-26b-a4b-it"
+mistral = "mistral-small-2603"
+cohere = "command-a-plus-05-2026"
+xai = "grok-build-0.1"
+groq = "llama-3.1-8b-instant"
+minimax = "MiniMax-M2.5-highspeed"
+# GLM-4.6 is Z.AI's cheap coding route, confirmed serving at paas/v4.
+zai = "glm-4.6"
+deepseek = "deepseek-v4-flash"
+gemini = "gemini-2.5-flash-lite"

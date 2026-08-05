@@ -1,0 +1,12 @@
+[harn] 3
+[harn] [name, age]
+[harn] 30
+[harn] 2
+[harn] alice
+[harn] 25
+[harn] age,name
+30,alice
+25,bob
+
+[harn] a,b
+c,d

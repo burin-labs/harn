@@ -1,0 +1,17 @@
+pipeline test(harness: Harness, task) {
+  const template = """
+// Auto-generated code - do not edit.
+pub fn {{ fn_name }}() -> dict {
+  return {}
+}
+"""
+  const name = "build"
+  const report = """
+root:
+  title: ${name}
+  nested:
+    keep: exact  
+"""
+  harness.stdio.log(template)
+  harness.stdio.log(report)
+}

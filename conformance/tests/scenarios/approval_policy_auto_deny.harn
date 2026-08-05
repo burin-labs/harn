@@ -1,0 +1,35 @@
+import { agent_loop } from "std/agent/loop"
+
+fn write_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "shell_exec",
+    "Run shell command",
+    {
+      handler: { args -> "" },
+      parameters: {cmd: {type: "string", description: "Command"}},
+      returns: {type: "string"},
+    },
+  )
+  return tools
+}
+
+pipeline main(harness: Harness) {
+  const denied = agent_loop(
+    harness,
+    "Try to run shell",
+    "You are helpful",
+    {
+      provider: "mock",
+      tools: write_tools(),
+      tool_format: "native",
+      max_iterations: 1,
+      approval_policy: {auto_deny: ["shell*"]},
+    },
+  )
+  harness.stdio.println(denied?.tools?.rejected[0] == "shell_exec")
+  const transcript = json_stringify(transcript_messages(denied?.transcript))
+  harness.stdio.println(transcript.contains("permission_denied"))
+  harness.stdio.println(transcript.contains("auto_denied") || transcript.contains("deny pattern"))
+}

@@ -1,0 +1,8 @@
+case1.status=done
+case1.grant=true
+case1.verify_passed=true
+case2.status=budget_exhausted
+case2.verify_failed=true
+case2.grants=3
+case3.status=budget_exhausted
+case3.reserved_events=0

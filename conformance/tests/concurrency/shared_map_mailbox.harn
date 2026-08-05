@@ -1,0 +1,18 @@
+pipeline default(harness: Harness) {
+  const memo = harness.runtime.shared_map({scope: "task_group", key: "memo", initial: {a: 1}})
+  harness.stdio.println(harness.runtime.shared_map_get(memo, "a"))
+  const snap = harness.runtime.shared_map_snapshot(memo, "a")
+  harness.stdio.println(harness.runtime.shared_map_cas(memo, "a", snap, 3))
+  harness.stdio.println(harness.runtime.shared_map_get(memo, "a"))
+  harness.runtime.shared_map_set(memo, "b", 4)
+  harness.stdio.println(harness.runtime.shared_map_entries(memo).b)
+  const inbox = harness.runtime.mailbox_open({scope: "task_group", name: "worker", capacity: 4})
+  const task = spawn {
+    harness.runtime.mailbox_send("worker", {kind: "hello", value: 42})
+  }
+  const msg = harness.runtime.mailbox_receive(inbox)
+  await(task)
+  harness.stdio.println(msg.kind)
+  harness.stdio.println(msg.value)
+  harness.stdio.println(harness.runtime.mailbox_metrics(inbox).depth == 0)
+}

@@ -1,0 +1,244 @@
+import { agent_edit_tools, agent_read_tools } from "std/agent/host_tools"
+import { agent_loop } from "std/agent/loop"
+import { agent_dispatch_tool_call } from "std/agent/primitives"
+import {
+  compose_tool_callers,
+  default_tool_caller,
+  with_audit_log,
+  with_consent,
+} from "std/llm/tool_middleware"
+import { with_llm_script } from "std/testing"
+
+fn has_tool(tools, name) {
+  for item in tools ?? [] {
+    if item?.function?.name == name || item?.name == name {
+      return true
+    }
+  }
+  return false
+}
+
+fn scripted_consent(_justification, _session_id) {
+  return {consent: "none", reason: "no consent", verdict: "deny"}
+}
+
+pipeline main(harness: Harness) {
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-edit-tools-" + harness.random.uuid(),
+  )
+  const outside = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-edit-tools-outside-" + harness.random.uuid(),
+  )
+  harness.fs.mkdir(root, true)
+  harness.fs.mkdir(outside, true)
+  const tools = agent_edit_tools(harness.fs, harness.tools, nil, {root: root, cwd: root})
+  // --- write_file happy path: create + read back ---
+  const wrote = agent_dispatch_tool_call(
+    harness.tools,
+    {id: "w1", name: "write_file", arguments: {path: "notes/hello.txt", content: "alpha\nbeta\n"}},
+    tools,
+  )
+  harness.stdio.println(wrote.ok)
+  const wrote_data = json_parse(wrote.rendered_result)
+  harness.stdio.println(wrote_data.created)
+  harness.stdio.println(harness.fs.read_text(path_join(root, "notes/hello.txt")))
+  // --- edit_file happy path: unique replacement ---
+  const edited = agent_dispatch_tool_call(
+    harness.tools,
+    {
+      id: "e1",
+      name: "edit_file",
+      arguments: {path: "notes/hello.txt", old_string: "beta", new_string: "gamma"},
+    },
+    tools,
+  )
+  harness.stdio.println(edited.ok)
+  const edited_data = json_parse(edited.rendered_result)
+  harness.stdio.println(edited_data.replacements)
+  harness.stdio.println(harness.fs.read_text(path_join(root, "notes/hello.txt")))
+  // --- edit_file replace_all ---
+  harness.fs.write_text(path_join(root, "notes/rep.txt"), "x x x\n")
+  const all = agent_dispatch_tool_call(
+    harness.tools,
+    {
+      id: "e2",
+      name: "edit_file",
+      arguments: {path: "notes/rep.txt", old_string: "x", new_string: "y", replace_all: true},
+    },
+    tools,
+  )
+  const all_data = json_parse(all.rendered_result)
+  harness.stdio.println(all_data.replacements)
+  harness.stdio.println(harness.fs.read_text(path_join(root, "notes/rep.txt")))
+  // --- edit_file uniqueness error (2 matches, no replace_all) ---
+  const ambiguous = agent_dispatch_tool_call(
+    harness.tools,
+    {
+      id: "e3",
+      name: "edit_file",
+      arguments: {path: "notes/rep.txt", old_string: "y", new_string: "z"},
+    },
+    tools,
+  )
+  harness.stdio.println(ambiguous.ok)
+  harness.stdio.println(contains(ambiguous.error, "not unique"))
+  // --- edit_file not-found error ---
+  const missing = agent_dispatch_tool_call(
+    harness.tools,
+    {
+      id: "e4",
+      name: "edit_file",
+      arguments: {path: "notes/hello.txt", old_string: "nope", new_string: "q"},
+    },
+    tools,
+  )
+  harness.stdio.println(missing.ok)
+  harness.stdio.println(contains(missing.error, "not found"))
+  // --- create_directory mkdir -p ---
+  const made = agent_dispatch_tool_call(
+    harness.tools,
+    {id: "d1", name: "create_directory", arguments: {path: "deep/nested/dir"}},
+    tools,
+  )
+  harness.stdio.println(made.ok)
+  harness.stdio.println(harness.fs.stat(path_join(root, "deep/nested/dir")).is_dir)
+  // --- delete_path: file removed ---
+  const del = agent_dispatch_tool_call(
+    harness.tools,
+    {id: "x1", name: "delete_path", arguments: {path: "notes/rep.txt"}},
+    tools,
+  )
+  const del_data = json_parse(del.rendered_result)
+  harness.stdio.println(del_data.removed)
+  harness.stdio.println(harness.fs.exists(path_join(root, "notes/rep.txt")))
+  // --- delete_path refuses non-empty dir without recursive ---
+  const refuse = agent_dispatch_tool_call(
+    harness.tools,
+    {id: "x2", name: "delete_path", arguments: {path: "notes"}},
+    tools,
+  )
+  harness.stdio.println(refuse.ok)
+  harness.stdio.println(contains(refuse.error, "recursive"))
+  harness.stdio.println(harness.fs.exists(path_join(root, "notes/hello.txt")))
+  // --- delete_path recursive removes the tree ---
+  const purge = agent_dispatch_tool_call(
+    harness.tools,
+    {id: "x3", name: "delete_path", arguments: {path: "notes", recursive: true}},
+    tools,
+  )
+  const purge_data = json_parse(purge.rendered_result)
+  harness.stdio.println(purge_data.removed)
+  harness.stdio.println(harness.fs.exists(path_join(root, "notes")))
+  // --- out-of-roots write refused by existing path resolution ---
+  const escape = agent_dispatch_tool_call(
+    harness.tools,
+    {id: "o1", name: "write_file", arguments: {path: path_join(outside, "evil.txt"), content: "x"}},
+    tools,
+  )
+  harness.stdio.println(escape.ok)
+  harness.stdio.println(contains(escape.error, "absolute paths are disabled"))
+  harness.stdio.println(harness.fs.exists(path_join(outside, "evil.txt")))
+  // --- honest mutating annotations ---
+  harness.stdio.println(tool_find(tools, "write_file").annotations.kind)
+  harness.stdio.println(tool_find(tools, "write_file").annotations.side_effect_level)
+  harness.stdio.println(tool_find(tools, "delete_path").annotations.kind)
+  harness.stdio.println(tool_find(tools, "edit_file").annotations.side_effect_level)
+  harness.stdio.println(tool_find(tools, "write_file").annotations.arg_schema.path_params[0])
+  harness.stdio.println(tool_find(tools, "edit_file").annotations.arg_schema.path_params[0])
+  harness.stdio.println(tool_find(tools, "create_directory").annotations.arg_schema.path_params[0])
+  harness.stdio.println(tool_find(tools, "delete_path").annotations.arg_schema.path_params[0])
+  // --- read-only stance hides every edit tool, keeps read tools ---
+  const surface = agent_edit_tools(
+    harness.fs,
+    harness.tools,
+    agent_read_tools(harness.fs, harness.tools, nil, {root: root}),
+    {root: root},
+  )
+  with_llm_script(
+    harness.llm,
+    [{text: "just researching ##DONE##"}],
+    { ->
+      const session = "edit-tools-stance-" + harness.random.uuid()
+      const _ = agent_loop(
+        harness,
+        "no changes yet, only investigate",
+        nil,
+        {
+          provider: "mock",
+          tools: surface,
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 2,
+          session_id: session,
+          read_only_stance: {enabled: true, armed: true, consent_check: scripted_consent},
+        },
+      )
+      const first_tools = harness.llm.mock_calls()[0].tools
+      harness.stdio.println(has_tool(first_tools, "read_file"))
+      harness.stdio.println(has_tool(first_tools, "write_file"))
+      harness.stdio.println(has_tool(first_tools, "edit_file"))
+      harness.stdio.println(has_tool(first_tools, "create_directory"))
+      harness.stdio.println(has_tool(first_tools, "delete_path"))
+    },
+  )
+  // --- burin-shaped: with_consent + with_audit_log wrap the canonical tools ---
+  const mw_root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-edit-tools-mw-" + harness.random.uuid(),
+  )
+  harness.fs.mkdir(mw_root, true)
+  const edit = agent_edit_tools(harness.fs, harness.tools, nil, {root: mw_root, cwd: mw_root})
+  const dispatch_next = { call ->
+    agent_dispatch_tool_call(
+      harness.tools,
+      {id: call.call_id, name: call.tool_name, arguments: call.tool_args},
+      edit,
+    )
+  }
+  const consent_hits = harness.runtime.atomic(0)
+  const audit_hits = harness.runtime.atomic(0)
+  const approve = { _call ->
+    harness.runtime.atomic_add(consent_hits, 1)
+    return true
+  }
+  const audit_sink = { _receipt ->
+    harness.runtime.atomic_add(audit_hits, 1)
+    return nil
+  }
+  const caller = compose_tool_callers(
+    harness.clock,
+    [
+      with_audit_log(harness.clock, harness.fs, {sink: audit_sink}),
+      with_consent(harness.clock, approve),
+      default_tool_caller(),
+    ],
+  )
+  const envelope = {
+    call_id: "mw1",
+    declared_executor: "harn",
+    description: "",
+    schema: nil,
+    tool_args: {content: "hi from middleware\n", path: "out/mw.txt"},
+    tool_name: "write_file",
+    turn: {iteration: 0, session_id: ""},
+  }
+  const mw_result = caller(envelope, dispatch_next)
+  harness.stdio.println(mw_result.status)
+  harness.stdio.println(harness.runtime.atomic_get(consent_hits))
+  harness.stdio.println(harness.runtime.atomic_get(audit_hits))
+  harness.stdio.println(harness.fs.read_text(path_join(mw_root, "out/mw.txt")))
+  // --- deny path: consent short-circuits, underlying write never runs ---
+  const deny_caller = compose_tool_callers(
+    harness.clock,
+    [with_consent(harness.clock, { _call -> false }), default_tool_caller()],
+  )
+  const denied = deny_caller(
+    envelope + {call_id: "mw2", tool_args: {content: "nope", path: "out/denied.txt"}},
+    dispatch_next,
+  )
+  harness.stdio.println(denied.ok)
+  harness.stdio.println(denied.error_category)
+  harness.stdio.println(harness.fs.exists(path_join(mw_root, "out/denied.txt")))
+}

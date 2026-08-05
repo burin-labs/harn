@@ -1,0 +1,716 @@
+// Question-aharness.fs, t-a-time planning agent (qmode).
+//
+// The model asks the user one question at a time, may use read-only
+// discovery tools between questions, then calls exit_plan_mode with a
+// grounded JSON plan. State lives on disk in .qmode/<task_id>/ so the
+// loop pauses across `harn playground` invocations: the harness exits
+// after each ask_question or exit_plan_mode call, the user (or Claude)
+// records the answer, and reruns the pipeline.
+//
+// Reuses workspace tools from lib/workspace.harn.
+import "std/path"
+import "std/runtime"
+import {
+  find_workspace,
+  list_workspace_files,
+  read_workspace,
+  workspace_root,
+} from "lib/workspace.harn"
+
+// -------------------------------------------------------------------------------------------------
+// Provider guard: hard-block remote inference.
+// -------------------------------------------------------------------------------------------------
+
+fn provider_name(env: HarnessEnv) {
+  return env.get_or("BURIN_MINI_PROVIDER", env.get_or("HARN_LLM_PROVIDER", "ollama"))
+}
+
+fn generator_model(env: HarnessEnv) {
+  return env.get_or(
+    "BURIN_MINI_GENERATOR_MODEL",
+    env.get_or("HARN_LLM_MODEL", "devstral-small-2:24b"),
+  )
+}
+
+fn assert_local_only(env: HarnessEnv) {
+  const p = lowercase(provider_name(env))
+  const allowed = ["ollama", "local", "mock"]
+  for name in allowed {
+    if p == name || starts_with(p, name + ":") {
+      return
+    }
+  }
+  throw "[qmode] provider '${p}' is not local-only. Allowed: ollama, local, mock. Set BURIN_MINI_PROVIDER=ollama and BURIN_MINI_GENERATOR_MODEL=devstral-small-2:24b."
+}
+
+// -------------------------------------------------------------------------------------------------
+// Task state directory layout.
+// -------------------------------------------------------------------------------------------------
+
+fn task_dir(fs: HarnessFs, task_id) {
+  return path_join(fs.source_dir(), ".qmode", task_id)
+}
+
+fn ensure_task_dir(fs: HarnessFs, task_id) {
+  const dir = task_dir(fs, task_id)
+  fs.mkdir(dir)
+  return dir
+}
+
+fn qa_path(fs: HarnessFs, task_id) {
+  return path_join(task_dir(fs, task_id), "qa.jsonl")
+}
+
+fn pending_path(fs: HarnessFs, task_id) {
+  return path_join(task_dir(fs, task_id), "pending.json")
+}
+
+fn plan_path(fs: HarnessFs, task_id) {
+  return path_join(task_dir(fs, task_id), "plan.json")
+}
+
+fn task_meta_path(fs: HarnessFs, task_id) {
+  return path_join(task_dir(fs, task_id), "task.json")
+}
+
+// -------------------------------------------------------------------------------------------------
+// JSONL helpers (newline-delimited JSON).
+// -------------------------------------------------------------------------------------------------
+
+fn read_jsonl(fs: HarnessFs, path) {
+  if !fs.exists(path) {
+    return []
+  }
+  const raw = fs.read_text(path)
+  if (raw ?? "").trim() == "" {
+    return []
+  }
+  let entries = []
+  for line in split(raw, "\n") {
+    const trimmed = line.trim()
+    if trimmed == "" {
+      continue
+    }
+    const parsed = json_parse(trimmed)
+    if parsed != nil {
+      entries = entries + [parsed]
+    }
+  }
+  return entries
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// Three-layer USER_PROFILE.md loader.
+// Most-specific-last concatenation. Each layer is tagged with its scope.
+
+// -------------------------------------------------------------------------------------------------
+
+fn read_profile_file(fs: HarnessFs, path, scope) {
+  if !fs.exists(path) {
+    return ""
+  }
+  const body = fs.read_text(path)
+  if body.trim() == "" {
+    return ""
+  }
+  return "<profile scope=\"${scope}\" path=\"${path}\">\n${body.trim()}\n</profile>"
+}
+
+fn load_profile_layers(fs: HarnessFs) {
+  const home = fs.home_dir()
+  const user_global = path_join(home, ".harn", "USER_PROFILE.md")
+  const project = path_join(workspace_root(fs), ".harn", "USER_PROFILE.md")
+  const cwd_local = path_join(fs.source_dir(), ".harn", "USER_PROFILE.md")
+  let blocks = []
+  const user_block = read_profile_file(fs, user_global, "user")
+  if user_block != "" {
+    blocks = blocks + [user_block]
+  }
+  const project_block = read_profile_file(fs, project, "project")
+  if project_block != "" {
+    blocks = blocks + [project_block]
+  }
+  const cwd_block = read_profile_file(fs, cwd_local, "cwd")
+  if cwd_block != "" {
+    blocks = blocks + [cwd_block]
+  }
+  if len(blocks) == 0 {
+    return "(no prior preferences saved)"
+  }
+  return join(blocks, "\n\n")
+}
+
+fn profile_path_for_scope(fs: HarnessFs, scope) {
+  if scope == "user" {
+    return path_join(fs.home_dir(), ".harn", "USER_PROFILE.md")
+  }
+  if scope == "project" {
+    return path_join(workspace_root(fs), ".harn", "USER_PROFILE.md")
+  }
+  return path_join(fs.source_dir(), ".harn", "USER_PROFILE.md")
+}
+
+fn append_profile_writes(clock: HarnessClock, fs: HarnessFs, profile_writes) {
+  if type_of(profile_writes) != "list" || len(profile_writes) == 0 {
+    return
+  }
+  const today = clock.date_iso().substring(0, 10)
+  for entry in profile_writes {
+    if type_of(entry) != "dict" {
+      continue
+    }
+    const scope = (entry?.scope ?? "project").trim()
+    const bullet = (entry?.bullet ?? "").trim()
+    if bullet == "" {
+      continue
+    }
+    const target = profile_path_for_scope(fs, scope)
+    fs.mkdir(path_parent(target))
+    const prior = if fs.exists(target) {
+      fs.read_text(target)
+    } else {
+      ""
+    }
+    // Dedup: skip bullets already present anywhere in the file. Cheap O(n)
+    // string match — profiles are tiny and this is the only correctness
+    // belt against a model that re-emits bullets it already saw via the
+    // injected <profile> block.
+    if contains(prior, "- ${bullet}\n") || contains(prior, "- ${bullet}") {
+      continue
+    }
+    const header = "\n\n## Auto-learned ${today}\n"
+    const body = if contains(prior, header) {
+      "- ${bullet}\n"
+    } else {
+      "${header}- ${bullet}\n"
+    }
+    fs.append(target, body)
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// Repo map (Aider-style orientation, but token-cheap).
+//
+// We front-load the workspace tree + a one-line summary per file so the model
+// doesn't burn iterations to learn the layout. The first non-empty line of
+// each file is a surprisingly strong proxy for "what is this file" across
+// markdown, JS/TS, Python, shell, JSON, Rust, etc. — and avoids tree-sitter
+// symbol extraction we don't have here.
+
+// -------------------------------------------------------------------------------------------------
+
+fn _first_nonempty_line(fs: HarnessFs, path) {
+  const body = fs.read_text(path)
+  if body == nil {
+    return ""
+  }
+  for line in split(body, "\n") {
+    const t = line.trim()
+    if t != "" {
+      return if len(t) > 100 {
+        t[0:100] + "…"
+      } else {
+        t
+      }
+    }
+  }
+  return ""
+}
+
+fn repo_map_text(fs: HarnessFs, process: HarnessProcess) {
+  const files = list_workspace_files(fs, process)
+  const root = workspace_root(fs)
+  if len(files) == 0 {
+    return "(workspace is empty)"
+  }
+  const cap = 60
+  const visible = if len(files) > cap {
+    files[0:cap]
+  } else {
+    files
+  }
+  let lines = ["root: ${root}", "files (${len(files)}; ${len(visible)} shown):"]
+  for rel in visible {
+    const abs = path_join(root, rel)
+    const body = fs.read_text(abs)
+    const line_count = if body == nil {
+      0
+    } else {
+      len(split(body, "\n"))
+    }
+    const summary = _first_nonempty_line(fs, abs)
+    lines = lines + ["  ${rel} (${line_count}L)  ${summary}"]
+  }
+  if len(files) > cap {
+    lines = lines + ["  ... (${len(files) - cap} more files; use find to discover)"]
+  }
+  return join(lines, "\n")
+}
+
+// -------------------------------------------------------------------------------------------------
+// Tools available to the model.
+// -------------------------------------------------------------------------------------------------
+
+fn build_tools(harness: Harness, dir) {
+  const pending_p = path_join(dir, "pending.json")
+  const plan_p = path_join(dir, "plan.json")
+  let registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "find",
+    "Find files OR content in the workspace. Searches BOTH filenames (case-insensitive substring) and file contents (ripgrep, case-insensitive). Pass a single short token like 'auth', 'rate', 'middleware' — not a phrase. Output has two sections (filename matches, content matches) or '(no matches for ...)'.",
+    {
+      parameters: {
+        query: {
+          type: "string",
+          description:
+            "A token or short pattern. Avoid multi-word natural-language phrases — those rarely match literally. Use 'auth' not 'auth middleware'.",
+        },
+      },
+      returns: {type: "string"},
+      handler: { args -> find_workspace(harness.fs, harness.process, args?.query ?? "") },
+    },
+  )
+  registry = tool_define(
+    registry,
+    "read",
+    "Read a single workspace file. Path must be workspace-relative (matching the paths in the workspace tree above).",
+    {
+      parameters: {path: {type: "string", description: "Workspace-relative file path."}},
+      returns: {type: "string"},
+      handler: { args -> read_workspace(harness.fs, args.path) },
+    },
+  )
+  registry = tool_define(
+    registry,
+    "save_user_pref",
+    "Save a durable user preference learned in THIS conversation. Call this when the user explicitly states something they'd want remembered next time (branch policy, default response shape, naming conventions, framework choices, tone). Idempotent: bullets already in the profile are skipped. Scope: 'user' (any project), 'project' (this repo), 'cwd' (this experiment). Don't call this for facts derivable from the code.",
+    {
+      parameters: {
+        bullet: {
+          type: "string",
+          description:
+            "One-line preference, written as the user would describe it. Example: \"All services should default to JSON responses with a status field, e.g. {status: 'ok'}.\"",
+        },
+        scope: {
+          type: "string",
+          description: "Where to save it: 'user', 'project', or 'cwd'. Default: 'project'.",
+        },
+      },
+      returns: {type: "string"},
+      handler: { args ->
+        const bullet = (args?.bullet ?? "").trim()
+        if bullet == "" {
+          return "Error: bullet was empty."
+        }
+        const scope = (args?.scope ?? "project").trim()
+        const allowed = ["user", "project", "cwd"]
+        let ok = false
+        for s in allowed {
+          if scope == s {
+            ok = true
+          }
+        }
+        if !ok {
+          return "Error: scope must be one of 'user', 'project', 'cwd'. Got '${scope}'."
+        }
+        const target = profile_path_for_scope(harness.fs, scope)
+        const prior = if harness.fs.exists(target) {
+          harness.fs.read_text(target)
+        } else {
+          ""
+        }
+        if contains(prior, "- ${bullet}") {
+          return "Already saved (no-op)."
+        }
+        append_profile_writes(harness.clock, harness.fs, [{scope: scope, bullet: bullet}])
+        "Saved to ${scope} profile."
+      },
+    },
+  )
+  registry = tool_define(
+    registry,
+    "ask_question",
+    "Ask the user exactly one short question (max 3 sentences). The harness pauses after this and resumes when the user answers. Always offer a default or example so they don't have to think hard.",
+    {
+      parameters: {
+        question: {
+          type: "string",
+          description:
+            "The next single question for the user. <=3 sentences. Friendly. Offer a default.",
+        },
+      },
+      returns: {type: "string"},
+      handler: { args ->
+        const q = (args?.question ?? "").trim()
+        if q == "" {
+          return "Error: question text was empty. Try again with a concrete question."
+        }
+        if !harness.fs.exists(pending_p) {
+          harness.fs.write_text(
+            pending_p,
+            json_stringify({question: q, asked_at: harness.clock.date_iso()}),
+          )
+        }
+        "Question recorded. The harness will pause and resume after the user answers."
+      },
+    },
+  )
+  // Idempotent: if multiple ask_question calls land in the same
+  // iteration (parallel tool-use), only the first sticks. agent_loop
+  // ends the step after this iteration via stop_after_successful_tools.
+  registry = tool_define(
+    registry,
+    "exit_plan_mode",
+    "Emit the final structured plan and end the conversation. Pass the plan as a JSON object (or JSON-stringified). To save durable user preferences, call save_user_pref BEFORE this.",
+    {
+      parameters: {
+        plan: {
+          type: "string",
+          description:
+            "The plan as a JSON object. Top-level keys: mode, direction, targets, grounding, tasks, verification, ready.",
+        },
+      },
+      returns: {type: "string"},
+      handler: { args ->
+        if !harness.fs.exists(plan_p) {
+          const raw = args?.plan ?? args ?? {}
+          const plan = if type_of(raw) == "string" {
+            json_parse(raw) ?? {}
+          } else {
+            raw
+          }
+          harness.fs.write_text(plan_p, json_stringify(plan))
+        }
+        "Plan recorded. The harness will end the step now."
+      },
+    },
+  )
+  return registry
+}
+
+// -------------------------------------------------------------------------------------------------
+// Prompt construction.
+// -------------------------------------------------------------------------------------------------
+
+fn system_prompt(profile_block) {
+  return """
+You are a planning partner pairing with the user. The user types one short message; you reply with one short question, or commit to a final plan. A whole conversation is typically 1–5 exchanges.
+
+This invocation is ONE STEP of that conversation. A step is: optional discovery (read/find), optional preference-saves (save_user_pref), then exactly one TERMINAL tool — ask_question or exit_plan_mode — that ends the step. Non-terminal tools can be called as many times as you need before the terminal one. The harness ends the step automatically the moment that terminal tool succeeds; you do not need to emit ##DONE## or anything else.
+
+Workflow this step:
+1. The user message starts with a <workspace> block listing every file (path + line count + first non-empty line). Treat that as your starting orientation; you usually don't need to call `find` to learn the layout. Use `find(query)` for token searches across filenames AND content (one tool — pass a single token like "auth", not a phrase). Use `read(path)` to fetch a specific file. Look BEFORE you ask — don't ask about facts that are obvious from the workspace block or from a read.
+2. End the step with exactly one tool call — `ask_question(question="...")` or `exit_plan_mode(plan=...)`. NEVER answer in prose; if you find yourself writing "Before I plan, I need to understand..." or "Let me ask about X, Y, Z...", that's prose — stop, pick the single most important one, and call ask_question with that one. You are a planning *partner*, so defaulting to "I'll just pick" silently is wrong: ask whenever the request is open-ended (e.g. "improve performance"), a design parameter isn't pinned by the code (limits, TTLs, library choices, error codes, naming), there are multiple sensible placement spots, the change is destructive (deletes/renames/schema drops), or your plan has any parameter you guessed at (in which case lead the question with a 1-sentence plan summary and "sound good, or adjust X?"). Only call exit_plan_mode directly when the request is concrete AND every choice in the plan is pinned by the code or by an answer earlier in this conversation.
+
+If the user's request looks like a direct question (e.g. "explain this repo"), call exit_plan_mode without asking — the plan describes the reading and synthesis the implementation phase will produce; you do not answer in free prose.
+
+Conversation style for ask_question:
+- Friendly, colloquial, like a coworker pairing on the problem.
+- Plain English, no jargon, no bullet lists.
+- ≤ 3 sentences. Always include a default ("…or just say 'whatever you think' and I'll pick something sensible").
+- One thing at a time. If you need two answers, ask the most important one first; you can ask the next on the following turn.
+- For confirm-the-plan questions: lead with a 1-sentence summary of what you'd do, then "sound good, or want me to change X?".
+
+Stopping rule: 3–5 questions is typical. More than 7 is stalling. Once the user has confirmed the plan (or the plan is fully pinned by code), call exit_plan_mode.
+
+Skip anything covered by <profile> below — those are durable preferences the user already shared. Don't re-ask them.
+
+Plan schema (exit_plan_mode):
+{
+  "mode": "fast_execute" | "plan_then_execute",
+  "direction": "one sentence summarizing the approach",
+  "targets": ["workspace-relative/path.ext", ...],
+  "grounding": [{"path": "...", "role": "sibling_exemplar|convention_anchor|source_under_change", "why": "phrase"}],
+  "tasks": ["concrete step 1 referencing real paths/symbols", "..."],
+  "verification": ["command or check"],
+  "ready": true
+}
+
+Saving user preferences: when the user expresses a durable preference IN THIS CONVERSATION (answers to your questions, or the original task text) that you'd want to remember next time — branch policy, response-shape defaults, naming conventions, framework choices, tone — call `save_user_pref(bullet="...", scope="user|project|cwd")` BEFORE exit_plan_mode. Don't save anything already shown in the <profile> block above (it's already saved). Don't save derivable facts (paths, structure, code) or fix recipes. If the user expressed no new preferences this turn, don't call save_user_pref at all.
+
+For read-only / "explain this" tasks: still call exit_plan_mode. The plan should describe the reading and the answer the implementation phase will produce — e.g. tasks=["Read README, api.ts, auth-guard.ts", "Write 2-paragraph explanation citing those paths"], mode="plan_then_execute".
+
+<profile>
+${profile_block}
+</profile>
+
+Reminder: no free-form prose answers. Every step ends with one tool call to ask_question or exit_plan_mode.
+"""
+    .trim()
+}
+
+/**
+ * First-turn user prompt: full orientation. Workspace overview + the task
+ * + the "what to do this step" rubric.
+ */
+fn build_first_turn_prompt(fs: HarnessFs, process: HarnessProcess, task) {
+  const lines = [
+    "The user's request:",
+    "",
+    task,
+    "",
+    "<workspace>",
+    repo_map_text(fs, process),
+    "</workspace>",
+    "",
+    "The workspace block above is your orientation — a `find` call is rarely needed before reading. Read 1-3 specific files if it'll change the plan, then ask the single most plan-changing question (or, if the request is concrete and every parameter is pinned by the code, commit to exit_plan_mode).",
+    "",
+    "End this step with one TERMINAL call: ask_question or exit_plan_mode. The harness terminates immediately after the terminal call. Non-terminal tools (read, find, save_user_pref) can be called freely before the terminal one.",
+  ]
+  return join(lines, "\n")
+}
+
+/**
+ * Resume-turn user prompt: just the user's latest answer. The model already
+ * has its full prior tool-call/result history via the persisted session, so
+ * re-injecting qa_history textually would just bloat tokens.
+ */
+fn build_resume_turn_prompt(answer, qa_count) {
+  const lines = [
+    answer,
+    "",
+    "(That's answer ${qa_count}. You already have the full prior conversation — your reads, your tool results, your earlier questions — in context. DEFAULT toward exit_plan_mode now. Only ask another question if the answer would *meaningfully change the file list or approach*. End the step with one TERMINAL call.)",
+  ]
+  return join(lines, "\n")
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// Session persistence.
+//
+// `agent_session_*` is thread-local in harn-vm — each `harn playground`
+// invocation gets a fresh in-memory session store. We bridge that across
+// invocations by snapshotting the session messages to disk after each
+// `agent_loop` call and replaying them on the next call. The result is a
+// genuine continuous transcript: turn N sees turn N-1's tool calls and
+// tool results, not just a textual summary of Q&A.
+
+// -------------------------------------------------------------------------------------------------
+
+fn session_id_for(task_id) {
+  return "qmode-${task_id}"
+}
+
+fn session_snapshot_path(dir) {
+  return path_join(dir, "session.json")
+}
+
+fn restore_session(agent: HarnessAgent, fs: HarnessFs, session_id, snap_path, fresh_system_prompt) {
+  agent.open(session_id)
+  // Always start with the fresh system prompt — profile may have changed
+  // (e.g. save_user_pref ran in a prior turn), and we want the latest
+  // <profile> block visible.
+  agent.inject(session_id, {role: "system", content: fresh_system_prompt})
+  if !fs.exists(snap_path) {
+    return false
+  }
+  // json_parse throws on invalid JSON, so guard it. A corrupted session
+  // file should NOT crash the pipeline — degrade gracefully to first-turn
+  // behaviour so the user can still make progress (the qa_history textual
+  // replay then becomes the model's only memory of prior turns).
+  const prior = try {
+    json_parse(fs.read_text(snap_path))
+  } catch (e) {
+    nil
+  }
+  if type_of(prior) != "list" {
+    return false
+  }
+  for msg in prior {
+    if type_of(msg) != "dict" {
+      continue
+    }
+    // Skip the prior turn's system message; we already injected a fresh one.
+    if msg?.role == "system" {
+      continue
+    }
+    agent.inject(session_id, msg)
+  }
+  return true
+}
+
+/**
+ * Fallback when session.json is missing or corrupt but qa.jsonl exists.
+ *
+ * Replays the textual Q&A pairs into the session so the model has SOME
+ * memory of the prior turns — degraded from "full prior tool history" to
+ * "skeleton conversation", which is still better than starting over.
+ */
+fn replay_qa_history_into_session(agent: HarnessAgent, session_id, qa_history) {
+  for entry in qa_history {
+    const q = if type_of(entry?.question) == "string" {
+      entry.question
+    } else {
+      ""
+    }
+    const a = if type_of(entry?.answer) == "string" {
+      entry.answer
+    } else {
+      ""
+    }
+    if q == "" || a == "" {
+      continue
+    }
+    agent.inject(session_id, {role: "assistant", content: q})
+    agent.inject(session_id, {role: "user", content: a})
+  }
+}
+
+fn save_session(agent: HarnessAgent, fs: HarnessFs, session_id, snap_path) {
+  const snap = agent.snapshot(session_id)
+  const messages = if type_of(snap) == "dict" {
+    snap.messages ?? []
+  } else {
+    []
+  }
+  fs.write_text(snap_path, json_stringify(messages))
+}
+
+// -------------------------------------------------------------------------------------------------
+// Main.
+// -------------------------------------------------------------------------------------------------
+
+pipeline default(harness: Harness) {
+  assert_local_only(harness.env)
+  const task_id = harness.env.get_or("QMODE_TASK_ID", "default")
+  const task_text = runtime_task()
+  const dir = ensure_task_dir(harness.fs, task_id)
+  // Reset step marker for this invocation; handlers overwrite it.
+  const step_marker = path_join(dir, "step.txt")
+  if harness.fs.exists(step_marker) {
+    harness.fs.delete(step_marker)
+  }
+  if harness.fs.exists(plan_path(harness.fs, task_id)) {
+    harness.fs.write_text(step_marker, "plan_already_exists")
+    return
+  }
+  if harness.fs.exists(pending_path(harness.fs, task_id)) {
+    throw "[qmode] pending.json exists at ${pending_path(harness, task_id)}. The driver should have cleared it after recording the answer."
+  }
+  // Persist task metadata on first run.
+  if !harness.fs.exists(task_meta_path(harness.fs, task_id)) {
+    if task_text.trim() == "" {
+      throw "[qmode] no task text supplied. Pass --task '...' on first invocation."
+    }
+    harness.fs.write_text(
+      task_meta_path(harness.fs, task_id),
+      json_stringify(
+        {
+          task: task_text,
+          workspace_root: workspace_root(harness.fs),
+          started_at: harness.clock.date_iso(),
+        },
+      ),
+    )
+  }
+  const task_meta = json_parse(harness.fs.read_text(task_meta_path(harness.fs, task_id))) ?? {}
+  const effective_task = task_meta?.task ?? task_text
+  const qa_history = read_jsonl(harness.fs, qa_path(harness.fs, task_id))
+  const profile_block = load_profile_layers(harness.fs)
+  const sys_prompt = system_prompt(profile_block)
+  // Restore prior session messages from disk (if any). On turn 1 this is a
+  // no-op and the session is empty after the system message; on turn 2+ the
+  // session contains every prior tool call + result + assistant message.
+  const session_id = session_id_for(task_id)
+  const snap_path = session_snapshot_path(dir)
+  // Only restore prior session if qa.jsonl says we're on turn 2+. A
+  // session.json without qa.jsonl entries is an inconsistent state (e.g.
+  // turn 1 errored after agent_loop wrote the snapshot but before
+  // ask_question landed pending.json) — restoring it would inject prior
+  // user/assistant messages AND a fresh first-turn user prompt, confusing
+  // the model with duplicate intent. Treat it as a fresh first turn.
+  const resumed = if len(qa_history) > 0 {
+    restore_session(harness.agent, harness.fs, session_id, snap_path, sys_prompt)
+  } else {
+    harness.agent.open(session_id)
+    harness.agent.inject(session_id, {role: "system", content: sys_prompt})
+    false
+  }
+  // Three resume modes:
+  //   "session"          — clean restore from session.json (turn 2+, normal case)
+  //   "textual_fallback" — qa.jsonl has entries but session.json is missing
+  //                        or corrupt; replay Q&A pairs as text so the model
+  //                        still has a skeleton of the conversation.
+  //   "first_turn"       — turn 1, no qa_history, full workspace orientation.
+  const resume_mode = if resumed {
+    "session"
+  } else if len(qa_history) > 0 {
+    "textual_fallback"
+  } else {
+    "first_turn"
+  }
+  const user_prompt = if resume_mode == "session" {
+    let last = qa_history[len(qa_history) - 1]
+    let answer = if type_of(last?.answer) == "string" {
+      last.answer
+    } else {
+      ""
+    }
+    build_resume_turn_prompt(answer, len(qa_history))
+  } else if resume_mode == "textual_fallback" {
+    replay_qa_history_into_session(harness.agent, session_id, qa_history)
+    "(Continue from the prior conversation. End this step with one TERMINAL call: ask_question or exit_plan_mode.)"
+  } else {
+    build_first_turn_prompt(harness.fs, harness.process, effective_task)
+  }
+  harness.fs.write_text(
+    path_join(dir, "last-prompt.txt"),
+    "===SYSTEM===\n${sys_prompt}\n===USER===\n${user_prompt}\n===RESUME-MODE===\n${resume_mode}\n",
+  )
+  // turn_policy forces a tool call (or explicit yield) on every iteration —
+  // without it qwen3.6 happily emits prose + ##DONE##. stop_after_successful_tools
+  // ends the loop the moment a terminal tool succeeds (Vercel AI SDK's
+  // `stopWhen: hasToolCall(...)` / OpenAI Agents SDK's `StopAtTools(...)`).
+  // session_id makes the conversation persistent: prior tool calls and
+  // tool results from earlier turns stay in the model's context.
+  const result = agent_loop(
+    harness,
+    user_prompt,
+    sys_prompt,
+    {
+      provider: provider_name(harness.env),
+      model: generator_model(harness.env),
+      tools: build_tools(harness, dir),
+      tool_format: "native",
+      temperature: 0.2,
+      max_tokens: 2048,
+      max_iterations: 10,
+      turn_policy: {require_action_or_yield: true, max_prose_chars: 280},
+      stop_after_successful_tools: ["ask_question", "exit_plan_mode"],
+      session_id: session_id,
+    },
+  )
+  // Persist the updated session for the next turn.
+  save_session(harness.agent, harness.fs, session_id, snap_path)
+  const outcome = if harness.fs.exists(path_join(dir, "plan.json")) {
+    "exit_plan_mode"
+  } else if harness.fs.exists(path_join(dir, "pending.json")) {
+    "ask_question"
+  } else {
+    "no_terminal"
+  }
+  const diag = {
+    outcome: outcome,
+    status: result?.status ?? "?",
+    iterations: result?.llm?.iterations ?? 0,
+    tool_calls: result?.tools?.calls ?? [],
+    visible_text: result?.visible_text ?? "",
+  }
+  harness.fs.write_text(path_join(dir, "step.txt"), outcome)
+  harness.fs.write_text(path_join(dir, "diag.json"), json_stringify(diag))
+  // Dump the full transcript for offline inspection.
+  harness.fs.write_text(
+    path_join(dir, "step-transcript.json"),
+    json_stringify({transcript: result?.transcript, task_ledger: result?.task_ledger}),
+  )
+  harness.stdio.println(
+    "[qmode] step=${outcome} status=${diag?.status} iterations=${diag?.iterations}",
+  )
+  if outcome == "no_terminal" {
+    harness.stdio.println("[qmode] WARN: model never called a terminal tool. visible_text:")
+    harness.stdio.println(diag.visible_text)
+  }
+}

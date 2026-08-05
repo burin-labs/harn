@@ -1,0 +1,31 @@
+import {
+  agent_reminder_providers_fire,
+  agent_session_apply_reminder_post_turn,
+} from "std/agent/state"
+
+pipeline main(harness: Harness) {
+  const session = harness.agent.open("reminder-provider-post-compact-recap")
+  harness.agent.reset(session)
+  const payload = {
+    session: {id: session},
+    iteration: 8,
+    archived_messages: 4,
+    new_summary_len: 16,
+    remaining_messages: 2,
+    summary: "compact recap",
+  }
+  const first = agent_reminder_providers_fire(harness.agent, session, "post_compact", payload, {})
+  const second = agent_reminder_providers_fire(harness.agent, session, "post_compact", payload, {})
+  const before = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
+  const ttl = agent_session_apply_reminder_post_turn(harness.agent, session, 9)
+  const after = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
+  harness.stdio.println(first.fired_count)
+  harness.stdio.println(second.reports[0].deduped_count)
+  harness.stdio.println(len(before))
+  harness.stdio.println(before[0].reminder.tags[0])
+  harness.stdio.println(before[0].reminder.propagate)
+  harness.stdio.println(before[0].reminder.body.contains("compact recap"))
+  harness.stdio.println(before[0].reminder.preserve_on_compact)
+  harness.stdio.println(ttl.decremented_count)
+  harness.stdio.println(after[0].reminder.ttl_turns)
+}

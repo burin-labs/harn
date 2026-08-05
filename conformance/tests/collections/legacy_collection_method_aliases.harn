@@ -1,0 +1,17 @@
+pipeline test(harness: Harness, task) {
+  const values = [3, 1, 2]
+  harness.stdio.log(values.push(4))
+  harness.stdio.log(values.pop())
+  harness.stdio.log(values.sort())
+  harness.stdio.log(values.sort_by({ value -> 0 - value }))
+  harness.stdio.log(values.reverse())
+  harness.stdio.log("harn".reverse())
+  const original_set = set([1, 2])
+  harness.stdio.log(original_set.add(3).to_list().sorted())
+  harness.stdio.log(original_set.remove(1).to_list().sorted())
+  harness.stdio.log(original_set.delete(2).to_list().sorted())
+  const original_dict = {a: 1, b: 2}
+  harness.stdio.log(original_dict.merge({c: 3}))
+  harness.stdio.log(original_dict.remove("a"))
+  harness.stdio.log(original_dict.rekey({ key -> "x_" + key }))
+}
