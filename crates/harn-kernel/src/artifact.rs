@@ -14,10 +14,10 @@ mod validation;
 mod wire;
 
 const MAGIC: &[u8; 8] = b"HARNPK01";
-pub const ARTIFACT_VERSION: u16 = 3;
+pub const ARTIFACT_VERSION: u16 = 4;
 /// Maximum UTF-8 source size accepted by every portable compiler adapter.
 const HEADER_BYTES: usize = 8 + 2 + 2 + 4 + 32;
-const SEMANTIC_ABI_DOMAIN: &[u8] = b"harn-portable-kernel-semantic-abi-v3\0";
+const SEMANTIC_ABI_DOMAIN: &[u8] = b"harn-portable-kernel-semantic-abi-v4\0";
 
 /// Hex fingerprint of every opcode, portable builtin, and capability contract
 /// that contributes to artifact execution semantics.

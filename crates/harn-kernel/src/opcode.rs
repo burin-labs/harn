@@ -348,18 +348,18 @@ impl Op {
 }
 
 /// Artifact format version whose golden opcode fingerprint is pinned below.
-pub const OPCODE_ABI_ARTIFACT_VERSION: u16 = 3;
+pub const OPCODE_ABI_ARTIFACT_VERSION: u16 = 4;
 
-/// Golden BLAKE3 digest of opcode bytes, names, and operand-role tags for v3.
+/// Golden BLAKE3 digest of opcode bytes, names, and operand-role tags for v4.
 ///
 /// Changing the schema requires an intentional artifact-version bump and a new
 /// named fingerprint rather than silently rewriting existing bytecode.
 ///
-/// v3 adds [`Op::AssertBindingType`] and its [`OperandKind::BindingTypeU16`]
-/// operand role, so that a declared type on a `let` / `const` is checked at
-/// the binding site the same way a declared parameter type is checked at a
-/// call site.
-pub const OPCODE_ABI_FINGERPRINT_V3: [u8; 32] = [
+/// v4 keeps the opcode schema of v3 (including [`Op::AssertBindingType`]) and
+/// bumps the artifact / semantic ABI so construction of a declared struct
+/// asserts each annotated field against the value that lands in it (harn#6268).
+/// The digest matches v3 because no opcode or operand role changed.
+pub const OPCODE_ABI_FINGERPRINT_V4: [u8; 32] = [
     0x8b, 0xbc, 0xdf, 0x24, 0x31, 0x39, 0x01, 0x8e, 0xc3, 0x48, 0xc3, 0x7d, 0xab, 0x00, 0x82, 0x9c,
     0xa9, 0x34, 0x3d, 0xb6, 0xb2, 0xfe, 0x3d, 0x22, 0x45, 0x4a, 0xfa, 0x0a, 0xe8, 0x88, 0xa6, 0x79,
 ];
@@ -382,7 +382,7 @@ pub fn opcode_abi_fingerprint() -> [u8; 32] {
 #[cfg(test)]
 mod tests {
     use super::{
-        opcode_abi_fingerprint, Op, OPCODE_ABI_ARTIFACT_VERSION, OPCODE_ABI_FINGERPRINT_V3,
+        opcode_abi_fingerprint, Op, OPCODE_ABI_ARTIFACT_VERSION, OPCODE_ABI_FINGERPRINT_V4,
     };
 
     #[test]
@@ -395,8 +395,8 @@ mod tests {
     }
 
     #[test]
-    fn opcode_schema_matches_artifact_v3_golden() {
+    fn opcode_schema_matches_artifact_v4_golden() {
         assert_eq!(OPCODE_ABI_ARTIFACT_VERSION, crate::ARTIFACT_VERSION);
-        assert_eq!(opcode_abi_fingerprint(), OPCODE_ABI_FINGERPRINT_V3);
+        assert_eq!(opcode_abi_fingerprint(), OPCODE_ABI_FINGERPRINT_V4);
     }
 }

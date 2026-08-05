@@ -4168,7 +4168,8 @@ unvalidated boundary value is used directly
 - A type annotation on the binding also validates: since harn#6252 a declared
   type is checked where it is written, exactly as a declared parameter type is
   checked where it is passed. `const doc: {name: string} = json_parse(text)`
-  rejects a payload whose `name` is not a string.
+  rejects a payload whose `name` is not a string. Constructing a struct with
+  annotated fields (harn#6268) checks those fields the same way.
 - Choose between them by the report you want on failure. A binding assertion
   names the binding and the declared type; `schema_expect()` names the field
   that failed and why. For a payload from outside the program, the second is

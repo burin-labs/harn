@@ -64,13 +64,18 @@ impl Compiler {
         }
         self.chunk
             .emit_u16(Op::BuildDict, fields.len() as u16, self.line);
-        let arg_count = if let Some(field_names) = self.struct_layouts.get(struct_name).cloned() {
+        let arg_count = if let Some(layout) = self.struct_layouts.get(struct_name) {
+            let field_names: Vec<String> = layout.iter().map(|field| field.name.clone()).collect();
             self.emit_string_list(&field_names);
             3
         } else {
             2
         };
         self.chunk.emit_u8(Op::Call, arg_count, self.line);
+        // Check declared field types against the constructed instance. One
+        // shape assertion covers every annotated field; that is smaller than
+        // one AssertBindingType per field and reuses the #6266 matcher.
+        self.emit_struct_field_type_assertion(struct_name);
         Ok(())
     }
 
@@ -246,7 +251,10 @@ impl Compiler {
         fn_compiler.struct_layouts = self.struct_layouts.clone();
         fn_compiler.struct_layouts.insert(
             name.to_string(),
-            fields.iter().map(|field| field.name.clone()).collect(),
+            fields
+                .iter()
+                .map(super::StructFieldLayout::from_ast)
+                .collect(),
         );
         let params = vec![TypedParam::untyped("__fields")];
         fn_compiler.declare_param_slots(&params);
@@ -264,6 +272,9 @@ impl Compiler {
         let field_names: Vec<String> = fields.iter().map(|field| field.name.clone()).collect();
         fn_compiler.emit_string_list(&field_names);
         fn_compiler.chunk.emit_u8(Op::Call, 3, self.line);
+        // Constructor path (`User(dict)` and module-exported constructors):
+        // assert field types on the instance before returning it.
+        fn_compiler.emit_struct_field_type_assertion(name);
         fn_compiler.chunk.emit(Op::Return, self.line);
 
         let param_slots = fn_compiler.compile_param_slots(&params);

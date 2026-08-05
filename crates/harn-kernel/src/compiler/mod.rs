@@ -1,5 +1,24 @@
 use harn_parser::{Node, SNode, TypeExpr, TypeParam};
 
+/// One declared struct field retained through compilation for construction
+/// layout and runtime field-type assertions (harn#6268).
+#[derive(Clone, Debug)]
+pub(super) struct StructFieldLayout {
+    pub(super) name: String,
+    pub(super) type_expr: Option<TypeExpr>,
+    pub(super) optional: bool,
+}
+
+impl StructFieldLayout {
+    pub(super) fn from_ast(field: &harn_parser::StructField) -> Self {
+        Self {
+            name: field.name.clone(),
+            type_expr: field.type_expr.clone(),
+            optional: field.optional,
+        }
+    }
+}
+
 mod bindings;
 mod callable_entry;
 mod catalogs;
@@ -289,8 +308,9 @@ pub struct Compiler {
     /// snapshot on scope exit prevents a block-local enum from leaking into
     /// later outer match patterns.
     enum_catalog_scopes: Vec<EnumCatalogSnapshot>,
-    /// Track struct type names to declared field order for indexed instances.
-    struct_layouts: std::collections::HashMap<String, Vec<String>>,
+    /// Track struct type names to declared field order and types for indexed
+    /// instances and construction-site field assertions (harn#6268).
+    struct_layouts: std::collections::HashMap<String, Vec<StructFieldLayout>>,
     /// Track interface names → method names for runtime enforcement.
     interface_methods: std::collections::HashMap<String, Vec<String>>,
     /// Stack of active loop contexts for break/continue.

@@ -1,4 +1,4 @@
-use harn_parser::{BindingPattern, Node, SNode, TypeExpr, TypedParam};
+use harn_parser::{BindingPattern, Node, SNode, ShapeField, TypeExpr, TypedParam};
 
 use crate::chunk::{Op, ParamSlot};
 
@@ -66,6 +66,42 @@ impl Compiler {
             // The table is u16-indexed. Overflowing it drops the check rather
             // than failing the compile: an unenforced annotation is what every
             // release before this one did, and it is the safe direction.
+            return;
+        };
+        self.chunk.emit_u16(Op::AssertBindingType, index, self.line);
+    }
+
+    /// Emit a single shape assertion for every annotated field of `struct_name`.
+    ///
+    /// Expects the constructed instance on top of the stack and leaves it
+    /// there. Unannotated fields and `any` / `unknown` are skipped — the same
+    /// opt-out binding annotations use. Fields without a checkable annotation
+    /// leave the table empty and emit nothing.
+    pub(super) fn emit_struct_field_type_assertion(&mut self, struct_name: &str) {
+        let Some(layout) = self.struct_layouts.get(struct_name).cloned() else {
+            return;
+        };
+        let mut shape_fields = Vec::new();
+        for field in &layout {
+            let Some(type_expr) = &field.type_expr else {
+                continue;
+            };
+            let expanded = self.expand_alias(type_expr);
+            if matches!(&expanded, TypeExpr::Named(name) if name == "any" || name == "unknown") {
+                continue;
+            }
+            shape_fields.push(ShapeField::synthetic(
+                field.name.clone(),
+                expanded,
+                field.optional,
+            ));
+        }
+        if shape_fields.is_empty() {
+            return;
+        }
+        let shape = TypeExpr::Shape(shape_fields);
+        let nominal = self.nominal_type_names_mentioned_by(&shape);
+        let Some(index) = self.chunk.add_binding_type(struct_name, &shape, &nominal) else {
             return;
         };
         self.chunk.emit_u16(Op::AssertBindingType, index, self.line);

@@ -1,0 +1,1 @@
+binding `User` expects {name: string}, got struct

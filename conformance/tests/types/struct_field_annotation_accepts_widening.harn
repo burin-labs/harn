@@ -1,0 +1,14 @@
+struct Point {
+  x: float
+  label: any
+  note: string?
+}
+
+pipeline test(harness: Harness, task) {
+  // What a struct field annotation must keep accepting: int where float is
+  // declared, anything at all for `any`, and nil for an optional.
+  const p = Point {x: 3, label: 12345, note: nil}
+  harness.stdio.log(p.x)
+  harness.stdio.log(p.label)
+  harness.stdio.log(p.note)
+}
