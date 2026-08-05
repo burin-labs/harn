@@ -350,14 +350,24 @@ pipeline main(harness: Harness, task) {
   const base_show = git_show_at(harness.process, base, CHANGELOG_REL)
   harness.stdio.println(
     "check_changelog_no_retroactive_edits: base=" + base + " resolved="
-      + resolved.sha.substring(0, 12)
+      + resolved.sha.substring(
+      0,
+      12,
+    )
       + " base_file="
-      + (if base_show.found { "read" } else { "absent" }),
+      + if base_show.found {
+      "read"
+    } else {
+      "absent"
+    },
   )
   if base_show.error != "" {
     harness.stdio.eprintln(
       "check_changelog_no_retroactive_edits: could not read " + CHANGELOG_REL
-        + " at " + base + " — " + base_show.error,
+        + " at "
+        + base
+        + " — "
+        + base_show.error,
     )
     return 1
   }

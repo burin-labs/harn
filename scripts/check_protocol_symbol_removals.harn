@@ -171,7 +171,11 @@ fn scope_line(
 ) -> string {
   return "check_protocol_symbol_removals: base=" + base
     + " resolved="
-    + (if resolved == "" { "none" } else { resolved.substring(0, 12) })
+    + if resolved == "" {
+    "none"
+  } else {
+    resolved.substring(0, 12)
+  }
     + " watched="
     + to_string(WATCHED.count)
     + " readable_at_head="

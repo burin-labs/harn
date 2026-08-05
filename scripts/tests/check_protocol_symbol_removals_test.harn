@@ -152,10 +152,7 @@ pipeline test_unreachable_base_fails_instead_of_reporting_clean(harness: Harness
   // the path "exists on disk, but not in <sha>" — the same wording it uses for
   // a path that genuinely was not in the tree. Read as absence, an unfetched
   // base makes the guard exit 0 having compared nothing.
-  const missing = resolve_commit(
-    harness.process,
-    "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
-  )
+  const missing = resolve_commit(harness.process, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
   assert_eq(missing.sha, "")
   assert_eq(missing.error != "", true)
   const present = resolve_commit(harness.process, "HEAD")
