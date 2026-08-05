@@ -891,7 +891,7 @@ jobs:
         # that outcome — install unconditionally on the measured target so a
         # budget failure can always produce its own attribution.
         if: matrix.target == 'x86_64-unknown-linux-gnu'
-        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        uses: taiki-e/install-action@065d6a08a14e61e89fb0a4c10eecdbdef39c7d8e # v2.85.4
         with:
           tool: cargo-bloat
 
@@ -1393,7 +1393,7 @@ jobs:
         # Recovery runs load current policy from main but build an older tag.
         # A custom predicate records that checked-out source; the verifier also
         # pins the signer workflow and certificate-backed policy revision.
-        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
         with:
           subject-path: ${{ steps.release-provenance.outputs.archive }}
           predicate-type: https://harnlang.com/attestations/release-archive/v1
@@ -1550,7 +1550,7 @@ jobs:
           done
 
       - name: Log in to GHCR
-        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
