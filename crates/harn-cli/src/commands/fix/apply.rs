@@ -151,6 +151,7 @@ fn apply_repairs_with_options_inner(
         applied,
         skipped,
         skipped_files: remaining.skipped_files,
+        declared_invalid_files: remaining.declared_invalid_files,
         post_apply_diagnostics_count: remaining.count,
         dry_run,
         frozen_callables,
@@ -467,6 +468,7 @@ pub(super) fn validate_edit_composition(path: &Path, edits: &[FixEditWire]) -> R
 struct RemainingDiagnostics {
     count: usize,
     skipped_files: Vec<SkippedFileWire>,
+    declared_invalid_files: Vec<SkippedFileWire>,
 }
 
 fn count_remaining_diagnostics(targets: &[PathBuf]) -> Result<RemainingDiagnostics, String> {
@@ -487,6 +489,7 @@ fn count_remaining_diagnostics(targets: &[PathBuf]) -> Result<RemainingDiagnosti
     let mut analysis = AnalysisDatabase::new();
     let mut count = 0;
     let mut skipped_files = Vec::new();
+    let mut declared_invalid_files = Vec::new();
 
     for file in &files {
         let mut config = package::load_check_config(Some(file));
@@ -495,10 +498,17 @@ fn count_remaining_diagnostics(targets: &[PathBuf]) -> Result<RemainingDiagnosti
             match commands::check::analyze_file(&mut analysis, file, &config, &module_graph) {
                 Ok(output) => output,
                 Err(skipped) => {
-                    skipped_files.push(skipped_file_from_analysis_error(
+                    let wire = skipped_file_from_analysis_error(
                         file.to_string_lossy().into_owned(),
                         skipped,
-                    ));
+                    );
+                    // A fixture the repo declares expected-invalid is still not
+                    // repairable, but it must not fail the run (harn#6264).
+                    if super::declares_expected_invalid(file) {
+                        declared_invalid_files.push(wire);
+                    } else {
+                        skipped_files.push(wire);
+                    }
                     continue;
                 }
             };
@@ -538,5 +548,6 @@ fn count_remaining_diagnostics(targets: &[PathBuf]) -> Result<RemainingDiagnosti
     Ok(RemainingDiagnostics {
         count,
         skipped_files,
+        declared_invalid_files,
     })
 }
