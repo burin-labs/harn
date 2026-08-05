@@ -11,6 +11,7 @@ pub(crate) struct RegistryVerificationReceipt {
     pub version_count: usize,
     pub remote_resolution: bool,
     pub resolved_git_versions: usize,
+    pub verified_manifests: usize,
     pub ok: bool,
     pub errors: Vec<String>,
 }
@@ -24,6 +25,7 @@ fn failed_receipt(source: &str, remote: bool, error: impl ToString) -> RegistryV
         version_count: 0,
         remote_resolution: remote,
         resolved_git_versions: 0,
+        verified_manifests: 0,
         ok: false,
         errors: vec![error.to_string()],
     }
@@ -68,6 +70,65 @@ fn resolve_git_tag(git: &str, tag: &str) -> Result<String, PackageError> {
         .ok_or_else(|| format!("{git} tag {tag} did not return a commit").into())
 }
 
+/// Prove the pinned revision's manifest declares the identity the index sells.
+///
+/// A registry entry makes two separate claims: that a package version exists,
+/// and that its bytes live at some commit. Nothing structural ties them
+/// together. An entry can advertise `0.1.0` while the manifest at its own
+/// `rev` still says `0.0.0`, and uniqueness, provenance shape, and even
+/// remote tag identity all still pass — the tag really does resolve to that
+/// commit; the commit just isn't the version being sold. Reading the manifest
+/// is the only check that closes the gap, so remote verification reads it.
+fn verify_manifest_identity(
+    git: &str,
+    commit: &str,
+    expected_package: Option<&str>,
+    expected_version: &str,
+) -> Result<(), PackageError> {
+    let checkout = unique_temp_dir(&std::env::temp_dir(), "harn-registry-verify")?;
+    let verified = (|| -> Result<(), PackageError> {
+        clone_git_commit_to(git, commit, &checkout)?;
+        let Some(manifest) = read_package_manifest_from_dir(&checkout)? else {
+            return Err(format!("{commit} has no {MANIFEST}").into());
+        };
+        let Some(package) = manifest.package else {
+            return Err(format!("{MANIFEST} at {commit} has no [package] section").into());
+        };
+        if let Some(expected) = expected_package {
+            match package.name.as_deref() {
+                Some(name) if name == expected => {}
+                Some(name) => {
+                    return Err(format!(
+                        "{MANIFEST} at {commit} declares package {name}, expected {expected}"
+                    )
+                    .into())
+                }
+                None => {
+                    return Err(format!(
+                        "{MANIFEST} at {commit} declares no package name, expected {expected}"
+                    )
+                    .into())
+                }
+            }
+        }
+        match package.version.as_deref() {
+            Some(version) if version == expected_version => Ok(()),
+            Some(version) => Err(format!(
+                "{MANIFEST} at {commit} declares version {version}, expected {expected_version}"
+            )
+            .into()),
+            None => Err(format!(
+                "{MANIFEST} at {commit} declares no version, expected {expected_version}"
+            )
+            .into()),
+        }
+    })();
+    // A verification checkout is scratch space; leaving it behind would grow
+    // the temp directory by one tree per registry version per run.
+    let _ = fs::remove_dir_all(&checkout);
+    verified
+}
+
 pub(crate) fn verify_package_registry_impl(
     source: &str,
     remote: bool,
@@ -88,9 +149,21 @@ pub(crate) fn verify_package_registry_impl(
         .sum();
     let mut errors = Vec::new();
     let mut resolved_git_versions = 0;
+    let mut verified_manifests = 0;
     if remote {
         for package in &index.packages {
             for version in &package.versions {
+                // Remote verification proves what the registry can resolve. A
+                // yanked version is unresolvable by construction — resolution
+                // filters it out of range selection and refuses it by name —
+                // so the registry makes no live claim about its source and
+                // there is nothing left to prove. This is also the only way to
+                // retire a record whose upstream history can no longer be
+                // corrected, without deleting the record or restating it as
+                // something it never was.
+                if version.yanked {
+                    continue;
+                }
                 let (Some(git), Some(tag), Some(expected)) = (
                     version.git.as_deref(),
                     version.tag.as_deref(),
@@ -101,6 +174,18 @@ pub(crate) fn verify_package_registry_impl(
                 match resolve_git_tag(git, tag) {
                     Ok(actual) if actual.eq_ignore_ascii_case(expected) => {
                         resolved_git_versions += 1;
+                        match verify_manifest_identity(
+                            git,
+                            expected,
+                            version.package.as_deref(),
+                            &version.version,
+                        ) {
+                            Ok(()) => verified_manifests += 1,
+                            Err(error) => errors.push(format!(
+                                "{}@{} manifest identity failed: {error}",
+                                package.name, version.version
+                            )),
+                        }
                     }
                     Ok(actual) => errors.push(format!(
                         "{}@{} tag {} resolves to {}, expected {}",
@@ -122,6 +207,7 @@ pub(crate) fn verify_package_registry_impl(
         version_count,
         remote_resolution: remote,
         resolved_git_versions,
+        verified_manifests,
         ok: errors.is_empty(),
         errors,
     }
@@ -149,7 +235,10 @@ pub fn verify_package_registry(source: &str, remote: bool, json: bool, receipt_o
             receipt.package_count,
             receipt.version_count,
             if remote {
-                format!(", {} Git tag identities", receipt.resolved_git_versions)
+                format!(
+                    ", {} Git tag identities, {} manifest identities",
+                    receipt.resolved_git_versions, receipt.verified_manifests
+                )
             } else {
                 String::new()
             }

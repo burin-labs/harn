@@ -372,7 +372,10 @@ harn package registry verify harn-package-index.toml --remote \
 ```
 
 Omit `--remote` for deterministic schema-only verification. With `--remote`,
-Harn resolves every Git tag and compares it to the recorded commit.
+Harn resolves every Git tag, compares it to the recorded commit, and reads
+`harn.toml` at that commit to confirm it declares the package name and version
+the entry advertises. Keeping the manifest version in lockstep with the tag is
+therefore mechanically enforced, not a convention.
 
 ## Cross-repo bump workflow
 
