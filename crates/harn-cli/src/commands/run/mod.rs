@@ -863,6 +863,19 @@ async fn execute_run_inner_scoped(
     }
     harn_vm::register_vm_stdlib(&mut vm);
     crate::install_default_hostlib(&mut vm);
+    // A project that declares `[check].trusted_host_dispatch` has declared
+    // itself a privileged embedder. `check`, `lint`, and `test` all honor it;
+    // `run` did not, and it has no CLI flag to compensate, so the manifest's
+    // own trigger handlers were compiled without the authority and refused
+    // every `host_call` before the script body ever ran. Enable it here, ahead
+    // of the first import, so one declaration means one thing everywhere.
+    if crate::compiler_context::trusted_host_dispatch_for_source(std::path::Path::new(path)) {
+        if let Err(error) = vm.enable_trusted_host_dispatch() {
+            stderr.push_str(&format!(
+                "warning: failed to enable trusted host dispatch: {error}\n"
+            ));
+        }
+    }
     let source_parent = std::path::Path::new(path)
         .parent()
         .unwrap_or(std::path::Path::new("."));

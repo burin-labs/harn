@@ -236,6 +236,21 @@ pub(crate) async fn execute_with_skill_dirs_and_options(
             let mut vm = harn_vm::Vm::new();
             harn_vm::register_vm_stdlib(&mut vm);
             install_default_hostlib(&mut vm);
+            // Compiling for trusted host dispatch only lowers the call; the VM
+            // still refuses it at runtime unless the same authority is enabled
+            // here. This must happen before the first import, which is why it
+            // sits immediately after stdlib registration.
+            if source_path
+                .map(crate::compiler_context::trusted_host_dispatch_for_source)
+                .unwrap_or(false)
+            {
+                vm.enable_trusted_host_dispatch().map_err(|error| {
+                    ExecError::new(
+                        ExecStage::Runtime,
+                        format!("failed to enable trusted host dispatch: {error}"),
+                    )
+                })?;
+            }
             let source_parent = source_path
                 .and_then(|p| p.parent())
                 .unwrap_or(std::path::Path::new("."));
