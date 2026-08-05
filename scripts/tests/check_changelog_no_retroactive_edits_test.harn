@@ -1,6 +1,9 @@
 // Tests for scripts/check_changelog_no_retroactive_edits.harn — exercise the
 // pure helpers on synthetic inputs (no filesystem / git dependency).
 import "../check_changelog_no_retroactive_edits.harn"
+// `flag_value` moved to the shared git plumbing when the protocol-symbol guard
+// grew the same needs; these cases keep pinning its behavior from here.
+import { flag_value } from "../git_base.harn"
 
 // --- heading_version / is_all_digits -------------------------------------
 @test
