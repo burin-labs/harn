@@ -345,14 +345,35 @@ pub(super) fn repair_for_ambient_capability_plan(
 /// callable at its declared arity through a call site the fixer cannot see, so
 /// its parameter list is observable and must not move.
 ///
-/// Collecting every identifier and intersecting with the callable set errs
-/// toward freezing a signature the fixer could have changed, which costs a
-/// human one edit. The opposite error silently rewires a call nothing can
+/// Names this file binds locally are excluded. Reading `repo_root` where the
+/// file says `const repo_root = ...` is a read of that local, not of some
+/// same-named callable in another module, and freezing on it costs the whole
+/// migration rather than one edit: on burin-code's `scripts/` corpus this
+/// distinction is the difference between 6 repairs and hundreds.
+///
+/// Erring toward freezing is still the right default for a genuine ambiguity —
+/// a file that both binds a name locally AND dispatches a callable of that name
+/// is pathological, and the opposite error silently rewires a call nothing can
 /// type-check.
 pub(super) fn collect_value_references(program: &[SNode], names: &mut BTreeSet<String>) {
+    let mut local = BTreeSet::new();
+    visit::walk_program(program, &mut |node| match &node.node {
+        Node::LetBinding { pattern, .. } | Node::ConstBinding { pattern, .. } => {
+            collect_pattern_names(pattern, &mut local);
+        }
+        Node::FnDecl { params, .. }
+        | Node::Pipeline { params, .. }
+        | Node::ToolDecl { params, .. }
+        | Node::Closure { params, .. } => {
+            local.extend(params.iter().map(|param| param.name.clone()));
+        }
+        _ => {}
+    });
     visit::walk_program(program, &mut |node| {
         if let Node::Identifier(name) = &node.node {
-            names.insert(name.clone());
+            if !local.contains(name) {
+                names.insert(name.clone());
+            }
         }
     });
 }
