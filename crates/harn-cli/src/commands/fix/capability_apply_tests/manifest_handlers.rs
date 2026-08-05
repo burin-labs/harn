@@ -160,6 +160,38 @@ fn a_trigger_handler_reached_through_an_export_is_frozen() {
     );
 }
 
+/// A frozen handler with more than one ambient call must not have its body
+/// rewritten either.
+///
+/// Only the primary ambient call's repair carries the signature edit; a
+/// secondary site emits just the body rewrite and leans on that repair to bind
+/// the receiver. Freezing refuses the primary and the secondary landed anyway,
+/// producing `harness.runtime.store_get(...)` inside a declaration that never
+/// gains a `harness`. Byte-identical is the only safe outcome: a half-applied
+/// migration is worse than none, because it does not parse as the code anyone
+/// wrote.
+///
+/// This is `enforce_stage_tool_gate` in burin-code, reduced.
+#[test]
+fn a_frozen_handler_with_two_ambient_calls_is_not_half_rewritten() {
+    const TWO_AMBIENT_CALLS: &str = concat!(
+        "pub fn on_pre_tool_use(event) {\n",
+        "  const current = (agent_session_current_id() ?? \"\").trim()\n",
+        "  const session = current ? current : (store_get(\"k\") ?? \"\").trim()\n",
+        "  store_set(\"last\", session)\n",
+        "  return nil\n",
+        "}\n",
+    );
+    let migrated = migrate_package(&[
+        ("harn.toml", MANIFEST_WITH_HOOK),
+        ("lib.harn", TWO_AMBIENT_CALLS),
+    ]);
+    assert_eq!(
+        migrated["lib.harn"], TWO_AMBIENT_CALLS,
+        "a frozen handler must be left byte-identical, body included"
+    );
+}
+
 /// The reason has to send the reader to `harn.toml`. Told it was a value
 /// escape, an author would go looking for a first-class reference that does not
 /// exist; told it was `@host_entry`, for an attribute that is not there.

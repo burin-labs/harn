@@ -326,9 +326,21 @@ pub(super) fn plan(
     // site exists for the type checker to report. Freeze the signature and
     // leave the site for a human, who can wrap it — `{ args -> f(harness,
     // args) }` — where the fixer cannot.
+    //
+    // A value reference is one way a caller becomes invisible; a declared entry
+    // point is the other. `@host_entry` and a `harn.toml` handler both fix the
+    // arity from outside this program, and this pass reached neither: it read
+    // `referenced_by_value` directly instead of the decision that combines all
+    // three. So `@host_entry` stopped a *narrowing* (#6193) but not an
+    // *introduction* — `enforce_stage_tool_gate(event)` still became
+    // `(harness: Harness, event)` here, with the attribute sitting right above
+    // it and no frozen-callable report to say so.
     let arity_observable = callables
         .iter()
-        .map(|callable| referenced_by_value.contains(&callable.info.name))
+        .map(|callable| {
+            referenced_by_value.contains(&callable.info.name)
+                || callable.info.frozen_cause.is_some()
+        })
         .collect::<Vec<_>>();
     let desired = callables
         .iter()

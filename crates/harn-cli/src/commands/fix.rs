@@ -957,11 +957,11 @@ fn lint_candidate_repair(
     module_graph: &harn_modules::ModuleGraph,
     escape: &mut ValueEscape<'_>,
 ) -> Option<(Repair, Vec<FixEdit>, RepairImpactWire)> {
+    let exported_names = module_graph
+        .exports_for_module(file)
+        .into_iter()
+        .collect::<BTreeSet<_>>();
     if ambient_capability_handle(diag.code).is_some() {
-        let exported_names = module_graph
-            .exports_for_module(file)
-            .into_iter()
-            .collect::<BTreeSet<_>>();
         let context = AmbientRepairContext {
             cross_module_importer_count: module_graph.importers_of(file).len(),
         };
