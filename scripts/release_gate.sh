@@ -747,6 +747,31 @@ cmd_audit() {
   local -a failed_lane_indices=()
   local needs_harn_performance=0
 
+  # Lane concurrency is a property of the machine, not of the audit. Each lane
+  # runs its own worker pool sized to the host (nextest in `rust-audit`, `harn
+  # test conformance --parallel` in `harn-audit`), so running them together
+  # oversubscribes the CPU by however many lanes are live. On a workstation
+  # that is the point. On a four-core hosted runner it starves the conformance
+  # pool until agent cases that suspend and cold-restart a subprocess exceed
+  # the per-test timeout, which is a hang backstop rather than a performance
+  # budget — so contention reads as a hang and fails the release.
+  #
+  # `ci.yml` already resolved the same starvation for the same two pools by
+  # giving conformance its own runner. This gate has one machine, so it
+  # serializes instead when the host cannot cover the lanes it would launch.
+  local lane_cpus="${HARN_RELEASE_GATE_LANE_CPUS:-}"
+  if [[ -z "$lane_cpus" ]]; then
+    lane_cpus="$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 0)"
+  fi
+  # Two cores per lane is the smallest split under which neither pool is
+  # reduced to a single worker. Below that, overlap costs more than it buys.
+  local serial_lanes=0
+  if [[ "$lane_cpus" -gt 0 && "$lane_cpus" -lt $(( ${#SELECTED_AUDIT_STEPS[@]} * 2 )) ]]; then
+    serial_lanes=1
+    printf 'audit lanes: serial (%s cpu for %s lanes)\n' \
+      "$lane_cpus" "${#SELECTED_AUDIT_STEPS[@]}"
+  fi
+
   # Each step writes its wall-clock duration to `<name>.dur` so the
   # parent can report per-step timings once everyone wraps. That lets
   # the release gate call out which audit lane is the long pole.
@@ -784,9 +809,19 @@ cmd_audit() {
     shift
     printf 'log: %-15s (%s)\n' "$name" "$tmp/$name.log"
     run_step "$name" "$@" &
+    local launched="$!"
     steps+=("$name")
-    pids+=("$!")
     runners+=("$1")
+    if [[ "$serial_lanes" -eq 1 ]]; then
+      # Settle this lane before the next one launches. The status is recorded
+      # in `<name>.rc` by `run_step`, so the settle loop below reads that
+      # instead of waiting on a pid it has already reaped. Record an empty pid
+      # to mark the lane as already settled.
+      wait "$launched" || true
+      pids+=("")
+      return
+    fi
+    pids+=("$launched")
   }
 
   local lane_idx
@@ -813,7 +848,18 @@ cmd_audit() {
     local step="${steps[$idx]}"
     local pid="${pids[$idx]}"
     local dur=""
-    if wait "$pid"; then
+    # A serialized lane was already reaped in `launch_step`, so its exit status
+    # survives only in `<step>.rc`. A missing file means the lane died without
+    # writing one, which counts as a failure.
+    local lane_rc=0
+    if [[ -n "$pid" ]]; then
+      wait "$pid" || lane_rc=$?
+    elif [[ -f "$tmp/$step.rc" ]]; then
+      lane_rc="$(cat "$tmp/$step.rc")"
+    else
+      lane_rc=1
+    fi
+    if [[ "$lane_rc" -eq 0 ]]; then
       dur="$([[ -f "$tmp/$step.dur" ]] && cat "$tmp/$step.dur" || echo '?')"
       printf 'ok: %-15s (%ss)\n' "$step" "$dur"
     else

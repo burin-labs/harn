@@ -398,6 +398,7 @@ run_parallel_case() {
     CARGO_TARGET_DIR="$target" \
     CARGO_BUILD_BUILD_DIR="$build" \
     FAKE_AUDIT_LANE=parallel \
+    HARN_RELEASE_GATE_LANE_CPUS=64 \
     FAKE_CARGO_MODE=stale-then-success \
     FAKE_CARGO_RECORD="$state/cargo-record" \
     FAKE_CARGO_STATE="$state" \
@@ -438,6 +439,77 @@ if ! grep -Fq 'recovery: retrying rust-audit (round 1 of' \
   "$parallel_state/output"; then
   echo "parallel recovery telemetry is missing" >&2
   cat "$parallel_state/output" >&2
+  exit 1
+fi
+
+# Lane concurrency is chosen from the host's CPU count: each lane runs its own
+# worker pool, so on a machine too small to cover them the gate serializes
+# rather than oversubscribing and starving a pool past its per-test timeout.
+# A serialized lane is reaped as it is launched, so it settles through its
+# `<step>.rc` file rather than through `wait`; these cases cover that path and
+# the decision that selects it.
+run_lane_cpu_case() {
+  local label="$1"
+  local cpus="$2"
+  local state="$tmp_root/state-lanecpu-$label"
+  local target="$tmp_root/target lanecpu $label"
+  local build="$tmp_root/build lanecpu $label"
+  mkdir -p "$state" "$target/deps" "$build/debug"
+  : > "$state/cargo-record"
+  : > "$state/make-record"
+  : > "$state/event-record"
+  set +e
+  HARN_RELEASE_ROOT="$release_root" \
+    HARN_BIN="$fake_harn" \
+    CARGO_TARGET_DIR="$target" \
+    CARGO_BUILD_BUILD_DIR="$build" \
+    FAKE_AUDIT_LANE=parallel \
+    HARN_RELEASE_GATE_LANE_CPUS="$cpus" \
+    FAKE_CARGO_MODE=success \
+    FAKE_CARGO_RECORD="$state/cargo-record" \
+    FAKE_CARGO_STATE="$state" \
+    FAKE_EVENT_RECORD="$state/event-record" \
+    FAKE_MAKE_MODE=success \
+    FAKE_MAKE_RECORD="$state/make-record" \
+    PATH="$fake_bin:$PATH" \
+    "$release_tools/release_gate.sh" audit --source-only > "$state/output" 2>&1
+  local status=$?
+  set -e
+  printf '%s\n' "$status" > "$state/status"
+  printf '%s\n' "$state"
+}
+
+# Two lanes on two CPUs cannot give either pool more than one worker.
+serial_state=$(run_lane_cpu_case serial 2)
+if [[ "$(<"$serial_state/status")" -ne 0 ]]; then
+  echo "serialized audit lanes should still pass" >&2
+  cat "$serial_state/output" >&2
+  exit 1
+fi
+if ! grep -Fq 'audit lanes: serial (2 cpu for 2 lanes)' "$serial_state/output"; then
+  echo "a host too small for its lanes should serialize them" >&2
+  cat "$serial_state/output" >&2
+  exit 1
+fi
+# Both lanes must still be reported, which is what proves the `.rc` settle path
+# reaches the same bookkeeping as the `wait` path.
+for lane in rust-audit security-audit; do
+  if ! grep -Eq "^ok: +$lane " "$serial_state/output"; then
+    echo "serialized lane $lane is missing from the settle report" >&2
+    cat "$serial_state/output" >&2
+    exit 1
+  fi
+done
+
+wide_state=$(run_lane_cpu_case wide 64)
+if [[ "$(<"$wide_state/status")" -ne 0 ]]; then
+  echo "parallel audit lanes should pass on a wide host" >&2
+  cat "$wide_state/output" >&2
+  exit 1
+fi
+if grep -Fq 'audit lanes: serial' "$wide_state/output"; then
+  echo "a host with CPUs to spare should keep its lanes parallel" >&2
+  cat "$wide_state/output" >&2
   exit 1
 fi
 
