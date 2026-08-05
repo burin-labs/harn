@@ -665,3 +665,23 @@ fn test_workflow_and_transcript_builtins_are_known() {
     );
     assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
 }
+
+/// A destructuring default is ordinary code, so every call diagnostic must
+/// reach inside it.
+///
+/// `check_pattern_defaults` used to run only `check_binops`, which left calls
+/// inside a default completely unchecked. burin-code shipped a one-argument
+/// call to a two-argument function in exactly that position; it threw at run
+/// time while `harn check` reported nothing.
+#[test]
+fn arity_is_checked_inside_a_destructuring_default() {
+    let warns = warnings(
+        "fn needs_two(a, b) {\n  return a\n}\n\nfn main() {\n  const source = {}\n  const {flag = false || needs_two(source)} = source\n  log(flag)\n}",
+    );
+    assert!(
+        warns
+            .iter()
+            .any(|w| w.contains("'needs_two' expects at least 2 arguments, got 1")),
+        "a call inside a destructuring default must be arity-checked: {warns:?}"
+    );
+}
