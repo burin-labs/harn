@@ -1849,9 +1849,9 @@
       "summary": "untyped dict access lint",
       "repairs": [
         {
-          "id": "types/add-shape-annotation",
-          "safety": "surface-changing",
-          "summary": "Annotate the dict with a concrete shape type"
+          "id": "types/validate-boundary-value",
+          "safety": "scope-local",
+          "summary": "Validate the parsed value with schema_expect() or schema_check() before reading it"
         }
       ],
       "related": [],
