@@ -93,7 +93,7 @@ jsonschema = { version = "0.47", default-features = false }
 rcgen = "0.14"
 libc = "0.2"
 tokio-stream = "0.1"
-base64 = "0.22"
+base64 = "0.23"
 cookie = { version = "0.18.1", features = ["signed", "key-expansion"] }
 bytes = "1"
 data-encoding = "2"

@@ -159,7 +159,7 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 globset = "0.4"
 walkdir = "2"
-base64 = "0.22"
+base64 = "0.23"
 regex = "1"
 regex-automata = "0.4"
 
