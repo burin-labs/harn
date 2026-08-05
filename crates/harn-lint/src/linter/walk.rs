@@ -478,7 +478,7 @@ impl<'a> Linter<'a> {
                             span: snode.span,
                             severity: LintSeverity::Warning,
                             suggestion: Some(
-                                "assign to a variable and validate with schema_expect() or a type annotation first"
+                                "assign to a variable and validate with schema_expect() or schema_check() first"
                                     .to_string(),
                             ),
                             fix: None,
@@ -501,7 +501,7 @@ impl<'a> Linter<'a> {
                             span: snode.span,
                             severity: LintSeverity::Warning,
                             suggestion: Some(
-                                "assign to a variable and validate with schema_expect() or a type annotation first"
+                                "assign to a variable and validate with schema_expect() or schema_check() first"
                                     .to_string(),
                             ),
                             fix: None,

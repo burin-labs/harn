@@ -639,7 +639,7 @@ impl TypeChecker {
                     self.error_at_with_help(Code::BoundaryValueUnvalidated,
                         format!("{} on unvalidated `{}()` result", kind.direct_label(), name),
                         span,
-                        "assign to a variable and validate with schema_expect() or a type annotation first".to_string(),
+                        "assign to a variable and validate with schema_expect() or schema_check() first".to_string(),
                     );
                 }
             }
@@ -654,7 +654,7 @@ impl TypeChecker {
                         source
                     ),
                     span,
-                    "validate with schema_expect(), schema_is() in an if-condition, or add a shape type annotation".to_string(),
+                    "validate with schema_expect(), schema_check(), or schema_is() in an if-condition".to_string(),
                 );
             }
         }

@@ -87,6 +87,41 @@ fn test_strict_types_shape_annotation_clears() {
     );
 }
 
+/// Every remedy HARN-OWN-004 names must actually validate.
+///
+/// The help used to offer "add a shape type annotation" alongside
+/// `schema_expect` and `schema_is`. An annotation clears the diagnostic without
+/// checking anything at runtime — an `int` reads out of a field declared
+/// `string`, and a JSON array satisfies a record annotation — so the help
+/// steered toward the one remedy that removes the signal without adding the
+/// safety, and it was also the cheapest to apply. See harn#6234.
+///
+/// The annotation remains a valid author assertion and still clears the rule;
+/// what changed is that the diagnostic no longer recommends it as validation.
+#[test]
+fn test_strict_types_unvalidated_help_only_names_validating_remedies() {
+    let help = check_source_strict(
+        r#"pipeline t(task) {
+  const data = json_parse("{}")
+  log(data.name)
+}"#,
+    )
+    .into_iter()
+    .find(|diag| diag.code == Code::BoundaryValueUnvalidated)
+    .expect("source should produce HARN-OWN-004")
+    .help
+    .expect("HARN-OWN-004 carries help");
+
+    assert!(
+        !help.contains("annotation"),
+        "help must not recommend a type annotation as validation, got: {help}"
+    );
+    assert!(
+        help.contains("schema_expect") && help.contains("schema_is"),
+        "help must name the validating remedies, got: {help}"
+    );
+}
+
 #[test]
 fn test_strict_types_propagation() {
     let errs = strict_errors(
