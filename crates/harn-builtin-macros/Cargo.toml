@@ -12,7 +12,7 @@ description = "#[harn_builtin] proc-macro: emits a runtime registration entry pl
 proc-macro = true
 
 [dependencies]
-syn = { version = "2", features = ["full", "extra-traits"] }
+syn = { version = "3", features = ["full", "extra-traits"] }
 quote = "1"
 proc-macro2 = "1"
 harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.55" }

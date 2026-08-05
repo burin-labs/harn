@@ -15,7 +15,7 @@ harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.55
 
 [build-dependencies]
 proc-macro2 = "1"
-syn = { version = "2", features = ["full"] }
+syn = { version = "3", features = ["full"] }
 
 [lints]
 workspace = true
