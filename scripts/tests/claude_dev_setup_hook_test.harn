@@ -11,7 +11,10 @@ pipeline test_claude_dev_setup_cwd_accepts_only_string_cwd(harness: Harness, tas
 @test
 pipeline test_claude_dev_setup_context_round_trips_json_escaping(harness: Harness, task) {
   const message = "Project \"setup\" completed.\nLog: /tmp/a b/setup.log"
-  const parsed = json_parse(claude_dev_setup_context(message))
-  assert_eq(parsed?.hookSpecificOutput?.hookEventName, "SessionStart")
-  assert_eq(parsed?.hookSpecificOutput?.additionalContext, message)
+  const parsed = schema_expect(
+    json_parse(claude_dev_setup_context(message)),
+    claude_dev_setup_context_schema(),
+  )
+  assert_eq(parsed.hookSpecificOutput.hookEventName, "SessionStart")
+  assert_eq(parsed.hookSpecificOutput.additionalContext, message)
 }

@@ -2,6 +2,59 @@
 // harn-hostlib. The receipt keys fitness to resolved package artifacts and the
 // exact corpus bytes; semantic fitness is enforced by the Rust corpus test.
 import { unified_diff } from "std/diff"
+import "std/schema"
+
+/**
+ * The corpus fields this script reads.
+ *
+ * The receipt it generates is consumed by ParserHealth, so a row missing
+ * `operations` or `authority` would otherwise be written into a committed
+ * artifact as `nil` and only surface wherever that artifact is trusted.
+ */
+fn corpus_schema() {
+  return schema_object(
+    {
+      schema_version: schema_field(schema_int()),
+      rows: schema_field(
+        schema_list(
+          schema_object(
+            {
+              language: schema_field(schema_string()),
+              fixture: schema_field(schema_string()),
+              operations: schema_field(schema_any()),
+              authority: schema_field(schema_any()),
+            },
+            {additional_properties: true},
+          ),
+        ),
+      ),
+    },
+    {additional_properties: true},
+  )
+}
+
+/** The `Cargo.lock` fields the package lookups need. */
+fn lock_schema() {
+  return schema_object(
+    {
+      package: schema_field(
+        schema_list(
+          schema_object(
+            {
+              name: schema_field(schema_string()),
+              version: schema_field(schema_string()),
+              source: schema_field(schema_string(), false),
+              checksum: schema_field(schema_string(), false),
+            },
+            {additional_properties: true},
+          ),
+        ),
+        false,
+      ),
+    },
+    {additional_properties: true},
+  )
+}
 
 const CORPUS = "crates/harn-hostlib/data/grammar-fitness/corpus.v1.json"
 
@@ -162,12 +215,19 @@ pub fn grammar_drift(committed_text: string, candidate_text: string) -> list<Gra
 
 fn render_receipt(fs: HarnessFs) -> string {
   const corpus_text = fs.read_text(CORPUS)
-  const corpus = json_parse(corpus_text)
-  if corpus?.schema_version != 1 {
+  const corpus_result = schema_check(json_parse(corpus_text), corpus_schema())
+  if is_err(corpus_result) {
+    throw "grammar fitness corpus is malformed: ${unwrap_err(corpus_result).message}"
+  }
+  const corpus = unwrap(corpus_result)
+  if corpus.schema_version != 1 {
     throw "unsupported grammar fitness corpus schema version"
   }
-  const lock = toml_parse(fs.read_text(LOCKFILE))
-  const packages = lock?.package ?? []
+  const lock_result = schema_check(toml_parse(fs.read_text(LOCKFILE)), lock_schema())
+  if is_err(lock_result) {
+    throw "${LOCKFILE} is malformed: ${unwrap_err(lock_result).message}"
+  }
+  const packages = unwrap(lock_result).package ?? []
   let languages = []
   for mapping in LANGUAGE_PACKAGES {
     const package = package_by_name(packages, mapping.package)

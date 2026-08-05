@@ -1,4 +1,5 @@
 import { help_requested, parse, parser } from "std/cli/argparse"
+import "std/schema"
 
 pub fn claude_dev_setup_cwd(input: string) -> string {
   let parsed = nil
@@ -15,6 +16,30 @@ pub fn claude_dev_setup_cwd(input: string) -> string {
     return ""
   }
   return to_string(cwd)
+}
+
+/**
+ * The Claude Code SessionStart hook contract this script emits.
+ *
+ * Exported so the round-trip test checks the document against the contract
+ * rather than against a restatement of it: the point of that test is that the
+ * escaping survives, and it can only mean that if both ends agree on the shape.
+ */
+pub fn claude_dev_setup_context_schema() {
+  return schema_object(
+    {
+      hookSpecificOutput: schema_field(
+        schema_object(
+          {
+            hookEventName: schema_field(schema_literal("SessionStart")),
+            additionalContext: schema_field(schema_string()),
+          },
+          {additional_properties: true},
+        ),
+      ),
+    },
+    {additional_properties: true},
+  )
 }
 
 pub fn claude_dev_setup_context(message: string) -> string {

@@ -1,4 +1,5 @@
 import { shell_quote } from "std/runtime"
+import "std/schema"
 
 const BASELINES = "bench/test-case-performance/baselines.toml"
 
@@ -268,8 +269,34 @@ pub fn evaluate_metrics(metrics: dict, baseline: dict) -> dict {
   return {ok: failures.count == 0, failures: failures, warnings: warnings, limits: limits}
 }
 
+/**
+ * What the baseline file has to look like.
+ *
+ * The two version fields are the file's own compatibility declaration, so a
+ * non-integer there is not a stale baseline to be rejected by the version
+ * comparison below — it is a malformed file, and worth saying so distinctly.
+ */
+fn baseline_schema() {
+  return schema_object(
+    {
+      schema_version: schema_field(schema_int(), false),
+      workload_version: schema_field(schema_int(), false),
+      platform: schema_field(schema_dict(schema_dict()), false),
+    },
+    {additional_properties: true},
+  )
+}
+
 pub fn load_platform_baseline(text: string, platform: string) -> dict {
-  const parsed = toml_parse(text)
+  const checked = schema_check(toml_parse(text), baseline_schema())
+  if is_err(checked) {
+    return {
+      ok: false,
+      error: "baseline file is malformed: ${unwrap_err(checked).message}",
+      baseline: {},
+    }
+  }
+  const parsed = unwrap(checked)
   if int_number(parsed?.schema_version) != 1 {
     return {ok: false, error: "baseline schema_version must be 1", baseline: {}}
   }

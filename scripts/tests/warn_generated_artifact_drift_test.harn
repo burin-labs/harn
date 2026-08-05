@@ -1,3 +1,4 @@
+import "../generated_artifacts_schema.harn"
 // Unit tests for scripts/warn_generated_artifact_drift.harn.
 import "../warn_generated_artifact_drift.harn"
 
@@ -125,8 +126,11 @@ pipeline test_format_warning_names_make_target(harness: Harness, task) {
 
 @test
 pipeline test_real_registry_highlight_source_warns(harness: Harness, task) {
-  const registry = toml_parse(harness.fs.read_text("../generated_artifacts.toml"))
-  const warnings = drift_warnings(registry?.artifact ?? [], ["crates/harn-lexer/src/token.rs"])
+  const registry = schema_expect(
+    toml_parse(harness.fs.read_text("../generated_artifacts.toml")),
+    generated_artifacts_schema(),
+  )
+  const warnings = drift_warnings(registry.artifact ?? [], ["crates/harn-lexer/src/token.rs"])
   const ids = warnings.map({ w -> w.id })
   assert_eq(ids.contains("highlight"), true)
   assert_eq(ids.contains("tree-sitter-keywords"), true)

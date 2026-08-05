@@ -454,10 +454,14 @@ lint-harn:
 # `lint --strict` does not typecheck: it reported no issues for scripts that
 # `harn run` refuses to execute. Whether a script was typed came down to
 # whether some other target happened to run that exact file, so a script only
-# ever imported by a test had no type gate at all. This is the runnability bar
-# — every file here must at least be able to run.
+# ever imported by a test had no type gate at all.
+#
+# `--strict-types` matches the bar harn-bump-fleet holds its own harnesses to
+# in scripts/harn-project.sh. It adds HARN-OWN-004, which requires a parsed
+# document to be validated at the boundary that reads it rather than
+# dereferenced on faith.
 	@echo "=== Type-checking Harn-authored scripts ==="
-	@$(HARN_CMD) check scripts/*.harn scripts/tests/*.harn
+	@$(HARN_CMD) check --strict-types scripts/*.harn scripts/tests/*.harn
 	@echo "=== Linting bundled demo scenarios ==="
 	@$(HARN_CMD) lint --strict crates/harn-cli/assets/demo
 	@echo "=== Checking stdlib metadata contract (HARN-STD-101) ==="
