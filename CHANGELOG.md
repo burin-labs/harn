@@ -9,6 +9,76 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.58
+
+### Breaking
+
+- A type annotation on a `let` or `const` is now checked at runtime against its
+  initializer, the same way a declared parameter type is already checked against
+  its argument. `const doc: {name: string} = json_parse(text)` rejects a payload
+  whose `name` is not a string instead of binding it and failing later somewhere
+  else.
+
+  This closes the gap that made an annotation on a boundary value decorative: the
+  type system trusted the annotation for everything downstream while nothing
+  enforced it at the point untrusted data entered.
+
+  Unannotated bindings are unchanged, and `any` remains the written opt-out.
+  Records stay open, `int` still satisfies a declared `float`, and `T?` still
+  accepts `nil`, so annotations that were true keep working. An annotation that
+  was aspirational now fails where it is written.
+
+  The portable program artifact is version 3: it carries a per-chunk binding-type
+  table and the new `AssertBindingType` opcode. Artifacts built by earlier
+  releases must be recompiled.
+
+  Also fixes a matcher bug this exposed: a program declaring its own
+  `enum Option<T>` had every value it could construct rejected by the built-in
+  nullable reading of `Option<T>`, at parameters as well as bindings.
+
+### Fixed
+
+- `harn fix --capability-migrations-only` no longer rewrites the capability
+  parameter of a callable that `harn.toml` registers as a `[[hooks]]` or
+  `[[triggers]]` handler. The runtime supplies that argument itself, and it
+  supplies the *root* `Harness` — so a migration that narrowed the parameter to
+  `runtime: HarnessRuntime`, or bundled it into `{agent: HarnessAgent, runtime:
+  HarnessRuntime}`, produced a carrier the dispatcher cannot construct. That is
+  the same failure as a `@host_entry` entry point, reached through a registration
+  Harn already parses rather than through an embedding host's source, and it lands
+  at dispatch rather than at `harn check`. The attributes chapter already
+  documented a `handler:` callback as recognized without annotation; the fixer now
+  reads the manifest and makes that true. Declaring `@host_entry` on such a
+  handler was never required and still is not.
+
+  Freezing a registered handler is deliberately conservative: for a hook the
+  runtime enters with `[harness, event]`, taking root `Harness` first is a legal
+  shape, so this refuses one rewrite that would have been correct in order to
+  refuse the several that are not. The refusal is reported as a frozen callable
+  rather than applied silently.
+
+  Two paths reached the same rewrite and only one honored the freeze, so
+  `@host_entry` had the same gap: the whole-program pass decided which signatures
+  were fixed from outside by reading value references directly rather than the
+  combined decision, and a secondary ambient call site emitted its body rewrite
+  without the signature edit that binds the receiver — leaving
+  `harness.runtime.store_get(...)` in a declaration with no `harness` parameter. A
+  declared entry point is now left byte-identical, body included.
+- `harn run` now honors `[check].trusted_host_dispatch` from `harn.toml`.
+  `check`, `lint`, and `test` already read the key, and `run` has no CLI flag to
+  compensate, so a project that declared the authority in its manifest still had
+  every `host_call` refused — including in the manifest's own trigger handlers,
+  which install before the script body runs and failed the whole invocation. The
+  manifest is also resolved from the absolute path, so a relative
+  `harn run scripts/main.harn` no longer runs out of ancestors before reaching
+  the repo-root manifest.
+- `harn check` no longer reports an embedder's declared host operations as
+  unknown capability methods. A host registers these at runtime, so no static
+  contract in the workspace owns them; `[check].host_capabilities` /
+  `host_capabilities_path` is the project's declaration that they exist, and the
+  capability-method check now reads it. Genuine misspellings on VM-contracted
+  capabilities are still errors.
+
 ## v0.10.57
 
 ### Added
