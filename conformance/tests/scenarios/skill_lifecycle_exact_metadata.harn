@@ -1,0 +1,81 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Metadata skill matching lives in Harn and uses exact normalized tokens.
+ * It should not activate skills from substring matches or stop words.
+ */
+pipeline test(harness: Harness, task) {
+  skill disk_cleanup {
+    description "Clean disk space by deleting caches"
+    when_to_use "Use when the user asks to reclaim disk space"
+    prompt "Remove disk caches carefully."
+  }
+  skill ship {
+    description "Deploy application releases"
+    when_to_use "Use when the user asks to ship or deploy"
+    prompt "Ship the release."
+  }
+  with_llm_script(
+    harness.llm,
+    [llm_text("No skill needed.")],
+    { ->
+      const generic = agent_loop(
+        harness,
+        "hey wassup? can you help with this?",
+        nil,
+        {
+          provider: "mock",
+          max_iterations: 1,
+          skills: disk_cleanup,
+          skill_match: {strategy: "metadata"},
+        },
+      )
+      assert(generic?.status == "done", "generic prompt completes")
+      assert(
+        !contains(harness.llm.mock_calls()[0].system, "## Active skills"),
+        "generic prompt does not activate cleanup",
+      )
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text("No ship skill needed.")],
+    { ->
+      const substring = agent_loop(
+        harness,
+        "review membership analytics",
+        nil,
+        {provider: "mock", max_iterations: 1, skills: ship, skill_match: {strategy: "metadata"}},
+      )
+      assert(substring?.status == "done", "substring prompt completes")
+      assert(
+        !contains(harness.llm.mock_calls()[0].system, "## Active skills"),
+        "membership does not match ship",
+      )
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text("Cleanup skill active.")],
+    { ->
+      const explicit_id = agent_loop(
+        harness,
+        "run disk cleanup",
+        nil,
+        {
+          provider: "mock",
+          max_iterations: 1,
+          skills: disk_cleanup,
+          skill_match: {strategy: "metadata"},
+        },
+      )
+      assert(explicit_id?.status == "done", "explicit skill-id prompt completes")
+      assert(
+        contains(harness.llm.mock_calls()[0].system, "disk_cleanup"),
+        "explicit id tokens activate cleanup",
+      )
+      harness.stdio.log("skill_lifecycle_exact_metadata tests passed")
+    },
+  )
+}

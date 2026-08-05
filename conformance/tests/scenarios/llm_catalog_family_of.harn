@@ -1,0 +1,14 @@
+// std/llm/catalog.family_of returns normalized review-diversity families
+// driven by catalog metadata and inferred provider fallback.
+import { family_of } from "std/llm/catalog"
+
+pipeline default(harness: Harness) {
+  harness.stdio.println(family_of(harness.llm, "claude-3-5-haiku-20241022"))
+  harness.stdio.println(family_of(harness.llm, "claude-opus-4-7-20260101"))
+  harness.stdio.println(family_of(harness.llm, "claude-sonnet-4-20250514"))
+  harness.stdio.println(family_of(harness.llm, "gpt-5-something"))
+  harness.stdio.println(family_of(harness.llm, "gpt-4o-mini"))
+  harness.stdio.println(family_of(harness.llm, "gemini-2.5-flash"))
+  harness.stdio.println(family_of(harness.llm, "ollama:qwen3:30b-a3b"))
+  harness.stdio.println(family_of(harness.llm, "mystery-model-xyz"))
+}

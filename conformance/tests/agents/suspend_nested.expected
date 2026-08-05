@@ -1,0 +1,8 @@
+a_suspended=suspended
+b_suspended=suspended
+distinct_ids=true
+distinct_snapshots=true
+a_after_resume=completed
+b_still_suspended=suspended
+b_after_resume=completed
+a_unchanged=completed

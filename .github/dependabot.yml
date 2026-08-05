@@ -1,0 +1,99 @@
+version: 2
+
+updates:
+  - package-ecosystem: "cargo"
+    directories:
+      - "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Los_Angeles"
+    groups:
+      cranelift:
+        patterns:
+          - "cranelift-*"
+      wasmtime:
+        patterns:
+          - "wasmtime*"
+      opentelemetry:
+        patterns:
+          - "opentelemetry*"
+          - "tracing-opentelemetry"
+      # Everything else routine, in one weekly PR. Majors match no group and
+      # keep their own PR and their own revert. The excludes are what keep the
+      # named families above out of this batch: GitHub would resolve the
+      # overlap by file order, but an explicit exclusion is a property of the
+      # group rather than of its position, and `scripts/check_dependabot_groups.harn`
+      # can check it.
+      cargo-minor-patch:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "cranelift-*"
+          - "wasmtime*"
+          - "opentelemetry*"
+          - "tracing-opentelemetry"
+        update-types:
+          - "minor"
+          - "patch"
+    # A grammar we hold back on purpose. The `=` pin in
+    # `crates/harn-hostlib/Cargo.toml` records the decision for a reader; this
+    # records it for the bot, which cannot see a comment. Without it the same
+    # known-bad version is re-proposed every week, and it has been merged that
+    # way once already (#5127, reverted by #5470).
+    #
+    # Scoped to the one bad version rather than the package, so a future
+    # 0.7.4 that fixes the regression still arrives as a normal update.
+    # Removing this entry is step 2 of #6227.
+    ignore:
+      - dependency-name: "tree-sitter-swift"
+        versions:
+          - "0.7.3"
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: "npm"
+    directories:
+      - "/"
+      - "/crates/harn-cli/portal"
+      - "/editors/vscode"
+      - "/tree-sitter-harn"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Los_Angeles"
+    groups:
+      react-runtime:
+        patterns:
+          - "react"
+          - "react-dom"
+      # Spans every configured directory. Dependabot still splits a group when
+      # two directories need incompatible versions of one package, so a portal
+      # constraint cannot drag the VS Code extension along with it.
+      npm-minor-patch:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "react"
+          - "react-dom"
+        update-types:
+          - "minor"
+          - "patch"
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Los_Angeles"
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns:
+          - "*"

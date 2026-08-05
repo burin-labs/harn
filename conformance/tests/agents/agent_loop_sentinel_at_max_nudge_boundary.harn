@@ -1,0 +1,21 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline default(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [llm_text("Still checking."), llm_text("finished ##DONE##")],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Finish with the sentinel after one retry.",
+        nil,
+        {provider: "mock", loop_until_done: true, max_iterations: 3, max_nudges: 1},
+      )
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.stop_reason)
+      harness.stdio.println(result.visible_text)
+      harness.stdio.println(result.llm.iterations)
+    },
+  )
+}

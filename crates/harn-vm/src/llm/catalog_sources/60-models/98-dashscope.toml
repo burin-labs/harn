@@ -1,0 +1,91 @@
+# DashScope (Alibaba Model Studio, international endpoint) — first-party
+# Qwen routes. Pricing verified 2026-07-02 against
+# https://www.alibabacloud.com/help/en/model-studio/model-pricing.
+#
+# Rows are keyed `dashscope/<wire-id>` so they stay collision-free with
+# the same weights hosted elsewhere (e.g. the bare `qwen3.6-35b-a3b`
+# llamacpp row); `wire_model` records the exact id sent on the wire.
+#
+# DashScope bills per request at the tier the TOTAL input size lands in
+# (<=32K / <=128K / <=256K / <=1M); this catalog's single-rate-card shape
+# records the base <=32K tier, so long-context requests cost more than a
+# naive rate-card estimate. Implicit prompt caching bills cache hits at
+# 20% of the input rate (explicit caches at 10%); cache_read below uses
+# the implicit 20% figure.
+
+[models."dashscope/qwen3-coder-plus"]
+name = "Qwen3 Coder Plus (DashScope)"
+provider = "dashscope"
+wire_model = "qwen3-coder-plus"
+served_variant = "dashscope"
+api_dialect = "openai_chat"
+context_window = 1048576
+capabilities = ["tools", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00, cache_read_per_mtok = 0.20 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "agentic", "long_context", "tool_use"]
+
+[models."dashscope/qwen3-coder-next"]
+name = "Qwen3 Coder Next (DashScope)"
+provider = "dashscope"
+wire_model = "qwen3-coder-next"
+logical_model = "qwen3-coder-next"
+equivalence_group = "qwen3-coder-next"
+served_variant = "dashscope"
+api_dialect = "openai_chat"
+context_window = 262144
+capabilities = ["tools", "streaming", "prompt_caching"]
+pricing = { input_per_mtok = 0.30, output_per_mtok = 1.50, cache_read_per_mtok = 0.06 }
+architecture = { parameter_count_b = 80.0, active_parameter_count_b = 3.0, moe = true, license = "Apache-2.0", source_url = "https://huggingface.co/Qwen/Qwen3-Coder-Next", last_verified = "2026-07-02" }
+benchmarks = { swe_bench_verified = 70.6, swe_bench_pro = 44.3 }
+tier = "mid"
+open_weight = true
+strengths = ["coding", "cheap", "long_context", "agentic", "tool_use"]
+
+[models."dashscope/qwen3.6-35b-a3b"]
+name = "Qwen3.6 35B A3B (DashScope)"
+provider = "dashscope"
+wire_model = "qwen3.6-35b-a3b"
+logical_model = "qwen3.6-35b-a3b"
+equivalence_group = "qwen3.6-35b-a3b"
+served_variant = "dashscope"
+api_dialect = "openai_chat"
+context_window = 262144
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.375, output_per_mtok = 2.25, cache_read_per_mtok = 0.075 }
+tier = "mid"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "long_context", "cheap"]
+
+[models."dashscope/qwen3.5-397b-a17b"]
+name = "Qwen3.5 397B A17B (DashScope)"
+provider = "dashscope"
+wire_model = "qwen3.5-397b-a17b"
+served_variant = "dashscope"
+api_dialect = "openai_chat"
+context_window = 262144
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.60, output_per_mtok = 3.60, cache_read_per_mtok = 0.12 }
+architecture = { parameter_count_b = 397.0, active_parameter_count_b = 17.0, moe = true, license = "Apache-2.0", source_url = "https://huggingface.co/Qwen/Qwen3.5-397B-A17B", last_verified = "2026-07-02" }
+benchmarks = { swe_bench_verified = 76.4 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "reasoning", "tool_use", "long_context", "vision"]
+
+# Qwen3.7-Max — Alibaba's closed frontier tier; flat (non-tiered) $2.50 /
+# $7.50 per MTok with a 1M window on DashScope.
+[models."dashscope/qwen3.7-max"]
+name = "Qwen3.7 Max (DashScope)"
+provider = "dashscope"
+wire_model = "qwen3.7-max"
+logical_model = "qwen3.7-max"
+equivalence_group = "qwen3.7-max"
+served_variant = "dashscope"
+api_dialect = "openai_chat"
+context_window = 1000000
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 2.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.50 }
+tier = "frontier"
+open_weight = false
+strengths = ["coding", "agentic", "tool_use", "long_context", "reasoning"]

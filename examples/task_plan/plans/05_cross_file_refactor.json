@@ -1,0 +1,47 @@
+{
+  "schema_version": "1",
+  "objective": "Extract a shared helper across three crates with verifier output",
+  "entry": "discover",
+  "nodes": {
+    "discover": {
+      "kind": "read_fact",
+      "purpose": "Audit the three call sites",
+      "prompt": "Read the three crates and identify the duplicated logic. Name the helper, target module, and the shape it should take.",
+      "tools": ["read", "grep"]
+    },
+    "design_review": {
+      "kind": "human_gate",
+      "purpose": "Approve the extraction shape before edits",
+      "human_gate": {
+        "approval_id": "refactor_design_approved",
+        "prompt": "Approve the proposed helper signature and target module before edits land.",
+        "skippable": false
+      }
+    },
+    "extract": {
+      "kind": "agent_loop",
+      "purpose": "Land the helper and the three call-site replacements",
+      "prompt": "Create the helper in the target module. Replace the three duplicated sites. Run `cargo check --workspace` after each crate to fail fast.",
+      "tools": ["read", "edit", "run"],
+      "effects": ["writes_files"],
+      "agent_loop": {"max_iterations": 10, "done_sentinel": "DONE"}
+    },
+    "compact_now": {
+      "kind": "compact",
+      "purpose": "Compact mid-refactor before the verifier step",
+      "compact": {"threshold_tokens": 6000, "preserve_recent": 8}
+    },
+    "verify": {
+      "kind": "verify",
+      "verify": {"command": "cargo test --workspace", "expect_status": 0}
+    }
+  },
+  "edges": [
+    {"from": "discover", "to": "design_review"},
+    {"from": "design_review", "to": "extract"},
+    {"from": "extract", "to": "compact_now"},
+    {"from": "compact_now", "to": "verify"}
+  ],
+  "capabilities": {"tools": ["read", "edit", "grep", "run"], "side_effect_level": "writes_files"},
+  "promotion_policy": {"shadow_runs_required": 5, "human_review_required": true, "min_pass_rate": 0.9}
+}

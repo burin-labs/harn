@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/delete_file.request.json",
+  "title": "tools.delete_file request",
+  "type": "object",
+  "properties": {
+    "path": { "type": "string" },
+    "recursive": { "type": "boolean", "default": false },
+    "session_id": {
+      "type": "string",
+      "description": "Optional hostlib session whose staged filesystem mode should intercept this delete."
+    }
+  },
+  "required": ["path"],
+  "additionalProperties": false
+}

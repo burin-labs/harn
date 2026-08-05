@@ -1,0 +1,2 @@
+provider=anthropic family=anthropic-claude native_tools=true
+native

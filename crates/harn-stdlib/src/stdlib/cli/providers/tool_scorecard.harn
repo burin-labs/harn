@@ -1,0 +1,578 @@
+/**
+ * `harn provider tool-scorecard` render layer.
+ *
+ * The scorecard aggregator stays in Rust because it consumes typed
+ * `ToolConformanceReport` fixtures and will later compare those observations
+ * with provider catalog rows. This script only renders the JSON envelope.
+ *
+ * Inputs (from the dispatch shim):
+ *   HARN_PROVIDER_TOOL_SCORECARD_PAYLOAD_JSON — JSON envelope matching the
+ *     `ToolScorecardReport` shape.
+ *   HARN_PROVIDER_TOOL_SCORECARD_PAYLOAD_PRETTY — pretty-printed companion,
+ *     forwarded verbatim in JSON mode to preserve serde float fidelity.
+ *   HARN_OUTPUT_JSON — "1" for the JSON envelope, else rendered text.
+ *   HARN_PROVIDER_TOOL_SCORECARD_MARKDOWN — "1" for Markdown instead of the
+ *     compact human summary when JSON mode is off.
+ */
+fn __safe_string(value, fallback: string) -> string {
+  if type_of(value) == "string" {
+    return value
+  }
+  return fallback
+}
+
+fn __safe_dict(value) -> dict {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+fn __safe_list(value) -> list {
+  if type_of(value) == "list" {
+    return value
+  }
+  return []
+}
+
+fn __safe_int(value, fallback: int) -> int {
+  if type_of(value) == "int" {
+    return value
+  }
+  return fallback
+}
+
+fn __safe_bool(value, fallback: bool) -> bool {
+  if type_of(value) == "bool" {
+    return value
+  }
+  return fallback
+}
+
+fn __join_strings(values: list, fallback: string) -> string {
+  let out = ""
+  let first = true
+  for value in values {
+    if type_of(value) != "string" {
+      continue
+    }
+    if !first {
+      out = out + ","
+    }
+    out = out + value
+    first = false
+  }
+  if out == "" {
+    return fallback
+  }
+  return out
+}
+
+fn __join_case_ids(values: list, fallback: string) -> string {
+  let out = ""
+  let first = true
+  for value in values {
+    if type_of(value) != "dict" {
+      continue
+    }
+    const id = __safe_string(value["id"], "")
+    if id == "" {
+      continue
+    }
+    if !first {
+      out = out + ","
+    }
+    out = out + id
+    first = false
+  }
+  if out == "" {
+    return fallback
+  }
+  return out
+}
+
+fn __case_execution_count(values: list, status: string) -> int {
+  let count = 0
+  for value in values {
+    if type_of(value) != "dict" {
+      continue
+    }
+    const execution = __safe_dict(value["execution"])
+    if __safe_string(execution["status"], "") == status {
+      count = count + 1
+    }
+  }
+  return count
+}
+
+fn __join_dict_field(values: list, key: string, fallback: string) -> string {
+  let out = ""
+  let first = true
+  for value in values {
+    if type_of(value) != "dict" {
+      continue
+    }
+    const item = __safe_string(value[key], "")
+    if item == "" {
+      continue
+    }
+    if !first {
+      out = out + ","
+    }
+    out = out + item
+    first = false
+  }
+  if out == "" {
+    return fallback
+  }
+  return out
+}
+
+fn __render_human(report: dict) -> string {
+  const summary = __safe_dict(report["summary"])
+  const fitness = __safe_dict(report["fitness"])
+  let out = "provider tool-call scorecard: routes="
+    + to_string(__safe_int(report["route_count"], 0))
+    + " pass="
+    + to_string(__safe_int(summary["pass"], 0))
+    + " warn="
+    + to_string(__safe_int(summary["warn"], 0))
+    + " fail="
+    + to_string(__safe_int(summary["fail"], 0))
+    + " trusted="
+    + to_string(__safe_int(summary["trusted"], 0))
+    + " needs_review="
+    + to_string(__safe_int(summary["needs_review"], 0))
+    + " quarantined="
+    + to_string(__safe_int(summary["quarantined"], 0))
+    + " format_recommendations="
+    + to_string(len(__safe_list(fitness["recommendations"])))
+    + "\n"
+  const best = __safe_dict(summary["best_route"])
+  const best_provider = __safe_string(best["provider"], "")
+  if best_provider != "" {
+    out = out + "best="
+      + best_provider
+      + " "
+      + __safe_string(best["model"], "")
+      + " score="
+      + to_string(__safe_int(best["quality_score"], 0))
+      + "\n"
+  }
+  const routes = __safe_list(report["routes"])
+  for route in routes {
+    if type_of(route) != "dict" {
+      continue
+    }
+    const cases = __safe_int(route["case_count"], 0)
+    const passed = __safe_int(route["successful_cases"], 0)
+    const catalog_mismatches = __safe_list(route["catalog_mismatches"])
+    out = out + "  "
+      + __safe_string(route["provider"], "")
+      + " "
+      + __safe_string(route["model"], "")
+      + " score="
+      + to_string(__safe_int(route["quality_score"], 0))
+      + " status="
+      + __safe_string(route["status"], "")
+      + " trust="
+      + __safe_string(route["trust_status"], "")
+      + " mode="
+      + __safe_string(route["recommended_tool_mode"], "")
+      + " pass="
+      + to_string(passed)
+      + "/"
+      + to_string(cases)
+      + " parseable="
+      + to_string(__safe_int(route["parseable_tool_call_cases"], 0))
+      + "/"
+      + to_string(cases)
+      + " actionless="
+      + to_string(__safe_int(route["actionless_cases"], 0))
+      + " issues="
+      + __join_strings(__safe_list(route["issues"]), "-")
+      + " trust_reasons="
+      + __join_strings(__safe_list(route["trust_reasons"]), "-")
+      + " catalog_mismatches="
+      + __join_dict_field(catalog_mismatches, "code", "-")
+      + "\n"
+  }
+  return out
+}
+
+fn __render_report_markdown(report: dict) -> string {
+  const summary = __safe_dict(report["summary"])
+  let out = "# Provider Tool-Call Scorecard\n\n"
+  out = out + "- Routes: " + to_string(__safe_int(report["route_count"], 0)) + "\n"
+  out = out + "- Pass: " + to_string(__safe_int(summary["pass"], 0)) + "\n"
+  out = out + "- Warn: " + to_string(__safe_int(summary["warn"], 0)) + "\n"
+  out = out + "- Fail: " + to_string(__safe_int(summary["fail"], 0)) + "\n"
+  out = out + "- Trusted: " + to_string(__safe_int(summary["trusted"], 0)) + "\n"
+  out = out + "- Needs review: "
+    + to_string(__safe_int(summary["needs_review"], 0))
+    + "\n"
+  out = out + "- Quarantined: "
+    + to_string(__safe_int(summary["quarantined"], 0))
+    + "\n"
+  const best = __safe_dict(summary["best_route"])
+  const best_provider = __safe_string(best["provider"], "")
+  if best_provider != "" {
+    out = out + "- Best route: `" + best_provider + " "
+      + __safe_string(best["model"], "")
+      + "` (score "
+      + to_string(__safe_int(best["quality_score"], 0))
+      + ")\n"
+  }
+  out = out + "\n"
+  out = out
+    + "| Provider | Model | Score | Status | Trust | Mode | Pass | Parseable | Issues | Trust reasons | Catalog mismatches |\n"
+  out = out + "| --- | --- | ---: | --- | --- | --- | ---: | ---: | --- | --- | --- |\n"
+  const routes = __safe_list(report["routes"])
+  for route in routes {
+    if type_of(route) != "dict" {
+      continue
+    }
+    const cases = __safe_int(route["case_count"], 0)
+    const catalog_mismatches = __safe_list(route["catalog_mismatches"])
+    out = out + "| "
+      + __safe_string(route["provider"], "")
+      + " | "
+      + __safe_string(route["model"], "")
+      + " | "
+      + to_string(__safe_int(route["quality_score"], 0))
+      + " | "
+      + __safe_string(route["status"], "")
+      + " | "
+      + __safe_string(route["trust_status"], "")
+      + " | "
+      + __safe_string(route["recommended_tool_mode"], "")
+      + " | "
+      + to_string(__safe_int(route["successful_cases"], 0))
+      + "/"
+      + to_string(cases)
+      + " | "
+      + to_string(__safe_int(route["parseable_tool_call_cases"], 0))
+      + "/"
+      + to_string(cases)
+      + " | "
+      + __join_strings(__safe_list(route["issues"]), "-")
+      + " | "
+      + __join_strings(__safe_list(route["trust_reasons"]), "-")
+      + " | "
+      + __join_dict_field(catalog_mismatches, "code", "-")
+      + " |\n"
+  }
+  return out
+}
+
+fn __render_plan_human(report: dict) -> string {
+  const catalog = __safe_dict(report["catalog"])
+  let out = "provider tool-call scorecard plan: routes="
+    + to_string(
+    __safe_int(report["route_count"], 0),
+  )
+    + " unscorecardable_providers="
+    + to_string(
+    __safe_int(report["unscorecardable_provider_count"], 0),
+  )
+    + " cases="
+    + to_string(__safe_int(report["case_count"], 0))
+    + " required="
+    + to_string(__safe_int(report["required_case_count"], 0))
+    + " executable="
+    + to_string(__safe_int(report["executable_case_count"], 0))
+    + " live_tool_probes="
+    + to_string(__safe_int(report["live_tool_probe_case_count"], 0))
+    + " offline_request_checks="
+    + to_string(__safe_int(report["offline_request_case_count"], 0))
+    + " not_applicable="
+    + to_string(__safe_int(report["not_applicable_case_count"], 0))
+    + " batch_manifest_requests="
+    + to_string(__safe_int(report["batch_manifest_request_count"], 0))
+    + " readiness_commands="
+    + to_string(__safe_int(report["readiness_command_count"], 0))
+    + "\n"
+  out = out + "catalog="
+    + __safe_string(catalog["hash_blake3"], "-")
+    + " schema="
+    + to_string(__safe_int(catalog["schema_version"], 0))
+    + "\n"
+  const routes = __safe_list(report["routes"])
+  for route in routes {
+    if type_of(route) != "dict" {
+      continue
+    }
+    const claim = __safe_dict(route["catalog_claim"])
+    const cases = __safe_list(route["cases"])
+    const readiness = __safe_dict(route["readiness"])
+    out = out + "  "
+      + __safe_string(route["provider"], "")
+      + " "
+      + __safe_string(route["model"], "")
+      + " trust="
+      + __safe_string(route["trust_status"], "")
+      + " trust_reasons="
+      + __join_strings(__safe_list(route["trust_reasons"]), "-")
+      + " readiness="
+      + __safe_string(readiness["status"], "")
+      + " preferred="
+      + __safe_string(claim["preferred_tool_format"], "-")
+      + " parity="
+      + __safe_string(claim["tool_mode_parity"], "-")
+      + " native="
+      + to_string(__safe_bool(claim["native_tools"], false))
+      + " text="
+      + to_string(__safe_bool(claim["text_tools"], false))
+      + " parallel="
+      + to_string(__safe_bool(claim["supports_parallel_tool_calls"], false))
+      + " batch="
+      + to_string(__safe_bool(claim["batch_api"], false))
+      + " executable="
+      + to_string(__case_execution_count(cases, "executable"))
+      + " missing_runner="
+      + to_string(__case_execution_count(cases, "missing_runner"))
+      + " cases="
+      + __join_case_ids(cases, "-")
+      + "\n"
+  }
+  const provider_summaries = __safe_list(report["provider_summaries"])
+  for provider in provider_summaries {
+    if type_of(provider) != "dict" {
+      continue
+    }
+    out = out + "  provider-summary "
+      + __safe_string(provider["provider"], "")
+      + " routes="
+      + to_string(__safe_int(provider["route_count"], 0))
+      + " cases="
+      + to_string(__safe_int(provider["case_count"], 0))
+      + " required="
+      + to_string(__safe_int(provider["required_case_count"], 0))
+      + " executable="
+      + to_string(__safe_int(provider["executable_case_count"], 0))
+      + " live_tool_probes="
+      + to_string(__safe_int(provider["live_tool_probe_case_count"], 0))
+      + " offline_request_checks="
+      + to_string(__safe_int(provider["offline_request_case_count"], 0))
+      + " readiness_commands="
+      + to_string(__safe_int(provider["readiness_command_count"], 0))
+      + " batch_manifest_requests="
+      + to_string(
+      __safe_int(provider["batch_manifest_request_count"], 0),
+    )
+      + " not_applicable="
+      + to_string(__safe_int(provider["not_applicable_case_count"], 0))
+      + "\n"
+  }
+  const unscorecardable = __safe_list(report["unscorecardable_providers"])
+  for provider in unscorecardable {
+    if type_of(provider) != "dict" {
+      continue
+    }
+    out = out + "  unscorecardable "
+      + __safe_string(provider["provider"], "")
+      + " reason="
+      + __safe_string(provider["reason"], "")
+      + " models="
+      + to_string(__safe_int(provider["model_count"], 0))
+      + " active_models="
+      + to_string(__safe_int(provider["active_model_count"], 0))
+      + " local_runtime="
+      + to_string(__safe_bool(provider["local_runtime"], false))
+      + " auth_required="
+      + to_string(__safe_bool(provider["auth_required"], false))
+      + " credential_env_names="
+      + __join_strings(__safe_list(provider["credential_env_names"]), "-")
+      + "\n"
+  }
+  return out
+}
+
+fn __render_plan_markdown(report: dict) -> string {
+  const catalog = __safe_dict(report["catalog"])
+  let out = "# Provider Tool-Call Scorecard Plan\n\n"
+  out = out + "- Routes: " + to_string(__safe_int(report["route_count"], 0)) + "\n"
+  out = out + "- Unscorecardable providers: "
+    + to_string(
+    __safe_int(report["unscorecardable_provider_count"], 0),
+  )
+    + "\n"
+  out = out + "- Cases: " + to_string(__safe_int(report["case_count"], 0)) + "\n"
+  out = out + "- Required cases: "
+    + to_string(__safe_int(report["required_case_count"], 0))
+    + "\n"
+  out = out + "- Executable cases: "
+    + to_string(__safe_int(report["executable_case_count"], 0))
+    + "\n"
+  out = out + "- Live tool probes: "
+    + to_string(__safe_int(report["live_tool_probe_case_count"], 0))
+    + "\n"
+  out = out + "- Offline request checks: "
+    + to_string(
+    __safe_int(report["offline_request_case_count"], 0),
+  )
+    + "\n"
+  out = out + "- Not applicable cases: "
+    + to_string(
+    __safe_int(report["not_applicable_case_count"], 0),
+  )
+    + "\n"
+  out = out + "- Batch manifest requests: "
+    + to_string(
+    __safe_int(report["batch_manifest_request_count"], 0),
+  )
+    + "\n"
+  out = out + "- Readiness commands: "
+    + to_string(__safe_int(report["readiness_command_count"], 0))
+    + "\n"
+  out = out + "- Catalog: `"
+    + __safe_string(catalog["hash_blake3"], "-")
+    + "` (schema "
+    + to_string(__safe_int(catalog["schema_version"], 0))
+    + ")\n\n"
+  out = out
+    + "| Provider | Model | Trust | Trust reasons | Readiness | Preferred | Parity | Native | Text | Parallel | Batch | Executable | Missing runner | Cases |\n"
+  out = out
+    + "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | ---: | ---: | --- |\n"
+  const routes = __safe_list(report["routes"])
+  for route in routes {
+    if type_of(route) != "dict" {
+      continue
+    }
+    const claim = __safe_dict(route["catalog_claim"])
+    const cases = __safe_list(route["cases"])
+    const readiness = __safe_dict(route["readiness"])
+    out = out + "| "
+      + __safe_string(route["provider"], "")
+      + " | "
+      + __safe_string(route["model"], "")
+      + " | "
+      + __safe_string(route["trust_status"], "")
+      + " | "
+      + __join_strings(__safe_list(route["trust_reasons"]), "-")
+      + " | "
+      + __safe_string(readiness["status"], "")
+      + " | "
+      + __safe_string(claim["preferred_tool_format"], "-")
+      + " | "
+      + __safe_string(claim["tool_mode_parity"], "-")
+      + " | "
+      + to_string(__safe_bool(claim["native_tools"], false))
+      + " | "
+      + to_string(__safe_bool(claim["text_tools"], false))
+      + " | "
+      + to_string(__safe_bool(claim["supports_parallel_tool_calls"], false))
+      + " | "
+      + to_string(__safe_bool(claim["batch_api"], false))
+      + " | "
+      + to_string(__case_execution_count(cases, "executable"))
+      + " | "
+      + to_string(__case_execution_count(cases, "missing_runner"))
+      + " | "
+      + __join_case_ids(cases, "-")
+      + " |\n"
+  }
+  const provider_summaries = __safe_list(report["provider_summaries"])
+  if len(provider_summaries) > 0 {
+    out = out
+      + "\n## Provider Scheduling Summary\n\n"
+      + "| Provider | Routes | Cases | Required | Executable | Live tool probes | Offline request checks | Readiness commands | Batch manifest requests | Not applicable |\n"
+    out = out + "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n"
+    for provider in provider_summaries {
+      if type_of(provider) != "dict" {
+        continue
+      }
+      out = out + "| "
+        + __safe_string(provider["provider"], "")
+        + " | "
+        + to_string(__safe_int(provider["route_count"], 0))
+        + " | "
+        + to_string(__safe_int(provider["case_count"], 0))
+        + " | "
+        + to_string(__safe_int(provider["required_case_count"], 0))
+        + " | "
+        + to_string(__safe_int(provider["executable_case_count"], 0))
+        + " | "
+        + to_string(__safe_int(provider["live_tool_probe_case_count"], 0))
+        + " | "
+        + to_string(__safe_int(provider["offline_request_case_count"], 0))
+        + " | "
+        + to_string(__safe_int(provider["readiness_command_count"], 0))
+        + " | "
+        + to_string(__safe_int(provider["batch_manifest_request_count"], 0))
+        + " | "
+        + to_string(__safe_int(provider["not_applicable_case_count"], 0))
+        + " |\n"
+    }
+  }
+  const unscorecardable = __safe_list(report["unscorecardable_providers"])
+  if len(unscorecardable) > 0 {
+    out = out
+      + "\n## Unscorecardable Providers\n\n"
+      + "| Provider | Reason | Models | Active models | Local runtime | Auth required | Credential env names |\n"
+    out = out + "| --- | --- | ---: | ---: | --- | --- | --- |\n"
+    for provider in unscorecardable {
+      if type_of(provider) != "dict" {
+        continue
+      }
+      out = out + "| "
+        + __safe_string(provider["provider"], "")
+        + " | "
+        + __safe_string(provider["reason"], "")
+        + " | "
+        + to_string(__safe_int(provider["model_count"], 0))
+        + " | "
+        + to_string(__safe_int(provider["active_model_count"], 0))
+        + " | "
+        + to_string(__safe_bool(provider["local_runtime"], false))
+        + " | "
+        + to_string(__safe_bool(provider["auth_required"], false))
+        + " | "
+        + __join_strings(__safe_list(provider["credential_env_names"]), "-")
+        + " |\n"
+    }
+  }
+  return out
+}
+
+fn main(harness: Harness) -> int {
+  const raw = harness.env.get_or("HARN_PROVIDER_TOOL_SCORECARD_PAYLOAD_JSON", "")
+  if raw == "" {
+    harness.stdio.eprintln(
+      "internal error: HARN_PROVIDER_TOOL_SCORECARD_PAYLOAD_JSON not set by dispatch shim",
+    )
+    return 70
+  }
+  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  const markdown_mode = harness.env.get_or("HARN_PROVIDER_TOOL_SCORECARD_MARKDOWN", "0") == "1"
+  if json_mode {
+    const pretty = harness.env.get_or("HARN_PROVIDER_TOOL_SCORECARD_PAYLOAD_PRETTY", raw)
+    harness.stdio.println(pretty)
+  } else {
+    const report = try {
+      json_parse(raw)
+    } catch (e) {
+      harness.stdio.eprintln(
+        "internal error: failed to parse provider-tool-scorecard payload: " + e.message,
+      )
+      return 70
+    }
+    const kind = __safe_string(report["kind"], "report")
+    const text = if markdown_mode && kind == "plan" {
+      __render_plan_markdown(report)
+    } else if markdown_mode {
+      __render_report_markdown(report)
+    } else if kind == "plan" {
+      __render_plan_human(report)
+    } else {
+      __render_human(report)
+    }
+    const trimmed = if len(text) > 0 && text[len(text) - 1] == "\n" {
+      text[0:len(text) - 1]
+    } else {
+      text
+    }
+    harness.stdio.println(trimmed)
+  }
+  return 0
+}

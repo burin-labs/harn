@@ -1,0 +1,16 @@
+pipeline test(harness: Harness, task) {
+  gen fn broken() -> Stream<int> {
+    emit 1
+    throw "stream failed"
+  }
+  const stream = broken()
+  const first = stream.next()
+  harness.stdio.println(first.value)
+  try {
+    stream.next()
+  } catch (err) {
+    harness.stdio.println("caught ${err}")
+  }
+  const final = stream.next()
+  harness.stdio.println(final.done)
+}

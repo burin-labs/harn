@@ -1,0 +1,82 @@
+// Calls whose object-literal argument is complete but whose own closing `)` the
+// model omitted — `edit({ ... }` where `edit({ ... })` was meant.
+//
+// Cheap models close the object and forget the call's paren. Dropping the call
+// over one character costs a turn and re-emits the same mistake, so a
+// structurally complete object at genuine end-of-input is recovered. The guard
+// is that it fires only at end-of-input: a complete object followed by stray
+// bytes is still a hard error (pinned in tool_parse_core_diagnostics).
+import { probe, sample_registry } from "_tool_parse_probe"
+
+pipeline main(harness: Harness) {
+  probe(
+    harness.agent,
+    harness.stdio,
+    "plain object arg, omitted paren",
+    "run({ command: \"go build ./...\" }",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "heredoc edit, omitted paren",
+    """edit({
+  "action": "create",
+  "path": "a.scala",
+  "content": <<EOF
+package x
+final case class Y()
+EOF
+}""",
+    sample_registry(),
+  )
+  // The multi-block shape from a real dropped payload: three `<tool_call>` edit
+  // blocks that each close their object with a bare `}` and omit the call's
+  // `)`, followed by a `run`. Before the implicit-close recovery only `run`
+  // parsed and the three authored edits were dropped as "missing closing `)`".
+  probe(
+    harness.agent,
+    harness.stdio,
+    "multiblock turn lands every call when the paren is omitted",
+    """<tool_call>
+edit({
+  "action": "create",
+  "path": "src/main/scala/rulekit/Rule.scala",
+  "content": <<EOF
+package rulekit
+
+sealed trait Rule
+EOF
+}
+</tool_call>
+
+<tool_call>
+edit({
+  "action": "create",
+  "path": "src/main/scala/rulekit/RuleSerializer.scala",
+  "content": <<EOF
+package rulekit
+
+object RuleSerializer
+EOF
+}
+</tool_call>
+
+<tool_call>
+edit({
+  "action": "create",
+  "path": "src/test/scala/rulekit/RuleSpec.scala",
+  "content": <<EOF
+package rulekit
+
+class RuleSpec
+EOF
+}
+</tool_call>
+
+<tool_call>
+run({ command: "sbt test" })
+</tool_call>""",
+    sample_registry(),
+  )
+}

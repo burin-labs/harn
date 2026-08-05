@@ -1,0 +1,24 @@
+{
+  "name": "tree-sitter-harn",
+  "version": "0.1.0",
+  "description": "Tree-sitter grammar for the Harn programming language",
+  "main": "bindings/node",
+  "keywords": [
+    "tree-sitter",
+    "parser",
+    "harn"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "node-addon-api": "^8.9.0",
+    "node-gyp-build": "^4.8.4"
+  },
+  "devDependencies": {
+    "tree-sitter-cli": "^0.26.11"
+  },
+  "scripts": {
+    "build": "./scripts/tree-sitter-cli.sh generate && ./scripts/tree-sitter-cli.sh build",
+    "test": "./scripts/tree-sitter-cli.sh test",
+    "parse": "./scripts/tree-sitter-cli.sh parse"
+  }
+}

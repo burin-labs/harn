@@ -1,0 +1,25 @@
+[package]
+name = "context-maintenance"
+
+[exports]
+maintenance = "lib.harn"
+
+[[hooks]]
+event = "FileEdited"
+handler = "maintenance::on_file_edited"
+
+[[hooks]]
+event = "SessionIdle"
+handler = "maintenance::on_session_idle"
+
+[[hooks]]
+event = "PreCompact"
+handler = "maintenance::on_pre_compact"
+
+[[hooks]]
+event = "PostTurn"
+handler = "maintenance::on_post_turn"
+
+[[hooks]]
+event = "SessionEnd"
+handler = "maintenance::on_session_end"

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/add_readonly_roots.request.json",
+  "title": "code_index.add_readonly_roots request",
+  "description": "Index one or more dependency/SDK roots as additive, READ-ONLY secondary roots. They are merged into `query`/`read_range` results so library API symbols become discoverable, but they never clobber the project index built by `rebuild` and are never mutated by any write builtin (version_record, reindex_file, rename_symbol, locks).",
+  "type": "object",
+  "properties": {
+    "roots": {
+      "type": "array",
+      "description": "Dependency/SDK directory roots to index read-only. Each must exist and be a directory.",
+      "items": { "type": "string" }
+    },
+    "replace": {
+      "type": "boolean",
+      "default": false,
+      "description": "When true, clear the existing read-only set before adding, so the whole dependency fan-out can be swapped without accumulating stale roots."
+    }
+  },
+  "additionalProperties": false
+}

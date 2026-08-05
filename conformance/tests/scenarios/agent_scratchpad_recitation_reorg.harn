@@ -1,0 +1,112 @@
+import { agent_loop } from "std/agent/loop"
+/**
+ * Scratchpad-enabled agent_loop recites live working memory at the prompt tail
+ * and periodically reorganizes it into cited notes for the next turn.
+ */
+import { agent_scratchpad_reorganize } from "std/agent/scratchpad"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn observe_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "observe",
+    "Return a deterministic observation.",
+    {
+      handler: fn(_args) { return "observed-value-42" },
+      parameters: {type: "object", properties: {}},
+    },
+  )
+  return tools
+}
+
+pipeline default(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      {tool_calls: [{id: "observe_1", name: "observe", arguments: {}}]},
+      llm_text(
+        "{\"schema\":\"harn.agent_scratchpad.v1\",\"goals\":[{\"text\":\"complete the scratchpad task\",\"source_ref\":\"user:initial\"}],\"open_items\":[],\"facts\":[{\"text\":\"observe returned observed-value-42\",\"source_ref\":\"turn:3\"}],\"refs\":[{\"id\":\"user:initial\",\"kind\":\"user_input\",\"label\":\"Initial task\"},{\"id\":\"turn:3\",\"kind\":\"tool\",\"label\":\"observed-value-42\"}]}",
+      ),
+      llm_text("Finished with the observation. ##DONE##"),
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "complete the scratchpad task",
+        "You are a test agent.",
+        {
+          provider: "mock",
+          tools: observe_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          max_iterations: 3,
+          scratchpad: {enabled: true, reorganize_every: 1, reorganizer: {provider: "mock"}},
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println("status:" + result.status)
+      harness.stdio.println("calls:" + to_string(len(calls)))
+      harness.stdio.println(
+        "first_has_scratchpad:" + to_string(contains(calls[0].system, "## Agent scratchpad")),
+      )
+      harness.stdio.println(
+        "first_tail:"
+          + to_string(
+          ends_with(calls[0].system, "user:initial (user_input): Initial task"),
+        ),
+      )
+      harness.stdio.println(
+        "reorg_prompt:"
+          + to_string(
+          contains(calls[1].messages[0].content, "Reorganize the live agent scratchpad"),
+        ),
+      )
+      harness.stdio.println(
+        "second_has_fact:"
+          + to_string(
+          contains(calls[2].system, "observe returned observed-value-42"),
+        ),
+      )
+      harness.stdio.println(
+        "second_has_source:" + to_string(contains(calls[2].system, "[source_ref: turn:3]")),
+      )
+      harness.stdio.println(
+        "snapshot_fact:" + result.transcript.metadata.agent_scratchpad.facts[0].text,
+      )
+    },
+  )
+  const manual_id = harness.agent.open("scratchpad-invalid-source")
+  harness.agent.set_scratchpad(
+    manual_id,
+    {
+      schema: "harn.agent_scratchpad.v1",
+      goals: [{text: "manual task", source_ref: "user:initial"}],
+      open_items: [],
+      facts: [{text: "stable fact", source_ref: "user:initial"}],
+      refs: [{id: "user:initial", kind: "user_input", label: "Initial task"}],
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text(
+        "{\"schema\":\"harn.agent_scratchpad.v1\",\"goals\":[{\"text\":\"manual task\",\"source_ref\":\"made-up\"}],\"open_items\":[],\"facts\":[{\"text\":\"uncited hallucination\",\"source_ref\":\"made-up\"}],\"refs\":[{\"id\":\"made-up\",\"kind\":\"unknown\",\"label\":\"not allowed\"}]}",
+      ),
+    ],
+    { ->
+      const rejected = agent_scratchpad_reorganize(
+        harness.agent,
+        harness.llm,
+        {session_id: manual_id, task: "manual task"},
+        {provider: "mock", scratchpad: {enabled: true, reorganizer: {provider: "mock"}}},
+        1,
+      )
+      harness.stdio.println("invalid_status:" + rejected.status)
+      harness.stdio.println(
+        "invalid_preserved:" + harness.agent.scratchpad(manual_id).facts[0].text,
+      )
+    },
+  )
+}

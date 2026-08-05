@@ -1,0 +1,18 @@
+import "std/hitl"
+
+pipeline test(harness: Harness, task) {
+  const prompt = "Need a human " + harness.random.uuid()
+  const handle = spawn {
+    harness.interaction.ask_user(prompt, {timeout: 5m})
+  }
+  harness.clock.sleep_ms(10ms)
+  const rows: list<HitlPendingRequest> = harness.interaction.hitl_pending({}).filter(
+    { row -> row.prompt == prompt },
+  )
+    .to_list()
+  harness.stdio.println(len(rows))
+  harness.stdio.println(rows[0]?.request_kind)
+  harness.stdio.println(starts_with(rows[0]?.prompt, "Need a human "))
+  harness.stdio.println(len(rows[0]?.approvers))
+  cancel(handle)
+}

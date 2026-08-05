@@ -1,0 +1,29 @@
+pipeline test(harness: Harness, task) {
+  fn divide(a, b) {
+    if b == 0 {
+      return Err("division by zero")
+    }
+    return Ok(a / b)
+  }
+  fn compute(x) {
+    const result = divide(x, 2)?
+    return Ok(result + 10)
+  }
+  fn compute_fail(x) {
+    const result = divide(x, 0)?
+    return Ok(result + 10)
+  }
+  // Success path: ? unwraps Ok
+  const r1 = compute(20)
+  harness.stdio.log(r1)
+  // Error path: ? propagates Err
+  const r2 = compute_fail(20)
+  harness.stdio.log(r2)
+  // Chained ?
+  fn chain() {
+    const a = divide(100, 5)?
+    const b = divide(a, 2)?
+    return Ok(b)
+  }
+  harness.stdio.log(chain())
+}

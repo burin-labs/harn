@@ -1,0 +1,728 @@
+# ---------- Anthropic (Claude) ------------------------------------------------
+
+# `prompt_cache_min_prefix_tokens` is the shortest prefix Anthropic will
+# actually cache. Below it a `cache_control` breakpoint is accepted and then
+# silently ignored — no error, no cache_creation_input_tokens. The value is
+# per-model and NOT monotonic across generations (512 on Opus 5 / Fable 5 /
+# Mythos 5, 1024 on Opus 4.8 and the Sonnet 4.5+ line, 2048 on Opus 4.7 and
+# Mythos Preview, 4096 on Opus 4.6/4.5 and Haiku 4.5), which is why it lives
+# per rule rather than as one Anthropic-dialect constant. Spot-checked against
+# the live API on 2026-07-24: a 1404-token prefix cached on Opus 5 and Opus 4.8
+# and silently did not on Opus 4.7 or Haiku 4.5.
+
+# Mythos Preview predates the 512-token floor: its minimum cacheable prefix is
+# 2048. `claude_generation` cannot parse the non-numeric `preview` tail, so a
+# version gate can't express this — it needs its own row ahead of the
+# `claude-mythos-*` catch-all.
+[[provider.anthropic]]
+model_match = "claude-mythos-preview*"
+extends = true
+prompt_cache_min_prefix_tokens = 2048
+
+# Mythos Preview predates the 512-token floor: its minimum cacheable prefix is
+# 2048. `claude_generation` cannot parse the non-numeric `preview` tail, so a
+# version gate can't express this — it needs its own row ahead of the
+# `anthropic/claude-mythos-*` catch-all.
+[[provider.anthropic]]
+model_match = "anthropic/claude-mythos-preview*"
+extends = true
+prompt_cache_min_prefix_tokens = 2048
+
+# Claude Fable 5 / Mythos 5 — the Mythos-class tier above Opus (launched
+# 2026-06-09). Same surface as Opus 4.7+: adaptive thinking (and on
+# this family thinking is always on — an explicit `disabled` is a 400, so
+# the request builder must omit the field), effort control, interleaved
+# thinking, no assistant prefill, sampling params rejected. No version_min:
+# every fable/mythos id is Mythos-class. Without these rows the ids would
+# fall through to the permissive `claude-*` catch-all at the bottom of this
+# file, which wrongly grants `thinking_modes = ["enabled"]` and prefill.
+[[provider.anthropic]]
+model_match = "claude-fable-*"
+prompt_cache_min_prefix_tokens = 512
+native_tools = true
+computer_use_style = "native_anthropic"
+screenshot_scaling = "xga"
+preferred_tool_format = "native"
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"]
+reasoning_disable_supported = false
+interleaved_thinking_supported = true
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+[[provider.anthropic]]
+model_match = "claude-mythos-*"
+prompt_cache_min_prefix_tokens = 512
+native_tools = true
+computer_use_style = "native_anthropic"
+screenshot_scaling = "xga"
+preferred_tool_format = "native"
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"]
+reasoning_disable_supported = false
+interleaved_thinking_supported = true
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+[[provider.anthropic]]
+model_match = "anthropic/claude-fable-*"
+prompt_cache_min_prefix_tokens = 512
+native_tools = true
+computer_use_style = "native_anthropic"
+screenshot_scaling = "xga"
+preferred_tool_format = "native"
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"]
+reasoning_disable_supported = false
+interleaved_thinking_supported = true
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+[[provider.anthropic]]
+model_match = "anthropic/claude-mythos-*"
+prompt_cache_min_prefix_tokens = 512
+native_tools = true
+computer_use_style = "native_anthropic"
+screenshot_scaling = "xga"
+preferred_tool_format = "native"
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"]
+reasoning_disable_supported = false
+interleaved_thinking_supported = true
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+# Claude 4.7+ uses adaptive thinking instead of explicit budgets.
+[[provider.anthropic]]
+model_match = "claude-haiku-*"
+version_min = [4, 7]
+native_tools = true
+computer_use_style = "native_anthropic"
+screenshot_scaling = "xga"
+preferred_tool_format = "native"
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["adaptive"]
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+# Opus 5 halves the minimum cacheable prefix to 512 tokens. Verified against
+# the live API on 2026-07-24: a 691-token prefix produced
+# cache_creation_input_tokens on claude-opus-5 and zero (silently uncached) on
+# claude-opus-4-8. Everything else layers onto the 4.7 row below.
+[[provider.anthropic]]
+model_match = "claude-opus-*"
+version_min = [5, 0]
+extends = true
+prompt_cache_min_prefix_tokens = 512
+
+# Opus 4.8 accepts a mid-conversation `system` section. Layer the native
+# placement onto the 4.7 capability row below via `extends`; older Opus models
+# keep folding the section to a `<system-reminder>` user block. Opus 5 inherits
+# this via the same version_min gate.
+[[provider.anthropic]]
+model_match = "claude-opus-*"
+version_min = [4, 8]
+extends = true
+system_message_placement = "native_directive"
+prompt_cache_min_prefix_tokens = 1024
+
+[[provider.anthropic]]
+model_match = "claude-opus-*"
+version_min = [4, 7]
+prompt_cache_min_prefix_tokens = 2048
+native_tools = true
+computer_use_style = "native_anthropic"
+screenshot_scaling = "xga"
+preferred_tool_format = "native"
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"]
+interleaved_thinking_supported = true
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+[[provider.anthropic]]
+model_match = "claude-sonnet-5*"
+prompt_cache_min_prefix_tokens = 1024
+native_tools = true
+computer_use_style = "native_anthropic"
+screenshot_scaling = "xga"
+preferred_tool_format = "native"
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"]
+reasoning_disable_supported = true
+interleaved_thinking_supported = true
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+[[provider.anthropic]]
+model_match = "claude-sonnet-*"
+version_min = [4, 7]
+native_tools = true
+computer_use_style = "native_anthropic"
+screenshot_scaling = "xga"
+preferred_tool_format = "native"
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["adaptive"]
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+# Haiku 4.5+ supports server-side tool search.
+[[provider.anthropic]]
+model_match = "claude-haiku-*"
+version_min = [4, 5]
+prompt_cache_min_prefix_tokens = 4096
+native_tools = true
+computer_use_style = "native_anthropic"
+screenshot_scaling = "xga"
+preferred_tool_format = "native"
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["enabled"]
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = true
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+# Opus 4.6+ supports interleaved thinking but rejects assistant prefill.
+[[provider.anthropic]]
+model_match = "claude-opus-*"
+version_min = [4, 6]
+prompt_cache_min_prefix_tokens = 4096
+native_tools = true
+computer_use_style = "native_anthropic"
+screenshot_scaling = "xga"
+preferred_tool_format = "native"
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["enabled"]
+interleaved_thinking_supported = true
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+[[provider.anthropic]]
+model_match = "claude-opus-*"
+version_min = [4, 0]
+native_tools = true
+computer_use_style = "native_anthropic"
+screenshot_scaling = "xga"
+preferred_tool_format = "native"
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["enabled"]
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = true
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+# Sonnet 4.6 rejects assistant prefill while keeping the 4.x tool surface.
+[[provider.anthropic]]
+model_match = "claude-sonnet-*"
+version_min = [4, 6]
+prompt_cache_min_prefix_tokens = 1024
+native_tools = true
+computer_use_style = "native_anthropic"
+screenshot_scaling = "xga"
+preferred_tool_format = "native"
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["enabled"]
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+# Sonnet 4.0+ supports tool search.
+[[provider.anthropic]]
+model_match = "claude-sonnet-*"
+version_min = [4, 0]
+native_tools = true
+computer_use_style = "native_anthropic"
+screenshot_scaling = "xga"
+preferred_tool_format = "native"
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["enabled"]
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = true
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+# OpenRouter-style `anthropic/claude-...` prefixes.
+[[provider.anthropic]]
+model_match = "anthropic/claude-haiku-*"
+version_min = [4, 7]
+native_tools = true
+computer_use_style = "native_anthropic"
+screenshot_scaling = "xga"
+preferred_tool_format = "native"
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["adaptive"]
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+[[provider.anthropic]]
+model_match = "anthropic/claude-opus-*"
+version_min = [4, 7]
+prompt_cache_min_prefix_tokens = 2048
+native_tools = true
+computer_use_style = "native_anthropic"
+screenshot_scaling = "xga"
+preferred_tool_format = "native"
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"]
+interleaved_thinking_supported = true
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+[[provider.anthropic]]
+model_match = "anthropic/claude-sonnet-5*"
+prompt_cache_min_prefix_tokens = 1024
+native_tools = true
+computer_use_style = "native_anthropic"
+screenshot_scaling = "xga"
+preferred_tool_format = "native"
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["adaptive", "effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high", "xhigh", "max"]
+reasoning_disable_supported = true
+interleaved_thinking_supported = true
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+[[provider.anthropic]]
+model_match = "anthropic/claude-sonnet-*"
+version_min = [4, 7]
+native_tools = true
+computer_use_style = "native_anthropic"
+screenshot_scaling = "xga"
+preferred_tool_format = "native"
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["adaptive"]
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+[[provider.anthropic]]
+model_match = "anthropic/claude-haiku-*"
+version_min = [4, 5]
+prompt_cache_min_prefix_tokens = 4096
+native_tools = true
+computer_use_style = "native_anthropic"
+screenshot_scaling = "xga"
+preferred_tool_format = "native"
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["enabled"]
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = true
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+[[provider.anthropic]]
+model_match = "anthropic/claude-opus-*"
+version_min = [4, 6]
+prompt_cache_min_prefix_tokens = 4096
+native_tools = true
+computer_use_style = "native_anthropic"
+screenshot_scaling = "xga"
+preferred_tool_format = "native"
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["enabled"]
+interleaved_thinking_supported = true
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+[[provider.anthropic]]
+model_match = "anthropic/claude-opus-*"
+version_min = [4, 0]
+native_tools = true
+computer_use_style = "native_anthropic"
+screenshot_scaling = "xga"
+preferred_tool_format = "native"
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["enabled"]
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = true
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+[[provider.anthropic]]
+model_match = "anthropic/claude-sonnet-*"
+version_min = [4, 6]
+prompt_cache_min_prefix_tokens = 1024
+native_tools = true
+computer_use_style = "native_anthropic"
+screenshot_scaling = "xga"
+preferred_tool_format = "native"
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["enabled"]
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+[[provider.anthropic]]
+model_match = "anthropic/claude-sonnet-*"
+version_min = [4, 0]
+native_tools = true
+computer_use_style = "native_anthropic"
+screenshot_scaling = "xga"
+preferred_tool_format = "native"
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["enabled"]
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = true
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+# Catch-all for older Claude models — native tools + prompt caching +
+# thinking, but no progressive tool disclosure.
+[[provider.anthropic]]
+model_match = "claude-*"
+native_tools = true
+computer_use_style = "native_anthropic"
+screenshot_scaling = "xga"
+preferred_tool_format = "native"
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["enabled"]
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = true
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+# Prefixed-id catch-all mirroring the `claude-*` row above. Hosts sometimes
+# hand this route an OpenRouter-style `anthropic/claude-...` id; the versioned
+# prefix rows above only match known families with parseable versions, so
+# without this row a new family name or unparseable version segment falls
+# through to the global text-channel `json` default even though every Claude
+# on the direct Anthropic route speaks first-class native tool calling.
+[[provider.anthropic]]
+model_match = "anthropic/claude-*"
+native_tools = true
+computer_use_style = "native_anthropic"
+screenshot_scaling = "xga"
+preferred_tool_format = "native"
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["enabled"]
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = true
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"

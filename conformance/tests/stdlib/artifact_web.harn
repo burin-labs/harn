@@ -1,0 +1,60 @@
+import {
+  web_artifact_apply_patch,
+  web_artifact_extract,
+  web_artifact_text_fallback,
+  web_artifact_validate,
+} from "std/artifact/web"
+
+pipeline default(harness: Harness) {
+  const good =
+    "<!doctype html><html><head><style>.card { color: red; }</style></head><body><main><h1>Hello</h1><button id=\"b\">Count</button><script>const count = 1; document.getElementById('b').textContent = count;</script></main></body></html>"
+  const extracted = web_artifact_extract(good)
+  harness.stdio.println(len(extracted.styles))
+  harness.stdio.println(len(extracted.scripts))
+  harness.stdio.println(extracted.body.contains("Hello"))
+  const css_patch = web_artifact_apply_patch(
+    good,
+    ".card { color: red; }",
+    ".card { color: blue; }",
+    {provenance: {agent: "fixture"}},
+  )
+  harness.stdio.println(css_patch.ok)
+  harness.stdio.println(css_patch.changed_regions[0].kind)
+  harness.stdio.println(css_patch.validation.ok)
+  harness.stdio.println(css_patch.text_fallback.contains("Hello"))
+  const js_patch = web_artifact_apply_patch(good, "const count = 1;", "const count = 2;")
+  harness.stdio.println(js_patch.ok)
+  harness.stdio.println(js_patch.changed_regions[0].kind)
+  const malicious = web_artifact_validate(
+    "<html><body><script>fetch('https://evil.example/x'); window.parent.postMessage('x','*'); location.href='https://evil.example'; const api_key = 'sk-abcdefghijklmnopqrstuvwxyz';</script></body></html>",
+  )
+  harness.stdio.println(malicious.ok)
+  harness.stdio.println(malicious.error_codes.contains("network_call"))
+  harness.stdio.println(malicious.error_codes.contains("host_bridge_call"))
+  harness.stdio.println(malicious.error_codes.contains("dangerous_navigation"))
+  harness.stdio.println(malicious.error_codes.contains("inline_secret"))
+  const harmless_text = web_artifact_validate(
+    "<html><head><style>.x { color: red; }</style></head><body><pre>fetch('https://example.invalid'); window.parent; location.href</pre><script>const ok = 1;</script></body></html>",
+  )
+  harness.stdio.println(harmless_text.ok)
+  const external = web_artifact_validate(
+    "<html><head><script src=\"//cdn.example/app.js\"></script><style>@import \"https://cdn.example/x.css\"; .x { background: url(//cdn.example/x.png); }</style></head><body></body></html>",
+  )
+  harness.stdio.println(external.ok)
+  harness.stdio.println(external.error_codes.contains("network_call"))
+  const broken = web_artifact_validate("<html><body><script>alert(1)</body></html>")
+  harness.stdio.println(broken.ok)
+  harness.stdio.println(broken.error_codes.contains("unclosed_script_tag"))
+  const bridge_default = web_artifact_validate(
+    "<html><body><script>window.parent.postMessage({}, '*');</script></body></html>",
+  )
+  const bridge_opt_in = web_artifact_validate(
+    "<html><body><script>window.parent.postMessage({}, '*');</script></body></html>",
+    {allow_host_bridge: true},
+  )
+  harness.stdio.println(bridge_default.error_codes.contains("host_bridge_call"))
+  harness.stdio.println(bridge_opt_in.error_codes.contains("host_bridge_call"))
+  const fallback = web_artifact_text_fallback(good)
+  harness.stdio.println(fallback.contains("Hello"))
+  harness.stdio.println(!fallback.contains("const count"))
+}

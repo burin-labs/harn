@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/extract_trigrams.response.json",
+  "title": "code_index.extract_trigrams response",
+  "description": "Distinct, sorted ascending packed trigrams. Each value packs `(a << 16) | (b << 8) | c` after ASCII case-folding.",
+  "type": "array",
+  "items": { "type": "integer", "minimum": 0 }
+}

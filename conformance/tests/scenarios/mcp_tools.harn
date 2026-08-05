@@ -1,0 +1,17 @@
+pipeline test(harness: Harness, task) {
+  // mcp_tools should accept a tool_registry (renamed from mcp_serve)
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "echo",
+    "Echo input",
+    {
+      parameters: {text: "string"},
+      handler: { args -> args.text },
+      annotations: {title: "Echo Tool", readOnlyHint: true, destructiveHint: false},
+    },
+  )
+  const result = harness.tools.mcp_tools(tools)
+  assert(result == nil, "mcp_tools should return nil")
+  harness.stdio.println("mcp_tools accepted tool_registry with annotations")
+}

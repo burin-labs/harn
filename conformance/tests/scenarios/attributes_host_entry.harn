@@ -1,0 +1,15 @@
+// `@host_entry` declares that an embedding host supplies the arguments,
+// so the signature is a contract with a caller no Harn source can see.
+// It emits no runtime registration: the attributed function stays an
+// ordinary callable, and the attribute name is recognized so it does not
+// trip the unknown-attribute typo guard.
+@host_entry
+pub fn dispatch(harness: Harness, args: dict) -> string {
+  harness.stdio.log("dispatch " + args.name)
+  return "dispatched"
+}
+
+pipeline test_host_entry(harness: Harness, task) {
+  assert(dispatch(harness, {name: "audit"}) == "dispatched", "still callable")
+  harness.stdio.log("attributes_host_entry ok")
+}

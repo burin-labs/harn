@@ -1,0 +1,216 @@
+use super::*;
+
+#[tokio::test(flavor = "current_thread")]
+async fn correlates_delegated_runs() {
+    let _guard = lock_harn_state_async().await;
+    let temp = TempDir::new().unwrap();
+    write_fixture(&temp);
+    let parent_path = temp.path().join("parent.json");
+    let child_path = temp.path().join("child.json");
+    let child = harn_vm::orchestration::RunRecord {
+        type_name: "workflow_run".to_string(),
+        id: "child".to_string(),
+        workflow_id: "child-workflow".to_string(),
+        status: "completed".to_string(),
+        parent_run_id: Some("parent".to_string()),
+        root_run_id: Some("parent".to_string()),
+        ..harn_vm::orchestration::RunRecord::default()
+    };
+    let parent = harn_vm::orchestration::RunRecord {
+        type_name: "workflow_run".to_string(),
+        id: "parent".to_string(),
+        workflow_id: "parent-workflow".to_string(),
+        status: "completed".to_string(),
+        root_run_id: Some("parent".to_string()),
+        child_runs: vec![harn_vm::orchestration::RunChildRecord {
+            worker_id: "worker-1".to_string(),
+            worker_name: "child".to_string(),
+            status: "completed".to_string(),
+            run_id: Some("child".to_string()),
+            run_path: Some(child_path.to_string_lossy().into_owned()),
+            ..harn_vm::orchestration::RunChildRecord::default()
+        }],
+        ..harn_vm::orchestration::RunRecord::default()
+    };
+    harn_vm::orchestration::save_run_record(&child, Some(child_path.to_str().unwrap())).unwrap();
+    harn_vm::orchestration::save_run_record(&parent, Some(parent_path.to_str().unwrap())).unwrap();
+    let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
+    let mut session = ConnectionState::default();
+
+    let report = call_tool(
+        &service,
+        &mut session,
+        "harn.run.report",
+        json!({ "path": "parent.json" }),
+    )
+    .await;
+    assert_eq!(report["schema"], "harn.run_report.v1");
+    assert_eq!(report["root_run_id"], "parent");
+    assert_eq!(report["agents"].as_array().unwrap().len(), 2);
+    assert_eq!(report["delegations"][0]["forward_pointer"], true);
+    assert_eq!(report["delegations"][0]["back_pointer"], true);
+    assert!(report["projection"]["hash"]
+        .as_str()
+        .is_some_and(|hash| hash.starts_with("sha256:")));
+}
+
+#[tokio::test(flavor = "current_thread")]
+#[allow(clippy::await_holding_lock)]
+async fn reviews_a_run_record_without_materializing_a_report_file() {
+    let _guard = lock_harn_state_async().await;
+    harn_vm::llm::clear_cli_llm_mock_mode();
+    let temp = TempDir::new().unwrap();
+    write_fixture(&temp);
+    let run_path = temp.path().join("root.json");
+    let run = harn_vm::orchestration::RunRecord {
+        type_name: "workflow_run".to_string(),
+        id: "root".to_string(),
+        workflow_id: "workflow".to_string(),
+        status: "completed".to_string(),
+        root_run_id: Some("root".to_string()),
+        ..harn_vm::orchestration::RunRecord::default()
+    };
+    harn_vm::orchestration::save_run_record(&run, Some(run_path.to_str().unwrap())).unwrap();
+    let fixture = harn_vm::llm::parse_llm_mocks_jsonl(
+        &json!({
+            "provider": "openai",
+            "model": "gpt-5.6-luna",
+            "text": "{\"verdict\":\"pass\",\"confidence\":0.95,\"summary\":\"The run report is structurally sound.\",\"findings\":[],\"actions\":[]}"
+        })
+        .to_string(),
+    )
+    .unwrap();
+    harn_vm::llm::install_cli_llm_mock_fixture(fixture);
+    let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
+    let mut session = ConnectionState::default();
+
+    let review = call_tool(
+        &service,
+        &mut session,
+        "harn.run.review",
+        json!({
+            "run_record_path": "root.json",
+            "model": "gpt-5.6-luna"
+        }),
+    )
+    .await;
+    harn_vm::llm::clear_cli_llm_mock_mode();
+
+    assert_eq!(review["schema"], "harn.run_review.v1");
+    assert_eq!(review["verdict"], "pass");
+    assert!(review["provenance"]["report_hash"]
+        .as_str()
+        .is_some_and(|hash| hash.starts_with("sha256:")));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn advertises_structurally_distinct_run_review_inputs_and_spend_semantics() {
+    let _guard = lock_harn_state_async().await;
+    let temp = TempDir::new().unwrap();
+    write_fixture(&temp);
+    let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
+    let mut session = ConnectionState::default();
+    let response = service
+        .handle_request(&mut session, stable_request(3, "tools/list", json!({})))
+        .await;
+    let tool = response["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == "harn.run.review")
+        .expect("run review tool");
+
+    assert_eq!(tool["inputSchema"]["oneOf"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        tool["inputSchema"]["oneOf"][0]["required"],
+        json!(["report_path"])
+    );
+    assert_eq!(
+        tool["inputSchema"]["oneOf"][1]["required"],
+        json!(["run_record_path"])
+    );
+    assert_eq!(tool["annotations"]["readOnlyHint"], false);
+    assert_eq!(tool["annotations"]["destructiveHint"], false);
+    assert_eq!(tool["annotations"]["openWorldHint"], true);
+    // Task capability is server-owned since the rmcp cutover: it is keyed by
+    // tool name rather than advertised on the descriptor. A run review makes a
+    // billable model call, so it must be eligible for asynchronous execution.
+    assert!(matches!(
+        crate::commands::mcp::serve::tools::task_policy_for_tool("harn.run.review"),
+        Some(crate::commands::mcp::serve::tools::TaskPolicy::Async)
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn rejects_project_root_escape() {
+    let _guard = lock_harn_state_async().await;
+    let temp = TempDir::new().unwrap();
+    write_fixture(&temp);
+    let outside = TempDir::new().unwrap();
+    let outside_path = outside.path().join("run.json");
+    let run = harn_vm::orchestration::RunRecord {
+        type_name: "workflow_run".to_string(),
+        id: "outside".to_string(),
+        workflow_id: "outside-workflow".to_string(),
+        ..harn_vm::orchestration::RunRecord::default()
+    };
+    harn_vm::orchestration::save_run_record(&run, Some(outside_path.to_str().unwrap())).unwrap();
+    let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
+    let mut session = ConnectionState::default();
+    let response = service
+        .handle_request(
+            &mut session,
+            stable_request(
+                2,
+                "tools/call",
+                json!({
+                    "name": "harn.run.report",
+                    "arguments": { "path": outside_path },
+                }),
+            ),
+        )
+        .await;
+    assert_eq!(response["result"]["isError"], true, "response={response}");
+    assert!(response["result"]["content"][0]["text"]
+        .as_str()
+        .is_some_and(|text| text.contains("outside the report's allowed roots")));
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn rejects_symlink_escape() {
+    let _guard = lock_harn_state_async().await;
+    let temp = TempDir::new().unwrap();
+    write_fixture(&temp);
+    let outside = TempDir::new().unwrap();
+    let outside_path = outside.path().join("run.json");
+    let link_path = temp.path().join("linked-run.json");
+    let run = harn_vm::orchestration::RunRecord {
+        type_name: "workflow_run".to_string(),
+        id: "outside".to_string(),
+        workflow_id: "outside-workflow".to_string(),
+        ..harn_vm::orchestration::RunRecord::default()
+    };
+    harn_vm::orchestration::save_run_record(&run, Some(outside_path.to_str().unwrap())).unwrap();
+    std::os::unix::fs::symlink(&outside_path, &link_path).unwrap();
+    let service = McpOrchestratorService::new(&fixture_args(&temp)).unwrap();
+    let mut session = ConnectionState::default();
+    let response = service
+        .handle_request(
+            &mut session,
+            stable_request(
+                2,
+                "tools/call",
+                json!({
+                    "name": "harn.run.report",
+                    "arguments": { "path": "linked-run.json" },
+                }),
+            ),
+        )
+        .await;
+
+    assert_eq!(response["result"]["isError"], true, "response={response}");
+    assert!(response["result"]["content"][0]["text"]
+        .as_str()
+        .is_some_and(|text| text.contains("outside the report's allowed roots")));
+}

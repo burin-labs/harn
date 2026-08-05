@@ -1,0 +1,82 @@
+import { Backpressure, pool_create, pool_wait } from "std/lifecycle/pool"
+import "std/triggers"
+
+/**
+ * Verifies the SpawnToPool trigger handler (#1889) composes triggers with
+ * named agent pools (#1883): the dispatcher submits each matched event into
+ * the named pool via its task_factory, and the pool's max_concurrent cap
+ * bounds in-flight closures regardless of the inbound event rate.
+ */
+pipeline test(harness: Harness, task) {
+  harness.testing.clock_set(1700000000000)
+  const bp = Backpressure()
+  const gate = harness.runtime.channel(nil, 8)
+  const inflight = harness.runtime.atomic(0)
+  const peak = harness.runtime.atomic(0)
+  const completed = harness.runtime.atomic(0)
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(
+    harness.random.range(100000, 999999),
+  )
+  const pool_name = "spawn-to-pool-cap-demo-" + unique
+  const _ = pool_create(
+    harness.agent,
+    {name: pool_name, max_concurrent: 3, backpressure: bp.queue(8, "fail_submitter")},
+  )
+  const task_factory = { _event ->
+    return { ->
+      let now = harness.runtime.atomic_add(inflight, 1) + 1
+      if now > harness.runtime.atomic_get(peak) {
+        harness.runtime.atomic_set(peak, now)
+      }
+      harness.runtime.receive(gate)
+      harness.runtime.atomic_add(inflight, -1)
+      harness.runtime.atomic_add(completed, 1)
+      return now
+    }
+  }
+  const trigger_id = "trigger-spawn-to-pool-" + unique
+  const handle: TriggerHandle = harness.runtime.trigger_register(
+    {
+      id: trigger_id,
+      kind: "issue.opened",
+      provider: "webhook",
+      handler: SpawnToPool({pool: pool_name, task_factory: task_factory}),
+      when: nil,
+      retry: nil,
+      match: {events: ["issue.opened"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  // Fire 8 events. With max_concurrent=3 the pool must keep at most three
+  // closures running concurrently regardless of inbound event rate.
+  let handles = []
+  for i in 0 to 8 exclusive {
+    const dispatch: DispatchHandle = harness.runtime.trigger_fire(
+      handle,
+      {
+        provider: "webhook",
+        kind: "issue.opened",
+        headers: {x_delivery: "evt-" + to_string(i) + "-" + unique},
+      },
+    )
+    if dispatch.status == "dispatched" && dispatch.result?.pool == pool_name {
+      handles = handles.appending(dispatch.result)
+    }
+  }
+  harness.stdio.println(len(handles) == 8)
+  for _i in 0 to len(handles) exclusive {
+    harness.runtime.send(gate, "go")
+  }
+  const results = pool_wait(harness.agent, handles)
+  harness.stdio.println(len(results) == 8)
+  harness.stdio.println(harness.runtime.atomic_get(peak) <= 3)
+  harness.stdio.println(harness.runtime.atomic_get(inflight) == 0)
+  harness.stdio.println(harness.runtime.atomic_get(completed) == 8)
+  harness.testing.clock_reset()
+}

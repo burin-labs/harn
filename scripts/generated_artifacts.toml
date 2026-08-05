@@ -1,0 +1,605 @@
+# Generated-artifact registry — single source of truth for every
+# "source of truth -> generated/mirrored file + drift check" pair in the repo.
+#
+# WHY THIS FILE EXISTS
+# --------------------
+# Generated-artifact drift guards must stay wired through two authoritative consumers:
+#   1. the `all:` recipe in the Makefile
+#   2. the audit step(s) in .github/workflows/ci.yml
+# The registry below is the authority that keeps those surfaces in sync. Without
+# it, a stale generated output can pass review when one consumer forgets to run
+# the corresponding `check-*` target.
+#
+# This registry is the one list. `scripts/check_generated_registry.harn`
+# (`make check-generated-registry`) audits the other consumers against
+# it, so a new gen/check pair cannot silently escape CI again, and a
+# generated output cannot lose its drift guard.
+#
+# HOW TO ADD A NEW GENERATED ARTIFACT
+# -----------------------------------
+#   1. Add `gen-<id>` (or `sync-<id>`) and `check-<id>` targets to the Makefile.
+#   2. Add an [[artifact]] block below describing them.
+#   3. Set the authority flags, then wire them:
+#        ci        -> add `make check-<id>` to .github/workflows/ci.yml (or another workflow)
+#        make_all  -> add `check-<id>` to the `all:` recipe in the Makefile
+#   4. Run `make check-generated-registry` — it fails until the registry
+#      and the consumers agree.
+#
+# A `check-*` Makefile target that is NOT a generated-artifact drift guard
+# (a behavioural validator, a perf soak, a LOC ratchet, the registry
+# auditor itself) belongs in `[meta].exempt_checks` instead of an
+# [[artifact]] block, so the completeness audit stays meaningful.
+
+[meta]
+# `check-*` Makefile targets that are intentionally NOT generated-artifact
+# drift guards. Every `^check-*:` target in the Makefile must be either an
+# [[artifact]].check below or listed here, so a newly-added drift guard
+# cannot be forgotten.
+exempt_checks = [
+  "check",                          # the umbrella `check: all` alias
+  "check-vm-rss-soak",              # perf/RSS soak, not a sync guard
+  "check-test-case-performance",     # parallel per-test performance ratchet, not a generated mirror
+  "check-ported-handler-loc",       # LOC ratchet (epic #2293), not a sync guard
+  "check-source-file-lengths",      # exact repo source LOC ratchet, not a generated mirror
+  "check-python-boundary",          # repo-language boundary ratchet, not a sync guard
+  "check-harn-syntax-sensitive-scans", # source-pattern guard, not a generated artifact mirror
+  "check-agent-guidance",             # canonical agent-guidance topology and principle links
+  "check-loud-boundaries",          # loud-boundary invariant registry (#5142), not a generated mirror
+  "check-ci-cache-policy",           # validates workflow cache ownership, not a generated mirror
+  "check-rust-test-lane-policy",     # validates the CI test-lane stack contract, not a generated mirror
+  "check-trigger-examples",         # validates example projects parse, not a mirror
+  "check-docs-model-refs",          # validates docs track provider aliases, not a mirror
+  "check-docs-snippets",            # validates ```harn blocks parse, not a mirror
+  "check-docs-cli-flags",           # validates docs bash/sh harn flags, not a mirror
+  "check-docs-links",               # validates docs/src local links resolve, not a mirror
+  "check-site-snippets",            # validates website Harn fixtures parse, not a mirror
+  "check-app-host",                 # validates readable browser-host sources with Prettier, ESLint, TypeScript, and Node
+  "check-crate-sibling-versions",   # validates publish-time intra-workspace crate pins, not a mirror
+  "check-dependabot-groups",        # validates Cargo compatibility-family update policy, not a mirror
+  "check-grammar-keywords",         # validates spec grammar keyword literals vs the lexer, not a mirror
+  "check-stdlib-strict-types",      # strict-types boundary ratchet over the stdlib, not a mirror
+  "check-stdlib-public-return-types", # public stdlib return-type ratchet, not a mirror
+  "check-schema-strict",             # zero-baseline strict gate for the std/schema facade, not a mirror
+  "check-optional-dep-feature-contracts", # optional-dep feature completeness ratchet (#5690), not a mirror
+  "check-all-features",             # cargo check --all-features compile gate (#5690), not a mirror
+  "check-release-audit-contract",  # validates typed release proof mapping against CI, not a mirror
+  "check-binary-size-policy",     # validates typed/bootstrap release size policy parity, not a mirror
+  "check-generated-registry",       # the auditor itself
+  "check-drift",                    # fast preflight aggregator (derives members from [preflight.dispatch])
+  "check-drift-binary",             # binary-tier preflight aggregator (derives members from [preflight.dispatch])
+]
+
+# ---------------------------------------------------------------------------
+# Fully-wired mirrors (gen + check + CI + make all, several also hooked)
+# ---------------------------------------------------------------------------
+
+[[artifact]]
+id = "cli-aot"
+description = "Target-independent bytecode payload and typed manifest for Harn-backed CLI commands, generated by the normal harn-vm dependency graph immediately before package/release assembly and embedded by harn-cli."
+lifecycle = "release-package"
+gen = "gen-cli-aot"
+check = "check-cli-aot"
+outputs = ["crates/harn-cli/generated/cli-bytecode-manifest.json", "crates/harn-cli/generated/cli-bytecode/"]
+sources = [
+  "crates/harn-cli-aot-gen/",
+  "crates/harn-cli/build_support/cli_aot_manifest.rs",
+  "crates/harn-stdlib/src/lib.rs",
+  "crates/harn-stdlib/src/stdlib/cli/",
+  "crates/harn-lexer/src/",
+  "crates/harn-parser/src/",
+  "crates/harn-ir/src/",
+  "crates/harn-kernel/src/",
+  "crates/harn-vm/build_support/codegen_fingerprint.rs",
+  "crates/harn-vm/src/compiler.rs",
+  "crates/harn-vm/src/bytecode_cache.rs",
+  "crates/harn-vm/src/chunk.rs",
+  "crates/harn-vm/src/chunk/",
+  "crates/harn-vm/src/module_artifact.rs",
+]
+ci = true
+make_all = false
+
+[[artifact]]
+id = "highlight"
+description = "Versioned Harn language vocabulary plus the legacy docs adapter, generated from the live lexer and stdlib builtin registry."
+gen = "gen-highlight"
+check = "check-highlight"
+outputs = [
+  "spec/language-vocabulary.json",
+  "docs/theme/harn-keywords.js",
+  "crates/harn-wasm/demo/language-vocabulary.json",
+]
+sources = ["crates/harn-lexer/src/", "crates/harn-stdlib/src/stdlib/", "crates/harn-vm/src/stdlib.rs", "crates/harn-vm/src/lib.rs", "crates/harn-modules/"]
+ci = true
+make_all = true
+
+[[artifact]]
+id = "vm-exposures"
+description = "Names of every `harness.<capability>.<method>` declared by `#[harn_builtin]` in harn-vm, projected into the dependency-leaf contracts crate so `harn check` can reject an unknown capability method without a running VM."
+gen = "gen-vm-exposures"
+check = "check-vm-exposures"
+outputs = ["crates/harn-capability-contracts/src/vm_declared.rs"]
+sources = ["crates/harn-vm/src/"]
+ci = true
+make_all = true
+
+[[artifact]]
+id = "wasm-wit-contract"
+description = "Canonical JSON projection of the Portable Harn Kernel WIT package, resolved and validated by pinned Bytecode Alliance wasm-tools."
+gen = "gen-wasm-wit"
+check = "check-wasm-wit"
+outputs = ["crates/harn-wasm/wit/harn-kernel.json"]
+sources = [
+  "crates/harn-wasm/wit/harn-kernel.wit",
+  "Makefile",
+  ".github/workflows/portable-kernel-wasm.yml",
+]
+ci = true
+make_all = false
+
+[[artifact]]
+id = "app-runtime"
+description = "Compressed browser runtime embedded by the standalone Apps host, generated from the canonical harn-wasm adapter."
+lifecycle = "release-package"
+gen = "gen-app-runtime"
+check = "check-app-runtime"
+outputs = [
+  "crates/harn-cli/src/commands/app_host/runtime/harn_wasm.js",
+  "crates/harn-cli/src/commands/app_host/harn_wasm.d.ts",
+  "crates/harn-cli/src/commands/app_host/runtime/harn_wasm_bg.wasm.d.ts",
+  "crates/harn-cli/src/commands/app_host/runtime/harn_wasm_bg.wasm.gz",
+]
+sources = [
+  "crates/harn-kernel/",
+  "crates/harn-wasm/",
+  "scripts/package_app_runtime.mjs",
+]
+ci = true
+make_all = false
+
+[[artifact]]
+id = "portable-demo-package"
+description = "Browser package-manifest projection generated from the standalone Harn reducer sources, so native and browser adapters consume one sample program rather than parallel source copies."
+gen = "gen-portable-demo-package"
+check = "check-portable-demo-package"
+outputs = ["crates/harn-wasm/demo/package.json"]
+sources = [
+  "crates/harn-wasm/demo/package-root.harn",
+  "crates/harn-wasm/demo/package-reducer-math.harn",
+  "crates/harn-cli/src/commands/portable_source.rs",
+  "crates/harn-cli/src/commands/portable.rs",
+]
+ci = true
+make_all = true
+
+[[artifact]]
+id = "portable-benchmark-schema"
+description = "Public JSON Schema generated from the Portable Kernel benchmark receipt type, validation constants, and serialization contract."
+gen = "gen-portable-benchmark-schema"
+check = "check-portable-benchmark-schema"
+outputs = ["spec/schemas/portable-kernel-benchmark.v1.schema.json"]
+sources = [
+  "crates/harn-kernel/src/benchmark.rs",
+  "crates/harn-kernel/src/benchmark/schema.rs",
+  "crates/harn-cli/src/commands/dump_portable_benchmark_schema.rs",
+]
+ci = true
+make_all = true
+
+[[artifact]]
+id = "prompt-grammar"
+description = "VS Code/Cursor TextMate grammar for .harn.prompt files, generated from the prompt-template keyword, filter, and section vocabulary the engine renders with."
+gen = "gen-prompt-grammar"
+check = "check-prompt-grammar"
+outputs = ["editors/vscode/syntaxes/harn-prompt.tmLanguage.json"]
+sources = [
+  "crates/harn-vm/src/stdlib/template/vocabulary.rs",
+  "crates/harn-cli/src/commands/dump_prompt_grammar.rs",
+]
+ci = true
+make_all = true
+
+[[artifact]]
+id = "language-spec"
+description = "spec/HARN_SPEC.md (single-file assembly), docs/src/language-spec.md (docs landing page), the per-chapter docs pages under docs/src/spec/language/, and the chapter list in docs/src/SUMMARY.md are all generated from the per-chapter sources in spec/chapters/."
+gen = "sync-language-spec"
+check = "check-language-spec"
+outputs = ["spec/HARN_SPEC.md", "docs/src/language-spec.md", "docs/src/spec/language", "docs/src/SUMMARY.md"]
+sources = ["spec/chapters/*.md"]
+ci = true
+make_all = true
+
+[[artifact]]
+id = "diagnostics-catalog"
+description = "Diagnostic-code catalog (markdown page + JSON sidecar) from the in-binary registry."
+gen = "sync-diagnostics-catalog"
+check = "check-diagnostics-catalog"
+outputs = ["docs/src/diagnostics.md", "docs/diagnostics-catalog.json"]
+sources = ["crates/harn-parser/src/diagnostic_codes.rs", "crates/harn-parser/src/diagnostic_codes/"]
+ci = true
+make_all = true
+
+[[artifact]]
+id = "tree-sitter-keywords"
+description = "tree-sitter-harn keyword list mirrors the harn-lexer KEYWORDS const, so the editor grammar and the runtime parser agree on the reserved word set."
+gen = "gen-tree-sitter-keywords"
+check = "check-tree-sitter-keywords"
+outputs = ["tree-sitter-harn/grammar/keywords.js"]
+sources = ["crates/harn-lexer/src/token.rs"]
+ci = true
+make_all = true
+
+[[artifact]]
+id = "tree-sitter-parser"
+description = "Compiled tree-sitter Harn parser tables and metadata generated from grammar.js and its modules by the CLI pinned in tree-sitter-harn/package-lock.json."
+gen = "gen-tree-sitter-parser"
+check = "check-tree-sitter-parser"
+outputs = [
+  "tree-sitter-harn/src/parser.c",
+  "tree-sitter-harn/src/grammar.json",
+  "tree-sitter-harn/src/node-types.json",
+]
+sources = [
+  "tree-sitter-harn/grammar.js",
+  "tree-sitter-harn/grammar/",
+  "tree-sitter-harn/package.json",
+  "tree-sitter-harn/package-lock.json",
+  "tree-sitter-harn/tree-sitter.json",
+  "tree-sitter-harn/scripts/tree-sitter-cli.sh",
+  "scripts/tree_sitter_generated.sh",
+]
+ci = true
+make_all = true
+
+[[artifact]]
+id = "grammar-fitness"
+description = "Resolved Tree-sitter artifact provenance and versioned parse/search/safe-edit corpus fitness receipt consumed by ParserHealth."
+gen = "gen-grammar-fitness"
+check = "check-grammar-fitness"
+outputs = ["crates/harn-hostlib/data/grammar-fitness/receipt.v1.json"]
+sources = [
+  "Cargo.lock",
+  "crates/harn-hostlib/Cargo.toml",
+  "crates/harn-hostlib/data/grammar-fitness/corpus.schema.json",
+  "crates/harn-hostlib/data/grammar-fitness/corpus.v1.json",
+  "crates/harn-hostlib/data/grammar-fitness/fixtures/",
+  "crates/harn-hostlib/tests/fixtures/ast/",
+  "crates/harn-hostlib/tests/fixtures/parser_agreement/",
+  "scripts/sync_grammar_fitness_receipt.harn",
+  "tree-sitter-harn/src/",
+]
+ci = true
+make_all = true
+
+# ---------------------------------------------------------------------------
+# Mirrors whose drift guards are required in both `make all` and CI. Keep this
+# section wired through the workflow audit before adding new generated outputs.
+# ---------------------------------------------------------------------------
+
+[[artifact]]
+id = "protocol-artifacts"
+description = "Harn Agents Protocol bindings (Rust/TS/Swift + manifest) generated from spec/openapi.yaml and the wire vocabulary."
+gen = "gen-protocol-artifacts"
+check = "check-protocol-artifacts"
+outputs = [
+  "spec/protocol-artifacts/harn-protocol.rs",
+  "spec/protocol-artifacts/harn-protocol.ts",
+  "spec/protocol-artifacts/HarnProtocol.swift",
+  "spec/protocol-artifacts/manifest.json",
+  "spec/protocol-artifacts/schemas/plan-document-v1.schema.json",
+]
+sources = ["spec/openapi.yaml", "crates/harn-cli/src/commands/"]
+ci = true
+make_all = true
+
+[[artifact]]
+id = "connector-schemas"
+description = "Rust normalized-event payload structs generated from the canonical Harn connector event schema module (Harn-first source of truth). GitHub today; more providers follow."
+gen = "gen-connector-schemas"
+check = "check-connector-schemas"
+outputs = ["crates/harn-vm/src/triggers/event/schemas_generated.rs"]
+sources = [
+  "crates/harn-stdlib/src/stdlib/stdlib_event_schemas.harn",
+  "crates/harn-cli/src/commands/connector_schema_codegen/",
+]
+ci = true
+make_all = true
+
+[[artifact]]
+id = "harness-migrations"
+description = "Removed-global → typed-harness-path table read by harn-parser, generated from the harn-vm migration registry. The parser compiles below the VM, so it cannot query the registry directly; without this projection it carries a second hand-written table that drifts (harn#6151)."
+gen = "gen-harness-migrations"
+check = "check-harness-migrations"
+outputs = ["crates/harn-parser/src/diagnostic/harness_migrations_generated.rs"]
+sources = [
+  "crates/harn-vm/src/stdlib/harness_migration.rs",
+  "crates/harn-cli/src/commands/harness_migration_codegen.rs",
+]
+ci = true
+make_all = true
+
+[[artifact]]
+id = "openapi-snapshot"
+description = "Harn Agents OpenAPI public path/schema surface snapshot and embedded server copy, generated from spec/openapi.yaml by scripts/check_openapi_snapshot.harn."
+gen = "gen-openapi-snapshot"
+check = "check-openapi-snapshot"
+outputs = ["spec/openapi.snapshot", "crates/harn-serve/openapi.yaml"]
+sources = ["spec/openapi.yaml"]
+ci = true
+make_all = true
+
+[[artifact]]
+id = "session-bundle-schema"
+description = "JSON Schema for the session-bundle DTO, generated from the Rust SessionBundle type."
+gen = "gen-session-bundle-schema"
+check = "check-session-bundle-schema"
+outputs = ["spec/schemas/session-bundle.v1.schema.json"]
+sources = [
+  "crates/harn-vm/src/session_bundle.rs",
+  "crates/harn-vm/src/session_bundle/",
+  "crates/harn-cli/src/commands/session.rs",
+]
+ci = true
+make_all = true
+
+[[artifact]]
+id = "run-session-view-fixtures"
+description = "Expected harn.run_view.v1 and harn.session_view.v1 projection snapshots generated from sanitized shared run-record fixtures."
+gen = "gen-run-view-fixtures"
+check = "check-run-view-fixtures"
+outputs = [
+  "spec/run-view-fixtures/cases/legacy-sparse/expected/runs/run.run_view.json",
+  "spec/run-view-fixtures/cases/legacy-sparse/expected/session_view.json",
+  "spec/run-view-fixtures/cases/root-transcript/expected/runs/run.run_view.json",
+  "spec/run-view-fixtures/cases/root-transcript/expected/session_view.json",
+  "spec/run-view-fixtures/cases/session-lineage-failure-approval/expected/runs/00-root.run_view.json",
+  "spec/run-view-fixtures/cases/session-lineage-failure-approval/expected/runs/01-child.run_view.json",
+  "spec/run-view-fixtures/cases/session-lineage-failure-approval/expected/session_view.json",
+  "spec/run-view-fixtures/cases/stage-transcript-active-auth/expected/runs/run.run_view.json",
+  "spec/run-view-fixtures/cases/stage-transcript-active-auth/expected/session_view.json",
+]
+sources = [
+  "crates/harn-vm/src/orchestration/records/view.rs",
+  "crates/harn-vm/tests/harn_vm/run_view_fixtures.rs",
+  "spec/run-view-fixtures/cases/",
+]
+# The Rust `run_view_fixtures` integration test executes this same snapshot
+# comparison in the full CI suite. Keep the named Make target for local and
+# release-gate use without compiling harn-vm a second time in the audit lane.
+ci = false
+make_all = true
+
+[[artifact]]
+id = "provider-catalog"
+description = "Checked-in provider/model catalog TOML, capability TOML, JSON, schema, and downstream type bindings generated from one source-fragment graph."
+gen = "gen-provider-catalog"
+check = "check-provider-catalog"
+outputs = [
+  "crates/harn-vm/src/llm/providers.toml",
+  "crates/harn-vm/src/llm/capabilities.toml",
+  "spec/provider-catalog/provider-catalog.json",
+  "spec/provider-catalog/provider-catalog.schema.json",
+  "spec/provider-catalog/harn-provider-catalog.d.ts",
+  "spec/provider-catalog/HarnProviderCatalog.swift",
+]
+sources = [
+  "crates/harn-vm/src/llm/catalog_sources/",
+  "crates/harn-vm/src/llm/capability_sources/",
+  "crates/harn-cli/src/cli/providers.rs",
+  "crates/harn-cli/src/commands/providers.rs",
+  "crates/harn-vm/src/llm_config.rs",
+  "crates/harn-vm/src/llm/capabilities.rs",
+  "crates/harn-vm/src/provider_catalog.rs",
+]
+ci = true
+make_all = true
+
+[[artifact]]
+id = "provider-catalog-drift"
+description = "Replays the provider-catalog refresh workflow against bundled HTTP fixtures and checks the rendered drift report + candidate TOML against committed goldens."
+gen = ""  # regenerate with: harn run scripts/update_provider_catalog.harn -- --check --update
+check = "check-provider-catalog-drift"
+outputs = [
+  "scripts/provider_catalog_fixtures/expected_candidate.toml",
+  "scripts/provider_catalog_fixtures/expected_drift_report.md",
+]
+sources = ["scripts/update_provider_catalog.harn", "scripts/provider_catalog_fixtures/", "crates/harn-vm/src/llm/"]
+ci = true
+make_all = true
+
+[[artifact]]
+id = "docs-workflow-quickstart"
+description = "Verifies the workflow-authoring quickstart fixtures still produce the bundle digests, executed-node sequences, and connector-status shapes the docs claim."
+gen = ""  # no generated file; this is a docs<->runtime behavioural guard
+check = "check-docs-workflow-quickstart"
+outputs = ["scripts/check_docs_workflow_quickstart.harn"]
+sources = ["docs/src/", "scripts/check_docs_workflow_quickstart.harn"]
+ci = true
+make_all = true
+
+[[artifact]]
+id = "receipt-structs"
+description = "Guards against duplicated/divergent copies of the receipt structs that must stay byte-identical across crates."
+gen = ""  # no generated file; structural duplication guard
+check = "check-receipt-structs"
+outputs = ["scripts/check_receipt_struct_duplication.harn"]
+sources = ["crates/harn-vm/src/", "crates/harn-hostlib/src/"]
+ci = true
+make_all = true
+
+# ---------------------------------------------------------------------------
+# Already-wired CI checks (verified present in a workflow).
+# ---------------------------------------------------------------------------
+
+[[artifact]]
+id = "protocol-bindings-roundtrip"
+description = "Round-trips the published JSON fixture through the Python and Go protocol bindings to catch wire-vocabulary drift."
+gen = ""  # python/go bindings are emitted by dump-protocol-artifacts; this is the roundtrip validator
+check = "check-bindings"
+outputs = [
+  "spec/protocol-artifacts/python/harn_protocol.py",
+  "spec/protocol-artifacts/go/harnprotocol/harnprotocol.go",
+]
+sources = ["spec/protocol-artifacts/python/", "spec/protocol-artifacts/go/", "scripts/check_protocol_bindings.harn"]
+ci = true
+make_all = true
+
+[[artifact]]
+id = "trigger-quickref"
+description = "LLM trigger quickref doc generated from the live ProviderCatalog metadata."
+gen = "gen-trigger-quickref"
+check = "check-trigger-quickref"
+outputs = ["docs/llm/harn-triggers-quickref.md"]
+sources = ["crates/harn-vm/src/llm/", "crates/harn-vm/src/provider_catalog.rs"]
+ci = true
+make_all = true
+
+[[artifact]]
+id = "provider-matrix"
+description = "Provider/model capability matrix doc generated from capabilities.toml."
+gen = "gen-provider-matrix"
+check = "check-provider-matrix"
+outputs = ["docs/src/provider-matrix.md"]
+sources = [
+  "crates/harn-cli/src/commands/provider_matrix.rs",
+  "crates/harn-vm/src/llm/capability_sources/",
+  "crates/harn-vm/src/llm/capabilities.toml",
+]
+ci = true
+make_all = true
+
+[[artifact]]
+id = "provider-support"
+description = "Provider support recommendations (markdown + JSON) generated from catalog/capabilities/notes."
+gen = "gen-provider-support"
+check = "check-provider-support"
+outputs = ["docs/src/provider-support.md", "docs/provider-support.json"]
+sources = [
+  "crates/harn-cli/src/cli/providers.rs",
+  "crates/harn-vm/src/llm/catalog_sources/",
+  "crates/harn-vm/src/llm/capability_sources/",
+  "crates/harn-vm/src/llm/providers.toml",
+  "crates/harn-vm/src/llm/capabilities.toml",
+]
+ci = true
+make_all = true
+
+[[artifact]]
+id = "connector-matrix"
+description = "Connector capability parity matrix doc generated from package manifests."
+gen = "gen-connector-matrix"
+check = "check-connector-matrix"
+outputs = ["docs/src/connectors/parity-matrix.md"]
+sources = ["crates/harn-cli/portal/", "crates/harn-modules/"]
+ci = true
+make_all = true
+
+# ---------------------------------------------------------------------------
+# Cross-repo guard — intentionally NOT in harn CI (needs a sibling
+# burin-code checkout). Runs in release / cross-repo jobs. ci = false.
+# ---------------------------------------------------------------------------
+
+[[artifact]]
+id = "burin-protocol-artifacts"
+description = "Confirms Burin Code's vendored Harn protocol bindings match this checkout. Source of truth is the harn protocol artifacts; the consumer is a sibling repo."
+gen = ""  # regenerate downstream by re-vendoring spec/protocol-artifacts into burin-code
+check = "check-burin-protocol-artifacts"
+outputs = ["spec/protocol-artifacts/HarnProtocol.swift", "spec/protocol-artifacts/harn-protocol.ts"]
+sources = ["spec/protocol-artifacts/"]
+ci = false  # requires BURIN_CODE_ROOT / a sibling burin-code checkout; runs in release + cross-repo jobs only
+make_all = false  # excluded from `make all` for the same reason (no sibling checkout locally)
+
+# ---------------------------------------------------------------------------
+# Drift-preflight dispatch classification — single source of truth for the
+# fast `make check-drift` / `make check-drift-binary` "before you declare
+# clean" preflights. scripts/drift_preflight_members.harn derives each
+# preflight's member list from this table; the Makefile targets just expand it.
+#
+# check-generated-registry (completeness_errors + preflight_dispatch_errors)
+# enforces that EVERY `^check-*:` Makefile target appears here with a tier, so a
+# newly-added drift guard cannot silently escape the preflight. `lint-*` guards
+# may also be classified `source` so the fast gate catches them too.
+#
+# Tiers, by DISPATCH SHAPE (the load-bearing distinction):
+#   source   -> reads committed files at interpret time (`harn run scripts/*.harn`
+#               that read files, or a plain `.sh` scan). Trustworthy the instant
+#               you save a file — a stale warm binary cannot change the verdict.
+#               These are `check-drift`, the true "before you declare clean" gate.
+#   binary   -> verdict depends on CURRENT binary semantics: generated output,
+#               parser, checker, or linter behavior. After a Rust edit but
+#               before a rebuild the warm binary is stale, so these can
+#               FALSE-PASS. Run `check-drift-binary` only after `make build` or
+#               with a fresh HARN_BIN; CI's HARN_BIN is freshly built.
+#   excluded -> not a fast file-drift scan: needs a cargo build/test, an external
+#               toolchain (go), a sibling repo checkout, executes runtime
+#               fixtures, or is a perf soak; in neither preflight.
+[preflight.dispatch]
+# --- source: fast, reads committed files (check-drift) ---
+"check-crate-sibling-versions" = "source"
+"check-dependabot-groups" = "source"
+"check-language-spec" = "source"
+"check-openapi-snapshot" = "source"
+"check-docs-model-refs" = "source"
+"check-docs-links" = "source"
+"check-app-host" = "source"
+"check-app-runtime" = "excluded"
+"check-receipt-structs" = "source"
+"check-ported-handler-loc" = "source"
+"check-source-file-lengths" = "source"
+"check-python-boundary" = "source"
+"check-harn-syntax-sensitive-scans" = "source"
+"check-agent-guidance" = "source"
+"check-loud-boundaries" = "source"
+"check-tree-sitter-keywords" = "source"
+"check-grammar-keywords" = "source"
+"check-grammar-fitness" = "excluded"
+"check-generated-registry" = "source"
+"check-release-audit-contract" = "source"
+"check-ci-cache-policy" = "source"
+"check-vm-exposures" = "source"
+"check-rust-test-lane-policy" = "source"
+"lint-test-patterns" = "source"
+"lint-diagnostic-codes" = "source"
+"lint-no-xfail-regression" = "source"
+"lint-no-rust-prompt-prose" = "source"
+"lint-agent-path-normalization" = "source"
+# --- binary: verdict depends on current executable semantics (check-drift-binary) ---
+"check-highlight" = "binary"
+"check-portable-benchmark-schema" = "binary"
+"check-portable-demo-package" = "binary"
+"check-prompt-grammar" = "binary"
+"check-protocol-artifacts" = "binary"
+"check-connector-schemas" = "binary"
+# The table is read out of the linked runtime registry, so a stale executable
+# reports a stale verdict.
+"check-harness-migrations" = "binary"
+"check-session-bundle-schema" = "binary"
+"check-trigger-quickref" = "binary"
+"check-provider-matrix" = "binary"
+"check-provider-support" = "binary"
+"check-provider-catalog" = "binary"
+"check-connector-matrix" = "binary"
+"check-provider-catalog-drift" = "binary"
+"check-diagnostics-catalog" = "binary"
+"check-docs-cli-flags" = "binary"
+"check-trigger-examples" = "binary"
+"check-docs-snippets" = "binary"
+"check-site-snippets" = "binary"
+"check-stdlib-strict-types" = "binary"
+"check-stdlib-public-return-types" = "binary"
+"check-schema-strict" = "binary"
+"check-binary-size-policy" = "binary" # typed policy contract and jq bootstrap parity
+"check-optional-dep-feature-contracts" = "binary" # Harn TOML contract over Cargo.toml feature sets
+# --- excluded: build/test, external toolchain, cross-repo, runtime fixtures, or perf soak ---
+"check-all-features" = "excluded"             # cargo check --workspace --all-features (build)
+"check-cli-aot" = "excluded"                  # cargo run -p harn-cli-aot-gen (build)
+"check-run-view-fixtures" = "excluded"        # cargo test -p harn-vm (build + test)
+"check-bindings" = "excluded"                 # go vet/test round-trip (external toolchain)
+"check-tree-sitter-parser" = "excluded"       # pinned npm tree-sitter CLI generation (external toolchain)
+"check-wasm-wit" = "excluded"                 # pinned Bytecode Alliance wasm-tools validation (external toolchain)
+"check-burin-protocol-artifacts" = "excluded" # needs a sibling burin-code checkout (ci = false)
+"check-docs-workflow-quickstart" = "excluded" # executes workflow fixtures (behavioural runtime guard)
+"check-vm-rss-soak" = "excluded"              # RSS perf soak (build + run)
+"check-test-case-performance" = "excluded"    # per-test perf ratchet (build + run)
+"check-drift" = "excluded"                    # the source-tier aggregator itself
+"check-drift-binary" = "excluded"             # the binary-tier aggregator itself

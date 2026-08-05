@@ -1,0 +1,32 @@
+import "std/schema"
+
+pipeline test(harness: Harness, task) {
+  const user_schema = schema_closed_object(
+    {
+      name: schema_field(schema_string() + {min_length: 2}),
+      role: schema_default(schema_string(), "user"),
+    },
+    {title: "ClosedUser"},
+  )
+  const validator = schema_validator(user_schema, {apply_defaults: true})
+  harness.stdio.println(validator.is({name: "Ada"}))
+  harness.stdio.println(!validator.is({name: "Ada", extra: true}))
+  const bad_report = validator.report({name: "Ada", extra: true})
+  harness.stdio.println(!bad_report.ok)
+  harness.stdio.println(
+    contains(
+      join(bad_report.errors, "\n"),
+      "Additional properties are not allowed ('extra' was unexpected)",
+    ),
+  )
+  harness.stdio.println(validator.expect({name: "Ada"}).role)
+  harness.stdio.println(validator.json_schema().additionalProperties)
+  const alias_schema = schema_strict_object(
+    {mode: schema_enum(["fast", "safe"])},
+    {additional_properties: schema_string()},
+  )
+  const alias_validator = schema_validator(alias_schema)
+  harness.stdio.println(alias_validator.is({mode: "fast"}))
+  harness.stdio.println(!alias_validator.is({mode: "fast", extra: "disallowed"}))
+  harness.stdio.println(alias_validator.json_schema().additionalProperties)
+}

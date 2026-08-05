@@ -1,0 +1,73 @@
+import { agent_loop } from "std/agent/loop"
+import { with_llm_script } from "std/testing"
+
+pipeline test(harness: Harness, task) {
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        text: "should not be consumed",
+        input_tokens: 1,
+        output_tokens: 1,
+        model: "claude-opus-4-20250514",
+      },
+    ],
+    { ->
+      const expensive = try {
+        harness.llm.call(
+          "budget preflight",
+          nil,
+          {
+            provider: "mock",
+            model: "claude-opus-4-20250514",
+            max_tokens: 1024,
+            budget: {max_cost_usd: 0.0001},
+          },
+        )
+      }
+      const expensive_err = unwrap_err(expensive)
+      harness.stdio.println(expensive_err.kind)
+      harness.stdio.println(expensive_err.reason)
+      harness.stdio.println(expensive_err.category)
+      harness.stdio.println(expensive_err.projected_cost_usd > 0.0001)
+      harness.stdio.println(len(harness.llm.mock_calls()) == 0)
+      const input_limited = try {
+        harness.llm.call(
+          "this prompt is longer than one estimated token",
+          nil,
+          {provider: "mock", model: "gpt-4o-mini", max_tokens: 16, budget: {max_input_tokens: 1}},
+        )
+      }
+      const input_err = unwrap_err(input_limited)
+      harness.stdio.println(input_err.limit)
+      harness.stdio.println(input_err.projected_input_tokens > 1)
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        text: "still should not be consumed",
+        input_tokens: 1,
+        output_tokens: 1,
+        model: "claude-opus-4-20250514",
+      },
+    ],
+    { ->
+      const loop_result = agent_loop(
+        harness,
+        "agent budget preflight",
+        nil,
+        {
+          provider: "mock",
+          model: "claude-opus-4-20250514",
+          max_tokens: 1024,
+          max_iterations: 2,
+          budget: {total_budget_usd: 0.0001},
+        },
+      )
+      harness.stdio.println(loop_result.status)
+      harness.stdio.println(len(harness.llm.mock_calls()) == 0)
+    },
+  )
+}

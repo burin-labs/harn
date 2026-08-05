@@ -1,0 +1,8 @@
+{
+  "mode": "mock",
+  "fs_reads": {"/fixture.txt": "fixture body"},
+  "expect_calls": [
+    {"sub_handle": "fs", "method": "read_text", "args": ["/fixture.txt"]},
+    {"sub_handle": "stdio", "method": "println", "args": ["fixture body"]}
+  ]
+}

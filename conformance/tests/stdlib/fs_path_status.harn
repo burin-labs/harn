@@ -1,0 +1,32 @@
+/** Verifies structured path visibility probes for hard preflight callers. */
+pipeline test(harness: Harness, task) {
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-fs-status-" + harness.random.uuid())
+  if harness.fs.exists(root) {
+    harness.fs.delete(root)
+  }
+  harness.fs.mkdir(path_join(root, "dir"))
+  harness.fs.write_text(path_join(root, "file.txt"), "ok\n")
+  const file_status = harness.fs.status(path_join(root, "file.txt"))
+  harness.stdio.log(file_status.status)
+  harness.stdio.log(file_status.kind)
+  harness.stdio.log(file_status.exists)
+  harness.stdio.log(file_status.visible)
+  harness.stdio.log(file_status.is_file)
+  harness.stdio.log(file_status.is_dir)
+  const dir_status = harness.fs.status(path_join(root, "dir"))
+  harness.stdio.log(dir_status.status)
+  harness.stdio.log(dir_status.kind)
+  harness.stdio.log(dir_status.exists)
+  harness.stdio.log(dir_status.visible)
+  harness.stdio.log(dir_status.is_file)
+  harness.stdio.log(dir_status.is_dir)
+  const missing_status = harness.fs.status(path_join(root, "missing.txt"))
+  harness.stdio.log(missing_status.status)
+  harness.stdio.log(missing_status.kind)
+  harness.stdio.log(missing_status.exists)
+  harness.stdio.log(missing_status.visible)
+  const write_probe = harness.fs.status(path_join(root, "file.txt"), "write")
+  harness.stdio.log(write_probe.status)
+  harness.stdio.log(write_probe.access)
+  harness.fs.delete(root)
+}

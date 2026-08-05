@@ -1,0 +1,1339 @@
+use std::error::Error as _;
+
+use async_trait::async_trait;
+use reqwest::Url;
+use serde_json::Value;
+use tokio::sync::broadcast;
+
+use crate::triggers::TriggerEvent;
+
+const A2A_AGENT_CARD_PATHS: &[&str] = &[
+    ".well-known/agent-card.json",
+    ".well-known/a2a-agent",
+    ".well-known/agent.json",
+    "agent/card",
+];
+const A2A_PROTOCOL_VERSION: &str = "0.3.0";
+const A2A_JSONRPC_TRANSPORT: &str = "JSONRPC";
+const A2A_PUSH_URL_ENV: &str = "HARN_A2A_PUSH_URL";
+const A2A_PUSH_TOKEN_ENV: &str = "HARN_A2A_PUSH_TOKEN";
+const A2A_ACTOR_CHAIN_METADATA_POINTERS: &[&str] = &[
+    "/actor_chain",
+    "/actorChain",
+    "/metadata/actor_chain",
+    "/metadata/actorChain",
+    "/metadata/harn/actor_chain",
+    "/metadata/harn/actorChain",
+    "/metadata/_harn/actorChain",
+    "/statusUpdate/actor_chain",
+    "/statusUpdate/actorChain",
+    "/statusUpdate/metadata/actor_chain",
+    "/statusUpdate/metadata/actorChain",
+    "/statusUpdate/metadata/harn/actor_chain",
+    "/statusUpdate/metadata/harn/actorChain",
+    "/statusUpdate/metadata/_harn/actorChain",
+    "/task/actor_chain",
+    "/task/actorChain",
+    "/task/metadata/actor_chain",
+    "/task/metadata/actorChain",
+    "/task/metadata/harn/actor_chain",
+    "/task/metadata/harn/actorChain",
+    "/task/metadata/_harn/actorChain",
+    "/message/metadata/actor_chain",
+    "/message/metadata/actorChain",
+    "/message/metadata/harn/actor_chain",
+    "/message/metadata/harn/actorChain",
+    "/message/metadata/_harn/actorChain",
+];
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedA2aEndpoint {
+    pub card_url: String,
+    pub rpc_url: String,
+    pub agent_id: Option<String>,
+    pub target_agent: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedA2aAgent {
+    pub endpoint: ResolvedA2aEndpoint,
+    pub card: Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DispatchAck {
+    InlineResult {
+        task_id: String,
+        result: Value,
+    },
+    PendingTask {
+        task_id: String,
+        state: String,
+        handle: Value,
+    },
+}
+
+#[derive(Debug)]
+pub enum A2aClientError {
+    InvalidTarget(String),
+    Discovery(String),
+    Protocol(String),
+    Denied(String),
+    Timeout(String),
+    Cancelled(String),
+}
+
+impl std::fmt::Display for A2aClientError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidTarget(message)
+            | Self::Discovery(message)
+            | Self::Protocol(message)
+            | Self::Denied(message)
+            | Self::Timeout(message)
+            | Self::Cancelled(message) => f.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for A2aClientError {}
+
+/// Abstraction over outbound A2A dispatch, injectable for tests.
+#[async_trait]
+pub trait A2aClient: Send + Sync + 'static {
+    async fn dispatch(
+        &self,
+        target: &str,
+        allow_cleartext: bool,
+        binding_id: &str,
+        binding_key: &str,
+        event: &TriggerEvent,
+        cancel_rx: &mut broadcast::Receiver<()>,
+    ) -> Result<(ResolvedA2aEndpoint, DispatchAck), A2aClientError>;
+}
+
+/// Production implementation that performs real HTTP A2A calls.
+pub struct RealA2aClient;
+
+#[async_trait]
+impl A2aClient for RealA2aClient {
+    async fn dispatch(
+        &self,
+        target: &str,
+        allow_cleartext: bool,
+        binding_id: &str,
+        binding_key: &str,
+        event: &TriggerEvent,
+        cancel_rx: &mut broadcast::Receiver<()>,
+    ) -> Result<(ResolvedA2aEndpoint, DispatchAck), A2aClientError> {
+        dispatch_trigger_event(
+            target,
+            allow_cleartext,
+            binding_id,
+            binding_key,
+            event,
+            cancel_rx,
+        )
+        .await
+    }
+}
+
+/// Return the first actor-chain metadata candidate accepted by Harn's A2A
+/// surfaces. Callers that accept invalid metadata should use
+/// [`actor_chain_from_metadata`]; callers that must reject malformed input can
+/// parse the returned value themselves and keep the pointer for diagnostics.
+pub fn actor_chain_metadata_candidate(value: &Value) -> Option<(&'static str, &Value)> {
+    for pointer in A2A_ACTOR_CHAIN_METADATA_POINTERS {
+        if let Some(candidate) = value.pointer(pointer) {
+            return Some((pointer, candidate));
+        }
+    }
+    None
+}
+
+pub fn actor_chain_from_metadata(value: &Value) -> Option<crate::actor_chain::ActorChain> {
+    actor_chain_metadata_candidate(value)
+        .and_then(|(_, candidate)| crate::actor_chain::ActorChain::from_json_value(candidate).ok())
+}
+
+#[derive(Debug)]
+enum AgentCardFetchError {
+    Cancelled(String),
+    Discovery(String),
+    ConnectRefused(String),
+    Denied(String),
+    Timeout(String),
+}
+
+pub async fn dispatch_trigger_event(
+    raw_target: &str,
+    allow_cleartext: bool,
+    binding_id: &str,
+    binding_key: &str,
+    event: &TriggerEvent,
+    cancel_rx: &mut broadcast::Receiver<()>,
+) -> Result<(ResolvedA2aEndpoint, DispatchAck), A2aClientError> {
+    let started = std::time::Instant::now();
+    let target = match parse_target(raw_target) {
+        Ok(target) => target,
+        Err(error) => {
+            record_a2a_metric(raw_target, "failed", started.elapsed());
+            return Err(error);
+        }
+    };
+    let endpoint = match resolve_endpoint(&target, allow_cleartext, cancel_rx).await {
+        Ok(endpoint) => endpoint,
+        Err(error) => {
+            record_a2a_metric(raw_target, "failed", started.elapsed());
+            return Err(error);
+        }
+    };
+    let message_id = format!("{}.{}", event.trace_id.0, event.id.0);
+    let actor_chain = crate::agent_sessions::current_actor_chain()
+        .as_ref()
+        .map(crate::actor_chain::ActorChain::to_json_value);
+    let mut envelope = serde_json::json!({
+        "kind": "harn.trigger.dispatch",
+        "message_id": message_id,
+        "trace_id": event.trace_id.0,
+        "event_id": event.id.0,
+        "trigger_id": binding_id,
+        "binding_key": binding_key,
+        "target_agent": endpoint.target_agent,
+        "event": event,
+    });
+    if let Some(chain) = actor_chain.as_ref() {
+        envelope["actor_chain"] = chain.clone();
+    }
+    let text = serde_json::to_string(&envelope)
+        .map_err(|error| A2aClientError::Protocol(format!("serialize A2A envelope: {error}")))?;
+    let push_config = push_notification_config();
+    let mut metadata = serde_json::json!({
+        "kind": "harn.trigger.dispatch",
+        "trace_id": event.trace_id.0,
+        "event_id": event.id.0,
+        "trigger_id": binding_id,
+        "binding_key": binding_key,
+        "target_agent": endpoint.target_agent,
+    });
+    if let Some(chain) = actor_chain.as_ref() {
+        metadata["actor_chain"] = chain.clone();
+        metadata["harn"] = serde_json::json!({"actor_chain": chain});
+    }
+    let mut params = serde_json::json!({
+        "contextId": event.trace_id.0,
+        "message": {
+            "messageId": message_id,
+            "role": "user",
+            "parts": [{
+                "type": "text",
+                "text": text,
+            }],
+            "metadata": metadata,
+        },
+    });
+    if let Some(config) = push_config.clone() {
+        params["configuration"] = serde_json::json!({
+            "blocking": false,
+            "returnImmediately": true,
+            "pushNotificationConfig": config,
+        });
+    }
+    let request = crate::jsonrpc::request(message_id.clone(), "message/send", params);
+
+    let body = match send_jsonrpc(&endpoint.rpc_url, &request, &event.trace_id.0, cancel_rx).await {
+        Ok(body) => body,
+        Err(error) => {
+            record_a2a_metric(raw_target, "failed", started.elapsed());
+            return Err(error);
+        }
+    };
+    let result = match body.get("result").cloned().ok_or_else(|| {
+        if let Some(error) = body.get("error") {
+            let message = error
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown A2A error");
+            A2aClientError::Protocol(format!("A2A task dispatch failed: {message}"))
+        } else {
+            A2aClientError::Protocol("A2A task dispatch response missing result".to_string())
+        }
+    }) {
+        Ok(result) => result,
+        Err(error) => {
+            record_a2a_metric(raw_target, "failed", started.elapsed());
+            return Err(error);
+        }
+    };
+
+    let task_id = match result
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| A2aClientError::Protocol("A2A task response missing result.id".to_string()))
+    {
+        Ok(task_id) => task_id.to_string(),
+        Err(error) => {
+            record_a2a_metric(raw_target, "failed", started.elapsed());
+            return Err(error);
+        }
+    };
+    let state = match task_state(&result) {
+        Ok(state) => state.to_string(),
+        Err(error) => {
+            record_a2a_metric(raw_target, "failed", started.elapsed());
+            return Err(error);
+        }
+    };
+
+    if state == "completed" {
+        let inline = extract_inline_result(&result);
+        record_a2a_metric(raw_target, "succeeded", started.elapsed());
+        return Ok((
+            endpoint,
+            DispatchAck::InlineResult {
+                task_id,
+                result: inline,
+            },
+        ));
+    }
+
+    if state == "rejected" {
+        record_a2a_metric(raw_target, "failed", started.elapsed());
+        return Err(A2aClientError::Denied(format!(
+            "A2A task rejected by remote agent: {}",
+            task_status_message(&result).unwrap_or("permission rejected")
+        )));
+    }
+
+    if let Some(config) = push_config {
+        register_push_notification_config(
+            &endpoint.rpc_url,
+            &task_id,
+            config,
+            &event.trace_id.0,
+            cancel_rx,
+        )
+        .await
+        .inspect_err(|_| {
+            record_a2a_metric(raw_target, "failed", started.elapsed());
+        })?;
+    }
+    record_a2a_metric(raw_target, "succeeded", started.elapsed());
+    Ok((
+        endpoint.clone(),
+        DispatchAck::PendingTask {
+            task_id: task_id.clone(),
+            state: state.clone(),
+            handle: serde_json::json!({
+                "kind": "a2a_task_handle",
+                "task_id": task_id,
+                "state": state,
+                "target_agent": endpoint.target_agent,
+                "rpc_url": endpoint.rpc_url,
+                "card_url": endpoint.card_url,
+                "agent_id": endpoint.agent_id,
+            }),
+        },
+    ))
+}
+
+pub async fn resolve_agent(
+    raw_target: &str,
+    allow_cleartext: bool,
+    cancel_rx: &mut broadcast::Receiver<()>,
+) -> Result<ResolvedA2aAgent, A2aClientError> {
+    let target = parse_target(raw_target)?;
+    let resolved = resolve_endpoint_with_card(&target, allow_cleartext, cancel_rx).await?;
+    Ok(ResolvedA2aAgent {
+        endpoint: resolved.0,
+        card: resolved.1,
+    })
+}
+
+pub async fn send_jsonrpc_request(
+    rpc_url: &str,
+    request: &Value,
+    trace_id: &str,
+    cancel_rx: &mut broadcast::Receiver<()>,
+) -> Result<Value, A2aClientError> {
+    send_jsonrpc(rpc_url, request, trace_id, cancel_rx).await
+}
+
+fn push_notification_config() -> Option<Value> {
+    let url = std::env::var(A2A_PUSH_URL_ENV)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())?;
+    let token = std::env::var(A2A_PUSH_TOKEN_ENV)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let mut config = serde_json::json!({ "url": url });
+    if let Some(token) = token {
+        config["token"] = Value::String(token.clone());
+        config["authentication"] = serde_json::json!({
+            "scheme": "Bearer",
+            "credentials": token,
+        });
+    }
+    Some(config)
+}
+
+async fn register_push_notification_config(
+    rpc_url: &str,
+    task_id: &str,
+    config: Value,
+    trace_id: &str,
+    cancel_rx: &mut broadcast::Receiver<()>,
+) -> Result<(), A2aClientError> {
+    let request = crate::jsonrpc::request(
+        format!("{trace_id}.{task_id}.push-config"),
+        "tasks/pushNotificationConfig/set",
+        serde_json::json!({
+            "taskId": task_id,
+            "pushNotificationConfig": config,
+        }),
+    );
+    let response = send_jsonrpc(rpc_url, &request, trace_id, cancel_rx).await?;
+    if response.get("error").is_some() {
+        return Err(A2aClientError::Protocol(format!(
+            "A2A push notification registration failed: {}",
+            response["error"]
+        )));
+    }
+    Ok(())
+}
+
+fn record_a2a_metric(target: &str, outcome: &str, duration: std::time::Duration) {
+    if let Some(metrics) = crate::active_metrics_registry() {
+        metrics.record_a2a_hop(target, outcome, duration);
+    }
+}
+
+pub fn target_agent_label(raw_target: &str) -> String {
+    parse_target(raw_target)
+        .map(|target| target.target_agent_label())
+        .unwrap_or_else(|_| raw_target.to_string())
+}
+
+#[derive(Clone, Debug)]
+struct ParsedTarget {
+    authority: String,
+    target_agent: String,
+}
+
+impl ParsedTarget {
+    fn target_agent_label(&self) -> String {
+        if self.target_agent.is_empty() {
+            self.authority.clone()
+        } else {
+            self.target_agent.clone()
+        }
+    }
+}
+
+fn parse_target(raw_target: &str) -> Result<ParsedTarget, A2aClientError> {
+    let parsed = Url::parse(&format!("http://{raw_target}")).map_err(|error| {
+        A2aClientError::InvalidTarget(format!(
+            "invalid a2a dispatch target '{raw_target}': {error}"
+        ))
+    })?;
+    let host = parsed.host_str().ok_or_else(|| {
+        A2aClientError::InvalidTarget(format!(
+            "invalid a2a dispatch target '{raw_target}': missing host"
+        ))
+    })?;
+    let authority = if let Some(port) = parsed.port() {
+        format!("{host}:{port}")
+    } else {
+        host.to_string()
+    };
+    Ok(ParsedTarget {
+        authority,
+        target_agent: parsed.path().trim_start_matches('/').to_string(),
+    })
+}
+
+async fn resolve_endpoint(
+    target: &ParsedTarget,
+    allow_cleartext: bool,
+    cancel_rx: &mut broadcast::Receiver<()>,
+) -> Result<ResolvedA2aEndpoint, A2aClientError> {
+    Ok(
+        resolve_endpoint_with_card(target, allow_cleartext, cancel_rx)
+            .await?
+            .0,
+    )
+}
+
+async fn resolve_endpoint_with_card(
+    target: &ParsedTarget,
+    allow_cleartext: bool,
+    cancel_rx: &mut broadcast::Receiver<()>,
+) -> Result<(ResolvedA2aEndpoint, Value), A2aClientError> {
+    let mut last_error = None;
+    for scheme in card_resolution_schemes(allow_cleartext) {
+        let mut last_scheme_error = None;
+        for path in A2A_AGENT_CARD_PATHS {
+            let card_url = format!("{scheme}://{}/{path}", target.authority);
+            match fetch_agent_card(&card_url, cancel_rx).await {
+                Ok(card) => {
+                    let endpoint = endpoint_from_card(
+                        card_url,
+                        allow_cleartext,
+                        &target.authority,
+                        target.target_agent.clone(),
+                        &card,
+                    )?;
+                    return Ok((endpoint, card));
+                }
+                Err(AgentCardFetchError::Cancelled(message)) => {
+                    return Err(A2aClientError::Cancelled(message));
+                }
+                Err(AgentCardFetchError::Timeout(message)) => {
+                    return Err(A2aClientError::Timeout(message));
+                }
+                Err(AgentCardFetchError::Denied(message)) => {
+                    return Err(A2aClientError::Denied(message));
+                }
+                Err(error) => {
+                    last_error = Some(agent_card_fetch_error_message(&error));
+                    last_scheme_error = Some(error);
+                }
+            }
+        }
+        if last_scheme_error.as_ref().is_some_and(|error| {
+            should_try_cleartext_fallback(scheme, allow_cleartext, error, &target.authority)
+        }) {
+            continue;
+        }
+        break;
+    }
+    Err(A2aClientError::Discovery(format!(
+        "could not resolve A2A agent card for '{}': {}",
+        target.authority,
+        last_error.unwrap_or_else(|| "unknown discovery error".to_string())
+    )))
+}
+
+async fn fetch_agent_card(
+    card_url: &str,
+    cancel_rx: &mut broadcast::Receiver<()>,
+) -> Result<Value, AgentCardFetchError> {
+    let response = tokio::select! {
+        response = crate::llm::shared_utility_client().get(card_url).send() => {
+            match response {
+                Ok(response) => Ok(response),
+                Err(error) if error.is_timeout() => Err(AgentCardFetchError::Timeout(
+                    format!("A2A HTTP request timed out: {}", crate::egress::redact_reqwest_error(&error))
+                )),
+                Err(error) if is_connect_refused(&error) => Err(AgentCardFetchError::ConnectRefused(
+                    format!("A2A HTTP request failed: {}", crate::egress::redact_reqwest_error(&error))
+                )),
+                Err(error) => Err(AgentCardFetchError::Discovery(
+                    format!("A2A HTTP request failed: {}", crate::egress::redact_reqwest_error(&error))
+                )),
+            }
+        }
+        _ = recv_cancel(cancel_rx) => Err(AgentCardFetchError::Cancelled(
+            "A2A agent-card fetch cancelled".to_string()
+        )),
+    }?;
+    if matches!(
+        response.status(),
+        reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN
+    ) {
+        return Err(AgentCardFetchError::Denied(format!(
+            "GET {card_url} returned HTTP {}",
+            response.status()
+        )));
+    }
+    if !response.status().is_success() {
+        let card_url = crate::egress::redact_diagnostic_text(card_url);
+        return Err(AgentCardFetchError::Discovery(format!(
+            "GET {card_url} returned HTTP {}",
+            response.status()
+        )));
+    }
+    response.json::<Value>().await.map_err(|error| {
+        AgentCardFetchError::Discovery(format!(
+            "parse {}: {error}",
+            crate::egress::redact_diagnostic_text(card_url)
+        ))
+    })
+}
+
+fn endpoint_from_card(
+    card_url: String,
+    allow_cleartext: bool,
+    requested_authority: &str,
+    target_agent: String,
+    card: &Value,
+) -> Result<ResolvedA2aEndpoint, A2aClientError> {
+    let rpc_url = if has_current_transport_fields(card) {
+        endpoint_from_current_card(card, allow_cleartext, requested_authority)?
+    } else if let Some(rpc_url) =
+        endpoint_from_legacy_supported_interfaces(card, allow_cleartext, requested_authority)?
+    {
+        rpc_url
+    } else {
+        return Err(A2aClientError::Discovery(
+            "A2A agent card missing preferredTransport/additionalInterfaces".to_string(),
+        ));
+    };
+
+    Ok(ResolvedA2aEndpoint {
+        card_url,
+        rpc_url: rpc_url.to_string(),
+        agent_id: card.get("id").and_then(Value::as_str).map(str::to_string),
+        target_agent,
+    })
+}
+
+fn has_current_transport_fields(card: &Value) -> bool {
+    card.get("preferredTransport").is_some() || card.get("additionalInterfaces").is_some()
+}
+
+fn endpoint_from_current_card(
+    card: &Value,
+    allow_cleartext: bool,
+    requested_authority: &str,
+) -> Result<Url, A2aClientError> {
+    let protocol_version = card
+        .get("protocolVersion")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            A2aClientError::Discovery("A2A agent card missing protocolVersion".to_string())
+        })?;
+    if protocol_version != A2A_PROTOCOL_VERSION {
+        return Err(A2aClientError::Discovery(format!(
+            "A2A agent card protocolVersion '{protocol_version}' is not supported; expected {A2A_PROTOCOL_VERSION}"
+        )));
+    }
+
+    let base_url = card
+        .get("url")
+        .and_then(Value::as_str)
+        .ok_or_else(|| A2aClientError::Discovery("A2A agent card missing url".to_string()))?;
+    let base_url = resolve_declared_url(
+        base_url,
+        allow_cleartext,
+        requested_authority,
+        "agent card url",
+    )?;
+
+    let preferred_transport = card
+        .get("preferredTransport")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            A2aClientError::Discovery("A2A agent card missing preferredTransport".to_string())
+        })?;
+    if transport_is_jsonrpc(preferred_transport) {
+        return Ok(base_url);
+    }
+
+    if let Some(interface_url) = current_additional_jsonrpc_url(card)? {
+        return resolve_declared_url(
+            interface_url,
+            allow_cleartext,
+            requested_authority,
+            "JSONRPC additionalInterface url",
+        );
+    }
+
+    Err(A2aClientError::Discovery(
+        "A2A agent card does not expose JSONRPC transport".to_string(),
+    ))
+}
+
+fn current_additional_jsonrpc_url(card: &Value) -> Result<Option<&str>, A2aClientError> {
+    let Some(interfaces) = card.get("additionalInterfaces") else {
+        return Ok(None);
+    };
+    let interfaces = interfaces.as_array().ok_or_else(|| {
+        A2aClientError::Discovery("A2A additionalInterfaces must be an array".to_string())
+    })?;
+    for interface in interfaces {
+        if interface
+            .get("transport")
+            .and_then(Value::as_str)
+            .is_some_and(transport_is_jsonrpc)
+        {
+            let interface_url = interface
+                .get("url")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    A2aClientError::Discovery(
+                        "A2A JSONRPC additionalInterface missing url".to_string(),
+                    )
+                })?;
+            return Ok(Some(interface_url));
+        }
+    }
+    Ok(None)
+}
+
+fn endpoint_from_legacy_supported_interfaces(
+    card: &Value,
+    allow_cleartext: bool,
+    requested_authority: &str,
+) -> Result<Option<Url>, A2aClientError> {
+    let Some(interfaces) = card.get("supportedInterfaces") else {
+        return Ok(None);
+    };
+    let interfaces = interfaces.as_array().ok_or_else(|| {
+        A2aClientError::Discovery("A2A supportedInterfaces must be an array".to_string())
+    })?;
+    let mut saw_jsonrpc = false;
+    for interface in interfaces {
+        if !interface
+            .get("protocolBinding")
+            .and_then(Value::as_str)
+            .is_some_and(transport_is_jsonrpc)
+        {
+            continue;
+        }
+        saw_jsonrpc = true;
+        if interface.get("protocolVersion").and_then(Value::as_str) != Some(A2A_PROTOCOL_VERSION) {
+            continue;
+        }
+        let interface_url = interface
+            .get("url")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                A2aClientError::Discovery("A2A JSONRPC supportedInterface missing url".to_string())
+            })?;
+        return resolve_declared_url(
+            interface_url,
+            allow_cleartext,
+            requested_authority,
+            "JSONRPC supportedInterface url",
+        )
+        .map(Some);
+    }
+    if saw_jsonrpc {
+        return Err(A2aClientError::Discovery(format!(
+            "A2A supportedInterfaces does not expose JSONRPC for protocolVersion {A2A_PROTOCOL_VERSION}"
+        )));
+    }
+    Err(A2aClientError::Discovery(
+        "A2A agent card does not expose a JSONRPC supportedInterface".to_string(),
+    ))
+}
+
+fn transport_is_jsonrpc(transport: &str) -> bool {
+    transport.eq_ignore_ascii_case(A2A_JSONRPC_TRANSPORT)
+}
+
+fn resolve_declared_url(
+    raw_url: &str,
+    allow_cleartext: bool,
+    requested_authority: &str,
+    label: &str,
+) -> Result<Url, A2aClientError> {
+    let url = Url::parse(raw_url).map_err(|error| {
+        A2aClientError::Discovery(format!(
+            "invalid A2A {label} '{}': {error}",
+            crate::egress::redact_diagnostic_text(raw_url)
+        ))
+    })?;
+    ensure_cleartext_allowed(&url, allow_cleartext, label)?;
+    let declared_authority = url_authority(&url)?;
+    if !authorities_equivalent(&declared_authority, requested_authority) {
+        return Err(A2aClientError::Denied(format!(
+            "A2A {label} authority mismatch: requested '{requested_authority}', card returned '{declared_authority}'"
+        )));
+    }
+    Ok(url)
+}
+
+fn card_resolution_schemes(allow_cleartext: bool) -> &'static [&'static str] {
+    if allow_cleartext {
+        &["https", "http"]
+    } else {
+        &["https"]
+    }
+}
+
+/// Decide whether an HTTPS discovery failure should fall through to cleartext.
+///
+/// External targets only fall back on `ConnectionRefused` — the common "HTTPS
+/// port isn't listening" case. TLS handshake failures to an external host MUST
+/// NOT silently downgrade to HTTP, because an active network attacker can
+/// forge TLS errors to trigger a downgrade.
+///
+/// Loopback targets (`127.0.0.0/8`, `::1`, `localhost`) fall back on any
+/// discovery-style error. They cover the standard local-dev case where
+/// `harn serve` binds HTTP-only on `127.0.0.1:PORT`, and the SSRF threat
+/// model for loopback is already bounded — any attacker who can reach the
+/// local loopback already has code execution on the box.
+fn should_try_cleartext_fallback(
+    scheme: &str,
+    allow_cleartext: bool,
+    error: &AgentCardFetchError,
+    authority: &str,
+) -> bool {
+    if !allow_cleartext || scheme != "https" {
+        return false;
+    }
+    match error {
+        AgentCardFetchError::Cancelled(_)
+        | AgentCardFetchError::Denied(_)
+        | AgentCardFetchError::Timeout(_) => false,
+        AgentCardFetchError::ConnectRefused(_) => true,
+        AgentCardFetchError::Discovery(_) => is_loopback_authority(authority),
+    }
+}
+
+fn ensure_cleartext_allowed(
+    url: &Url,
+    allow_cleartext: bool,
+    label: &str,
+) -> Result<(), A2aClientError> {
+    if allow_cleartext || url.scheme() != "http" {
+        return Ok(());
+    }
+    Err(A2aClientError::Denied(format!(
+        "cleartext A2A {label} '{url}' requires `allow_cleartext = true` on the trigger binding"
+    )))
+}
+
+fn is_loopback_authority(authority: &str) -> bool {
+    let (host, _) = split_authority(authority);
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return ip.is_loopback();
+    }
+    false
+}
+
+/// Return true when two authority strings refer to the same A2A endpoint.
+///
+/// Exact string equality is the default — an agent card that reports a
+/// different host than the one the client asked for is a security-relevant
+/// discrepancy (see harn#248 SSRF hardening). The one well-defined exception
+/// is loopback: `localhost`, `127.0.0.1`, `::1`, and the rest of
+/// `127.0.0.0/8` are all the same socket on this machine, and `harn serve`
+/// hardcodes `http://localhost:PORT` in its agent card even when a caller
+/// dials `127.0.0.1:PORT`. Treating both sides as loopback avoids a spurious
+/// mismatch in that case without widening the external-host trust boundary.
+fn authorities_equivalent(card_authority: &str, requested_authority: &str) -> bool {
+    if card_authority == requested_authority {
+        return true;
+    }
+    let (_, card_port) = split_authority(card_authority);
+    let (_, requested_port) = split_authority(requested_authority);
+    if card_port != requested_port {
+        return false;
+    }
+    is_loopback_authority(card_authority) && is_loopback_authority(requested_authority)
+}
+
+/// Split an authority into `(host, port_or_empty)`. Strips IPv6 brackets so
+/// `[::1]:8080` becomes `("::1", "8080")`.
+fn split_authority(authority: &str) -> (&str, &str) {
+    let (host_raw, port) = if authority.starts_with('[') {
+        // IPv6 bracketed form: "[addr]:port" or "[addr]".
+        if let Some(end) = authority.rfind(']') {
+            let host = &authority[..=end];
+            let rest = &authority[end + 1..];
+            let port = rest.strip_prefix(':').unwrap_or("");
+            (host, port)
+        } else {
+            (authority, "")
+        }
+    } else {
+        match authority.rsplit_once(':') {
+            Some((host, port)) => (host, port),
+            None => (authority, ""),
+        }
+    };
+    let host = host_raw.trim_start_matches('[').trim_end_matches(']');
+    (host, port)
+}
+
+fn agent_card_fetch_error_message(error: &AgentCardFetchError) -> String {
+    match error {
+        AgentCardFetchError::Cancelled(message)
+        | AgentCardFetchError::Discovery(message)
+        | AgentCardFetchError::ConnectRefused(message)
+        | AgentCardFetchError::Denied(message)
+        | AgentCardFetchError::Timeout(message) => message.clone(),
+    }
+}
+
+fn is_connect_refused(error: &reqwest::Error) -> bool {
+    if !error.is_connect() {
+        return false;
+    }
+    let mut source = error.source();
+    while let Some(cause) = source {
+        if let Some(io_error) = cause.downcast_ref::<std::io::Error>() {
+            if io_error.kind() == std::io::ErrorKind::ConnectionRefused {
+                return true;
+            }
+        }
+        source = cause.source();
+    }
+    false
+}
+
+fn url_authority(url: &Url) -> Result<String, A2aClientError> {
+    let host = url
+        .host_str()
+        .ok_or_else(|| A2aClientError::Discovery(format!("A2A card url '{url}' missing host")))?;
+    Ok(if let Some(port) = url.port() {
+        format!("{host}:{port}")
+    } else {
+        host.to_string()
+    })
+}
+
+async fn send_jsonrpc(
+    rpc_url: &str,
+    request: &Value,
+    trace_id: &str,
+    cancel_rx: &mut broadcast::Receiver<()>,
+) -> Result<Value, A2aClientError> {
+    let response = send_http(
+        crate::llm::shared_blocking_client()
+            .post(rpc_url)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .header("A2A-Version", A2A_PROTOCOL_VERSION)
+            .header("A2A-Trace-Id", trace_id)
+            .json(request),
+        cancel_rx,
+        "A2A task dispatch cancelled",
+    )
+    .await?;
+    if matches!(
+        response.status(),
+        reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN
+    ) {
+        return Err(A2aClientError::Denied(format!(
+            "A2A task dispatch returned HTTP {}",
+            response.status()
+        )));
+    }
+    if !response.status().is_success() {
+        return Err(A2aClientError::Protocol(format!(
+            "A2A task dispatch returned HTTP {}",
+            response.status()
+        )));
+    }
+    response
+        .json::<Value>()
+        .await
+        .map_err(|error| A2aClientError::Protocol(format!("parse A2A dispatch response: {error}")))
+}
+
+async fn send_http(
+    request: reqwest::RequestBuilder,
+    cancel_rx: &mut broadcast::Receiver<()>,
+    cancelled_message: &'static str,
+) -> Result<reqwest::Response, A2aClientError> {
+    tokio::select! {
+        response = request.send() => response.map_err(|error| {
+            if error.is_timeout() {
+                A2aClientError::Timeout(format!(
+                    "A2A HTTP request timed out: {}",
+                    crate::egress::redact_reqwest_error(&error)
+                ))
+            } else {
+                A2aClientError::Protocol(format!(
+                    "A2A HTTP request failed: {}",
+                    crate::egress::redact_reqwest_error(&error)
+                ))
+            }
+        }),
+        _ = recv_cancel(cancel_rx) => Err(A2aClientError::Cancelled(cancelled_message.to_string())),
+    }
+}
+
+fn task_state(task: &Value) -> Result<&str, A2aClientError> {
+    task.pointer("/status/state")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            A2aClientError::Protocol("A2A task response missing result.status.state".to_string())
+        })
+}
+
+fn task_status_message(task: &Value) -> Option<&str> {
+    task.pointer("/status/message/parts")
+        .and_then(Value::as_array)
+        .and_then(|parts| {
+            parts.iter().find_map(|part| {
+                if part.get("type").and_then(Value::as_str) == Some("text") {
+                    part.get("text").and_then(Value::as_str).map(str::trim)
+                } else {
+                    None
+                }
+            })
+        })
+        .filter(|message| !message.is_empty())
+}
+
+fn extract_inline_result(task: &Value) -> Value {
+    let text = task
+        .get("history")
+        .and_then(Value::as_array)
+        .and_then(|history| {
+            history.iter().rev().find_map(|message| {
+                let role = message.get("role").and_then(Value::as_str)?;
+                if role != "agent" {
+                    return None;
+                }
+                message
+                    .get("parts")
+                    .and_then(Value::as_array)
+                    .and_then(|parts| {
+                        parts.iter().find_map(|part| {
+                            if part.get("type").and_then(Value::as_str) == Some("text") {
+                                part.get("text").and_then(Value::as_str).map(str::trim_end)
+                            } else {
+                                None
+                            }
+                        })
+                    })
+            })
+        });
+    match text {
+        Some(text) if !text.is_empty() => {
+            serde_json::from_str(text).unwrap_or_else(|_| Value::String(text.to_string()))
+        }
+        _ => task.clone(),
+    }
+}
+
+async fn recv_cancel(cancel_rx: &mut broadcast::Receiver<()>) {
+    let _ = cancel_rx.recv().await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn target_agent_label_prefers_path() {
+        assert_eq!(target_agent_label("reviewer.prod/triage"), "triage");
+        assert_eq!(target_agent_label("reviewer.prod"), "reviewer.prod");
+    }
+
+    #[test]
+    fn extract_inline_result_parses_json_text() {
+        let task = serde_json::json!({
+            "history": [
+                {"role": "user", "parts": [{"type": "text", "text": "ignored"}]},
+                {"role": "agent", "parts": [{"type": "text", "text": "{\"trace_id\":\"trace_123\"}\n"}]},
+            ]
+        });
+        assert_eq!(
+            extract_inline_result(&task),
+            serde_json::json!({"trace_id": "trace_123"})
+        );
+    }
+
+    #[test]
+    fn discovery_prefers_https_before_http() {
+        assert_eq!(card_resolution_schemes(false), ["https"]);
+        assert_eq!(card_resolution_schemes(true), ["https", "http"]);
+    }
+
+    #[test]
+    fn endpoint_from_card_accepts_current_preferred_transport() {
+        let endpoint = endpoint_from_card(
+            "https://trusted.example/.well-known/agent-card.json".to_string(),
+            false,
+            "trusted.example",
+            "triage".to_string(),
+            &serde_json::json!({
+                "name": "trusted",
+                "protocolVersion": "0.3.0",
+                "url": "https://trusted.example/rpc",
+                "preferredTransport": "JSONRPC",
+                "additionalInterfaces": [{
+                    "url": "https://trusted.example/rpc",
+                    "transport": "JSONRPC"
+                }]
+            }),
+        )
+        .expect("current A2A card should resolve");
+        assert_eq!(endpoint.rpc_url, "https://trusted.example/rpc");
+        assert_eq!(
+            endpoint.card_url,
+            "https://trusted.example/.well-known/agent-card.json"
+        );
+        assert_eq!(endpoint.target_agent, "triage");
+    }
+
+    #[test]
+    fn endpoint_from_card_uses_additional_jsonrpc_interface_when_needed() {
+        let endpoint = endpoint_from_card(
+            "https://trusted.example/.well-known/agent-card.json".to_string(),
+            false,
+            "trusted.example",
+            "triage".to_string(),
+            &serde_json::json!({
+                "name": "trusted",
+                "protocolVersion": "0.3.0",
+                "url": "https://trusted.example/rest",
+                "preferredTransport": "HTTP+JSON",
+                "additionalInterfaces": [{
+                    "url": "https://trusted.example/rpc",
+                    "transport": "JSONRPC"
+                }]
+            }),
+        )
+        .expect("current A2A card should resolve through additionalInterfaces");
+        assert_eq!(endpoint.rpc_url, "https://trusted.example/rpc");
+    }
+
+    #[test]
+    fn endpoint_from_card_accepts_legacy_supported_interfaces() {
+        let endpoint = endpoint_from_card(
+            "https://trusted.example/.well-known/agent-card.json".to_string(),
+            false,
+            "trusted.example",
+            "triage".to_string(),
+            &serde_json::json!({
+                "name": "trusted",
+                "supportedInterfaces": [{
+                    "protocolBinding": "JSONRPC",
+                    "protocolVersion": "0.3.0",
+                    "url": "https://trusted.example/rpc"
+                }],
+            }),
+        )
+        .expect("legacy A2A card should resolve during the transition");
+        assert_eq!(endpoint.rpc_url, "https://trusted.example/rpc");
+    }
+
+    #[test]
+    fn endpoint_from_card_rejects_removed_interfaces_shape() {
+        let error = endpoint_from_card(
+            "https://trusted.example/.well-known/agent-card.json".to_string(),
+            false,
+            "trusted.example",
+            "triage".to_string(),
+            &serde_json::json!({
+                "url": "https://trusted.example",
+                "interfaces": [{"protocol": "jsonrpc", "url": "/rpc"}],
+            }),
+        )
+        .expect_err("pre-0.3 Harn discovery shape should be rejected");
+        assert_eq!(
+            error.to_string(),
+            "A2A agent card missing preferredTransport/additionalInterfaces"
+        );
+    }
+
+    #[test]
+    fn cleartext_fallback_only_after_https_connect_refused() {
+        assert!(should_try_cleartext_fallback(
+            "https",
+            true,
+            &AgentCardFetchError::ConnectRefused("connect refused".to_string()),
+            "reviewer.example:443",
+        ));
+        assert!(!should_try_cleartext_fallback(
+            "http",
+            true,
+            &AgentCardFetchError::ConnectRefused("connect refused".to_string()),
+            "reviewer.example:443",
+        ));
+        assert!(!should_try_cleartext_fallback(
+            "https",
+            true,
+            &AgentCardFetchError::Discovery("tls handshake failed".to_string()),
+            "reviewer.example:443",
+        ));
+    }
+
+    #[test]
+    fn cleartext_fallback_requires_opt_in_even_for_loopback_authorities() {
+        for authority in [
+            "127.0.0.1:8080",
+            "localhost:8080",
+            "[::1]:8080",
+            "127.1.2.3:9000",
+        ] {
+            assert!(
+                !should_try_cleartext_fallback(
+                    "https",
+                    false,
+                    &AgentCardFetchError::Discovery("tls handshake failed".to_string()),
+                    authority,
+                ),
+                "cleartext fallback must stay disabled without opt-in for '{authority}'"
+            );
+        }
+    }
+
+    #[test]
+    fn cleartext_fallback_allows_loopback_after_opt_in() {
+        // Local dev: harn serve is HTTP-only, so TLS handshake fails but we
+        // still need the HTTP fallback to succeed.
+        for authority in [
+            "127.0.0.1:8080",
+            "localhost:8080",
+            "[::1]:8080",
+            "127.1.2.3:9000",
+        ] {
+            assert!(
+                should_try_cleartext_fallback(
+                    "https",
+                    true,
+                    &AgentCardFetchError::Discovery("tls handshake failed".to_string()),
+                    authority,
+                ),
+                "expected cleartext fallback for loopback authority '{authority}'"
+            );
+        }
+    }
+
+    #[test]
+    fn cleartext_fallback_denies_external_tls_failures() {
+        // External target + TLS handshake failure must not downgrade — an
+        // attacker able to forge TLS errors shouldn't force cleartext.
+        for authority in [
+            "reviewer.example:443",
+            "8.8.8.8:443",
+            "192.168.1.10:8080",
+            "10.0.0.5:8443",
+        ] {
+            assert!(
+                !should_try_cleartext_fallback(
+                    "https",
+                    true,
+                    &AgentCardFetchError::Discovery("tls handshake failed".to_string()),
+                    authority,
+                ),
+                "cleartext fallback must be denied for external authority '{authority}'"
+            );
+        }
+    }
+
+    #[test]
+    fn is_loopback_authority_recognises_loopback_forms() {
+        assert!(is_loopback_authority("127.0.0.1:8080"));
+        assert!(is_loopback_authority("localhost:8080"));
+        assert!(is_loopback_authority("LOCALHOST:9000"));
+        assert!(is_loopback_authority("[::1]:8080"));
+        assert!(is_loopback_authority("127.5.5.5:1234"));
+        assert!(!is_loopback_authority("8.8.8.8:443"));
+        assert!(!is_loopback_authority("192.168.1.10:8080"));
+        assert!(!is_loopback_authority("example.com:443"));
+        assert!(!is_loopback_authority("reviewer.prod"));
+    }
+
+    #[test]
+    fn endpoint_from_card_rejects_card_url_authority_mismatch() {
+        let error = endpoint_from_card(
+            "https://trusted.example/.well-known/agent-card.json".to_string(),
+            false,
+            "trusted.example",
+            "triage".to_string(),
+            &serde_json::json!({
+                "protocolVersion": "0.3.0",
+                "url": "https://evil.example",
+                "preferredTransport": "JSONRPC",
+            }),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "A2A agent card url authority mismatch: requested 'trusted.example', card returned 'evil.example'"
+        );
+    }
+
+    #[test]
+    fn endpoint_from_card_rejects_cleartext_without_opt_in() {
+        let error = endpoint_from_card(
+            "https://127.0.0.1:8080/.well-known/agent-card.json".to_string(),
+            false,
+            "127.0.0.1:8080",
+            "triage".to_string(),
+            &serde_json::json!({
+                "protocolVersion": "0.3.0",
+                "url": "http://localhost:8080",
+                "preferredTransport": "JSONRPC",
+            }),
+        )
+        .expect_err("cleartext card should require explicit opt-in");
+        assert!(error
+            .to_string()
+            .contains("requires `allow_cleartext = true`"));
+    }
+
+    #[test]
+    fn endpoint_from_card_accepts_loopback_alias_pairs_when_cleartext_opted_in() {
+        // harn serve reports `http://localhost:PORT` in its card, but clients
+        // commonly dial `127.0.0.1:PORT`. Both refer to the same socket, so
+        // the authority check must not spuriously reject the pair.
+        let card = serde_json::json!({
+            "protocolVersion": "0.3.0",
+            "url": "http://localhost:8080",
+            "preferredTransport": "JSONRPC",
+        });
+        let endpoint = endpoint_from_card(
+            "http://127.0.0.1:8080/.well-known/agent-card.json".to_string(),
+            true,
+            "127.0.0.1:8080",
+            "triage".to_string(),
+            &card,
+        )
+        .expect("loopback alias pair should be accepted");
+        assert_eq!(endpoint.rpc_url, "http://localhost:8080/");
+
+        // IPv6 loopback `[::1]` also aliases to `127.0.0.1` / `localhost`.
+        let card_v6 = serde_json::json!({
+            "protocolVersion": "0.3.0",
+            "url": "http://[::1]:8080",
+            "preferredTransport": "JSONRPC",
+        });
+        let endpoint_v6 = endpoint_from_card(
+            "http://localhost:8080/.well-known/agent-card.json".to_string(),
+            true,
+            "localhost:8080",
+            "triage".to_string(),
+            &card_v6,
+        )
+        .expect("IPv6 loopback alias should be accepted");
+        assert_eq!(endpoint_v6.rpc_url, "http://[::1]:8080/");
+
+        // Port mismatch is still rejected even on loopback.
+        let card_wrong_port = serde_json::json!({
+            "protocolVersion": "0.3.0",
+            "url": "http://localhost:9000",
+            "preferredTransport": "JSONRPC",
+        });
+        let error = endpoint_from_card(
+            "http://127.0.0.1:8080/.well-known/agent-card.json".to_string(),
+            true,
+            "127.0.0.1:8080",
+            "triage".to_string(),
+            &card_wrong_port,
+        )
+        .expect_err("mismatched ports must still be rejected even on loopback");
+        assert!(error
+            .to_string()
+            .contains("A2A agent card url authority mismatch"));
+    }
+
+    #[test]
+    fn authorities_equivalent_rejects_non_loopback_host_mismatch() {
+        assert!(!authorities_equivalent(
+            "internal.corp.example:443",
+            "trusted.example:443",
+        ));
+        assert!(!authorities_equivalent("10.0.0.5:8080", "127.0.0.1:8080",));
+        assert!(authorities_equivalent(
+            "trusted.example:443",
+            "trusted.example:443",
+        ));
+    }
+}

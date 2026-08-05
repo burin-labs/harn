@@ -1,0 +1,16 @@
+pipeline test(harness: Harness, task) {
+  harness.testing.clear()
+  harness.testing.respond("project", "metadata_get", {value: "facts"})
+  harness.testing.respond_error("project", "metadata_set", "write denied")
+  const facts = harness.project.metadata_get({dir: "pkg", namespace: "facts"})
+  harness.stdio.println(facts.value)
+  const denied = try {
+    harness.project.metadata_set({dir: "pkg", namespace: "facts", value: {}})
+  }
+  harness.stdio.println(is_err(denied))
+  const calls = harness.testing.calls()
+  harness.stdio.println(len(calls))
+  harness.stdio.println(calls[0].capability)
+  harness.stdio.println(calls[0].method)
+  harness.stdio.println(calls[0].args[0].namespace)
+}

@@ -1,0 +1,144 @@
+{
+  "chain": {
+    "generated_at": "2026-04-19T20:33:00Z",
+    "producer": {
+      "name": "harn",
+      "version": "0.8.x"
+    },
+    "root_hash": "sha256:39ff5a2c614a49c14059863afe5c3320343ff1198514b7d9060ef079aa23b6eb",
+    "topic": "trust_graph",
+    "total": 3,
+    "verified": true
+  },
+  "records": [
+    {
+      "action": "agent.spawn",
+      "agent": "parent-orchestrator",
+      "approver": null,
+      "autonomy_tier": "act_auto",
+      "chain_index": 1,
+      "cost_usd": null,
+      "entry_hash": "sha256:4995c13f9e31cfd5d049254f00bb5748de8f4a3c84f8946606a688b4b7a112f0",
+      "metadata": {
+        "actor_chain": {
+          "act": {
+            "sub": "agent:parent-orchestrator"
+          },
+          "sub": "user:operator"
+        },
+        "effects_grant": [
+          {
+            "kind": {
+              "kind": "net"
+            },
+            "resource": "https://api.example",
+            "scope": "write"
+          },
+          {
+            "kind": {
+              "kind": "fs"
+            },
+            "resource": "/workspace/src",
+            "scope": "read"
+          },
+          {
+            "kind": {
+              "kind": "fs"
+            },
+            "resource": "/workspace/tmp",
+            "scope": "write"
+          }
+        ]
+      },
+      "outcome": "success",
+      "previous_hash": null,
+      "record_id": "01966f4c-3000-7001-a000-000000000001",
+      "schema": "opentrustgraph/v0.1",
+      "timestamp": "2026-04-19T20:30:00Z",
+      "trace_id": "trace_effect_root"
+    },
+    {
+      "action": "agent.spawn",
+      "agent": "child-spawner",
+      "approver": null,
+      "autonomy_tier": "act_auto",
+      "chain_index": 2,
+      "cost_usd": null,
+      "entry_hash": "sha256:ffcb9cb912d2a48b3400be9469e8f2601ca5ae8926fc8787d23597eb913d6701",
+      "metadata": {
+        "actor_chain": {
+          "act": {
+            "act": {
+              "sub": "agent:parent-orchestrator"
+            },
+            "sub": "agent:child-spawner"
+          },
+          "sub": "user:operator"
+        },
+        "effects_grant": [
+          {
+            "kind": {
+              "kind": "net"
+            },
+            "resource": "https://api.example",
+            "scope": "write"
+          },
+          {
+            "kind": {
+              "kind": "fs"
+            },
+            "resource": "/workspace/src",
+            "scope": "read"
+          }
+        ],
+        "parent_record_id": "01966f4c-3000-7001-a000-000000000001"
+      },
+      "outcome": "success",
+      "previous_hash": "sha256:4995c13f9e31cfd5d049254f00bb5748de8f4a3c84f8946606a688b4b7a112f0",
+      "record_id": "01966f4c-3001-7002-a000-000000000002",
+      "schema": "opentrustgraph/v0.1",
+      "timestamp": "2026-04-19T20:31:00Z",
+      "trace_id": "trace_effect_child"
+    },
+    {
+      "action": "fs.read",
+      "agent": "grandchild-worker",
+      "approver": null,
+      "autonomy_tier": "act_auto",
+      "chain_index": 3,
+      "cost_usd": 0.001,
+      "entry_hash": "sha256:39ff5a2c614a49c14059863afe5c3320343ff1198514b7d9060ef079aa23b6eb",
+      "metadata": {
+        "actor_chain": {
+          "act": {
+            "act": {
+              "act": {
+                "sub": "agent:parent-orchestrator"
+              },
+              "sub": "agent:child-spawner"
+            },
+            "sub": "agent:grandchild-worker"
+          },
+          "sub": "user:operator"
+        },
+        "effects_used": [
+          {
+            "kind": {
+              "kind": "fs"
+            },
+            "resource": "/workspace/src",
+            "scope": "read"
+          }
+        ],
+        "parent_record_id": "01966f4c-3001-7002-a000-000000000002"
+      },
+      "outcome": "success",
+      "previous_hash": "sha256:ffcb9cb912d2a48b3400be9469e8f2601ca5ae8926fc8787d23597eb913d6701",
+      "record_id": "01966f4c-3002-7003-a000-000000000003",
+      "schema": "opentrustgraph/v0.1",
+      "timestamp": "2026-04-19T20:32:00Z",
+      "trace_id": "trace_effect_grandchild"
+    }
+  ],
+  "schema": "opentrustgraph-chain/v0"
+}

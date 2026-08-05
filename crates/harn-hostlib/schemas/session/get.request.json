@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/session/get.request.json",
+  "title": "session.get request",
+  "type": "object",
+  "properties": {
+    "root": { "type": "string", "minLength": 1 },
+    "session_id": { "type": "string", "minLength": 1 }
+  },
+  "required": ["root", "session_id"],
+  "additionalProperties": false
+}

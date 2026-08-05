@@ -1,0 +1,15 @@
+enum Door {
+  Open
+  Closed
+}
+
+fn describe(door: Door) -> string {
+  match door {
+    Open -> { return "matched" }
+  }
+}
+
+pipeline default(harness: Harness) {
+  harness.stdio.println(describe(Door.Open))
+  harness.stdio.println(describe(Door.Closed))
+}

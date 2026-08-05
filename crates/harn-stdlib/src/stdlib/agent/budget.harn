@@ -1,0 +1,43 @@
+fn __budget_envelope(opts) {
+  return opts?.budget
+}
+
+/**
+ * agent_budget_pre_call_blocked.
+ *
+ * @effects: [host]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_budget_pre_call_blocked(agent: HarnessAgent, session, opts) {
+  const envelope = __budget_envelope(opts)
+  if envelope == nil {
+    return false
+  }
+  return agent.budget_pre_call_blocked(session.session_id, envelope)
+}
+
+/**
+ * agent_budget_post_call_blocked.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_budget_post_call_blocked(totals, opts) {
+  const envelope = __budget_envelope(opts)
+  if envelope == nil && opts?.token_budget == nil {
+    return false
+  }
+  if opts?.token_budget != nil && totals?.tokens_used != nil {
+    if totals.tokens_used >= opts.token_budget {
+      return true
+    }
+  }
+  if envelope?.total_budget_usd != nil && totals?.cost_usd != nil {
+    if totals.cost_usd >= envelope.total_budget_usd {
+      return true
+    }
+  }
+  return false
+}

@@ -1,0 +1,11 @@
+pipeline test(harness: Harness, task) {
+  const err = try {
+    harness.llm.resolved_options({})
+    nil
+  } catch (e) {
+    e
+  }
+  assert(err != nil, "missing opts.model must error")
+  assert(err.contains("opts.model is required"), "error mentions opts.model is required")
+  harness.stdio.log("llm_resolved_options_requires_model passed")
+}

@@ -1,0 +1,61 @@
+[package]
+name = "harn-vm-perf"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+harn-vm = { path = "../../crates/harn-vm", features = ["vm-bench-internals"] }
+serde_json = "1"
+
+[dev-dependencies]
+criterion = "0.8"
+tokio = { version = "1", features = ["rt", "time"] }
+
+[[bench]]
+name = "bench_vmenv_clone"
+path = "bench_vmenv_clone.rs"
+harness = false
+
+[[bench]]
+name = "bench_inline_cache_slot"
+path = "bench_inline_cache_slot.rs"
+harness = false
+
+[[bench]]
+name = "bench_adaptive_binary_cache_read"
+path = "bench_adaptive_binary_cache_read.rs"
+harness = false
+
+[[bench]]
+name = "bench_method_cache_read"
+path = "bench_method_cache_read.rs"
+harness = false
+
+[[bench]]
+name = "bench_property_cache_read"
+path = "bench_property_cache_read.rs"
+harness = false
+
+[[bench]]
+name = "bench_direct_call_state_read"
+path = "bench_direct_call_state_read.rs"
+harness = false
+
+[[bench]]
+name = "bench_vm_fixtures"
+path = "bench_vm_fixtures.rs"
+harness = false
+
+[[bench]]
+name = "bench_vm_hot_paths"
+path = "bench_vm_hot_paths.rs"
+harness = false
+
+[[bench]]
+name = "bench_string_scan"
+path = "bench_string_scan.rs"
+harness = false
+
+[lints]
+workspace = true

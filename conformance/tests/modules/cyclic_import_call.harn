@@ -1,0 +1,10 @@
+// Importing `b` first forces the cycle to be closed at `x` (the module that
+// selectively imports `helper` from the still-loading `b`). The deferred-import
+// pass must bind `helper` into `x` before `x_render` runs.
+import { helper } from "cyclic_import_call_b"
+import { x_render } from "cyclic_import_call_x"
+
+pipeline default(harness: Harness) {
+  harness.stdio.println(helper())
+  harness.stdio.println(x_render())
+}

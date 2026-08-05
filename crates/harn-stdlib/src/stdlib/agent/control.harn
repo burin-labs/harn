@@ -1,0 +1,456 @@
+import { agent_emit_event } from "std/agent/state"
+
+type AgentLoopCommandAction = "none" | "extend" | "stop"
+
+type AgentLoopCommand = {
+  action: AgentLoopCommandAction,
+  by: int,
+  until: int,
+  reason: string,
+  status: string,
+}
+
+type AgentLoopBudget = {
+  mode: string,
+  initial: int,
+  max: int,
+  extend_by: int,
+  expose_decisions: bool,
+  wall_clock_ms: int?,
+  total_cost_usd: float?,
+  consecutive_failures: dict?,
+}
+
+type AgentLoopBudgetDecision = {
+  iteration: int,
+  action: string,
+  old_limit: int,
+  new_limit: int,
+  reason: string,
+  status: string,
+}
+
+type AgentLoopCommandApplication = {
+  stop: bool,
+  final_status: string,
+  stop_reason: string?,
+  current_max: int,
+  extensions_used: int,
+  decisions: list<AgentLoopBudgetDecision>,
+}
+
+type AgentLoopState = {
+  iteration: int,
+  budget: dict,
+  turn: dict,
+  session: dict,
+  completion: dict,
+  progress: dict,
+}
+
+fn __agent_loop_state(args) -> AgentLoopState {
+  const current_limit = args.current_limit
+  const iteration = args.iteration
+  const remaining = if iteration >= current_limit {
+    0
+  } else {
+    current_limit - iteration
+  }
+  const missing = args.missing_required_tools
+  return {
+    iteration: iteration,
+    budget: {
+      current_limit: current_limit,
+      max: args.budget_max,
+      remaining: remaining,
+      extension_count: args.extensions_used,
+      wall_clock_ms: args.wall_clock_ms ?? 0,
+      wall_clock_limit_ms: args.wall_clock_limit_ms,
+      cost_usd: args.cost_usd ?? 0.0,
+      total_cost_limit_usd: args.total_cost_limit_usd,
+      consecutive_failures: args.consecutive_failures ?? 0,
+      consecutive_failure_limit: args.consecutive_failure_limit,
+    },
+    turn: {
+      tool_call_count: args.turn_tool_count,
+      successful_tool_names: args.turn_successful,
+      rejected_tool_names: args.turn_rejected,
+      text_chars: args.turn_text_chars,
+      native_fallback_used: args.turn_native_fallback_used,
+    },
+    session: {
+      successful_tool_names: args.session_successful,
+      rejected_tool_names: args.session_rejected,
+      required_tools_satisfied: len(missing) == 0,
+      required_tools_missing: missing,
+    },
+    completion: {
+      proposed: args.completion_proposed,
+      vetoed: args.completion_vetoed,
+      verdict: args.completion_verdict,
+      feedback: args.completion_feedback,
+    },
+    progress: {
+      changed: args.progress_changed,
+      summary: args.progress_summary,
+      no_net_advance: args.progress_no_net_advance ?? false,
+    },
+  }
+}
+
+/**
+ * Single source of truth for "the agent is still advancing the task."
+ * `progress.changed` (computed once in `agent_loop_snapshot_state`) covers tool
+ * calls, successful tool results, AND visible text — so a turn that is pure
+ * planning/narration toward the next edit (no tool call *this* turn) is still
+ * forward progress. This is deliberately NOT re-gated on a tool call here: an
+ * earlier inline `progress.changed && tool_call_count > 0` denied the extension
+ * whenever the budget boundary happened to land on a planning turn, cutting a
+ * productive multi-file refactor off mid-work (a methodical model editing across
+ * ~6 files stopped at its initial cap because one interleaved planning turn was
+ * treated as "no progress"). Degenerate narration that never acts is bounded
+ * independently by the iteration max and the stall detector.
+ *
+ * The ONE principled override is `progress.no_net_advance`: activity-without-
+ * advancement is NOT progress. `progress.changed` is an ACTIVITY signal — it
+ * fires merely because the model issued tool calls — which makes a thrashing run
+ * (lots of edits/verifies, the SAME compile/test failure recurring turn after
+ * turn, no error draining toward a green build) read as "progressing" every
+ * turn and lets the loop extend its own budget without bound (observed
+ * 24->32->...->72 on a run that should have been cut). `no_net_advance` is set
+ * ONLY on the verify-bearing failing path when the verification OUTCOME is not
+ * advancing (the same failure signature has recurred past a threshold, i.e. the
+ * stall detector's same-diagnostic streak). It is the harn-side twin of burin's
+ * no-net-progress ripcord. Crucially it is OUTCOME-AWARE, not a second activity
+ * notion: a productive edit changes the error signature (streak resets => still
+ * progress) or a test passes (failure model clears => still progress), and
+ * read-only / explore turns with no failing verification never set it. So this
+ * AND only suppresses an extension for a *measured* no-net-advancement thrash;
+ * every genuinely-advancing run keeps its budget. Keep this the *only* place
+ * that defines "progress" so no other competing notion can be ANDed in.
+ */
+fn agent_loop_is_progressing(state: AgentLoopState) -> bool {
+  return state.progress.changed && !(state.progress?.no_net_advance ?? false)
+}
+
+/**
+ * Ordered extension policy for the default loop control: each entry pairs a
+ * named, eagerly-evaluated condition with the reason recorded on the resulting
+ * budget decision, and the first satisfied entry wins. Expressing the policy as
+ * an explicit table — rather than a chain of inline compound `if`s — keeps every
+ * extension trigger auditable in one place and forces each signal through a
+ * single definition (there is nowhere to silently AND an extra condition onto a
+ * rule, which is exactly the class of bug this replaced).
+ */
+fn __agent_loop_extension_rules(state: AgentLoopState) {
+  return [
+    {when: state.completion.vetoed, reason: "completion gate vetoed"},
+    {when: !state.session.required_tools_satisfied, reason: "required tools missing"},
+    {when: agent_loop_is_progressing(state), reason: "recent turn made progress"},
+  ]
+}
+
+fn __agent_default_loop_control(state: AgentLoopState) {
+  // Only decide at the budget boundary; below it, keep looping untouched.
+  if state.budget.remaining > 0 {
+    return nil
+  }
+  for rule in __agent_loop_extension_rules(state) {
+    if rule.when {
+      return {action: "extend", reason: rule.reason}
+    }
+  }
+  // No extension rule matched — let the loop stop at the current cap.
+  return nil
+}
+
+fn __agent_interpret_loop_command(command) -> AgentLoopCommand {
+  if command == nil {
+    return {action: "none", by: 0, until: 0, reason: "", status: ""}
+  }
+  if type_of(command) != "dict" {
+    throw "agent_loop: loop_control must return nil or a dict; got " + type_of(command)
+  }
+  const action = command?.action ?? "none"
+  if action != "none" && action != "extend" && action != "stop" {
+    throw "agent_loop: loop_control action must be \"none\", \"extend\", or \"stop\"; got "
+      + to_string(
+      action,
+    )
+  }
+  const by = command?.by ?? 0
+  if type_of(by) != "int" {
+    throw "agent_loop: loop_control `by` must be an integer; got " + type_of(by)
+  }
+  const until = command?.until ?? 0
+  if type_of(until) != "int" {
+    throw "agent_loop: loop_control `until` must be an integer; got " + type_of(until)
+  }
+  return {
+    action: action,
+    by: by,
+    until: until,
+    reason: command?.reason ?? "",
+    status: command?.status ?? "",
+  }
+}
+
+/**
+ * agent_loop_control_invoke normalizes a custom or adaptive loop command.
+ *
+ * @effects: [state.mutate]
+ * @errors: [agent_loop]
+ * @api_stability: experimental
+ */
+pub fn agent_loop_control_invoke(
+  opts,
+  budget: AgentLoopBudget,
+  state: AgentLoopState,
+) -> AgentLoopCommand {
+  const policy = opts?.loop_control
+  if policy != nil {
+    return __agent_interpret_loop_command(policy(state))
+  }
+  if budget.mode == "adaptive" {
+    return __agent_interpret_loop_command(__agent_default_loop_control(state))
+  }
+  return __agent_interpret_loop_command(nil)
+}
+
+fn __agent_apply_extension(command: AgentLoopCommand, budget: AgentLoopBudget, current_max: int) {
+  const cap = budget.max
+  const target = if command.until > 0 {
+    command.until
+  } else {
+    let by = if command.by > 0 {
+      command.by
+    } else {
+      budget.extend_by
+    }
+    current_max + by
+  }
+  const bounded = if target > cap {
+    cap
+  } else {
+    target
+  }
+  if bounded <= current_max {
+    return {extended: false, new_limit: current_max, delta: 0}
+  }
+  return {extended: true, new_limit: bounded, delta: bounded - current_max}
+}
+
+fn __agent_record_budget_decision(
+  decisions: list<AgentLoopBudgetDecision>,
+  iteration: int,
+  action: string,
+  old_limit: int,
+  new_limit: int,
+  reason: string,
+  status: string,
+) -> list<AgentLoopBudgetDecision> {
+  return decisions.appending(
+    {
+      iteration: iteration,
+      action: action,
+      old_limit: old_limit,
+      new_limit: new_limit,
+      reason: reason,
+      status: status,
+    },
+  )
+}
+
+fn __agent_progress_summary_text(
+  completion_vetoed: bool,
+  tool_count: int,
+  visible_text: string,
+  no_net_advance: bool,
+) -> string {
+  if completion_vetoed {
+    return "completion gate vetoed"
+  }
+  // Activity present but the verification outcome is not advancing (same failure
+  // recurring): name the thrash so the recorded loop decision is auditable.
+  if no_net_advance {
+    return "tool activity without net verification progress"
+  }
+  if tool_count > 0 {
+    return "executed " + to_string(tool_count) + " tool call(s)"
+  }
+  if trim(visible_text) != "" {
+    return "produced visible text"
+  }
+  return "no progress signal"
+}
+
+/**
+ * agent_loop_snapshot_state builds the loop-control state callback payload.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_loop_snapshot_state(args) -> AgentLoopState {
+  const verdict = args.verdict
+  const completion_vetoed = verdict != nil && verdict?.vetoed
+  const completion_verdict = if verdict == nil {
+    nil
+  } else {
+    verdict?.verdict
+  }
+  const completion_feedback = if verdict == nil {
+    nil
+  } else {
+    verdict?.feedback
+  }
+  const visible_text = args.visible_text
+  const tool_count = args.tool_count
+  const turn_successful = args.turn_successful
+  const progress_changed = tool_count > 0 || len(turn_successful) > 0
+    || trim(visible_text) != ""
+  // Outcome-aware override: the caller (the loop) passes `progress_no_net_advance`
+  // when this turn is on the verify-bearing failing path AND the verification
+  // outcome is not advancing (same-diagnostic streak past threshold). It only
+  // suppresses the extension when there WAS activity to begin with — a thrash —
+  // never when there is genuinely no activity (that case is already "no progress").
+  const no_net_advance = progress_changed && (args.progress_no_net_advance ?? false)
+  const progress_summary = __agent_progress_summary_text(
+    completion_vetoed,
+    tool_count,
+    visible_text,
+    no_net_advance,
+  )
+  return __agent_loop_state(
+    {
+      iteration: args.iteration,
+      current_limit: args.current_limit,
+      budget_max: args.budget_max,
+      extensions_used: args.extensions_used,
+      wall_clock_ms: args.wall_clock_ms,
+      wall_clock_limit_ms: args.wall_clock_limit_ms,
+      cost_usd: args.cost_usd,
+      total_cost_limit_usd: args.total_cost_limit_usd,
+      consecutive_failures: args.consecutive_failures,
+      consecutive_failure_limit: args.consecutive_failure_limit,
+      turn_tool_count: tool_count,
+      turn_successful: turn_successful,
+      turn_rejected: args.turn_rejected,
+      turn_text_chars: len(visible_text),
+      turn_native_fallback_used: args.turn_native_fallback_used,
+      session_successful: args.session_successful,
+      session_rejected: args.session_rejected,
+      missing_required_tools: args.missing_required_tools,
+      completion_proposed: args.completion_proposed,
+      completion_vetoed: completion_vetoed,
+      completion_verdict: completion_verdict,
+      completion_feedback: completion_feedback,
+      progress_changed: progress_changed,
+      progress_no_net_advance: no_net_advance,
+      progress_summary: progress_summary,
+    },
+  )
+}
+
+/**
+ * agent_loop_apply_command applies a normalized command to the loop budget.
+ *
+ * @effects: [agent]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_loop_apply_command(agent: HarnessAgent, state) -> AgentLoopCommandApplication {
+  const command = state.command
+  const session_id = state.session_id
+  const iteration = state.iteration
+  const current_max = state.current_max
+  const budget = state.budget
+  if command.action == "stop" {
+    const stop_status = if command.status != "" {
+      command.status
+    } else {
+      "stopped"
+    }
+    const stop_reason = if command.reason != "" {
+      command.reason
+    } else {
+      "loop_control"
+    }
+    const decisions = __agent_record_budget_decision(
+      state.decisions,
+      iteration,
+      "stop",
+      current_max,
+      current_max,
+      command.reason,
+      stop_status,
+    )
+    agent_emit_event(
+      agent,
+      session_id,
+      "loop_control_decision",
+      {
+        iteration: iteration,
+        action: "stop",
+        old_limit: current_max,
+        new_limit: current_max,
+        reason: command.reason,
+        status: stop_status,
+      },
+    )
+    return {
+      stop: true,
+      final_status: stop_status,
+      stop_reason: stop_reason,
+      current_max: current_max,
+      extensions_used: state.extensions_used,
+      decisions: decisions,
+    }
+  }
+  if command.action == "extend" {
+    const applied = __agent_apply_extension(command, budget, current_max)
+    if applied.extended {
+      const old_limit = current_max
+      const new_limit = applied.new_limit
+      const extensions_used = state.extensions_used + 1
+      const decisions = __agent_record_budget_decision(
+        state.decisions,
+        iteration,
+        "extend",
+        old_limit,
+        new_limit,
+        command.reason,
+        "",
+      )
+      agent_emit_event(
+        agent,
+        session_id,
+        "loop_control_decision",
+        {
+          iteration: iteration,
+          action: "extend",
+          old_limit: old_limit,
+          new_limit: new_limit,
+          reason: command.reason,
+          status: "",
+        },
+      )
+      return {
+        stop: false,
+        final_status: "",
+        stop_reason: nil,
+        current_max: new_limit,
+        extensions_used: extensions_used,
+        decisions: decisions,
+      }
+    }
+  }
+  return {
+    stop: false,
+    final_status: "",
+    stop_reason: nil,
+    current_max: current_max,
+    extensions_used: state.extensions_used,
+    decisions: state.decisions,
+  }
+}

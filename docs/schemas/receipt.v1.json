@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/receipt.v1.json",
+  "title": "Harn Receipt Envelope v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "id",
+    "parent_run_id",
+    "persona",
+    "step",
+    "trace_id",
+    "started_at",
+    "completed_at",
+    "status",
+    "inputs_digest",
+    "outputs_digest",
+    "model_calls",
+    "tool_calls",
+    "cost_usd",
+    "approvals",
+    "handoffs",
+    "side_effects",
+    "error",
+    "redaction_class",
+    "metadata"
+  ],
+  "properties": {
+    "schema": {
+      "const": "harn.receipt.v1",
+      "description": "Stable discriminator for the canonical Harn receipt envelope."
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "parent_run_id": {
+      "type": ["string", "null"]
+    },
+    "persona": {
+      "type": "string",
+      "minLength": 1
+    },
+    "step": {
+      "type": ["string", "null"]
+    },
+    "trace_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "completed_at": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "accepted",
+        "running",
+        "success",
+        "noop",
+        "failure",
+        "denied",
+        "duplicate",
+        "cancelled"
+      ]
+    },
+    "inputs_digest": {
+      "$ref": "#/$defs/nullable_digest"
+    },
+    "outputs_digest": {
+      "$ref": "#/$defs/nullable_digest"
+    },
+    "model_calls": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/payload_object"
+      }
+    },
+    "tool_calls": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/payload_object"
+      }
+    },
+    "cost_usd": {
+      "type": "number",
+      "minimum": 0
+    },
+    "approvals": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/payload_object"
+      }
+    },
+    "handoffs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/payload_object"
+      }
+    },
+    "side_effects": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/payload_object"
+      }
+    },
+    "error": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/payload_object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "redaction_class": {
+      "type": "string",
+      "enum": ["public", "internal", "receipt_only", "secret"]
+    },
+    "metadata": {
+      "$ref": "#/$defs/metadata"
+    }
+  },
+  "$defs": {
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "nullable_digest": {
+      "type": ["string", "null"],
+      "description": "Digest of the corresponding payload, formatted as algorithm:value such as sha256:abc123."
+    },
+    "payload_object": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

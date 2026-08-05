@@ -1,0 +1,55 @@
+pub fn provider_id() {
+  return "notion"
+}
+
+pub fn kinds() {
+  return ["webhook", "poll"]
+}
+
+pub fn payload_schema() {
+  return {
+    harn_schema_name: "NotionEventPayload",
+    json_schema: {type: "object", additionalProperties: true},
+  }
+}
+
+pub fn init(_harness: Harness, ctx) {
+  if ctx.provider_id != "notion" {
+    throw "unexpected provider id"
+  }
+}
+
+pub fn activate(harness: Harness, bindings) {
+  harness.obs.metrics_inc("notion_contract_activations", len(bindings))
+}
+
+pub fn normalize_inbound(_harness: Harness, raw) {
+  const body = raw.body_json ?? json_parse(raw.body_text)
+  return {
+    type: "event",
+    event: {
+      kind: body.type,
+      dedupe_key: "notion:" + body.entity.id,
+      payload: body,
+      signature_status: {state: "verified"},
+    },
+  }
+}
+
+pub fn poll_tick(_harness: Harness, ctx) {
+  return {
+    cursor: {last_seen: ctx.tick_at},
+    state: {state_key: ctx.state_key},
+    events: [
+      {
+        kind: "notion.page.polled",
+        dedupe_key: "notion:poll:" + ctx.binding_id,
+        payload: {binding_id: ctx.binding_id, lease_id: ctx.lease.id},
+      },
+    ],
+  }
+}
+
+pub fn call(_harness: Harness, method, _args) {
+  throw "method_not_found:" + method
+}

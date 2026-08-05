@@ -1,0 +1,19 @@
+pipeline default(harness: Harness) {
+  // Wildcard pattern
+  const x = 42
+  let result = ""
+  match x {
+    1 -> { result = "one" }
+    2 -> { result = "two" }
+    _ -> { result = "other" }
+  }
+  harness.stdio.println(result)
+  // Wildcard with strings
+  const s = "hello"
+  let r2 = ""
+  match s {
+    "bye" -> { r2 = "farewell" }
+    _ -> { r2 = "catch-all" }
+  }
+  harness.stdio.println(r2)
+}

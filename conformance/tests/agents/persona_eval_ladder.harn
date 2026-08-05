@@ -1,0 +1,38 @@
+pipeline main(harness: Harness) {
+  const root = harness.fs.workspace_root()
+  const artifacts = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-persona-eval-ladder-" + harness.random.uuid(),
+  )
+  const manifest = persona_eval_ladder_manifest(
+    {
+      id: "merge-captain-ladder-conformance",
+      persona: "merge_captain",
+      base_dir: root,
+      artifact_root: artifacts,
+      backend: {kind: "replay", path: "examples/personas/merge_captain/transcripts/green_pr.jsonl"},
+      model_routes: [
+        {
+          id: "gemma-value",
+          route: "local/gemma-value",
+          provider: "llama.cpp",
+          model: "gemma",
+          profile: "value",
+        },
+      ],
+      timeout_tiers: [
+        {id: "tiny", max_tool_calls: 1},
+        {id: "balanced", max_tool_calls: 4, max_model_calls: 1},
+      ],
+    },
+  )
+  const report = harness.runtime.persona_eval_ladder_run(manifest)
+  harness.stdio.println(report.pass)
+  harness.stdio.println(report.total)
+  harness.stdio.println(report.first_correct_tier)
+  harness.stdio.println(report.first_correct_route)
+  harness.stdio.println(report.tiers[0].outcome)
+  harness.stdio.println(report.tiers[1].outcome)
+  harness.stdio.println(len(report.tiers[1].state_machine_coverage.observed_steps) > 0)
+  harness.stdio.println(harness.fs.exists(report.tiers[1].receipt_path))
+}

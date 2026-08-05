@@ -1,0 +1,132 @@
+// std/cli/paths - application-scoped config/data/cache directories for CLI scripts.
+//
+// Import with: import { xdg_config_home, xdg_data_home, xdg_cache_home } from "std/cli/paths"
+import { is_absolute } from "std/path"
+
+fn __app_segment(app_name: string) -> string {
+  const name = trim(app_name ?? "")
+  if name == "" || name == "." || name == ".." || contains(name, "/") || contains(name, "\\") {
+    throw "std/cli/paths: app_name must be a single path segment"
+  }
+  return name
+}
+
+fn __absolute_env_dir(env: HarnessEnv, name: string) {
+  const raw = env.get(name)
+  if raw == nil {
+    return nil
+  }
+  const value = to_string(raw)
+  if trim(value) == "" || !is_absolute(value) {
+    return nil
+  }
+  return value
+}
+
+fn __home_dir(env: HarnessEnv) -> string {
+  const home = __absolute_env_dir(env, "HOME")
+  if home != nil {
+    return home
+  }
+  const user_profile = __absolute_env_dir(env, "USERPROFILE")
+  if user_profile != nil {
+    return user_profile
+  }
+  throw "std/cli/paths: HOME or USERPROFILE must be an absolute path"
+}
+
+fn __join_segments(segments: list<string>) -> string {
+  let out = ""
+  for segment in segments {
+    if out == "" {
+      out = segment
+    } else {
+      out = path_join(out, segment)
+    }
+  }
+  return out
+}
+
+fn __resolve_app_home(
+  env: HarnessEnv,
+  system: HarnessSystem,
+  app_name: string,
+  env_key: string,
+  xdg_segments: list<string>,
+  macos_segments: list<string>,
+) -> string {
+  const app = __app_segment(app_name)
+  const env_root = __absolute_env_dir(env, env_key)
+  if env_root != nil {
+    return path_join(env_root, app)
+  }
+  const root_segments = if system.platform().os == "darwin" {
+    macos_segments
+  } else {
+    xdg_segments
+  }
+  return __join_segments([__home_dir(env)] + root_segments + [app])
+}
+
+/**
+ * Return the application-specific user config directory. Honors an
+ * absolute `XDG_CONFIG_HOME`; otherwise uses
+ * `~/Library/Application Support/<app_name>` on macOS and
+ * `$HOME/.config/<app_name>` elsewhere. The directory is not created.
+ *
+ * @effects: [env.read]
+ * @errors: ["app_name must be a single path segment", "HOME or USERPROFILE must be an absolute path"]
+ * @example: xdg_config_home(harness.env, harness.system, "harn")
+ */
+pub fn xdg_config_home(env: HarnessEnv, system: HarnessSystem, app_name: string) -> string {
+  return __resolve_app_home(
+    env,
+    system,
+    app_name,
+    "XDG_CONFIG_HOME",
+    [".config"],
+    ["Library", "Application Support"],
+  )
+}
+
+/**
+ * Return the application-specific user data directory. Honors an
+ * absolute `XDG_DATA_HOME`; otherwise uses
+ * `~/Library/Application Support/<app_name>` on macOS and
+ * `$HOME/.local/share/<app_name>` elsewhere. The directory is not created.
+ *
+ * @effects: [env.read]
+ * @errors: ["app_name must be a single path segment", "HOME or USERPROFILE must be an absolute path"]
+ * @example: xdg_data_home(harness.env, harness.system, "harn")
+ */
+pub fn xdg_data_home(env: HarnessEnv, system: HarnessSystem, app_name: string) -> string {
+  return __resolve_app_home(
+    env,
+    system,
+    app_name,
+    "XDG_DATA_HOME",
+    [".local", "share"],
+    ["Library", "Application Support"],
+  )
+}
+
+/**
+ * Return the application-specific user cache directory. Honors an
+ * absolute `XDG_CACHE_HOME`; otherwise uses
+ * `~/Library/Caches/<app_name>` on macOS and
+ * `$HOME/.cache/<app_name>` elsewhere. The directory is not created.
+ *
+ * @effects: [env.read]
+ * @errors: ["app_name must be a single path segment", "HOME or USERPROFILE must be an absolute path"]
+ * @example: xdg_cache_home(harness.env, harness.system, "harn")
+ */
+pub fn xdg_cache_home(env: HarnessEnv, system: HarnessSystem, app_name: string) -> string {
+  return __resolve_app_home(
+    env,
+    system,
+    app_name,
+    "XDG_CACHE_HOME",
+    [".cache"],
+    ["Library", "Caches"],
+  )
+}

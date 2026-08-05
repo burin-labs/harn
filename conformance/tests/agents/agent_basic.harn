@@ -1,0 +1,66 @@
+import { agent, agent_config, agent_name } from "std/agent/workers"
+
+fn agent_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "read",
+    "Read a file",
+    {
+      handler: { _args -> "" },
+      parameters: {path: {type: "string", description: "Path to read"}},
+      returns: {type: "string"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "search",
+    "Search project files",
+    {
+      handler: { _args -> "" },
+      parameters: {
+        pattern: {type: "string", description: "Pattern to search"},
+        file_glob: {type: "string", description: "Optional file glob", required: false},
+      },
+      returns: {type: "string"},
+    },
+  )
+  return tools
+}
+
+pipeline test(harness: Harness, task) {
+  // Test agent() and agent_config() builtins.
+  const classifier = agent(
+    "classifier",
+    {
+      system: "You classify code directories",
+      provider: "mock",
+      model: "test-model",
+      max_iterations: 5,
+      reasoning_policy: "auto",
+      reasoning_scale: "large",
+      reasoning_task: "code",
+      tools: agent_tools(),
+    },
+  )
+  // Check agent dict shape
+  assert(classifier._type == "agent", "should be agent type")
+  assert(classifier.name == "classifier", "should have name")
+  assert(classifier.system == "You classify code directories", "should have system")
+  assert(classifier.provider == "mock", "should have provider")
+  assert(classifier.max_iterations == 5, "should have max_iterations")
+  // Test agent_name
+  const name = agent_name(classifier)
+  assert(name == "classifier", "agent_name should return name")
+  // Test agent_config
+  const cfg = agent_config(classifier, "Classify src/models")
+  assert(cfg.prompt == "Classify src/models", "should have prompt")
+  assert(cfg.system == "You classify code directories", "should have system")
+  assert(cfg.options.provider == "mock", "should have provider in options")
+  assert(cfg.options.model == "test-model", "should have model in options")
+  assert(cfg.options.max_iterations == 5, "should have max_iterations in options")
+  assert(cfg.options.reasoning_policy == "auto", "should have reasoning_policy in options")
+  assert(cfg.options.reasoning_scale == "large", "should have reasoning_scale in options")
+  assert(cfg.options.reasoning_task == "code", "should have reasoning_task in options")
+  harness.stdio.log("agent tests passed")
+}

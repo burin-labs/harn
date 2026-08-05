@@ -1,0 +1,288 @@
+// std/plan — Harn-owned plan artifact and approval helpers.
+//
+// Import with: `import "std/plan"`.
+import "std/hitl"
+
+type PlanStepStatus = "pending" | "in_progress" | "completed" | "blocked" | "cancelled"
+
+type PlanStep = {id: string, content: string, status: PlanStepStatus, priority: string | int | nil}
+
+type PlanApprovalState = "unrequested" | "requested" | "approved" | "rejected"
+
+type PlanApproval = {
+  state: PlanApprovalState,
+  request_id?: string,
+  reviewer?: string,
+  reviewers?: list<string>,
+  approved_at?: string,
+  reason?: string?,
+}
+
+type PlanArtifact = {
+  _type: "plan_artifact",
+  schema_version: "harn.plan.v1",
+  id: string,
+  tool: string,
+  title: string,
+  summary: string,
+  steps: list<PlanStep>,
+  assumptions: list<string>,
+  open_questions: list<string>,
+  verification_commands: list<string>,
+  approval: PlanApproval,
+}
+
+pub type PlanAuthor = {id: string, display_name?: string}
+
+pub type PlanSource = {kind: string, uri?: string}
+
+pub type PlanCommentState = "open" | "addressed" | "resolved" | "reopened"
+
+pub type PlanRevisionCreate = {kind: "create", event_id: string}
+
+pub type PlanRevisionEdit = {kind: "edit", event_id: string}
+
+pub type PlanRevisionComment = {kind: "comment", event_id: string, comment_id: string}
+
+pub type PlanRevisionCommentState = {
+  kind: "comment_state",
+  event_id: string,
+  comment_id: string,
+  state: PlanCommentState,
+}
+
+pub type PlanRevisionOperation = PlanRevisionCreate \
+  | PlanRevisionEdit \
+  | PlanRevisionComment \
+  | PlanRevisionCommentState
+
+pub type PlanRevision = {
+  revision_id: string,
+  parent_revision_id?: string,
+  markdown: string,
+  plan: PlanArtifact,
+  author: PlanAuthor,
+  source: PlanSource,
+  created_at: string,
+  operation: PlanRevisionOperation,
+}
+
+pub type PlanCommentAnchor = {
+  step_id?: string,
+  quoted_text?: string,
+  range?: {start: int, end: int},
+}
+
+pub type PlanComment = {
+  comment_id: string,
+  anchor: PlanCommentAnchor,
+  body: string,
+  state: PlanCommentState,
+  author: PlanAuthor,
+  created_at: string,
+  updated_at: string,
+}
+
+pub type PlanCommentResolutionReceipt = {
+  receipt_id: string,
+  comment_id: string,
+  input_revision_id: string,
+  output_revision_id: string,
+  agent_run_id: string,
+  event_id: string,
+  explanation?: string,
+  created_at: string,
+}
+
+pub type PlanDocument = {
+  _type: "plan_document",
+  schema_version: "harn.plan_document.v1",
+  document_id: string,
+  current_revision: PlanRevision,
+  comments: list<PlanComment>,
+  resolution_receipts: list<PlanCommentResolutionReceipt>,
+  created_at: string,
+  updated_at: string,
+}
+
+/**
+ * plan_from normalizes flexible model/user plan shapes into harn.plan.v1.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn plan_from(plan) -> PlanArtifact {
+  return plan_artifact(plan)
+}
+
+/**
+ * plan_acp_entries returns ACP-compatible plan entries for a harn.plan.v1 artifact.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn plan_acp_entries(plan) {
+  return plan_entries(plan)
+}
+
+/**
+ * emit_plan_tool registers the Harn-owned terminal plan emission tool.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn emit_plan_tool(registry) {
+  return tool_define(
+    registry,
+    "emit_plan",
+    "Emit a structured plan artifact and end the planning turn.",
+    {
+      executor: "harn",
+      parameters: {
+        summary: {type: "string", description: "One-sentence plan summary", required: false},
+        direction: {
+          type: "string",
+          description: "First-order-plan direction alias",
+          required: false,
+        },
+        steps: {
+          type: "array",
+          description: "Plan steps with content/step and status",
+          required: false,
+        },
+        tasks: {type: "array", description: "First-order-plan tasks alias", required: false},
+        assumptions: {
+          type: "array",
+          description: "Assumptions the plan relies on",
+          required: false,
+        },
+        open_questions: {
+          type: "array",
+          description: "Questions that remain unresolved",
+          required: false,
+        },
+        verification_commands: {
+          type: "array",
+          description: "Commands or checks to verify the work",
+          required: false,
+        },
+        verification: {
+          type: "array",
+          description: "First-order-plan verification alias",
+          required: false,
+        },
+        approval: {type: "object", description: "Optional approval state", required: false},
+      },
+      returns: {type: "object"},
+    },
+  )
+}
+
+/**
+ * update_plan_tool registers the incremental Harn-owned plan update tool.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn update_plan_tool(registry) {
+  return tool_define(
+    registry,
+    "update_plan",
+    "Update the current structured plan artifact.",
+    {
+      executor: "harn",
+      parameters: {
+        explanation: {type: "string", description: "Short reason for the update", required: false},
+        document_id: {
+          type: "string",
+          description: "Stable collaborative plan document id",
+          required: false,
+        },
+        expected_revision_id: {
+          type: "string",
+          description: "Revision observed by the editor; stale values fail with a conflict",
+          required: false,
+        },
+        markdown: {
+          type: "string",
+          description: "Canonical editable Markdown for the new revision",
+          required: false,
+        },
+        plan: {type: "array", description: "Plan steps with step/content and status"},
+        assumptions: {
+          type: "array",
+          description: "Assumptions the plan relies on",
+          required: false,
+        },
+        open_questions: {
+          type: "array",
+          description: "Questions that remain unresolved",
+          required: false,
+        },
+        verification_commands: {
+          type: "array",
+          description: "Commands or checks to verify the work",
+          required: false,
+        },
+        approval: {type: "object", description: "Optional approval state", required: false},
+      },
+      returns: {type: "object"},
+    },
+  )
+}
+
+/**
+ * plan_tools adds emit_plan and update_plan to a tool registry.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn plan_tools(registry = nil) {
+  let tools = registry ?? tool_registry()
+  tools = emit_plan_tool(tools)
+  tools = update_plan_tool(tools)
+  return tools
+}
+
+/**
+ * plan_approved returns a copy of plan with an approved/rejected approval state.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn plan_approved(plan, approval: ApprovalRecord) -> PlanArtifact {
+  const artifact = plan_from(plan)
+  const state = if approval.approved {
+    "approved"
+  } else {
+    "rejected"
+  }
+  return artifact
+    + {
+    approval: {
+      state: state,
+      reviewers: approval.reviewers,
+      approved_at: approval.approved_at,
+      reason: approval.reason,
+    },
+  }
+}
+
+/**
+ * request_plan_approval uses std/hitl approval primitives for plan approval/resume flows.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn request_plan_approval(interaction: HarnessInteraction, plan, options = nil) -> PlanArtifact {
+  const artifact = plan_from(plan)
+  const action = options?.action ?? "Approve plan"
+  let approval_options = if options {
+    options
+  } else {
+    {}
+  }
+  approval_options = approval_options + {detail: artifact}
+  const record: ApprovalRecord = interaction.request_approval(action, approval_options)
+  return plan_approved(artifact, record)
+}

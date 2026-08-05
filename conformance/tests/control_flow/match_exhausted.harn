@@ -1,0 +1,11 @@
+pipeline test(harness: Harness, task) {
+  // Match with no matching arm should throw
+  const result = try {
+    match "unexpected" {
+      "a" -> { "got a" }
+      "b" -> { "got b" }
+    }
+  }
+  harness.stdio.log(is_err(result))
+  harness.stdio.log(unwrap_err(result))
+}

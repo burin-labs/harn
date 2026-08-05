@@ -1,0 +1,5 @@
+pub type SmartTarget = {name: string, score: int}
+
+pub fn pick(name: string) -> SmartTarget {
+  return {name: name, score: 7}
+}

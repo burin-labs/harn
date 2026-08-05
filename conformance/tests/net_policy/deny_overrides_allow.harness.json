@@ -1,0 +1,5 @@
+{
+  "mode": "mock",
+  "net_gets": {"https://api.github.com/probe": "good-body"},
+  "expect_stdio": "api=good-body\nevil_blocked=true\nmatched_rule=evil.github.com\n"
+}

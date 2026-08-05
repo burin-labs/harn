@@ -1,0 +1,99 @@
+import "std/triggers"
+
+pipeline test(harness: Harness, task) {
+  const providers: list<ProviderCatalogEntry> = list_providers(harness.llm)
+  const builtin = providers.filter({ provider -> provider.runtime.kind == "builtin" })
+  assert(len(builtin) == 9, "expected nine builtin trigger providers")
+  const stream_providers = providers.filter(
+    { provider -> provider.kinds.any({ kind -> kind == "stream" }) },
+  )
+  assert(len(stream_providers) == 6, "expected six stream trigger providers")
+  assert(
+    stream_providers.all({ provider -> provider.schema_name == "StreamEventPayload" }),
+    "stream providers should publish the shared stream payload schema",
+  )
+  assert(
+    stream_providers.all(
+      { provider -> provider.runtime.kind == "builtin" && provider.runtime.connector == "stream" },
+    ),
+    "stream providers should use the generic stream ingress connector",
+  )
+  assert(
+    stream_providers.any({ provider -> provider.provider == "kafka" })
+      && stream_providers.any(
+      { provider -> provider.provider == "nats" },
+    )
+      && stream_providers.any({ provider -> provider.provider == "pulsar" })
+      && stream_providers.any(
+      { provider -> provider.provider == "postgres-cdc" },
+    )
+      && stream_providers.any({ provider -> provider.provider == "email" })
+      && stream_providers.any(
+      { provider -> provider.provider == "websocket" },
+    ),
+    "catalog should include every STREAM-01 provider",
+  )
+  const cron = builtin.find({ provider -> provider.provider == "cron" })
+  assert(cron?.schema_name == "CronEventPayload", "cron schema should be cataloged")
+  assert(cron?.runtime?.connector == "cron", "cron should use the cron connector")
+  assert(
+    cron?.signature_verification?.kind == "none",
+    "cron should not require signature verification",
+  )
+  assert(len(cron?.secret_requirements ?? []) == 0, "cron should not require secrets")
+  assert(len(cron?.outbound_methods ?? []) == 0, "cron should not publish outbound methods yet")
+  const webhook = builtin.find({ provider -> provider.provider == "webhook" })
+  assert(webhook?.schema_name == "GenericWebhookPayload", "webhook schema should be cataloged")
+  assert(webhook?.runtime?.connector == "webhook", "webhook should use the webhook connector")
+  assert(
+    webhook?.runtime?.default_signature_variant == "standard",
+    "webhook should default to standard signatures",
+  )
+  assert(
+    webhook?.signature_verification?.kind == "hmac",
+    "webhook should publish HMAC verification metadata",
+  )
+  assert(
+    webhook?.signature_verification?.variant == "standard",
+    "webhook should publish the standard variant",
+  )
+  assert(
+    webhook?.signature_verification?.signature_header == "webhook-signature",
+    "webhook should expose the signature header",
+  )
+  assert(
+    webhook?.signature_verification?.timestamp_header == "webhook-timestamp",
+    "webhook should expose the timestamp header",
+  )
+  const webhook_secrets = webhook?.secret_requirements ?? []
+  assert(len(webhook_secrets) == 1, "webhook should require one secret")
+  const webhook_secret = webhook_secrets[0]
+  assert(webhook_secret.name == "signing_secret", "webhook should require signing_secret")
+  assert(webhook_secret.namespace == "webhook", "webhook secrets should stay namespaced to webhook")
+  const a2a_push = builtin.find({ provider -> provider.provider == "a2a-push" })
+  assert(a2a_push?.schema_name == "A2aPushPayload", "a2a-push schema should be cataloged")
+  assert(a2a_push?.runtime?.connector == "a2a-push", "a2a-push should use the a2a-push connector")
+  assert(
+    a2a_push?.signature_verification?.kind == "none",
+    "a2a-push should not require catalog-level signature verification",
+  )
+  assert(
+    len(a2a_push?.secret_requirements ?? []) == 0,
+    "a2a-push should not require catalog secrets",
+  )
+  assert(
+    len(a2a_push?.outbound_methods ?? []) == 0,
+    "a2a-push should not publish outbound methods yet",
+  )
+  assert(
+    (a2a_push?.kinds ?? []).any({ kind -> kind == "a2a-push" }),
+    "a2a-push should publish its trigger kind",
+  )
+  for package_provider in ["github", "slack", "linear", "notion"] {
+    assert(
+      providers.find({ provider -> provider.provider == package_provider }) == nil,
+      package_provider + " must be registered by its package",
+    )
+  }
+  harness.stdio.log("trigger_provider_catalog tests passed")
+}

@@ -1,0 +1,381 @@
+// std/worktree — isolated git worktree helpers built on std/runtime process exec.
+//
+// Every git subprocess these helpers spawn runs non-interactive by
+// default: `GIT_TERMINAL_PROMPT=0` plus an empty askpass and an ssh
+// `BatchMode=yes` transport. Harn runs worktree git from TTY-less
+// contexts (`harn serve`, `@job`, CI); without this guard a clone/fetch
+// that needs a credential or host-key decision would block on an
+// interactive prompt and hang the runtime. The guard only disables
+// *prompting* — credentials supplied via env/helper/agent still work —
+// and is merged (`env_mode: "merge"`) so inherited PATH/HOME survive.
+// Callers that genuinely want interactive git can override by passing
+// their own `env` / `env_mode` in `options`.
+//
+// Import: import "std/worktree"
+import { unique } from "std/collections"
+import { git_env_remove, git_noninteractive_env } from "std/git"
+import { process_run, process_shell, runtime_state_paths_under } from "std/runtime"
+
+const WORKTREE_PRUNE_DEFAULT_MIN_AGE_SECONDS = 60 * 60
+
+const WORKTREE_PRUNE_DEFAULT_DISPOSABLE_PATHS = [
+  "target",
+  ".target",
+  ".build",
+  "node_modules",
+  "Pods",
+  ".venv",
+  "venv",
+  "__pycache__",
+  ".codex",
+  ".burin",
+  ".DS_Store",
+]
+
+pub type WorktreePruneReason = "main_checkout" \
+  | "current_worktree" \
+  | "in_use" \
+  | "dirty" \
+  | "unpushed" \
+  | "not_merged" \
+  | "too_young"
+
+pub type WorktreePruneFacts = {
+  path: string,
+  branch?: string,
+  is_main: bool,
+  is_current: bool,
+  has_process: bool,
+  dirty: bool,
+  unpushed: bool,
+  merged: bool,
+  abandoned: bool,
+  age_seconds: int,
+  size_bytes?: int,
+}
+
+pub type WorktreePruneVerdict = {reclaimable: bool, reason?: WorktreePruneReason, label?: string}
+
+pub type WorktreeStatusEditOptions = {disposable_paths?: list<string>}
+
+/**
+ * worktree_prune_default_min_age_seconds returns the default age floor for
+ * guarded worktree pruning. Younger worktrees are treated as active even when
+ * they otherwise look clean.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn worktree_prune_default_min_age_seconds() -> int {
+  return WORKTREE_PRUNE_DEFAULT_MIN_AGE_SECONDS
+}
+
+/**
+ * worktree_prune_default_disposable_paths returns path prefixes that are
+ * treated as disposable build/cache output when interpreting git status.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn worktree_prune_default_disposable_paths() -> list<string> {
+  return [runtime_state_paths_under(".").state_root] + WORKTREE_PRUNE_DEFAULT_DISPOSABLE_PATHS
+}
+
+/**
+ * worktree_prune_reason_label returns stable user-facing text for a
+ * non-reclaimable worktree guard.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn worktree_prune_reason_label(reason: WorktreePruneReason) -> string {
+  if reason == "main_checkout" {
+    return "main checkout"
+  }
+  if reason == "current_worktree" {
+    return "current worktree"
+  }
+  if reason == "in_use" {
+    return "in use (process attached)"
+  }
+  if reason == "dirty" {
+    return "dirty (uncommitted edits)"
+  }
+  if reason == "unpushed" {
+    return "unpushed commits"
+  }
+  if reason == "not_merged" {
+    return "branch not merged"
+  }
+  return "too recent"
+}
+
+fn __worktree_prune_protected(reason: WorktreePruneReason) -> WorktreePruneVerdict {
+  return {reclaimable: false, reason: reason, label: worktree_prune_reason_label(reason)}
+}
+
+/**
+ * worktree_prune_classify is the pure safety policy for deciding whether a git
+ * worktree may be reclaimed. It never shells out; callers supply already-gathered
+ * facts so the policy is deterministic and easy to test.
+ *
+ * A worktree is reclaimable only when it is linked, not current, unused, clean,
+ * has no unpushed work, is merged or abandoned, and is older than the age floor.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn worktree_prune_classify(
+  entry: WorktreePruneFacts,
+  min_age_seconds: int = WORKTREE_PRUNE_DEFAULT_MIN_AGE_SECONDS,
+) -> WorktreePruneVerdict {
+  if entry.is_main {
+    return __worktree_prune_protected("main_checkout")
+  }
+  if entry.is_current {
+    return __worktree_prune_protected("current_worktree")
+  }
+  if entry.has_process {
+    return __worktree_prune_protected("in_use")
+  }
+  if entry.dirty {
+    return __worktree_prune_protected("dirty")
+  }
+  if entry.unpushed {
+    return __worktree_prune_protected("unpushed")
+  }
+  if !entry.merged && !entry.abandoned {
+    return __worktree_prune_protected("not_merged")
+  }
+  if entry.age_seconds < min_age_seconds {
+    return __worktree_prune_protected("too_young")
+  }
+  return {reclaimable: true}
+}
+
+/**
+ * worktree_prune_normalize_disposable_path returns a safe repo-relative path
+ * prefix for disposable artifact cleanup, or nil for unsafe inputs. Absolute
+ * paths, dot-dot traversal, empty paths, and `.git` paths are rejected.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn worktree_prune_normalize_disposable_path(raw: string) -> string? {
+  let normalized = replace(trim(raw ?? ""), "\\", "/")
+  if starts_with(normalized, "/") {
+    return nil
+  }
+  normalized = regex_replace("^\\./+", "", normalized)
+  normalized = regex_replace("/+$", "", normalized)
+  if normalized == "" || normalized == ".git" || starts_with(normalized, ".git/") {
+    return nil
+  }
+  for component in split(normalized, "/") {
+    if component == "" || component == "." || component == ".." {
+      return nil
+    }
+  }
+  return normalized
+}
+
+fn __worktree_prune_disposable_paths(extra_paths: list<string> = []) -> list<string> {
+  let out = []
+  for path in worktree_prune_default_disposable_paths() + (extra_paths ?? []) {
+    const normalized = worktree_prune_normalize_disposable_path(path)
+    if normalized != nil {
+      out = out + [normalized]
+    }
+  }
+  return unique(out)
+}
+
+fn __worktree_prune_status_path(line: string) -> string {
+  if len(line) < 3 {
+    return ""
+  }
+  const raw = trim(substring(line, 3))
+  const renamed = split(raw, " -> ")
+  return renamed[len(renamed) - 1] ?? raw
+}
+
+fn __worktree_prune_path_matches_prefix(path: string, prefix: string) -> bool {
+  const normalized = replace(trim(path), "\\", "/")
+  const clean = regex_replace("^\\./+", "", normalized)
+  return clean == prefix || starts_with(clean, prefix + "/")
+}
+
+/**
+ * worktree_prune_status_has_real_edits returns true when a `git status
+ * --porcelain` stream contains source/user edits after ignoring known
+ * disposable build/cache paths. It is pure so product hosts can share the same
+ * cleanup policy without depending on wall-clock or git process behavior.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn worktree_prune_status_has_real_edits(
+  porcelain: string,
+  options: WorktreeStatusEditOptions = {},
+) -> bool {
+  const disposable_paths = __worktree_prune_disposable_paths(options.disposable_paths ?? [])
+  for line in split(porcelain ?? "", "\n") {
+    if len(line) < 3 {
+      continue
+    }
+    const path = __worktree_prune_status_path(line)
+    if path == "" {
+      continue
+    }
+    let disposable = false
+    for prefix in disposable_paths {
+      if __worktree_prune_path_matches_prefix(path, prefix) {
+        disposable = true
+        break
+      }
+    }
+    if !disposable {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * worktree_noninteractive_env returns the default prompt guard env applied
+ * to git subprocesses so credential/host-key prompts fail fast. Alias of
+ * `git_noninteractive_env` — the single source of truth for the guard.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn worktree_noninteractive_env() -> dict {
+  return git_noninteractive_env()
+}
+
+/**
+ * __worktree_git_options builds process.exec options for a git command in
+ * `cwd`: non-interactive guard env merged with the inherited environment,
+ * the std/git ambient-env strip, and any caller overrides from `options`.
+ */
+fn __worktree_git_options(cwd, options) -> dict {
+  const opts = options ?? {}
+  // Caller `env` overrides individual guard keys; `env_mode` defaults to
+  // "merge" so inherited PATH/HOME/credentials survive.
+  const env = git_noninteractive_env() + (opts?.env ?? {})
+  let out = {
+    cwd: cwd,
+    env: env,
+    env_mode: opts?.env_mode ?? "merge",
+    env_remove: opts?.env_remove ?? git_env_remove(),
+  }
+  for key in ["timeout_ms", "stdin", "capture", "max_inline_bytes", "policy_context"] {
+    if opts[key] != nil {
+      out = out + {[key]: opts[key]}
+    }
+  }
+  return out
+}
+
+/**
+ * __worktree_git runs one argv-mode git command in `cwd` with the
+ * non-interactive guard applied. `args` omits the leading "git".
+ */
+fn __worktree_git(process: HarnessProcess, cwd, args, options) {
+  return process_run(process, ["git"] + args, __worktree_git_options(cwd, options))
+}
+
+/**
+ * worktree_default_path.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn worktree_default_path(repo: string, name: string) -> string {
+  return path_join(runtime_state_paths_under(repo).worktree_root, name)
+}
+
+/**
+ * worktree_create.
+ *
+ * @effects: [host]
+ * @errors: []
+ */
+pub fn worktree_create(
+  fs: HarnessFs,
+  process: HarnessProcess,
+  repo,
+  name,
+  base_ref,
+  path,
+  options = {},
+) {
+  const layout = runtime_state_paths_under(repo)
+  const target = if path == nil || path == "" {
+    worktree_default_path(repo, name)
+  } else {
+    path
+  }
+  fs.mkdir(layout.state_root)
+  fs.mkdir(layout.worktree_root)
+  const result = __worktree_git(
+    process,
+    repo,
+    ["worktree", "add", "-B", name, target, base_ref],
+    options,
+  )
+  return {
+    repo: repo,
+    name: name,
+    path: target,
+    base_ref: base_ref,
+    result: result,
+    success: result?.success,
+  }
+}
+
+/**
+ * worktree_remove.
+ *
+ * @effects: [host]
+ * @errors: []
+ */
+pub fn worktree_remove(process: HarnessProcess, repo, path, force, options = {}) {
+  if force {
+    return __worktree_git(process, repo, ["worktree", "remove", "--force", path], options)
+  }
+  return __worktree_git(process, repo, ["worktree", "remove", path], options)
+}
+
+/**
+ * worktree_status.
+ *
+ * @effects: [host]
+ * @errors: []
+ */
+pub fn worktree_status(process: HarnessProcess, path, options = {}) {
+  return __worktree_git(process, path, ["status", "--short", "--branch"], options)
+}
+
+/**
+ * worktree_diff.
+ *
+ * @effects: [host]
+ * @errors: []
+ */
+pub fn worktree_diff(process: HarnessProcess, path, base_ref, options = {}) {
+  if base_ref == nil || base_ref == "" {
+    return __worktree_git(process, path, ["diff", "--stat"], options)
+  }
+  return __worktree_git(process, path, ["diff", base_ref + "...HEAD"], options)
+}
+
+/**
+ * worktree_shell.
+ *
+ * @effects: [host]
+ * @errors: []
+ */
+pub fn worktree_shell(process: HarnessProcess, path, script, options = {}) {
+  return process_shell(process, script, __worktree_git_options(path, options))
+}

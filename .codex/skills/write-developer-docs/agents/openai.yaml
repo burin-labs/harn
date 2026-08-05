@@ -1,0 +1,4 @@
+interface:
+  display_name: "Write developer docs"
+  short_description: "Write clear, task-shaped developer documentation"
+  default_prompt: "Use $write-developer-docs to write or revise these developer docs."

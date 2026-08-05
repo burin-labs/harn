@@ -1,0 +1,43 @@
+pipeline default(harness: Harness) {
+  // Dict pattern: match on field value, bind others
+  const response = {status: "ok", data: "hello world"}
+  match response {
+    {status: "ok", data: d} -> { harness.stdio.println("Got: " + d) }
+    {status: "error", message: m} -> { harness.stdio.println("Error: " + m) }
+    _ -> { harness.stdio.println("unknown") }
+  }
+  // Dict pattern: second arm matches
+  const err = {status: "error", message: "not found"}
+  match err {
+    {status: "ok", data: d} -> { harness.stdio.println("Got: " + d) }
+    {status: "error", message: m} -> { harness.stdio.println("Error: " + m) }
+    _ -> { harness.stdio.println("unknown") }
+  }
+  // Dict pattern: no match falls to wildcard
+  match 42 {
+    {status: "ok"} -> { harness.stdio.println("dict") }
+    _ -> { harness.stdio.println("not a dict") }
+  }
+  // List pattern: bind elements
+  match [1, 2, 3] {
+    [1, x, y] -> { harness.stdio.println(to_string(x) + "," + to_string(y)) }
+    _ -> { harness.stdio.println("no match") }
+  }
+  // List pattern: first arm fails, second matches
+  match [5, 6] {
+    [1, w] -> { harness.stdio.println("one") }
+    [5, w] -> { harness.stdio.println("five:" + to_string(w)) }
+    _ -> { harness.stdio.println("no match") }
+  }
+  // List pattern: non-list falls to wildcard
+  match "hello" {
+    [x] -> { harness.stdio.println("list") }
+    _ -> { harness.stdio.println("not a list") }
+  }
+  // List pattern: wrong length falls through
+  match [1] {
+    [a, b, c] -> { harness.stdio.println("three") }
+    [a] -> { harness.stdio.println("one:" + to_string(a)) }
+    _ -> { harness.stdio.println("no match") }
+  }
+}

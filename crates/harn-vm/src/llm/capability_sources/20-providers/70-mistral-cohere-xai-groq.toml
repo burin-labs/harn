@@ -1,0 +1,201 @@
+# ---------- Mistral / Cohere / xAI / Groq OpenAI-compatible routes ------------
+
+[[provider.mistral]]
+model_match = "mistral-medium-3-5*"
+native_tools = true
+preferred_tool_format = "native"
+recommended_endpoint = "/chat/completions"
+text_tool_wire_format_supported = true
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high"]
+vision_supported = true
+vision = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
+[[provider.mistral]]
+model_match = "mistral-*"
+native_tools = true
+preferred_tool_format = "native"
+recommended_endpoint = "/chat/completions"
+text_tool_wire_format_supported = true
+structured_output = "native"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
+[[provider.mistral]]
+model_match = "codestral-*"
+native_tools = true
+preferred_tool_format = "native"
+recommended_endpoint = "/chat/completions"
+text_tool_wire_format_supported = true
+structured_output = "native"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
+[[provider.mistral]]
+model_match = "devstral-*"
+native_tools = true
+preferred_tool_format = "native"
+recommended_endpoint = "/chat/completions"
+text_tool_wire_format_supported = true
+structured_output = "native"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
+[[provider.cohere]]
+model_match = "command-*"
+native_tools = true
+preferred_tool_format = "native"
+recommended_endpoint = "/chat/completions"
+text_tool_wire_format_supported = true
+structured_output = "native"
+thinking_modes = ["adaptive"]
+vision_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
+[[provider.xai]]
+model_match = "grok-*"
+native_tools = true
+preferred_tool_format = "native"
+recommended_endpoint = "/chat/completions"
+text_tool_wire_format_supported = true
+structured_output = "native"
+thinking_modes = ["adaptive"]
+prompt_caching = true
+vision_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+# xAI rejects these OpenAI sampling fields on every Grok model with HTTP 400
+# ("Model grok-* does not support parameter ..."); confirmed by live probe on
+# grok-4.5, grok-4.3, and grok-build-0.1 (2026-07-14). Gating them here keeps
+# the quirk in Harn's compat layer so no caller ever sends an invalid request.
+frequency_penalty_supported = false
+presence_penalty_supported = false
+stop_supported = false
+
+# Groq Compound systems route through the chat-completions endpoint but reject
+# OpenAI `tools` outright (`tool calling is not supported with this model`,
+# 2026-07-09 live Harn tool-probe). A text-tool smoke with the runtime contract
+# returned a pseudo call in provider reasoning text, not an executable visible
+# tool call, so treat them as fast agentic chat systems rather than Harn
+# tool-calling executors.
+[[provider.groq]]
+model_match = "groq/compound*"
+native_tools = false
+preferred_tool_format = "none"
+text_tool_wire_format_supported = false
+structured_output = "none"
+structured_output_mode = "none"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
+# gpt-oss on Groq uses NATIVE tool calls. The prior `json`/text pin was a
+# defensive workaround for an "empty native streaming payload" defect that no
+# longer reproduces: 2026-06-12 live probes (raw curl + Harn's streaming path)
+# confirm gpt-oss-120b returns clean OpenAI-shape `tool_calls` in both
+# non-streaming and SSE modes, and Harn's index-keyed SSE reassembler
+# (transport.rs `oai_tool_map`) accumulates the arg-fragment deltas correctly.
+# Conversely, BOTH `json` and `text` formats yield ZERO parsed calls because
+# gpt-oss does not emit Harn's ```tool/name/args contract — it emits a bare
+# `{"tool":..,"arguments":..}` dialect that the fenced-JSON parser does not
+# recognize. native is therefore the measured-best (and only working) channel.
+# Pinned EXPLICITLY (not inherited) because `groq/openai/gpt-oss-120b` is a
+# catalogued model and the catalog invariant requires every catalogued model's
+# rule to set native_tools + preferred_tool_format. To change, set
+# `preferred_tool_format` ("native" | "json" | "text").
+#
+# `reasoning_required_for_tools = true`: gpt-oss (Harmony) calls tools INSIDE
+# the chain-of-thought channel, so reasoning-off breaks tool calling. Live
+# Groq probe (2026-06-13): reasoning_effort=low -> 1 clean tool call;
+# reasoning_effort=none -> rejected ("must be one of low/medium/high"). So
+# this row only ever sends {low,medium,high} (reasoning_effort_levels) and
+# never floors to off for tool tasks. Must NOT carry a Qwen-style
+# `auto_reasoning_overrides = "off"`.
+[[provider.groq]]
+model_match = "*gpt-oss-*"
+native_tools = true
+preferred_tool_format = "native"
+recommended_endpoint = "/chat/completions"
+text_tool_wire_format_supported = true
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high"]
+reasoning_required_for_tools = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
+# Qwen 3.6 on Groq speaks clean OpenAI-shape native tool calls (Groq
+# parses the Qwen tool format server-side); no reported parity issues.
+[[provider.groq]]
+model_match = "qwen/qwen3.6*"
+native_tools = true
+preferred_tool_format = "native"
+recommended_endpoint = "/chat/completions"
+text_tool_wire_format_supported = true
+structured_output = "native"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.groq]]
+model_match = "llama-*"
+native_tools = true
+preferred_tool_format = "native"
+recommended_endpoint = "/chat/completions"
+text_tool_wire_format_supported = true
+structured_output = "native"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"

@@ -1,0 +1,118 @@
+// The drop ledger: every path that consumes text without producing a call has
+// to record what it swallowed.
+//
+// This is the invariant a whole detector depends on. Eleven branches of the
+// scanner recorded a dropped fragment and one did not, and the symptom showed
+// up three layers away as a shape detector going quiet on a real dropped
+// dialect. Downstream consumers rejoin the fragments in document order and
+// treat the reasons as metadata, so the fragment BOUNDARIES may legitimately
+// change — whole-unit fragments instead of line slices are fine. What may not
+// change is that something is recorded.
+//
+// The ledger lives in its own fixture for exactly that reason: a port that
+// re-cuts granularity should diff here and nowhere else.
+import { probe_drops, sample_registry } from "_tool_parse_probe"
+
+pipeline main(harness: Harness) {
+  // An unknown dialect inside a fence, naming a tool the registry never heard
+  // of: no call can be recovered, so the bytes must be recorded.
+  probe_drops(
+    harness.agent,
+    harness.stdio,
+    "fenced unknown dialect, unregistered tool",
+    """```
+<tool>
+search({ query: "x" })
+</tool>
+```""",
+    sample_registry(),
+  )
+  // A dialect nobody has named, caught because it is SHAPED like an invocation.
+  probe_drops(
+    harness.agent,
+    harness.stdio,
+    "invented fenced dialect",
+    """```
+<perform_action>
+search({ query: "x" })
+</perform_action>
+```""",
+    sample_registry(),
+  )
+  // Bare/native JSON across lines inside a fence, naming an unknown tool.
+  probe_drops(
+    harness.agent,
+    harness.stdio,
+    "fenced json naming an unknown tool",
+    """```
+{
+  "name": "search",
+  "arguments": { "query": "x" }
+}
+```""",
+    sample_registry(),
+  )
+  // Fenced source code is consumed as narration and still recorded.
+  probe_drops(
+    harness.agent,
+    harness.stdio,
+    "fenced source code",
+    """```rust
+fn main() { println!("hi"); }
+```""",
+    sample_registry(),
+  )
+  // An unknown tool name at top level.
+  probe_drops(
+    harness.agent,
+    harness.stdio,
+    "unknown tool at top level",
+    "fictitious_tool({ x: 1 })",
+    sample_registry(),
+  )
+  // A truncated heredoc: several fragments, none of them a call.
+  probe_drops(
+    harness.agent,
+    harness.stdio,
+    "truncated heredoc body",
+    """edit({
+    action: "create",
+    path: "main.go",
+    content: <<EOF
+package main
+
+func main() {
+    fmt.Println("hello""",
+    sample_registry(),
+  )
+  // A fenced call the sniffer CAN execute is not a drop: the call ran.
+  probe_drops(
+    harness.agent,
+    harness.stdio,
+    "fenced call naming a registered tool",
+    """```
+<tool>
+edit({ action: "create", path: "a.rs" })
+</tool>
+```""",
+    sample_registry(),
+  )
+  // A well-formed call consumes nothing unaccounted for.
+  probe_drops(
+    harness.agent,
+    harness.stdio,
+    "well formed wrapped call",
+    """<tool_call>
+edit({ action: "create", path: "a.rs", content: "x" })
+</tool_call>""",
+    sample_registry(),
+  )
+  // Prose the parser keeps as prose is not a drop — it was not swallowed.
+  probe_drops(
+    harness.agent,
+    harness.stdio,
+    "plain prose",
+    "just prose with no tags at all",
+    sample_registry(),
+  )
+}

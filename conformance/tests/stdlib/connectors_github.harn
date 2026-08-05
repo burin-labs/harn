@@ -1,0 +1,53 @@
+import {
+  forge_pull_request_event,
+  forge_writeback_request,
+  github_repo,
+  github_slug_from_remote,
+} from "std/connectors/github"
+
+pipeline test(harness: Harness, task) {
+  assert_eq(
+    github_slug_from_remote("git@github.com:octo-org/octo-repo.git"),
+    "octo-org/octo-repo",
+    "scp-like SSH remotes parse",
+  )
+  assert_eq(
+    github_slug_from_remote("https://github.com/octo-org/octo-repo.git"),
+    "octo-org/octo-repo",
+    "HTTPS remotes parse",
+  )
+  assert_eq(
+    github_slug_from_remote("ssh://git@github.com/octo-org/octo-repo.git"),
+    "octo-org/octo-repo",
+    "ssh:// remotes parse",
+  )
+  assert_eq(
+    github_slug_from_remote("ssh://git@github.com:22/octo-org/octo-repo.git"),
+    "octo-org/octo-repo",
+    "ssh:// remotes with ports parse",
+  )
+  assert_eq(
+    github_slug_from_remote("https://example.com/octo-org/octo-repo.git"),
+    nil,
+    "non-GitHub remotes do not parse",
+  )
+  const repo = github_repo("git@github.com:octo-org/octo-repo.git")
+  assert_eq(repo.owner, "octo-org", "repo owner")
+  assert_eq(repo.name, "octo-repo", "repo name")
+  assert_eq(repo.full_name, "octo-org/octo-repo", "repo full name")
+  const forge = unwrap(
+    forge_pull_request_event(
+      {
+        action: "opened",
+        repository: {full_name: "octo-org/octo-repo"},
+        pull_request: {number: 24, title: "Preview", head: {ref: "preview"}, base: {ref: "main"}},
+      },
+    ),
+  )
+  assert_eq(forge.lifecycle, "opened", "forge lifecycle")
+  assert_eq(forge.kind, "pull_request.opened", "forge event kind")
+  const writeback = forge_writeback_request(forge, "Preview ready")
+  assert_eq(writeback.method, "issues.create_comment", "forge writeback method")
+  assert_eq(writeback.params.issue_number, 24, "forge writeback issue number")
+  harness.stdio.log("github stdlib ok")
+}

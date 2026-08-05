@@ -1,0 +1,44 @@
+import { workflow_execute } from "std/workflow/execute"
+
+pipeline main(harness: Harness) {
+  const flow = workflow_graph(
+    {
+      name: "replay_demo",
+      entry: "act",
+      nodes: {
+        act: {kind: "stage", mode: "llm", model_policy: {provider: "mock"}},
+        verify: {
+          kind: "verify",
+          mode: "llm",
+          model_policy: {provider: "mock"},
+          verify: {assert_text: "Mock"},
+        },
+      },
+      edges: [{from: "act", to: "verify"}],
+    },
+  )
+  const first = workflow_execute(
+    harness,
+    "Write a note",
+    flow,
+    [],
+    {max_steps: 4, persist_path: "/tmp/harn-workflow-replay-source.json"},
+  )
+  const replayed = workflow_execute(
+    harness,
+    "Write a note",
+    flow,
+    [],
+    {
+      max_steps: 4,
+      replay_run: first?.run,
+      replay_mode: "deterministic",
+      persist_path: "/tmp/harn-workflow-replay-replayed.json",
+    },
+  )
+  harness.stdio.println(first?.status)
+  harness.stdio.println(replayed?.status)
+  harness.stdio.println(replayed?.run?.metadata?.replay_mode)
+  harness.stdio.println(replayed?.run?.metadata?.replayed_from == first?.run?.id)
+  harness.stdio.println(len(replayed?.run?.stages) == len(first?.run?.stages))
+}

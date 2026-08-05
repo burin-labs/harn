@@ -1,0 +1,49 @@
+pipeline default(harness: Harness) {
+  // Dict destructuring with defaults — missing keys get default values
+  const {name = "workflow", system = "none"} = {name: "custom"}
+  harness.stdio.println(name)
+  harness.stdio.println(system)
+  // Default NOT triggered when key exists
+  const {x = 99} = {x: 42}
+  harness.stdio.println(x)
+  // Dict default with alias
+  const {name: displayName = "Unknown"} = {}
+  harness.stdio.println(displayName)
+  // Alias NOT triggered when key exists
+  const {name: label = "fallback"} = {name: "real"}
+  harness.stdio.println(label)
+  // List destructuring with defaults
+  const [a = 10, b = 20, c = 30] = [1, 2]
+  harness.stdio.println(a)
+  harness.stdio.println(b)
+  harness.stdio.println(c)
+  // List default NOT triggered when element exists
+  const [p = 100] = [7]
+  harness.stdio.println(p)
+  // For-in with dict destructuring defaults
+  const tasks = [{status: "done"}, {priority: 5}, {status: "active", priority: 1}]
+  for {status = "pending", priority = 0} in tasks {
+    harness.stdio.println("${status}:${priority}")
+  }
+  // Default expressions evaluated fresh per iteration
+  const items = [{id: 10}, {}, {id: 30}]
+  for {id = 0} in items {
+    harness.stdio.println(id)
+  }
+  // Empty source dict — all defaults apply
+  const {a: alpha = "A", b: beta = "B"} = {}
+  harness.stdio.println(alpha)
+  harness.stdio.println(beta)
+  // Mixed: some with defaults, some without
+  const {present, missing = "default"} = {present: "here"}
+  harness.stdio.println(present)
+  harness.stdio.println(missing)
+  // Nested usage in function body
+  fn configure(opts = {}) {
+    const {max = 100, min = 0} = opts
+    return max - min
+  }
+  harness.stdio.println(configure({}))
+  harness.stdio.println(configure({max: 50}))
+  harness.stdio.println(configure({max: 200, min: 50}))
+}

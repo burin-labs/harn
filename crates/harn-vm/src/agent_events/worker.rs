@@ -1,0 +1,154 @@
+use serde::{Deserialize, Serialize};
+
+/// Structured terminal outcome for one delegated sub-agent run.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SubagentTerminalStatus {
+    Success,
+    Failure,
+    Cancellation,
+    Timeout,
+}
+
+/// One agent run and the session whose transcript owns it.
+///
+/// Session and run identifiers are deliberately separate: a session may host
+/// multiple runs, while lifecycle correlation must name the exact run.
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct AgentRunRef {
+    pub session_id: String,
+    pub run_id: String,
+}
+
+/// Authoritative parent/child identity for one delegated run.
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct DelegatedRunLineage {
+    pub parent: AgentRunRef,
+    pub child: AgentRunRef,
+}
+
+/// One coalesced filesystem notification from a hostlib `fs_watch`
+/// subscription.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FsWatchEvent {
+    pub kind: String,
+    pub paths: Vec<String>,
+    pub relative_paths: Vec<String>,
+    pub raw_kind: String,
+    pub error: Option<String>,
+}
+
+/// Typed worker lifecycle events emitted by delegated/background agent
+/// execution. Bridge-facing worker updates still derive a string status
+/// from these variants, but the runtime no longer passes raw status
+/// strings around internally.
+///
+/// `Spawned`/`Completed`/`Failed`/`Stopped`/`Cancelled` are the terminal-or-start
+/// states. `Progressed` is fired on intermediate milestones (e.g. a
+/// retriggerable worker resuming from `awaiting_input`, or a workflow
+/// stage completing without ending the worker). `WaitingForInput` covers
+/// retriggerable workers that finish a cycle but stay alive pending the
+/// next host-supplied trigger payload. `Suspended`/`Resumed` cover
+/// cooperative mid-loop pause and warm resume (harn#1836); the
+/// `agent_loop` honors the pause signal at the next turn boundary,
+/// distinct from a graceful `Stopped` handoff or hard `Cancelled` interrupt.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub enum WorkerEvent {
+    WorkerSpawned,
+    WorkerProgressed,
+    WorkerWaitingForInput,
+    WorkerSuspended,
+    WorkerResumed,
+    WorkerCompleted,
+    WorkerFailed,
+    WorkerStopped,
+    WorkerCancelled,
+}
+
+impl WorkerEvent {
+    /// The full set of `WorkerEvent` variants in canonical order. Mirrors
+    /// the pattern used by `ToolCallStatus::ALL` so the protocol-artifact
+    /// dumper can enumerate worker status wire values without
+    /// special-casing each lifecycle event.
+    pub const ALL: [Self; 9] = [
+        Self::WorkerSpawned,
+        Self::WorkerProgressed,
+        Self::WorkerWaitingForInput,
+        Self::WorkerSuspended,
+        Self::WorkerResumed,
+        Self::WorkerCompleted,
+        Self::WorkerFailed,
+        Self::WorkerStopped,
+        Self::WorkerCancelled,
+    ];
+
+    /// Wire-level status string used by bridge `worker_update` payloads
+    /// and ACP `worker_update` session updates. The four canonical
+    /// states are mirrored from harn's internal worker `status` field
+    /// (`running`/`completed`/`failed`/`cancelled`), and the four newer
+    /// lifecycle states pick names that don't collide with any existing
+    /// status string.
+    pub fn as_status(self) -> &'static str {
+        match self {
+            Self::WorkerSpawned => "running",
+            Self::WorkerProgressed => "progressed",
+            Self::WorkerWaitingForInput => "awaiting_input",
+            Self::WorkerSuspended => "suspended",
+            Self::WorkerResumed => "running",
+            Self::WorkerCompleted => "completed",
+            Self::WorkerFailed => "failed",
+            Self::WorkerStopped => "stopped",
+            Self::WorkerCancelled => "cancelled",
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::WorkerSpawned => "WorkerSpawned",
+            Self::WorkerProgressed => "WorkerProgressed",
+            Self::WorkerWaitingForInput => "WorkerWaitingForInput",
+            Self::WorkerSuspended => "WorkerSuspended",
+            Self::WorkerResumed => "WorkerResumed",
+            Self::WorkerCompleted => "WorkerCompleted",
+            Self::WorkerFailed => "WorkerFailed",
+            Self::WorkerStopped => "WorkerStopped",
+            Self::WorkerCancelled => "WorkerCancelled",
+        }
+    }
+
+    /// True for lifecycle events that mean the worker has reached a
+    /// final, non-resumable state. Retriggerable awaiting, progressed,
+    /// and cooperative suspend/resume milestones are *not* terminal —
+    /// the worker keeps running, is waiting for a trigger, or is parked
+    /// awaiting an external resume.
+    pub fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            Self::WorkerCompleted
+                | Self::WorkerFailed
+                | Self::WorkerStopped
+                | Self::WorkerCancelled
+        )
+    }
+
+    /// Interpret a persisted worker status through the lifecycle owner.
+    /// `running` is represented by the spawn variant because both spawn and
+    /// resume intentionally project to the same non-terminal wire state.
+    pub fn from_status(status: &str) -> Option<Self> {
+        match status {
+            "running" => Some(Self::WorkerSpawned),
+            "progressed" => Some(Self::WorkerProgressed),
+            "awaiting_input" => Some(Self::WorkerWaitingForInput),
+            "suspended" => Some(Self::WorkerSuspended),
+            "completed" => Some(Self::WorkerCompleted),
+            "failed" => Some(Self::WorkerFailed),
+            "stopped" => Some(Self::WorkerStopped),
+            "cancelled" | "canceled" => Some(Self::WorkerCancelled),
+            _ => None,
+        }
+    }
+
+    pub fn status_is_terminal(status: &str) -> bool {
+        Self::from_status(status).is_some_and(Self::is_terminal)
+    }
+}

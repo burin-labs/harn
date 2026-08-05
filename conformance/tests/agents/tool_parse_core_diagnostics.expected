@@ -1,0 +1,95 @@
+# unknown tool name
+  calls=0 errors=1 violations=0 stray=0
+  err "Unknown tool 'fictitious_tool'. Tool calls must be one of: [edit, ledger, load_skill, run]."
+  prose=""
+  answer=null
+  done=null
+# unknown tool name beside a valid call
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","path":"a.go"}
+  prose="fictitious_tool({ x: 1 })"
+  answer=null
+  done=null
+# read is aliased to look
+  calls=0 errors=1 violations=0 stray=0
+  err "Unknown tool 'read'. Use `look({ intent: \"read\", ... })` to read a file. Tool calls must be one of: [edit, ledger, load_skill, run]."
+  prose=""
+  answer=null
+  done=null
+# source code: it
+  calls=0 errors=1 violations=0 stray=0
+  err "`it(...)` looks like source code, not a tool call. If this is file content, wrap it in a heredoc or a string `content` value (e.g. `edit({ action: \"create\", path: ..., content: <<EOF ... EOF })`). Tool calls must be one of: [edit, ledger, load_skill, run]."
+  prose=""
+  answer=null
+  done=null
+# source code: expect
+  calls=0 errors=1 violations=0 stray=0
+  err "`expect(...)` looks like source code, not a tool call. If this is file content, wrap it in a heredoc or a string `content` value (e.g. `edit({ action: \"create\", path: ..., content: <<EOF ... EOF })`). Tool calls must be one of: [edit, ledger, load_skill, run]."
+  prose=""
+  answer=null
+  done=null
+# source code: describe
+  calls=0 errors=1 violations=0 stray=0
+  err "`describe(...)` looks like source code, not a tool call. If this is file content, wrap it in a heredoc or a string `content` value (e.g. `edit({ action: \"create\", path: ..., content: <<EOF ... EOF })`). Tool calls must be one of: [edit, ledger, load_skill, run]."
+  prose=""
+  answer=null
+  done=null
+# source code: assertServiceCount
+  calls=0 errors=1 violations=0 stray=0
+  err "`assertServiceCount(...)` looks like source code, not a tool call. If this is file content, wrap it in a heredoc or a string `content` value (e.g. `edit({ action: \"create\", path: ..., content: <<EOF ... EOF })`). Tool calls must be one of: [edit, ledger, load_skill, run]."
+  prose=""
+  answer=null
+  done=null
+# close miss typo
+  calls=0 errors=1 violations=0 stray=0
+  err "Unknown tool 'edt'. Did you mean 'edit'? Tool calls must be one of: [edit, ledger, load_skill, run]."
+  prose=""
+  answer=null
+  done=null
+# unknown label prefix on a known tool
+  calls=0 errors=1 violations=0 stray=0
+  err "Saw `Hint: run(...)`. Do not prefix tool calls with `Hint:` — emit bare `run({ ... })` on its own line. The previous line was treated as prose and no tool ran; re-emit it without the prefix."
+  prose=""
+  answer=null
+  done=null
+# unknown label prefix on an unknown identifier
+  calls=0 errors=0 violations=0 stray=0
+  prose="Note: make_coffee({ strength: \"strong\" })"
+  answer=null
+  done=null
+# raw multi-line body teaches the heredoc
+  calls=0 errors=1 violations=0 stray=0
+  err "TOOL CALL PARSE ERROR: `edit(...)` — unexpected character `}` starting a value. For a multi-line body (e.g. `content`/`new_text`/`new_body`/`old_string`), do not paste raw text — wrap it in a heredoc: put `<key>: <<BODY` on the key line, then the body lines verbatim, then `BODY` alone on its own closing line. For a short value, wrap it in double quotes.. Tool arguments must be a TypeScript object literal: `{ key: value, key: value }`. Raw: { action: \"replace_range\", path: \"a.zig\", content: // helper\n} })"
+  prose=""
+  answer=null
+  done=null
+# unclosed object literal
+  calls=0 errors=1 violations=0 stray=0
+  err "TOOL CALL PARSE ERROR: `edit(...)` — unterminated template literal. Tool arguments must be a TypeScript object literal: `{ key: value, key: value }`. Raw: { action: \"create\", path: \"a.go\", content: `hello"
+  prose=""
+  answer=null
+  done=null
+# bare scalar argument
+  calls=0 errors=1 violations=0 stray=0
+  err "Tool 'edit' must be called with an object literal argument like edit({ ... })."
+  prose=""
+  answer=null
+  done=null
+# object literal parse error preview
+  calls=0 errors=1 violations=0 stray=0
+  err "TOOL CALL PARSE ERROR: `edit(...)` — unexpected character `}` starting a value. For a multi-line body (e.g. `content`/`new_text`/`new_body`/`old_string`), do not paste raw text — wrap it in a heredoc: put `<key>: <<BODY` on the key line, then the body lines verbatim, then `BODY` alone on its own closing line. For a short value, wrap it in double quotes.. Tool arguments must be a TypeScript object literal: `{ key: value, key: value }`. Raw: { action: })"
+  prose=""
+  answer=null
+  done=null
+# legacy named argument form
+  calls=0 errors=1 violations=0 stray=0
+  err "Tool 'edit' must be called with an object literal argument like edit({ ... })."
+  prose=""
+  answer=null
+  done=null
+# omitted paren recovery rejects trailing garbage
+  calls=0 errors=1 violations=0 stray=0
+  err "TOOL CALL PARSE ERROR: `edit(...)` — missing closing `)`. Every tool call must be a complete TypeScript expression."
+  prose=""
+  answer=null
+  done=null

@@ -1,0 +1,74 @@
+import { read_json_typed, read_json_typed_result, write_json } from "std/fs"
+import "std/schema"
+
+type AliasReportUser = {name: string}
+
+fn alias_report_user_name(user: AliasReportUser) {
+  return user.name
+}
+
+pipeline test(harness: Harness, task) {
+  const user_schema = schema_object(
+    {name: schema_field(schema_string()), role: schema_default(schema_string(), "user")},
+    {additional_properties: false},
+  )
+  harness.stdio.println(is_type({name: "Ada"}, user_schema))
+  const parsed = get_typed_value({name: "Ada"}, user_schema, true)
+  harness.stdio.println(parsed.role)
+  const missing_required = get_typed_report({}, user_schema, true)
+  harness.stdio.println(!missing_required.ok)
+  harness.stdio.println(
+    contains(join(missing_required.errors, "\n"), "\"name\" is a required property"),
+  )
+  const openapi = schema_openapi(user_schema)
+  harness.stdio.println(openapi.type)
+  const from_json = from_json_schema(
+    {type: "object", properties: {name: {type: "string"}}, required: ["name"]},
+  )
+  harness.stdio.println(is_type({name: "Bob"}, from_json))
+  const report_schema = schema_object(
+    {
+      age: schema_field(schema_int() + {min: 0}),
+      name: schema_field(schema_string() + {min_length: 2}),
+      role: schema_default(schema_string(), "user"),
+    },
+    {additional_properties: false},
+  )
+  const report = get_typed_report({age: -1, name: "A"}, report_schema)
+  const issue_text = json_stringify(report.issues)
+  const error_text = join(report.errors, "\n")
+  harness.stdio.println(report.ok)
+  harness.stdio.println(len(report.issues) == 2)
+  harness.stdio.println(contains(issue_text, "\"path\":\"age\""))
+  harness.stdio.println(contains(issue_text, "\"path\":\"name\""))
+  harness.stdio.println(contains(error_text, "is less than the minimum of 0"))
+  harness.stdio.println(contains(error_text, "is shorter than 2 characters"))
+  const defaulted = get_typed_report({age: 3, name: "Jo"}, report_schema, true)
+  harness.stdio.println(defaulted.ok)
+  harness.stdio.println(defaulted.value.role)
+  const alias_report = schema_report({name: "Kai"}, AliasReportUser)
+  harness.stdio.println(alias_report.ok)
+  harness.stdio.println(alias_report_user_name({name: "Kai"}))
+  const parsed_json: AliasReportUser? = parse_json_typed("{\"name\":\"Nia\"}", AliasReportUser)
+  harness.stdio.println(parsed_json?.name)
+  const malformed_json = parse_json_typed_report("{bad", AliasReportUser)
+  harness.stdio.println(!malformed_json.ok)
+  harness.stdio.println(malformed_json.stage)
+  const wrong_shape = parse_json_typed_report("{\"name\": 42}", AliasReportUser)
+  harness.stdio.println(!wrong_shape.ok)
+  harness.stdio.println(wrong_shape.stage)
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-schema-runtime-" + harness.random.uuid_v7(),
+  )
+  const json_path = path_join(root, "user.json")
+  write_json(harness.fs, json_path, {name: "Mira"})
+  harness.stdio.println(read_json_typed(harness.fs, json_path, AliasReportUser).name)
+  const missing_result = read_json_typed_result(
+    harness.fs,
+    path_join(root, "missing.json"),
+    AliasReportUser,
+  )
+  harness.stdio.println(is_err(missing_result))
+  harness.stdio.println(unwrap_err(missing_result).kind)
+}

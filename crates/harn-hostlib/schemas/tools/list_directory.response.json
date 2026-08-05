@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/list_directory.response.json",
+  "title": "tools.list_directory response",
+  "type": "object",
+  "properties": {
+    "path": { "type": "string" },
+    "entries": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Entry" }
+    },
+    "truncated": { "type": "boolean" }
+  },
+  "required": ["path", "entries", "truncated"],
+  "additionalProperties": false,
+  "$defs": {
+    "Entry": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "is_dir": { "type": "boolean" },
+        "is_symlink": { "type": "boolean" },
+        "size": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["name", "is_dir", "is_symlink", "size"],
+      "additionalProperties": false
+    }
+  }
+}

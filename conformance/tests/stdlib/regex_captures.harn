@@ -1,0 +1,22 @@
+pipeline test(harness: Harness, task) {
+  // Basic capture groups
+  const caps = regex_captures("(\\w+)@(\\w+)", "user@host admin@server")
+  harness.stdio.log(len(caps))
+  harness.stdio.log(caps[0]["match"])
+  harness.stdio.log(caps[0]["groups"])
+  harness.stdio.log(caps[1]["match"])
+  harness.stdio.log(caps[1]["groups"])
+  // Named capture groups
+  const named = regex_captures("(?P<name>\\w+):(?P<value>\\d+)", "foo:42 bar:99")
+  harness.stdio.log(named[0]["name"])
+  harness.stdio.log(named[0]["value"])
+  harness.stdio.log(named[1]["name"])
+  harness.stdio.log(named[1]["value"])
+  // No matches returns empty list
+  const none = regex_captures("(\\d+)", "no digits here")
+  harness.stdio.log(none)
+  // Optional groups (non-matching)
+  const opt = regex_captures("(\\w+)(-(\\w+))?", "hello")
+  harness.stdio.log(opt[0]["match"])
+  harness.stdio.log(opt[0]["groups"])
+}

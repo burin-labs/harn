@@ -1,0 +1,14 @@
+fn destructive_step() -> string {
+  return "deleted"
+}
+
+pipeline test(harness: Harness, task) {
+  harness.testing.clear()
+  harness.testing.respond(
+    "interaction",
+    "dual_control_response",
+    [{approved: true, reviewer: "alice"}, {approved: true, reviewer: "bob"}],
+  )
+  const result = harness.interaction.dual_control(2, 3, destructive_step, ["alice", "bob", "carol"])
+  harness.stdio.println(result)
+}

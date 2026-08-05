@@ -1,0 +1,1374 @@
+# Language basics
+
+This guide covers the core syntax and semantics of Harn.
+
+## Implicit pipeline
+
+Harn files can contain top-level code without a `pipeline` block. The
+runtime wraps it in an implicit pipeline automatically:
+
+```harn
+const x = 1 + 2
+harness.stdio.log(x)
+
+fn double(n) {
+  return n * 2
+}
+harness.stdio.log(double(5))
+```
+
+This is convenient for scripts, experiments, and small programs.
+
+## Pipelines
+
+For larger programs, organize code into named pipelines. The runtime
+executes the pipeline named `default`, or the first one declared.
+
+```harn
+pipeline default(harness: Harness, task) {
+  harness.stdio.log("Hello from the default pipeline")
+}
+
+pipeline other(harness: Harness, task) {
+  harness.stdio.log("This only runs if called or if there's no default")
+}
+```
+
+Pipeline parameters `task` and `project` are injected by the host runtime.
+A `context` dict with keys `task`, `project_root`, and `task_type` is
+always available.
+
+## Variables
+
+`const` creates a binding whose value never changes. `let` creates one whose
+value may change.
+
+```harn
+const name = "Alice"
+let counter = 0
+
+counter = counter + 1  // ok
+name = "Bob"           // error: immutable assignment
+```
+
+That rule covers collections too, and it is the one place Harn surprises people
+arriving from JavaScript or Python. Collections are **values**, not references,
+so writing into one changes the binding's whole value and needs `let`:
+
+```harn
+let scores = {}
+scores["alice"] = 1    // ok: changes the value of `scores`, so `let`
+
+const frozen = {}
+frozen["alice"] = 1    // error: `const` means this value never changes
+```
+
+Methods never modify the receiver — `appending` returns a *new* list — so they are
+fine on a `const`, and you build a collection by assigning the result back:
+
+```harn
+let items = []
+items = items.appending("a")   // `items` is now ["a"]
+
+const base = []
+base.appending("a")            // error[HARN-LNT-066]: no effect — `base` is still []
+```
+
+See [Binding mutability](language-spec.md) in the language spec for the full
+rule and why Harn follows Swift here rather than TypeScript.
+
+Bindings are lexically scoped. Each `if` branch, loop body, `catch` body, and
+explicit `{ ... }` block gets its own scope, so inner bindings can shadow outer
+names without colliding:
+
+```harn
+const status = "outer"
+
+if true {
+  const status = "inner"
+  harness.stdio.log(status)  // inner
+}
+
+harness.stdio.log(status)    // outer
+```
+
+If you want to update an outer binding from inside a block, declare it with
+`var` outside the block and assign to it inside the branch or loop body.
+
+## Types and values
+
+Harn is dynamically typed with optional type annotations.
+
+| Type | Example | Notes |
+|---|---|---|
+| `int` | `42` | Platform-width integer |
+| `float` | `3.14` | Double-precision |
+| `decimal` | `decimal("0.10")` | Exact base-10 (money); see below |
+| `string` | `"hello"` | UTF-8, supports interpolation |
+| `bool` | `true`, `false` | |
+| `nil` | `nil` | Null value |
+| `list` | `[1, 2, 3]` | Heterogeneous, ordered |
+| `tuple<T0, T1, ...>` | `tuple("retries", 3)` | Fixed-length positional list |
+| `dict` | `{name: "Alice"}` | String-keyed map |
+| `closure` | `{ x -> x + 1 }` | First-class function |
+| `duration` | `5s`, `100ms` | Time duration |
+
+### Type annotations
+
+Annotations are optional and checked at compile time:
+
+```harn
+const x: int = 42
+const name: string = "hello"
+const nums: list<int> = [1, 2, 3]
+const pair: tuple<string, int> = ["retries", 3]
+
+fn add(a: int, b: int) -> int {
+  return a + b
+}
+```
+
+Supported type expressions: `int`, `float`, `decimal`, `string`, `bool`, `nil`,
+`list`, `list<T>`, `tuple<T0, T1, ...>`, `dict`, `dict<K, V>`, union types
+(`string | nil`), and structural shape types (`{name: string, age: int}`).
+
+### Fixed-arity tuples
+
+Use a tuple when length and position are part of the contract:
+
+```harn
+const row = tuple("retries", 3)  // tuple<string, int>
+const name: string = row[0]
+const count: int = row[-1]
+
+fn retry_count(row: tuple<string, int>) -> int {
+  return row[1]
+}
+retry_count(["timeout", 5])       // bracket literal is contextually a tuple
+```
+
+Ordinary bracket literals still infer lists. A `tuple<...>` annotation or
+parameter can contextually type a bracket literal, and `tuple(...)` requests
+tuple inference explicitly. Constant indexes preserve the exact positional
+type and an out-of-bounds constant is a static error. A dynamic index is the
+union of all positions plus `nil`.
+
+Tuples use the same value-semantic runtime representation and operations as
+lists. They widen to lists when an operation changes arity, and can be passed
+to `list<T>` when every position satisfies `T`. A general list cannot narrow
+to a tuple because it does not prove a fixed length.
+
+### Decimal (exact arithmetic)
+
+`decimal` is an exact base-10 number (96-bit, up to 28–29 significant digits)
+for money and other values where binary-float rounding is unacceptable —
+`decimal("0.1") + decimal("0.2")` is exactly `0.3`, not `0.30000000000000004`.
+
+Construct one with the `decimal(value)` builtin from a string (exact parse), an
+int (exact), a float (an explicit opt-in to the lossy binary→decimal step), or
+another decimal. Unlike `to_int`/`to_float`, `decimal` **throws** on an
+un-parseable value rather than returning `nil`, so a bad money string fails loud.
+
+```harn
+const price = decimal("19.99")
+const total = price * 3            // 59.97 — int operands promote exactly
+const half  = decimal("1") / decimal("2")  // 0.5
+```
+
+Decimal is a distinct type. It arithmetic-promotes `int` operands, but
+**`decimal` and `float` never mix** — `decimal("1") + 1.5` is a compile-time
+error; convert explicitly with `decimal(x)` or `to_float(x)`. For
+equality/ordering, `decimal` only compares against `decimal` (scale-insensitive,
+so `decimal("1.5") == decimal("1.50")`); `decimal("1") == 1` is `false`. Decimals
+cross the host/JSON boundary as strings to preserve precision, and bind natively
+to Postgres `NUMERIC`/`DECIMAL` columns.
+
+Parameter type annotations for primitive types (`int`, `float`, `string`,
+`bool`, `list`, `dict`, `set`, `nil`, `closure`) are enforced at runtime.
+Calling a function with the wrong type produces a `TypeError`:
+
+```harn,ignore
+fn add(a: int, b: int) -> int {
+  return a + b
+}
+
+add("hello", "world")
+// TypeError: parameter 'a' expected int, got string (hello)
+```
+
+### Structural types (shapes)
+
+Shape types describe the expected fields of a dict. The type checker verifies
+that required fields are present with compatible types. Extra fields are allowed
+(width subtyping).
+
+```harn
+const user: {name: string, age: int} = {name: "Alice", age: 30}
+const config: {host: string, port?: int} = {host: "localhost"}
+
+fn greet(u: {name: string}) -> string {
+  return "hi ${u["name"]}"
+}
+greet({name: "Bob", age: 25})
+```
+
+Use `type` aliases for reusable shape definitions:
+
+```harn
+type Config = {model: string, max_tokens: int}
+const cfg: Config = {model: "gpt-4", max_tokens: 100}
+```
+
+### Truthiness
+
+These values are falsy: `false`, `nil`, `0`, `0.0`, `""`, `[]`, `{}`. Everything else is truthy.
+
+## Strings
+
+### Interpolation
+
+```harn
+const name = "world"
+harness.stdio.log("Hello, ${name}!")
+harness.stdio.log("2 + 2 = ${2 + 2}")
+```
+
+Any expression works inside `${}`.
+
+### Raw strings
+
+Raw strings use the `r"..."` prefix. No escape processing or interpolation
+is performed -- backslashes and dollar signs are taken literally. Useful for
+regex patterns and file paths:
+
+```harn
+const pattern = r"\d+\.\d+"
+const path = r"C:\Users\alice\docs"
+```
+
+Raw strings cannot span multiple lines.
+
+### Multi-line strings
+
+```harn
+const doc = """
+  This is a multi-line string.
+  Common leading whitespace is stripped.
+"""
+```
+
+Multi-line strings support `${expression}` interpolation with automatic
+indent stripping:
+
+```harn
+const name = "world"
+const greeting = """
+  Hello, ${name}!
+  Welcome to Harn.
+"""
+```
+
+### Escape sequences
+
+`\n` (newline), `\t` (tab), `\\` (backslash), `\"` (quote), `\$` (dollar sign).
+
+### String methods
+
+```harn
+"hello".count                    // 5
+"hello".empty                    // false
+"hello".contains("ell")          // true
+"hello".replace("l", "r")       // "herro"
+"a,b,c".split(",")              // ["a", "b", "c"]
+"  hello  ".trim()              // "hello"
+"hello".starts_with("he")       // true
+"hello".ends_with("lo")         // true
+"hello hello".rfind("lo")       // 9
+"hello".uppercase()             // "HELLO"
+"hello".lowercase()             // "hello"
+"hello world".substring(0, 5)   // "hello"
+```
+
+## Operators
+
+Ordered by precedence (lowest to highest):
+
+| Precedence | Operators | Description |
+|---|---|---|
+| 1 | `\|>` | Pipe |
+| 2 | `? :` | Ternary conditional |
+| 3 | `\|\|` | Logical OR (short-circuit) |
+| 4 | `&&` | Logical AND (short-circuit) |
+| 5 | `==` `!=` | Equality |
+| 6 | `<` `>` `<=` `>=` `in` `not in` | Comparison, membership |
+| 7 | `+` `-` | Add, subtract, string/list concat |
+| 8 | `??` | Nil coalescing |
+| 9 | `*` `/` `%` | Multiply, divide, modulo |
+| 10 | `!` `-` | Unary not, negate |
+| 11 | `**` | Exponentiation |
+| 12 | `.` `?.` `[]` `?.[]` `[:]` `()` `?` | Member access, optional chaining, subscript, optional subscript, slice, call, try |
+
+Integer division truncates toward zero. Integer division (and any modulo) by
+zero raises a catchable runtime error, while float division by zero follows
+IEEE-754 (`±inf`, or `NaN` for `0.0 / 0.0`).
+Arithmetic operators are strictly typed — mismatched operands (e.g.
+`"hello" + 5`) produce a `TypeError`. Use `to_string()` or string
+interpolation (`"value=${x}"`) for explicit conversion.
+
+`??` binds tighter than comparisons and logical operators but looser than
+multiplication, so `xs?.count ?? 0 > 0` means `(xs?.count ?? 0) > 0`.
+`harn fmt` adds clarifying parentheses when `??` is mixed with looser binary
+operators.
+
+### Optional chaining (`?.`)
+
+Access properties, indexes, or call methods on values that might be nil. Returns
+nil instead of erroring when the receiver is nil:
+
+```harn
+const user = nil
+harness.stdio.log(user?.name)           // nil (no error)
+harness.stdio.log(user?.greet("hi"))    // nil (method not called)
+harness.stdio.log(user?.["name"])       // nil (subscript not evaluated)
+
+const d = {name: "Alice"}
+harness.stdio.log(d?.name)              // Alice
+harness.stdio.log(d?.["name"])          // Alice
+```
+
+Chains propagate nil: `a?.b?.[0]?.c` returns nil if any step is nil.
+
+### List and string slicing (`[start:end]`)
+
+Extract sublists or substrings using slice syntax:
+
+```harn
+const items = [10, 20, 30, 40, 50]
+harness.stdio.log(items[1:3])   // [20, 30]
+harness.stdio.log(items[:2])    // [10, 20]
+harness.stdio.log(items[3:])    // [40, 50]
+harness.stdio.log(items[-2:])   // [40, 50]
+
+const s = "hello world"
+harness.stdio.log(s[0:5])       // hello
+harness.stdio.log(s[-5:])       // world
+```
+
+Negative indices count from the end. Omit start for 0, omit end for
+length.
+
+### Try operator (`?`)
+
+The postfix `?` operator works with `Result` values (`Ok` / `Err`). It
+unwraps `Ok` values and propagates `Err` values by returning early from
+the enclosing function:
+
+```harn
+fn divide(a, b) {
+  if b == 0 {
+    return Err("division by zero")
+  }
+  return Ok(a / b)
+}
+
+fn compute(x) {
+  const result = divide(x, 2)?   // unwraps Ok, or returns Err early
+  return Ok(result + 10)
+}
+
+fn compute_zero(x) {
+  const result = divide(x, 0)?   // divide returns Err, ? propagates it
+  return Ok(result + 10)
+}
+
+harness.stdio.log(compute(20))       // Result.Ok(20)
+harness.stdio.log(compute_zero(20))  // Result.Err(division by zero)
+```
+
+Multiple `?` calls can be chained in a single function to build
+pipelines that short-circuit on the first error.
+
+### Membership operators (`in`, `not in`)
+
+Test whether a value is contained in a collection:
+
+```harn
+// Lists
+harness.stdio.log(3 in [1, 2, 3])          // true
+harness.stdio.log(6 not in [1, 2, 3])      // true
+
+// Strings (substring containment)
+harness.stdio.log("world" in "hello world") // true
+harness.stdio.log("xyz" not in "hello")     // true
+
+// Dicts (key membership)
+const data = {name: "Alice", age: 30}
+harness.stdio.log("name" in data)           // true
+harness.stdio.log("email" not in data)      // true
+
+// Sets
+const s = set(1, 2, 3)
+harness.stdio.log(2 in s)                   // true
+harness.stdio.log(5 not in s)               // true
+```
+
+## Control flow
+
+### if/else
+
+```harn
+if score > 90 {
+  harness.stdio.log("A")
+} else if score > 80 {
+  harness.stdio.log("B")
+} else {
+  harness.stdio.log("C")
+}
+```
+
+Can be used as an expression: `let grade = if score > 90 { "A" } else { "B" }`
+
+### for/in
+
+```harn
+for item in [1, 2, 3] {
+  harness.stdio.log(item)
+}
+
+// Dict iteration yields {key, value} entries sorted by key
+for entry in {a: 1, b: 2} {
+  harness.stdio.log("${entry.key}: ${entry.value}")
+}
+```
+
+### while
+
+```harn
+let i = 0
+while i < 10 {
+  harness.stdio.log(i)
+  i = i + 1
+}
+```
+
+Safety limit of 10,000 iterations.
+
+### match
+
+```harn
+match status {
+  "active" -> { harness.stdio.log("Running") }
+  "stopped" -> { harness.stdio.log("Halted") }
+}
+```
+
+Patterns are expressions compared by equality. First match wins. No match returns `nil`.
+
+### guard
+
+Early exit if a condition isn't met:
+
+```harn
+guard x > 0 else {
+  return "invalid"
+}
+// x is guaranteed > 0 here
+```
+
+### Ranges
+
+Harn has a single range keyword: `to`. Ranges are **inclusive by default** —
+`1 to 5` is `[1, 2, 3, 4, 5]` — because that matches how the expression reads
+aloud. Add the trailing `exclusive` modifier when you want the half-open form.
+
+```harn
+for i in 1 to 5 {              // inclusive: 1, 2, 3, 4, 5
+  harness.stdio.log(i)
+}
+
+for i in 0 to 3 exclusive {    // half-open: 0, 1, 2
+  harness.stdio.log(i)
+}
+```
+
+For Python-compatible 0-indexed iteration there is also a `range()` stdlib
+builtin. `range(n)` is equivalent to `0 to n exclusive`; `range(a, b)` is
+`a to b exclusive`. Both forms always produce half-open integer ranges.
+
+```harn
+for i in range(5) { harness.stdio.log(i) }        // 0, 1, 2, 3, 4
+for i in range(3, 7) { harness.stdio.log(i) }      // 3, 4, 5, 6
+```
+
+### Iteration patterns
+
+Prefer destructuring and stdlib helpers over integer-indexed loops — they
+read better and avoid off-by-one bugs.
+
+```harn
+// enumerate(): yields a list of {index, value} dicts.
+for {index, value} in ["a", "b", "c"].enumerate() {
+  harness.stdio.log("${index}: ${value}")
+}
+
+// zip(): yields [a, b] pairs — use list destructuring.
+for [name, score] in names.zip(scores) {
+  harness.stdio.log("${name}: ${score}")
+}
+
+// Dict iteration yields {key, value} entries sorted by key.
+for {key, value} in {a: 1, b: 2}.entries() {
+  harness.stdio.log("${key} -> ${value}")
+}
+```
+
+`for` heads accept a bare name or one of three destructuring patterns, each
+matching the *shape* the iterable yields:
+
+- a **pair** pattern `(a, b)` — for iterables that yield `Pair` values:
+  `iter(x).enumerate()`, `iter(x).zip(...)`, and `dict.iter()`;
+- a **list** pattern `[a, b]` — for `list.zip(other)`, which yields `[a, b]`
+  lists;
+- a **dict** pattern `{index, value}` — for `list.enumerate()` (yields
+  `{index, value}`) and `entries()` (yields `{key, value}`).
+
+Using a pair pattern over a non-`Pair` item (e.g. `for (i, x) in
+list.enumerate()`, whose items are `{index, value}` dicts) now fails loudly
+instead of silently binding both names to `nil`.
+
+## Functions and closures
+
+### Named functions
+
+```harn
+fn double(x) {
+  return x * 2
+}
+
+fn greet(name: string) -> string {
+  return "Hello, ${name}!"
+}
+```
+
+Functions can be declared at the top level (for library files) or inside pipelines.
+
+### Rest parameters
+
+Use `...name` as the last parameter to collect any remaining arguments into
+a list:
+
+```harn
+fn sum(...nums) {
+  let total = 0
+  for n in nums {
+    total = total + n
+  }
+  return total
+}
+harness.stdio.log(sum(1, 2, 3))  // 6
+
+fn report(level, ...parts) {
+  harness.stdio.log("[${level}] ${join(parts, " ")}")
+}
+report("INFO", "server", "started")  // [INFO] server started
+```
+
+If no extra arguments are provided, the rest parameter is an empty list. A type
+annotation on a rest parameter describes each extra argument, and the binding
+inside the function has the corresponding list type: `...nums: int` accepts
+only integer extras and binds `nums` as `list<int>`.
+
+### Closures
+
+```harn
+const square = { x -> x * x }
+const add = { a, b -> a + b }
+
+harness.stdio.log(square(4))     // 16
+harness.stdio.log(add(2, 3))     // 5
+```
+
+Closures capture the enclosing bindings they reference.
+
+### Calling returned functions
+
+Call postfixes can chain on the same line. If a function returns another
+function, call the result directly:
+
+```harn
+fn make_adder(base: int) -> fn(int) -> int {
+  return { value: int -> base + value }
+}
+
+const answer = make_adder(40)(2)       // 42
+const also = (make_adder(39))(3)       // 42
+```
+
+The opening parenthesis must stay on the callee's line. A newline starts a new
+statement, so `const add = make_adder(40)\n(2)` binds `add` and then evaluates
+`2`; it does not call `add`.
+
+### Capture semantics
+
+Closures capture the enclosing bindings they reference, by reference. A closure
+that reassigns a captured `let` (a rebind like `n = n + 1`, a compound
+assignment, or an in-place container write such as `xs[i] = ...` or
+`d.field = ...`) mutates the same binding the enclosing scope holds, and later
+calls see the running value. This is how JavaScript and Python behave.
+
+```harn
+let n = 0
+const bump = { -> n = n + 1 }
+bump()
+bump()
+harness.stdio.log(n)   // 2
+```
+
+Capture shares bindings, not values. Distinct variables stay independent:
+`let b = a` copies, so mutating `b` leaves `a` untouched. Parameters and `const`
+bindings are immutable, so a closure can read them but never rebind them.
+
+A captured variable can change whenever a closure runs, so the type checker does
+not narrow (by `!= nil`, `type_of`, and the like) any variable that a nested
+closure reassigns. TypeScript and Flow use the same rule. Reach for optional
+chaining or a non-null assertion on such a variable instead of a guard:
+
+```harn
+let x: string? = "config"
+const clear = { -> x = nil }
+if x != nil {
+  clear()          // x may be nil again after this call
+  harness.stdio.log(x?.len())    // x is not narrowed here; use ?. (or x!) rather than x.len()
+}
+```
+
+Reassigning a captured variable from concurrent `parallel` or `spawn` branches
+writes through one shared cell, so the branches race on it. The
+`mutable-capture-across-parallel` lint (`HARN-LNT-064`) flags this. Return each
+branch's result and combine after the fan-out instead.
+
+### Higher-order functions
+
+```harn
+const nums = [1, 2, 3, 4, 5]
+
+nums.map({ x -> x * 2 })           // [2, 4, 6, 8, 10]
+nums.filter({ x -> x > 3 })        // [4, 5]
+nums.reduce(0, { acc, x -> acc + x }) // 15
+nums.find({ x -> x == 3 })         // 3
+nums.any({ x -> x > 4 })           // true
+nums.all({ x -> x > 0 })           // true
+nums.flat_map({ x -> [x, x] })     // [1, 1, 2, 2, 3, 3, 4, 4, 5, 5]
+```
+
+### Lazy iterators
+
+Collection methods like `.map` and `.filter` above are *eager* — each
+call allocates a new list and walks the whole input. That's fine for
+small inputs, but wastes work when you only need the first few
+results, or when you want to compose several transforms.
+
+Harn also ships a lazy iterator protocol. Call `.iter()` on any
+iterable source (list, dict, set, string, generator, channel) to lift
+it into an `Iter<T>` — a single-pass, fused iterator. Combinators on
+an `Iter` return a new `Iter` without running any work. Sinks drain
+the iter and return an eager value.
+
+```harn,ignore
+const xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+const first_three_doubled_evens = xs
+  .iter()
+  .filter({ x -> x % 2 == 0 })
+  .map({ x -> x * 2 })
+  .take(3)
+  .to_list()
+harness.stdio.log(first_three_doubled_evens)  // [4, 8, 12]
+```
+
+Use `.enumerate()` to get `(index, value)` pairs in a for-loop:
+
+```harn,ignore
+const items = ["a", "b", "c"]
+for (i, x) in items.iter().enumerate() {
+  harness.stdio.log("${i}: ${x}")
+}
+```
+
+`.iter()` on a dict yields `Pair(key, value)` values — destructure
+them in a for-loop:
+
+```harn,ignore
+for (k, v) in {a: 1, b: 2}.iter() {
+  harness.stdio.log("${k}: ${v}")
+}
+```
+
+A direct `for entry in some_dict` still yields the usual
+`{key, value}` dicts (back-compat). `pair(a, b)` also exists as a
+builtin for constructing pairs explicitly.
+
+**Lazy combinators** (return a new `Iter`): `.map`, `.filter`,
+`.flat_map`, `.take(n)`, `.skip(n)`, `.take_while`, `.skip_while`,
+`.zip`, `.enumerate`, `.chain`, `.chunks(n)`, `.windows(n)`.
+
+**Sinks** (drain the iter, return a value): `.to_list()`, `.to_set()`,
+`.to_dict()` (requires `Pair` items), `.count()`, `.sum()`, `.min()`,
+`.max()`, `.reduce(init, f)`, `.first()`, `.last()`, `.any(p)`,
+`.all(p)`, `.find(p)`, `.for_each(f)`.
+
+**When to use which**: reach for eager list/dict/set methods for
+simple one-shot transforms where you want a collection back. Reach
+for `.iter()` when you're composing multiple transforms, taking the
+first N results of a large input, consuming a generator lazily, or
+driving a for-loop over combined sources.
+
+Iterators are **single-pass and fused** — once exhausted, they stay
+exhausted. Iteration takes a **snapshot** of the backing collection,
+so mutating the source after `.iter()` does not affect the iter.
+Printing an iter renders `<iter>` without draining it.
+
+Numeric ranges (`a to b`, `range(n)`) participate in the lazy iter
+protocol directly: `.map / .filter / .take / .zip / .enumerate / ...`
+on a Range return a lazy iter with no upfront allocation, so
+`(1 to 10_000_000).map(fn(x) { return x * 2 }).take(5).to_list()`
+finishes instantly. Range still keeps its O(1) fast paths for
+`.len / .first / .last / .contains(x)` and `r[k]` subscript — those
+don't round-trip through iter.
+
+## Pipe operator
+
+The pipe operator `|>` passes the left side as the argument to the right side:
+
+```harn
+const result = data
+  |> { list -> list.filter({ x -> x > 0 }) }
+  |> { list -> list.map({ x -> x * 2 }) }
+  |> json_stringify
+```
+
+### Pipe placeholder (`_`)
+
+Use `_` to control where the piped value is placed in the call:
+
+```harn
+"hello world" |> split(_, " ")       // ["hello", "world"]
+[3, 1, 2] |> _.sorted()               // [1, 2, 3]
+items |> len(_)                      // length of items
+"world" |> replace("hello _", "_", _) // "hello world"
+```
+
+Without `_`, the value is passed as the sole argument to a closure or
+function name.
+
+## Multiline expressions
+
+Binary operators, method chains, and pipes can span multiple lines:
+
+```harn,ignore
+const message = "hello"
+  + " "
+  + "world"
+
+const result = items
+  .filter({ x -> x > 0 })
+  .map({ x -> x * 2 })
+
+const valid = check_a()
+  && check_b()
+  || fallback()
+
+const name = nil
+  ?? "unknown"
+
+const same = 1
+  == 1
+```
+
+Note: `-` does not continue across lines because it doubles as unary
+negation. Keyword operators `in`, `not in`, and `to` also require an explicit
+backslash continuation.
+
+A backslash at the end of a line forces the next line to continue the
+current expression, even when no operator is present:
+
+```harn,ignore
+const long_value = some_function( \
+  arg1, arg2, arg3 \
+)
+```
+
+## Destructuring
+
+Destructuring extracts values from dicts and lists into local variables.
+Use `_` when a position should be evaluated and ignored without creating a
+real variable.
+
+### Dict destructuring
+
+```harn
+const person = {name: "Alice", age: 30}
+const {name, age} = person
+harness.stdio.log(name)  // "Alice"
+harness.stdio.log(age)   // 30
+
+const {name, debug: _} = {name: "Alice", debug: true}
+harness.stdio.log(name)  // "Alice"
+```
+
+### List destructuring
+
+```harn
+const items = [1, 2, 3, 4, 5]
+const [first, ...rest] = items
+harness.stdio.log(first)  // 1
+harness.stdio.log(rest)   // [2, 3, 4, 5]
+
+const [_, second, _] = [10, 20, 30]
+harness.stdio.log(second)  // 20
+```
+
+### Renaming
+
+Use `:` to bind a dict field to a different variable name:
+
+```harn
+const data = {name: "Alice"}
+const {name: user_name} = data
+harness.stdio.log(user_name)  // "Alice"
+```
+
+### Destructuring in for-in loops
+
+```harn
+const entries = [{key: "a", value: 1}, {key: "b", value: 2}]
+for {key, value} in entries {
+  harness.stdio.log("${key}: ${value}")
+}
+
+for [_, value] in [[0, "x"], [1, "y"]] {
+  harness.stdio.log(value)
+}
+```
+
+### Default values
+
+Pattern fields can specify defaults with `= expr`. The default is used when
+the value would otherwise be `nil`:
+
+```harn
+const { name = "anon", role = "user" } = { name: "Alice" }
+harness.stdio.log(name)  // Alice
+harness.stdio.log(role)  // user
+
+const [a = 0, b = 0, c = 0] = [1, 2]
+harness.stdio.log(c)     // 0
+
+// Combine with renaming
+const { name: display = "Unknown" } = {}
+harness.stdio.log(display)  // Unknown
+```
+
+### Missing keys and empty rest
+
+Missing keys destructure to `nil` (unless a default is specified). A rest
+pattern with no remaining items gives an empty collection:
+
+```harn
+const {name, email} = {name: "Alice"}
+harness.stdio.log(email)  // nil
+
+const [only, ...rest] = [42]
+harness.stdio.log(rest)   // []
+```
+
+## Collections
+
+### Lists
+
+```harn
+const nums = [1, 2, 3]
+nums.count          // 3
+nums.first          // 1
+nums.last           // 3
+nums.empty          // false
+nums[0]             // 1 (subscript access)
+```
+
+Lists support `+` for concatenation: `[1, 2] + [3, 4]` yields `[1, 2, 3, 4]`.
+Assigning to an out-of-bounds index throws an error.
+
+### Dicts
+
+```harn
+const user = {name: "Alice", age: 30}
+user.name           // "Alice" (property access)
+user["age"]         // 30 (subscript access)
+user.missing        // nil (missing keys return nil)
+user.has("email")   // false
+
+user.keys()         // ["age", "name"] (sorted)
+user.values()       // [30, "Alice"]
+user.entries()      // [{key: "age", value: 30}, ...]
+user.merging({role: "admin"})  // new dict with merged keys
+user.map_values({ v -> to_string(v) })
+user.filter({ v -> type_of(v) == "int" })
+```
+
+Computed keys use bracket syntax: `{[dynamic_key]: value}`.
+
+Quoted string keys are also supported for JSON compatibility:
+`{"content-type": "json"}`. The formatter normalizes simple quoted keys
+to unquoted form and non-identifier keys to computed key syntax.
+
+Keywords can be used as dict keys and property names: `{type: "read"}`,
+`op.type`.
+
+Dicts iterate in **sorted key order** (alphabetical). This means
+`for k in dict` is deterministic and reproducible, but does not preserve
+insertion order.
+
+### Sets
+
+Sets are unordered collections of unique values. Duplicates are
+automatically removed.
+
+```harn
+const s = set(1, 2, 3)          // create from individual values
+const s2 = set([4, 5, 5, 6])   // create from a list (deduplicates)
+const tags = set("a", "b", "c") // works with any value type
+```
+
+Set operations are provided as builtin functions:
+
+```harn
+const a = set(1, 2, 3)
+const b = set(3, 4, 5)
+
+set_contains(a, 2)       // true
+set_contains(a, 99)      // false
+
+set_union(a, b)          // set(1, 2, 3, 4, 5)
+set_intersect(a, b)      // set(3)
+set_difference(a, b)     // set(1, 2) -- items in a but not in b
+
+set_add(a, 4)            // set(1, 2, 3, 4)
+set_remove(a, 2)         // set(1, 3)
+```
+
+Sets support iteration with `for..in`:
+
+```harn
+let sum = 0
+for item in set(10, 20, 30) {
+  sum = sum + item
+}
+harness.stdio.log(sum)  // 60
+```
+
+Convert a set to a list with `to_list()`:
+
+```harn
+const items = to_list(set(10, 20))
+type_of(items)  // "list"
+```
+
+## Enums and structs
+
+### Enums
+
+```harn
+enum Status {
+  Active
+  Inactive
+  Pending(reason)
+  Failed(code, message)
+}
+
+const s = Status.Pending("waiting")
+match s.variant {
+  "Pending" -> { harness.stdio.log(s.fields[0]) }
+  "Active" -> { harness.stdio.log("ok") }
+  "Inactive" -> { harness.stdio.log("inactive") }
+  "Failed" -> { harness.stdio.log(s.fields[1]) }
+}
+```
+
+### Structs
+
+```harn
+struct Point {
+  x: int
+  y: int
+}
+
+const p = {x: 10, y: 20}
+harness.stdio.log(p.x)
+```
+
+Structs can also be constructed with the struct name as a constructor,
+using named fields directly:
+
+```harn
+struct Point {
+  x: int
+  y: int
+}
+
+const p = Point { x: 10, y: 20 }
+harness.stdio.log(p.x)  // 10
+```
+
+Structs can declare type parameters when fields should stay connected:
+
+```harn
+struct Pair<A, B> {
+  first: A
+  second: B
+}
+
+const pair: Pair<int, string> = Pair { first: 1, second: "two" }
+harness.stdio.log(pair.second)  // two
+```
+
+### Impl blocks
+
+Add methods to a struct with `impl`:
+
+```harn
+struct Point {
+  x: int
+  y: int
+}
+
+impl Point {
+  fn distance(self) {
+    return sqrt(self.x * self.x + self.y * self.y)
+  }
+  fn translate(self, dx, dy) {
+    return Point { x: self.x + dx, y: self.y + dy }
+  }
+}
+
+const p = Point { x: 3, y: 4 }
+harness.stdio.log(p.distance())       // 5.0
+harness.stdio.log(p.translate(10, 20)) // Point({x: 13, y: 24})
+```
+
+The first parameter must be `self`, which receives the struct instance.
+Methods are called with dot syntax on values constructed with the struct
+constructor.
+
+## Interfaces
+
+Interfaces let you define a contract: a set of methods that a type must
+have. Harn uses **implicit satisfaction**, just like Go. A struct satisfies
+an interface automatically if its `impl` block has all the required methods.
+You never write `implements` or `impl Interface for Type`.
+
+### Step 1: define an interface
+
+An interface lists method signatures without bodies:
+
+```harn
+interface Displayable {
+  fn display(self) -> string
+}
+```
+
+This says: any type that has a `display(self) -> string` method counts as
+`Displayable`.
+
+Interfaces can also be generic, and individual interface methods may declare
+their own type parameters when the contract needs them:
+
+```harn
+interface Repository<T> {
+  fn get(id: string) -> T
+  fn map<U>(value: T, f: fn(T) -> U) -> U
+}
+```
+
+Interfaces may also declare associated types when the contract needs to name
+an implementation-defined type without making the whole interface generic:
+
+```harn
+interface Collection {
+  type Item
+  fn get(self, index: int) -> Item
+}
+```
+
+### Step 2: create structs with matching methods
+
+```harn
+struct Dog {
+  name: string
+  breed: string
+}
+
+impl Dog {
+  fn display(self) -> string {
+    return "${self.name} the ${self.breed}"
+  }
+}
+
+struct Cat {
+  name: string
+  indoor: bool
+}
+
+impl Cat {
+  fn display(self) -> string {
+    const status = if self.indoor { "indoor" } else { "outdoor" }
+    return "${self.name} (${status} cat)"
+  }
+}
+```
+
+Both `Dog` and `Cat` have a `display(self) -> string` method, so they
+both satisfy `Displayable`. No extra annotation is needed.
+
+### Step 3: use the interface as a type
+
+Now you can write a function that accepts any `Displayable`:
+
+```harn,ignore
+fn introduce(animal: Displayable) {
+  harness.stdio.log("Meet: ${animal.display()}")
+}
+
+const d = Dog({name: "Rex", breed: "Labrador"})
+const c = Cat({name: "Whiskers", indoor: true})
+
+introduce(d)  // Meet: Rex the Labrador
+introduce(c)  // Meet: Whiskers (indoor cat)
+```
+
+The type checker verifies at compile time that `Dog` and `Cat` satisfy
+`Displayable`. If a struct is missing a required method, you get a
+clear error at the call site.
+
+### Interfaces with multiple methods
+
+Interfaces can require more than one method:
+
+```harn
+interface Serializable {
+  fn serialize(self) -> string
+  fn byte_size(self) -> int
+}
+```
+
+### `guard`, `require`, and `assert`
+
+These three forms serve different jobs:
+
+- `guard condition else { ... }` handles expected control flow and narrows types after the guard.
+- `require condition, "message"` enforces runtime invariants in normal code and throws on failure.
+- `assert`, `assert_eq`, and `assert_ne` are for test pipelines. The linter
+  warns when you use them in non-test code, and it nudges test pipelines away
+  from `require`.
+
+```harn
+guard user != nil else {
+  return "missing user"
+}
+
+require len(user.name) > 0, "user name cannot be empty"
+```
+
+A struct must implement all listed methods to satisfy the interface.
+
+### Generic constraints
+
+You can also use interfaces as constraints on generic type parameters:
+
+```harn
+fn log_item<T>(item: T) where T: Displayable {
+  harness.stdio.log("[LOG] ${item.display()}")
+}
+```
+
+The `where T: Displayable` clause tells the type checker to verify that
+whatever concrete type is passed for `T` satisfies `Displayable`. If it
+does not, a compile-time error is produced. Generic parameters must also bind
+consistently across arguments, so `fn<T>(a: T, b: T)` cannot be called with
+mixed concrete types such as `(int, string)`. Container bindings like
+`list<T>` preserve and validate their element type at call sites too.
+
+### Variance: `in T` and `out T`
+
+Type parameters on user-defined generics may be marked `in` (the
+parameter is contravariant — it appears only in input positions) or
+`out` (covariant — only in output positions). Unannotated parameters
+default to **invariant**: `Box<int>` and `Box<float>` are unrelated
+unless `Box` declares `out T` and uses `T` only covariantly.
+
+```harn,ignore
+type Reader<out T> = fn() -> T          // T is produced
+interface Sink<in T> { fn accept(v: T) -> int }  // T is consumed
+```
+
+Built-in containers carry variance matching their semantics: `iter<T>` and
+value-semantic `list<T>` are covariant. Fixed-arity tuples are covariant
+position by position; `dict<K, V>` is invariant in `K` and covariant in `V`.
+Function types are contravariant in their parameters and covariant in
+their return type — `fn(float)` can stand in for `fn(int)`, but not
+the other way around. The full variance table lives in the spec under
+"Subtyping and variance".
+
+Declarations are checked at the definition site: a `type Box<out T>
+= fn(T) -> int` is rejected because `T` appears in a contravariant
+position despite the `out` annotation.
+
+## Spread in function calls
+
+The spread operator `...` expands a list into individual function
+arguments:
+
+```harn
+fn add(a, b, c) {
+  return a + b + c
+}
+
+const nums = [1, 2, 3]
+harness.stdio.log(add(...nums))  // 6
+```
+
+You can mix regular arguments and spread arguments:
+
+```harn
+fn add(a, b, c) {
+  return a + b + c
+}
+
+const rest = [2, 3]
+harness.stdio.log(add(1, ...rest))  // 6
+```
+
+Spread works in method calls too:
+
+```harn,ignore
+const point = Point({x: 0, y: 0})
+const deltas = [10, 20]
+const moved = point.translate(...deltas)
+```
+
+## Try-expression
+
+The `try` keyword without a `catch` block is a try-expression. It
+evaluates its body and wraps the outcome in a `Result`:
+
+```harn
+const result = try { json_parse(raw_input) }
+// Result.Ok(parsed_data)  -- if parsing succeeds
+// Result.Err("invalid JSON: ...") -- if parsing throws
+```
+
+This is the complement of the `?` operator. Use `try` to enter
+Result-land (catching errors into `Result.Err`), and `?` to exit
+Result-land (propagating errors upward):
+
+```harn
+fn safe_divide(a, b) {
+  return try { a / b }
+}
+
+fn compute(x) {
+  const half = safe_divide(x, 2)?  // unwrap Ok or propagate Err
+  return Ok(half + 10)
+}
+```
+
+No `catch` or `finally` is needed. If a `catch` follows `try`, it is
+parsed as the traditional `try`/`catch` statement instead.
+
+## Ask expression
+
+The `ask` expression is syntactic sugar for making an LLM call. It takes
+a set of key-value fields and returns the LLM response as a string:
+
+```harn,ignore
+const answer = ask {
+  system: "You are a helpful assistant.",
+  user: "What is 2 + 2?"
+}
+harness.stdio.log(answer)
+```
+
+Common fields include `system` (system prompt), `user` (user message),
+`model`, `max_tokens`, and `provider`. The `ask` expression is equivalent
+to building a dict and passing it to `llm_call`.
+
+## Duration literals
+
+```harn
+const d1 = 500ms   // 500 milliseconds
+const d2 = 5s      // 5 seconds
+const d3 = 2m      // 2 minutes
+const d4 = 1h      // 1 hour
+```
+
+Durations can be passed to `harness.clock.sleep_ms()` and used in `deadline` blocks.
+
+## Math constants
+
+`pi` and `e` are global constants (not functions):
+
+```harn
+harness.stdio.log(pi)    // 3.141592653589793
+harness.stdio.log(e)     // 2.718281828459045
+
+const area = pi * r * r
+```
+
+## Named format placeholders
+
+The `format` builtin supports both positional `{}` placeholders and named
+`{key}` placeholders when the second argument is a dict:
+
+```harn
+// Positional
+harness.stdio.log(format("Hello, {}!", "world"))
+
+// Named
+harness.stdio.log(format("Hello {name}, you are {age}.", {name: "Alice", age: 30}))
+```
+
+For simple cases, string interpolation with `${}` is usually more
+convenient:
+
+```harn
+const name = "Alice"
+harness.stdio.log("Hello, ${name}!")
+```
+
+## Comments
+
+```harn
+// Line comment
+
+/** HarnDoc comment for a public API.
+    Use a `/** ... */` block directly above `pub fn`. */
+pub fn greet(name: string) -> string {
+  return "Hello, ${name}"
+}
+
+pub pipeline deploy(task) {
+  return
+}
+
+pub enum Result {
+  Ok(value: string)
+  Err(message: string)
+}
+
+pub struct Config {
+  host: string
+  port?: int
+}
+
+/* Block comment
+   /* Nested block comments are supported */
+   Still inside the outer comment */
+```

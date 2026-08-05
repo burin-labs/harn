@@ -1,0 +1,16 @@
+// std/llm/safe.safe_call wraps a successful llm_call into the canonical
+// envelope shape against the mock provider.
+import { safe_call } from "std/llm/safe"
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline default(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [llm_text("ok")],
+    { ->
+      const r = safe_call(harness.llm, "hi", nil, {provider: "mock", model: "mock-model"})
+      harness.stdio.println(r.ok)
+      harness.stdio.println(r.value.text)
+    },
+  )
+}

@@ -1,0 +1,63 @@
+/**
+ * `needs-human` is a transverse autonomy class: side effects tagged
+ * `needs-human` raise a structured `HARN-AUT-NEEDS-HUMAN` deny regardless
+ * of the resolved `AutonomyTier`. Even at `act_auto` (which normally
+ * auto-applies every side effect) a `needs-human`-tagged write is
+ * forbidden, a pending approval request is queued with the autonomy
+ * class flowing through `detail.autonomy_class`, and the trust-graph
+ * record carries `metadata.autonomy_class = "needs-human"` plus
+ * `metadata.requires_human = true`.
+ *
+ * Tracking: harn#1792.
+ */
+fn attempt_write(fs: HarnessFs, target: string) -> dict {
+  try {
+    fs.write_text(target, "should never land")
+    return {caught: nil, wrote: true}
+  } catch (e) {
+    return {caught: to_string(e), wrote: false}
+  }
+}
+
+pipeline test(harness: Harness, task) {
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(
+    harness.random.range(100000, 999999),
+  )
+  const agent = "needs-human-" + unique
+  const target = path_join(harness.fs.workspace_temp_dir(), "needs_human_" + unique + ".txt")
+  const outcome = harness.runtime.with_autonomy_policy(
+    {
+      agent_id: agent,
+      autonomy_tier: "act_auto",
+      reviewers: ["ops-lead"],
+      requires_human_actions: ["fs.write"],
+    },
+    fn() { return attempt_write(harness.fs, target) },
+  )
+  // 1. The structured deny fired and the file was never written, even
+  //    though the resolved tier is `act_auto`.
+  harness.stdio.println(outcome.caught != nil && !harness.fs.exists(target))
+  harness.stdio.println(contains(outcome.caught, "HARN-AUT-NEEDS-HUMAN"))
+  harness.stdio.println(contains(outcome.caught, "tool_rejected"))
+  // 2. A trust-graph record was appended with outcome `denied` and the
+  //    autonomy class flowing through metadata.
+  const records: list<TrustRecord> = harness.runtime.trust_query({agent: agent, action: "fs.write"})
+  harness.stdio.println(len(records) == 1)
+  harness.stdio.println(records[0].outcome == "denied")
+  harness.stdio.println(records[0].metadata.autonomy_class == "needs-human")
+  harness.stdio.println(records[0].metadata.requires_human)
+  harness.stdio.println(records[0].metadata.deny_code == "HARN-AUT-NEEDS-HUMAN")
+  harness.stdio.println(records[0].metadata["autonomy.enforcement"] == "needs_human_denied")
+  // 3. An approval-request was queued with the `needs-human` tag in the
+  //    payload so reviewers can render it distinctly from a normal
+  //    tier-driven approval ask.
+  const pending = harness.interaction.hitl_pending({}).filter({ row -> row.agent == agent })
+  harness.stdio.println(len(pending) == 1)
+  harness.stdio.println(pending[0].metadata.detail.autonomy_class == "needs-human")
+  harness.stdio.println(pending[0].metadata.detail.requires_human)
+  harness.stdio.println(pending[0].metadata.detail.deny_code == "HARN-AUT-NEEDS-HUMAN")
+  if harness.fs.exists(target) {
+    harness.fs.delete(target)
+  }
+}

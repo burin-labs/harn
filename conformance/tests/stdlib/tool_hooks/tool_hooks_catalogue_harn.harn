@@ -1,0 +1,38 @@
+import { tool_hooks_seed_registry } from "std/tool_hooks_catalogues"
+
+/**
+ * Harn (this repo) seed catalogue (TH-04 #1897). The single rule
+ * warns on `cargo run --bin harn` invocations missing `--quiet`. The
+ * rewrite inserts `--quiet` so subsequent agent reads see clean stdout.
+ */
+fn probe_with_rewrite(stdio: HarnessStdio, tools: HarnessTools, reg, cmd) {
+  const m = tools.hooks_match(reg, cmd, {stacks: ["harn"]})
+  if len(m) > 0 {
+    const rewrite = m[0].rewrite
+    const after = if rewrite == nil {
+      cmd
+    } else {
+      to_string(rewrite(cmd, {}))
+    }
+    stdio.println(m[0].rule_id + " => " + after)
+  } else {
+    stdio.println("miss")
+  }
+}
+
+pipeline default(harness: Harness) {
+  const reg = tool_hooks_seed_registry(harness.env, harness.tools, ["harn"])
+  /* Bare `cargo run --bin harn` fires, rewrite inserts --quiet. */
+  probe_with_rewrite(harness.stdio, harness.tools, reg, "cargo run --bin harn -- run script.harn")
+  /* Already-quiet calls are skipped. */
+  probe_with_rewrite(
+    harness.stdio,
+    harness.tools,
+    reg,
+    "cargo run --quiet --bin harn -- check x.harn",
+  )
+  /* `-q` short form is also recognized. */
+  probe_with_rewrite(harness.stdio, harness.tools, reg, "cargo run -q --bin harn -- --help")
+  /* Different binary — quiet flag missing but the rule scopes to harn. */
+  probe_with_rewrite(harness.stdio, harness.tools, reg, "cargo run --bin other-tool")
+}

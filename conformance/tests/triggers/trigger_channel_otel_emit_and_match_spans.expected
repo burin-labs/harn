@@ -1,0 +1,11 @@
+transcript.channel.emit
+tenant:default:ch.otel.input
+tenant
+true
+transcript.channel.match
+tenant:default:ch.otel.input
+local
+true
+true
+true
+true

@@ -1,0 +1,8 @@
+pipeline test(harness: Harness, task) {
+  const x: int = 42
+  harness.stdio.log(x)
+  const name: string = "hello"
+  harness.stdio.log(name)
+  const flag: bool = true
+  harness.stdio.log(flag)
+}

@@ -1,0 +1,69 @@
+import "std/agents"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn resume_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "noop",
+    "Return a short observation.",
+    {handler: { _args -> "ok" }, parameters: {}, returns: {type: "string"}},
+  )
+  return tools
+}
+
+pipeline main(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        tool_calls: [
+          {id: "park_1", name: "agent_await_resumption", arguments: {reason: "waiting on review"}},
+        ],
+        input_tokens: 7,
+        output_tokens: 3,
+      },
+      {tool_calls: [{id: "noop_1", name: "noop", arguments: {}}]},
+      llm_text("done"),
+    ],
+    { ->
+      const session_id = "resume-continuity-" + harness.random.uuid()
+      const handle = sub_agent_run(
+        harness,
+        "Park until an operator resumes you.",
+        {
+          provider: "mock",
+          background: true,
+          session_id: session_id,
+          tools: resume_tools(),
+          tool_format: "native",
+          max_iterations: 3,
+        },
+      )
+      const suspended = wait_agent(harness.agent, handle)
+      const resumed = resume_agent(harness.agent, suspended, "operator says go", true)
+      const completed = wait_agent(harness.agent, handle)
+      const calls = harness.llm.mock_calls()
+      const resumed_msgs = calls[1].messages
+      const resumed_tail = resumed_msgs[len(resumed_msgs) - 1].content
+      const next_msgs = calls[2].messages
+      const next_tail = next_msgs[len(next_msgs) - 1].content
+      const remaining = transcript_events_by_kind(completed.transcript, "system_reminder").filter(
+        { event -> event.reminder.dedupe_key == "resume_continuity" },
+      )
+      harness.stdio.println(suspended.status)
+      harness.stdio.println(resumed.status)
+      harness.stdio.println(completed.status)
+      harness.stdio.println(contains(resumed_tail, "You were suspended at turn"))
+      harness.stdio.println(contains(resumed_tail, "waiting on review"))
+      harness.stdio.println(contains(resumed_tail, "You have been resumed by the operator"))
+      harness.stdio.println(contains(resumed_tail, "The resumer provided input: operator says go"))
+      harness.stdio.println(!contains(next_tail, "You were suspended at turn"))
+      harness.stdio.println(len(remaining))
+    },
+  )
+}
+// The resume-continuity reminder is a SystemText reminder, now delivered
+// as the trailing user message rather than folded into the system string,
+// so the system string stays byte-stable across turns. Its body is
+// unchanged at the new position.

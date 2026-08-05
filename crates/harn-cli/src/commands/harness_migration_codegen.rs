@@ -1,0 +1,146 @@
+//! `harn dump-harness-migrations` — project the runtime's migration record
+//! into a table `harn-parser` can read.
+//!
+//! `harn_vm::stdlib::harness_migration_for_builtin` knows which capability
+//! method replaced a removed global. `harn-parser` sits *below* `harn-vm`, so
+//! the type checker cannot call it and grew a hand-written `match` instead —
+//! unguarded, and backstopped by a Levenshtein search that answered `uuid_v5`
+//! for `uuid_v7` (harn#6151).
+//!
+//! Generating the projection is how the repo already resolves this shape; see
+//! `connector_schema_codegen` and `dump-protocol-artifacts`. `--check`
+//! re-renders and compares without writing, so the table cannot drift from the
+//! registry it mirrors.
+//!
+//! **The projection is a fallback, not a replacement.** The issue assumed the
+//! hand-written table was a strict subset of the registry. Measured against 417
+//! generated rows, it is not: 60 hand-written entries agree, 84 have no registry
+//! row at all (the whole `harness.net.*` family among them), and **4 disagree**.
+//! Three of those disagree dangerously, because the registry is keyed by builtin
+//! name and `read_file` / `write_file` / `delete_file` each collide with an
+//! unrelated `harness.tools.*` agent tool. So `harn-parser` consults its own
+//! tables first and this one last; `HARNESS_MIGRATION_DISAGREEMENTS` pins the
+//! four, and the tests here assert the collisions are still real.
+
+use std::collections::BTreeMap;
+use std::path::Path;
+
+use crate::cli::DumpHarnessMigrationsArgs;
+
+/// The vendored generated file, relative to the repo root.
+const DEFAULT_OUTPUT: &str = "crates/harn-parser/src/diagnostic/harness_migrations_generated.rs";
+
+pub(crate) fn run(args: &DumpHarnessMigrationsArgs) -> i32 {
+    match run_inner(args) {
+        Ok(code) => code,
+        Err(message) => {
+            eprintln!("harn dump-harness-migrations: {message}");
+            1
+        }
+    }
+}
+
+fn run_inner(args: &DumpHarnessMigrationsArgs) -> Result<i32, String> {
+    let rendered = render(&migrations());
+    let out = Path::new(args.out.as_deref().unwrap_or(DEFAULT_OUTPUT));
+
+    if args.check {
+        return Ok(check_against(out, &rendered));
+    }
+
+    harn_vm::atomic_io::atomic_write(out, rendered.as_bytes())
+        .map_err(|error| format!("failed to write {}: {error}", out.display()))?;
+    eprintln!("wrote {}", out.display());
+    Ok(0)
+}
+
+/// Every removed global the runtime can route, as
+/// `legacy name -> harness.<capability>.<method>`.
+///
+/// Sorted and deduplicated by construction: the output is a `BTreeMap`, so the
+/// generated table is stable across runs and bisectable in review.
+pub(crate) fn migrations() -> BTreeMap<String, String> {
+    let mut rows = BTreeMap::new();
+    for name in harn_vm::stdlib::stdlib_builtin_names() {
+        // `__`-prefixed names are compiler plumbing and are never spelled in
+        // source, so a "did you mean" for one would be noise.
+        if name.starts_with("__") {
+            continue;
+        }
+        let Some(migration) = harn_vm::stdlib::harness_migration_for_builtin(&name) else {
+            continue;
+        };
+        rows.insert(
+            name,
+            format!(
+                "harness.{}.{}",
+                migration.capability.field_name(),
+                migration.method
+            ),
+        );
+    }
+    rows
+}
+
+/// Render the table.
+///
+/// `#[rustfmt::skip]` is load-bearing, not cosmetic. Without it rustfmt wraps
+/// the longer rows across three lines, the committed file stops matching what
+/// the generator emits, and `--check` reports drift on every run with no way to
+/// converge — the generator would have to reproduce rustfmt's wrapping rule
+/// exactly. Letting the generator own its own layout is the only stable
+/// arrangement.
+pub(crate) fn render(rows: &BTreeMap<String, String>) -> String {
+    let mut out = String::from(HEADER);
+    out.push_str("#[rustfmt::skip]\n");
+    out.push_str("pub(super) const HARNESS_MIGRATIONS: &[(&str, &str)] = &[\n");
+    for (name, replacement) in rows {
+        out.push_str(&format!("    ({name:?}, {replacement:?}),\n"));
+    }
+    out.push_str("];\n");
+    out
+}
+
+fn check_against(out: &Path, rendered: &str) -> i32 {
+    match std::fs::read_to_string(out) {
+        Ok(existing) if normalize(&existing) == normalize(rendered) => 0,
+        Ok(_) => {
+            eprintln!(
+                "{} is out of date; regenerate with `make gen-harness-migrations`",
+                out.display()
+            );
+            1
+        }
+        Err(_) => {
+            eprintln!(
+                "{} is missing; generate it with `make gen-harness-migrations`",
+                out.display()
+            );
+            1
+        }
+    }
+}
+
+/// Compare ignoring line-ending differences so the check passes on Windows
+/// checkouts (mirrors `dump-protocol-artifacts`).
+fn normalize(text: &str) -> String {
+    text.replace("\r\n", "\n")
+}
+
+const HEADER: &str = "\
+// DO NOT EDIT — generated by `harn dump-harness-migrations`.
+//
+// Source of truth: harn_vm::stdlib::harness_migration_for_builtin
+// Regenerate with: make gen-harness-migrations
+// Verify (CI):     make check-harness-migrations
+//
+// `harn-parser` cannot call the runtime registry — it compiles below harn-vm —
+// so this table is the projection it reads instead of a second hand-written
+// one. Every entry is `legacy global -> the typed harness path that replaced
+// it`; the argument shapes stay in the runtime recipe, because a mapping that
+// happens to compile is not necessarily the one the author meant.
+
+";
+
+#[cfg(test)]
+mod tests;

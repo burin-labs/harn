@@ -1,0 +1,152 @@
+# Connector OAuth
+
+`harn connect` is the guided setup entry point for connector credentials. It is
+intended for local operator setup: run the browser flow once, store tokens in
+the workspace keyring namespace, then reference the resulting secret ids from
+connector configuration.
+
+## Provider flows
+
+Built-in OAuth commands are available for Slack, Linear, and Notion:
+
+```bash
+harn connect slack \
+  --client-id "$SLACK_CLIENT_ID" \
+  --client-secret "$SLACK_CLIENT_SECRET" \
+  --scope "app_mentions:read chat:write"
+harn connect linear \
+  --client-id "$LINEAR_CLIENT_ID" \
+  --client-secret "$LINEAR_CLIENT_SECRET"
+harn connect notion \
+  --client-id "$NOTION_CLIENT_ID" \
+  --client-secret "$NOTION_CLIENT_SECRET"
+```
+
+The generic OAuth 2.1 path targets compliant protected resources:
+
+```bash
+harn connect generic acme https://mcp.example.com/mcp
+harn connect --generic acme https://mcp.example.com/mcp
+```
+
+Connector packages can also declare their setup metadata in the registered
+provider entry, letting operators run `harn connect <provider>` without
+hardcoded provider logic in core:
+
+```toml
+[[providers]]
+id = "acme"
+connector = { harn = "acme-connector/lib" }
+oauth = {
+  resource = "https://mcp.example.com/mcp",
+  authorization_endpoint = "https://auth.example.com/oauth/authorize",
+  token_endpoint = "https://auth.example.com/oauth/token",
+  registration_endpoint = "https://auth.example.com/oauth/register",
+  scopes = "mcp.read mcp.write",
+  token_endpoint_auth_method = "none",
+}
+```
+
+Hosts use the same metadata for generic setup and repair UI. Every connector
+package should declare a `setup` table on its `[[providers]]` entry:
+
+```toml
+[[providers]]
+id = "acme"
+connector = { harn = "acme-connector/lib" }
+capabilities = ["webhook", "oauth"]
+
+[providers.setup]
+auth_type = "oauth2"
+flow = "browser"
+required_scopes = ["mcp.read", "mcp.write"]
+setup_command = ["harn", "connect", "acme"]
+validation_command = ["harn", "connect", "status", "--connector", "acme", "--json"]
+
+[[providers.setup.health_checks]]
+id = "credentials"
+kind = "command"
+command = ["harn", "connect", "status", "--connector", "acme", "--json"]
+
+[providers.setup.recovery]
+missing_auth = "Run `harn connect acme`."
+expired_credentials = "Refresh or reconnect the OAuth token."
+revoked_credentials = "Revoke the stale local token, then reconnect."
+missing_scopes = "Reconnect with the scopes listed in required_scopes."
+inaccessible_resource = "Grant the connector access to the requested resource."
+transient_provider_outage = "Retry after the provider or credential backend recovers."
+```
+
+`harn connect setup-plan --connector <id> --json` emits a host-renderable plan.
+`harn connect status --connector <id> --json` reports one of `healthy`,
+`missing_install`, `missing_auth`, `expired_credentials`,
+`revoked_credentials`, `missing_scopes`, `inaccessible_resource`, or
+`transient_provider_outage`.
+
+When endpoints are not supplied, Harn discovers protected-resource metadata,
+then authorization-server metadata. For MCP login, the default client
+registration mode is CIMD: Harn sends
+`https://harnlang.com/.well-known/oauth-client.json` as its client id when the
+authorization server advertises Client ID Metadata Document support. If CIMD is
+not available and the server advertises dynamic client registration, Harn
+registers a loopback client for the selected redirect URI.
+
+GitHub App setup is separate from OAuth access tokens:
+
+```bash
+harn connect github \
+  --app-slug my-harn-app \
+  --app-id 12345 \
+  --private-key-file app.pem
+```
+
+The command opens the GitHub App installation URL and waits for the app setup
+callback to include `installation_id`. You can skip the browser callback when
+you already know the installation:
+
+```bash
+harn connect github \
+  --installation-id 67890 \
+  --app-id 12345 \
+  --private-key-file app.pem
+```
+
+## Callback server
+
+OAuth and GitHub App setup callbacks use plaintext HTTP and bind only to
+`127.0.0.1` or `localhost`. The default redirect URI uses port `0`, so Harn
+chooses a random free local port and sends that concrete URI in the
+authorization request; custom redirect URIs must also include an explicit port.
+Callback listeners are single-use and time out after five minutes. If a callback
+request includes an `Origin` header, Harn requires it to match the redirect
+origin.
+
+## OAuth guarantees
+
+Harn always sends PKCE S256 parameters. The generic flow validates advertised
+PKCE support when authorization-server metadata is available. The generic flow
+also sends the `resource` parameter to both the authorization endpoint and token
+endpoint; MCP server URLs are canonicalized first by lowercasing the scheme and
+host, dropping default ports, and removing query strings, fragments, and trailing
+slashes. Provider-specific flows let you override `--resource` when a provider
+requires one.
+
+## Stored secrets
+
+OAuth setup stores connector-friendly ids in the same keyring namespace that
+the nearest `harn.toml` uses:
+
+- `<provider>/access-token`
+- `<provider>/refresh-token` when returned by the provider
+- `<provider>/oauth-token` for refresh metadata such as token endpoint, client
+  id, client secret, scopes, resource, and expiration
+
+GitHub App setup stores:
+
+- `github/installation-<id>`
+- `github/app-private-key` when `--private-key-file` is supplied
+- `github/webhook-secret` when a webhook secret is supplied
+
+Use `harn connect --list`, `harn connect --refresh <provider>`, and
+`harn connect --revoke <provider>` to inspect, refresh, or remove local
+connector credentials.

@@ -1,0 +1,21 @@
+pub enum Status {
+  Ready(message: string)
+  Failed(message: string, code: int)
+}
+
+pub struct Config {
+  host: string
+  port?: int
+}
+
+interface Repository<T> {
+  fn get(self, id: string) -> T
+  fn map<U>(self, value: T, f: fn(T) -> U) -> U
+}
+
+pub pipeline default(harness: Harness) {
+  const status = Status.Ready("ready")
+  const cfg = Config({host: "localhost"})
+  harness.stdio.println(status.variant)
+  harness.stdio.println(cfg.host)
+}

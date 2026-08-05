@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/toolchain_facts.request.json",
+  "title": "tools.toolchain_facts request",
+  "description": "Config-declared toolchain identity probes for verification profiles. Rows are data, not a hardcoded language/toolchain list.",
+  "type": "object",
+  "properties": {
+    "probes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Stable toolchain/profile name, e.g. cargo, zig, go, or a project-local synthetic adapter."
+          },
+          "argv": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string" },
+            "description": "Version probe argv. Shell parsing is intentionally not implicit."
+          },
+          "cwd": {
+            "type": "string",
+            "description": "Optional working directory for the probe and relative state path checks."
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": { "type": "string" },
+            "description": "Environment overrides passed to the probe."
+          },
+          "env_mode": {
+            "type": "string",
+            "enum": ["inherit_clean", "replace", "patch"],
+            "default": "inherit_clean"
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Probe timeout. Zero or absent means no hostlib deadline."
+          },
+          "version": {
+            "type": "object",
+            "properties": {
+              "parser": {
+                "type": "string",
+                "enum": ["first_line", "regex"],
+                "default": "first_line"
+              },
+              "pattern": {
+                "type": "string",
+                "description": "Regex pattern used when parser is regex."
+              },
+              "group": {
+                "type": "integer",
+                "minimum": 0,
+                "default": 1,
+                "description": "Capture group used when parser is regex."
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": { "parser": { "const": "regex" } },
+                  "required": ["parser"]
+                },
+                "then": { "required": ["pattern"] }
+              }
+            ],
+            "additionalProperties": false
+          },
+          "cache_env": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "description": "Environment variable names that identify toolchain caches, e.g. CARGO_HOME or ZIG_LOCAL_CACHE_DIR."
+          },
+          "state_paths": {
+            "type": "array",
+            "maxItems": 128,
+            "items": { "type": "string", "minLength": 1 },
+            "description": "Optional build-server/cache state paths to stat, resolved relative to cwd when not absolute."
+          }
+        },
+        "required": ["name", "argv"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["probes"],
+  "additionalProperties": false
+}

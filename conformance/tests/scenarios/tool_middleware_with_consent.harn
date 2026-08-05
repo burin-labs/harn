@@ -1,0 +1,66 @@
+/**
+ * with_consent — short-circuits denied calls; passes through approved
+ * ones with `audit.consent` populated.
+ */
+import { with_consent } from "std/llm/tool_middleware"
+
+fn synthetic_next() {
+  return { call ->
+    return {
+      ok: true,
+      status: "ok",
+      tool_name: call.tool_name,
+      tool_call_id: call.call_id,
+      arguments: call.tool_args,
+      result: "ran",
+      rendered_result: "ran",
+      observation: "",
+      error: nil,
+      error_category: nil,
+      executor: "harn",
+    }
+  }
+}
+
+fn envelope(name) {
+  return {
+    tool_name: name,
+    tool_args: {},
+    call_id: "call-" + name,
+    declared_executor: "harn",
+    schema: nil,
+    description: "",
+    turn: {iteration: 0, session_id: ""},
+  }
+}
+
+pipeline default(harness: Harness) {
+  const next = synthetic_next()
+  // Decide based on tool name; `delete_files` always denied.
+  const prompt = { call ->
+    if call.tool_name == "delete_files" {
+      return {decision: "denied", reason: "destructive op needs human approval", decided_by: "test"}
+    }
+    return {decision: "approved", decided_by: "test"}
+  }
+  const mw = with_consent(harness.clock, prompt)
+  // approved
+  const r1 = mw(envelope("read"), next)
+  harness.stdio.println(r1.ok)
+  harness.stdio.println(r1.audit.consent.decision)
+  harness.stdio.println(r1.audit.consent.decided_by)
+  // denied
+  const r2 = mw(envelope("delete_files"), next)
+  harness.stdio.println(r2.ok)
+  harness.stdio.println(r2.error_category)
+  harness.stdio.println(r2.error)
+  harness.stdio.println(r2.audit.consent.decision)
+  // bool-shorthand: returning bool is also accepted
+  const approve_all = with_consent(harness.clock, { _call -> true })
+  const deny_all = with_consent(harness.clock, { _call -> false })
+  const r3 = approve_all(envelope("any"), next)
+  const r4 = deny_all(envelope("any"), next)
+  harness.stdio.println(r3.ok)
+  harness.stdio.println(r4.ok)
+  harness.stdio.println(r4.error_category)
+}

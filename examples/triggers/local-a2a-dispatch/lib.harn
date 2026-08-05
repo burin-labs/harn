@@ -1,0 +1,21 @@
+import "std/triggers"
+
+/** Return deterministic issue triage output from normalized issue input. */
+pub fn triage_issue_payload(raw, trace_id, replay_of_event_id) -> dict {
+  const issue = raw.issue ?? raw
+  const title = issue.title ?? "untitled issue"
+  return {
+    status: "triaged",
+    labels: ["needs-owner"],
+    title: title,
+    trace_id: trace_id,
+    replay_of_event_id: replay_of_event_id,
+  }
+}
+
+/** Return deterministic issue triage output for local and A2A dispatch demos. */
+pub fn triage_issue(harness: Harness, event: TriggerEvent) -> dict {
+  const raw = event.provider_payload.raw ?? {}
+  const context = harness.runtime.handler_context()
+  return triage_issue_payload(raw, context?.trace_id ?? event.trace_id, context?.replay_of_event_id)
+}

@@ -1,0 +1,14 @@
+/**
+ * Resolve provider-aware automatic reasoning options for an agent loop.
+ *
+ * Harn keeps the provider calibration in the VM so raw `llm_call`,
+ * `agent_loop`, and ACP session config all share one policy vocabulary:
+ * `auto`, `off`, `minimal`, `low`, `medium`, `high`, and `xhigh`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_reasoning_apply(llm: HarnessLlm, opts) {
+  return llm.apply_reasoning_policy(opts)
+}

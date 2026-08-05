@@ -1,0 +1,10 @@
+/**
+ * CH-03 (#1874): bare `harness.channels.append("foo", ...)` resolves to
+ * `tenant:<current-or-default-tenant>:foo`.
+ */
+pipeline default(harness: Harness) {
+  const receipt = harness.channels.append("pr.merged", {n: 1}, {id: "bare-1"})
+  harness.stdio.println(receipt.scope)
+  harness.stdio.println(receipt.scope_id)
+  harness.stdio.println(receipt.name_resolved)
+}

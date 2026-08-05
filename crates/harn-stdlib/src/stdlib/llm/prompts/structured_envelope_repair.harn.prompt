@@ -1,0 +1,8 @@
+The following text was supposed to be JSON conforming to the configured schema, but it failed validation. Repair it and respond with only the corrected JSON. Do not include prose, markdown fences, or commentary.
+
+Validation errors: {{ errors_line }}
+
+Original text:
+{{ raw_text }}
+
+Reply with valid JSON only.

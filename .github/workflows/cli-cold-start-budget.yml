@@ -1,0 +1,78 @@
+# Cold-start budget gate for ported CLI subcommands. Tracks epic
+# #2293 (G5 = #2298).
+#
+# IMPORTANT: this workflow is NOT wired into the required-status set in
+# `ci.yml`'s `CI status` job. It is intentionally advisory and runs on a daily
+# main-branch cadence plus manual dispatch. Do not add a pull_request trigger:
+# this lane builds an optimized `harn` binary before measuring ~millisecond
+# CLI startup and otherwise adds release-build wall time to PR rollup.
+#
+# See bench/cli/README.md for the methodology and per-command budgets.
+
+name: CLI cold-start budget
+
+on:
+  schedule:
+    - cron: '17 11 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  # Match ci.yml so warnings don't slip in via a path that only this
+  # workflow exercises.
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  cold-start-budget:
+    name: Cold-start budget
+    # Keep manual release-ref runs out of this advisory lane. The release binary
+    # matrix already builds official artifacts, so this budget lane would add
+    # noise without new coverage.
+    if: >-
+      (github.event_name != 'workflow_dispatch' || !startsWith(github.ref_name, 'release/v'))
+    # This advisory workflow can run on GitHub-hosted runners before it is part
+    # of the required CI aggregate. Keep an explicit ceiling so a wedged release
+    # build does not burn the platform default timeout.
+    timeout-minutes: 30
+    # Bench is wall-clock sensitive, so runner noise is the main threat
+    # to the budget. This repo runs CI on hosted runners only (public
+    # repo: hosted minutes are free, and self-hosted routing contends
+    # with local development work), so the budget and iteration count
+    # are calibrated to the ubuntu-latest noise floor.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/rust-toolchain
+      - uses: ./.github/actions/sccache-install
+        # sccache is a build-cache optimization, not a build requirement.
+        continue-on-error: true
+      - name: Configure Cargo to use sccache
+        if: env.SCCACHE_PATH != ''
+        run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
+      - uses: ./.github/actions/rust-cache
+        continue-on-error: true
+        with:
+          shared-key: cli-cold-start-budget
+          cache-bin: false
+      - name: Build release harn
+        # This is benchmark setup, not the startup-performance budget. Hosted
+        # cold builds now sit just beyond 20 minutes, so keep enough bounded
+        # headroom for compilation while the measured bench retains its
+        # separate five-minute ceiling below.
+        timeout-minutes: 25
+        run: cargo build --locked --release --bin harn
+      - name: Run cold-start bench
+        timeout-minutes: 5
+        # `--no-build` because we already built above; `--iterations` is
+        # intentionally lower on CI than the local default (20) because
+        # the ubuntu-latest noise floor makes a tighter loop misleading.
+        run: ./scripts/bench_cli_cold_start.sh --no-build --iterations 10

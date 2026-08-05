@@ -1,0 +1,29 @@
+import { with_llm_script } from "std/testing"
+
+/**
+ * Transport-level failure: the underlying LLM call errors out (e.g.
+ * rate limit). The envelope surfaces ok=false, error_category=
+ * "rate_limit" (the underlying category — not "transport"), and skips
+ * any repair pass (no raw text to salvage).
+ */
+pipeline default(harness: Harness) {
+  const schema = {type: "object", required: ["k"], properties: {k: {type: "string"}}}
+  with_llm_script(
+    harness.llm,
+    [{error: {category: "rate_limit", message: "429 slow down"}}],
+    { ->
+      const r = harness.llm.call_structured_result(
+        "Q",
+        schema,
+        {provider: "mock", repair: {enabled: true}},
+      )
+      harness.stdio.println(r.ok)
+      harness.stdio.println(r.data == nil)
+      harness.stdio.println(r.error_category)
+      harness.stdio.println(contains(r.error, "429"))
+      harness.stdio.println(r.repaired)
+      harness.stdio.println(r.attempts)
+      harness.stdio.println(r.raw_text)
+    },
+  )
+}

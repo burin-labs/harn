@@ -1,0 +1,5 @@
+import { run } from "pub_import_typed_facade_outer"
+
+pipeline default() {
+  run({options: {token: "x"}})
+}

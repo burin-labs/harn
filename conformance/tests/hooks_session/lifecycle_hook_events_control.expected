@@ -1,0 +1,8 @@
+pre_suspend.control=block
+pre_suspend.reason=operator hold
+pre_resume.control=modify
+pre_resume.modify.resume_input=amended task
+on_drain_decision.control=block
+on_drain_decision.reason=policy violation
+on_unsettled_detected.control=block
+on_unsettled_detected.reason=settle before exit

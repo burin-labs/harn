@@ -1,0 +1,6 @@
+pipeline default(harness: Harness) {
+  // `x` has the gradual `any` type; `string + any` is compatible (the real
+  // check is deferred to runtime), not a static "can't add" error.
+  const x: any = "5"
+  harness.stdio.println("v=" + x)
+}

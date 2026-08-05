@@ -1,0 +1,363 @@
+import "std/schema"
+
+type DependabotGroup = {
+  patterns: list<string>,
+  exclude_patterns: list<string>,
+  update_types: list<string>,
+}
+
+/**
+ * What one package ecosystem's groups have to look like.
+ *
+ * `families` are the named high-risk sets that must stay reviewable on their
+ * own. `catch_all_update_types` is what the catch-all group is allowed to
+ * sweep up: `["minor", "patch"]` for package ecosystems, so a major keeps its
+ * own PR and its own revert, and `[]` for `github-actions`, where majors are
+ * runner-baseline bumps that arrive fleet-wide and are better batched.
+ */
+type EcosystemPolicy = {families: dict<string, list<string>>, catch_all_update_types: list<string>}
+
+/**
+ * One Dependabot update entry: the unit a grouping policy applies to.
+ *
+ * A repository may declare an ecosystem more than once when its packages live
+ * in unrelated directories — `npm` for a dashboard and `npm` for a published
+ * SDK want different families and different review owners. Each entry carries
+ * its own `groups` map, so "the catch-all for npm" is only a well-formed
+ * question once the directory is part of the subject.
+ */
+pub type EcosystemGroups = {
+  ecosystem: string,
+  directories: list<string>,
+  groups: dict<string, DependabotGroup>,
+}
+
+pub type GroupErrorKind = "missing_group" \
+  | "ambiguous_membership" \
+  | "missing_catch_all" \
+  | "extra_catch_all" \
+  | "catch_all_update_types" \
+  | "unknown_ecosystem"
+
+pub type GroupError = {
+  kind: GroupErrorKind,
+  ecosystem: string,
+  directories: list<string>,
+  group: string,
+  dependency: string,
+  matches: list<string>,
+}
+
+const POLICIES: dict<string, EcosystemPolicy> = {
+  cargo: {
+    families: {
+      cranelift: [
+        "cranelift-codegen",
+        "cranelift-frontend",
+        "cranelift-jit",
+        "cranelift-module",
+        "cranelift-native",
+        "cranelift-object",
+      ],
+      wasmtime: ["wasmtime", "wasmtime-wasi"],
+      opentelemetry: [
+        "opentelemetry",
+        "opentelemetry_sdk",
+        "opentelemetry-otlp",
+        "tracing-opentelemetry",
+      ],
+    },
+    catch_all_update_types: ["minor", "patch"],
+  },
+  npm: {
+    families: {"react-runtime": ["react", "react-dom"]},
+    catch_all_update_types: ["minor", "patch"],
+  },
+  "github-actions": {families: {}, catch_all_update_types: []},
+}
+
+fn dependabot_schema() {
+  const group = schema_object(
+    {
+      patterns: schema_field(schema_list(schema_string())),
+      "exclude-patterns": schema_field(schema_list(schema_string()), false),
+      "update-types": schema_field(schema_list(schema_string()), false),
+    },
+    {additional_properties: true},
+  )
+  const update = schema_object(
+    {
+      "package-ecosystem": schema_field(schema_string()),
+      directory: schema_field(schema_string(), false),
+      directories: schema_field(schema_list(schema_string()), false),
+      groups: schema_field(schema_dict(group), false),
+    },
+    {additional_properties: true},
+  )
+  return schema_object(
+    {version: schema_field(schema_int()), updates: schema_field(schema_list(update))},
+    {additional_properties: true},
+  )
+}
+
+/**
+ * The directories one update entry governs, from either spelling.
+ *
+ * Dependabot accepts `directory:` for a single path and `directories:` for a
+ * list, and rejects an entry carrying both. Normalizing at this boundary means
+ * nothing downstream has to know there are two spellings.
+ */
+fn entry_directories(update, ecosystem: string) -> list<string> {
+  const single = update.get("directory")
+  const many = update.get("directories")
+  if single != nil && many != nil {
+    throw "Dependabot '${ecosystem}' entry sets both 'directory' and 'directories'"
+  }
+  if many != nil {
+    return many
+  }
+  if single != nil {
+    return [single]
+  }
+  throw "Dependabot '${ecosystem}' entry sets neither 'directory' nor 'directories'"
+}
+
+/**
+ * Parse and normalize every update entry's group map at the owning YAML
+ * boundary.
+ *
+ * The result is a list rather than a map because `package-ecosystem` alone
+ * does not identify an entry: one repository can declare `npm` twice for two
+ * package directories. Two entries that claim the same ecosystem *and* the
+ * same directory do collide — nothing would say which group map governs that
+ * directory — so that fails closed rather than picking one.
+ */
+pub fn groups_from_text(text: string) -> list<EcosystemGroups> {
+  const document = unwrap(schema_check(yaml_parse(text), dependabot_schema()))
+  let entries: list<EcosystemGroups> = []
+  for update in document.updates {
+    const ecosystem = update.get("package-ecosystem")
+    const directories = entry_directories(update, ecosystem)
+    for existing in entries {
+      if existing.ecosystem == ecosystem {
+        for directory in directories {
+          if existing.directories.contains(directory) {
+            throw "Dependabot has two '${ecosystem}' update entries covering '${directory}'"
+          }
+        }
+      }
+    }
+    const groups = (update.get("groups") ?? {}).map_values(
+      { group ->
+        {
+          patterns: group.patterns,
+          exclude_patterns: group.get("exclude-patterns") ?? [],
+          update_types: group.get("update-types") ?? [],
+        }
+      },
+    )
+    entries = entries + [{ecosystem: ecosystem, directories: directories, groups: groups}]
+  }
+  return entries
+}
+
+/** GitHub Dependabot `patterns` use `*` as a zero-or-more wildcard. */
+pub fn dependabot_pattern_matches(pattern: string, dependency: string) -> bool {
+  const pchars = chars(pattern)
+  const dchars = chars(dependency)
+  let p = 0
+  let d = 0
+  let star = -1
+  let retry_at = 0
+  while d < dchars.count {
+    if p < pchars.count && pchars[p] == dchars[d] {
+      p = p + 1
+      d = d + 1
+    } else if p < pchars.count && pchars[p] == "*" {
+      star = p
+      retry_at = d
+      p = p + 1
+    } else if star >= 0 {
+      retry_at = retry_at + 1
+      d = retry_at
+      p = star + 1
+    } else {
+      return false
+    }
+  }
+  while p < pchars.count && pchars[p] == "*" {
+    p = p + 1
+  }
+  return p == pchars.count
+}
+
+/**
+ * Whether `dependency` belongs to `group`.
+ *
+ * `exclude-patterns` wins over `patterns`, which is what keeps a catch-all
+ * from also claiming a named family. GitHub resolves such an overlap by
+ * assigning the update to the first matching group in file order, but
+ * `yaml_parse` hands back a sorted map, so file order is not observable here
+ * — and a contract that depends on it is one a reader cannot check either.
+ * Excluding the families explicitly makes membership a property of the group
+ * rather than of its position.
+ */
+fn group_matches(group: DependabotGroup, dependency: string) -> bool {
+  for excluded in group.exclude_patterns {
+    if dependabot_pattern_matches(excluded, dependency) {
+      return false
+    }
+  }
+  for pattern in group.patterns {
+    if dependabot_pattern_matches(pattern, dependency) {
+      return true
+    }
+  }
+  return false
+}
+
+pub fn matching_groups(groups: dict<string, DependabotGroup>, dependency: string) -> list<string> {
+  let matches: list<string> = []
+  for group in groups {
+    if group_matches(group.value, dependency) {
+      matches = matches + [group.key]
+    }
+  }
+  return matches.sorted()
+}
+
+fn dependabot_pattern_is_catch_all(pattern: string) -> bool {
+  if pattern == "" {
+    return false
+  }
+  for character in chars(pattern) {
+    if character != "*" {
+      return false
+    }
+  }
+  return true
+}
+
+fn group_is_catch_all(group: DependabotGroup) -> bool {
+  for pattern in group.patterns {
+    if dependabot_pattern_is_catch_all(pattern) {
+      return true
+    }
+  }
+  return false
+}
+
+fn error_at(
+  kind: string,
+  entry: EcosystemGroups,
+  group: string,
+  matches: list<string> = [],
+  dependency: string = "",
+) -> GroupError {
+  return {
+    kind: kind,
+    ecosystem: entry.ecosystem,
+    directories: entry.directories,
+    group: group,
+    dependency: dependency,
+    matches: matches,
+  }
+}
+
+pub fn ecosystem_errors(entry: EcosystemGroups, policy: EcosystemPolicy) -> list<GroupError> {
+  const groups = entry.groups
+  let errors: list<GroupError> = []
+  for family in policy.families {
+    if groups.get(family.key) == nil {
+      errors = errors + [error_at("missing_group", entry, family.key)]
+    }
+    for dependency in family.value {
+      const matches = matching_groups(groups, dependency)
+      if matches != [family.key] {
+        errors = errors + [error_at("ambiguous_membership", entry, family.key, matches, dependency)]
+      }
+    }
+  }
+  let catch_alls: list<string> = []
+  for group in groups {
+    if group_is_catch_all(group.value) {
+      catch_alls = catch_alls + [group.key]
+    }
+  }
+  catch_alls = catch_alls.sorted()
+  if catch_alls.count == 0 {
+    return errors + [error_at("missing_catch_all", entry, "")]
+  }
+  if catch_alls.count > 1 {
+    return errors + [error_at("extra_catch_all", entry, "", catch_alls)]
+  }
+  const catch_all_name = catch_alls[0] ?? ""
+  const catch_all = groups.get(catch_all_name)
+  if catch_all.update_types.sorted() != policy.catch_all_update_types.sorted() {
+    return errors
+      + [
+      error_at("catch_all_update_types", entry, catch_all_name, catch_all.update_types.sorted()),
+    ]
+  }
+  return errors
+}
+
+pub fn group_errors(
+  entries: list<EcosystemGroups>,
+  policies: dict<string, EcosystemPolicy> = POLICIES,
+) -> list<GroupError> {
+  let errors: list<GroupError> = []
+  for entry in entries {
+    const policy = policies.get(entry.ecosystem)
+    if policy == nil {
+      errors = errors + [error_at("unknown_ecosystem", entry, "")]
+    } else {
+      errors = errors + ecosystem_errors(entry, policy)
+    }
+  }
+  return errors
+}
+
+/**
+ * Which update entry an error is about.
+ *
+ * The directories are part of the subject, not decoration: a repository with
+ * two `npm` entries gets two of most of these errors, and "npm: missing group
+ * 'react-runtime'" would not say which one to edit.
+ */
+pub fn group_error_scope(error: GroupError) -> string {
+  return "${error.ecosystem} (${error.directories.join(", ")})"
+}
+
+pub fn group_error_message(error: GroupError) -> string {
+  const scope = group_error_scope(error)
+  if error.kind == "missing_group" {
+    return "${scope}: missing group '${error.group}'"
+  }
+  if error.kind == "missing_catch_all" {
+    return "${scope}: no catch-all group, so every routine update opens its own PR"
+  }
+  if error.kind == "extra_catch_all" {
+    return "${scope}: more than one catch-all group: ${json_stringify(error.matches)}"
+  }
+  if error.kind == "catch_all_update_types" {
+    return "${scope}: catch-all '${error.group}' sweeps up ${json_stringify(error.matches)}"
+  }
+  if error.kind == "unknown_ecosystem" {
+    return "${scope}: no grouping policy is declared for this ecosystem"
+  }
+  return "${scope}: ${error.dependency} must match only '${error.group}', matched ${json_stringify(error.matches)}"
+}
+
+pipeline main(harness: Harness, task) {
+  const entries = groups_from_text(harness.fs.read_text(".github/dependabot.yml"))
+  const errors = group_errors(entries)
+  if errors.count > 0 {
+    for error in errors {
+      harness.stdio.eprintln("error: ${group_error_message(error)}")
+    }
+    return 1
+  }
+  harness.stdio.println("Dependabot update groups OK")
+  return 0
+}

@@ -1,0 +1,51 @@
+import {
+  actor_chain_format,
+  actor_chain_report,
+  actor_chain_subject_parts,
+  actor_chain_summary,
+} from "std/identity"
+
+pipeline default(harness: Harness) {
+  const chain = {
+    sub: "user:owner",
+    scopes: ["repo:read", "repo:write"],
+    may_act: {sub: "agent:delegate"},
+    act: {
+      sub: "agent:reviewer",
+      scopes: ["repo:read"],
+      act: {sub: "agent:planner", scope: "repo:read"},
+    },
+  }
+  const report = actor_chain_report(chain)
+  harness.stdio.println(report.ok)
+  harness.stdio.println(report.depth)
+  harness.stdio.println(report.delegated)
+  const current = report.current
+  require current != nil, "report should expose current actor"
+  harness.stdio.println(current.subject)
+  harness.stdio.println(current.role)
+  harness.stdio.println(join(current.scopes, ","))
+  harness.stdio.println(report.prior_actors[0]?.subject)
+  harness.stdio.println(join(report.prior_actors[0]?.scopes ?? [], ","))
+  const origin = report.origin
+  require origin != nil, "report should expose origin"
+  harness.stdio.println(origin.subject)
+  harness.stdio.println(report.may_act)
+  harness.stdio.println(actor_chain_format(chain))
+  harness.stdio.println(actor_chain_format(chain, {style: "arrow"}))
+  const parts = actor_chain_subject_parts("agent:reviewer")
+  harness.stdio.println(parts.kind + "/" + parts.id)
+  const plain = actor_chain_subject_parts("root")
+  harness.stdio.println(plain.kind + "/" + plain.id)
+  const solo = actor_chain_summary({sub: "user:solo"})
+  harness.stdio.println(solo.delegated)
+  harness.stdio.println(solo.current.subject)
+  const invalid = actor_chain_report({sub: "user:owner", act: {sub: 42, scopes: "repo:read"}})
+  harness.stdio.println(invalid.ok)
+  harness.stdio.println(invalid.issues[0]?.code)
+  harness.stdio.println(invalid.issues[0]?.path)
+  const bad_scope = actor_chain_report({sub: "user:owner", scopes: [1]})
+  harness.stdio.println(bad_scope.ok)
+  harness.stdio.println(bad_scope.issues[0]?.code)
+  harness.stdio.println(bad_scope.issues[0]?.path)
+}

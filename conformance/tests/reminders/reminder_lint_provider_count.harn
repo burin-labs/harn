@@ -1,0 +1,5 @@
+import { agent_loop } from "std/agent/loop"
+
+pipeline main(harness: Harness, task) {
+  agent_loop(harness, task, nil, {reminders: {providers: ["a", "b", "c", "d", "e"]}})
+}

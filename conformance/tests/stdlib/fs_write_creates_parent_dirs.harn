@@ -1,0 +1,32 @@
+/**
+ * Regression guard for harn#4147: content-producing filesystem writes must
+ * recreate missing ancestor directories (`mkdir -p`). Before the fix, writing
+ * into a not-yet-created directory failed with "No such file or directory".
+ * Covers the exact shape that broke qmode's exit_plan_mode (harness.fs.write_text
+ * into a fresh state dir) plus the stdlib write_file / append_file variants.
+ */
+pipeline default(harness: Harness) {
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-scoped-parent-" + harness.random.uuid(),
+  )
+  // harness.fs.write_text into a not-yet-created nested dir (the qmode case).
+  const plan_p = path_join(root, "qmode/task-1/plan.json")
+  harness.fs.write_text(plan_p, "{\"plan\":\"Redis-backed\"}")
+  harness.stdio.println(contains(harness.fs.read_text(plan_p), "Redis-backed"))
+  // stdlib write_file into a deeper missing chain.
+  const cfg_p = path_join(root, "a/b/c/config.json")
+  harness.fs.write_text(cfg_p, "cfg-ok")
+  harness.stdio.println(harness.fs.read_text(cfg_p))
+  // append_file creates the file and its parents when absent.
+  const log_p = path_join(root, "logs/deep/qa.jsonl")
+  harness.fs.append(log_p, "line1\n")
+  harness.fs.append(log_p, "line2\n")
+  harness.stdio.println(harness.fs.read_text(log_p) == "line1\nline2\n")
+  // append_file_locked preserves the same parent-creation contract while
+  // taking an advisory cross-process lock around the append.
+  const locked_log_p = path_join(root, "locked/logs/deep/qa.jsonl")
+  harness.fs.append_locked(locked_log_p, "locked\n", {timeout_ms: 1000})
+  harness.stdio.println(harness.fs.read_text(locked_log_p) == "locked\n")
+  harness.fs.delete(root)
+}

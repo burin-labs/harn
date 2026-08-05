@@ -1,0 +1,66 @@
+import { agent_loop } from "std/agent/loop"
+// Verifies the per-agent autonomy budget is VM-enforced: once the
+// configured per_day quota is consumed, the next agent_loop call
+// short-circuits with `status = "approval_required"` and emits a HITL
+// approval request before any LLM work fires. Mirrors the trigger-side
+// `daily_autonomy_budget_exceeded` flow added in burin-labs/harn#928.
+import "std/hitl"
+import { with_llm_script } from "std/testing"
+
+pipeline test(harness: Harness, task) {
+  with_llm_script(
+    harness.llm,
+    [
+      {text: "##DONE##", input_tokens: 5, output_tokens: 2, model: "mock-model"},
+      {text: "##DONE##", input_tokens: 5, output_tokens: 2, model: "mock-model"},
+    ],
+    { ->
+      const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+        + to_string(
+        harness.random.range(100000, 999999),
+      )
+      const key = "agent.autonomy.budget." + unique
+      const first = agent_loop(
+        harness,
+        "First task",
+        "You are helpful",
+        {
+          provider: "mock",
+          model: "mock-model",
+          max_iterations: 1,
+          max_nudges: 0,
+          autonomy_budget: {per_day: 1, key: key},
+        },
+      )
+      harness.stdio.println(first.status)
+      const second = agent_loop(
+        harness,
+        "Second task",
+        "You are helpful",
+        {
+          provider: "mock",
+          model: "mock-model",
+          max_iterations: 1,
+          max_nudges: 0,
+          autonomy_budget: {per_day: 1, key: key, reviewer: "oncall"},
+        },
+      )
+      harness.stdio.println(second.status)
+      harness.stdio.println(second.reason)
+      harness.stdio.println(second.approval_required)
+      harness.stdio.println(second.from_tier)
+      harness.stdio.println(second.requested_tier)
+      harness.stdio.println(second.reviewers[0])
+      harness.stdio.println(type_of(second.request_id) == "string" && len(second.request_id) > 0)
+      const pending = harness.interaction.hitl_pending({}).filter({ row -> row.agent == key })
+      harness.stdio.println(len(pending) >= 1)
+      harness.stdio.println(pending[0].request_kind)
+    },
+  )
+}
+// First call burns the quota.
+// Mock's `##DONE##` exits the loop cleanly -> status "done".
+// Second call exceeds the daily quota and is routed to approval
+// before the LLM is touched. The result envelope carries the same
+// `approval_required` shape the trigger dispatcher emits.
+// The approval request landed on hitl.approvals.

@@ -1,0 +1,63 @@
+import { agent_loop } from "std/agent/loop"
+/**
+ * agent_loop(harness, {tool_caller}) routes every dispatch through the supplied
+ * caller. The caller increments a counter, observes the envelope, and
+ * delegates. Asserts the counter matches the number of tool calls and
+ * that the audit data attached by the caller surfaces on the dispatch
+ * result that gets recorded into the session.
+ */
+import { with_required_reason } from "std/llm/tool_middleware"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn tools() {
+  const r = tool_registry()
+  return tool_define(
+    r,
+    "echo",
+    "Echo back",
+    {
+      handler: { args -> "echoed: " + to_string(args?.msg ?? "") },
+      parameters: {msg: {type: "string"}},
+    },
+  )
+}
+
+pipeline default(harness: Harness) {
+  const observed = harness.runtime.atomic(0)
+  // Two tool calls in turn 1, then a finishing turn.
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        tool_calls: [
+          {id: "c1", name: "echo", arguments: {msg: "first", reason: "first call"}},
+          {id: "c2", name: "echo", arguments: {msg: "second", reason: "second call"}},
+        ],
+      },
+      llm_text("##DONE##"),
+    ],
+    { ->
+      const mw = with_required_reason()
+      const counting_caller = { call, next ->
+        let _ = harness.runtime.atomic_add(observed, 1)
+        return mw.caller(call, next)
+      }
+      const result = agent_loop(
+        harness,
+        "do it",
+        nil,
+        {
+          provider: "mock",
+          tools: tools(),
+          tool_format: "native",
+          max_iterations: 3,
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          tool_caller: counting_caller,
+        },
+      )
+      harness.stdio.println(result.status)
+      harness.stdio.println(harness.runtime.atomic_get(observed))
+    },
+  )
+}

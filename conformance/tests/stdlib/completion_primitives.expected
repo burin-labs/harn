@@ -1,0 +1,16 @@
+[harn] harn.completion.context.v1
+[harn] swift
+[harn] metadata
+[harn] true
+[harn] provider_blocked
+[harn] off
+[harn] provider_blocked
+[harn] inline_replace
+[harn] true
+[harn] true
+[harn] true
+[harn] true
+[harn] inline-completion/ollama/qwen
+[harn] success
+[harn] completion
+[harn] 100

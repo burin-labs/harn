@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/list_handles.response.json",
+  "title": "tools.list_handles response",
+  "type": "object",
+  "properties": {
+    "handles": {
+      "type": "array",
+      "description": "Live long-running command handles for the session, empty when none are running. An entry disappears the instant its process exits and its waiter drains it.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "handle_id": { "type": "string" },
+          "session_id": { "type": "string" },
+          "lease": { "type": "string", "enum": ["awaited", "service"] },
+          "command_or_op_descriptor": { "type": "string" },
+          "started_at": { "type": "string", "format": "date-time" }
+        },
+        "required": [
+          "handle_id",
+          "session_id",
+          "lease",
+          "command_or_op_descriptor",
+          "started_at"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["handles"],
+  "additionalProperties": false
+}

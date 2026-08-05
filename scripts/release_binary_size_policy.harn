@@ -1,0 +1,625 @@
+// The typed two-level release binary-size policy (#6020).
+//
+// Two different questions were previously answered by one number:
+//
+//   1. "Is this artifact safe to distribute?" — a fail-closed absolute ceiling.
+//   2. "Did this change grow the binary more than we expect?" — a relative
+//      signal that wants attribution and a decision.
+//
+// Collapsing them made the ceiling hug the last measurement (the old policy
+// required 1-4 MiB of headroom above a ~222 MiB baseline), so every genuine
+// change turned into a release-day byte cliff: 212 -> 213 -> 216 -> 218 -> 220
+// MiB inside one release line, each raise its own PR and its own exact release
+// build after the useful work was already certified.
+//
+// The fuse and the growth signal are separated here. The fuse keeps material
+// headroom and changes rarely. The growth signal fires early and explains
+// itself, and a crossing is accepted only by a written reason that lands in the
+// same change as the growth.
+//
+// Raw bytes alone cannot classify causality, which is why comparability is a
+// first-class part of the contract. Between v0.10.52 candidates with identical
+// source and toolchain, moving x86_64 release codegen units from 16 to 8 shed
+// 8,407,168 bytes. That is codegen duplication and layout, not eight megabytes
+// of product. A baseline built with different codegen settings is not a
+// baseline this policy will draw a growth conclusion from.
+import { TypedReadResult, read_json_typed_result } from "std/fs"
+import "std/schema"
+
+/**
+ * The build settings that have to match before two measurements can be
+ * subtracted from each other.
+ *
+ * `aot_embedded` is a boolean rather than a byte count on purpose: whether the
+ * AOT payload is compiled in is a build-identity question, while how large it
+ * has become is product growth this policy exists to report.
+ */
+pub type ReleaseBuildIdentity = {
+  profile: string,
+  codegen_units: int,
+  lto: string,
+  strip: string,
+  rustc: string,
+  aot_embedded: bool,
+}
+
+pub type ReleaseBinarySizeBaseline = {
+  version: string,
+  source_sha: string,
+  bytes: int,
+  observed_at: string,
+  build_identity: ReleaseBuildIdentity,
+}
+
+/**
+ * A growth crossing needs both a floor and a scale. An absolute-only threshold
+ * is noise on a large artifact; a ratio-only threshold is noise on a small one.
+ * `warn_percent_hundredths` is an integer per-ten-thousand so the contract has
+ * no float equality in it: 200 is 2.00%.
+ */
+pub type ReleaseBinarySizeGrowthPolicy = {warn_bytes: int, warn_percent_hundredths: int}
+
+/**
+ * A recorded decision that the artifact is allowed to grow past the signal.
+ *
+ * The acceptance is scoped to the baseline it was written against, not to the
+ * commit that caused the growth: a contributor cannot predict the squashed main
+ * SHA their PR will become, but they do know which baseline they measured
+ * against. Validation rejects an entry whose `against_baseline_sha` is not the
+ * current baseline, so refreshing the baseline after a release forces every
+ * stale acceptance to be dropped in the same change.
+ *
+ * The reason still lands in the same PR as the growth — there is no way to
+ * accept a crossing without editing this file alongside the code that caused
+ * it.
+ */
+pub type ReleaseBinarySizeAcceptedGrowth = {
+  against_baseline_sha: string,
+  bytes: int,
+  reason: string,
+}
+
+pub type ReleaseBinarySizeTargetPolicy = {
+  target: string,
+  distribution_fuse_bytes: int,
+  growth: ReleaseBinarySizeGrowthPolicy,
+  baseline: ReleaseBinarySizeBaseline,
+  accepted_growth: list<ReleaseBinarySizeAcceptedGrowth>,
+}
+
+pub type ReleaseBinarySizePolicy = {
+  schema_version: int,
+  default_target: string,
+  targets: list<ReleaseBinarySizeTargetPolicy>,
+}
+
+/** One exact-policy build, measured. */
+pub type ReleaseBinarySizeMeasurement = {
+  target: string,
+  source_sha: string,
+  bytes: int,
+  build_identity: ReleaseBuildIdentity,
+}
+
+/**
+ * The two verdicts, kept apart.
+ *
+ * `fuse` is "ok" or "breached" and always applies. `growth` is "ok", "warn",
+ * "accepted", or "not-comparable"; only "warn" fails, and only a comparable
+ * baseline can produce it.
+ */
+pub type ReleaseBinarySizeVerdict = {
+  target: string,
+  bytes: int,
+  fuse_bytes: int,
+  fuse: string,
+  comparability: string,
+  divergent_identity_fields: list<string>,
+  baseline_bytes: int,
+  delta_bytes: int,
+  delta_percent_hundredths: int,
+  growth: string,
+  accepted_reason: string,
+  failures: list<string>,
+}
+
+pub const RELEASE_BINARY_SIZE_POLICY_PATH: string = ".github/release-binary-size-policy.json"
+
+pub const RELEASE_BINARY_SIZE_SCHEMA_VERSION: int = 2
+
+/**
+ * The fuse is an emergency distribution ceiling, not a ratchet. Too tight and
+ * it becomes the byte cliff again; too loose and it stops being a fuse at all.
+ */
+pub const MIN_FUSE_HEADROOM_PERCENT: int = 10
+
+pub const MAX_FUSE_HEADROOM_PERCENT: int = 15
+
+fn release_build_identity_schema() -> any {
+  return schema_closed_object(
+    {
+      profile: schema_string(),
+      codegen_units: schema_int(),
+      lto: schema_string(),
+      strip: schema_string(),
+      rustc: schema_string(),
+      aot_embedded: schema_bool(),
+    },
+  )
+}
+
+fn release_binary_size_baseline_schema() -> any {
+  return schema_closed_object(
+    {
+      version: schema_string(),
+      source_sha: schema_string(),
+      bytes: schema_int(),
+      observed_at: schema_string(),
+      build_identity: release_build_identity_schema(),
+    },
+  )
+}
+
+fn release_binary_size_policy_schema() -> any {
+  return schema_closed_object(
+    {
+      schema_version: schema_int(),
+      default_target: schema_string(),
+      targets: schema_list(
+        schema_closed_object(
+          {
+            target: schema_string(),
+            distribution_fuse_bytes: schema_int(),
+            growth: schema_closed_object(
+              {warn_bytes: schema_int(), warn_percent_hundredths: schema_int()},
+            ),
+            baseline: release_binary_size_baseline_schema(),
+            accepted_growth: schema_list(
+              schema_closed_object(
+                {
+                  against_baseline_sha: schema_string(),
+                  bytes: schema_int(),
+                  reason: schema_string(),
+                },
+              ),
+            ),
+          },
+        ),
+      ),
+    },
+  )
+}
+
+pub fn read_release_binary_size_policy_result(
+  fs: HarnessFs,
+  path: string,
+) -> TypedReadResult<ReleaseBinarySizePolicy> {
+  return read_json_typed_result<ReleaseBinarySizePolicy>(
+    fs,
+    path,
+    release_binary_size_policy_schema(),
+  )
+}
+
+fn is_full_commit_sha(value: string) -> bool {
+  return len(regex_captures("^[0-9a-f]{40}$", value)) > 0
+}
+
+fn baseline_errors(entry: ReleaseBinarySizeTargetPolicy) -> list<string> {
+  let errors = []
+  const baseline = entry.baseline
+  if baseline.bytes <= 0 {
+    errors = errors + ["${entry.target}: baseline.bytes must be positive"]
+  }
+  if len(regex_captures("^[0-9]+[.][0-9]+[.][0-9]+$", baseline.version)) == 0 {
+    errors = errors + ["${entry.target}: baseline.version must be a semantic release version"]
+  }
+  if !is_full_commit_sha(baseline.source_sha) {
+    errors = errors + ["${entry.target}: baseline.source_sha must be a full lowercase Git commit"]
+  }
+  if len(
+    regex_captures(
+      "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+      baseline.observed_at,
+    ),
+  )
+    == 0 {
+    errors = errors
+      + [
+      "${entry.target}: baseline.observed_at must be a UTC second-resolution timestamp",
+    ]
+  }
+  if baseline.build_identity.profile == "" {
+    errors = errors + ["${entry.target}: baseline.build_identity.profile must not be empty"]
+  }
+  if baseline.build_identity.codegen_units <= 0 {
+    errors = errors + ["${entry.target}: baseline.build_identity.codegen_units must be positive"]
+  }
+  if baseline.build_identity.rustc == "" {
+    errors = errors + ["${entry.target}: baseline.build_identity.rustc must not be empty"]
+  }
+  return errors
+}
+
+fn fuse_errors(entry: ReleaseBinarySizeTargetPolicy) -> list<string> {
+  let errors = []
+  if entry.distribution_fuse_bytes <= 0 {
+    errors = errors + ["${entry.target}: distribution_fuse_bytes must be positive"]
+  }
+  if entry.baseline.bytes <= 0 || entry.distribution_fuse_bytes <= 0 {
+    return errors
+  }
+  // Integer comparison against the scaled baseline. Multiplying the baseline
+  // keeps the check exact; dividing the fuse would round the boundary.
+  const min_fuse = entry.baseline.bytes * (100 + MIN_FUSE_HEADROOM_PERCENT) / 100
+  const max_fuse = entry.baseline.bytes * (100 + MAX_FUSE_HEADROOM_PERCENT) / 100
+  if entry.distribution_fuse_bytes < min_fuse {
+    errors = errors
+      + [
+      "${entry.target}: distribution_fuse_bytes must leave at least ${MIN_FUSE_HEADROOM_PERCENT}% headroom above the baseline (>= ${min_fuse})",
+    ]
+  }
+  if entry.distribution_fuse_bytes > max_fuse {
+    errors = errors
+      + [
+      "${entry.target}: distribution_fuse_bytes must stay within ${MAX_FUSE_HEADROOM_PERCENT}% of the baseline (<= ${max_fuse})",
+    ]
+  }
+  return errors
+}
+
+fn growth_errors(entry: ReleaseBinarySizeTargetPolicy) -> list<string> {
+  let errors = []
+  if entry.growth.warn_bytes <= 0 {
+    errors = errors + ["${entry.target}: growth.warn_bytes must be positive"]
+  }
+  if entry.growth.warn_percent_hundredths <= 0 {
+    errors = errors + ["${entry.target}: growth.warn_percent_hundredths must be positive"]
+  }
+  for accepted in entry.accepted_growth {
+    if accepted.against_baseline_sha != entry.baseline.source_sha {
+      errors = errors
+        + [
+        "${entry.target}: accepted_growth.against_baseline_sha must be the current baseline ${entry.baseline.source_sha}, got ${accepted.against_baseline_sha}",
+      ]
+    }
+    if accepted.bytes <= 0 {
+      errors = errors + ["${entry.target}: accepted_growth.bytes must be positive"]
+    }
+    if accepted.reason.trim() == "" {
+      errors = errors + ["${entry.target}: accepted_growth.reason must not be empty"]
+    }
+  }
+  return errors
+}
+
+pub fn release_binary_size_policy_errors(policy: ReleaseBinarySizePolicy) -> list<string> {
+  let errors = []
+  if policy.schema_version != RELEASE_BINARY_SIZE_SCHEMA_VERSION {
+    errors = errors + ["schema_version must be ${RELEASE_BINARY_SIZE_SCHEMA_VERSION}"]
+  }
+  if policy.targets.count == 0 {
+    errors = errors + ["targets must not be empty"]
+  }
+  let seen_targets = []
+  for entry in policy.targets {
+    if entry.target == "" {
+      errors = errors + ["target must not be empty"]
+    } else if seen_targets.contains(entry.target) {
+      errors = errors + ["target must be unique: ${entry.target}"]
+    }
+    seen_targets = seen_targets + [entry.target]
+    errors = errors + fuse_errors(entry) + baseline_errors(entry) + growth_errors(entry)
+  }
+  if !seen_targets.contains(policy.default_target) {
+    errors = errors + ["default_target must name one target policy"]
+  }
+  return errors
+}
+
+pub fn release_binary_size_target_policy(
+  policy: ReleaseBinarySizePolicy,
+  target: string,
+) -> ReleaseBinarySizeTargetPolicy? {
+  for entry in policy.targets {
+    if entry.target == target {
+      return entry
+    }
+  }
+  return nil
+}
+
+/**
+ * The build-identity fields on which a measurement diverges from a baseline,
+ * named so the report can say why it declined to draw a conclusion.
+ */
+pub fn divergent_identity_fields(
+  baseline: ReleaseBuildIdentity,
+  observed: ReleaseBuildIdentity,
+) -> list<string> {
+  let divergent = []
+  if baseline.profile != observed.profile {
+    divergent = divergent + ["profile"]
+  }
+  if baseline.codegen_units != observed.codegen_units {
+    divergent = divergent + ["codegen_units"]
+  }
+  if baseline.lto != observed.lto {
+    divergent = divergent + ["lto"]
+  }
+  if baseline.strip != observed.strip {
+    divergent = divergent + ["strip"]
+  }
+  if baseline.rustc != observed.rustc {
+    divergent = divergent + ["rustc"]
+  }
+  if baseline.aot_embedded != observed.aot_embedded {
+    divergent = divergent + ["aot_embedded"]
+  }
+  return divergent
+}
+
+fn accepted_growth_reason(entry: ReleaseBinarySizeTargetPolicy, delta_bytes: int) -> string {
+  for accepted in entry.accepted_growth {
+    if delta_bytes <= accepted.bytes {
+      return accepted.reason
+    }
+  }
+  return ""
+}
+
+/**
+ * Apply both levels to one measurement.
+ *
+ * The fuse is unconditional: an artifact over the ceiling is never
+ * distributable, whatever it was built with. The growth signal is conditional
+ * on comparability, because subtracting two differently-built artifacts
+ * produces a number with no causal meaning.
+ */
+pub fn evaluate_release_binary_size(
+  entry: ReleaseBinarySizeTargetPolicy,
+  measurement: ReleaseBinarySizeMeasurement,
+) -> ReleaseBinarySizeVerdict {
+  let failures = []
+  const fuse = if measurement.bytes > entry.distribution_fuse_bytes {
+    "breached"
+  } else {
+    "ok"
+  }
+  if fuse == "breached" {
+    failures = failures
+      + [
+      "distribution fuse: ${measurement.bytes} bytes exceeds the ${entry.distribution_fuse_bytes}-byte ceiling for ${entry.target}",
+    ]
+  }
+  const divergent = divergent_identity_fields(
+    entry.baseline.build_identity,
+    measurement.build_identity,
+  )
+  const delta_bytes = measurement.bytes - entry.baseline.bytes
+  const delta_percent_hundredths = delta_bytes * 10000 / entry.baseline.bytes
+  let growth = "ok"
+  let accepted_reason = ""
+  if divergent.count > 0 {
+    growth = "not-comparable"
+  } else if delta_bytes >= entry.growth.warn_bytes
+    && delta_percent_hundredths
+    >= entry.growth
+    .warn_percent_hundredths {
+    // Both axes must be crossed. A few megabytes on a 200+ MiB artifact is
+    // measurement noise, and a large ratio on a small one is not a
+    // distribution concern.
+    accepted_reason = accepted_growth_reason(entry, delta_bytes)
+    growth = if accepted_reason != "" {
+      "accepted"
+    } else {
+      "warn"
+    }
+  }
+  if growth == "warn" {
+    failures = failures
+      + [
+      "growth signal: ${measurement.source_sha} is ${delta_bytes} bytes (${delta_percent_hundredths} hundredths of a percent) above the ${entry.baseline.version} baseline, and no accepted_growth entry covers it",
+    ]
+  }
+  return {
+    target: entry.target,
+    bytes: measurement.bytes,
+    fuse_bytes: entry.distribution_fuse_bytes,
+    fuse: fuse,
+    comparability: if divergent.count > 0 {
+      "not-comparable"
+    } else {
+      "comparable"
+    },
+    divergent_identity_fields: divergent,
+    baseline_bytes: entry.baseline.bytes,
+    delta_bytes: delta_bytes,
+    delta_percent_hundredths: delta_percent_hundredths,
+    growth: growth,
+    accepted_reason: accepted_reason,
+    failures: failures,
+  }
+}
+
+// --- causality attribution ---------------------------------------------------
+/** One row of the `size -A -d` table the release workflow already emits. */
+pub type ElfSection = {name: string, bytes: int}
+
+/** How one section moved between two measurements. */
+pub type ElfSectionDelta = {name: string, before: int, after: int, delta: int}
+
+/**
+ * Sections whose growth is generated code and the metadata that describes it.
+ * More codegen units duplicate inlined code and its unwind and landing-pad
+ * tables, so these three move together and dominate a layout change.
+ */
+const CODEGEN_SECTIONS: list<string> = [".text", ".eh_frame", ".eh_frame_hdr", ".gcc_except_table"]
+
+/**
+ * Sections that carry content: embedded assets, string tables, static data.
+ * A real capability addition shows up here.
+ */
+const CONTENT_SECTIONS: list<string> = [".rodata", ".data", ".data.rel.ro", ".bss", ".init_array"]
+
+/** Parse the `size -A -d <binary>` table the release workflow already emits. */
+pub fn parse_elf_sections(text: string) -> list<ElfSection> {
+  let sections = []
+  for line in text.split("\n") {
+    const captures = regex_captures("^\\s*([.][A-Za-z0-9_.-]+)\\s+([0-9]+)\\s", line)
+    if captures.count == 0 {
+      continue
+    }
+    const groups = captures[0]?.groups ?? []
+    const name = groups[0] ?? ""
+    const bytes = to_int(groups[1] ?? "")
+    if name != "" && bytes != nil {
+      sections = sections + [{name: name, bytes: bytes}]
+    }
+  }
+  return sections
+}
+
+fn section_bytes(sections: list<ElfSection>, name: string) -> int {
+  for section in sections {
+    if section.name == name {
+      return section.bytes
+    }
+  }
+  return 0
+}
+
+/** Every section present in either table, sorted by descending magnitude. */
+pub fn elf_section_deltas(
+  before: list<ElfSection>,
+  after: list<ElfSection>,
+) -> list<ElfSectionDelta> {
+  let names = []
+  for section in before + after {
+    if !names.contains(section.name) {
+      names = names + [section.name]
+    }
+  }
+  let deltas = []
+  for name in names {
+    const before_bytes = section_bytes(before, name)
+    const after_bytes = section_bytes(after, name)
+    if before_bytes == after_bytes {
+      continue
+    }
+    deltas = deltas
+      + [
+      {name: name, before: before_bytes, after: after_bytes, delta: after_bytes - before_bytes},
+    ]
+  }
+  // Descending magnitude. `names` is built in a deterministic order and the
+  // sort is stable, so equal-magnitude sections keep a fixed relative order.
+  return deltas.sorted_by({ entry -> -abs(entry.delta) })
+}
+
+pub type GrowthAttribution = {
+  codegen_bytes: int,
+  content_bytes: int,
+  other_bytes: int,
+  classification: string,
+}
+
+/**
+ * Classify a section delta as codegen layout or product content.
+ *
+ * This is the discrimination raw bytes cannot make. The v0.10.52 16-CGU to
+ * 8-CGU change moved 8.4 MB with `.text`, `.eh_frame`, and `.gcc_except_table`
+ * carrying essentially all of it and `.rodata` barely moving; a new embedded
+ * asset of the same magnitude looks the opposite way round.
+ */
+pub fn classify_growth(deltas: list<ElfSectionDelta>) -> GrowthAttribution {
+  let codegen_bytes = 0
+  let content_bytes = 0
+  let other_bytes = 0
+  for entry in deltas {
+    if CODEGEN_SECTIONS.contains(entry.name) {
+      codegen_bytes = codegen_bytes + entry.delta
+    } else if CONTENT_SECTIONS.contains(entry.name) {
+      content_bytes = content_bytes + entry.delta
+    } else {
+      other_bytes = other_bytes + entry.delta
+    }
+  }
+  const codegen_magnitude = abs(codegen_bytes)
+  const content_magnitude = abs(content_bytes)
+  const total = codegen_magnitude + content_magnitude + abs(other_bytes)
+  const classification = if total == 0 {
+    "unchanged"
+  } else if codegen_magnitude * 100 / total >= 80 {
+    "codegen-layout"
+  } else if content_magnitude * 100 / total >= 80 {
+    "content"
+  } else {
+    "mixed"
+  }
+  return {
+    codegen_bytes: codegen_bytes,
+    content_bytes: content_bytes,
+    other_bytes: other_bytes,
+    classification: classification,
+  }
+}
+
+// --- report ------------------------------------------------------------------
+/** One build identity, on one line, in a shape that diffs against the other. */
+fn identity_line(label: string, identity: ReleaseBuildIdentity) -> string {
+  return "${label}: profile=${identity.profile} codegen_units=${identity.codegen_units} lto=${identity.lto} strip=${identity.strip} rustc=${identity.rustc} aot_embedded=${identity.aot_embedded}"
+}
+
+/**
+ * The lines that explain the verdict, appended to the size report so a blocked
+ * release carries its own attribution instead of requiring a second build.
+ */
+pub fn verdict_report_lines(
+  verdict: ReleaseBinarySizeVerdict,
+  entry: ReleaseBinarySizeTargetPolicy,
+  measurement: ReleaseBinarySizeMeasurement,
+) -> list<string> {
+  // `report_lines` already states the fuse in bytes and MiB; this block owns
+  // the verdict, not a second copy of the number.
+  let lines = [
+    "distribution_fuse: ${verdict.fuse}",
+    "baseline_version: ${entry.baseline.version}",
+    "baseline_source_sha: ${entry.baseline.source_sha}",
+    "baseline_bytes: ${verdict.baseline_bytes}",
+    "delta_bytes: ${verdict.delta_bytes}",
+    "delta_percent_hundredths: ${verdict.delta_percent_hundredths}",
+    "growth_warn_bytes: ${entry.growth.warn_bytes}",
+    "growth_warn_percent_hundredths: ${entry.growth.warn_percent_hundredths}",
+    "comparability: ${verdict.comparability}",
+    "growth: ${verdict.growth}",
+    identity_line("baseline_build_identity", entry.baseline.build_identity),
+    identity_line("observed_build_identity", measurement.build_identity),
+  ]
+  if verdict.divergent_identity_fields.count > 0 {
+    lines = lines
+      + ["divergent_identity_fields: ${verdict.divergent_identity_fields.join(",")}"]
+  }
+  if verdict.accepted_reason != "" {
+    lines = lines + ["accepted_growth_reason: ${verdict.accepted_reason}"]
+  }
+  return lines
+}
+
+/** The section table, rendered under the verdict when a baseline table exists. */
+pub fn section_report_lines(deltas: list<ElfSectionDelta>) -> list<string> {
+  const attribution = classify_growth(deltas)
+  let lines = [
+    "",
+    "section deltas",
+    "==============",
+    "classification: ${attribution.classification}",
+    "codegen_bytes: ${attribution.codegen_bytes}",
+    "content_bytes: ${attribution.content_bytes}",
+    "other_bytes: ${attribution.other_bytes}",
+  ]
+  for entry in deltas {
+    lines = lines + ["${entry.name}: ${entry.before} -> ${entry.after} (${entry.delta})"]
+  }
+  return lines
+}

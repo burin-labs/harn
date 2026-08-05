@@ -1,0 +1,125 @@
+# wrapped function markup
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"create","content":"package handlers\n\n// Health returns 200.\nfunc Health() int { return 200 }","path":"internal/handlers/health.go"}
+  prose=""
+  answer=null
+  done=null
+# unwrapped function markup
+  calls=1 errors=0 violations=1 stray=0
+  call run {"command":"go test ./..."}
+  vio "Tool call `run` was emitted as chat-template function markup instead of `<tool_call>run({ ... })</tool_call>`. Recovered this turn so work moves forward; emit the canonical form on subsequent turns."
+  prose=""
+  answer=null
+  done=null
+# invoke attribute markup
+  calls=1 errors=0 violations=1 stray=0
+  call run {"command":"cargo check"}
+  vio "Tool call `run` was emitted as chat-template function markup instead of `<tool_call>run({ ... })</tool_call>`. Recovered this turn so work moves forward; emit the canonical form on subsequent turns."
+  prose=""
+  answer=null
+  done=null
+# invoke markup with a string attribute
+  calls=1 errors=0 violations=0 stray=0
+  call look {"file":"src/root.zig"}
+  prose=""
+  answer=null
+  done=null
+# missing function close, parameters closed
+  calls=1 errors=0 violations=0 stray=0
+  call run {"command":"ls"}
+  prose=""
+  answer=null
+  done=null
+# unclosed wrapper, complete markup
+  calls=1 errors=0 violations=0 stray=0
+  call run {"command":"pwd"}
+  prose=""
+  answer=null
+  done=null
+# truncated parameter
+  calls=0 errors=1 violations=0 stray=0
+  err "TOOL CALL TRUNCATED: a `<parameter ...>` block in the `<function=...>` markup for `edit` was never closed with `</parameter>` — the response appears to have been cut off. The call was NOT executed; re-emit the complete call."
+  prose=""
+  answer=null
+  done=null
+# unknown tool in markup
+  calls=0 errors=1 violations=0 stray=0
+  err "Unknown tool 'frobnicate' in chat-template `<function=...>` tool-call markup. Available tools: [edit, ledger, load_skill, run]"
+  prose=""
+  answer=null
+  done=null
+# prose mentioning markup does not fire
+  calls=0 errors=0 violations=0 stray=0
+  prose="I considered emitting\n\n<function=edit> markup but used the native channel."
+  answer=null
+  done=null
+# fenced markup example does not fire
+  calls=0 errors=0 violations=0 stray=0
+  prose="The legacy markup looks like this:\n\n```text\n\n<function=edit>\n\n<parameter=action>\n\ncreate\n\n</parameter>\n\n</function>\n\n```"
+  answer=null
+  done=null
+# string-typed parameter keeps a numeric value verbatim
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"create","content":"123","path":"version.txt"}
+  prose=""
+  answer=null
+  done=null
+# list-typed parameter parses as json
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"patch","ops":[{"op":"a"}],"path":"main.go"}
+  prose=""
+  answer=null
+  done=null
+# function markup, trailing json object
+  calls=1 errors=0 violations=1 stray=0
+  call echo_marker {"value":"MK-7Q3Z"}
+  vio "Tool call `echo_marker` was emitted as chat-template function markup instead of `<tool_call>echo_marker({ ... })</tool_call>`. Recovered this turn so work moves forward; emit the canonical form on subsequent turns."
+  prose=""
+  answer=null
+  done=null
+# function markup, enclosed json object
+  calls=1 errors=0 violations=1 stray=0
+  call echo_marker {"value":"MK-7Q3Z"}
+  vio "Tool call `echo_marker` was emitted as chat-template function markup instead of `<tool_call>echo_marker({ ... })</tool_call>`. Recovered this turn so work moves forward; emit the canonical form on subsequent turns."
+  prose=""
+  answer=null
+  done=null
+# function markup, wrapped trailing json object
+  calls=1 errors=0 violations=0 stray=0
+  call echo_marker {"value":"MK-7Q3Z"}
+  prose=""
+  answer=null
+  done=null
+# function markup, empty json object
+  calls=1 errors=0 violations=1 stray=0
+  call echo_marker {}
+  vio "Tool call `echo_marker` was emitted as chat-template function markup instead of `<tool_call>echo_marker({ ... })</tool_call>`. Recovered this turn so work moves forward; emit the canonical form on subsequent turns."
+  prose=""
+  answer=null
+  done=null
+# function markup, nested json object
+  calls=1 errors=0 violations=1 stray=0
+  call echo_marker {"meta":{"n":1},"value":"x"}
+  vio "Tool call `echo_marker` was emitted as chat-template function markup instead of `<tool_call>echo_marker({ ... })</tool_call>`. Recovered this turn so work moves forward; emit the canonical form on subsequent turns."
+  prose=""
+  answer=null
+  done=null
+# invoke markup, trailing json object
+  calls=1 errors=0 violations=1 stray=0
+  call echo_marker {"value":"MK-7Q3Z"}
+  vio "Tool call `echo_marker` was emitted as chat-template function markup instead of `<tool_call>echo_marker({ ... })</tool_call>`. Recovered this turn so work moves forward; emit the canonical form on subsequent turns."
+  prose=""
+  answer=null
+  done=null
+# function markup, truncated trailing json
+  calls=0 errors=1 violations=0 stray=0
+  err "TOOL CALL TRUNCATED: the JSON arguments object in the `<function=...>` markup for `echo_marker` was never closed — the response appears to have been cut off. The call was NOT executed; re-emit the complete call."
+  prose=""
+  answer=null
+  done=null
+# heredoc nested inside a markup parameter stays verbatim
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"create","content":"<<EOF\nfn f() void {\n    var x: u32 = 1;\n    x <<= 4;\n}\nEOF","path":"src/writer.zig"}
+  prose=""
+  answer=null
+  done=null

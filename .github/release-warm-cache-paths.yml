@@ -1,0 +1,17 @@
+# Source inputs that can rotate a release build cache or change the release
+# build topology. build-release-binaries.yml consumes this file directly via
+# dorny/paths-filter; scripts/check_ci_cache_policy.harn validates its closed
+# shape, normalized unique paths, required compiler inputs, and workflow wiring.
+release_build_inputs:
+  - .github/actions/rust-cache/**
+  - .github/actions/rust-toolchain/**
+  - .github/actions/sccache-install/**
+  - .github/release-runner-policy.json
+  - .github/release-warm-cache-paths.yml
+  - .github/workflows/build-release-binaries.yml
+  - '**/Cargo.toml'
+  - Cargo.lock
+  - Cargo.toml
+  - rust-toolchain.toml
+  - scripts/prune_ci_cache_generations.sh
+  - scripts/release_runner_matrix.sh

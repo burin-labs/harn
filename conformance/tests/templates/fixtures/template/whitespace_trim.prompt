@@ -1,0 +1,5 @@
+Items:
+{{- for x in xs -}}
+  {{ x }},
+{{- end -}}
+DONE

@@ -1,0 +1,23 @@
+import "std/agents"
+import "std/context"
+
+pipeline default(harness: Harness) {
+  const flow = workflow(
+    {
+      name: "demo",
+      model_tier: "mid",
+      loop_until_done: false,
+      act: {mode: "llm", context: context([section("brief", "Stay concise.", nil)], nil)},
+      verify: {assert_text: "not present"},
+      repair: {mode: "llm", model_tier: "frontier"},
+    },
+  )
+  const result = task_run(harness, "Write a note", flow, {provider: "mock"})
+  harness.stdio.println(result?.status)
+  harness.stdio.println(result?.repair != nil)
+  harness.stdio.println(result?.transcript?._type)
+  const continued = workflow_continue(harness, result, "Continue", flow, {provider: "mock"})
+  harness.stdio.println(continued?.transcript?._type)
+  const compacted = workflow_compact(harness.agent, continued, {provider: "mock", keep_last: 1})
+  harness.stdio.println(transcript_summary(compacted) != nil)
+}

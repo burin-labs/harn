@@ -1,0 +1,22 @@
+/** Test logical operator narrowing (&&, ||, !) */
+pipeline test(harness: Harness, task) {
+  fn and_check(x: string | int | nil) -> string {
+    if x != nil && type_of(x) == "string" {
+      return "string: ${x}"
+    }
+    return "other"
+  }
+  fn or_falsy(x: string?, y: int?) -> string {
+    if x || y {
+      return "at least one truthy"
+    }
+    // Both are nil in else path
+    return "both nil"
+  }
+  harness.stdio.log(and_check("hello"))
+  harness.stdio.log(and_check(42))
+  harness.stdio.log(and_check(nil))
+  harness.stdio.log(or_falsy("a", nil))
+  harness.stdio.log(or_falsy(nil, 1))
+  harness.stdio.log(or_falsy(nil, nil))
+}

@@ -1,0 +1,99 @@
+// std/security — prompt-injection defense configuration (Burin Layers 0/1).
+//
+// Scope: configure the runtime's spotlighting + lethal-trifecta gate. The
+// substrate lives in the VM (`crate::security`): untrusted external tool/MCP
+// output is framed as data, and exfiltration-capable tools are gated once
+// untrusted content has entered context. This module is the thin Harn surface
+// a host (Burin) calls with `harness.system` from its resolved `[security]`
+// config / feature flag;
+// pipelines rarely need it.
+//
+// Import with:
+//   import { configure, spotlight, strict, local_ml, off } from "std/security"
+/**
+ * Push a security policy derived from `config` onto the runtime stack and
+ * return the resolved summary. Recognised keys (all optional; safe defaults
+ * are applied for any omitted):
+ *
+ *   - mode: "off" | "spotlight" | "strict" | "local-ml"
+ *   - spotlight_external: bool       — frame untrusted output as data
+ *   - neutralize_special_tokens: bool — neutralize reserved chat-template tokens
+ *                                      (<|im_start|>, [INST], …) inside untrusted
+ *                                      spans (on by default for non-"off" modes)
+ *   - destyle_untrusted: bool        — destyle forged turn/reasoning markers
+ *                                      (User:/Assistant:/System: prefixes,
+ *                                      <think> tags) inside untrusted spans
+ *                                      (on by default for non-"off" modes)
+ *   - trifecta_gate: bool            — gate exfil tools while tainted
+ *   - pin_mcp_schemas: bool          — re-approve on tool-description change
+ *   - authenticate_directives: bool  — quarantine cross-agent/orchestration
+ *                                      directives that lack a valid provenance
+ *                                      stamp (default OFF; net-new enforcement)
+ *   - gate_secret_reads: bool        — gate secret-file reads while tainted
+ *   - detect_injection: bool         — score untrusted content with the
+ *                                      injection classifier (implied by
+ *                                      mode "local-ml")
+ *   - guard_threshold_percent: int   — flag at/above this score percent (0..100)
+ *   - trusted_mcp_servers: [str]     — servers exempt from taint + pinning
+ *
+ * @effects: [state]
+ * @errors: []
+ * @example: configure(harness.system, { mode: "spotlight", trusted_mcp_servers: ["internal-docs"] })
+ */
+pub fn configure(system: HarnessSystem, config: dict = {}) -> dict {
+  return system.security_policy(config)
+}
+
+/**
+ * Enable the default posture: spotlight untrusted content + trifecta gate.
+ *
+ * @effects: [state]
+ * @errors: []
+ */
+pub fn spotlight(system: HarnessSystem) -> dict {
+  return system.security_policy({mode: "spotlight"})
+}
+
+/**
+ * Enable strict mode: spotlight + per-line datamarking of untrusted content +
+ * the origin-provenance bundle (directive authentication, file + command-read
+ * taint, and the precise destination-aware exfil gate).
+ *
+ * @effects: [state]
+ * @errors: []
+ */
+pub fn strict(system: HarnessSystem) -> dict {
+  return system.security_policy({mode: "strict"})
+}
+
+/**
+ * Enable local-ml mode: spotlight + trifecta gate + the origin-provenance
+ * bundle (directive authentication, file + command-read taint, and the precise
+ * destination-aware exfil gate) + on-device injection detection. Untrusted
+ * content is scored by the injection classifier (the built-in heuristic by
+ * default, or a downloadable `harn-guard` neural model when registered), and a
+ * flagged score tightens the trifecta gate.
+ *
+ * Pass `model` to select a `harn guard` catalog name or model directory; the
+ * host loads it lazily when built with the guard inference backend. The empty
+ * default keeps the host's configured model (typically the ungated default).
+ *
+ * @effects: [state]
+ * @errors: []
+ */
+pub fn local_ml(system: HarnessSystem, model: string = "") -> dict {
+  if model == "" {
+    return system.security_policy({mode: "local-ml"})
+  }
+  return system.security_policy({mode: "local-ml", guard_model: model})
+}
+
+/**
+ * Disable every prompt-injection defense layer for this run.
+ *
+ * @effects: [state]
+ * @errors: []
+ */
+pub fn off(system: HarnessSystem) -> dict {
+  return system.security_policy({mode: "off"})
+}

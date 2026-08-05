@@ -1,0 +1,82 @@
+import {
+  composition_mcp_api,
+  composition_mcp_execute,
+  composition_mcp_search,
+} from "std/composition"
+
+pipeline main(harness: Harness) {
+  const tools = {
+    _type: "tool_registry",
+    tools: [
+      {
+        name: "docs__search",
+        description: "Search runtime documentation",
+        inputSchema: {
+          type: "object",
+          required: ["query"],
+          properties: {query: {type: "string"}, limit: {type: "integer"}},
+        },
+        annotations: {kind: "search", side_effect_level: "read_only", inline_result: true},
+        executor: "mcp_server",
+        mcp_server: "docs",
+        _mcp_server: "docs",
+        _mcp_tool_name: "search",
+        defer_loading: true,
+        handler: { args ->
+          return json_stringify({items: [{title: "Harn docs", query: args.query}], total: 1})
+        },
+      },
+      {
+        name: "local_echo",
+        description: "Not an MCP tool",
+        parameters: {type: "object"},
+        handler: { args -> return args },
+      },
+    ],
+  }
+  const api = composition_mcp_api(harness, tools)
+  harness.stdio.println(api.tool_count)
+  harness.stdio.println(api.servers[0])
+  harness.stdio.println(api.manifest.bindings[0].source)
+  harness.stdio.println(api.manifest.bindings[0].deferred)
+  harness.stdio.println(
+    contains(api.harn_api, "type DocsSearchArgs = {limit?: int, query: string}"),
+  )
+  harness.stdio.println(contains(api.harn_api, "fn docs_search(args: DocsSearchArgs)"))
+  const searched = composition_mcp_search(harness, tools, "runtime documentation", {limit: 1})
+  harness.stdio.println(searched.manifest.bindings[0].name)
+  const report = composition_mcp_execute(
+    harness,
+    "let hits = json_parse(docs_search({query: \"runtime\"}))\nreturn {title: hits.items[0].title, total: hits.total}",
+    tools,
+    {run_id: "mcp-code-mode"},
+  )
+  harness.stdio.println(report.ok)
+  harness.stdio.println(report.child_call_count)
+  harness.stdio.println(report.child_results == nil)
+  harness.stdio.println(report.result.title)
+  harness.stdio.println(report.result.total)
+  const full_report = composition_mcp_execute(
+    harness,
+    "let hits = json_parse(docs_search({query: \"runtime\"}))\nreturn {title: hits.items[0].title, total: hits.total}",
+    tools,
+    {run_id: "mcp-code-mode-report", include_report: true},
+  )
+  harness.stdio.println(full_report.child_calls[0].tool_name)
+  harness.stdio.println(contains(full_report.child_results[0].raw_output, "Harn docs"))
+  const settled = composition_mcp_execute(
+    harness,
+    "let result = map_bounded([\"runtime\", \"stdlib\"], { q -> docs_search({query: q}) }, {concurrency: 2})\nreturn {succeeded: result.succeeded, failed: result.failed}",
+    tools,
+    {
+      run_id: "mcp-code-mode-bounded",
+      max_concurrent: 2,
+      max_concurrent_per_server: 1,
+      trusted_servers: ["docs"],
+      retry: {max_attempts: 2, base_delay_ms: 0, max_delay_ms: 0},
+    },
+  )
+  harness.stdio.println(settled.ok)
+  harness.stdio.println(settled.result.succeeded)
+  harness.stdio.println(settled.result.failed)
+}

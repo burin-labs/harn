@@ -1,0 +1,479 @@
+# Orchestrator MCP server
+
+`harn mcp serve` exposes a local Harn orchestrator as an MCP server so any MCP
+client can fire triggers, inspect queues, replay events, and read runtime state
+without a Harn-specific adapter.
+
+This page is the canonical reference for the orchestrator control-plane MCP
+server. For the general MCP client/server guide, see
+[MCP, ACP, and A2A integration](./mcp-and-acp.md); for the full protocol routing
+table, see [Protocol support matrix](./protocol-support.md).
+
+The server is aimed at closed-loop agent clients that already know how to speak
+MCP, including:
+
+- Cursor Composer
+- Claude Desktop
+- Claude Code
+- LangChain MCP adapters
+
+## Quickstart
+
+Hook Harn into Cursor Composer in 3 steps:
+
+1. Start the server from the workspace that owns your orchestrator manifest.
+
+```bash
+harn mcp serve --config ./harn.toml --state-dir ./.harn/orchestrator
+```
+
+1. Point Cursor at the command as a stdio MCP server.
+
+```json
+{
+  "mcpServers": {
+    "harn": {
+      "command": "harn",
+      "args": ["mcp", "serve", "--config", "/absolute/path/to/harn.toml", "--state-dir", "/absolute/path/to/.harn/orchestrator"]
+    }
+  }
+}
+```
+
+1. Ask the client to call Harn tools such as `harn.trigger.list` or
+   `harn.orchestrator.inspect`.
+
+Example prompts:
+
+- "List the Harn triggers in this workspace."
+- "Fire the `cron-ok` trigger with an empty payload."
+- "Show the Harn DLQ and retry the newest entry."
+- "Scan this diff for secrets before I open a PR."
+
+## Transports
+
+`harn mcp serve` supports:
+
+- `stdio` for local spawned clients. This is the default.
+- `http` for remote MCP clients.
+
+HTTP mode exposes:
+
+- Streamable HTTP POST at `--path` (default `/mcp`)
+- Unofficial MCP endpoint discovery at `/.well-known/mcp.json`
+
+Clients call `server/discover` with `POST /mcp`, carry self-contained metadata
+and standard routing headers on every request, and do not use sessions.
+Requests normally return one `application/json` JSON-RPC response; clients
+that only accept `text/event-stream` receive an SSE stream containing
+`message` events.
+
+Example:
+
+```bash
+harn mcp serve \
+  --config ./harn.toml \
+  --state-dir ./.harn/orchestrator \
+  --transport http \
+  --bind 127.0.0.1:8765
+```
+
+Discovery check:
+
+```bash
+curl http://127.0.0.1:8765/.well-known/mcp.json
+harn mcp discover http://127.0.0.1:8765 --json
+```
+
+Behind a tunnel or reverse proxy, Harn derives the published endpoint from
+`X-Forwarded-Proto` and `X-Forwarded-Host` when present, falling back to
+`Host`. Configure those headers in the proxy so clients see the public MCP
+endpoint rather than the private bind address.
+
+## Auth
+
+MCP OAuth applies only to HTTP transports. Local stdio servers are launched by
+the client process and should receive credentials through the launch
+environment or client-specific secret configuration, not through HTTP
+`WWW-Authenticate`, protected-resource metadata, or bearer-token refresh.
+
+For HTTP transports, prefer OAuth resource-server mode. Set
+`HARN_MCP_OAUTH_AUTHORIZATION_SERVERS` to a comma-separated list of issuer URLs
+and configure exactly how the MCP server validates bearer tokens:
+
+- `HARN_MCP_OAUTH_INTROSPECTION_URL` for opaque-token introspection, optionally
+  with `HARN_MCP_OAUTH_INTROSPECTION_CLIENT_ID`,
+  `HARN_MCP_OAUTH_INTROSPECTION_CLIENT_SECRET`, or
+  `HARN_MCP_OAUTH_INTROSPECTION_TOKEN`
+- `HARN_MCP_OAUTH_JWKS_URL` for JWT validation against a JWKS endpoint
+
+Recommended production settings:
+
+- `HARN_MCP_OAUTH_RESOURCE` to the canonical MCP resource URI clients pass as
+  the RFC 8707 `resource` value, for example `https://mcp.example.com/mcp`
+- `HARN_MCP_OAUTH_AUDIENCE` when tokens use an audience value different from
+  the resource URI
+- `HARN_MCP_OAUTH_ISSUER` when tokens should be pinned to one issuer
+- `HARN_MCP_OAUTH_SCOPES` as a comma- or space-separated list of scopes required
+  for the MCP control plane
+
+When OAuth mode is configured, unauthenticated HTTP requests return `401` with
+`WWW-Authenticate: Bearer resource_metadata="..."`. The challenge includes
+`scope="..."` when `HARN_MCP_OAUTH_SCOPES` is set. The server publishes RFC
+9728 protected resource metadata at both:
+
+- `/.well-known/oauth-protected-resource`
+- `/.well-known/oauth-protected-resource/<mcp-path>`
+
+The metadata includes `authorization_servers`, the canonical `resource`, and
+`scopes_supported` when scopes are configured. Access tokens must be sent on
+every HTTP request as `Authorization: Bearer <token>`. Tokens are rejected when
+they are inactive, expired, issued for a different audience/resource or issuer,
+or missing required scopes.
+
+For auth debugging, check these endpoints from the same public origin the MCP
+client uses:
+
+```bash
+curl https://mcp.example.com/.well-known/mcp.json
+curl https://mcp.example.com/.well-known/oauth-protected-resource/mcp
+```
+
+The first endpoint answers "where is the MCP Streamable HTTP endpoint?" The
+second answers "which authorization server protects this resource?" Keep both
+responses aligned with the public URL and resource value clients use during
+OAuth.
+
+Set `HARN_ORCHESTRATOR_API_KEYS` to a comma-separated key list to require API
+keys.
+
+HTTP clients can authenticate with either:
+
+- `Authorization: Bearer <key>`
+- `x-api-key: <key>`
+
+If neither OAuth mode nor `HARN_ORCHESTRATOR_API_KEYS` is configured, the MCP
+server runs without auth.
+
+## Tool catalog
+
+MCP list endpoints use cursor pagination. `tools/list`, `resources/list`,
+`resources/templates/list`, and `prompts/list` return up to 100
+entries by default and include `nextCursor` when more entries are available.
+Set `HARN_MCP_LIST_PAGE_SIZE` to a positive integer to change the per-page
+limit for large local catalogs.
+
+### `harn.secret_scan`
+
+Scans arbitrary text or diffs for high-signal leaked credentials and returns a
+redacted finding list. Use it before commit or PR-open flows. The server also
+accepts the legacy alias `harn::secret_scan`.
+
+Input:
+
+```json
+{
+  "content": "token = \"ghp_example...\""
+}
+```
+
+Returns a JSON array of findings. Each finding includes:
+
+- `detector`
+- `source`
+- `title`
+- `line`
+- `column_start`
+- `column_end`
+- `start_offset`
+- `end_offset`
+- `redacted`
+- `fingerprint`
+
+### `harn.trigger.fire`
+
+Dispatch a trigger inline.
+
+Input:
+
+```json
+{
+  "trigger_id": "cron-ok",
+  "payload": {}
+}
+```
+
+Returns the dispatch handle summary including `event_id` and `status`.
+
+### `harn.trigger.list`
+
+Lists manifest-backed triggers with:
+
+- `trigger_id`
+- `kind`
+- `provider`
+- `when`
+- `handler`
+- `version`
+- `state`
+- `metrics`
+
+### `harn.trigger.replay`
+
+Replays a historical event. Supports `as_of` to resolve bindings against a
+historical timestamp when needed.
+
+```json
+{
+  "event_id": "trigger_evt_123",
+  "as_of": "2026-04-19T18:00:00Z"
+}
+```
+
+### `harn.orchestrator.queue`
+
+Returns queue counts plus recent head previews for:
+
+- inbox
+- outbox
+- attempts
+- DLQ
+
+### `harn.orchestrator.dlq.list`
+
+Lists pending dead-letter entries.
+
+### `harn.orchestrator.dlq.retry`
+
+Retries one DLQ entry by id.
+
+```json
+{
+  "entry_id": "dlq_123"
+}
+```
+
+### `harn.orchestrator.inspect`
+
+Returns the dispatcher snapshot, trigger-centric inspect data, persisted
+orchestrator snapshot, flow-control state, and recent dispatch records.
+
+### `harn.trust.query`
+
+Placeholder trust-graph surface. Today it returns:
+
+```json
+{
+  "results": []
+}
+```
+
+## Resources
+
+The server exposes these MCP resources:
+
+- `harn://manifest`
+- `harn://topic/trigger.inbox`
+- `harn://topic/trigger.outbox`
+- `harn://topic/agent.transcript.<id>`
+- `harn://event/<event_id>`
+- `harn://dlq/<entry_id>`
+
+`harn://event/<event_id>` includes the recorded trigger event plus related
+outbox/attempt/DLQ/action-graph trace entries.
+
+`resources/templates/list` advertises the parameterized forms clients can use
+after discovering concrete examples:
+
+- `harn://topic/{name}`
+- `harn://event/{event_id}`
+- `harn://dlq/{entry_id}`
+
+`completion/complete` supports those resource template arguments. Topic
+completion includes static trigger topics and discovered agent transcript
+topics; event and DLQ completion use recorded trigger and pending DLQ ids.
+
+`harn://topic/*` resources expose recent EventLog entries for orchestrator
+topics. Harn does not advertise `subscriptions/listen`; requests for that
+optional notification stream return an explicit unsupported-feature error.
+
+## Prompts
+
+The server exposes `.harn.prompt` files from the project root and from
+installed prompt-library packages in the leased current generation.
+TOML front matter can define display metadata and MCP arguments:
+
+```harn-prompt
+---
+id = "review"
+description = "Review code"
+[[arguments]]
+name = "code"
+description = "Code to review"
+required = true
+[[arguments]]
+name = "language"
+required = false
+suggestions = ["rust", "typescript", "python"]
+---
+Review this:
+{{ code }}
+```
+
+`prompts/get` renders the template with the supplied `arguments` object.
+`completion/complete` uses the optional `suggestions`/`completions` list on
+front-matter arguments when a client asks for prompt argument completions.
+The server reads the current manifest, prompt, lockfile, and package metadata
+when clients request a catalog page.
+
+## Protocol support
+
+`harn mcp serve` implements stable MCP `2026-07-28`. It is a control-plane
+server for Harn orchestration state, so it supports tools, resources, prompts,
+completions, MCP tasks, cancellation, and progress. It does not expose roots.
+The orchestrator-mode catalog does not currently embed sampling input requests
+(Harn's MCP clients resolve sampling input — see the
+[client docs](mcp-and-acp.md#mcp-client-support-matrix)).
+
+| Method or feature | Status |
+|---|---|
+| `server/discover`, `ping` | Supported |
+| `tools/list`, `tools/call` | Supported for the Harn tool catalog above |
+| `notifications/progress`, `notifications/cancelled` | Supported for cancellable work |
+| `resources/list`, `resources/read` | Supported for manifest, EventLog topic, event, and DLQ resources |
+| `resources/templates/list` | Supported for EventLog topic, trigger event, and DLQ URI patterns |
+| `subscriptions/listen` | Not advertised; rejected with an explicit unsupported-feature error |
+| `prompts/list` | Supported for `.harn.prompt` files in the project and prompt-library packages |
+| `prompts/get` | Supported; renders prompt templates with supplied arguments |
+| `completion/complete` | Supported for prompt arguments with front-matter suggestions and orchestrator resource template arguments |
+| Embedded `elicitation/create` input | Script-driven servers return it in an `input_required` result when a handler calls `mcp_elicit(...)` (see [Elicitation](#elicitation)) |
+| Embedded `roots/list` input | Script-driven servers return it in an `input_required` result when a handler calls `harness.tools.mcp_client_roots()` |
+| Embedded `sampling/createMessage` input | Resolved when Harn is the client; not currently emitted by Harn's server catalogs |
+| `tasks/get`, `tasks/update`, `tasks/cancel` | Supported for asynchronous orchestrator tool calls through the stable tasks extension |
+| `tools/call` task results | Asynchronous orchestrator tools return `resultType = "task"`; other tools return inline results |
+
+Explicitly unsupported methods return a JSON-RPC error with code `-32601` and
+`error.data.type = "mcp.unsupportedFeature"`. Task polling, input responses,
+and cancellation use the stable tasks extension.
+
+`roots/list`, `sampling/createMessage`, and `elicitation/create` are embedded
+input requests in stable multi-round-trip results. They are not top-level calls
+to an MCP server endpoint. Harn returns an explicit `mcp.unsupportedFeature`
+error when a client sends one as a top-level server request.
+
+## Elicitation
+
+Script-driven MCP servers (those built with `harness.tools.mcp_tools(...)` /
+`harness.tools.mcp_resource(...)` / `harness.tools.mcp_prompt(...)` and started with `harn run --serve mcp`
+or `harn serve mcp`) can request structured user input during a handler with
+the `mcp_elicit(...)` builtin:
+
+```harn
+const answer = mcp_elicit({
+  message: "Which environment should I deploy to?",
+  requestedSchema: {
+    type: "object",
+    properties: {
+      env: { type: "string", enum: ["staging", "production"] },
+      confirm: { type: "boolean" }
+    },
+    required: ["env", "confirm"]
+  }
+})
+// answer is one of:
+//   { action: "accept", content: { env: "staging", confirm: true } }
+//   { action: "decline" }
+//   { action: "cancel" }
+```
+
+On the first pass, Harn returns `resultType = "input_required"` with an embedded
+form-mode `elicitation/create` request. The client collects an answer and
+retries the original operation with `inputResponses` and Harn's opaque
+`requestState`. Harn re-enters the handler, and the builtin returns the
+canonical `{action, content?}` envelope from the
+[MCP elicitation spec](https://modelcontextprotocol.io/specification/2026-07-28/client/elicitation).
+On `accept`, `content` is validated against `requestedSchema` before
+returning so scripts can rely on its shape. On `decline` / `cancel`,
+`content` is omitted.
+
+`mcp_elicit(...)` is only valid while Harn is handling an MCP tool, resource,
+or prompt request. If called at pipeline
+top-level — it raises a structured error rather than hanging.
+
+## Client roots
+
+Script-driven MCP servers can ask the client for its roots:
+
+```harn
+const roots = harness.tools.mcp_client_roots()
+```
+
+Like elicitation, this uses an `input_required` result and a retry of the
+original operation. The builtin is only valid inside a served handler and
+returns the resolved `roots/list` result as a list of root objects.
+
+When Harn is on the *client* side of an MCP connection (`harness.tools.mcp_connect(...)`
+or `harness.tools.mcp_call(...)`) and a stable server embeds an
+`elicitation/create` input request, Harn dispatches it to the embedder via the `HostCallBridge`
+(`capability="mcp"`, `operation="elicit"`). If no host bridge is wired
+up, Harn responds with `{ action: "decline" }` so the server can fall
+back to a sensible default rather than blocking forever.
+
+## Progress notifications
+
+Per the [MCP progress utility][mcp-progress], a client may opt into
+progress updates by attaching `_meta.progressToken` to a request. While
+the matching tool call is in flight, Harn's `harness.tools.mcp_report_progress(...)`
+builtin emits `notifications/progress` notifications carrying that
+token:
+
+```harn,ignore
+pub fn import_records(rows: list) -> string {
+  let i = 0
+  for row in rows {
+    i = i + 1
+    process(row)
+    harness.tools.mcp_report_progress(i, {total: len(rows), message: "imported " + to_string(i)})
+  }
+  return "imported " + to_string(i) + " records"
+}
+```
+
+The builtin returns `true` when a notification was emitted and `false`
+when it was dropped — either because the client did not opt in via
+`_meta.progressToken`, the call sits outside an MCP tool handler, or
+the value would not strictly increase per the spec's monotonicity
+requirement. Scripts can therefore call it unconditionally without a
+preflight check.
+
+`opts` is optional; supported keys:
+
+- `total`: numeric ceiling so the client can render a progress bar
+- `message`: human-readable status string
+- `token`: override the ambient request token (rarely needed; useful
+  only when fanning progress out for nested work)
+
+The orchestrator-mode `harn.trigger.fire` tool also emits its own
+milestones (`loading runtime`, `preparing event`, `firing trigger`,
+`trigger complete`) so MCP clients can render meaningful progress for
+long trigger fan-outs without any user-side wiring.
+
+[mcp-progress]: https://modelcontextprotocol.io/specification/2026-07-28/basic/utilities/progress
+
+## Observability
+
+Every MCP tool call appends an `observability.action_graph` event and emits a
+stderr log line with:
+
+- MCP client identity
+- tool name
+- status
+- trace id
+
+`harn.trigger.fire` also injects MCP client identity and trace metadata into the
+synthetic event headers so downstream dispatch traces can be tied back to the
+calling MCP client.
+
+`harn.secret_scan` additionally appends `audit.secret_scan` records with only
+redacted findings plus stable fingerprints so future trust-graph consumers can
+reason about scan hygiene without storing raw secret material.

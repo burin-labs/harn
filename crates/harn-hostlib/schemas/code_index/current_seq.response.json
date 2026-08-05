@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/current_seq.response.json",
+  "title": "code_index.current_seq response",
+  "description": "Latest assigned global edit sequence (0 when no edits have been recorded).",
+  "type": "integer",
+  "minimum": 0
+}

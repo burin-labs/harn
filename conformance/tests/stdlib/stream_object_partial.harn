@@ -1,0 +1,42 @@
+import { stream_object } from "std/json"
+
+/**
+ * stream_object yields the current partial object per chunk (growing
+ * monotonically) and ends with the fully-parsed object. Assertions check
+ * behavior — partial growth + final equality — not exact intermediate prose.
+ */
+pipeline default(harness: Harness) {
+  const chunks = ["{\"name\":\"A", "da\",\"age\"", ":30,\"tags\":[\"x", "\",\"y\"]}"]
+  let partials = []
+  for obj in stream_object(harness.runtime, chunks) {
+    partials = partials.appending(obj)
+  }
+  // More than one partial was emitted as the object filled in.
+  harness.stdio.println(len(partials) >= 2)
+  // The first partial already exposes the first field (possibly a partial value).
+  harness.stdio.println(partials[0]?.name != nil)
+  // Key count never decreases across successive partials (monotonic growth).
+  let monotonic = true
+  let prev = 0
+  for partial in partials {
+    const count = len(partial.keys())
+    if count < prev {
+      monotonic = false
+    }
+    prev = count
+  }
+  harness.stdio.println(monotonic)
+  // The final emission is the complete, fully-parsed object.
+  const final = partials[len(partials) - 1]
+  harness.stdio.println(final.name)
+  harness.stdio.println(final.age)
+  harness.stdio.println(join(final.tags, ","))
+  // A truncated stream still yields its best-effort final partial (no throw):
+  // the complete `a` member survives, the half-typed `b` key is dropped.
+  let truncated = nil
+  for obj in stream_object(harness.runtime, ["{\"a\":1,\"b"]) {
+    truncated = obj
+  }
+  harness.stdio.println(truncated.a)
+  harness.stdio.println(truncated?.b == nil)
+}

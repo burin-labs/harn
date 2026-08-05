@@ -1,0 +1,17 @@
+pipeline default(harness: Harness) {
+  /** Define an interface */
+  interface Printable {
+    fn to_display() -> string
+  }
+  // Define a struct
+  struct Point {
+    x: int
+    y: int
+  }
+  // Create struct instances (dict-style construction)
+  const p = {x: 10, y: 20}
+  harness.stdio.println(p.x)
+  harness.stdio.println(p.y)
+  // Interfaces are declarative type contracts
+  harness.stdio.println("interfaces work")
+}

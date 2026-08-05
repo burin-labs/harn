@@ -1,0 +1,51 @@
+r1
+tenant-a
+true
+1
+2026-06-05T12:00:00Z
+4
+SELECT id::text AS id FROM "receipts" WHERE id = $1::uuid
+r1
+true
+2
+true
+SELECT '{}' AS empty, $1 AS value
+ok
+SELECT * FROM "tenant data"."receipts""live"
+"select"
+SELECT $1
+danger
+true
+true
+true
+true
+true
+true
+true
+true
+SELECT id::text AS id, to_json(created_at)#>>'{}' AS created_at, payload FROM receipts WHERE tenant_id = $1::uuid
+tenant-a
+true
+true
+vaults.id::text AS id, CASE WHEN items.owner_id IS NULL THEN NULL ELSE items.owner_id::text END AS owner_id, to_json(vaults.created_at)#>>'{}' AS created_at, CASE WHEN items.expires_at IS NULL THEN NULL ELSE to_json(items.expires_at)#>>'{}' END AS expires_at
+true
+true
+SELECT data#>>'{}' AS data FROM events WHERE tags && '{a,b}'::text[] AND tenant_id = $1::uuid
+tenant-a
+1
+UPDATE t SET d = jsonb_set(d, '{path}', $1)
+42
+SELECT '{}'::jsonb AS empty
+scan_events
+many
+true
+true
+true
+SELECT jsonb_build_object('id', "receipts"."id"::text, 'owner''s note', "receipts"."note", 'created_at', to_json("receipts"."created_at")#>>'{}') AS record FROM "receipts" WHERE (((("receipts"."tenant_id" IS NULL) OR ("receipts"."tenant_id" = "receipts"."owner_tenant_id"))) AND ((NOT ("receipts"."status" = 'archived')))) AND id = $1::uuid
+r1
+true
+true
+true
+true
+true
+true

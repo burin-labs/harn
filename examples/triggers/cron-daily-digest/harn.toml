@@ -1,0 +1,12 @@
+[package]
+name = "cron-daily-digest"
+
+[[triggers]]
+id = "daily-digest"
+kind = "cron"
+provider = "cron"
+match = { events = ["cron.tick"] }
+handler = "send_daily_digest"
+schedule = "0 9 * * 1-5"
+timezone = "America/Los_Angeles"
+budget = { daily_cost_usd = 1.50, max_concurrent = 1 }

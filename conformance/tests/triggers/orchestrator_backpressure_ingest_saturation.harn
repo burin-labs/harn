@@ -1,0 +1,7 @@
+pipeline test(harness: Harness, task) {
+  const result = harness.runtime.trigger_test_harness("orchestrator_backpressure_ingest_saturation")
+  harness.stdio.println(result.ok)
+  harness.stdio.println(result.attempts[1].status == "ingest_saturated")
+  harness.stdio.println(result.attempts[1].backoff_ms == 60000)
+  harness.stdio.println(result.details.status == 503)
+}

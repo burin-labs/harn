@@ -1,0 +1,588 @@
+/**
+ * std/eval/remote_fanout — deterministic remote-eval planning and rejoin.
+ *
+ * Harn owns the versioned plan and receipt contracts. Transport adapters only
+ * move each shard's argv and opaque metadata, then return payloads keyed by the
+ * Harn-assigned shard id.
+ */
+pub type RemoteFanoutCatalog = {evals: dict<string, unknown>, groups: dict<string, list<string>>}
+
+pub type RemoteFanoutArtifactLimits = {raw_file_max_bytes: int, compressed_bundle_max_bytes: int}
+
+pub type RemoteFanoutOptions = {
+  cells: list<string>,
+  trials: int,
+  max_concurrency: int,
+  max_escalating: int,
+  model: string,
+  split: string,
+  runner_argv_template: list<string>,
+  backend: string,
+  backend_metadata: dict<string, unknown>,
+  artifact_limits: RemoteFanoutArtifactLimits,
+  base_seed?: int,
+}
+
+pub type RemoteFanoutShard = {
+  id: string,
+  cell: string,
+  trial_index: int,
+  seed: int,
+  runner_argv: list<string>,
+}
+
+pub type RemoteFanoutConcurrency = {
+  max_concurrency: int,
+  max_escalating: int,
+  escalation_governor: "adapter_must_limit_simultaneously_escalating_shards",
+}
+
+pub type RemoteFanoutPlan = {
+  schema: "harn.eval.remote_fanout.plan.v1",
+  schema_version: int,
+  producer: "harn_remote_eval_fanout_plan_v1",
+  backend: string,
+  backend_metadata: dict<string, unknown>,
+  split: string,
+  model: string,
+  cells: list<string>,
+  shard_count: int,
+  shards: list<RemoteFanoutShard>,
+  concurrency: RemoteFanoutConcurrency,
+  artifact_limits: RemoteFanoutArtifactLimits,
+  plan_checksum: string,
+}
+
+pub type RemoteFanoutTrialReceipt = {
+  schema: "harn.eval.remote_fanout.trial.v1",
+  schema_version: int,
+  producer: "harn_remote_eval_fanout_trial_receipt_v1",
+  plan_checksum: string,
+  shard_id: string,
+  cell: string,
+  trial_index: int,
+  seed: int,
+  status: string,
+  ok: bool,
+  result: dict<string, unknown>,
+  artifacts: dict<string, unknown>,
+  receipt_checksum: string,
+}
+
+pub type RemoteFanoutPathRewrite = {shard_id: string, remote_prefix: string, local_prefix: string}
+
+pub type RemoteFanoutArtifactManifest = {
+  schema: "harn.eval.remote_fanout.artifacts.v1",
+  schema_version: int,
+  producer: "harn_remote_eval_fanout_artifact_manifest_v1",
+  plan_checksum: string,
+  shard_count: int,
+  path_rewrite_map: list<RemoteFanoutPathRewrite>,
+  path_rewrite_checksum: string,
+  manifest_checksum: string,
+}
+
+pub type RemoteFanoutFailedShard = {shard_id: string, status: string}
+
+pub type RemoteFanoutMalformedReceipt = {index: int, shard_id: string, reason: string}
+
+pub type RemoteFanoutQuarantine = {
+  missing_shard_ids: list<string>,
+  duplicate_shard_ids: list<string>,
+  unknown_shard_ids: list<string>,
+  failed_shards: list<RemoteFanoutFailedShard>,
+  malformed_receipts: list<RemoteFanoutMalformedReceipt>,
+}
+
+pub type RemoteFanoutReadiness = {
+  status: "ready" | "blocked",
+  ingest_ready: bool,
+  accepted_shard_count: int,
+  expected_shard_count: int,
+  received_receipt_count: int,
+}
+
+pub type RemoteFanoutRejoinReceipt = {
+  schema: "harn.eval.remote_fanout.rejoin.v1",
+  schema_version: int,
+  producer: "harn_remote_eval_fanout_rejoin_receipt_v1",
+  plan_checksum: string,
+  readiness: RemoteFanoutReadiness,
+  accepted_shard_ids: list<string>,
+  quarantine: RemoteFanoutQuarantine,
+  rejoin_checksum: string,
+}
+
+fn __positive(name: string, value: int) -> int {
+  if value < 1 {
+    throw "std/eval/remote_fanout: " + name + " must be a positive integer"
+  }
+  return value
+}
+
+fn __append_unique(values: list<string>, value: string) -> list<string> {
+  if values.contains(value) {
+    return values
+  }
+  return values + [value]
+}
+
+fn __checksum(value: unknown) -> string {
+  return "sha256:" + sha256(json_stringify(value))
+}
+
+fn __shard_safe(value: string) -> string {
+  let out = ""
+  for ch in value.chars() {
+    const text = to_string(ch)
+    if (text >= "a" && text <= "z")
+      || (text >= "A" && text <= "Z")
+      || (text >= "0" && text <= "9") {
+      out = out + text
+    } else {
+      out = out + "-"
+    }
+  }
+  while out.contains("--") {
+    out = out.replace("--", "-")
+  }
+  const slug = lowercase(out.trim("-"))
+  if slug == "" {
+    return "case"
+  }
+  return slug
+}
+
+fn __render_arg(
+  template: string,
+  cell: string,
+  model: string,
+  split: string,
+  trial_index: int,
+  seed: int,
+) -> string {
+  return template.replace("{case}", cell).replace("{model}", model).replace("{split}", split)
+    .replace("{trial}", to_string(trial_index))
+    .replace("{seed}", to_string(seed))
+}
+
+fn __render_argv(
+  template: list<string>,
+  cell: string,
+  model: string,
+  split: string,
+  trial_index: int,
+  seed: int,
+) -> list<string> {
+  let argv: list<string> = []
+  for arg in template {
+    argv = argv + [__render_arg(arg, cell, model, split, trial_index, seed)]
+  }
+  return argv
+}
+
+/**
+ * Expand catalog cases and groups in caller order, deduplicating cases.
+ *
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn expand_remote_fanout_cells(
+  requested: list<string>,
+  catalog: RemoteFanoutCatalog,
+) -> list<string> {
+  let expanded: list<string> = []
+  for name in requested {
+    if catalog.evals[name] != nil {
+      expanded = __append_unique(expanded, name)
+      continue
+    }
+    const group = catalog.groups[name]
+    if group == nil {
+      throw "std/eval/remote_fanout: unknown catalog case or group '" + name + "'"
+    }
+    for cell in group {
+      if catalog.evals[cell] == nil {
+        throw "std/eval/remote_fanout: group '" + name + "' names unknown case '" + cell + "'"
+      }
+      expanded = __append_unique(expanded, cell)
+    }
+  }
+  return expanded
+}
+
+fn __plan_body(options: RemoteFanoutOptions, cells: list<string>, shards: list<RemoteFanoutShard>) {
+  return {
+    schema: "harn.eval.remote_fanout.plan.v1",
+    schema_version: 1,
+    producer: "harn_remote_eval_fanout_plan_v1",
+    backend: options.backend,
+    backend_metadata: options.backend_metadata,
+    split: options.split,
+    model: options.model,
+    cells: cells,
+    shard_count: len(shards),
+    shards: shards,
+    concurrency: {
+      max_concurrency: options.max_concurrency,
+      max_escalating: options.max_escalating,
+      escalation_governor: "adapter_must_limit_simultaneously_escalating_shards",
+    },
+    artifact_limits: options.artifact_limits,
+  }
+}
+
+fn __plan_checksum(plan: RemoteFanoutPlan) -> string {
+  return __checksum(
+    {
+      schema: plan.schema,
+      schema_version: plan.schema_version,
+      producer: plan.producer,
+      backend: plan.backend,
+      backend_metadata: plan.backend_metadata,
+      split: plan.split,
+      model: plan.model,
+      cells: plan.cells,
+      shard_count: plan.shard_count,
+      shards: plan.shards,
+      concurrency: plan.concurrency,
+      artifact_limits: plan.artifact_limits,
+    },
+  )
+}
+
+fn __require_valid_plan(plan: RemoteFanoutPlan) {
+  if plan.shard_count != len(plan.shards) || plan.plan_checksum != __plan_checksum(plan) {
+    throw "std/eval/remote_fanout: plan checksum mismatch"
+  }
+}
+
+/**
+ * Build one deterministic, transport-neutral fanout plan.
+ *
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn remote_eval_fanout_plan(
+  options: RemoteFanoutOptions,
+  catalog: RemoteFanoutCatalog,
+) -> RemoteFanoutPlan {
+  __positive("trials", options.trials)
+  __positive("max_concurrency", options.max_concurrency)
+  __positive("max_escalating", options.max_escalating)
+  __positive("artifact_limits.raw_file_max_bytes", options.artifact_limits.raw_file_max_bytes)
+  __positive(
+    "artifact_limits.compressed_bundle_max_bytes",
+    options.artifact_limits.compressed_bundle_max_bytes,
+  )
+  if options.artifact_limits.compressed_bundle_max_bytes
+    > options.artifact_limits.raw_file_max_bytes {
+    throw "std/eval/remote_fanout: compressed artifact budget cannot exceed raw file budget"
+  }
+  if options.max_escalating > options.max_concurrency {
+    throw "std/eval/remote_fanout: max_escalating cannot exceed max_concurrency"
+  }
+  if len(options.runner_argv_template) == 0 {
+    throw "std/eval/remote_fanout: runner_argv_template must not be empty"
+  }
+  const cells = expand_remote_fanout_cells(options.cells, catalog)
+  if len(cells) == 0 {
+    throw "std/eval/remote_fanout: cells must name at least one catalog case or group"
+  }
+  const base_seed = options.base_seed ?? 1
+  let shards: list<RemoteFanoutShard> = []
+  let ids: list<string> = []
+  for cell in cells {
+    const case_hash = substring(sha256(cell), 0, 8)
+    for trial_index in range(1, options.trials + 1) {
+      const seed = base_seed + trial_index - 1
+      const id = __shard_safe(cell) + "-" + case_hash + "-t" + to_string(trial_index)
+      if ids.contains(id) {
+        throw "std/eval/remote_fanout: duplicate shard id '" + id + "'"
+      }
+      ids = ids + [id]
+      shards = shards
+        + [
+        {
+          id: id,
+          cell: cell,
+          trial_index: trial_index,
+          seed: seed,
+          runner_argv: __render_argv(
+            options.runner_argv_template,
+            cell,
+            options.model,
+            options.split,
+            trial_index,
+            seed,
+          ),
+        },
+      ]
+    }
+  }
+  const body = __plan_body(options, cells, shards)
+  const checksum = __checksum(body)
+  return body + {plan_checksum: checksum}
+}
+
+fn __plan_shard_by_id(plan: RemoteFanoutPlan) -> dict<string, RemoteFanoutShard> {
+  let shards: dict<string, RemoteFanoutShard> = {}
+  for shard in plan.shards {
+    shards = shards + {[shard.id]: shard}
+  }
+  return shards
+}
+
+fn __status_ok(status: string) -> bool {
+  return ["ok", "pass", "passed", "success", "complete", "completed"].contains(lowercase(status))
+}
+
+fn __trial_checksum(
+  plan_checksum: string,
+  shard: RemoteFanoutShard,
+  status: string,
+  ok: bool,
+  result: dict<string, unknown>,
+  artifacts: dict<string, unknown>,
+) -> string {
+  return __checksum(
+    {
+      schema: "harn.eval.remote_fanout.trial.v1",
+      schema_version: 1,
+      producer: "harn_remote_eval_fanout_trial_receipt_v1",
+      plan_checksum: plan_checksum,
+      shard_id: shard.id,
+      cell: shard.cell,
+      trial_index: shard.trial_index,
+      seed: shard.seed,
+      status: status,
+      ok: ok,
+      result: result,
+      artifacts: artifacts,
+    },
+  )
+}
+
+/**
+ * Bind one adapter result to the exact Harn plan and shard.
+ *
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn remote_eval_fanout_trial_receipt(
+  plan: RemoteFanoutPlan,
+  shard_id: string,
+  result: dict<string, unknown>,
+  artifacts: dict<string, unknown> = {},
+) -> RemoteFanoutTrialReceipt {
+  __require_valid_plan(plan)
+  const shard = __plan_shard_by_id(plan)[shard_id]
+  if shard == nil {
+    throw "std/eval/remote_fanout: unknown shard id '" + shard_id + "'"
+  }
+  const status = lowercase(to_string(result["status"] ?? "unknown"))
+  const passed = result["passed"]
+  const ok = __status_ok(status) && (passed == nil || passed)
+  const receipt_checksum = __trial_checksum(
+    plan.plan_checksum,
+    shard,
+    status,
+    ok,
+    result,
+    artifacts,
+  )
+  return {
+    schema: "harn.eval.remote_fanout.trial.v1",
+    schema_version: 1,
+    producer: "harn_remote_eval_fanout_trial_receipt_v1",
+    plan_checksum: plan.plan_checksum,
+    shard_id: shard_id,
+    cell: shard.cell,
+    trial_index: shard.trial_index,
+    seed: shard.seed,
+    status: status,
+    ok: ok,
+    result: result,
+    artifacts: artifacts,
+    receipt_checksum: receipt_checksum,
+  }
+}
+
+fn __slash_join(base: string, tail: string) -> string {
+  const clean_base = base.trim_end("/")
+  const clean_tail = tail.trim_start("/")
+  if clean_base == "" {
+    return clean_tail
+  }
+  if clean_tail == "" {
+    return clean_base
+  }
+  return clean_base + "/" + clean_tail
+}
+
+/**
+ * Produce the deterministic path projection used by byte transports.
+ *
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn remote_eval_fanout_artifact_manifest(
+  plan: RemoteFanoutPlan,
+  remote_root: string,
+  local_root: string,
+) -> RemoteFanoutArtifactManifest {
+  __require_valid_plan(plan)
+  let rewrites: list<RemoteFanoutPathRewrite> = []
+  for shard in plan.shards {
+    rewrites = rewrites
+      + [
+      {
+        shard_id: shard.id,
+        remote_prefix: __slash_join(remote_root, shard.id),
+        local_prefix: __slash_join(local_root, shard.id),
+      },
+    ]
+  }
+  const path_rewrite_checksum = __checksum(rewrites)
+  const body = {
+    schema: "harn.eval.remote_fanout.artifacts.v1",
+    schema_version: 1,
+    producer: "harn_remote_eval_fanout_artifact_manifest_v1",
+    plan_checksum: plan.plan_checksum,
+    shard_count: len(plan.shards),
+    path_rewrite_map: rewrites,
+    path_rewrite_checksum: path_rewrite_checksum,
+  }
+  return body + {manifest_checksum: __checksum(body)}
+}
+
+fn __malformed(
+  malformed: list<RemoteFanoutMalformedReceipt>,
+  index: int,
+  shard_id: string,
+  reason: string,
+) -> list<RemoteFanoutMalformedReceipt> {
+  return malformed + [{index: index, shard_id: shard_id, reason: reason}]
+}
+
+fn __trial_contract_matches(
+  receipt: dict<string, unknown>,
+  plan: RemoteFanoutPlan,
+  shard: RemoteFanoutShard,
+) -> bool {
+  return receipt["schema"] == "harn.eval.remote_fanout.trial.v1"
+    && receipt["schema_version"] == 1
+    && receipt["producer"]
+    == "harn_remote_eval_fanout_trial_receipt_v1"
+    && receipt["plan_checksum"] == plan.plan_checksum
+    && receipt["cell"] == shard.cell
+    && receipt["trial_index"] == shard.trial_index
+    && receipt["seed"] == shard.seed
+    && type_of(receipt["result"]) == "dict"
+    && type_of(receipt["artifacts"]) == "dict"
+}
+
+/**
+ * Validate and quarantine adapter receipts, then report typed ingest readiness.
+ *
+ * This function never mutates an external ledger and never interprets an
+ * application-specific verdict.
+ *
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn remote_eval_fanout_rejoin_receipt(
+  plan: RemoteFanoutPlan,
+  receipts: list<unknown>,
+) -> RemoteFanoutRejoinReceipt {
+  __require_valid_plan(plan)
+  const expected = __plan_shard_by_id(plan)
+  let seen: dict<string, bool> = {}
+  let accepted: list<string> = []
+  let duplicate_ids: list<string> = []
+  let unknown_ids: list<string> = []
+  let failed: list<RemoteFanoutFailedShard> = []
+  let malformed: list<RemoteFanoutMalformedReceipt> = []
+  for {index, value} in receipts.enumerate() {
+    if type_of(value) != "dict" {
+      malformed = __malformed(malformed, index, "", "receipt is not an object")
+      continue
+    }
+    const shard_id = to_string(value["shard_id"] ?? "")
+    if shard_id == "" {
+      malformed = __malformed(malformed, index, "", "receipt omits shard_id")
+      continue
+    }
+    const expected_shard = expected[shard_id]
+    if expected_shard == nil {
+      unknown_ids = __append_unique(unknown_ids, shard_id)
+      continue
+    }
+    if seen[shard_id] != nil {
+      duplicate_ids = __append_unique(duplicate_ids, shard_id)
+      continue
+    }
+    seen = seen + {[shard_id]: true}
+    const status = lowercase(to_string(value["status"] ?? ""))
+    const ok = value["ok"]
+    const result = value["result"]
+    const artifacts = value["artifacts"]
+    if !__trial_contract_matches(value, plan, expected_shard) {
+      malformed = __malformed(malformed, index, shard_id, "receipt contract mismatch")
+      continue
+    }
+    const actual_checksum = __trial_checksum(
+      plan.plan_checksum,
+      expected_shard,
+      status,
+      ok,
+      result,
+      artifacts,
+    )
+    if value["receipt_checksum"] != actual_checksum {
+      malformed = __malformed(malformed, index, shard_id, "receipt checksum mismatch")
+      continue
+    }
+    if !ok || !__status_ok(status) {
+      failed = failed + [{shard_id: shard_id, status: status}]
+      continue
+    }
+    accepted = accepted + [shard_id]
+  }
+  let missing: list<string> = []
+  for shard in plan.shards {
+    if seen[shard.id] == nil {
+      missing = missing + [shard.id]
+    }
+  }
+  const ingest_ready = len(missing) == 0
+    && len(duplicate_ids) == 0
+    && len(unknown_ids) == 0
+    && len(failed) == 0
+    && len(malformed) == 0
+    && len(accepted) == len(plan.shards)
+  const readiness: RemoteFanoutReadiness = {
+    status: ingest_ready ? "ready" : "blocked",
+    ingest_ready: ingest_ready,
+    accepted_shard_count: len(accepted),
+    expected_shard_count: len(plan.shards),
+    received_receipt_count: len(receipts),
+  }
+  const quarantine: RemoteFanoutQuarantine = {
+    missing_shard_ids: missing,
+    duplicate_shard_ids: duplicate_ids,
+    unknown_shard_ids: unknown_ids,
+    failed_shards: failed,
+    malformed_receipts: malformed,
+  }
+  const body = {
+    schema: "harn.eval.remote_fanout.rejoin.v1",
+    schema_version: 1,
+    producer: "harn_remote_eval_fanout_rejoin_receipt_v1",
+    plan_checksum: plan.plan_checksum,
+    readiness: readiness,
+    accepted_shard_ids: accepted,
+    quarantine: quarantine,
+  }
+  return body + {rejoin_checksum: __checksum(body)}
+}

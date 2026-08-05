@@ -1,0 +1,323 @@
+import { help_requested, parse, parser } from "std/cli/argparse"
+import { render_table } from "std/table"
+
+const DEFAULT_ORG = "burin-labs"
+
+const DEFAULT_REPOS = ["harn", "burin-code"]
+
+const DEFAULT_RUNS_PER_REPO = 50
+
+const PRICE_PER_MINUTE = {UBUNTU: 0.008, WINDOWS: 0.016, MACOS: 0.08}
+
+fn arg_spec() {
+  return parser(
+    {
+      name: "gha_spend_report",
+      args: [
+        {kind: "flag", name: "org", long: "--org", parse: "string", default: DEFAULT_ORG},
+        {kind: "flag", name: "repo", long: "--repo", parse: "string", multi: true, default: []},
+        {
+          kind: "flag",
+          name: "runs_per_repo",
+          long: "--runs-per-repo",
+          parse: "int",
+          default: DEFAULT_RUNS_PER_REPO,
+        },
+        {kind: "switch", name: "json", long: "--json", default: false},
+      ],
+    },
+  )
+}
+
+fn usage() -> string {
+  return join(
+    [
+      "usage: harn run scripts/gha_spend_report.harn -- [--org ORG] [--repo NAME ...] [--runs-per-repo N] [--json]",
+      "",
+      "Examples:",
+      "  harn run scripts/gha_spend_report.harn --",
+      "  harn run scripts/gha_spend_report.harn -- --org burin-labs --repo harn --repo burin-code",
+      "  harn run scripts/gha_spend_report.harn -- --json",
+    ],
+    "\n",
+  )
+}
+
+fn format_float_2(value) -> string {
+  const f = to_float(value) ?? 0.0
+  const sign = if f < 0.0 {
+    "-"
+  } else {
+    ""
+  }
+  const scaled = to_int(round(abs(f) * 100.0)) ?? 0
+  const whole = scaled / 100
+  const frac = scaled % 100
+  const frac_text = if frac < 10 {
+    "0" + to_string(frac)
+  } else {
+    to_string(frac)
+  }
+  return sign + to_string(whole) + "." + frac_text
+}
+
+fn number_value(value) -> float {
+  return to_float(value) ?? 0.0
+}
+
+fn sort_spend_rows(rows: list) -> list {
+  let out = []
+  for row in rows ?? [] {
+    let next = []
+    let inserted = false
+    for existing in out {
+      if !inserted && number_value(row.usd) > number_value(existing.usd) {
+        next = next.appending(row)
+        inserted = true
+      }
+      next = next.appending(existing)
+    }
+    if !inserted {
+      next = next.appending(row)
+    }
+    out = next
+  }
+  return out
+}
+
+fn parse_json_maybe(text: string) {
+  const trimmed = text.trim()
+  if trimmed == "" {
+    return nil
+  }
+  return try {
+    json_parse(trimmed)
+  } catch (_err) {
+    nil
+  }
+}
+
+pub fn has_billing_usage_items(data) -> bool {
+  return type_of(data?.usageItems) == "list"
+}
+
+fn repo_filter_allows(repo: string, include_repos: list<string>) -> bool {
+  if len(include_repos ?? []) == 0 {
+    return true
+  }
+  return include_repos.contains(repo)
+}
+
+pub fn billing_usage_rows(data, include_repos: list<string> = []) -> list {
+  let totals = {}
+  for item in data?.usageItems ?? [] {
+    if item?.product != "actions" || item?.unitType != "Minutes" {
+      continue
+    }
+    const repo = to_string(item?.repositoryName ?? "unknown")
+    if !repo_filter_allows(repo, include_repos) {
+      continue
+    }
+    const prior = totals[repo]
+      ?? {
+      label: "repo:" + repo,
+      minutes: 0.0,
+      usd: 0.0,
+      source: "billing-usage",
+    }
+    totals = totals
+      + {
+      [repo]: prior
+        + {
+        minutes: number_value(prior.minutes) + number_value(item?.quantity),
+        usd: number_value(prior.usd) + number_value(item?.netAmount),
+      },
+    }
+  }
+  let rows = []
+  for key in keys(totals).sorted() {
+    rows = rows.appending(totals[key])
+  }
+  return sort_spend_rows(rows)
+}
+
+pub fn action_run_refs(data) -> list {
+  let out = []
+  for run in data?.workflow_runs ?? [] {
+    const id = run?.id
+    if id == nil {
+      continue
+    }
+    out = out.appending({id: to_string(id), name: to_string(run?.name ?? "")})
+  }
+  return out
+}
+
+pub fn run_timing_rows(samples: list) -> list {
+  let totals = {}
+  for sample in samples ?? [] {
+    const repo = to_string(sample?.repo ?? "")
+    const workflow = to_string(sample?.workflow ?? "")
+    if repo == "" || workflow == "" {
+      continue
+    }
+    const key = repo + ":" + workflow
+    const prior = totals[key] ?? {label: key, minutes: 0.0, usd: 0.0, source: "run-timing"}
+    let minutes = 0.0
+    let usd = 0.0
+    const billable = sample?.timing?.billable ?? {}
+    for os_name in keys(billable) {
+      const os_minutes = number_value(billable[os_name]?.total_ms) / 60000.0
+      minutes = minutes + os_minutes
+      usd = usd + os_minutes * number_value(PRICE_PER_MINUTE[os_name])
+    }
+    totals = totals
+      + {
+      [key]: prior
+        + {
+        minutes: number_value(prior.minutes) + minutes,
+        usd: number_value(prior.usd) + usd,
+      },
+    }
+  }
+  let rows = []
+  for key in keys(totals).sorted() {
+    rows = rows.appending(totals[key])
+  }
+  return sort_spend_rows(rows)
+}
+
+fn table_rows(rows: list) -> list {
+  let out = []
+  for row in rows ?? [] {
+    out = out.appending(
+      {
+        workflow: row.label,
+        minutes: format_float_2(row.minutes),
+        estimated_usd: format_float_2(row.usd),
+        source: row.source,
+      },
+    )
+  }
+  return out
+}
+
+pub fn render_spend_table(rows: list) -> string {
+  return render_table(
+    table_rows(rows),
+    {
+      columns: [
+        {key: "workflow", header: "workflow"},
+        {key: "minutes", header: "minutes", align: "right"},
+        {key: "estimated_usd", header: "estimated_usd", align: "right"},
+        {key: "source", header: "source"},
+      ],
+      empty: "No GitHub Actions spend rows found.",
+    },
+  )
+}
+
+fn current_utc_year(process: HarnessProcess) -> string {
+  const res = process.run({program: "date", args: ["-u", "+%Y"]})
+  if res.success {
+    return res.stdout.trim()
+  }
+  return "2026"
+}
+
+fn require_gh(harness: Harness) {
+  const res = harness.process.run({program: "gh", args: ["--version"]})
+  if !res.success {
+    harness.stdio.eprintln("gha_spend_report: gh CLI not found")
+    harness.runtime.exit(1)
+  }
+}
+
+fn gh_api_json(process: HarnessProcess, path: string) {
+  const res = process.run({program: "gh", args: ["api", path]})
+  if !res.success {
+    return nil
+  }
+  return parse_json_maybe(res.stdout)
+}
+
+fn collect_run_timing_rows(
+  process: HarnessProcess,
+  org: string,
+  repos: list<string>,
+  runs_per_repo: int,
+) -> list {
+  let samples = []
+  for repo in repos {
+    const runs = gh_api_json(
+      process,
+      "/repos/${org}/${repo}/actions/runs?per_page=${runs_per_repo}",
+    )
+    for ref in action_run_refs(runs) {
+      const timing = gh_api_json(process, "/repos/${org}/${repo}/actions/runs/${ref.id}/timing")
+      if timing == nil {
+        continue
+      }
+      samples = samples.appending({repo: repo, workflow: ref.name, timing: timing})
+    }
+  }
+  return run_timing_rows(samples)
+}
+
+fn main(harness: Harness) {
+  if help_requested(argv) {
+    harness.stdio.println(usage())
+    return nil
+  }
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
+    harness.stdio.eprintln("")
+    harness.stdio.eprintln(usage())
+    harness.runtime.exit(2)
+  }
+  const parsed = unwrap(parsed_result).options
+  const org = to_string(parsed?.org ?? DEFAULT_ORG)
+  const requested_repos: list<string> = parsed?.repo ?? []
+  const repos: list<string> = if len(requested_repos) == 0 {
+    DEFAULT_REPOS
+  } else {
+    requested_repos
+  }
+  const runs_per_repo = to_int(parsed?.runs_per_repo ?? DEFAULT_RUNS_PER_REPO)
+    ?? DEFAULT_RUNS_PER_REPO
+  require_gh(harness)
+  const billing_path =
+    "/orgs/${org}/settings/billing/usage?year=${current_utc_year(harness.process)}"
+  const billing = gh_api_json(harness.process, billing_path)
+  if parsed?.json ?? false {
+    if has_billing_usage_items(billing) {
+      harness.stdio.println(json_stringify_pretty(billing))
+    } else {
+      harness.stdio.println(
+        json_stringify(
+          {
+            error:
+              "billing usage endpoint unavailable; rerun without --json for the run-timing fallback table",
+          },
+        ),
+      )
+    }
+    return nil
+  }
+  if has_billing_usage_items(billing) {
+    harness.stdio.println(
+      "GitHub Actions spend report for org \"${org}\" (source: billing usage report)",
+    )
+    harness.stdio.println(render_spend_table(billing_usage_rows(billing, requested_repos)))
+  } else {
+    harness.stdio.println("GitHub Actions spend report for org \"${org}\"")
+    harness.stdio.eprintln(
+      "(billing usage endpoint unavailable or unauthorized; falling back to run /timing minutes)",
+    )
+    harness.stdio.println(
+      render_spend_table(collect_run_timing_rows(harness.process, org, repos, runs_per_repo)),
+    )
+  }
+  return nil
+}

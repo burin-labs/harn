@@ -1,0 +1,90 @@
+import { agent_sitrep, agent_sitrep_append, agent_sitrep_preferred_routes } from "std/agent/sitrep"
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline test(harness: Harness, task) {
+  // Default route list is non-empty and contains anthropic+haiku at the head.
+  const routes = agent_sitrep_preferred_routes()
+  harness.stdio.println(len(routes) > 0)
+  harness.stdio.println(routes[0].provider == "anthropic")
+  harness.stdio.println(routes[0].model == "claude-haiku-4-5-20251001")
+  // Mock provider is always available — pin opts.routes to it so the
+  // test does not depend on which env keys are present in CI.
+  const messages = [
+    {role: "user", content: "Investigate parser drift."},
+    {role: "assistant", content: "Inspected the lexer entrypoint."},
+    {role: "user", content: "Focus on diagnostics next."},
+  ]
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text(
+        "CURRENT STATE — investigating parser drift.\nWORK DONE — inspected lexer.rs and noted a missing fall-through case.\nNEXT ACTION — patch lexer.rs and re-run the conformance suite.",
+      ),
+    ],
+    { ->
+      const result = agent_sitrep(
+        harness.fs,
+        harness.llm,
+        messages,
+        {routes: [{provider: "mock", model: "mock-sitrep"}]},
+      )
+      harness.stdio.println(!result.skipped)
+      harness.stdio.println(result.provider_used == "mock")
+      harness.stdio.println(len(result.lines) == 3)
+      harness.stdio.println(result.lines[0].starts_with("CURRENT STATE"))
+      harness.stdio.println(result.lines[1].starts_with("WORK DONE"))
+      harness.stdio.println(result.lines[2].starts_with("NEXT ACTION"))
+      const prompt = harness.llm.mock_calls()[0].messages[0].content
+      harness.stdio.println(prompt.contains("[USER] Investigate parser drift."))
+      harness.stdio.println(prompt.contains("3 short sentences"))
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text("should not be reached")],
+    { ->
+      const empty_result = agent_sitrep(
+        harness.fs,
+        harness.llm,
+        [],
+        {routes: [{provider: "mock", model: "mock-sitrep"}]},
+      )
+      harness.stdio.println(empty_result.skipped)
+      harness.stdio.println(empty_result.reason == "empty_transcript")
+      harness.stdio.println(len(harness.llm.mock_calls()) == 0)
+    },
+  )
+  const unavailable_result = agent_sitrep(
+    harness.fs,
+    harness.llm,
+    messages,
+    {routes: [{provider: "definitely-not-a-real-provider"}]},
+  )
+  harness.stdio.println(unavailable_result.skipped)
+  harness.stdio.println(unavailable_result.reason == "no_available_provider")
+  // agent_sitrep_append wraps the summary in <sitrep>...</sitrep> and
+  // appends as a system-role message.
+  with_llm_script(
+    harness.llm,
+    [llm_text("STATE — A.\nWORK — B.\nNEXT — C.")],
+    { ->
+      const appended = agent_sitrep_append(
+        harness.fs,
+        harness.llm,
+        messages,
+        {routes: [{provider: "mock", model: "mock-sitrep"}]},
+      )
+      harness.stdio.println(len(appended) == len(messages) + 1)
+      harness.stdio.println(appended[len(appended) - 1].role == "system")
+      harness.stdio.println(appended[len(appended) - 1].content.contains("<sitrep>"))
+      harness.stdio.println(appended[len(appended) - 1].content.contains("STATE — A."))
+    },
+  )
+  const appended_skipped = agent_sitrep_append(
+    harness.fs,
+    harness.llm,
+    [],
+    {routes: [{provider: "mock", model: "mock-sitrep"}]},
+  )
+  harness.stdio.println(len(appended_skipped) == 0)
+}
