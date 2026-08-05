@@ -37,6 +37,19 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    # A grammar we hold back on purpose. The `=` pin in
+    # `crates/harn-hostlib/Cargo.toml` records the decision for a reader; this
+    # records it for the bot, which cannot see a comment. Without it the same
+    # known-bad version is re-proposed every week, and it has been merged that
+    # way once already (#5127, reverted by #5470).
+    #
+    # Scoped to the one bad version rather than the package, so a future
+    # 0.7.4 that fixes the regression still arrives as a normal update.
+    # Removing this entry is step 2 of #6227.
+    ignore:
+      - dependency-name: "tree-sitter-swift"
+        versions:
+          - "0.7.3"
     cooldown:
       default-days: 7
 

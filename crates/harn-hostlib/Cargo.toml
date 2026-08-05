@@ -194,6 +194,12 @@ tree-sitter-kotlin-ng = { version = "1.1", optional = true }
 tree-sitter-php = { version = "0.24", optional = true }
 tree-sitter-scala = { version = "0.26", optional = true }
 tree-sitter-bash = { version = "0.25", optional = true }
+# Held at 0.7.2 on purpose, not merely "not yet updated". 0.7.3 regressed to a
+# root missing-node on the optional-chain/cast/coalesce fixture in the fitness
+# corpus (#5007, pinned by #5008, re-proven by #5470). `=` because a caret range
+# would resolve straight past it. Dependabot is told separately in
+# `.github/dependabot.yml`; unpin both together once upstream ships a fix and
+# the Swift corpus row passes against it (#6227).
 tree-sitter-swift = { version = "=0.7.2", optional = true }
 tree-sitter-zig = { version = "1.1", optional = true }
 tree-sitter-elixir = { version = "0.3", optional = true }
