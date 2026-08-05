@@ -1005,3 +1005,31 @@ pipeline test_workflow_evaluates_the_growth_signal_after_the_fuse(harness: Harne
   assert(growth.run?.contains("export BINARY_SIZE_SOURCE_SHA=") ?? false)
   assert_eq(growth.env?.BINARY_SIZE_SOURCE_REF, gha_expression("needs.setup.outputs.ref"))
 }
+
+/**
+ * Tag recovery runs the policy from the dispatch ref but the size script from
+ * the source checkout. Recovering a tag cut before the policy contract existed
+ * must therefore skip the growth signal rather than fail on that script's own
+ * hardcoded default (#6257) — v0.10.51's would reject 218.05 MiB while the
+ * fuse it just cleared is 250 MiB.
+ */
+@test
+pipeline test_workflow_skips_the_growth_signal_for_pre_contract_sources(harness: Harness, task) {
+  const steps = release_workflow(harness.fs).jobs.build.steps
+  const growth = release_workflow_step(steps, "Evaluate the binary-size growth signal")
+  const run = growth.run ?? ""
+  const contract_at = run.index_of(".github/release-binary-size-policy.json")
+  const invoke_at = run.index_of("scripts/check_binary_size.harn")
+  assert(contract_at >= 0, "the growth step must test for the policy contract")
+  assert(invoke_at >= 0, "the growth step must invoke the size script")
+  // Ordering is the whole point: a check after the invocation prevents nothing.
+  assert(contract_at < invoke_at, "the contract check must precede the invocation")
+  // A skip that reads as a pass is the failure mode this guard must not have.
+  assert(run.contains("::notice::"), "an unevaluated growth signal must announce itself")
+  assert(run.contains("growth_signal: not-evaluated"), "the report must record the skip")
+  assert(run.contains("exit 0"), "a pre-contract source is not a release failure")
+  // Exporting a legacy BINARY_SIZE_BUDGET_MB would also make recovery pass, but
+  // it is a shim with no retirement condition. Matched as an assignment so the
+  // workflow comment explaining that choice does not satisfy the check.
+  assert(!run.contains("BINARY_SIZE_BUDGET_MB="), "no legacy budget-name alias")
+}

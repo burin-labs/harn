@@ -1279,6 +1279,32 @@ jobs:
           HARN_RELEASE_TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
+          # Recovery of an existing tag splits the two refs on purpose: the
+          # policy comes from the dispatch ref via setup, the source from the
+          # tag. The fuse above honors that split because setup hands it the
+          # bytes. This step cannot: it runs the *source* checkout's
+          # check_binary_size.harn, so recovering a tag cut before the policy
+          # contract existed runs a script that never heard of
+          # BINARY_SIZE_FUSE_BYTES and falls back to its own hardcoded default
+          # (#6257). v0.10.51's script would fail on 218.00 MiB while the fuse
+          # it just cleared is 250 MiB — accusing a binary 4.5 MB below the
+          # baseline of growing.
+          #
+          # A growth signal is not computable for a source tree whose policy
+          # contract did not exist, so skip it and say so. Deliberately not a
+          # legacy BINARY_SIZE_BUDGET_MB alias: that is a shim with no
+          # retirement condition, while this guard can never fire once every
+          # recoverable tag postdates the contract. The fuse already ran from
+          # the dispatch ref and stays authoritative either way.
+          if [[ ! -f .github/release-binary-size-policy.json ]]; then
+            echo "::notice::binary-size growth signal not evaluated: the checked-out source ($BINARY_SIZE_SOURCE_REF) predates .github/release-binary-size-policy.json; the distribution fuse from the dispatch ref still applied"
+            {
+              echo ""
+              echo "growth_signal: not-evaluated"
+              echo "growth_signal_reason: source predates .github/release-binary-size-policy.json"
+            } >> "$BINARY_SIZE_REPORT_DIR/binary-size.txt"
+            exit 0
+          fi
           # The attested checked-out revision, so the report names the commit
           # that was measured rather than the tag that asked for it.
           export BINARY_SIZE_SOURCE_SHA="${HARN_BUILD_REVISION:-$BINARY_SIZE_SOURCE_REF}"
