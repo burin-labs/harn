@@ -114,6 +114,16 @@ ci = true
 make_all = true
 
 [[artifact]]
+id = "vm-exposures"
+description = "Names of every `harness.<capability>.<method>` declared by `#[harn_builtin]` in harn-vm, projected into the dependency-leaf contracts crate so `harn check` can reject an unknown capability method without a running VM."
+gen = "gen-vm-exposures"
+check = "check-vm-exposures"
+outputs = ["crates/harn-capability-contracts/src/vm_declared.rs"]
+sources = ["crates/harn-vm/src/"]
+ci = true
+make_all = true
+
+[[artifact]]
 id = "wasm-wit-contract"
 description = "Canonical JSON projection of the Portable Harn Kernel WIT package, resolved and validated by pinned Bytecode Alliance wasm-tools."
 gen = "gen-wasm-wit"
@@ -546,6 +556,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 "check-generated-registry" = "source"
 "check-release-audit-contract" = "source"
 "check-ci-cache-policy" = "source"
+"check-vm-exposures" = "source"
 "check-rust-test-lane-policy" = "source"
 "lint-test-patterns" = "source"
 "lint-diagnostic-codes" = "source"
