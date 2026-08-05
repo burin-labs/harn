@@ -15,6 +15,8 @@ use harn_parser::{
     RepairSafety, SNode, TypeExpr,
 };
 
+#[path = "fix/alias_widening.rs"]
+mod alias_widening;
 #[path = "fix/capability_arguments.rs"]
 mod capability_arguments;
 #[path = "fix/capability_migrations.rs"]
@@ -91,6 +93,10 @@ struct CallableInfo {
     /// arity, so a `harness` parameter must not be introduced. `None` is the
     /// ordinary case.
     frozen_cause: Option<FrozenCause>,
+    /// The edits that must land with this callable's new parameter when its
+    /// arity is fixed by a `type X = fn(...)` the migration may move: the alias
+    /// declaration, and every call dispatched through a value it types.
+    alias_widening_edits: Vec<FixEdit>,
     calls: Vec<CallSite>,
     ambient_capability_calls: Vec<AmbientCapabilityCall>,
 }
@@ -898,7 +904,7 @@ fn synthesize_ambient_capability_repair(
     for &idx in &needed {
         let info = &infos[idx];
         escape.record(info);
-        edits.push(add_harness_param_edit(source, info)?);
+        push_signature_edits(&mut edits, source, info)?;
     }
     for (callee_idx, callers) in reverse_callers.iter().enumerate() {
         if !needed.contains(&callee_idx) {
@@ -1062,6 +1068,22 @@ fn capability_bundle_literal(expected: &TypeExpr, binding: &str) -> Option<Strin
     (!fields.is_empty()).then(|| format!("{{{}}}", fields.join(", ")))
 }
 
+/// Emit the new capability parameter and, when the callable's arity is fixed by
+/// a local `type X = fn(...)`, the edit that moves that alias with it.
+///
+/// The two must land in the same pass. A widened signature without its alias —
+/// or an alias without its signature — does not type-check, and `harn fix
+/// --apply` runs unattended.
+fn push_signature_edits(edits: &mut Vec<FixEdit>, source: &str, info: &CallableInfo) -> Option<()> {
+    edits.push(add_harness_param_edit(source, info)?);
+    for alias_edit in &info.alias_widening_edits {
+        if !edits.iter().any(|edit| edit.span == alias_edit.span) {
+            edits.push(alias_edit.clone());
+        }
+    }
+    Some(())
+}
+
 fn synthesize_missing_harness_repair(
     span: Span,
     source: &str,
@@ -1085,7 +1107,7 @@ fn synthesize_missing_harness_repair(
     let mut edits = Vec::new();
     for &idx in &needed {
         escape.record(&infos[idx]);
-        edits.push(add_harness_param_edit(source, &infos[idx])?);
+        push_signature_edits(&mut edits, source, &infos[idx])?;
     }
     for (callee_idx, callers) in reverse_callers.iter().enumerate() {
         if !needed.contains(&callee_idx) {
@@ -1157,7 +1179,7 @@ fn synthesize_missing_root_argument_repair(
     for &idx in &needed {
         if infos[idx].harness_binding.is_none() {
             escape.record(&infos[idx]);
-            edits.push(add_harness_param_edit(source, &infos[idx])?);
+            push_signature_edits(&mut edits, source, &infos[idx])?;
         }
     }
     for (callee_idx, callers) in reverse_callers.iter().enumerate() {

@@ -175,6 +175,14 @@ fn capability_plan_names_the_frozen_callable_that_blocked_the_migration() {
             "  return read_text(request)\n",
             "}\n",
             "\n",
+            // The value also escapes into a list, so the alias widening in
+            // #6153 cannot prove this one and the refusal stands. Without the
+            // extra read this fixture now migrates, and the test would assert
+            // a report that correctly no longer exists.
+            "fn registry() -> list {\n",
+            "  return [resolve_thing]\n",
+            "}\n",
+            "\n",
             "pub fn run(harness: Harness, resolver: ResolverFn = resolve_thing) -> string {\n",
             "  return resolver(\"q\")\n",
             "}\n",

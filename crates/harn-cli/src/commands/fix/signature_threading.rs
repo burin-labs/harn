@@ -12,6 +12,7 @@ use harn_parser::{
     visit, BindingPattern, DiagnosticCode as Code, Node, Repair, SNode, TypeExpr, TypedParam,
 };
 
+use super::alias_widening::AliasWidening;
 use super::capability_migrations::collect_callable_node_calls;
 use super::value_escape::FrozenCause;
 use super::CallableInfo;
@@ -22,13 +23,16 @@ const HOST_ENTRY_ATTRIBUTE: &str = "host_entry";
 
 /// Why this callable's signature cannot gain a `harness` parameter, if it
 /// cannot. A value reference is checked first because it is the stronger
-/// statement: the call site is invisible, not merely external.
+/// statement: the call site is invisible, not merely external — unless the
+/// widening proved it visible after all, in which case the reference stops
+/// being a reason to freeze anything.
 fn frozen_cause(
     name: &str,
     referenced_by_value: &BTreeSet<String>,
     host_entry: bool,
+    widening: &AliasWidening,
 ) -> Option<FrozenCause> {
-    if referenced_by_value.contains(name) {
+    if referenced_by_value.contains(name) && !widening.covers(name) {
         return Some(FrozenCause::ValueReference);
     }
     host_entry.then_some(FrozenCause::HostEntry)
@@ -40,6 +44,10 @@ pub(super) fn collect_callable_infos(
     exported_names: &BTreeSet<String>,
     referenced_by_value: &BTreeSet<String>,
 ) -> Vec<CallableInfo> {
+    // A value-referenced callable is frozen unless the alias that fixes its
+    // arity moves with it (#6153). Deciding that needs the whole file, so it is
+    // decided once here rather than per callable.
+    let widening = AliasWidening::analyze(program, source, referenced_by_value);
     let mut infos = Vec::new();
     for node in program {
         let (attributes, inner) = match &node.node {
@@ -91,7 +99,8 @@ pub(super) fn collect_callable_infos(
                     has_params: has_params || !params.is_empty(),
                     bound_names,
                     harness_binding: harness_param_name(params).map(str::to_string),
-                    frozen_cause: frozen_cause(name, referenced_by_value, host_entry),
+                    frozen_cause: frozen_cause(name, referenced_by_value, host_entry, &widening),
+                    alias_widening_edits: widening.edits_for(name).to_vec(),
                     calls,
                     ambient_capability_calls,
                 });
@@ -126,7 +135,8 @@ pub(super) fn collect_callable_infos(
                     has_params: has_params || !params.is_empty(),
                     bound_names,
                     harness_binding: harness_param_name(params).map(str::to_string),
-                    frozen_cause: frozen_cause(name, referenced_by_value, host_entry),
+                    frozen_cause: frozen_cause(name, referenced_by_value, host_entry, &widening),
+                    alias_widening_edits: widening.edits_for(name).to_vec(),
                     calls,
                     ambient_capability_calls,
                 });
