@@ -33,6 +33,7 @@ pub(super) fn print_human_plan(plan: &RepairPlan) {
         }
     }
     print_skipped_files(&plan.skipped_files);
+    print_declared_invalid_files(&plan.declared_invalid_files);
     print_frozen_callables(&plan.frozen_callables);
 }
 
@@ -71,6 +72,25 @@ fn print_skipped_files(skipped_files: &[SkippedFileWire]) {
     }
 }
 
+/// Name the fixtures that were left alone because the repo declared them
+/// expected-invalid.
+///
+/// Reported rather than dropped: a file the codemod did not visit should never
+/// be invisible, or "the suite was clean" and "the suite was never read" look
+/// the same from the outside (harn#6264).
+fn print_declared_invalid_files(declared: &[SkippedFileWire]) {
+    if declared.is_empty() {
+        return;
+    }
+    println!(
+        "left {} declared-invalid fixture(s) untouched (sibling `.error` file):",
+        declared.len()
+    );
+    for file in declared {
+        println!("  {}", file.path);
+    }
+}
+
 pub(super) fn print_apply_result(result: &ApplyResult) {
     let verb = if result.dry_run {
         "would apply"
@@ -90,6 +110,7 @@ pub(super) fn print_apply_result(result: &ApplyResult) {
         );
     }
     print_skipped_files(&result.skipped_files);
+    print_declared_invalid_files(&result.declared_invalid_files);
     print_frozen_callables(&result.frozen_callables);
 }
 

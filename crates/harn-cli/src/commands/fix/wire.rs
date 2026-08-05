@@ -41,6 +41,16 @@ pub(crate) struct RepairPlan {
     pub repairs: Vec<RepairWire>,
     #[serde(rename = "skippedFiles")]
     pub skipped_files: Vec<SkippedFileWire>,
+    /// Files the repository declares are expected to be unparseable (a sibling
+    /// `.error` fixture). Excluded from repair like any unparseable file, but
+    /// they do not fail the run. Omitted when empty so existing consumers see
+    /// byte-identical output.
+    #[serde(
+        rename = "declaredInvalidFiles",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub declared_invalid_files: Vec<SkippedFileWire>,
     #[serde(rename = "safetyLevels")]
     pub safety_levels: Vec<String>,
     /// Callables the capability migration wanted to re-sign but could not.
@@ -68,6 +78,13 @@ pub(crate) struct ApplyResult {
     pub skipped: Vec<SkippedRepairWire>,
     #[serde(rename = "skippedFiles")]
     pub skipped_files: Vec<SkippedFileWire>,
+    /// See [`RepairPlan::declared_invalid_files`].
+    #[serde(
+        rename = "declaredInvalidFiles",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub declared_invalid_files: Vec<SkippedFileWire>,
     #[serde(rename = "post_apply_diagnostics_count")]
     pub post_apply_diagnostics_count: usize,
     #[serde(rename = "dryRun")]

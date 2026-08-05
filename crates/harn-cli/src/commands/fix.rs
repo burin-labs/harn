@@ -412,6 +412,7 @@ fn build_plan_with_options(
 
     let mut candidates = Vec::new();
     let mut skipped_files = Vec::new();
+    let mut declared_invalid_files = Vec::new();
     let mut frozen_callables: Vec<FrozenCallable> = Vec::new();
     for file in &files {
         if options.capability_migrations_only {
@@ -432,12 +433,20 @@ fn build_plan_with_options(
                 frozen: &mut frozen_callables,
             },
         ) {
-            skipped_files.push(skipped);
+            if declares_expected_invalid(file) {
+                declared_invalid_files.push(skipped);
+            } else {
+                skipped_files.push(skipped);
+            }
         }
     }
 
+    // Both kinds are excluded from the files a repair can be applied to — a
+    // file that did not parse has no spans to rewrite either way. They differ
+    // only in whether the run fails, which is decided by the caller.
     let skipped_paths = skipped_files
         .iter()
+        .chain(declared_invalid_files.iter())
         .map(|skipped| {
             std::fs::canonicalize(&skipped.path)
                 .unwrap_or_else(|_| Path::new(&skipped.path).to_path_buf())
@@ -557,6 +566,7 @@ fn build_plan_with_options(
         diagnostics,
         repairs,
         skipped_files,
+        declared_invalid_files,
         safety_levels,
         frozen_callables: frozen_callables
             .into_iter()
@@ -566,6 +576,27 @@ fn build_plan_with_options(
             })
             .collect(),
     })
+}
+
+/// Whether the repository declares that this file is *supposed* to be
+/// unparseable.
+///
+/// Conformance suites keep fixtures whose whole purpose is to be rejected, and
+/// they already say so: the expected diagnostic lives in a sibling `.error`
+/// file next to the `.harn`. Both this repo (`conformance/tests/modules/*.error`)
+/// and burin-code (`conformance/errors/*.error`) use that convention.
+///
+/// Without this, `harn fix --apply .` reads such a fixture, fails to parse it,
+/// and fails the whole run — which made every consuming repo that tests its own
+/// parser errors permanently un-bumpable, because the reusable bump workflow
+/// runs the codemod repo-wide under `set -euo pipefail` (harn#6264). burin-code
+/// sat nine patch releases behind on exactly this.
+///
+/// A file with no such declaration still fails the run. That distinction is the
+/// point: an undeclared parse error is a corrupt file, and staying loud about
+/// it is why this reads a declaration rather than suppressing the category.
+fn declares_expected_invalid(file: &Path) -> bool {
+    file.with_extension("error").is_file()
 }
 
 fn collect_file_candidates(

@@ -1169,6 +1169,8 @@ mod prefix_invariant;
 
 #[path = "capability_apply_tests/alias_widening.rs"]
 mod alias_widening;
+#[path = "capability_apply_tests/expected_invalid.rs"]
+mod expected_invalid;
 #[path = "capability_apply_tests/host_entry.rs"]
 mod host_entry;
 #[path = "capability_apply_tests/plan.rs"]
