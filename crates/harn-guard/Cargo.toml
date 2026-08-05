@@ -23,7 +23,7 @@ thiserror = "2"
 # `tokenizer.json`. Both are off by default and never built in CI.
 # `download-binaries` requires a TLS feature once defaults are off; use
 # `tls-rustls` to match the workspace rustls posture (see #5690).
-ort = { version = "=2.0.0-rc.12", optional = true, default-features = false, features = [
+ort = { version = "=2.0.0-rc.13", optional = true, default-features = false, features = [
     "download-binaries",
     "tls-rustls",
 ] }
