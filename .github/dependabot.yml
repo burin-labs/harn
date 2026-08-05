@@ -20,6 +20,20 @@ updates:
         patterns:
           - "opentelemetry*"
           - "tracing-opentelemetry"
+      # Every tree-sitter crate, runtime and grammars alike. A grammar bump is
+      # not a routine dependency bump: it changes how source parses, so it is
+      # gated by the `harn-hostlib` parser-agreement corpus and by the fitness
+      # receipt, and reviewing it means reading a corpus result rather than a
+      # version number.
+      #
+      # In the catch-all it also holds unrelated work hostage — twice now a
+      # single `tree-sitter-swift` bump has blocked seventeen other crates
+      # (#6205, #6240), because the group cannot merge until the grammar
+      # question is settled. Its own PR gets its own review and its own revert,
+      # which is the same reason the three families above are carved out.
+      tree-sitter:
+        patterns:
+          - "tree-sitter*"
       # Everything else routine, in one weekly PR. Majors match no group and
       # keep their own PR and their own revert. The excludes are what keep the
       # named families above out of this batch: GitHub would resolve the
@@ -34,6 +48,7 @@ updates:
           - "wasmtime*"
           - "opentelemetry*"
           - "tracing-opentelemetry"
+          - "tree-sitter*"
         update-types:
           - "minor"
           - "patch"
