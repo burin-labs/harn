@@ -273,3 +273,50 @@ fn missing_root_argument_repair_preserves_parenthesized_first_argument() {
     );
     harn_parser::parse_source(&applied).expect("repair must remain parse-safe");
 }
+
+/// A read of a local binding is not a value read of a same-named callable.
+///
+/// The set is collected across the whole program so a registry in one module
+/// can freeze a handler defined in another. That reach is what makes the
+/// distinction load-bearing: without it an ordinary `const repo_root = ...`
+/// anywhere in the corpus freezes every `repo_root` helper in it.
+#[test]
+fn value_references_skip_locally_bound_names() {
+    let source = concat!(
+        "fn main(harness: Harness) {\n",
+        "  const repo_root = discover()\n",
+        "  let shell_argv = false\n",
+        "  const {alias: renamed} = config()\n",
+        "  const [first] = items()\n",
+        "  print(repo_root, shell_argv, renamed, first)\n",
+        "}\n",
+    );
+    let program = harn_parser::parse_source(source).unwrap();
+    let mut names = BTreeSet::new();
+    super::signature_threading::collect_value_references(&program, &mut names);
+    for local in ["repo_root", "shell_argv", "renamed", "first"] {
+        assert!(!names.contains(local), "`{local}` is a local binding");
+    }
+}
+
+/// A genuine first-class read still freezes: this is the case the whole
+/// mechanism exists for, and the local-binding filter must not weaken it.
+#[test]
+fn value_references_still_catch_a_bare_handler_reference() {
+    let source = concat!(
+        "fn handler(args: dict) -> string {\n",
+        "  return \"\"\n",
+        "}\n",
+        "fn main(harness: Harness) {\n",
+        "  const registry = {handler: handler}\n",
+        "  use_it(registry)\n",
+        "}\n",
+    );
+    let program = harn_parser::parse_source(source).unwrap();
+    let mut names = BTreeSet::new();
+    super::signature_threading::collect_value_references(&program, &mut names);
+    assert!(
+        names.contains("handler"),
+        "a bare reference must still freeze"
+    );
+}
