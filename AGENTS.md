@@ -143,7 +143,7 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   `HARN_TEST_ONE_NAME='module::tests::case' make test-one`. Set
   `HARN_TEST_ONE_PACKAGE` only when the test is outside `harn-cli`; zero matches
   fail loudly.
-- Workspace tests: `make test` (nextest when available).
+- Workspace tests: `make test` (requires cargo-nextest; `make setup` installs it).
 - Full gate: `make all`.
 - Before declaring a change clean, run `make check-drift` and inspect
   `git status`. After Rust registry or executable-semantics changes, rebuild

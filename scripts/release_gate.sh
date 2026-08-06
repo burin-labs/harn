@@ -483,7 +483,7 @@ run_rust_audit() {
   time_phase "cargo fmt --check" make fmt-check
   time_phase "cargo clippy --workspace --all-targets" \
     env RUN_PROMPT_PROSE_RATCHET=true ./scripts/ci/run_rust_lint_lane.sh
-  time_phase "make test (nextest/cargo test)" make test
+  time_phase "make test (cargo-nextest)" make test
 }
 
 run_harn_audit() {

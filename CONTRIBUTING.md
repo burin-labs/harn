@@ -104,17 +104,20 @@ Runs on:
 
 ### Preferred Rust test path
 
-`make test` is the default Rust workspace test entry point. When
-`cargo-nextest` is installed, it runs `cargo nextest run --workspace` for
-better cross-binary parallelism and bounded timeouts. When nextest is not
-installed, it falls back to `cargo test --workspace`.
+`make test` is the default Rust workspace test entry point. It requires
+`cargo-nextest` and runs `cargo nextest run --workspace` so the fast suite
+keeps nextest's process-per-test isolation, profile filters, and bounded
+timeouts. It does **not** fall back to `cargo test`: that path has no profile
+support (so it silently widens into the E2E tier) and runs tests as threads in
+one process (so process-local env mutations race). See
+[Deterministic test patterns](docs/src/dev/testing.md#supported-runner).
 
 `make setup` already installs `cargo-nextest`; if you need to add it
 manually:
 
 ```bash
 cargo install cargo-nextest --locked
-make test       # fast suite
+make test       # fast suite (requires nextest)
 make test-e2e   # slow E2E suite (requires nextest)
 ```
 
@@ -122,7 +125,8 @@ The workspace `.config/nextest.toml` applies a 15 s slow-test threshold by
 default and a 60 s hard termination cap. Tests that legitimately need more
 time (the LLM transport tests, E2E subprocess tests) have targeted overrides.
 
-If you need the baseline Cargo behavior explicitly, use:
+If you intentionally need the baseline Cargo behavior (different isolation,
+no profile filter), use:
 
 ```bash
 make test-cargo
@@ -148,7 +152,7 @@ make test-e2e    # run slow E2E / smoke suite
 - `make lint-no-xfail-regression`: conformance xfail count ratchet
 - `markdownlint-cli2`: Markdown lint
 - `harn lint`: Harn linter on conformance tests
-- `make test`: Rust workspace tests (`cargo nextest` when available)
+- `make test`: Rust workspace tests (`cargo nextest`; required)
 - `harn test conformance`: conformance suite
 
 Model-facing prompt prose lives in `crates/harn-stdlib/src/stdlib/**/*.harn.prompt`.
