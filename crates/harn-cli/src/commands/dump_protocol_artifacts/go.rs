@@ -173,6 +173,16 @@ pub(super) fn generate_go_for_version(artifact_version: &str) -> String {
         &worker_status_values(),
     ));
     out.push_str(&go_typed_array_owned(
+        "HarnAgentLifecycleState",
+        "HarnAgentLifecycleStates",
+        &agent_lifecycle_state_values(),
+    ));
+    out.push_str(&go_typed_array_owned(
+        "HarnAgentLifecycleEvent",
+        "HarnAgentLifecycleEvents",
+        &agent_lifecycle_event_values(),
+    ));
+    out.push_str(&go_typed_array_owned(
         "AgentTerminalClass",
         "AgentTerminalClasses",
         &agent_terminal_class_values(),

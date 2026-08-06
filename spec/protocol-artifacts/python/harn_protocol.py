@@ -40,6 +40,8 @@ __all__ = [
     "HARN_TOOL_CALL_ERROR_CATEGORIES",
     "HARN_SIDE_EFFECT_LEVELS",
     "HARN_WORKER_STATUSES",
+    "HARN_AGENT_LIFECYCLE_STATES",
+    "HARN_AGENT_LIFECYCLE_EVENTS",
     "HARN_TOOL_CALL_RECEIPT_STATUSES",
     "HARN_TOOL_CALL_RECEIPT_EXECUTORS",
     "HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS",
@@ -70,6 +72,8 @@ __all__ = [
     "HarnToolCallErrorCategory",
     "HarnSideEffectLevel",
     "HarnWorkerStatus",
+    "HarnAgentLifecycleState",
+    "HarnAgentLifecycleEvent",
     "ToolCallReceiptStatus",
     "ToolCallReceiptExecutor",
     "A2ATaskState",
@@ -349,6 +353,28 @@ HARN_WORKER_STATUSES: tuple = (
     "failed",
     "stopped",
     "cancelled",
+)
+HARN_AGENT_LIFECYCLE_STATES: tuple = (
+    "running",
+    "progressed",
+    "awaiting_input",
+    "suspended",
+    "completed",
+    "failed",
+    "stopped",
+    "cancelled",
+)
+HARN_AGENT_LIFECYCLE_EVENTS: tuple = (
+    "Spawned",
+    "Progressed",
+    "WaitingForInput",
+    "Suspended",
+    "Resumed",
+    "Completed",
+    "Failed",
+    "Stopped",
+    "Cancelled",
+    "Joined",
 )
 HARN_TOOL_CALL_RECEIPT_STATUSES: tuple = (
     "ok",
@@ -647,6 +673,30 @@ class HarnWorkerStatus(str, Enum):
     FAILED = "failed"
     STOPPED = "stopped"
     CANCELLED = "cancelled"
+
+
+class HarnAgentLifecycleState(str, Enum):
+    RUNNING = "running"
+    PROGRESSED = "progressed"
+    AWAITING_INPUT = "awaiting_input"
+    SUSPENDED = "suspended"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    STOPPED = "stopped"
+    CANCELLED = "cancelled"
+
+
+class HarnAgentLifecycleEvent(str, Enum):
+    SPAWNED = "Spawned"
+    PROGRESSED = "Progressed"
+    WAITINGFORINPUT = "WaitingForInput"
+    SUSPENDED = "Suspended"
+    RESUMED = "Resumed"
+    COMPLETED = "Completed"
+    FAILED = "Failed"
+    STOPPED = "Stopped"
+    CANCELLED = "Cancelled"
+    JOINED = "Joined"
 
 
 class ToolCallReceiptStatus(str, Enum):

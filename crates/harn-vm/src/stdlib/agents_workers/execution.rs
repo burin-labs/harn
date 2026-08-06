@@ -447,15 +447,24 @@ pub(in super::super) fn spawn_worker_task(
                                 worker.audit.run_id = Some(run_id.clone());
                             }
                             if suspended {
-                                worker.status = "suspended".to_string();
+                                worker.status = crate::agent_events::AgentLifecycleState::Suspended
+                                    .wire_name()
+                                    .to_string();
                                 worker.finished_at = None;
                             } else if worker.carry_policy.retriggerable {
-                                worker.status = "awaiting".to_string();
+                                // Canonical wire name from the shared lifecycle
+                                // registry; `awaiting` remains a parse alias only.
+                                worker.status =
+                                    crate::agent_events::AgentLifecycleState::AwaitingInput
+                                        .wire_name()
+                                        .to_string();
                                 worker.finished_at = None;
                                 worker.awaiting_started_at = Some(uuid::Uuid::now_v7().to_string());
                                 worker.awaiting_since = Some(std::time::Instant::now());
                             } else {
-                                worker.status = "completed".to_string();
+                                worker.status = crate::agent_events::AgentLifecycleState::Completed
+                                    .wire_name()
+                                    .to_string();
                                 worker.finished_at = Some(uuid::Uuid::now_v7().to_string());
                             }
                             if worker.carry_policy.persist_state || suspended {
@@ -470,9 +479,13 @@ pub(in super::super) fn spawn_worker_task(
                                     ..
                                 }
                             ) {
-                                worker.status = "cancelled".to_string();
+                                worker.status = crate::agent_events::AgentLifecycleState::Cancelled
+                                    .wire_name()
+                                    .to_string();
                             } else {
-                                worker.status = "failed".to_string();
+                                worker.status = crate::agent_events::AgentLifecycleState::Failed
+                                    .wire_name()
+                                    .to_string();
                             }
                             worker.finished_at = Some(uuid::Uuid::now_v7().to_string());
                             worker.latest_error = Some(error.to_string());
@@ -493,10 +506,10 @@ pub(in super::super) fn spawn_worker_task(
                             None
                         }
                         // Retriggerable workers don't terminate when their
-                        // current cycle completes; they go into `awaiting`
-                        // and wait for the next host trigger. Surface that
-                        // explicitly so observers see the state transition
-                        // rather than radio silence.
+                        // current cycle completes; they go into
+                        // `awaiting_input` and wait for the next host
+                        // trigger. Surface that explicitly so observers see
+                        // the state transition rather than radio silence.
                         Ok(_) if worker.carry_policy.retriggerable => {
                             Some(WorkerEvent::WorkerWaitingForInput)
                         }

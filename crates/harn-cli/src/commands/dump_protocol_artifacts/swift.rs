@@ -162,6 +162,14 @@ pub(super) fn generate_swift_for_version(artifact_version: &str) -> String {
     ));
     out.push_str(&swift_enum("HarnWorkerStatus", &worker_status_values()));
     out.push_str(&swift_enum(
+        "HarnAgentLifecycleState",
+        &agent_lifecycle_state_values(),
+    ));
+    out.push_str(&swift_enum(
+        "HarnAgentLifecycleEvent",
+        &agent_lifecycle_event_values(),
+    ));
+    out.push_str(&swift_enum(
         "HarnAgentTerminalClass",
         &agent_terminal_class_values(),
     ));

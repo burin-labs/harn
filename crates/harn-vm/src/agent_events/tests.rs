@@ -411,6 +411,20 @@ fn worker_event_status_strings_cover_all_variants() {
     assert!(WorkerEvent::status_is_terminal("canceled"));
     assert!(!WorkerEvent::status_is_terminal("suspended"));
     assert!(!WorkerEvent::status_is_terminal("unknown"));
+    // Compatibility aliases resolve through the shared lifecycle registry
+    // without becoming distinct canonical wire states.
+    assert_eq!(
+        WorkerEvent::from_status("awaiting"),
+        Some(WorkerEvent::WorkerWaitingForInput)
+    );
+    assert_eq!(
+        WorkerEvent::from_status("awaiting_input"),
+        Some(WorkerEvent::WorkerWaitingForInput)
+    );
+    assert_eq!(
+        AgentLifecycleState::canonicalize("awaiting"),
+        Some("awaiting_input")
+    );
 
     // `ALL` is the iteration order downstream protocol-artifact
     // dumpers walk; keep it in lockstep with the variant list so a

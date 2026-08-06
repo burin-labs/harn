@@ -438,6 +438,54 @@ public enum HarnWorkerStatus: String, Codable, Sendable, CaseIterable {
     ].map { Self(rawValue: $0)! }
 }
 
+public enum HarnAgentLifecycleState: String, Codable, Sendable, CaseIterable {
+    case running = "running"
+    case progressed = "progressed"
+    case awaitingInput = "awaiting_input"
+    case suspended = "suspended"
+    case completed = "completed"
+    case failed = "failed"
+    case stopped = "stopped"
+    case cancelled = "cancelled"
+
+    public static let allCases: [Self] = [
+        "running",
+        "progressed",
+        "awaiting_input",
+        "suspended",
+        "completed",
+        "failed",
+        "stopped",
+        "cancelled",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnAgentLifecycleEvent: String, Codable, Sendable, CaseIterable {
+    case Spawned = "Spawned"
+    case Progressed = "Progressed"
+    case WaitingForInput = "WaitingForInput"
+    case Suspended = "Suspended"
+    case Resumed = "Resumed"
+    case Completed = "Completed"
+    case Failed = "Failed"
+    case Stopped = "Stopped"
+    case Cancelled = "Cancelled"
+    case Joined = "Joined"
+
+    public static let allCases: [Self] = [
+        "Spawned",
+        "Progressed",
+        "WaitingForInput",
+        "Suspended",
+        "Resumed",
+        "Completed",
+        "Failed",
+        "Stopped",
+        "Cancelled",
+        "Joined",
+    ].map { Self(rawValue: $0)! }
+}
+
 public enum HarnAgentTerminalClass: String, Codable, Sendable, CaseIterable {
     case contextOverflow = "context_overflow"
     case providerMisconfigured = "provider_misconfigured"

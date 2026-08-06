@@ -355,7 +355,9 @@ async fn worker_trigger_builtin(
                 worker.id
             )));
         }
-        if worker.status != "awaiting" {
+        if crate::agent_events::AgentLifecycleState::from_wire(&worker.status)
+            != Some(crate::agent_events::AgentLifecycleState::AwaitingInput)
+        {
             return Err(VmError::Runtime(format!(
                 "worker_trigger: worker {} is not awaiting (status={})",
                 worker.id, worker.status
@@ -1165,7 +1167,10 @@ pub(crate) fn snapshot_suspended_subagents() -> Vec<serde_json::Value> {
                             .and_then(|value| serde_json::to_value(value).ok()),
                     }));
                 }
-                if worker.status != "awaiting" || worker.mode != "sub_agent" {
+                if crate::agent_events::AgentLifecycleState::from_wire(&worker.status)
+                    != Some(crate::agent_events::AgentLifecycleState::AwaitingInput)
+                    || worker.mode != "sub_agent"
+                {
                     return None;
                 }
                 let age_ms = worker
