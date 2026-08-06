@@ -309,6 +309,38 @@ var HarnWorkerStatuses = []HarnWorkerStatus{
 	"cancelled",
 }
 
+// HarnAgentLifecycleState is the typed alias for the HarnAgentLifecycleStates wire vocabulary.
+type HarnAgentLifecycleState = string
+
+// HarnAgentLifecycleStates enumerates every wire value Harn currently emits for HarnAgentLifecycleState.
+var HarnAgentLifecycleStates = []HarnAgentLifecycleState{
+	"running",
+	"progressed",
+	"awaiting_input",
+	"suspended",
+	"completed",
+	"failed",
+	"stopped",
+	"cancelled",
+}
+
+// HarnAgentLifecycleEvent is the typed alias for the HarnAgentLifecycleEvents wire vocabulary.
+type HarnAgentLifecycleEvent = string
+
+// HarnAgentLifecycleEvents enumerates every wire value Harn currently emits for HarnAgentLifecycleEvent.
+var HarnAgentLifecycleEvents = []HarnAgentLifecycleEvent{
+	"Spawned",
+	"Progressed",
+	"WaitingForInput",
+	"Suspended",
+	"Resumed",
+	"Completed",
+	"Failed",
+	"Stopped",
+	"Cancelled",
+	"Joined",
+}
+
 // AgentTerminalClass is the typed alias for the AgentTerminalClasses wire vocabulary.
 type AgentTerminalClass = string
 

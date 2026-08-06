@@ -296,6 +296,32 @@ export const HARN_WORKER_STATUSES = [
 ] as const
 export type HarnWorkerStatus = (typeof HARN_WORKER_STATUSES)[number]
 
+export const HARN_AGENT_LIFECYCLE_STATES = [
+  "running",
+  "progressed",
+  "awaiting_input",
+  "suspended",
+  "completed",
+  "failed",
+  "stopped",
+  "cancelled",
+] as const
+export type HarnAgentLifecycleState = (typeof HARN_AGENT_LIFECYCLE_STATES)[number]
+
+export const HARN_AGENT_LIFECYCLE_EVENTS = [
+  "Spawned",
+  "Progressed",
+  "WaitingForInput",
+  "Suspended",
+  "Resumed",
+  "Completed",
+  "Failed",
+  "Stopped",
+  "Cancelled",
+  "Joined",
+] as const
+export type HarnAgentLifecycleEvent = (typeof HARN_AGENT_LIFECYCLE_EVENTS)[number]
+
 export const HARN_TOOL_CALL_RECEIPT_STATUSES = [
   "ok",
   "schema_violation",

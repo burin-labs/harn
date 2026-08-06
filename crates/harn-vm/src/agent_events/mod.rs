@@ -27,6 +27,7 @@
 mod agent;
 mod from_host;
 mod host_injection;
+mod lifecycle;
 mod registry;
 mod sinks;
 mod terminal;
@@ -47,6 +48,10 @@ pub use agent::{
 pub use host_injection::{
     AttachmentFlavor, AttachmentRendering, HostInjectionProvenance, InjectionDelivery,
     SanitizationAction, SanitizationVerdict,
+};
+pub use lifecycle::{
+    AgentLifecycle, AgentLifecycleEvent, AgentLifecycleProjection, AgentLifecycleState,
+    LifecycleTransitionError,
 };
 #[cfg(test)]
 pub use registry::reset_wildcard_sinks;

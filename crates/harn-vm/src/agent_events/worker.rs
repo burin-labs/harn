@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use super::lifecycle::{AgentLifecycleEvent, AgentLifecycleState};
+
 /// Structured terminal outcome for one delegated sub-agent run.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -136,24 +138,30 @@ impl WorkerEvent {
         Self::WorkerCancelled,
     ];
 
-    /// Wire-level status string used by bridge `worker_update` payloads
-    /// and ACP `worker_update` session updates. The four canonical
-    /// states are mirrored from harn's internal worker `status` field
-    /// (`running`/`completed`/`failed`/`cancelled`), and the four newer
-    /// lifecycle states pick names that don't collide with any existing
-    /// status string.
-    pub fn as_status(self) -> &'static str {
+    /// Map onto the shared agent/run lifecycle event owner.
+    pub const fn lifecycle_event(self) -> AgentLifecycleEvent {
         match self {
-            Self::WorkerSpawned => "running",
-            Self::WorkerProgressed => "progressed",
-            Self::WorkerWaitingForInput => "awaiting_input",
-            Self::WorkerSuspended => "suspended",
-            Self::WorkerResumed => "running",
-            Self::WorkerCompleted => "completed",
-            Self::WorkerFailed => "failed",
-            Self::WorkerStopped => "stopped",
-            Self::WorkerCancelled => "cancelled",
+            Self::WorkerSpawned => AgentLifecycleEvent::Spawned,
+            Self::WorkerProgressed => AgentLifecycleEvent::Progressed,
+            Self::WorkerWaitingForInput => AgentLifecycleEvent::WaitingForInput,
+            Self::WorkerSuspended => AgentLifecycleEvent::Suspended,
+            Self::WorkerResumed => AgentLifecycleEvent::Resumed,
+            Self::WorkerCompleted => AgentLifecycleEvent::Completed,
+            Self::WorkerFailed => AgentLifecycleEvent::Failed,
+            Self::WorkerStopped => AgentLifecycleEvent::Stopped,
+            Self::WorkerCancelled => AgentLifecycleEvent::Cancelled,
         }
+    }
+
+    /// Wire-level status string used by bridge `worker_update` payloads
+    /// and ACP `worker_update` session updates. Derived from
+    /// [`AgentLifecycleState`] so adapter dumps cannot drift from the
+    /// shared registry.
+    pub fn as_status(self) -> &'static str {
+        self.lifecycle_event()
+            .target_state()
+            .expect("worker events always target a lifecycle state")
+            .wire_name()
     }
 
     pub fn as_str(self) -> &'static str {
@@ -176,33 +184,30 @@ impl WorkerEvent {
     /// the worker keeps running, is waiting for a trigger, or is parked
     /// awaiting an external resume.
     pub fn is_terminal(self) -> bool {
-        matches!(
-            self,
-            Self::WorkerCompleted
-                | Self::WorkerFailed
-                | Self::WorkerStopped
-                | Self::WorkerCancelled
-        )
+        self.lifecycle_event()
+            .target_state()
+            .is_some_and(AgentLifecycleState::is_terminal)
     }
 
     /// Interpret a persisted worker status through the lifecycle owner.
     /// `running` is represented by the spawn variant because both spawn and
     /// resume intentionally project to the same non-terminal wire state.
+    /// Compatibility aliases (`awaiting`, `canceled`, …) are accepted but
+    /// never become distinct canonical states.
     pub fn from_status(status: &str) -> Option<Self> {
-        match status {
-            "running" => Some(Self::WorkerSpawned),
-            "progressed" => Some(Self::WorkerProgressed),
-            "awaiting_input" => Some(Self::WorkerWaitingForInput),
-            "suspended" => Some(Self::WorkerSuspended),
-            "completed" => Some(Self::WorkerCompleted),
-            "failed" => Some(Self::WorkerFailed),
-            "stopped" => Some(Self::WorkerStopped),
-            "cancelled" | "canceled" => Some(Self::WorkerCancelled),
-            _ => None,
+        match AgentLifecycleState::from_wire(status)? {
+            AgentLifecycleState::Running => Some(Self::WorkerSpawned),
+            AgentLifecycleState::Progressed => Some(Self::WorkerProgressed),
+            AgentLifecycleState::AwaitingInput => Some(Self::WorkerWaitingForInput),
+            AgentLifecycleState::Suspended => Some(Self::WorkerSuspended),
+            AgentLifecycleState::Completed => Some(Self::WorkerCompleted),
+            AgentLifecycleState::Failed => Some(Self::WorkerFailed),
+            AgentLifecycleState::Stopped => Some(Self::WorkerStopped),
+            AgentLifecycleState::Cancelled => Some(Self::WorkerCancelled),
         }
     }
 
     pub fn status_is_terminal(status: &str) -> bool {
-        Self::from_status(status).is_some_and(Self::is_terminal)
+        AgentLifecycleState::status_is_terminal(status)
     }
 }

@@ -31,6 +31,109 @@
     ]
   },
   "acp": {
+    "agentLifecycleEvents": [
+      "Spawned",
+      "Progressed",
+      "WaitingForInput",
+      "Suspended",
+      "Resumed",
+      "Completed",
+      "Failed",
+      "Stopped",
+      "Cancelled",
+      "Joined"
+    ],
+    "agentLifecycleStateProjections": [
+      {
+        "a2aTaskState": "working",
+        "aliases": [],
+        "resumable": false,
+        "runRecordStatus": "running",
+        "terminal": false,
+        "wire": "running"
+      },
+      {
+        "a2aTaskState": "working",
+        "aliases": [],
+        "resumable": false,
+        "runRecordStatus": "progressed",
+        "terminal": false,
+        "wire": "progressed"
+      },
+      {
+        "a2aTaskState": "input-required",
+        "aliases": [
+          "awaiting"
+        ],
+        "resumable": true,
+        "runRecordStatus": "awaiting_input",
+        "terminal": false,
+        "wire": "awaiting_input"
+      },
+      {
+        "a2aTaskState": "paused",
+        "aliases": [],
+        "resumable": true,
+        "runRecordStatus": "suspended",
+        "terminal": false,
+        "wire": "suspended"
+      },
+      {
+        "a2aTaskState": "completed",
+        "aliases": [
+          "done",
+          "succeeded",
+          "success",
+          "ok"
+        ],
+        "resumable": false,
+        "runRecordStatus": "completed",
+        "terminal": true,
+        "wire": "completed"
+      },
+      {
+        "a2aTaskState": "failed",
+        "aliases": [
+          "error",
+          "errored",
+          "timeout",
+          "timed_out"
+        ],
+        "resumable": false,
+        "runRecordStatus": "failed",
+        "terminal": true,
+        "wire": "failed"
+      },
+      {
+        "a2aTaskState": "cancelled",
+        "aliases": [],
+        "resumable": false,
+        "runRecordStatus": "stopped",
+        "terminal": true,
+        "wire": "stopped"
+      },
+      {
+        "a2aTaskState": "cancelled",
+        "aliases": [
+          "canceled",
+          "aborted"
+        ],
+        "resumable": false,
+        "runRecordStatus": "cancelled",
+        "terminal": true,
+        "wire": "cancelled"
+      }
+    ],
+    "agentLifecycleStates": [
+      "running",
+      "progressed",
+      "awaiting_input",
+      "suspended",
+      "completed",
+      "failed",
+      "stopped",
+      "cancelled"
+    ],
     "agentMethods": [
       "initialize",
       "session/inject",

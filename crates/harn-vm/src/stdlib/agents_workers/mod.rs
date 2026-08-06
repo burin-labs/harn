@@ -257,7 +257,13 @@ pub(super) fn worker_trigger_payload_text(value: &VmValue) -> String {
 }
 
 pub(super) fn worker_wait_blocks(status: &str) -> bool {
-    matches!(status, "running" | "awaiting")
+    matches!(
+        crate::agent_events::AgentLifecycleState::from_wire(status),
+        Some(
+            crate::agent_events::AgentLifecycleState::Running
+                | crate::agent_events::AgentLifecycleState::AwaitingInput
+        )
+    )
 }
 
 pub(super) fn worker_id_from_value(value: &VmValue) -> Result<String, VmError> {

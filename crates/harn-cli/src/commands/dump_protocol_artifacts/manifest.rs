@@ -138,6 +138,9 @@ pub(super) fn generate_manifest_for_version(
             "promptErrorTerminalClasses": agent_terminal_class_values(),
             "toolExecutorSimpleValues": ACP_TOOL_EXECUTOR_SIMPLE_VALUES,
             "workerStatuses": worker_status_values(),
+            "agentLifecycleStates": agent_lifecycle_state_values(),
+            "agentLifecycleEvents": agent_lifecycle_event_values(),
+            "agentLifecycleStateProjections": agent_lifecycle_state_projections(),
         },
         "a2a": {
             "protocolVersion": A2A_PROTOCOL_VERSION,

@@ -1,12 +1,16 @@
 use std::collections::BTreeSet;
 
 use harn_serve::adapters::acp::{ACP_SESSION_UPDATE_VARIANTS, HARN_SESSION_UPDATE_EXTENSIONS};
+#[cfg(test)]
+use harn_vm::agent_events::WorkerEvent;
 use harn_vm::agent_events::{
-    AgentTerminalKind, ToolCallErrorCategory, ToolCallStatus, ToolMutationStatus, WorkerEvent,
+    AgentLifecycleEvent, AgentLifecycleState, AgentTerminalKind, ToolCallErrorCategory,
+    ToolCallStatus, ToolMutationStatus,
 };
 use harn_vm::llm::AgentTerminalClass;
 use harn_vm::tool_annotations::{SideEffectLevel, ToolKind};
 use serde::Serialize;
+use serde_json::{json, Value as JsonValue};
 
 pub(super) fn all_acp_session_updates() -> Vec<String> {
     unique_ordered(
@@ -61,20 +65,68 @@ pub(super) fn agent_terminal_owner_values() -> Vec<String> {
 }
 
 pub(super) fn worker_status_values() -> Vec<String> {
-    // Multiple lifecycle events can share a wire status (e.g.
-    // `WorkerSpawned` and `WorkerResumed` both surface as `running`).
-    // The published vocabulary is a set, not a multiset — dedupe while
-    // preserving the first-seen order so downstream consumers see a
-    // stable list.
-    let mut seen = BTreeSet::new();
-    let mut out = Vec::new();
-    for event in WorkerEvent::ALL.iter() {
-        let status = event.as_status().to_string();
-        if seen.insert(status.clone()) {
-            out.push(status);
-        }
+    // Worker wire statuses are a projection of the shared agent/run
+    // lifecycle registry. Keep this list equal to
+    // `AgentLifecycleState::ALL` so a new state cannot land without a
+    // protocol-artifact update.
+    agent_lifecycle_state_values()
+}
+
+pub(super) fn agent_lifecycle_state_values() -> Vec<String> {
+    AgentLifecycleState::ALL
+        .iter()
+        .map(|state| state.wire_name().to_string())
+        .collect()
+}
+
+pub(super) fn agent_lifecycle_event_values() -> Vec<String> {
+    AgentLifecycleEvent::ALL
+        .iter()
+        .map(|event| event.as_str().to_string())
+        .collect()
+}
+
+/// Rich projection table for schemas/docs. Aliases are listed per state
+/// but never appear as independent canonical wire values.
+pub(super) fn agent_lifecycle_state_projections() -> Vec<JsonValue> {
+    AgentLifecycleState::ALL
+        .iter()
+        .map(|state| {
+            let projection = state.projection();
+            json!({
+                "wire": projection.wire_name,
+                "terminal": projection.terminal,
+                "resumable": projection.resumable,
+                "runRecordStatus": projection.run_record_status,
+                "a2aTaskState": projection.a2a_task_state,
+                "aliases": state.aliases(),
+            })
+        })
+        .collect()
+}
+
+/// Exhaustive parity: every WorkerEvent status must resolve through the
+/// lifecycle registry, and every lifecycle state must be reachable from
+/// at least one worker event (Joined is event-only and excluded here).
+#[cfg(test)]
+pub(super) fn assert_worker_lifecycle_parity() {
+    for event in WorkerEvent::ALL {
+        let status = event.as_status();
+        let state = AgentLifecycleState::from_wire(status)
+            .unwrap_or_else(|| panic!("worker status `{status}` missing from lifecycle registry"));
+        assert_eq!(state.wire_name(), status);
+        assert_eq!(event.is_terminal(), state.is_terminal());
+        assert_eq!(event.lifecycle_event().target_state(), Some(state));
     }
-    out
+    for state in AgentLifecycleState::ALL {
+        assert!(
+            WorkerEvent::ALL
+                .iter()
+                .any(|event| event.as_status() == state.wire_name()),
+            "lifecycle state `{}` has no WorkerEvent projection",
+            state.wire_name()
+        );
+    }
 }
 
 pub(super) fn side_effect_level_values() -> Vec<String> {

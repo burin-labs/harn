@@ -13,6 +13,18 @@ contributions that mirror this surface see
 [ACP `session/suspend`](./protocol-contributions/acp-session-suspend.md) and
 [A2A `TaskState.PAUSED`](./protocol-contributions/a2a-paused-state.md).
 
+## Canonical status registry
+
+Shared agent/run/worker status vocabulary — wire names, terminal versus
+resumable classification, compatibility aliases, valid transitions, and
+protocol projection metadata — lives in one compile-time owner:
+`crates/harn-vm/src/agent_events/lifecycle.rs` (`AgentLifecycleState`,
+`AgentLifecycleEvent`, `AgentLifecycle`). Runtime reducers enforce those
+transitions; ACP/A2A/worker wire statuses and `spec/protocol-artifacts`
+bindings are generated or parity-checked projections of that registry.
+Tool-call, task-list, provider-job, and session-retention statuses stay
+separate where their semantics differ.
+
 ## When to suspend
 
 Suspend/resume is one of several ways Harn lets an agent yield. Pick the

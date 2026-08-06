@@ -901,6 +901,46 @@ fn explicit_artifact_version_is_validated_and_stamped_everywhere() {
 }
 
 #[test]
+fn agent_lifecycle_registry_owns_worker_and_a2a_projections() {
+    use harn_vm::agent_events::AgentLifecycleState;
+
+    assert_worker_lifecycle_parity();
+    assert_eq!(worker_status_values(), agent_lifecycle_state_values());
+
+    let a2a: BTreeSet<&str> = A2A_TASK_STATES.iter().copied().collect();
+    for state in AgentLifecycleState::ALL {
+        let Some(projected) = state.a2a_task_state() else {
+            continue;
+        };
+        // `paused` is the documented A2A protocol contribution and is not
+        // yet part of the shipped A2A task-state vocabulary.
+        if projected == "paused" {
+            continue;
+        }
+        assert!(
+            a2a.contains(projected),
+            "lifecycle state `{}` projects to A2A `{projected}` missing from A2A_TASK_STATES",
+            state.wire_name()
+        );
+    }
+
+    let manifest: serde_json::Value = serde_json::from_str(
+        &generate_manifest(&protocol_source()).expect("generate protocol manifest"),
+    )
+    .expect("parse protocol manifest");
+    assert_eq!(
+        manifest["acp"]["agentLifecycleStates"],
+        json!(agent_lifecycle_state_values())
+    );
+    assert_eq!(
+        manifest["acp"]["workerStatuses"],
+        json!(agent_lifecycle_state_values())
+    );
+    assert!(manifest["acp"]["agentLifecycleStateProjections"].is_array());
+    assert!(manifest["acp"]["agentLifecycleEvents"].is_array());
+}
+
+#[test]
 fn committed_protocol_artifacts_match_generator() {
     let source = protocol_source();
     let artifacts = generate_artifacts(&source, env!("CARGO_PKG_VERSION")).expect("artifacts");

@@ -139,6 +139,16 @@ pub(super) fn generate_typescript_for_version(artifact_version: &str) -> String 
         &worker_status_values(),
         "HarnWorkerStatus",
     ));
+    out.push_str(&ts_array_owned(
+        "HARN_AGENT_LIFECYCLE_STATES",
+        &agent_lifecycle_state_values(),
+        "HarnAgentLifecycleState",
+    ));
+    out.push_str(&ts_array_owned(
+        "HARN_AGENT_LIFECYCLE_EVENTS",
+        &agent_lifecycle_event_values(),
+        "HarnAgentLifecycleEvent",
+    ));
     out.push_str(&ts_array(
         "HARN_TOOL_CALL_RECEIPT_STATUSES",
         TOOL_CALL_RECEIPT_STATUSES,

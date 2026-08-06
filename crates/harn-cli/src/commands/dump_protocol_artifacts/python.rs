@@ -118,6 +118,14 @@ pub(super) fn generate_python_for_version(artifact_version: &str) -> String {
         "HARN_WORKER_STATUSES",
         &worker_status_values(),
     ));
+    out.push_str(&py_const_tuple_owned(
+        "HARN_AGENT_LIFECYCLE_STATES",
+        &agent_lifecycle_state_values(),
+    ));
+    out.push_str(&py_const_tuple_owned(
+        "HARN_AGENT_LIFECYCLE_EVENTS",
+        &agent_lifecycle_event_values(),
+    ));
     out.push_str(&py_const_tuple(
         "HARN_TOOL_CALL_RECEIPT_STATUSES",
         TOOL_CALL_RECEIPT_STATUSES,
@@ -209,6 +217,14 @@ pub(super) fn generate_python_for_version(artifact_version: &str) -> String {
     out.push_str(&py_str_enum_owned(
         "HarnWorkerStatus",
         &worker_status_values(),
+    ));
+    out.push_str(&py_str_enum_owned(
+        "HarnAgentLifecycleState",
+        &agent_lifecycle_state_values(),
+    ));
+    out.push_str(&py_str_enum_owned(
+        "HarnAgentLifecycleEvent",
+        &agent_lifecycle_event_values(),
     ));
     out.push_str(&py_str_enum(
         "ToolCallReceiptStatus",
@@ -850,6 +866,8 @@ pub(super) fn python_public_names() -> Vec<String> {
         "HARN_TOOL_CALL_ERROR_CATEGORIES",
         "HARN_SIDE_EFFECT_LEVELS",
         "HARN_WORKER_STATUSES",
+        "HARN_AGENT_LIFECYCLE_STATES",
+        "HARN_AGENT_LIFECYCLE_EVENTS",
         "HARN_TOOL_CALL_RECEIPT_STATUSES",
         "HARN_TOOL_CALL_RECEIPT_EXECUTORS",
         "HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS",
@@ -880,6 +898,8 @@ pub(super) fn python_public_names() -> Vec<String> {
         "HarnToolCallErrorCategory",
         "HarnSideEffectLevel",
         "HarnWorkerStatus",
+        "HarnAgentLifecycleState",
+        "HarnAgentLifecycleEvent",
         "ToolCallReceiptStatus",
         "ToolCallReceiptExecutor",
         "A2ATaskState",
