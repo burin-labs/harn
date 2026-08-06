@@ -14,7 +14,11 @@ use harn_parser::{
 };
 
 use super::capability_migrations::ambient_capability_handle;
-use super::signature_threading::{add_call_argument_edit, collect_callable_infos};
+use super::signature_threading::{
+    add_call_argument_edit, collect_callable_infos, collect_value_reference_sites,
+};
+use super::value_escape::{FrozenCallable, FrozenCause};
+use super::value_wrap::{wrap_value_reference_edit, ValueReferenceSite};
 use super::{CallableInfo, RepairCandidate, RepairImpactWire, SignatureChangeWire};
 
 #[path = "whole_program_capabilities/edits.rs"]
@@ -52,6 +56,7 @@ struct ProgramFile {
     path: PathBuf,
     source: String,
     imported_capability_signatures: BTreeMap<String, imported_calls::Signature>,
+    value_reference_sites: Vec<ValueReferenceSite>,
 }
 
 #[derive(Debug)]
@@ -128,6 +133,7 @@ pub(super) fn plan(
     diagnostics: &[RepairCandidate],
     referenced_by_value: &BTreeSet<String>,
     manifest_host_entries: &super::manifest_host_entries::ManifestHostEntries,
+    frozen: &mut Vec<FrozenCallable>,
 ) -> Result<Vec<RepairCandidate>, String> {
     let mut program_files = Vec::new();
     let mut callables = Vec::new();
@@ -264,10 +270,12 @@ pub(super) fn plan(
                 direct_root_requirement,
             });
         }
+        let value_reference_sites = collect_value_reference_sites(&program);
         program_files.push(ProgramFile {
             path: canonical(file),
             source,
             imported_capability_signatures,
+            value_reference_sites,
         });
     }
     if callables.is_empty() {
@@ -319,22 +327,16 @@ pub(super) fn plan(
     }
 
     // A callable whose value is taken as a first-class reference is invoked
-    // through that reference at its declared arity, and the fixer cannot see
-    // those call sites: `handler: web_search_handler` in a registry dict is
-    // dispatched as `handler(args)`. Adding a leading capability parameter
-    // would silently move `args` into the capability slot, and no static call
-    // site exists for the type checker to report. Freeze the signature and
-    // leave the site for a human, who can wrap it — `{ args -> f(harness,
-    // args) }` — where the fixer cannot.
+    // through that reference at its declared arity: `handler: web_search_handler`
+    // is dispatched as `handler(args)`. Adding a leading capability parameter
+    // without repairing the hand-over would silently move `args` into the
+    // capability slot. Prefer synthesizing the wrap the decline message already
+    // describes; freeze only when a site cannot receive `harness`.
     //
     // A value reference is one way a caller becomes invisible; a declared entry
     // point is the other. `@host_entry` and a `harn.toml` handler both fix the
-    // arity from outside this program, and this pass reached neither: it read
-    // `referenced_by_value` directly instead of the decision that combines all
-    // three. So `@host_entry` stopped a *narrowing* (#6193) but not an
-    // *introduction* — `enforce_stage_tool_gate(event)` still became
-    // `(harness: Harness, event)` here, with the attribute sitting right above
-    // it and no frozen-callable report to say so.
+    // arity from outside this program (#6193 / #6272) and cannot be wrapped —
+    // those stay frozen via `frozen_cause`.
     let arity_observable = callables
         .iter()
         .map(|callable| {
@@ -342,11 +344,27 @@ pub(super) fn plan(
                 || callable.info.frozen_cause.is_some()
         })
         .collect::<Vec<_>>();
+    let wrappable = mark_value_reference_wraps(
+        &program_files,
+        &callables,
+        &arity_observable,
+        &requirements,
+        &mut root_requirements,
+        frozen,
+    );
+    // Wrapping a hand-over site may newly require root Harness in the
+    // containing callable; re-propagate so callers of those containers move too.
+    propagate_carrier_requirements(
+        &edges,
+        &callables,
+        &mut requirements,
+        &mut root_requirements,
+    );
     let desired = callables
         .iter()
         .enumerate()
         .map(|(idx, callable)| {
-            if arity_observable[idx] {
+            if arity_observable[idx] && !wrappable[idx] {
                 return callable
                     .carrier
                     .as_ref()
@@ -360,12 +378,21 @@ pub(super) fn plan(
         .zip(&requirements)
         .enumerate()
         .map(|(idx, (callable, required))| {
-            if arity_observable[idx] {
+            if arity_observable[idx] && !wrappable[idx] {
                 return BTreeMap::new();
             }
             added_split_capability_bindings(callable, required, root_requirements[idx])
         })
         .collect::<Vec<_>>();
+    // Emit wraps only after desired carriers are known, so the inner call's
+    // leading argument matches what signature threading would pass.
+    let wrap_edits_by_file = emit_value_reference_wraps(
+        &program_files,
+        &callables,
+        &wrappable,
+        &desired,
+        &added_capabilities,
+    )?;
     let changed = callables
         .iter()
         .zip(&desired)
@@ -419,6 +446,9 @@ pub(super) fn plan(
     };
 
     let mut edits_by_file: BTreeMap<usize, Vec<FixEdit>> = BTreeMap::new();
+    for (file_idx, edits) in wrap_edits_by_file {
+        edits_by_file.entry(file_idx).or_default().extend(edits);
+    }
     for (idx, callable) in callables.iter().enumerate() {
         let Some(desired) = desired[idx].as_ref() else {
             continue;
@@ -677,6 +707,260 @@ pub(super) fn plan(
         });
     }
     Ok(planned)
+}
+
+/// Decide which value-referenced callables can be unblocked by a wrap.
+///
+/// Containers that must supply the capability into a wrap get
+/// `root_requirements` set so the subsequent propagate/desired pass threads
+/// them. Wrap text is emitted later in [`emit_value_reference_wraps`] once
+/// desired carriers are known.
+fn mark_value_reference_wraps(
+    program_files: &[ProgramFile],
+    callables: &[ProgramCallable],
+    arity_observable: &[bool],
+    requirements: &[BTreeSet<CapabilityId>],
+    root_requirements: &mut [bool],
+    frozen: &mut Vec<FrozenCallable>,
+) -> Vec<bool> {
+    let mut wrappable = vec![false; callables.len()];
+    let callable_by_name = callables
+        .iter()
+        .enumerate()
+        .map(|(idx, callable)| (callable.info.name.as_str(), idx))
+        .collect::<BTreeMap<_, _>>();
+    let mut sites_by_name: BTreeMap<&str, Vec<(usize, Span)>> = BTreeMap::new();
+    for (file_idx, file) in program_files.iter().enumerate() {
+        for site in &file.value_reference_sites {
+            if callable_by_name.contains_key(site.name.as_str()) {
+                sites_by_name
+                    .entry(site.name.as_str())
+                    .or_default()
+                    .push((file_idx, site.span));
+            }
+        }
+    }
+
+    for (idx, callable) in callables.iter().enumerate() {
+        if !arity_observable[idx] {
+            continue;
+        }
+        let needs_new_param = callable.carrier.is_none()
+            && (!requirements[idx].is_empty()
+                || root_requirements[idx]
+                || !callable.info.ambient_capability_calls.is_empty());
+        if !needs_new_param {
+            continue;
+        }
+
+        let sites = sites_by_name
+            .get(callable.info.name.as_str())
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        let site_locations = || {
+            sites
+                .iter()
+                .map(|(file_idx, span)| {
+                    (
+                        program_files[*file_idx].path.display().to_string(),
+                        span.line,
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+
+        // Host and manifest entries fix arity outside this program; wraps
+        // cannot invent an argument the embedding runtime was never asked to
+        // supply (#6193 / #6272).
+        if let Some(cause @ (FrozenCause::HostEntry | FrozenCause::ManifestHandler)) =
+            callable.info.frozen_cause
+        {
+            record_frozen_callable(frozen, &callable.info.name, cause, &site_locations());
+            continue;
+        }
+        if sites.is_empty() {
+            record_frozen_callable(
+                frozen,
+                &callable.info.name,
+                FrozenCause::ValueReference,
+                &[],
+            );
+            continue;
+        }
+
+        let mut container_idxs = Vec::new();
+        let mut refused = false;
+        for &(file_idx, span) in sites {
+            let Some(container_idx) = containing_callable(callables, file_idx, span) else {
+                refused = true;
+                break;
+            };
+            if matches!(
+                callables[container_idx].info.frozen_cause,
+                Some(FrozenCause::HostEntry | FrozenCause::ManifestHandler)
+            ) || callables[container_idx].info.is_host_entry
+            {
+                refused = true;
+                break;
+            }
+            if wrap_value_reference_edit(
+                &program_files[file_idx].source,
+                span,
+                &callable.info.name,
+                &callable.info.param_names,
+            )
+            .is_none()
+            {
+                refused = true;
+                break;
+            }
+            container_idxs.push(container_idx);
+        }
+        if refused {
+            record_frozen_callable(
+                frozen,
+                &callable.info.name,
+                FrozenCause::ValueReference,
+                &site_locations(),
+            );
+            continue;
+        }
+
+        for container_idx in container_idxs {
+            root_requirements[container_idx] = true;
+        }
+        wrappable[idx] = true;
+    }
+
+    wrappable
+}
+
+fn emit_value_reference_wraps(
+    program_files: &[ProgramFile],
+    callables: &[ProgramCallable],
+    wrappable: &[bool],
+    desired: &[Option<CarrierKind>],
+    added_capabilities: &[BTreeMap<CapabilityId, String>],
+) -> Result<BTreeMap<usize, Vec<FixEdit>>, String> {
+    let mut edits_by_file: BTreeMap<usize, Vec<FixEdit>> = BTreeMap::new();
+    let callable_by_name = callables
+        .iter()
+        .enumerate()
+        .map(|(idx, callable)| (callable.info.name.as_str(), idx))
+        .collect::<BTreeMap<_, _>>();
+
+    for (file_idx, file) in program_files.iter().enumerate() {
+        for site in &file.value_reference_sites {
+            let Some(&callee_idx) = callable_by_name.get(site.name.as_str()) else {
+                continue;
+            };
+            if !wrappable[callee_idx] {
+                continue;
+            }
+            let Some(container_idx) = containing_callable(callables, file_idx, site.span) else {
+                continue;
+            };
+            let callee = &callables[callee_idx];
+            let caller = &callables[container_idx];
+            let Some(caller_desired) = desired[container_idx].as_ref() else {
+                return Err(format!(
+                    "wrap for `{}` needs a capability in `{}`, but none was planned",
+                    callee.info.name, caller.info.name
+                ));
+            };
+            let Some(callee_desired) = desired[callee_idx].as_ref() else {
+                return Err(format!(
+                    "wrap for `{}` planned without a desired carrier",
+                    callee.info.name
+                ));
+            };
+            let argument = argument_for_kind(
+                caller,
+                caller_desired,
+                &added_capabilities[container_idx],
+                callee_desired,
+            )
+            .map_err(|error| {
+                format!(
+                    "wrap for `{}` inside `{}`: {error}",
+                    callee.info.name, caller.info.name
+                )
+            })?;
+            let params = callee.info.param_names.join(", ");
+            let call_args = if params.is_empty() {
+                argument
+            } else {
+                format!("{argument}, {params}")
+            };
+            let replacement = if params.is_empty() {
+                format!("{{ -> {}({call_args}) }}", callee.info.name)
+            } else {
+                format!("{{ {params} -> {}({call_args}) }}", callee.info.name)
+            };
+            let region = file
+                .source
+                .get(site.span.start..site.span.end)
+                .ok_or_else(|| {
+                    format!(
+                        "wrap site for `{}` is out of range in {}",
+                        callee.info.name,
+                        file.path.display()
+                    )
+                })?;
+            if region != callee.info.name {
+                return Err(format!(
+                    "wrap site for `{}` in {} no longer names the callable",
+                    callee.info.name,
+                    file.path.display()
+                ));
+            }
+            edits_by_file.entry(file_idx).or_default().push(FixEdit {
+                span: site.span,
+                replacement,
+            });
+        }
+    }
+    Ok(edits_by_file)
+}
+
+fn containing_callable(
+    callables: &[ProgramCallable],
+    file_idx: usize,
+    span: Span,
+) -> Option<usize> {
+    callables
+        .iter()
+        .enumerate()
+        .filter(|(_, callable)| {
+            callable.file_idx == file_idx
+                && callable.info.span.start <= span.start
+                && callable.info.span.end >= span.end
+        })
+        .min_by_key(|(_, callable)| {
+            callable
+                .info
+                .span
+                .end
+                .saturating_sub(callable.info.span.start)
+        })
+        .map(|(idx, _)| idx)
+}
+
+fn record_frozen_callable(
+    frozen: &mut Vec<FrozenCallable>,
+    name: &str,
+    cause: FrozenCause,
+    sites: &[(String, usize)],
+) {
+    if let Some(existing) = frozen.iter_mut().find(|entry| entry.name == name) {
+        // Per-file synthesis may have recorded the freeze without sites; prefer
+        // the whole-program reason that names the hand-over locations.
+        if !sites.is_empty() && !existing.reason.contains("escaping reference") {
+            *existing = FrozenCallable::new(name, cause, sites);
+        }
+        return;
+    }
+    frozen.push(FrozenCallable::new(name, cause, sites));
 }
 
 fn declaration_parts<'a>(
@@ -1004,6 +1288,39 @@ fn seed_ambient_requirements(
                 }
             }
         }
+    }
+
+    // Per-file synthesis returns `None` for a frozen owner, so its ambient
+    // diagnostics never become plan candidates and the loop above never sees
+    // them. The AST still recorded the ambient calls; seed from those so a
+    // wrap can plan a carrier for the callee. Skip host/manifest entries: those
+    // contracts must not gain a parameter the embedding runtime was never
+    // asked to pass (#6193 / #6272).
+    for callable in callables.iter_mut() {
+        if callable.info.is_host_entry
+            || matches!(
+                callable.info.frozen_cause,
+                Some(FrozenCause::HostEntry | FrozenCause::ManifestHandler)
+            )
+        {
+            continue;
+        }
+        if !callable.direct_requirements.is_empty() || callable.direct_root_requirement {
+            continue;
+        }
+        for call in &callable.info.ambient_capability_calls {
+            if let Some(capability) = ambient_call_capability(call) {
+                callable.direct_requirements.insert(capability);
+            } else if call.code == Code::LintAmbientHarnessMethod {
+                callable.direct_root_requirement = true;
+            }
+        }
+    }
+
+    for (path, diagnostics) in diagnostics_by_file {
+        let Some(file_idx) = file_indices.get(path).copied() else {
+            continue;
+        };
         for diagnostic in &diagnostics.missing_capability_arguments {
             let Some(span) = diagnostic.span else {
                 continue;

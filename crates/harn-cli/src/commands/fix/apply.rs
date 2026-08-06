@@ -40,7 +40,12 @@ fn apply_repairs_with_options_inner(
 ) -> Result<ApplyResult, String> {
     let mut applied = Vec::new();
     let mut skipped = Vec::new();
-    let max_passes = if options.capability_migrations_only && !dry_run {
+    // Capability migration converges across passes. Dry-run must walk the same
+    // pass loop as a real apply: stopping after pass one reports the first
+    // wave's repair count against the untouched tree, which is how
+    // `--apply --dry-run` invented a net-negative on burin-code `scripts/`
+    // (551 repairs, "post-apply" 8993) while a real apply reached 365.
+    let max_passes = if options.capability_migrations_only {
         CAPABILITY_MIGRATION_MAX_PASSES
     } else {
         1
@@ -110,7 +115,7 @@ fn apply_repairs_with_options_inner(
             });
         }
 
-        if dry_run || edits_by_file.is_empty() {
+        if edits_by_file.is_empty() {
             converged = true;
             break;
         }
@@ -121,6 +126,11 @@ fn apply_repairs_with_options_inner(
                 original_files.insert(path.clone(), source);
             }
         }
+        // Dry-run writes too, then `finish_with_rollback` restores. Counting
+        // post-apply diagnostics has to see the converged tree; the previous
+        // "plan but do not write" dry-run counted the pre-repair tree (plus
+        // any package-generation side effects from planning) and called that
+        // post-apply.
         if options.capability_migrations_only {
             let rendered_files = render_capability_migration_pass(&edits_by_file)?;
             for (path, rendered) in rendered_files {
@@ -203,9 +213,25 @@ pub(super) fn finish_with_rollback<T>(
     dry_run: bool,
     original_files: &BTreeMap<String, String>,
 ) -> Result<T, String> {
+    if dry_run {
+        // Capability dry-run writes intermediate passes so post-apply counts
+        // reflect the converged tree; restore before the caller observes the
+        // filesystem. A failed restore is worse than a dirty dry-run tree
+        // only if we hide it, so surface it on both Ok and Err.
+        if let Err(restore_error) = restore_original_files(original_files) {
+            return match result {
+                Ok(_) => Err(format!(
+                    "dry-run converged but failed to restore the tree: {restore_error}"
+                )),
+                Err(error) => Err(format!(
+                    "{error}; additionally failed to restore the dry-run tree: {restore_error}"
+                )),
+            };
+        }
+        return result;
+    }
     match result {
         Ok(value) => Ok(value),
-        Err(error) if dry_run => Err(error),
         Err(error) => match restore_original_files(original_files) {
             Ok(()) => Err(error),
             Err(restore_error) => Err(format!(

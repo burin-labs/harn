@@ -205,6 +205,7 @@ fn missing_root_argument_threads_a_distinct_root_past_a_narrow_harness_binding()
         &mut ValueEscape {
             manifest_handlers: &BTreeSet::new(),
             referenced_by_value: &BTreeSet::new(),
+            escape_sites: &BTreeMap::new(),
             frozen: &mut Vec::new(),
         },
     )
@@ -263,6 +264,7 @@ fn missing_root_argument_repair_preserves_parenthesized_first_argument() {
         &mut ValueEscape {
             manifest_handlers: &BTreeSet::new(),
             referenced_by_value: &BTreeSet::new(),
+            escape_sites: &BTreeMap::new(),
             frozen: &mut Vec::new(),
         },
     )

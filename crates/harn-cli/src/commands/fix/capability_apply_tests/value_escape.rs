@@ -1,13 +1,12 @@
-//! Callables whose value escapes as a first-class reference keep their arity.
+//! Callables whose value escapes as a first-class reference are wrapped.
 
 use super::*;
 
-/// A registry dispatches `handler(args)` through a stored reference, so the
-/// fixer sees no call site it could widen. Threading a capability into the
-/// handler would move `args` into the capability slot at runtime, and
-/// `harn check` reports nothing because the call goes through a value.
+/// A registry dispatches `handler(args)` through a stored reference. The fixer
+/// wraps the hand-over so the registry still sees arity 1 while the body gains
+/// its capability parameter.
 #[test]
-fn capability_apply_keeps_the_arity_of_a_handler_referenced_by_value() {
+fn capability_apply_wraps_a_handler_referenced_by_value() {
     let temp = tempfile::TempDir::new().unwrap();
     let entry = temp.path().join("main.harn");
     fs::write(
@@ -43,20 +42,28 @@ fn capability_apply_keeps_the_arity_of_a_handler_referenced_by_value() {
     .unwrap();
 
     let updated = fs::read_to_string(entry).unwrap();
+    let params = callable_params(&updated, "web_search_handler");
     assert_eq!(
-        callable_params(&updated, "web_search_handler"),
-        vec![param("args", "dict")],
-        "a handler reached through a stored reference must keep its arity: {updated}"
+        params.last(),
+        Some(&param("args", "dict")),
+        "original params must survive: {updated}"
+    );
+    assert!(
+        params.len() >= 2,
+        "the handler must gain a capability parameter: {updated}"
+    );
+    assert!(
+        updated.contains("{ args -> web_search_handler("),
+        "the registry hand-over must be wrapped: {updated}"
     );
 }
 
 /// The registration usually lives in a different file from the handler —
 /// burin-code defines `web_search_handler` in `lib/tools/web.harn` and
-/// registers it in `lib/tools/surface.harn`. A per-file scan sees a definition
-/// nothing references and threads it, so the escape has to be observed across
-/// the whole program.
+/// registers it in `lib/tools/surface.harn`. The wrap must land at the
+/// cross-file hand-over, not only when definition and registry share a file.
 #[test]
-fn capability_apply_keeps_the_arity_of_a_handler_registered_in_another_file() {
+fn capability_apply_wraps_a_handler_registered_in_another_file() {
     let temp = tempfile::TempDir::new().unwrap();
     fs::write(
         temp.path().join("web.harn"),
@@ -106,10 +113,112 @@ fn capability_apply_keeps_the_arity_of_a_handler_registered_in_another_file() {
     .unwrap();
 
     let web = fs::read_to_string(temp.path().join("web.harn")).unwrap();
+    let surface = fs::read_to_string(temp.path().join("surface.harn")).unwrap();
+    let params = callable_params(&web, "web_search_handler");
+    assert!(
+        params.len() >= 2 && params.last() == Some(&param("args", "dict")),
+        "handler must gain a carrier and keep args: {web}"
+    );
+    assert!(
+        surface.contains("{ args -> web_search_handler("),
+        "cross-file hand-over must be wrapped: {surface}"
+    );
+}
+
+/// Refusing one value-referenced callable must not cost its neighbours their
+/// repair. Each ambient diagnostic is its own synthesis; a frozen owner aborts
+/// only that repair, not the file.
+#[test]
+fn ambient_migration_still_repairs_a_sibling_of_a_frozen_value_reference() {
+    let temp = tempfile::TempDir::new().unwrap();
+    fs::write(
+        temp.path().join("main.harn"),
+        concat!(
+            "@host_entry\n",
+            "pub fn registry() -> list {\n",
+            "  return [frozen_handler]\n",
+            "}\n",
+            "\n",
+            "fn frozen_handler(args: dict) -> string {\n",
+            "  return read_text(args?.path ?? \"\")\n",
+            "}\n",
+            "\n",
+            "pub fn summarize(path: string) -> string {\n",
+            "  return read_text(path)\n",
+            "}\n",
+        ),
+    )
+    .unwrap();
+
+    apply_repairs_with_options_at(
+        temp.path(),
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions::capability_migrations(),
+    )
+    .unwrap();
+
+    let updated = fs::read_to_string(temp.path().join("main.harn")).unwrap();
+    assert!(
+        updated.contains("fn frozen_handler(args: dict)"),
+        "the frozen handler must keep its arity: {updated}"
+    );
+    assert!(
+        updated.contains("pub fn summarize(fs: HarnessFs, path: string)")
+            || updated.contains("pub fn summarize(harness: Harness, path: string)"),
+        "the sibling must still be migrated: {updated}"
+    );
+}
+
+/// Dry-run must converge the same pass loop as a real apply and report the
+/// post-apply diagnostic count of the would-be tree — not the pre-repair count.
+#[test]
+fn capability_dry_run_reports_converged_post_apply_diagnostics() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("main.harn");
+    fs::write(
+        &script,
+        concat!(
+            "fn helper(path: string) -> string {\n",
+            "  return read_text(path)\n",
+            "}\n",
+            "\n",
+            "fn main() {\n",
+            "  helper(\"x\")\n",
+            "}\n",
+        ),
+    )
+    .unwrap();
+    let before = fs::read_to_string(&script).unwrap();
+
+    let dry = apply_repairs_with_options_at(
+        temp.path(),
+        RepairSafety::SurfaceChanging,
+        true,
+        FixOptions::capability_migrations(),
+    )
+    .unwrap();
+    assert!(dry.dry_run);
     assert_eq!(
-        callable_params(&web, "web_search_handler"),
-        vec![param("args", "dict")],
-        "a handler registered in another file must keep its arity: {web}"
+        fs::read_to_string(&script).unwrap(),
+        before,
+        "dry-run must restore the tree"
+    );
+
+    let applied = apply_repairs_with_options_at(
+        temp.path(),
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions::capability_migrations(),
+    )
+    .unwrap();
+    assert_eq!(
+        dry.post_apply_diagnostics_count, applied.post_apply_diagnostics_count,
+        "dry-run post-apply count must match a real apply: dry={dry:#?} applied={applied:#?}"
+    );
+    assert!(
+        dry.post_apply_diagnostics_count < 3,
+        "migration should clear the ambient diagnostics: {dry:#?}"
     );
 }
 
@@ -155,15 +264,11 @@ fn capability_apply_still_threads_a_callable_that_never_escapes() {
     );
 }
 
-/// Freezing is correct; freezing silently is not.
-///
-/// The frozen callable owns the ambient capability use, so its missing
-/// parameter edit is `None` and the `?` discards the whole file's repair. The
-/// run then reports `applied 0 repair(s), skipped 0` with the capability
-/// diagnostics still standing, and nothing names the callable that blocked it
-/// (#6153).
+/// A value-referenced callable whose hand-over sites can see `harness` is
+/// wrapped, not frozen: the closure keeps the pre-migration arity for the
+/// invisible dispatcher while the body receives the capability.
 #[test]
-fn capability_plan_names_the_frozen_callable_that_blocked_the_migration() {
+fn capability_apply_wraps_a_value_referenced_callable_instead_of_freezing() {
     let temp = tempfile::TempDir::new().unwrap();
     let entry = temp.path().join("main.harn");
     fs::write(
@@ -175,16 +280,58 @@ fn capability_plan_names_the_frozen_callable_that_blocked_the_migration() {
             "  return read_text(request)\n",
             "}\n",
             "\n",
-            // The value also escapes into a list, so the alias widening in
-            // #6153 cannot prove this one and the refusal stands. Without the
-            // extra read this fixture now migrates, and the test would assert
-            // a report that correctly no longer exists.
-            "fn registry() -> list {\n",
+            "fn registry(harness: Harness) -> list {\n",
             "  return [resolve_thing]\n",
             "}\n",
             "\n",
             "pub fn run(harness: Harness, resolver: ResolverFn = resolve_thing) -> string {\n",
             "  return resolver(\"q\")\n",
+            "}\n",
+        ),
+    )
+    .unwrap();
+
+    apply_repairs_with_options_at(
+        temp.path(),
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions::capability_migrations(),
+    )
+    .unwrap();
+
+    let updated = fs::read_to_string(entry).unwrap();
+    assert!(
+        updated.contains("resolve_thing(fs: HarnessFs, request: string)")
+            || updated.contains("resolve_thing(harness: Harness, request: string)"),
+        "the callable must gain its carrier: {updated}"
+    );
+    assert!(
+        updated.contains("{ request -> resolve_thing("),
+        "each escaping reference must be wrapped: {updated}"
+    );
+    assert!(
+        !updated.contains("return [resolve_thing]"),
+        "the bare list hand-over must not survive: {updated}"
+    );
+}
+
+/// Freezing silently is not correct (#6153). When a wrap cannot be synthesized,
+/// the plan must name the callable and the escaping reference's file:line.
+#[test]
+fn capability_plan_names_the_frozen_callable_and_its_escape_site() {
+    let temp = tempfile::TempDir::new().unwrap();
+    // `@host_entry` on the only container that holds the reference: the wrap
+    // would need harness in that container, which the host contract forbids.
+    fs::write(
+        temp.path().join("main.harn"),
+        concat!(
+            "@host_entry\n",
+            "pub fn registry() -> list {\n",
+            "  return [resolve_thing]\n",
+            "}\n",
+            "\n",
+            "fn resolve_thing(request: string) -> string {\n",
+            "  return read_text(request)\n",
             "}\n",
         ),
     )
@@ -209,8 +356,8 @@ fn capability_plan_names_the_frozen_callable_that_blocked_the_migration() {
         frozen.reason
     );
     assert!(
-        frozen.reason.contains("resolve_thing(harness, args)"),
-        "the reason must show the wrap that unblocks it: {}",
+        frozen.reason.contains("main.harn:"),
+        "the reason must name the escape site file:line: {}",
         frozen.reason
     );
 }

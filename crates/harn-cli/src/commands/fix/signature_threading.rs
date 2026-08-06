@@ -108,7 +108,9 @@ pub(super) fn collect_callable_infos(
                     insert_offset,
                     has_params: has_params || !params.is_empty(),
                     bound_names,
+                    param_names: params.iter().map(|param| param.name.clone()).collect(),
                     harness_binding: harness_param_name(params).map(str::to_string),
+                    is_host_entry: host_entry,
                     frozen_cause: frozen_cause(
                         name,
                         referenced_by_value,
@@ -150,7 +152,9 @@ pub(super) fn collect_callable_infos(
                     insert_offset,
                     has_params: has_params || !params.is_empty(),
                     bound_names,
+                    param_names: params.iter().map(|param| param.name.clone()).collect(),
                     harness_binding: harness_param_name(params).map(str::to_string),
+                    is_host_entry: host_entry,
                     frozen_cause: frozen_cause(
                         name,
                         referenced_by_value,
@@ -378,6 +382,18 @@ pub(super) fn repair_for_ambient_capability_plan(
 /// is pathological, and the opposite error silently rewires a call nothing can
 /// type-check.
 pub(super) fn collect_value_references(program: &[SNode], names: &mut BTreeSet<String>) {
+    for site in collect_value_reference_sites(program) {
+        names.insert(site.name);
+    }
+}
+
+/// Every bare-identifier value read in `program`, with its span.
+///
+/// Same local-binding exclusion as [`collect_value_references`]: a `const` or
+/// parameter of the same name is a read of that local, not of a callable.
+pub(super) fn collect_value_reference_sites(
+    program: &[SNode],
+) -> Vec<super::value_wrap::ValueReferenceSite> {
     let mut local = BTreeSet::new();
     visit::walk_program(program, &mut |node| match &node.node {
         Node::LetBinding { pattern, .. } | Node::ConstBinding { pattern, .. } => {
@@ -391,13 +407,18 @@ pub(super) fn collect_value_references(program: &[SNode], names: &mut BTreeSet<S
         }
         _ => {}
     });
+    let mut sites = Vec::new();
     visit::walk_program(program, &mut |node| {
         if let Node::Identifier(name) = &node.node {
             if !local.contains(name) {
-                names.insert(name.clone());
+                sites.push(super::value_wrap::ValueReferenceSite {
+                    name: name.clone(),
+                    span: node.span,
+                });
             }
         }
     });
+    sites
 }
 
 pub(super) fn add_harness_param_edit(source: &str, info: &CallableInfo) -> Option<FixEdit> {

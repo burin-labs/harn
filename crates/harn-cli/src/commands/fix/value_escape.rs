@@ -7,23 +7,25 @@
 //! declared `@host_entry` is entered by an embedding host whose registration
 //! lives in that host's source (#6193); one named by a `harn.toml` hook or
 //! trigger is entered by the runtime through a registration that is written
-//! down but is not a call site (#6272). This module owns both halves of the
-//! decision: which names stay frozen, and the record of what freezing blocked.
+//! down but is not a call site (#6272). Value references can be unblocked by
+//! wrapping the hand-over site (see `value_wrap`); host and manifest entries
+//! cannot. This module owns the freeze record.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
+use super::value_wrap::format_escape_sites;
 use super::CallableInfo;
 
 /// A callable whose signature the capability migration wanted to change but
-/// could not, because its value is read as a first-class reference.
+/// could not.
 ///
-/// Freezing is correct (#6146) — the callable is invoked at its declared arity
-/// through a call site no static pass can see. Freezing SILENTLY is not: the
-/// frozen callable is the owner of the ambient capability use, so
-/// `add_harness_param_edit` returns `None` and the `?` discards the entire
-/// file's repair. The run then reports `applied 0 repair(s), skipped 0` and
-/// exits 0 with the capability diagnostics still standing, giving an operator
-/// no way to learn which callable blocked the migration (#6153).
+/// Freezing the CALLABLE is correct (#6146 / #6193 / #6272). Freezing SILENTLY
+/// is not (#6153): the owner of the ambient capability use returns `None` from
+/// `add_harness_param_edit`, and that `?` aborts that owner's repair synthesis.
+/// Sibling callables in the same file are planned as separate repairs and still
+/// migrate — partial file repair is sound because each repair's `needed` set
+/// only contains the owner and its unfrozen callers, never a frozen neighbour.
+/// What must not stay silent is *which* callable blocked *its* ambient uses.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct FrozenCallable {
     pub(super) name: String,
@@ -50,12 +52,14 @@ pub(super) enum FrozenCause {
 
 /// The value-escape facts one planning pass carries.
 ///
-/// `referenced_by_value` names what must not be re-signed;
-/// `frozen` collects what that actually blocked. They are decided together and
-/// consumed together, so they travel as one value rather than as two
-/// positional parameters threaded through every synthesizer.
+/// `referenced_by_value` names what must not be re-signed without a wrap;
+/// `escape_sites` maps each such name to the `file:line` hand-over locations
+/// so a freeze reason is a residual work list rather than a search;
+/// `manifest_handlers` names this file's runtime registrations from
+/// `harn.toml`; `frozen` collects what that actually blocked.
 pub(super) struct ValueEscape<'a> {
     pub(super) referenced_by_value: &'a BTreeSet<String>,
+    pub(super) escape_sites: &'a BTreeMap<String, Vec<(String, usize)>>,
     /// Names this file's manifest registers as runtime handlers, already
     /// resolved to this file — see `manifest_host_entries`.
     pub(super) manifest_handlers: &'a BTreeSet<String>,
@@ -66,30 +70,37 @@ impl ValueEscape<'_> {
     /// Note a frozen callable before the edit that is about to fail on it.
     ///
     /// `add_harness_param_edit` returns `None` for a frozen callable and the
-    /// caller's `?` then discards the whole repair, so this must run BEFORE it
-    /// or the reason is lost along with the candidate.
+    /// caller's `?` then discards that repair, so this must run BEFORE it or
+    /// the reason is lost along with the candidate.
     pub(super) fn record(&mut self, info: &CallableInfo) {
         let Some(cause) = info.frozen_cause else {
             return;
         };
+        let sites = self
+            .escape_sites
+            .get(&info.name)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
         if self.frozen.iter().any(|entry| entry.name == info.name) {
             return;
         }
-        self.frozen.push(FrozenCallable::new(&info.name, cause));
+        self.frozen
+            .push(FrozenCallable::new(&info.name, cause, sites));
     }
 }
 
 impl FrozenCallable {
-    pub(super) fn new(name: &str, cause: FrozenCause) -> Self {
+    pub(super) fn new(name: &str, cause: FrozenCause, sites: &[(String, usize)]) -> Self {
+        let site_note = format_escape_sites(sites);
         let reason = match cause {
             FrozenCause::ValueReference => format!(
-                "its value is read as a first-class reference, so it is invoked at its declared arity through a call site the fixer cannot see. It owns the ambient capability use, and a capability it cannot receive cannot be threaded into its body — pass the capability through an existing parameter, or wrap the reference as `{{ args -> {name}(harness, args) }}`"
+                "its value is read as a first-class reference, so it is invoked at its declared arity through a call site the fixer cannot see{site_note}. It owns the ambient capability use, and a capability it cannot receive cannot be threaded into its body — pass the capability through an existing parameter, or wrap the reference as `{{ args -> {name}(harness, args) }}`"
             ),
             FrozenCause::HostEntry => format!(
-                "it is declared `@host_entry`, so an embedding host supplies its arguments at the arity it declares. It owns the ambient capability use, and a parameter the host was never asked to pass cannot be introduced — thread the capability through an existing parameter, or have the host pass it and drop `@host_entry` from `{name}`"
+                "it is declared `@host_entry`, so an embedding host supplies its arguments at the arity it declares{site_note}. It owns the ambient capability use, and a parameter the host was never asked to pass cannot be introduced — thread the capability through an existing parameter, or have the host pass it and drop `@host_entry` from `{name}`"
             ),
             FrozenCause::ManifestHandler => format!(
-                "`harn.toml` registers it as a runtime handler, so the runtime supplies its capability argument — and it supplies the root `Harness`, which a narrowed or record carrier cannot receive. Thread the capability through an existing parameter, declare the root handle yourself, or remove the `harn.toml` block that names `{name}`"
+                "`harn.toml` registers it as a runtime handler, so the runtime supplies its capability argument — and it supplies the root `Harness`, which a narrowed or record carrier cannot receive{site_note}. Thread the capability through an existing parameter, declare the root handle yourself, or remove the `harn.toml` block that names `{name}`"
             ),
         };
         Self {
