@@ -76,12 +76,14 @@ pub fn lookup_with_privileged_wire(
 pub fn legacy_capability_method_entry(
     name: &str,
 ) -> Option<&'static harn_builtin_registry::BuiltinManifestEntry> {
-    let mut matches = ambient_harness_method_entries().filter(|entry| {
-        matches!(
-            entry.contract.exposure,
-            BuiltinExposure::HarnessMethod { method, .. } if method == name
-        )
-    });
+    let mut matches = ambient_harness_method_entries()
+        .into_iter()
+        .filter(|entry| {
+            matches!(
+                entry.contract.exposure,
+                BuiltinExposure::HarnessMethod { method, .. } if method == name
+            )
+        });
     let entry = matches.next()?;
     matches.next().is_none().then_some(entry)
 }
@@ -92,7 +94,9 @@ pub fn legacy_capability_method_entry(
 pub fn legacy_ambient_cap_global_entry(
     name: &str,
 ) -> Option<&'static harn_builtin_registry::BuiltinManifestEntry> {
-    ambient_harness_method_entries().find(|entry| entry.name.strip_prefix("__cap_") == Some(name))
+    ambient_harness_method_entries()
+        .into_iter()
+        .find(|entry| entry.name.strip_prefix("__cap_") == Some(name))
 }
 
 /// Resolve a privileged-wire builtin published as `__<name>` (for example
@@ -122,11 +126,17 @@ pub fn legacy_ambient_runtime_name(name: &str) -> Option<&'static str> {
     legacy_privileged_wire_entry(name).map(|entry| entry.name)
 }
 
-fn ambient_harness_method_entries(
-) -> impl Iterator<Item = &'static harn_builtin_registry::BuiltinManifestEntry> {
-    harn_builtin_registry::installed_manifest()
-        .into_iter()
-        .chain(harn_capability_contracts::manifest().iter().copied())
+fn ambient_harness_method_entries() -> Vec<&'static harn_builtin_registry::BuiltinManifestEntry> {
+    // Once the CLI/runtime installs the process manifest, prefer it alone.
+    // Chaining the static capability-contracts table on top duplicates every
+    // `__cap_*` method and makes `legacy_capability_method_entry` treat unique
+    // owners as ambiguous (two identical matches), which breaks ambient check.
+    let installed = harn_builtin_registry::installed_manifest();
+    if installed.is_empty() {
+        harn_capability_contracts::manifest().to_vec()
+    } else {
+        installed
+    }
 }
 
 /// Resolve the signature paired with one capability method contract.
@@ -331,5 +341,36 @@ fn builtin_return_type_names(sig: &BuiltinSignature) -> &'static [&'static str] 
         },
         Ty::Never => &["never"],
         _ => &[],
+    }
+}
+
+#[cfg(test)]
+mod ambient_install_regression {
+    use super::*;
+
+    #[test]
+    fn installed_manifest_does_not_shadow_ambient_capability_methods() {
+        std::env::set_var("HARN_LEGACY_AMBIENT_CAPABILITIES", "1");
+        assert!(
+            is_builtin("store_set"),
+            "capability-contracts fallback must resolve ambient store_set"
+        );
+
+        // Project the same contracts the CLI installs before `harn check`.
+        let entries: &'static [&'static harn_builtin_registry::BuiltinManifestEntry] = Box::leak(
+            harn_capability_contracts::manifest()
+                .to_vec()
+                .into_boxed_slice(),
+        );
+        harn_builtin_registry::install_builtin_manifest(entries);
+
+        assert!(
+            is_builtin("store_set"),
+            "after manifest install, ambient store_set must still resolve uniquely"
+        );
+        assert!(
+            legacy_capability_method_entry("store_set").is_some(),
+            "legacy_capability_method_entry must stay unique after install"
+        );
     }
 }
