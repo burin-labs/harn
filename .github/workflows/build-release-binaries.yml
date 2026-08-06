@@ -897,7 +897,7 @@ jobs:
         # that outcome — install unconditionally on the measured target so a
         # budget failure can always produce its own attribution.
         if: matrix.target == 'x86_64-unknown-linux-gnu'
-        uses: taiki-e/install-action@065d6a08a14e61e89fb0a4c10eecdbdef39c7d8e # v2.85.4
+        uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
         with:
           tool: cargo-bloat
 
