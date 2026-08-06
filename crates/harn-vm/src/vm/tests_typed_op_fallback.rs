@@ -8,11 +8,11 @@
 //!
 //! Since harn#6252 an annotated `let` / `const` is checked at the binding site,
 //! so an annotation can no longer be the *source* of the drift: the initializer
-//! is rejected before any typed opcode sees it. Parameters remain a live drift
-//! route on the native VM, because the native parameter guard treats `int` and
-//! `float` as interchangeable (`numeric_compat`) while the binding guard and the
-//! portable kernel do not — see the note on
-//! `annotated_binding_initializer_is_rejected_not_absorbed`.
+//! is rejected before any typed opcode sees it. Since harn#6267 a declared
+//! `int` parameter rejects a float the same way, so the native parameter guard
+//! is no longer a drift route either — see
+//! `annotated_binding_initializer_is_rejected_not_absorbed` and
+//! `typed_param_fed_dynamic_float_is_rejected`.
 
 use crate::compiler::{Compiler, CompilerOptions};
 use crate::stdlib::register_vm_stdlib;
@@ -60,9 +60,10 @@ fn assert_opt_matches_unopt(source: &str) -> Result<String, String> {
 }
 
 #[test]
-fn typed_param_fed_dynamic_float_falls_back() {
-    // `n: int` is a static guess; the `any` argument is actually a float. The
-    // typed `MulInt` must fall back to generic multiply, not throw.
+fn typed_param_fed_dynamic_float_is_rejected() {
+    // `n: int` used to accept a dynamic float under numeric_compat and then
+    // rely on `MulInt` falling back. The parameter guard now matches the
+    // kernel rule, so the float never reaches the body.
     let result = assert_opt_matches_unopt(
         r#"pipeline default(harness: Harness, task) {
   fn f(n: int) { return n * 2 }
@@ -70,7 +71,11 @@ fn typed_param_fed_dynamic_float_falls_back() {
   harness.stdio.log("${f(harness.runtime.shared_get(cell))}")
 }"#,
     );
-    assert_eq!(result.unwrap(), "[harn] 5.0");
+    let error = result.unwrap_err();
+    assert!(
+        error.contains("parameter 'n'") && error.contains("expected int"),
+        "expected the parameter-site type error, got: {error}"
+    );
 }
 
 #[test]
@@ -116,11 +121,10 @@ fn annotated_mutable_binding_is_checked_like_an_immutable_one() {
 }
 
 #[test]
-fn typed_comparison_fed_dynamic_float_falls_back() {
-    // A typed `LessInt` fed a float operand must fall back to the generic
-    // comparison rather than throwing. The drift is introduced through a
-    // parameter, the route that still reaches a typed opcode with an operand
-    // its static guess did not predict.
+fn typed_comparison_fed_dynamic_float_is_rejected() {
+    // Same tightening as `typed_param_fed_dynamic_float_is_rejected`: a float
+    // argument to an `int` parameter is rejected at the call, so `LessInt`
+    // never sees a drifted operand from this route.
     let result = assert_opt_matches_unopt(
         r#"pipeline default(harness: Harness, task) {
   fn under(n: int) { return n < 3 }
@@ -128,7 +132,11 @@ fn typed_comparison_fed_dynamic_float_falls_back() {
   harness.stdio.log("${under(harness.runtime.shared_get(cell))}")
 }"#,
     );
-    assert_eq!(result.unwrap(), "[harn] true");
+    let error = result.unwrap_err();
+    assert!(
+        error.contains("parameter 'n'") && error.contains("expected int"),
+        "expected the parameter-site type error, got: {error}"
+    );
 }
 
 #[test]

@@ -83,7 +83,7 @@ pub(super) fn validate_schema_value(
     let root = schema.as_dict().cloned().unwrap_or_default();
     let mut traversal = SchemaTraversal::new();
     let normalized = if options.apply_defaults {
-        apply_defaults(data, &root, &root, options.numeric_compat, &mut traversal)
+        apply_defaults(data, &root, &root, &mut traversal)
     } else {
         data.clone()
     };
@@ -96,17 +96,12 @@ pub(super) fn validate_schema_value(
         &root,
         &root,
         "",
-        options.numeric_compat,
         &mut traversal,
         &mut ref_stack,
         &mut errors,
     );
     if errors.is_empty() {
-        errors.extend(validate_json_schema(
-            &normalized,
-            schema,
-            options.numeric_compat,
-        ));
+        errors.extend(validate_json_schema(&normalized, schema));
     }
     ValidationResult {
         value: normalized,
@@ -119,7 +114,7 @@ pub(super) fn validate_schema_fragment(
     schema: &crate::value::DictMap,
     root: &crate::value::DictMap,
     path: &str,
-    options: ValidationOptions,
+    _options: ValidationOptions,
 ) -> ValidationResult {
     let mut traversal = SchemaTraversal::new();
     let mut ref_stack = Vec::new();
@@ -129,7 +124,6 @@ pub(super) fn validate_schema_fragment(
         schema,
         root,
         path,
-        options.numeric_compat,
         &mut traversal,
         &mut ref_stack,
         &mut errors,
@@ -137,13 +131,7 @@ pub(super) fn validate_schema_fragment(
     if errors.is_empty() {
         let fragment = VmValue::dict(schema.clone());
         let root = VmValue::dict(root.clone());
-        errors.extend(validate_json_schema_fragment(
-            value,
-            &fragment,
-            &root,
-            options.numeric_compat,
-            path,
-        ));
+        errors.extend(validate_json_schema_fragment(value, &fragment, &root, path));
     }
     ValidationResult {
         value: value.clone(),
@@ -155,7 +143,6 @@ fn validate_json_schema_fragment(
     value: &VmValue,
     schema: &VmValue,
     root: &VmValue,
-    numeric_compat: bool,
     path_prefix: &str,
 ) -> Vec<ValidationIssue> {
     let mut json_schema = match canonical_to_json_schema(schema, false) {
@@ -174,28 +161,23 @@ fn validate_json_schema_fragment(
             }
         }
     }
-    validate_exported_json_schema(value, json_schema, numeric_compat, path_prefix)
+    validate_exported_json_schema(value, json_schema, path_prefix)
 }
 
-fn validate_json_schema(
-    value: &VmValue,
-    schema: &VmValue,
-    numeric_compat: bool,
-) -> Vec<ValidationIssue> {
+fn validate_json_schema(value: &VmValue, schema: &VmValue) -> Vec<ValidationIssue> {
     let json_schema = match canonical_to_json_schema(schema, false) {
         Ok(schema) => schema,
         Err(error) => return vec![ValidationIssue::schema("", error)],
     };
-    validate_exported_json_schema(value, json_schema, numeric_compat, "")
+    validate_exported_json_schema(value, json_schema, "")
 }
 
 fn validate_exported_json_schema(
     value: &VmValue,
     mut json_schema: serde_json::Value,
-    numeric_compat: bool,
     path_prefix: &str,
 ) -> Vec<ValidationIssue> {
-    sanitize_schema_types(&mut json_schema, numeric_compat);
+    sanitize_schema_types(&mut json_schema);
     let validator = match compile_validator(&json_schema) {
         CompiledValidator::Ready(validator) => validator,
         CompiledValidator::Invalid(error) => {
@@ -222,13 +204,13 @@ fn validate_exported_json_schema(
         .collect()
 }
 
-fn sanitize_schema_types(schema: &mut serde_json::Value, numeric_compat: bool) {
+fn sanitize_schema_types(schema: &mut serde_json::Value) {
     match schema {
         serde_json::Value::Object(object) => {
             if let Some(serde_json::Value::String(kind)) = object.get_mut("type") {
-                if numeric_compat && kind == "integer" {
-                    *kind = "number".to_string();
-                } else if !matches!(
+                // Preserve `"integer"`: the unified numeric rule rejects floats
+                // for int, so exported schemas must advertise integer (harn#6267).
+                if !matches!(
                     kind.as_str(),
                     "array" | "boolean" | "integer" | "null" | "number" | "object" | "string"
                 ) {
@@ -236,12 +218,12 @@ fn sanitize_schema_types(schema: &mut serde_json::Value, numeric_compat: bool) {
                 }
             }
             for child in object.values_mut() {
-                sanitize_schema_types(child, numeric_compat);
+                sanitize_schema_types(child);
             }
         }
         serde_json::Value::Array(items) => {
             for item in items {
-                sanitize_schema_types(item, numeric_compat);
+                sanitize_schema_types(item);
             }
         }
         _ => {}
@@ -283,7 +265,6 @@ fn validate_harn_types(
     schema: &crate::value::DictMap,
     root: &crate::value::DictMap,
     path: &str,
-    numeric_compat: bool,
     traversal: &mut SchemaTraversal,
     ref_stack: &mut Vec<String>,
     errors: &mut Vec<ValidationIssue>,
@@ -292,16 +273,7 @@ fn validate_harn_types(
         errors.push(ValidationIssue::schema(path, error));
         return;
     }
-    validate_harn_types_inner(
-        value,
-        schema,
-        root,
-        path,
-        numeric_compat,
-        traversal,
-        ref_stack,
-        errors,
-    );
+    validate_harn_types_inner(value, schema, root, path, traversal, ref_stack, errors);
     traversal.exit_schema();
 }
 
@@ -311,7 +283,6 @@ fn validate_harn_types_inner(
     schema: &crate::value::DictMap,
     root: &crate::value::DictMap,
     path: &str,
-    numeric_compat: bool,
     traversal: &mut SchemaTraversal,
     ref_stack: &mut Vec<String>,
     errors: &mut Vec<ValidationIssue>,
@@ -342,16 +313,7 @@ fn validate_harn_types_inner(
             return;
         }
         ref_stack.push(resolved_pointer);
-        validate_harn_types(
-            value,
-            &resolved,
-            root,
-            path,
-            numeric_compat,
-            traversal,
-            ref_stack,
-            errors,
-        );
+        validate_harn_types(value, &resolved, root, path, traversal, ref_stack, errors);
         ref_stack.pop();
         return;
     }
@@ -366,7 +328,6 @@ fn validate_harn_types_inner(
                 branch,
                 root,
                 path,
-                numeric_compat,
                 traversal,
                 ref_stack,
                 &mut branch_errors,
@@ -383,20 +344,11 @@ fn validate_harn_types_inner(
     }
     if let Some(VmValue::List(branches)) = schema.get("all_of") {
         for branch in branches.iter().filter_map(VmValue::as_dict) {
-            validate_harn_types(
-                value,
-                branch,
-                root,
-                path,
-                numeric_compat,
-                traversal,
-                ref_stack,
-                errors,
-            );
+            validate_harn_types(value, branch, root, path, traversal, ref_stack, errors);
         }
     }
     if let Some(expected) = schema_type_name(schema) {
-        if !value_matches_type(value, expected, numeric_compat) {
+        if !value_matches_type(value, expected) {
             errors.push(ValidationIssue::schema(
                 path,
                 format!(
@@ -429,7 +381,6 @@ fn validate_harn_types_inner(
                             child_schema,
                             root,
                             &child_path(path, name),
-                            numeric_compat,
                             traversal,
                             ref_stack,
                             errors,
@@ -446,7 +397,6 @@ fn validate_harn_types_inner(
                         extra_schema,
                         root,
                         &child_path(path, name),
-                        numeric_compat,
                         traversal,
                         ref_stack,
                         errors,
@@ -464,7 +414,6 @@ fn validate_harn_types_inner(
                     item_schema,
                     root,
                     &index_path(path, index),
-                    numeric_compat,
                     traversal,
                     ref_stack,
                     errors,
@@ -486,13 +435,12 @@ fn apply_defaults(
     value: &VmValue,
     schema: &crate::value::DictMap,
     root: &crate::value::DictMap,
-    numeric_compat: bool,
     traversal: &mut SchemaTraversal,
 ) -> VmValue {
     if traversal.enter_schema().is_err() {
         return value.clone();
     }
-    let normalized = apply_defaults_inner(value, schema, root, numeric_compat, traversal);
+    let normalized = apply_defaults_inner(value, schema, root, traversal);
     traversal.exit_schema();
     normalized
 }
@@ -501,7 +449,6 @@ fn apply_defaults_inner(
     value: &VmValue,
     schema: &crate::value::DictMap,
     root: &crate::value::DictMap,
-    numeric_compat: bool,
     traversal: &mut SchemaTraversal,
 ) -> VmValue {
     if let Some(VmValue::String(pointer)) = schema.get("$ref") {
@@ -510,18 +457,18 @@ fn apply_defaults_inner(
         }
         return resolve_canonical_ref_with_path(root, pointer).map_or_else(
             || value.clone(),
-            |(_, resolved)| apply_defaults(value, &resolved, root, numeric_compat, traversal),
+            |(_, resolved)| apply_defaults(value, &resolved, root, traversal),
         );
     }
     let mut normalized = value.clone();
     if let Some(VmValue::List(branches)) = schema.get("all_of") {
         for branch in branches.iter().filter_map(VmValue::as_dict) {
-            normalized = apply_defaults(&normalized, branch, root, numeric_compat, traversal);
+            normalized = apply_defaults(&normalized, branch, root, traversal);
         }
     }
     if let Some(VmValue::List(branches)) = schema.get("union") {
         for branch in branches.iter().filter_map(VmValue::as_dict) {
-            let candidate = apply_defaults(&normalized, branch, root, numeric_compat, traversal);
+            let candidate = apply_defaults(&normalized, branch, root, traversal);
             let result = validate_schema_fragment(
                 &candidate,
                 branch,
@@ -529,7 +476,6 @@ fn apply_defaults_inner(
                 "",
                 ValidationOptions {
                     apply_defaults: false,
-                    numeric_compat,
                 },
             );
             if result.errors.is_empty() {
@@ -554,12 +500,12 @@ fn apply_defaults_inner(
                 };
                 if let Some(child) = fields.get(name).cloned() {
                     let normalized = with_child_ref_budget(traversal, |traversal| {
-                        apply_defaults(&child, child_schema, root, numeric_compat, traversal)
+                        apply_defaults(&child, child_schema, root, traversal)
                     });
                     fields.insert(name.clone(), normalized);
                 } else if let Some(default) = child_schema.get("default") {
                     let normalized = with_child_ref_budget(traversal, |traversal| {
-                        apply_defaults(default, child_schema, root, numeric_compat, traversal)
+                        apply_defaults(default, child_schema, root, traversal)
                     });
                     fields.insert(name.clone(), normalized);
                 }
@@ -577,7 +523,7 @@ fn apply_defaults_inner(
             .iter()
             .map(|item| {
                 with_child_ref_budget(traversal, |traversal| {
-                    apply_defaults(item, item_schema, root, numeric_compat, traversal)
+                    apply_defaults(item, item_schema, root, traversal)
                 })
             })
             .collect::<Vec<_>>();

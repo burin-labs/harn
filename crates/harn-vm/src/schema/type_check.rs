@@ -34,18 +34,12 @@ pub(super) fn schema_type_name(schema: &crate::value::DictMap) -> Option<&str> {
     }
 }
 
-pub(super) fn value_matches_type(value: &VmValue, expected: &str, numeric_compat: bool) -> bool {
+pub(super) fn value_matches_type(value: &VmValue, expected: &str) -> bool {
     match expected {
         "any" => true,
         "dict" => matches!(value, VmValue::Dict(_) | VmValue::StructInstance { .. }),
-        "int" => {
-            matches!(value, VmValue::Int(_))
-                || (numeric_compat && matches!(value, VmValue::Float(_)))
-        }
-        "float" => {
-            matches!(value, VmValue::Float(_))
-                || (numeric_compat && matches!(value, VmValue::Int(_)))
-        }
+        "int" => matches!(value, VmValue::Int(_)),
+        "float" | "number" => matches!(value, VmValue::Float(_) | VmValue::Int(_)),
         other => actual_value_type(value) == other,
     }
 }
