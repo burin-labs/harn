@@ -19,6 +19,33 @@ enforces that new test code does not reintroduce these patterns.
 
 [#1057]: https://github.com/burin-labs/harn/issues/1057
 
+## Supported runner
+
+`make test` and `make test-e2e` require [cargo-nextest](https://nexte.st/).
+`make setup` installs it. Nextest is the supported runner for this workspace
+because it gives each test its own process: process-local environment
+mutations (`std::env::set_var`, `TMPDIR`, artifact caps, and similar) cannot
+bleed into a sibling test the way they can under `cargo test`'s threaded
+runner.
+
+That isolation contract is load-bearing. Several hostlib and CLI tests mutate
+env for the duration of one case and do not take a shared `ENV_LOCK` against
+every other binary in the crate — under nextest they do not need to. A module
+mutex only serializes tests that take that same mutex; it is not a substitute
+for process isolation.
+
+Do not treat `make test-cargo` (`cargo test --workspace`) as an equivalent
+fallback:
+
+- it has no nextest profile filter, so it also runs the subprocess-spawning
+  `harn-cli` E2E binaries that `make test` excludes;
+- it shares one process across tests, so env and filesystem side effects race.
+
+Use `make test-cargo` only when you intentionally want those semantics.
+Release and audit gates that call `make test` must have nextest installed
+(they do after `make setup`); failing loudly is preferred to silently changing
+what "the tests pass" means (#6145).
+
 ## Approved patterns
 
 ### `harn_clock::Clock` injection (preferred for runtime code)

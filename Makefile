@@ -255,16 +255,17 @@ check-dependabot-groups:
 # Run the fast (in-process, deterministic) test suite via cargo-nextest.
 # Subprocess-spawning integration tests are excluded by the nextest "default"
 # profile's default-filter. Run `make test-e2e` for the slow E2E suite.
-# Falls back to `cargo test --workspace` when nextest is not installed
-# (cargo test has no profile support, so it will run all tests).
+#
+# Requires cargo-nextest. Do not silently fall back to `cargo test`: that
+# runner has no profile filter (so it widens into the e2e tier) and runs tests
+# as threads in one process (so process-local env mutations race). Use
+# `make test-cargo` only when you intentionally want those semantics (#6145).
 test:
-	@if command -v cargo-nextest >/dev/null 2>&1; then \
-		$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run --workspace; \
-	else \
-		echo "cargo-nextest not installed; falling back to cargo test --workspace"; \
-		echo "hint: run 'make setup' or 'cargo install cargo-nextest --locked'"; \
-		$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) test --workspace; \
-	fi
+	@command -v cargo-nextest >/dev/null 2>&1 || { \
+		echo "make test requires cargo-nextest; run 'make setup' or 'cargo install cargo-nextest --locked'" >&2; \
+		echo "for intentional plain cargo test (different isolation; includes e2e binaries): make test-cargo" >&2; \
+		exit 1; }
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run --workspace
 
 # Run exactly one library test without making nextest enumerate every test
 # binary in the package first. The environment-variable boundary keeps the

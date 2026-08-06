@@ -1,10 +1,13 @@
 # cargo-nextest configuration for the Harn workspace.
 #
-# Run with `cargo nextest run --workspace` after `cargo install cargo-nextest --locked`.
-# Nextest is optional; plain `cargo test` also works but does not enforce
-# the slow-test timeouts below. The goal of this file is to guarantee that
-# no single test can wedge the suite indefinitely (historically, tests that
-# bound a `TcpListener` in blocking mode have hung CI for many minutes).
+# `make test` / `make test-e2e` require cargo-nextest (`make setup` installs it).
+# Nextest is the supported runner: one process per test, profile filters, and
+# the slow-test / leak budgets below. Plain `cargo test` is available only via
+# the explicit `make test-cargo` escape hatch — it has no profile filter and
+# shares process state across tests, so it is not a substitute for `make test`
+# (#6145). The goal of this file is also to guarantee that no single test can
+# wedge the suite indefinitely (historically, tests that bound a `TcpListener`
+# in blocking mode have hung CI for many minutes).
 #
 # Custom profiles inherit `[[profile.default.overrides]]` per setting: for a
 # test T and setting S, nextest applies the first override in the *running*
