@@ -30,6 +30,11 @@
       "workflow": "ci.yml",
       "job": "rust-checks",
       "shared_key": "workspace-tests"
+    },
+    {
+      "workflow": "ci.yml",
+      "job": "rust-cache-refresh",
+      "shared_key": "workspace-tests"
     }
   ]
 }

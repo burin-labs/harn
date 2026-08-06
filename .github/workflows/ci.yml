@@ -84,6 +84,7 @@ jobs:
       merge_group_proven: ${{ steps.merge_group_proof.outputs.proven }}
       rust: ${{ steps.force.outputs.rust }}
       package_audit: ${{ steps.force.outputs.package_audit }}
+      rust_cache_refresh: ${{ steps.force.outputs.rust_cache_refresh }}
       portal: ${{ steps.surface_filter.outputs.portal }}
       docs_site: ${{ steps.surface_filter.outputs.docs_site }}
       vscode: ${{ steps.surface_filter.outputs.vscode }}
@@ -279,10 +280,20 @@ jobs:
           MERGE_GROUP_DOCS_ONLY_TAIL: ${{ steps.merge_group_tail.outputs.docs_only_tail }}
         run: |
           set -euo pipefail
+          rust_cache_refresh=false
           if [ "${MERGE_GROUP_PROVEN}" = "true" ]; then
             echo "::notice::changes: exact ${GITHUB_SHA} already passed this workflow on merge_group — skipping duplicate heavy push lanes"
             echo "rust=false" >> "$GITHUB_OUTPUT"
             echo "package_audit=false" >> "$GITHUB_OUTPUT"
+            # rust-cache save-if is hard-gated to refs/heads/main, and GHA cache
+            # entries are scoped to the writing ref. Exact-SHA proof reuse skips
+            # the compile lanes on main, so without a dedicated refresher the
+            # shared Linux workspace-tests cache never receives a main-scoped
+            # write and every merge_group compiles from a cold (or missing) restore.
+            if [ "${F_RUST}" = "true" ]; then
+              rust_cache_refresh=true
+              echo "::notice::changes: scheduling main-scoped Rust cache refresh for the next merge_group"
+            fi
           elif [ "${FORCE_MERGE_GROUP}" = "true" ] && [ "${MERGE_GROUP_DOCS_ONLY_TAIL}" = "true" ]; then
             echo "::notice::changes: ${GITHUB_EVENT_NAME} — skipping heavy Linux Rust lanes for a proven docs-only merge-queue tail"
             echo "rust=false" >> "$GITHUB_OUTPUT"
@@ -300,6 +311,7 @@ jobs:
             echo "rust=${F_RUST}" >> "$GITHUB_OUTPUT"
             echo "package_audit=${F_PACKAGE_AUDIT}" >> "$GITHUB_OUTPUT"
           fi
+          echo "rust_cache_refresh=${rust_cache_refresh}" >> "$GITHUB_OUTPUT"
 
   fmt:
     name: Format check
@@ -332,6 +344,10 @@ jobs:
     # budget was calibrated for the faster paid runner and left ~4m of
     # headroom, one noisy neighbor away from a mid-suite timeout kill.
     timeout-minutes: 30
+    # Workflow-level permissions are read-only; cache saves need actions: write.
+    permissions:
+      contents: read
+      actions: write
     env:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
       # Keep this lane on the combined Harn/AOT-generator Cargo invocation.
@@ -393,6 +409,11 @@ jobs:
     # ci-status treats a skip here as PASS so branch protection isn't deadlocked.
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
+    # Workflow-level permissions are read-only; the workspace-tests leg saves
+    # the shared Linux rust-cache and needs actions: write to persist it.
+    permissions:
+      contents: read
+      actions: write
     # Linux-only: emit line-tables-only debuginfo for dev builds. Trims link
     # time and disk on these link-bound lanes while keeping panic line numbers
     # for nextest backtraces. NOT applied to the Windows/macOS jobs — #2127/
@@ -612,6 +633,51 @@ jobs:
           archive: false
           if-no-files-found: error
           retention-days: 1
+
+  # Post-merge main-scoped cache writer. merge_group builds are the required
+  # proofs but cannot populate a cache other refs can read; main push would
+  # normally save, but exact-SHA proof reuse skips those compile lanes. This
+  # job restores → warms → saves the shared workspace-tests key so the next
+  # merge_group is not forced through a cold Linux compile (#5003).
+  rust-cache-refresh:
+    name: Refresh Rust cache
+    needs: [changes]
+    if: needs.changes.outputs.rust_cache_refresh == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: write
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
+      HARN_RUNNER_TIER: github-hosted
+      CARGO_BUILD_JOBS: "4"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+      - uses: ./.github/actions/free-disk-space
+      - name: Install mold linker
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 5
+        with:
+          packages: mold
+          check-command: mold
+      - uses: ./.github/actions/rust-toolchain
+      - uses: ./.github/actions/rust-cache
+        continue-on-error: true
+        with:
+          shared-key: workspace-tests
+          cache-on-failure: true
+          cache-bin: false
+          save: "true"
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@065d6a08a14e61e89fb0a4c10eecdbdef39c7d8e # v2.85.4
+        with:
+          tool: nextest@0.9.132
+      - name: Warm shared Cargo graph
+        run: ./scripts/ci/warm_rust_cache.sh
 
   # FALLBACK-ONLY consumer. By default the environment-neutral suite executes
   # inside the warm Rust workspace tests leg (see rust-checks), so this job skips and
@@ -848,9 +914,23 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >-
-          "$HARN_BIN" run scripts/ci_walltime_report.harn -- --limit 50
-          >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          set -euo pipefail
+          report="${RUNNER_TEMP}/ci-walltime-report.json"
+          "$HARN_BIN" run scripts/ci_walltime_report.harn -- --limit 50 --json > "$report"
+          "$HARN_BIN" run scripts/ci_walltime_report.harn -- --limit 50 >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload rolling merge-group wall time
+        if: >-
+          matrix.kind == 'conformance'
+          && github.event_name == 'merge_group'
+          && steps.release-audit-harn.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-walltime-report
+          path: ${{ runner.temp }}/ci-walltime-report.json
+          if-no-files-found: warn
+          retention-days: 14
 
   audit-scripts:
     name: Audit scripts
@@ -1599,6 +1679,7 @@ jobs:
         lint-md,
         rust-checks,
         rust-check-inputs,
+        rust-cache-refresh,
         rust-test,
         rust-security,
         harn-audit,
@@ -1704,6 +1785,22 @@ jobs:
               :
             else
               echo "::error::Rust audit artifact build failed or skipped while Rust proof was required."
+              exit 1
+            fi
+          fi
+
+          # Post-merge cache refresh is not a behavior proof, but when the
+          # changes job schedules it a failure means the next merge_group will
+          # compile cold again. Require success whenever it was requested.
+          rust_cache_refresh_result="${{ needs['rust-cache-refresh'].result }}"
+          rust_cache_refresh_expected="${{ needs.changes.outputs.rust_cache_refresh }}"
+          echo "Rust cache refresh: $rust_cache_refresh_result (expected=$rust_cache_refresh_expected)"
+          if [ "$rust_cache_refresh_result" != "success" ]; then
+            if [ "$rust_cache_refresh_result" = "skipped" ] \
+              && [ "$rust_cache_refresh_expected" != "true" ]; then
+              :
+            else
+              echo "::error::Rust cache refresh failed or skipped while a main-scoped cache write was required."
               exit 1
             fi
           fi
