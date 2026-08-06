@@ -324,6 +324,7 @@
 - [ADR 0003: Use the official Rust MCP SDK](./adr/0003-mcp-hand-rolled-vs-rmcp.md)
 - [ADR 0004: VM multithreading via Send values + share-nothing isolates](./adr/0004-vm-multithreading.md)
 - [ADR 0005: Keep Harn's A2A adapter; do not adopt a2a-lf](./adr/0005-a2a-keep-bespoke-adapter.md)
+- [ADR 0006: Keep hand-rolled ACP until the official SDK clears the Zed falsifier](./adr/0006-acp-hand-rolled-vs-sdk.md)
 
 # Operations
 
@@ -342,6 +343,7 @@
 - [Windows test coverage](./dev/windows-test-coverage.md)
 - [Deterministic test patterns](./dev/testing.md)
 - [Update Harn's MCP integration](./dev/mcp-maintenance.md)
+- [Update Harn's ACP integration](./dev/acp-maintenance.md)
 - [Thread-local work-stealing audit](./dev/thread-local-work-stealing-audit.md)
 - [Testbench mode](./dev/testbench.md)
 - [Tape format](./dev/tape-format.md)

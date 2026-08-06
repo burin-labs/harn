@@ -576,7 +576,10 @@ Add to `claude_desktop_config.json`:
 
 ACP lets host applications and local clients use Harn as a
 runtime backend. Communication is JSON-RPC 2.0 over stdin/stdout or
-WebSocket text frames.
+WebSocket text frames. Harn still owns the ACP runtime; the official SDK
+evaluation and cutover conditions are in
+[ADR 0006](./adr/0006-acp-hand-rolled-vs-sdk.md). Maintainer update steps are in
+[Update Harn's ACP integration](./dev/acp-maintenance.md).
 
 Bridge-level tool gates and daemon idle/resume notifications are documented in
 [Bridge protocol](./bridge-protocol.md).
