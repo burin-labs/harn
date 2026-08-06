@@ -1,0 +1,506 @@
+/**
+ * std/media/composition — deterministic layered design documents.
+ *
+ * Exact user-authored text stays in typed text layers instead of depending on
+ * stochastic image lettering. Export produces an editable SVG, a PNG of the
+ * image layer, and a reopenable design document.
+ */
+import { MediaAsset, media_asset_store_result, media_asset_verify_result } from "std/media/asset"
+
+pub type DesignLayerKind = "image" | "text"
+
+pub type DesignImageLayer = {
+  kind: "image",
+  id: string,
+  asset_uri: string,
+  x: float,
+  y: float,
+  width: float,
+  height: float,
+}
+
+pub type DesignTextLayer = {
+  kind: "text",
+  id: string,
+  text: string,
+  x: float,
+  y: float,
+  font_family: string,
+  font_size: float,
+  fill: string,
+  font_weight?: string,
+  anchor?: "start" | "middle" | "end",
+}
+
+pub type DesignLayer = DesignImageLayer | DesignTextLayer
+
+pub type DesignDocument = {
+  schema: "harn.design_document.v1",
+  id: string,
+  width: int,
+  height: int,
+  layers: list<DesignLayer>,
+  metadata?: dict,
+}
+
+pub type DesignDocumentFailureKind = "invalid" | "missing_asset" | "asset_mismatch"
+
+pub type DesignDocumentFailure = {
+  kind: DesignDocumentFailureKind,
+  message: string,
+  path?: string,
+  detail?: unknown,
+}
+
+pub type DesignExport = {
+  schema: "harn.design_export.v1",
+  document: DesignDocument,
+  document_path: string,
+  svg_path: string,
+  png_path: string,
+  svg_asset: MediaAsset,
+  png_asset: MediaAsset,
+}
+
+fn __design_failure(
+  kind: DesignDocumentFailureKind,
+  message: string,
+  details = {},
+) -> DesignDocumentFailure {
+  return {kind: kind, message: message} + (details ?? {})
+}
+
+fn __design_escape(text: string) -> string {
+  return replace(
+    replace(replace(replace(text, "&", "&amp;"), "<", "&lt;"), ">", "&gt;"),
+    "\"",
+    "&quot;",
+  )
+}
+
+fn __design_validate_layer(layer: DesignLayer) -> Result<DesignLayer, DesignDocumentFailure> {
+  const id = trim(layer.id)
+  if id == "" {
+    return Err(__design_failure("invalid", "design layer id is required"))
+  }
+  if layer.kind == "image" {
+    const uri = trim(layer.asset_uri)
+    if uri == "" || !starts_with(uri, "asset://sha256/") {
+      return Err(
+        __design_failure(
+          "invalid",
+          "image layer asset_uri must use asset://sha256/<digest>",
+          {detail: uri},
+        ),
+      )
+    }
+    if layer.width <= 0.0 || layer.height <= 0.0 {
+      return Err(__design_failure("invalid", "image layer size must be positive", {detail: id}))
+    }
+    return Ok(
+      {
+        kind: "image",
+        id: id,
+        asset_uri: uri,
+        x: layer.x,
+        y: layer.y,
+        width: layer.width,
+        height: layer.height,
+      },
+    )
+  }
+  if layer.kind == "text" {
+    const text = layer.text
+    if trim(text) == "" {
+      return Err(__design_failure("invalid", "text layer text must be non-empty", {detail: id}))
+    }
+    if layer.font_size <= 0.0 {
+      return Err(__design_failure("invalid", "text layer font_size must be positive", {detail: id}))
+    }
+    let next: DesignTextLayer = {
+      kind: "text",
+      id: id,
+      text: text,
+      x: layer.x,
+      y: layer.y,
+      font_family: trim(layer.font_family) == "" ? "Georgia, serif" : trim(layer.font_family),
+      font_size: layer.font_size,
+      fill: trim(layer.fill) == "" ? "#1f3d5a" : trim(layer.fill),
+    }
+    if layer.font_weight != nil {
+      next.font_weight = trim(layer.font_weight)
+    }
+    if layer.anchor != nil {
+      next.anchor = layer.anchor
+    }
+    return Ok(next)
+  }
+  return Err(__design_failure("invalid", "unknown design layer kind", {detail: layer}))
+}
+
+/**
+ * Validate and normalize a layered design document.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn design_document_result(raw) -> Result<DesignDocument, DesignDocumentFailure> {
+  if raw == nil || type_of(raw) != "dict" {
+    return Err(__design_failure("invalid", "design document must be a record"))
+  }
+  if raw.schema != nil && raw.schema != "harn.design_document.v1" {
+    return Err(
+      __design_failure(
+        "invalid",
+        "design document schema must be harn.design_document.v1",
+        {detail: raw.schema},
+      ),
+    )
+  }
+  const id = trim(to_string(raw.id ?? ""))
+  if id == "" {
+    return Err(__design_failure("invalid", "design document id is required"))
+  }
+  const width = to_int(raw.width)
+  const height = to_int(raw.height)
+  if width == nil || width <= 0 || height == nil || height <= 0 {
+    return Err(__design_failure("invalid", "design document size must be positive integers"))
+  }
+  if type_of(raw.layers) != "list" || len(raw.layers) == 0 {
+    return Err(__design_failure("invalid", "design document requires at least one layer"))
+  }
+  let layers: list<DesignLayer> = []
+  let ids = {}
+  let text_count = 0
+  let image_count = 0
+  for layer in raw.layers {
+    const checked = __design_validate_layer(layer)
+    if !is_ok(checked) {
+      return Err(unwrap_err(checked))
+    }
+    const next = unwrap(checked)
+    if ids[next.id] != nil {
+      return Err(__design_failure("invalid", "duplicate design layer id: " + next.id))
+    }
+    ids[next.id] = true
+    if next.kind == "text" {
+      text_count = text_count + 1
+    } else {
+      image_count = image_count + 1
+    }
+    layers = layers + [next]
+  }
+  if image_count == 0 {
+    return Err(__design_failure("invalid", "design document requires an image layer"))
+  }
+  if text_count == 0 {
+    return Err(
+      __design_failure(
+        "invalid",
+        "design document requires a text layer so exact lettering is preserved",
+      ),
+    )
+  }
+  let document: DesignDocument = {
+    schema: "harn.design_document.v1",
+    id: id,
+    width: width,
+    height: height,
+    layers: layers,
+  }
+  if raw.metadata != nil {
+    document.metadata = raw.metadata
+  }
+  return Ok(document)
+}
+
+/**
+ * Build a logo-style document with one image layer and one exact text layer.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn design_document_with_exact_text(
+  id: string,
+  image: MediaAsset,
+  text: string,
+  options = {},
+) -> Result<DesignDocument, DesignDocumentFailure> {
+  const opts = options ?? {}
+  const width = to_int(opts.width ?? image.width) ?? 0
+  const height = to_int(opts.height ?? image.height) ?? 0
+  if width <= 0 || height <= 0 {
+    return Err(
+      __design_failure(
+        "invalid",
+        "exact-text design requires positive width and height",
+        {detail: image.uri},
+      ),
+    )
+  }
+  const font_size = to_float(opts.font_size) ?? to_float(height) * 0.12
+  const text_x = to_float(opts.x) ?? to_float(width) / 2.0
+  const text_y = to_float(opts.y) ?? to_float(height) * 0.62
+  return design_document_result(
+    {
+      id: id,
+      width: width,
+      height: height,
+      metadata: opts.metadata,
+      layers: [
+        {
+          kind: "image",
+          id: "background",
+          asset_uri: image.uri,
+          x: 0.0,
+          y: 0.0,
+          width: to_float(width),
+          height: to_float(height),
+        },
+        {
+          kind: "text",
+          id: "lettering",
+          text: text,
+          x: text_x,
+          y: text_y,
+          font_family: opts.font_family ?? "Georgia, serif",
+          font_size: font_size,
+          fill: opts.fill ?? "#4B7BE5",
+          font_weight: opts.font_weight ?? "600",
+          anchor: opts.anchor ?? "middle",
+        },
+      ],
+    },
+  )
+}
+
+fn __design_resolve_image(
+  fs: HarnessFs,
+  assets: dict,
+  layer: DesignImageLayer,
+) -> Result<MediaAsset, DesignDocumentFailure> {
+  const cached = assets[layer.asset_uri]
+  if cached != nil {
+    return Ok(cached)
+  }
+  return Err(
+    __design_failure(
+      "missing_asset",
+      "design image layer asset was not provided",
+      {detail: layer.asset_uri},
+    ),
+  )
+}
+
+/**
+ * Render an editable SVG that keeps text as real text nodes.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ */
+pub fn design_document_svg_result(
+  fs: HarnessFs,
+  document: DesignDocument,
+  assets: list<MediaAsset>,
+) -> Result<string, DesignDocumentFailure> {
+  const checked = design_document_result(document)
+  if !is_ok(checked) {
+    return Err(unwrap_err(checked))
+  }
+  const design = unwrap(checked)
+  let by_uri = {}
+  for asset in assets {
+    const verified = media_asset_verify_result(fs, asset)
+    if !is_ok(verified) {
+      return Err(
+        __design_failure(
+          "asset_mismatch",
+          unwrap_err(verified).message,
+          {path: asset.path, detail: asset.uri},
+        ),
+      )
+    }
+    by_uri[asset.uri] = unwrap(verified)
+  }
+  let body = ""
+  for layer in design.layers {
+    if layer.kind == "image" {
+      const asset = __design_resolve_image(fs, by_uri, layer)
+      if !is_ok(asset) {
+        return Err(unwrap_err(asset))
+      }
+      const resolved = unwrap(asset)
+      const href = "data:" + resolved.mime_type + ";base64,"
+        + bytes_to_base64(
+        fs.read_bytes(resolved.path),
+      )
+      body = body + "<image id=\"" + __design_escape(layer.id) + "\" href=\"" + href + "\" x=\""
+        + to_string(
+        layer.x,
+      )
+        + "\" y=\""
+        + to_string(layer.y)
+        + "\" width=\""
+        + to_string(layer.width)
+        + "\" height=\""
+        + to_string(layer.height)
+        + "\" preserveAspectRatio=\"xMidYMid meet\" />"
+    } else {
+      const weight = layer.font_weight == nil ? "" : "; font-weight: " + layer.font_weight
+      const anchor = layer.anchor ?? "start"
+      body = body + "<text id=\"" + __design_escape(layer.id) + "\" x=\"" + to_string(layer.x)
+        + "\" y=\""
+        + to_string(layer.y)
+        + "\" fill=\""
+        + __design_escape(layer.fill)
+        + "\" font-family=\""
+        + __design_escape(layer.font_family)
+        + "\" font-size=\""
+        + to_string(layer.font_size)
+        + "\" text-anchor=\""
+        + anchor
+        + "\" style=\"white-space: pre"
+        + weight
+        + "\">"
+        + __design_escape(layer.text)
+        + "</text>"
+    }
+  }
+  return Ok(
+    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\" width=\""
+      + to_string(
+      design.width,
+    )
+      + "\" height=\""
+      + to_string(design.height)
+      + "\" viewBox=\"0 0 "
+      + to_string(design.width)
+      + " "
+      + to_string(design.height)
+      + "\" role=\"img\">\n"
+      + body
+      + "\n</svg>\n",
+  )
+}
+
+fn __design_primary_image(document: DesignDocument) -> DesignImageLayer? {
+  for layer in document.layers {
+    if layer.kind == "image" {
+      return layer
+    }
+  }
+  return nil
+}
+
+/**
+ * Write the reopenable design document, editable SVG, and image-layer PNG.
+ *
+ * Exact lettering lives in the design document and SVG text nodes. The PNG is
+ * the verified image-layer raster so hosts and other tools can still open a
+ * bitmap without inventing a second composition owner.
+ *
+ * @effects: [fs.read, fs.write]
+ * @errors: []
+ */
+pub fn design_document_export_result(
+  fs: HarnessFs,
+  document: DesignDocument,
+  assets: list<MediaAsset>,
+  output_stem: string,
+  options = {},
+) -> Result<DesignExport, DesignDocumentFailure> {
+  const checked = design_document_result(document)
+  if !is_ok(checked) {
+    return Err(unwrap_err(checked))
+  }
+  const design = unwrap(checked)
+  const stem = path_normalize(trim(output_stem))
+  if stem == "" {
+    return Err(__design_failure("invalid", "export output_stem is required"))
+  }
+  const opts = options ?? {}
+  const root = opts.root
+  const svg = design_document_svg_result(fs, design, assets)
+  if !is_ok(svg) {
+    return Err(unwrap_err(svg))
+  }
+  const image_layer = __design_primary_image(design)
+  if image_layer == nil {
+    return Err(__design_failure("invalid", "design document requires an image layer"))
+  }
+  let by_uri = {}
+  for asset in assets {
+    by_uri[asset.uri] = asset
+  }
+  const image = __design_resolve_image(fs, by_uri, image_layer)
+  if !is_ok(image) {
+    return Err(unwrap_err(image))
+  }
+  const image_asset = unwrap(image)
+  const verified = media_asset_verify_result(fs, image_asset)
+  if !is_ok(verified) {
+    return Err(
+      __design_failure(
+        "asset_mismatch",
+        unwrap_err(verified).message,
+        {path: image_asset.path, detail: image_asset.uri},
+      ),
+    )
+  }
+  const document_path = stem + ".design.json"
+  const svg_path = stem + ".svg"
+  const png_path = stem + ".png"
+  fs.mkdir(dirname(document_path), true)
+  fs.write_text(document_path, json_stringify_pretty(design) + "\n")
+  fs.write_text(svg_path, unwrap(svg))
+  fs.copy(image_asset.path, png_path)
+  let svg_options = {
+    mime_type: "image/svg+xml",
+    width: design.width,
+    height: design.height,
+    parents: [image_asset.uri],
+    metadata: {kind: "design-svg", design_id: design.id, document_path: document_path},
+  }
+  let text_layer_ids: list<string> = []
+  for layer in design.layers {
+    if layer.kind == "text" {
+      text_layer_ids = text_layer_ids + [layer.id]
+    }
+  }
+  let png_options = {
+    mime_type: image_asset.mime_type,
+    width: image_asset.width,
+    height: image_asset.height,
+    parents: image_asset.parents ?? [image_asset.uri],
+    producing_job: image_asset.producing_job,
+    metadata: {
+      kind: "design-png",
+      design_id: design.id,
+      source_asset: image_asset.uri,
+      exact_text_layers: text_layer_ids,
+    },
+  }
+  if root != nil {
+    svg_options.root = root
+    png_options.root = root
+  }
+  const svg_asset = media_asset_store_result(fs, bytes_from_string(unwrap(svg)), svg_options)
+  if !is_ok(svg_asset) {
+    return Err(__design_failure("asset_mismatch", unwrap_err(svg_asset).message, {path: svg_path}))
+  }
+  const png_asset = media_asset_store_result(fs, fs.read_bytes(png_path), png_options)
+  if !is_ok(png_asset) {
+    return Err(__design_failure("asset_mismatch", unwrap_err(png_asset).message, {path: png_path}))
+  }
+  return Ok(
+    {
+      schema: "harn.design_export.v1",
+      document: design,
+      document_path: document_path,
+      svg_path: svg_path,
+      png_path: png_path,
+      svg_asset: unwrap(svg_asset),
+      png_asset: unwrap(png_asset),
+    },
+  )
+}

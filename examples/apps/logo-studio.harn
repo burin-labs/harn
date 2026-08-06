@@ -1,5 +1,12 @@
 import { MediaAsset, media_asset_store_result, media_asset_verify_result } from "std/media/asset"
 import {
+  DesignDocument,
+  DesignExport,
+  design_document_export_result,
+  design_document_result,
+  design_document_with_exact_text,
+} from "std/media/composition"
+import {
   ComfyWorkflowBuilder,
   ModelBackend,
   ModelJobError,
@@ -27,6 +34,9 @@ import {
  * Burin Logo Studio — a complete interactive app written in Harn.
  *
  * Run with: harn app run examples/apps/logo-studio.harn
+ *
+ * Exact logo lettering is a deterministic text layer. The image model polishes
+ * the sketch; export writes a reopenable design document, editable SVG, and PNG.
  */
 import * as ui from "std/ui"
 import { UiDocument, UiEvent, UiStroke } from "std/ui/contracts"
@@ -38,19 +48,24 @@ type LogoState = {
   strokes: list<UiStroke>,
   annotations: list<string>,
   annotation_draft: string,
+  logo_text: string,
   model: LogoModel,
   output_path: string,
   status: string,
   running?: ModelJobRun,
   hosted_sketch?: MediaAsset,
   asset?: MediaAsset,
+  design?: DesignDocument,
+  export?: DesignExport,
   preview?: string,
 }
 
 type LogoIo = {env: HarnessEnv, fs: HarnessFs}
 
 const DEFAULT_NOTE =
-  "The cursive lettering “Cornflower Garden” should be cornflower blue. Use a calm green for grass behind it, with a dark outline only when the lettering needs more contrast."
+  "Use a calm green for grass behind the mark, with soft botanical detail and a dark outline only where contrast helps."
+
+const DEFAULT_LOGO_TEXT = "Cornflower Garden"
 
 fn default_state() -> LogoState {
   return {
@@ -58,9 +73,10 @@ fn default_state() -> LogoState {
     strokes: [],
     annotations: [DEFAULT_NOTE],
     annotation_draft: "",
+    logo_text: DEFAULT_LOGO_TEXT,
     model: "replay",
-    output_path: "logo.png",
-    status: "Ready — sketch loosely, then describe the intended finish.",
+    output_path: "logo",
+    status: "Ready — sketch loosely, set exact logo text, then describe the finish.",
   }
 }
 
@@ -94,6 +110,18 @@ fn reopen_work(io: LogoIo) -> LogoState {
     state.hosted_sketch = nil
     state.status = "Hosted generation was interrupted. Polish the drawing to retry."
   }
+  if state.logo_text == nil || trim(state.logo_text) == "" {
+    state.logo_text = DEFAULT_LOGO_TEXT
+  }
+  if state.design != nil {
+    const design_checked = design_document_result(state.design)
+    if !is_ok(design_checked) {
+      state.design = nil
+      state.export = nil
+    } else {
+      state.design = unwrap(design_checked)
+    }
+  }
   if state.asset != nil {
     if is_ok(media_asset_verify_result(io.fs, state.asset)) {
       state.preview = "data:" + state.asset.mime_type + ";base64,"
@@ -102,6 +130,8 @@ fn reopen_work(io: LogoIo) -> LogoState {
       )
     } else {
       state.asset = nil
+      state.design = nil
+      state.export = nil
       state.status = "Reopened the drawing and directions, but the previous result was unavailable."
     }
   }
@@ -113,11 +143,13 @@ fn remember_work(io: LogoIo, state: LogoState) {
   io.fs.mkdir(dirname(path), true)
   let remembered = state
   remembered.preview = nil
+  remembered.export = nil
   io.fs.write_text(path, json_stringify_pretty(remembered) + "\n")
 }
 
 fn prompt(state: LogoState) -> string {
-  return "Polish this loose hand-drawn logo sketch into a clean, legible rectangular logo. "
+  return "Polish this loose hand-drawn logo sketch into a clean rectangular mark. "
+    + "Do not render lettering; exact text is composed as a separate deterministic layer. "
     + join(
     state.annotations,
     " ",
@@ -185,6 +217,14 @@ fn document(state: LogoState) -> UiDocument {
     },
     {id: "add_note", kind: "button", parent: "panel", label: "Add direction"},
     {
+      id: "logo_text",
+      kind: "field",
+      parent: "panel",
+      label: "Exact logo text",
+      value: state.logo_text,
+      placeholder: "Lettering preserved outside the image model",
+    },
+    {
       id: "model",
       kind: "select",
       parent: "panel",
@@ -203,7 +243,10 @@ fn document(state: LogoState) -> UiDocument {
       parent: "panel",
       label: busy(state) ? "Working…" : "Polish drawing",
       variant: "primary",
-      disabled: busy(state) || len(state.strokes) == 0 || len(state.annotations) == 0,
+      disabled: busy(state)
+        || len(state.strokes) == 0
+        || len(state.annotations) == 0
+        || trim(state.logo_text) == "",
     },
     {
       id: "cancel",
@@ -216,15 +259,15 @@ fn document(state: LogoState) -> UiDocument {
       id: "output_path",
       kind: "field",
       parent: "panel",
-      label: "Output file",
+      label: "Output stem",
       value: state.output_path,
     },
     {
       id: "write_file",
       kind: "button",
       parent: "panel",
-      label: "Write PNG",
-      disabled: state.asset == nil || trim(state.output_path) == "",
+      label: "Export SVG + PNG",
+      disabled: state.asset == nil || trim(state.output_path) == "" || trim(state.logo_text) == "",
     },
     {id: "status", kind: "status", parent: "panel", text: state.status},
   ]
@@ -329,14 +372,55 @@ fn run_options(fs: HarnessFs) -> ModelJobRunOptions {
   }
 }
 
+fn compose_design(state: LogoState, asset: MediaAsset) -> Result<DesignDocument, string> {
+  const designed = design_document_with_exact_text(
+    "logo-" + asset.sha256,
+    asset,
+    trim(state.logo_text),
+    {
+      width: asset.width ?? 1536,
+      height: asset.height ?? 1024,
+      fill: "#4B7BE5",
+      metadata: {
+        backend_model: state.model,
+        annotations: state.annotations,
+        parents: asset.parents ?? [],
+        producing_job: asset.producing_job,
+      },
+    },
+  )
+  if !is_ok(designed) {
+    return Err(unwrap_err(designed).message)
+  }
+  return Ok(unwrap(designed))
+}
+
 fn accept_receipt(fs: HarnessFs, state: LogoState, receipt: ModelJobReceipt) -> LogoState {
-  const asset = receipt.assets[0]
+  const first = receipt.assets[0]
+  if first == nil {
+    let empty = state
+    empty.running = nil
+    empty.status = "Finished with " + receipt.backend + ", but no media asset was returned."
+    return bump(empty)
+  }
+  const asset: MediaAsset = first
   let next = state
   next.running = nil
   next.asset = asset
+  next.export = nil
   next.preview = "data:" + asset.mime_type + ";base64,"
     + bytes_to_base64(fs.read_bytes(asset.path))
-  next.status = "Finished with " + receipt.backend + ". Review the result or write the PNG."
+  const designed = compose_design(next, asset)
+  if is_ok(designed) {
+    next.design = unwrap(designed)
+    next.status = "Finished with " + receipt.backend
+      + ". Exact text is a separate layer — export SVG + PNG when ready."
+  } else {
+    next.design = nil
+    next.status = "Finished with " + receipt.backend
+      + ", but composition failed: "
+      + unwrap_err(designed)
+  }
   return bump(next)
 }
 
@@ -377,7 +461,10 @@ pipeline main(harness: Harness, task) {
     "ui://burin-labs/logo-studio",
     "Burin Logo Studio",
     "logo.handle_event",
-    {description: "Sketch, annotate, generate, replay, and write a logo PNG", version: "2"},
+    {
+      description: "Sketch, annotate, generate, replay, and export exact-text SVG plus PNG",
+      version: "3",
+    },
   )
   const tool_meta = ui.tool_metadata(resource, {visibility: ["model", "app"]})
   const io: LogoIo = {env: harness.env, fs: harness.fs}
@@ -538,11 +625,32 @@ pipeline main(harness: Harness, task) {
     } else if event.target == "cancel" && state.running != nil {
       return cancel_generation(state.running)
     } else if event.target == "write_file" && state.asset != nil {
-      const written = try {
-        harness.fs.mkdir(dirname(state.output_path), true)
-        harness.fs.copy(state.asset.path, state.output_path)
+      const asset: MediaAsset = state.asset
+      const existing = state.design
+      const designed = existing != nil ? Ok(existing) : compose_design(state, asset)
+      if !is_ok(designed) {
+        state.status = "Could not compose exact text: " + unwrap_err(designed)
+        return respond()
       }
-      state.status = is_ok(written) ? "Wrote " + state.output_path : "Could not write the PNG."
+      const exported = design_document_export_result(
+        harness.fs,
+        unwrap(designed),
+        [asset],
+        trim(state.output_path),
+        {root: path_join(harness.fs.source_dir(), ".harn", "logo-assets")},
+      )
+      if is_ok(exported) {
+        state.design = unwrap(exported).document
+        state.export = unwrap(exported)
+        state.status = "Wrote "
+          + unwrap(exported).document_path
+          + ", "
+          + unwrap(exported).svg_path
+          + ", and "
+          + unwrap(exported).png_path
+      } else {
+        state.status = "Could not export the design: " + unwrap_err(exported).message
+      }
     }
     return respond()
   }
@@ -554,6 +662,13 @@ pipeline main(harness: Harness, task) {
     if event.kind == "input" {
       if event.target == "annotation_draft" {
         state.annotation_draft = event.value ?? ""
+      } else if event.target == "logo_text" {
+        state.logo_text = event.value ?? ""
+        if state.asset != nil {
+          const asset: MediaAsset = state.asset
+          const designed = compose_design(state, asset)
+          state.design = is_ok(designed) ? unwrap(designed) : nil
+        }
       } else if event.target == "model" && !busy(state) {
         const selected = event.value ?? "replay"
         state.model = ["replay", "local", "openai"].contains(selected) ? selected : "replay"

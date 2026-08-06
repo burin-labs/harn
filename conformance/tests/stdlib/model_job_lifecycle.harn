@@ -1,4 +1,9 @@
 import {
+  MediaAssetOptions,
+  media_asset_store_result,
+  media_asset_verify_result,
+} from "std/media/asset"
+import {
   ModelJobObservation,
   ModelJobOutput,
   ModelJobRequest,
@@ -6,7 +11,6 @@ import {
   ModelJobState,
   ModelOutputSpec,
   ModelTask,
-  media_asset_verify_result,
   model_job_fake_backend,
   model_job_replay_backend,
   model_job_run_result,
@@ -98,5 +102,35 @@ pipeline test(harness: Harness, task) {
   const after_timeout = transcript_events_by_kind(harness.agent.snapshot(session), "model_job")
   harness.stdio.log(to_string(len(after_timeout) - len(transcript_events)))
   harness.stdio.log(after_timeout[len(after_timeout) - 1]?.metadata?.kind ?? "missing")
+  const sketch_options: MediaAssetOptions = {
+    mime_type: "image/png",
+    width: 1,
+    height: 1,
+    root: root,
+  }
+  const sketch = unwrap(media_asset_store_result(harness.fs, png, sketch_options))
+  const edit_task: ModelTask = "image.edit"
+  const edit_request: ModelJobRequest = {
+    id: "logo-edit",
+    task: edit_task,
+    prompt: "Polish the sketch",
+    output: output_spec,
+    model: "fixture",
+    inputs: [sketch],
+    seed: 7,
+  }
+  const edit = unwrap(
+    model_job_run_result(
+      harness,
+      model_job_fake_backend(
+        "fixture-edit",
+        [{job_id: "job-edit", state: "succeeded", progress: 1.0, outputs: [output]}],
+      ),
+      edit_request,
+      run_options,
+    ),
+  )
+  harness.stdio.log(to_string(edit.assets[0]?.parents[0] == sketch.uri))
+  harness.stdio.log(to_string(is_ok(media_asset_verify_result(harness.fs, edit.assets[0]))))
   const _ = harness.testing.clock_reset()
 }

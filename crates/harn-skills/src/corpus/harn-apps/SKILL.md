@@ -47,8 +47,8 @@ Use `ui.test.run` for event-handler tests.
 5. Run `harn app run path/to/app.harn` and open the printed URL.
 
 Start with `examples/apps/decision-card.harn` for forms and
-`examples/apps/logo-studio.harn` for canvas input, model jobs, result files,
-and restart recovery.
+`examples/apps/logo-studio.harn` for canvas input, model jobs, exact-text
+composition (`std/media/composition`), SVG+PNG export, and restart recovery.
 
 ## Run one reducer in browser and server
 
@@ -75,6 +75,11 @@ through the same typed model-job contract. Prefer `model_job_submit_result`,
 `model_job_step_result`, and `model_job_finish_result` when the interface must
 show progress or allow cancellation. Use the synchronous helper only when the
 caller does not need intermediate states.
+
+Keep exact lettering in `std/media/composition` text layers. Ask image models to
+polish the mark without rendering words, then export a design document, editable
+SVG, and image-layer PNG. Edit outputs should carry parent asset URIs for sketch
+→ candidate lineage.
 
 Keep provider details in provider-specific code. The ComfyUI backend can upload
 verified sketch assets before it builds an image-edit workflow. A hosted backend
