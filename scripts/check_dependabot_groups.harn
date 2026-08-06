@@ -1,10 +1,5 @@
 import "std/schema"
 
-// Harn-local family membership and catch-all update-types policy.
-// Structural Dependabot *delivery* invariants (catch-all presence across list
-// styles, lockfile coverage, cargo directory scope, frozen override ceilings)
-// are owned by burin-labs/.github `check-dependabot-config` and run in CI
-// without a Harn binary. Do not re-implement those here.
 type DependabotGroup = {
   patterns: list<string>,
   exclude_patterns: list<string>,
@@ -30,6 +25,12 @@ type EcosystemPolicy = {families: dict<string, list<string>>, catch_all_update_t
  * SDK want different families and different review owners. Each entry carries
  * its own `groups` map, so "the catch-all for npm" is only a well-formed
  * question once the directory is part of the subject.
+ *
+ * This script owns Harn-local family membership and catch-all update-types.
+ * Structural delivery invariants (catch-all presence across list styles,
+ * lockfile coverage, cargo directory scope, frozen override ceilings) are
+ * owned by burin-labs/.github `check-dependabot-config` and run in CI without
+ * a Harn binary. Do not re-implement those here.
  */
 pub type EcosystemGroups = {
   ecosystem: string,
