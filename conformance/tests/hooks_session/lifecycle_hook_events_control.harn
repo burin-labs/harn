@@ -1,0 +1,62 @@
+/**
+ * P-06 (harn#1859): lifecycle hooks honor Block / Modify control
+ * returns through `run_lifecycle_hooks_with_control`.
+ *   * PreSuspend Block surfaces as control=block with reason.
+ *   * PreResume Modify surfaces as control=modify with the rewritten
+ *     payload echoed back.
+ *   * OnDrainDecision Modify rewrites the audit payload.
+ *   * OnUnsettledDetected Block surfaces as control=block.
+ * The PreFinish-Block invalid case is covered by a dedicated runtime
+ * error fixture (see lifecycle_hook_events_pre_finish_block.harn).
+ */
+pipeline default(harness: Harness) {
+  harness.agent.clear_session_hooks()
+  // PreSuspend Block.
+  harness.agent.register_session_hook(
+    "pre_suspend",
+    { _hook_harness, _event -> return {block: true, reason: "operator hold"} },
+  )
+  const pre_suspend = __host_fire_session_hook(
+    "pre_suspend",
+    {worker: {id: "w1"}, reason: "self-park"},
+  )
+  harness.stdio.println("pre_suspend.control=" + pre_suspend.control)
+  harness.stdio.println("pre_suspend.reason=" + pre_suspend.reason)
+  harness.agent.clear_session_hooks()
+  // PreResume Modify rewrites resume_input.
+  harness.agent.register_session_hook(
+    "pre_resume",
+    { _hook_harness, _event -> return {modify: {resume_input: "amended task"}} },
+  )
+  const pre_resume = __host_fire_session_hook(
+    "pre_resume",
+    {worker: {id: "w1"}, resume_input: "original task"},
+  )
+  harness.stdio.println("pre_resume.control=" + pre_resume.control)
+  harness.stdio.println("pre_resume.modify.resume_input=" + pre_resume.modify.resume_input)
+  harness.agent.clear_session_hooks()
+  // OnDrainDecision Block short-circuits the tool call.
+  harness.agent.register_session_hook(
+    "on_drain_decision",
+    { _hook_harness, _event -> return {block: true, reason: "policy violation"} },
+  )
+  const drain = __host_fire_session_hook(
+    "on_drain_decision",
+    {action: "resume", item: {id: "envelope_1"}},
+  )
+  harness.stdio.println("on_drain_decision.control=" + drain.control)
+  harness.stdio.println("on_drain_decision.reason=" + drain.reason)
+  harness.agent.clear_session_hooks()
+  // OnUnsettledDetected Block prevents finish until settled.
+  harness.agent.register_session_hook(
+    "on_unsettled_detected",
+    { _hook_harness, _event -> return {block: true, reason: "settle before exit"} },
+  )
+  const unsettled = __host_fire_session_hook(
+    "on_unsettled_detected",
+    {unsettled: {suspended_subagents: [{id: "w1"}]}},
+  )
+  harness.stdio.println("on_unsettled_detected.control=" + unsettled.control)
+  harness.stdio.println("on_unsettled_detected.reason=" + unsettled.reason)
+  harness.agent.clear_session_hooks()
+}

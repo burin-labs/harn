@@ -1,0 +1,7 @@
+pipeline default(harness: Harness) {
+  const ts = date_parse("2026-04-25T17:32:09.481Z")
+  harness.stdio.println(date_format(ts, "%Y-%m-%dT%H:%M:%S.%3fZ"))
+  harness.stdio.println(date_to_zone(ts, "UTC"))
+  harness.stdio.println(date_format(ts, "%s.%3f"))
+  harness.stdio.println(date_format(date_parse("2026-04-25T17:32:09.123456Z"), "%6f"))
+}

@@ -1,0 +1,26 @@
+pipeline main(harness: Harness) {
+  const old = transcript_reminder_event(
+    {body: "old duplicate", dedupe_key: "slot", ttl_turns: 3, preserve_on_compact: true},
+  )
+  const newest = transcript_reminder_event(
+    {body: "new duplicate", dedupe_key: "slot", ttl_turns: 3, preserve_on_compact: true},
+  )
+  const crafted = {
+    _type: "transcript",
+    messages: [
+      {role: "user", content: "one"},
+      {role: "assistant", content: "two"},
+      {role: "user", content: "three"},
+      {role: "assistant", content: "four"},
+    ],
+    events: [old, newest],
+  }
+  const compacted = harness.agent.compact_transcript(
+    crafted,
+    {strategy: "truncate", keep_last: 1, target_tokens: 1},
+  )
+  const reminders = transcript_events_by_kind(compacted, "system_reminder")
+  harness.stdio.println(len(reminders))
+  harness.stdio.println(reminders[0].reminder.body)
+  harness.stdio.println(reminders[0].reminder.ttl_turns)
+}

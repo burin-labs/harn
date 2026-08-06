@@ -1,0 +1,37 @@
+pipeline main(harness: Harness) {
+  const base = transcript_from_messages(
+    [
+      {role: "user", content: "one"},
+      {role: "assistant", content: "two"},
+      {role: "user", content: "three"},
+      {role: "assistant", content: "four"},
+    ],
+  )
+  const with_keeper = harness.agent.transcript_inject_reminder(
+    base,
+    {
+      body: "preserved across compaction",
+      dedupe_key: "keeper",
+      ttl_turns: 5,
+      preserve_on_compact: true,
+    },
+  ).transcript
+  const with_discard = harness.agent.transcript_inject_reminder(
+    with_keeper,
+    {
+      body: "discarded during compaction",
+      dedupe_key: "discard",
+      ttl_turns: 5,
+      preserve_on_compact: false,
+    },
+  ).transcript
+  const compacted = harness.agent.compact_transcript(
+    with_discard,
+    {strategy: "truncate", keep_last: 1, target_tokens: 1},
+  )
+  const reminders = transcript_events_by_kind(compacted, "system_reminder")
+  harness.stdio.println(len(reminders))
+  harness.stdio.println(reminders[0].reminder.body)
+  harness.stdio.println(reminders[0].reminder.preserve_on_compact)
+  harness.stdio.println(reminders[0].reminder.ttl_turns)
+}

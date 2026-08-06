@@ -1,0 +1,17 @@
+{
+  "event": "github.review_requested",
+  "review_captain": {
+    "repo": "burin-labs/harn",
+    "pr_number": 463,
+    "changed_files": [
+      "personas/review_captain/harn.toml",
+      "personas/review_captain/manifest.harn"
+    ],
+    "missing_tests": [
+      "persona smoke run"
+    ],
+    "risky_paths": [
+      "personas/review_captain/harn.toml"
+    ]
+  }
+}

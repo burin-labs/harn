@@ -1,0 +1,43 @@
+import { with_llm_script } from "std/testing"
+
+/**
+ * Failover: the first link returns a 429 rate_limit error, the
+ * second link succeeds. The chain should advance and the envelope
+ * should surface both attempts.
+ */
+pipeline test(harness: Harness, task) {
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        error: {category: "rate_limit", message: "HTTP 429 rate limit", retry_after_ms: 100},
+        model: "mock",
+        provider: "mock",
+      },
+      {text: "second link won", model: "mock-strong", provider: "mock"},
+    ],
+    { ->
+      const policy = harness.llm.routing_policy(
+        {
+          chain: [
+            {provider: "mock", model: "mock", label: "cheap"},
+            {provider: "mock", model: "mock-strong", label: "frontier"},
+          ],
+          failover: {on_status: [429, 500, 502, 503], max_attempts: 3},
+          label: "cheap-then-frontier",
+        },
+      )
+      const result = harness.llm.call("hi", nil, {routing: policy})
+      harness.stdio.println(result.text)
+      harness.stdio.println(result.routing.policy)
+      const attempts = result.routing.attempts
+      harness.stdio.println(len(attempts))
+      harness.stdio.println(attempts[0].label)
+      harness.stdio.println(attempts[0].status)
+      harness.stdio.println(attempts[0].error.category)
+      harness.stdio.println(attempts[1].label)
+      harness.stdio.println(attempts[1].status)
+      harness.stdio.println(result.routing.selected)
+    },
+  )
+}

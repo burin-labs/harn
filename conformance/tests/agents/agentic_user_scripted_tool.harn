@@ -1,0 +1,60 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { scripted_user, simulated_user_status, user_tools } from "std/agent/user"
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline main(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        tool_calls: [
+          {id: "ask_1", name: "ask_user", arguments: {question: "Which test runner should I use?"}},
+        ],
+      },
+      llm_text("Created index.test.ts with Vitest edge coverage."),
+    ],
+    { ->
+      const answerer = scripted_user(
+        harness,
+        [
+          {
+            match: "*test runner*",
+            reply: "Use Vitest and cover empty, invalid, and boundary inputs.",
+          },
+        ],
+        {max_replies: 2},
+      )
+      const session = "agentic-user-scripted-tool"
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Create index.test.ts with edge coverage.",
+          nil,
+          {
+            provider: "mock",
+            tools: user_tools(answerer),
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 3,
+            session_id: session,
+          },
+        ) },
+      )
+      const simulated_audit = captured.events.find(
+        { event ->
+          return event.type == "tool_call_audit" && event.audit.event_type == "simulated_user_reply"
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      const status = simulated_user_status(harness.runtime, answerer)
+      harness.stdio.println(captured.result.status)
+      harness.stdio.println(contains(captured.result.text, "Vitest edge coverage"))
+      harness.stdio.println(status.state.replies)
+      harness.stdio.println(simulated_audit != nil)
+      harness.stdio.println(contains(json_stringify(calls[1].messages), "Use Vitest"))
+    },
+  )
+}

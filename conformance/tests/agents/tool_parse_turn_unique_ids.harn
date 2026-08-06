@@ -1,0 +1,38 @@
+// Synthetic tool-call ids are unique within a turn and never reused across
+// turns.
+//
+// Each per-body parser only ever sees its own single-call vector, so without a
+// turn-global renumber two `<tool_call>` blocks in one response would both come
+// back as `tc_0` and result correlation would be ambiguous — the loop could not
+// tell which tool result belonged to which call.
+//
+// The counter is process-wide and monotonic, so the ABSOLUTE ids depend on how
+// many parses ran earlier in the same process; under the full suite they are in
+// the hundreds. Pinning literal values would pin fixture execution order rather
+// than the contract, so what is asserted here is the contract itself:
+// consecutive ids within a turn, and no reuse when the next turn parses.
+import { agent_parse_tool_calls } from "std/agent/primitives"
+import { sample_registry } from "_tool_parse_probe"
+
+const TWO_BLOCKS = """<tool_call>run({ command: "echo a" })</tool_call>
+<tool_call>run({ command: "echo b" })</tool_call>"""
+
+/** The numeric suffix of a `tc_<n>` synthetic id. */
+fn id_seq(id: string) -> int {
+  return to_int(split(id, "_")[1])
+}
+
+pipeline main(harness: Harness) {
+  const first = agent_parse_tool_calls(harness.agent, TWO_BLOCKS, sample_registry(), "text")
+  const second = agent_parse_tool_calls(harness.agent, TWO_BLOCKS, sample_registry(), "text")
+  harness.stdio.println("calls=${len(first.tool_calls)}")
+  harness.stdio.println("prefixed=${starts_with(first.tool_calls[0].id, "tc_")}")
+  harness.stdio.println("distinct_in_turn=${first.tool_calls[0].id != first.tool_calls[1].id}")
+  harness.stdio.println(
+    "consecutive=${id_seq(first.tool_calls[1].id) - id_seq(first.tool_calls[0].id)}",
+  )
+  harness.stdio.println("reused_across_turns=${first.tool_calls[1].id == second.tool_calls[0].id}")
+  harness.stdio.println(
+    "advances_across_turns=${id_seq(second.tool_calls[0].id) > id_seq(first.tool_calls[1].id)}",
+  )
+}

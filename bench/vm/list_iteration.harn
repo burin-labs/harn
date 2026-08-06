@@ -1,0 +1,9 @@
+pipeline default(harness: Harness, task) {
+  let total = 0
+  for value in range(0, 100000) {
+    total = total + value
+  }
+  if total < 0 {
+    harness.stdio.log("unreachable")
+  }
+}

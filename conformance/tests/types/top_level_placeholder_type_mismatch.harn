@@ -1,0 +1,3 @@
+const x: int = 1
+
+const y: string = x

@@ -1,0 +1,1206 @@
+use crate::value::VmDictExt;
+use std::cell::{Cell, RefCell};
+use std::collections::{BTreeMap, VecDeque};
+use std::future::Future;
+use std::path::{Path, PathBuf};
+use std::pin::Pin;
+use std::sync::Arc;
+
+use crate::bridge::HostBridge;
+use crate::llm::daemon::{load_snapshot, DaemonSnapshot};
+use crate::orchestration::DaemonEventKindRecord;
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::stdlib::options::{self, ErrorKind};
+use crate::value::{VmError, VmValue};
+use crate::vm::Vm;
+
+const SNAPSHOT_FILE: &str = "daemon.json";
+const META_FILE: &str = "daemon.meta.json";
+const DEFAULT_EVENT_QUEUE_CAPACITY: usize = 1024;
+const DAEMON_MONITOR_POLL_MS: u64 = 10;
+const DAEMON_STOP_WAIT_MS: u64 = 500;
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &DAEMON_SNAPSHOT_BUILTIN_DEF,
+    &DAEMON_SPAWN_BUILTIN_DEF,
+    &DAEMON_TRIGGER_BUILTIN_DEF,
+    &DAEMON_STOP_BUILTIN_DEF,
+    &DAEMON_RESUME_BUILTIN_DEF,
+];
+
+fn default_event_queue_capacity() -> usize {
+    DEFAULT_EVENT_QUEUE_CAPACITY
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+struct QueuedDaemonEvent {
+    seq: u64,
+    enqueued_at: String,
+    payload: serde_json::Value,
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct PersistedDaemonMeta {
+    #[serde(rename = "_type")]
+    type_name: String,
+    id: String,
+    name: String,
+    prompt: String,
+    system: Option<String>,
+    session_id: String,
+    options: serde_json::Value,
+    #[serde(default = "default_event_queue_capacity")]
+    event_queue_capacity: usize,
+    #[serde(default)]
+    next_event_seq: u64,
+    #[serde(default)]
+    pending_events: Vec<QueuedDaemonEvent>,
+    #[serde(default)]
+    inflight_event: Option<QueuedDaemonEvent>,
+}
+
+#[derive(Clone)]
+struct DaemonSpawnSpec {
+    id: String,
+    name: String,
+    prompt: String,
+    system: Option<String>,
+    session_id: String,
+    persist_root: String,
+    snapshot_path: String,
+    event_queue_capacity: usize,
+    options: crate::value::DictMap,
+}
+
+struct DaemonState {
+    id: String,
+    name: String,
+    prompt: String,
+    system: Option<String>,
+    session_id: String,
+    persist_root: String,
+    snapshot_path: String,
+    options: crate::value::DictMap,
+    bridge: Arc<HostBridge>,
+    handle: Option<tokio::task::JoinHandle<Result<VmValue, VmError>>>,
+    monitor_handle: Option<tokio::task::JoinHandle<()>>,
+    status: String,
+    last_error: Option<String>,
+    last_result: Option<serde_json::Value>,
+    last_snapshot: Option<DaemonSnapshot>,
+    event_queue_capacity: usize,
+    next_event_seq: u64,
+    pending_events: VecDeque<QueuedDaemonEvent>,
+    inflight_event: Option<QueuedDaemonEvent>,
+    inflight_snapshot_saved_at: Option<String>,
+    inflight_snapshot_iterations: usize,
+    stop_requested: bool,
+}
+
+thread_local! {
+    static DAEMON_REGISTRY: RefCell<BTreeMap<String, Arc<parking_lot::Mutex<DaemonState>>>> =
+        const { RefCell::new(BTreeMap::new()) };
+    static DAEMON_COUNTER: Cell<u64> = const { Cell::new(0) };
+}
+
+pub fn register_daemon_builtins(vm: &mut Vm) {
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
+}
+
+#[harn_builtin(
+    exposure = "harness.agent.daemon_spawn",
+    effects = ["worker.mutate@dynamic", "state.mutate@dynamic"],
+    sig = "daemon_spawn(config: dict) -> dict",
+    kind = "async",
+    category = "agent.daemon"
+)]
+async fn daemon_spawn_builtin(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let child_vm = ctx.child_vm();
+    let config = options::dict_arg(&args, 0, "daemon_spawn", "config", ErrorKind::Runtime)?;
+    let spec = parse_spawn_spec(config, None, None)?;
+    if find_daemon_by_root(&spec.persist_root).is_some_and(|state| state.lock().status == "running")
+    {
+        return Err(VmError::Runtime(format!(
+            "daemon_spawn: a daemon is already running for '{}'",
+            spec.persist_root
+        )));
+    }
+
+    let state = Arc::new(parking_lot::Mutex::new(DaemonState {
+        id: spec.id.clone(),
+        name: spec.name.clone(),
+        prompt: spec.prompt.clone(),
+        system: spec.system.clone(),
+        session_id: spec.session_id.clone(),
+        persist_root: spec.persist_root.clone(),
+        snapshot_path: spec.snapshot_path.clone(),
+        options: spec.options.clone(),
+        bridge: new_daemon_bridge(&ctx).await?,
+        handle: None,
+        monitor_handle: None,
+        status: "running".to_string(),
+        last_error: None,
+        last_result: None,
+        last_snapshot: None,
+        event_queue_capacity: spec.event_queue_capacity.max(1),
+        next_event_seq: 0,
+        pending_events: VecDeque::new(),
+        inflight_event: None,
+        inflight_snapshot_saved_at: None,
+        inflight_snapshot_iterations: 0,
+        stop_requested: false,
+    }));
+    {
+        let daemon = state.lock();
+        persist_daemon_meta(&daemon)?;
+    }
+    register_daemon(state.clone());
+    spawn_daemon_task(state.clone(), child_vm);
+    start_daemon_monitor(state.clone());
+    wait_for_snapshot(state.clone(), None, 500).await;
+    record_daemon_event(
+        &spec.id,
+        &spec.name,
+        DaemonEventKindRecord::Spawned,
+        &spec.persist_root,
+        summarize_text(&spec.prompt),
+    );
+    let summary = {
+        let daemon = state.lock();
+        daemon_summary(&daemon)?
+    };
+    Ok(summary)
+}
+
+#[harn_builtin(
+    exposure = "harness.agent.daemon_trigger",
+    effects = ["worker.mutate@arg0", "state.mutate@arg0"],
+    sig = "daemon_trigger(handle: any, event: any) -> dict",
+    kind = "async",
+    category = "agent.daemon"
+)]
+async fn daemon_trigger_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let target = args
+        .first()
+        .ok_or_else(|| VmError::Runtime("daemon_trigger: missing daemon handle".to_string()))?;
+    let payload = args
+        .get(1)
+        .ok_or_else(|| VmError::Runtime("daemon_trigger: missing event payload".to_string()))?;
+    let daemon_id = daemon_id_from_value(target)?;
+    let state = with_daemon_state(&daemon_id, |state| Ok(state.clone()))?;
+    {
+        let mut daemon = state.lock();
+        refresh_snapshot(&mut daemon)?;
+        reconcile_inflight_event(&mut daemon)?;
+        if daemon.status != "running" {
+            return Err(VmError::Runtime(format!(
+                "daemon_trigger: daemon {} is not running",
+                daemon.id
+            )));
+        }
+        if queued_event_len(&daemon) >= daemon.event_queue_capacity {
+            return Err(VmError::DaemonQueueFull {
+                daemon_id: daemon.id.clone(),
+                capacity: daemon.event_queue_capacity,
+            });
+        }
+        let next_seq = daemon.next_event_seq + 1;
+        daemon.next_event_seq = next_seq;
+        daemon.pending_events.push_back(QueuedDaemonEvent {
+            seq: next_seq,
+            enqueued_at: crate::orchestration::now_unix_seconds_text(),
+            payload: crate::llm::vm_value_to_json(payload),
+        });
+        persist_daemon_meta(&daemon)?;
+    }
+    {
+        let daemon = state.lock();
+        record_daemon_event(
+            &daemon.id,
+            &daemon.name,
+            DaemonEventKindRecord::Triggered,
+            &daemon.persist_root,
+            summarize_text(&trigger_payload_text(payload)),
+        );
+    }
+    maybe_deliver_next_event(state.clone()).await?;
+    let summary = {
+        let daemon = state.lock();
+        daemon_summary(&daemon)?
+    };
+    Ok(summary)
+}
+
+#[harn_builtin(
+    exposure = "harness.agent.managed_daemon_snapshot",
+    effects = ["state.read@arg0"],
+    sig = "daemon_snapshot(handle: any) -> dict",
+    category = "agent.daemon"
+)]
+fn daemon_snapshot_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let target = args
+        .first()
+        .ok_or_else(|| VmError::Runtime("daemon_snapshot: missing daemon handle".to_string()))?;
+    let daemon_id = daemon_id_from_value(target)?;
+    with_daemon_state(&daemon_id, |state| {
+        let mut daemon = state.lock();
+        let snapshot = refresh_snapshot(&mut daemon)?;
+        reconcile_inflight_event(&mut daemon)?;
+        record_daemon_event(
+            &daemon.id,
+            &daemon.name,
+            DaemonEventKindRecord::Snapshotted,
+            &daemon.persist_root,
+            summarize_snapshot(snapshot.as_ref()),
+        );
+        let pending_events = daemon.pending_events.iter().cloned().collect::<Vec<_>>();
+        Ok(snapshot_to_vm(
+            &snapshot.unwrap_or_default(),
+            &pending_events,
+            daemon.inflight_event.as_ref(),
+            daemon.event_queue_capacity,
+        ))
+    })
+}
+
+#[harn_builtin(
+    exposure = "harness.agent.daemon_stop",
+    effects = ["worker.mutate@arg0", "state.mutate@arg0"],
+    sig = "daemon_stop(handle: any) -> dict",
+    kind = "async",
+    category = "agent.daemon"
+)]
+async fn daemon_stop_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let target = args
+        .first()
+        .ok_or_else(|| VmError::Runtime("daemon_stop: missing daemon handle".to_string()))?;
+    let daemon_id = daemon_id_from_value(target)?;
+    let state = with_daemon_state(&daemon_id, |state| Ok(state.clone()))?;
+    let start_cleanup = {
+        let mut daemon = state.lock();
+        if daemon.status == "stopped" && !daemon.stop_requested {
+            return daemon_summary(&daemon);
+        }
+        if daemon.stop_requested {
+            false
+        } else {
+            // Persist first: once ownership is published below, cleanup must
+            // have an infallible path to its detached task.
+            persist_daemon_meta(&daemon)?;
+            daemon.stop_requested = true;
+            if let Some(handle) = daemon.monitor_handle.take() {
+                handle.abort();
+            }
+            true
+        }
+    };
+    if start_cleanup {
+        let cleanup_state = state.clone();
+        let cleanup = tokio::task::spawn_local(async move {
+            if let Err(error) = finish_daemon_stop(cleanup_state.clone()).await {
+                let mut daemon = cleanup_state.lock();
+                // Distinguish an incomplete stop from a naturally failed
+                // daemon. Retrying daemon_stop is safe; daemon_resume is not.
+                daemon.status = "stop_failed".to_string();
+                daemon.last_error = Some(error.to_string());
+                daemon.stop_requested = false;
+                let _ = persist_daemon_meta(&daemon);
+            }
+        });
+        drop(cleanup);
+    }
+
+    // Cleanup is detached from this caller so cancellation cannot strand the
+    // ownership bit. Every concurrent caller observes the same completed
+    // transition instead of racing a second abort/finalize sequence.
+    loop {
+        {
+            let daemon = state.lock();
+            if !daemon.stop_requested {
+                if daemon.status == "stopped" {
+                    return daemon_summary(&daemon);
+                }
+                return Err(VmError::Runtime(
+                    daemon
+                        .last_error
+                        .clone()
+                        .unwrap_or_else(|| "daemon_stop: cleanup failed".to_string()),
+                ));
+            }
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    }
+}
+
+async fn finish_daemon_stop(state: Arc<parking_lot::Mutex<DaemonState>>) -> Result<(), VmError> {
+    let started = std::time::Instant::now();
+    while (started.elapsed().as_millis() as u64) < DAEMON_STOP_WAIT_MS {
+        {
+            let daemon = state.lock();
+            if daemon.status != "running" || daemon.bridge.is_daemon_idle() {
+                break;
+            }
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    }
+
+    let (cancelled_handle, session_id) = {
+        let mut daemon = state.lock();
+        refresh_snapshot(&mut daemon)?;
+        reconcile_inflight_event(&mut daemon)?;
+        requeue_inflight_event(&mut daemon)?;
+        let handle = daemon.handle.take();
+        if let Some(handle) = handle.as_ref() {
+            handle.abort();
+        }
+        (handle, daemon.session_id.clone())
+    };
+    if let Some(handle) = cancelled_handle {
+        let _ = handle.await;
+    }
+    crate::llm::agent_session_host::cancellation::abandon_agent_session(&session_id).await?;
+    {
+        let mut daemon = state.lock();
+        daemon.status = "stopped".to_string();
+        daemon.last_error = None;
+        daemon.stop_requested = false;
+        daemon.bridge.set_daemon_idle(false);
+        persist_daemon_meta(&daemon)?;
+        record_daemon_event(
+            &daemon.id,
+            &daemon.name,
+            DaemonEventKindRecord::Stopped,
+            &daemon.persist_root,
+            summarize_snapshot(daemon.last_snapshot.as_ref()),
+        );
+    }
+    Ok(())
+}
+
+#[harn_builtin(
+    exposure = "harness.agent.daemon_resume",
+    effects = ["worker.mutate@arg0", "state.mutate@arg0"],
+    sig = "daemon_resume(path: string) -> dict",
+    kind = "async",
+    category = "agent.daemon"
+)]
+async fn daemon_resume_builtin(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let child_vm = ctx.child_vm();
+    let persist_root =
+        options::required_string_arg(&args, 0, "daemon_resume", "path", ErrorKind::Runtime)?;
+    let paths = daemon_paths(&persist_root);
+    let snapshot = load_snapshot(&paths.snapshot_path)?;
+    let meta = read_meta(&paths.meta_path)?;
+    let mut pending_events = VecDeque::from(meta.pending_events.clone());
+    if let Some(inflight) = meta.inflight_event.clone() {
+        pending_events.push_front(inflight);
+    }
+
+    let options = match crate::stdlib::json_to_vm_value(&meta.options) {
+        VmValue::Dict(dict) => (*dict).clone(),
+        _ => {
+            return Err(VmError::Runtime(format!(
+                "daemon_resume: metadata at '{}' is not a dict",
+                paths.meta_path
+            )))
+        }
+    };
+    let spec = parse_spawn_spec(
+        &crate::value::DictMap::from_iter([
+            (
+                crate::value::intern_key("name"),
+                VmValue::String(arcstr::ArcStr::from(meta.name.clone())),
+            ),
+            (
+                crate::value::intern_key("task"),
+                VmValue::String(arcstr::ArcStr::from(meta.prompt.clone())),
+            ),
+            (
+                crate::value::intern_key("persist_path"),
+                VmValue::String(arcstr::ArcStr::from(persist_root.clone())),
+            ),
+            (
+                crate::value::intern_key("session_id"),
+                VmValue::String(arcstr::ArcStr::from(meta.session_id.clone())),
+            ),
+            (
+                crate::value::intern_key("options"),
+                VmValue::dict(options.clone()),
+            ),
+        ]),
+        Some(meta.id.clone()),
+        meta.system.clone(),
+    )?;
+
+    if let Some(state) = find_daemon_by_root(&persist_root) {
+        let cannot_resume = {
+            let daemon = state.lock();
+            daemon.status == "running" || daemon.status == "stop_failed" || daemon.stop_requested
+        };
+        if cannot_resume {
+            return Err(VmError::Runtime(format!(
+                "daemon_resume: daemon '{persist_root}' is running or stop cleanup is incomplete"
+            )));
+        }
+        let bridge = new_daemon_bridge(&ctx).await?;
+        {
+            let mut daemon = state.lock();
+            daemon.id = spec.id.clone();
+            daemon.name = spec.name.clone();
+            daemon.prompt = spec.prompt.clone();
+            daemon.system = spec.system.clone();
+            daemon.session_id = spec.session_id.clone();
+            daemon.persist_root = spec.persist_root.clone();
+            daemon.snapshot_path = spec.snapshot_path.clone();
+            daemon.options = options.clone();
+            daemon
+                .options
+                .insert(crate::value::intern_key("daemon"), VmValue::Bool(true));
+            daemon.options.insert(
+                crate::value::intern_key("loop_until_done"),
+                VmValue::Bool(false),
+            );
+            daemon
+                .options
+                .put_str("session_id", spec.session_id.clone());
+            daemon
+                .options
+                .put_str("persist_path", spec.snapshot_path.clone());
+            daemon
+                .options
+                .put_str("resume_path", spec.snapshot_path.clone());
+            daemon.status = "running".to_string();
+            daemon.last_error = None;
+            daemon.last_result = None;
+            daemon.last_snapshot = Some(snapshot.clone());
+            daemon.event_queue_capacity = meta.event_queue_capacity.max(1);
+            daemon.next_event_seq = meta.next_event_seq;
+            daemon.pending_events = pending_events.clone();
+            daemon.inflight_event = None;
+            daemon.inflight_snapshot_saved_at = None;
+            daemon.inflight_snapshot_iterations = 0;
+            daemon.stop_requested = false;
+            daemon.bridge = bridge;
+            daemon.bridge.set_daemon_idle(true);
+            persist_daemon_meta(&daemon)?;
+        }
+        maybe_deliver_next_event(state.clone()).await?;
+        spawn_daemon_task(state.clone(), child_vm);
+        start_daemon_monitor(state.clone());
+        wait_for_snapshot(state.clone(), Some(snapshot.saved_at.clone()), 500).await;
+        let summary = {
+            let daemon = state.lock();
+            record_daemon_event(
+                &daemon.id,
+                &daemon.name,
+                DaemonEventKindRecord::Resumed,
+                &daemon.persist_root,
+                summarize_snapshot(Some(&snapshot)),
+            );
+            daemon_summary(&daemon)?
+        };
+        return Ok(summary);
+    }
+
+    let mut resume_options = options;
+    resume_options.insert(crate::value::intern_key("daemon"), VmValue::Bool(true));
+    resume_options.insert(
+        crate::value::intern_key("loop_until_done"),
+        VmValue::Bool(false),
+    );
+    resume_options.put_str("session_id", spec.session_id.clone());
+    resume_options.put_str("persist_path", spec.snapshot_path.clone());
+    resume_options.put_str("resume_path", spec.snapshot_path.clone());
+
+    let state = Arc::new(parking_lot::Mutex::new(DaemonState {
+        id: spec.id.clone(),
+        name: spec.name.clone(),
+        prompt: spec.prompt.clone(),
+        system: spec.system.clone(),
+        session_id: spec.session_id.clone(),
+        persist_root: spec.persist_root.clone(),
+        snapshot_path: spec.snapshot_path.clone(),
+        options: resume_options,
+        bridge: new_daemon_bridge(&ctx).await?,
+        handle: None,
+        monitor_handle: None,
+        status: "running".to_string(),
+        last_error: None,
+        last_result: None,
+        last_snapshot: Some(snapshot.clone()),
+        event_queue_capacity: meta.event_queue_capacity.max(1),
+        next_event_seq: meta.next_event_seq,
+        pending_events,
+        inflight_event: None,
+        inflight_snapshot_saved_at: None,
+        inflight_snapshot_iterations: 0,
+        stop_requested: false,
+    }));
+    {
+        let daemon = state.lock();
+        persist_daemon_meta(&daemon)?;
+    }
+    state.lock().bridge.set_daemon_idle(true);
+    maybe_deliver_next_event(state.clone()).await?;
+    register_daemon(state.clone());
+    spawn_daemon_task(state.clone(), child_vm);
+    start_daemon_monitor(state.clone());
+    wait_for_snapshot(state.clone(), Some(snapshot.saved_at.clone()), 500).await;
+    record_daemon_event(
+        &spec.id,
+        &spec.name,
+        DaemonEventKindRecord::Resumed,
+        &spec.persist_root,
+        summarize_snapshot(Some(&snapshot)),
+    );
+    let summary = {
+        let daemon = state.lock();
+        daemon_summary(&daemon)?
+    };
+    Ok(summary)
+}
+
+fn optional_string(dict: &crate::value::DictMap, key: &str) -> Option<String> {
+    dict.get(key)
+        .map(VmValue::display)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn daemon_paths(root: &str) -> DaemonPaths {
+    let root_path = PathBuf::from(root);
+    DaemonPaths {
+        persist_root: root.to_string(),
+        snapshot_path: root_path.join(SNAPSHOT_FILE).to_string_lossy().into_owned(),
+        meta_path: root_path.join(META_FILE).to_string_lossy().into_owned(),
+    }
+}
+
+struct DaemonPaths {
+    persist_root: String,
+    snapshot_path: String,
+    meta_path: String,
+}
+
+fn parse_spawn_spec(
+    config: &crate::value::DictMap,
+    explicit_id: Option<String>,
+    explicit_system: Option<String>,
+) -> Result<DaemonSpawnSpec, VmError> {
+    let mut options = if let Some(VmValue::Dict(dict)) = config.get("options") {
+        (**dict).clone()
+    } else {
+        config.clone()
+    };
+    for key in [
+        "name",
+        "task",
+        "system",
+        "options",
+        "event_queue_capacity",
+        "persist_path",
+        "session_id",
+    ] {
+        options.remove(key);
+    }
+
+    let prompt = optional_string(config, "task")
+        .ok_or_else(|| VmError::Runtime("daemon_spawn: config must include `task`".to_string()))?;
+    let persist_root = optional_string(config, "persist_path").ok_or_else(|| {
+        VmError::Runtime("daemon_spawn: config must include `persist_path`".to_string())
+    })?;
+    let paths = daemon_paths(&persist_root);
+    let id = explicit_id.unwrap_or_else(next_daemon_id);
+    let name = optional_string(config, "name").unwrap_or_else(|| id.clone());
+    let session_id = optional_string(config, "session_id")
+        .unwrap_or_else(|| format!("daemon_session_{}", uuid::Uuid::now_v7()));
+    let system = explicit_system.or_else(|| optional_string(config, "system"));
+    let event_queue_capacity = config
+        .get("event_queue_capacity")
+        .and_then(|value| value.as_int())
+        .and_then(|value| usize::try_from(value).ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_EVENT_QUEUE_CAPACITY);
+
+    options.insert(crate::value::intern_key("daemon"), VmValue::Bool(true));
+    options.insert(
+        crate::value::intern_key("loop_until_done"),
+        VmValue::Bool(false),
+    );
+    options.put_str("session_id", session_id.clone());
+    options.put_str("persist_path", paths.snapshot_path.clone());
+    options.remove("resume_path");
+
+    Ok(DaemonSpawnSpec {
+        id,
+        name,
+        prompt,
+        system,
+        session_id,
+        persist_root: paths.persist_root,
+        snapshot_path: paths.snapshot_path,
+        event_queue_capacity,
+        options,
+    })
+}
+
+fn next_daemon_id() -> String {
+    DAEMON_COUNTER.with(|counter| {
+        let next = counter.get() + 1;
+        counter.set(next);
+        format!("daemon_{}", uuid::Uuid::now_v7())
+    })
+}
+
+fn register_daemon(state: Arc<parking_lot::Mutex<DaemonState>>) {
+    let daemon_id = state.lock().id.clone();
+    DAEMON_REGISTRY.with(|registry| {
+        registry.borrow_mut().insert(daemon_id, state);
+    });
+}
+
+fn find_daemon_by_root(persist_root: &str) -> Option<Arc<parking_lot::Mutex<DaemonState>>> {
+    DAEMON_REGISTRY.with(|registry| {
+        registry
+            .borrow()
+            .values()
+            .find(|state| state.lock().persist_root == persist_root)
+            .cloned()
+    })
+}
+
+fn daemon_id_from_value(value: &VmValue) -> Result<String, VmError> {
+    match value {
+        VmValue::String(text) => Ok(text.to_string()),
+        VmValue::Dict(dict) => match dict.get("id") {
+            Some(VmValue::String(id)) => Ok(id.to_string()),
+            Some(other) => Ok(other.display()),
+            None => Err(VmError::Runtime(
+                "daemon handle dict is missing an id field".to_string(),
+            )),
+        },
+        _ => Err(VmError::Runtime(
+            "expected daemon handle or daemon id".to_string(),
+        )),
+    }
+}
+
+fn with_daemon_state<T>(
+    daemon_id: &str,
+    f: impl FnOnce(&Arc<parking_lot::Mutex<DaemonState>>) -> Result<T, VmError>,
+) -> Result<T, VmError> {
+    let state = DAEMON_REGISTRY.with(|registry| registry.borrow().get(daemon_id).cloned());
+    let state = state.ok_or_else(|| VmError::Runtime(format!("unknown daemon '{daemon_id}'")))?;
+    f(&state)
+}
+
+fn refresh_snapshot(daemon: &mut DaemonState) -> Result<Option<DaemonSnapshot>, VmError> {
+    let path = PathBuf::from(&daemon.snapshot_path);
+    if !path.exists() {
+        return Ok(daemon.last_snapshot.clone());
+    }
+    let snapshot = load_snapshot(&daemon.snapshot_path)?;
+    daemon.last_snapshot = Some(snapshot.clone());
+    Ok(Some(snapshot))
+}
+
+fn snapshot_to_vm(
+    snapshot: &DaemonSnapshot,
+    pending_events: &[QueuedDaemonEvent],
+    inflight_event: Option<&QueuedDaemonEvent>,
+    event_queue_capacity: usize,
+) -> VmValue {
+    let mut json = serde_json::to_value(snapshot).unwrap_or_default();
+    json["pending_events"] = serde_json::to_value(pending_events).unwrap_or_default();
+    json["pending_event_count"] = serde_json::json!(pending_events.len());
+    json["inflight_event"] = serde_json::to_value(inflight_event).unwrap_or_default();
+    json["queued_event_count"] =
+        serde_json::json!(pending_events.len() + usize::from(inflight_event.is_some()));
+    json["event_queue_capacity"] = serde_json::json!(event_queue_capacity);
+    crate::stdlib::json_to_vm_value(&json)
+}
+
+fn daemon_summary(daemon: &DaemonState) -> Result<VmValue, VmError> {
+    let mut summary = serde_json::json!({
+        "id": daemon.id,
+        "name": daemon.name,
+        "status": daemon.status,
+        "session_id": daemon.session_id,
+        "persist_path": daemon.persist_root,
+        "snapshot_path": daemon.snapshot_path,
+        "pending_event_count": daemon.pending_events.len(),
+        "queued_event_count": queued_event_len(daemon),
+        "event_queue_capacity": daemon.event_queue_capacity,
+    });
+    if let Some(error) = &daemon.last_error {
+        summary["error"] = serde_json::json!(error);
+    }
+    if let Some(result) = &daemon.last_result {
+        summary["result"] = result.clone();
+    }
+    if let Some(snapshot) = &daemon.last_snapshot {
+        summary["daemon_state"] = serde_json::json!(snapshot.daemon_state);
+        summary["saved_at"] = serde_json::json!(snapshot.saved_at);
+    }
+    if let Some(inflight) = &daemon.inflight_event {
+        summary["inflight_event"] = serde_json::to_value(inflight).unwrap_or_default();
+    }
+    Ok(crate::stdlib::json_to_vm_value(&summary))
+}
+
+async fn new_daemon_bridge(ctx: &crate::vm::AsyncBuiltinCtx) -> Result<Arc<HostBridge>, VmError> {
+    let vm = ctx.child_vm();
+    let module_path = daemon_bridge_module_path()?;
+    HostBridge::from_harn_module(vm, &module_path)
+        .await
+        .map(Arc::new)
+}
+
+fn daemon_bridge_module_path() -> Result<PathBuf, VmError> {
+    let dir = std::env::temp_dir().join("harn-daemon-bridge");
+    std::fs::create_dir_all(&dir)
+        .map_err(|error| VmError::Runtime(format!("daemon bridge mkdir error: {error}")))?;
+    let path = dir.join("noop_host.harn");
+    if !Path::new(&path).exists() {
+        std::fs::write(&path, "pub fn request_permission() {\n  return true\n}\n")
+            .map_err(|error| VmError::Runtime(format!("daemon bridge write error: {error}")))?;
+    }
+    Ok(path)
+}
+
+fn trigger_payload_text(payload: &VmValue) -> String {
+    match payload {
+        VmValue::String(text) => text.to_string(),
+        _ => serde_json::to_string(&crate::llm::vm_value_to_json(payload))
+            .unwrap_or_else(|_| payload.display()),
+    }
+}
+
+fn summarize_text(text: &str) -> Option<String> {
+    let compact = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if compact.is_empty() {
+        return None;
+    }
+    const MAX_LEN: usize = 160;
+    if compact.len() <= MAX_LEN {
+        Some(compact)
+    } else {
+        Some(format!("{}...", &compact[..MAX_LEN]))
+    }
+}
+
+fn summarize_snapshot(snapshot: Option<&DaemonSnapshot>) -> Option<String> {
+    snapshot.map(|snapshot| {
+        format!(
+            "state={} saved_at={}",
+            snapshot.daemon_state, snapshot.saved_at
+        )
+    })
+}
+
+fn record_daemon_event(
+    daemon_id: &str,
+    name: &str,
+    kind: DaemonEventKindRecord,
+    persist_path: &str,
+    payload_summary: Option<String>,
+) {
+    let mut fields = serde_json::Map::new();
+    fields.insert("daemon_id".to_string(), serde_json::json!(daemon_id));
+    fields.insert("name".to_string(), serde_json::json!(name));
+    fields.insert("kind".to_string(), serde_json::json!(kind));
+    fields.insert("persist_path".to_string(), serde_json::json!(persist_path));
+    fields.insert(
+        "payload_summary".to_string(),
+        payload_summary.map_or(serde_json::Value::Null, serde_json::Value::String),
+    );
+    crate::llm::append_observability_sidecar_entry("daemon_event", fields);
+}
+
+fn write_persisted_meta(meta_path: &str, meta: &PersistedDaemonMeta) -> Result<(), VmError> {
+    let meta_path = PathBuf::from(meta_path);
+    if let Some(parent) = meta_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|error| VmError::Runtime(format!("daemon meta mkdir error: {error}")))?;
+    }
+    let encoded = serde_json::to_string_pretty(meta)
+        .map_err(|error| VmError::Runtime(format!("daemon meta encode error: {error}")))?;
+    let tmp = meta_path.with_extension("json.tmp");
+    std::fs::write(&tmp, encoded)
+        .map_err(|error| VmError::Runtime(format!("daemon meta write error: {error}")))?;
+    std::fs::rename(&tmp, &meta_path)
+        .map_err(|error| VmError::Runtime(format!("daemon meta finalize error: {error}")))?;
+    Ok(())
+}
+
+fn persist_daemon_meta(daemon: &DaemonState) -> Result<(), VmError> {
+    let meta = PersistedDaemonMeta {
+        type_name: "daemon_meta".to_string(),
+        id: daemon.id.clone(),
+        name: daemon.name.clone(),
+        prompt: daemon.prompt.clone(),
+        system: daemon.system.clone(),
+        session_id: daemon.session_id.clone(),
+        options: crate::llm::vm_value_to_json(&VmValue::dict(daemon.options.clone())),
+        event_queue_capacity: daemon.event_queue_capacity.max(1),
+        next_event_seq: daemon.next_event_seq,
+        pending_events: daemon.pending_events.iter().cloned().collect(),
+        inflight_event: daemon.inflight_event.clone(),
+    };
+    write_persisted_meta(&daemon_paths(&daemon.persist_root).meta_path, &meta)
+}
+
+fn read_meta(meta_path: &str) -> Result<PersistedDaemonMeta, VmError> {
+    let content = std::fs::read_to_string(meta_path)
+        .map_err(|error| VmError::Runtime(format!("daemon meta read error: {error}")))?;
+    serde_json::from_str(&content)
+        .map_err(|error| VmError::Runtime(format!("daemon meta parse error: {error}")))
+}
+
+fn spawn_daemon_task(state: Arc<parking_lot::Mutex<DaemonState>>, mut vm: crate::vm::Vm) {
+    let (prompt, system, options, bridge) = {
+        let daemon = state.lock();
+        (
+            daemon.prompt.clone(),
+            daemon.system.clone(),
+            daemon.options.clone(),
+            daemon.bridge.clone(),
+        )
+    };
+    vm.set_bridge(bridge.clone());
+    let task_state = state.clone();
+    let handle = tokio::task::spawn_local(async move {
+        let harness = vm.root_harness_value().ok_or_else(|| {
+            VmError::Runtime("daemon agent loop has no root Harness authority".to_string())
+        })?;
+        let args = vec![
+            harness,
+            VmValue::String(arcstr::ArcStr::from(prompt)),
+            match system {
+                Some(text) => VmValue::String(arcstr::ArcStr::from(text)),
+                None => VmValue::Nil,
+            },
+            VmValue::dict(options),
+        ];
+
+        crate::llm::install_current_host_bridge(bridge);
+        let mut bridge_cleared = false;
+        let mut future = Pin::from(Box::new(crate::stdlib::harn_entry::call_harn_export_on_vm(
+            &mut vm,
+            "std/agent/loop",
+            "agent_loop",
+            "daemon agent loop",
+            &args,
+        )));
+        let result = std::future::poll_fn(|cx| {
+            let polled = Future::poll(future.as_mut(), cx);
+            if !bridge_cleared {
+                crate::llm::clear_current_host_bridge();
+                bridge_cleared = true;
+            }
+            polled
+        })
+        .await;
+        if !bridge_cleared {
+            crate::llm::clear_current_host_bridge();
+        }
+
+        {
+            let mut daemon = task_state.lock();
+            daemon.bridge.set_daemon_idle(false);
+            match &result {
+                Ok(value) => {
+                    daemon.status = "stopped".to_string();
+                    daemon.last_error = None;
+                    daemon.last_result = Some(crate::llm::vm_value_to_json(value));
+                }
+                Err(error) => {
+                    daemon.status = "failed".to_string();
+                    daemon.last_error = Some(error.to_string());
+                }
+            }
+            let _ = refresh_snapshot(&mut daemon);
+            let _ = reconcile_inflight_event(&mut daemon);
+            daemon.handle = None;
+            let _ = persist_daemon_meta(&daemon);
+        }
+
+        result
+    });
+
+    state.lock().handle = Some(handle);
+}
+
+fn start_daemon_monitor(state: Arc<parking_lot::Mutex<DaemonState>>) {
+    let monitor_state = state.clone();
+    let handle = tokio::task::spawn_local(async move {
+        loop {
+            let should_exit = {
+                let mut daemon = monitor_state.lock();
+                let _ = refresh_snapshot(&mut daemon);
+                let _ = reconcile_inflight_event(&mut daemon);
+                daemon.status != "running" || daemon.stop_requested
+            };
+            if should_exit {
+                break;
+            }
+            let _ = maybe_deliver_next_event(monitor_state.clone()).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(DAEMON_MONITOR_POLL_MS)).await;
+        }
+    });
+    state.lock().monitor_handle = Some(handle);
+}
+
+async fn maybe_deliver_next_event(
+    state: Arc<parking_lot::Mutex<DaemonState>>,
+) -> Result<(), VmError> {
+    let delivery = {
+        let mut daemon = state.lock();
+        if daemon.status != "running"
+            || daemon.stop_requested
+            || daemon.inflight_event.is_some()
+            || daemon.pending_events.is_empty()
+            || !daemon.bridge.is_daemon_idle()
+        {
+            None
+        } else {
+            let event = daemon
+                .pending_events
+                .pop_front()
+                .expect("pending_events checked above");
+            daemon.inflight_snapshot_saved_at = daemon
+                .last_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.saved_at.clone());
+            daemon.inflight_snapshot_iterations = daemon
+                .last_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.total_iterations)
+                .unwrap_or(0);
+            daemon.inflight_event = Some(event.clone());
+            persist_daemon_meta(&daemon)?;
+            Some((
+                daemon.bridge.clone(),
+                trigger_payload_text_json(&event.payload),
+            ))
+        }
+    };
+
+    if let Some((bridge, message)) = delivery {
+        bridge
+            .push_queued_user_message(message, "interrupt_immediate")
+            .await;
+        bridge.signal_resume();
+    }
+
+    Ok(())
+}
+
+fn queued_event_len(daemon: &DaemonState) -> usize {
+    daemon.pending_events.len() + usize::from(daemon.inflight_event.is_some())
+}
+
+fn reconcile_inflight_event(daemon: &mut DaemonState) -> Result<(), VmError> {
+    let Some(inflight_snapshot_saved_at) = daemon.inflight_snapshot_saved_at.as_ref() else {
+        return Ok(());
+    };
+    let Some(current_saved_at) = daemon
+        .last_snapshot
+        .as_ref()
+        .map(|snapshot| snapshot.saved_at.clone())
+    else {
+        return Ok(());
+    };
+    let current_iterations = daemon
+        .last_snapshot
+        .as_ref()
+        .map(|snapshot| snapshot.total_iterations)
+        .unwrap_or(0);
+    if daemon.inflight_event.is_some()
+        && (&current_saved_at != inflight_snapshot_saved_at
+            || current_iterations > daemon.inflight_snapshot_iterations)
+    {
+        daemon.inflight_event = None;
+        daemon.inflight_snapshot_saved_at = None;
+        daemon.inflight_snapshot_iterations = 0;
+        persist_daemon_meta(daemon)?;
+    }
+    Ok(())
+}
+
+fn requeue_inflight_event(daemon: &mut DaemonState) -> Result<(), VmError> {
+    if let Some(event) = daemon.inflight_event.take() {
+        daemon.pending_events.push_front(event);
+    }
+    daemon.inflight_snapshot_saved_at = None;
+    daemon.inflight_snapshot_iterations = 0;
+    persist_daemon_meta(daemon)
+}
+
+async fn wait_for_snapshot(
+    state: Arc<parking_lot::Mutex<DaemonState>>,
+    baseline_saved_at: Option<String>,
+    timeout_ms: u64,
+) {
+    let start = std::time::Instant::now();
+    loop {
+        let maybe_saved_at = {
+            let mut daemon = state.lock();
+            match refresh_snapshot(&mut daemon) {
+                Ok(snapshot) => snapshot.map(|snapshot| snapshot.saved_at),
+                Err(_) => None,
+            }
+        };
+        if let Some(saved_at) = maybe_saved_at {
+            if baseline_saved_at
+                .as_ref()
+                .is_none_or(|baseline| baseline != &saved_at)
+            {
+                break;
+            }
+        }
+        if start.elapsed().as_millis() as u64 >= timeout_ms {
+            break;
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    }
+}
+
+fn trigger_payload_text_json(payload: &serde_json::Value) -> String {
+    match payload {
+        serde_json::Value::String(text) => text.clone(),
+        _ => serde_json::to_string(payload).unwrap_or_else(|_| payload.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compiler::Compiler;
+    use crate::stdlib::register_vm_stdlib;
+    use crate::vm::Vm;
+    use harn_lexer::Lexer;
+    use harn_parser::Parser;
+
+    fn run_harn_result(source: &str) -> Result<(String, VmValue), VmError> {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let local = tokio::task::LocalSet::new();
+            local
+                .run_until(async {
+                    let mut lexer = Lexer::new(source);
+                    let tokens = lexer.tokenize().unwrap();
+                    let mut parser = Parser::new(tokens);
+                    let program = parser.parse().unwrap();
+                    let chunk = Compiler::new().compile(&program).unwrap();
+
+                    let mut vm = Vm::new();
+                    register_vm_stdlib(&mut vm);
+                    let result = vm.execute(&chunk).await?;
+                    Ok((vm.output().to_string(), result))
+                })
+                .await
+        })
+    }
+
+    #[test]
+    fn daemon_trigger_reports_queue_overflow() {
+        let result = run_harn_result(
+            r#"
+pipeline test(harness: Harness, task) {
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(harness.random.range(100000, 999999))
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-daemon-overflow-" + unique)
+  harness.fs.mkdir(root)
+  harness.llm.mock_enqueue({text: "daemon ready"})
+  const daemon = harness.agent.daemon_spawn({
+    name: "overflow",
+    task: "Wait for daemon trigger messages.",
+    provider: "mock",
+    persist_path: root,
+    event_queue_capacity: 1,
+    wake_interval_ms: 1000,
+  })
+  harness.agent.daemon_trigger(daemon, {kind: "trigger", payload: {n: 1}})
+  harness.agent.daemon_trigger(daemon, {kind: "trigger", payload: {n: 2}})
+}
+"#,
+        );
+        let err = result.expect_err("expected queue overflow");
+        match err {
+            VmError::DaemonQueueFull { capacity, .. } => assert_eq!(capacity, 1),
+            other => panic!("expected DaemonQueueFull, got {other}"),
+        }
+    }
+
+    #[test]
+    fn daemon_resume_requeues_inflight_trigger_after_stop() {
+        let (output, _) = run_harn_result(
+            r#"
+fn wait_for_iterations(agent: HarnessAgent, clock: HarnessClock, handle, min_iterations) {
+  let attempts = 0
+  let snap = agent.managed_daemon_snapshot(handle)
+  while attempts < 200 && snap?.total_iterations ?? 0 < min_iterations {
+    clock.sleep_ms(10ms)
+    snap = agent.managed_daemon_snapshot(handle)
+    attempts = attempts + 1
+  }
+  return snap
+}
+
+pipeline test(harness: Harness, task) {
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(harness.random.range(100000, 999999))
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-daemon-requeue-" + unique)
+  harness.fs.mkdir(root)
+  harness.llm.mock_enqueue({text: "daemon ready"})
+  harness.llm.mock_enqueue({text: "handled alpha"})
+  const daemon = harness.agent.daemon_spawn({
+    name: "requeue",
+    task: "Wait for daemon trigger messages and echo the latest payload.",
+    provider: "mock",
+    persist_path: root,
+    wake_interval_ms: 1000,
+  })
+  harness.agent.daemon_trigger(daemon, {kind: "trigger", payload: {path: "alpha.txt"}})
+  const cancelled_stop = spawn { harness.agent.daemon_stop(daemon) }
+  harness.clock.sleep_ms(10ms)
+  cancel(cancelled_stop)
+  const stopped = parallel(2) { harness.agent.daemon_stop(daemon) }
+  harness.stdio.println(stopped[0]?.status == "stopped" && stopped[1]?.status == "stopped")
+  harness.stdio.println(stopped[0]?.queued_event_count == 1 && stopped[1]?.queued_event_count == 1)
+  const resumed = harness.agent.daemon_resume(root)
+  const final_snap = wait_for_iterations(harness.agent, harness.clock, resumed, 2)
+  harness.stdio.println(contains(json_stringify(final_snap?.recorded_messages ?? []), "alpha.txt"))
+  harness.stdio.println(final_snap?.queued_event_count == 0)
+  harness.agent.daemon_stop(resumed)
+  harness.fs.delete(root)
+}
+"#,
+        )
+        .expect("daemon stop/resume script should succeed");
+        let lines: Vec<_> = output
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect();
+        assert_eq!(lines, vec!["true", "true", "true", "true"]);
+    }
+}

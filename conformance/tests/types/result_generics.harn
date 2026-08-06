@@ -1,0 +1,20 @@
+pipeline test(harness: Harness, task) {
+  fn divide(a: int, b: int) -> Result<int, string> {
+    if b == 0 {
+      return Result.Err("division by zero")
+    }
+    return Result.Ok(a / b)
+  }
+  fn halve_division(a: int, b: int) -> Result<int, string> {
+    const value: int = divide(a, b)?
+    return Result.Ok(value / 2)
+  }
+  const ok: Result<int, string> = halve_division(12, 3)
+  const err: Result<int, string> = halve_division(12, 0)
+  harness.stdio.log(ok)
+  harness.stdio.log(err)
+  match ok {
+    Result.Ok(value) -> { harness.stdio.log("ok: ${value}") }
+    Result.Err(message) -> { harness.stdio.log("err: ${message}") }
+  }
+}

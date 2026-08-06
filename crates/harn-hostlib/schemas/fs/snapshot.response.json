@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/fs/snapshot.response.json",
+  "title": "fs.snapshot response",
+  "type": "object",
+  "properties": {
+    "snapshot_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable handle for restore/list/drop. Equal to scope_id from the request."
+    },
+    "captured_paths": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "byte_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Sum of bytes copied into the snapshot for captured_paths."
+    }
+  },
+  "required": ["snapshot_id", "captured_paths", "byte_count"],
+  "additionalProperties": false
+}

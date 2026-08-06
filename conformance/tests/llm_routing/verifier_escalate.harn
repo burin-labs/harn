@@ -1,0 +1,43 @@
+import { with_llm_script } from "std/testing"
+
+/**
+ * Verifier-signal escalation: the cheap link returns text containing a
+ * forbidden pattern, so the lint verifier escalates to the frontier
+ * link. The frontier candidate passes verification and is returned.
+ */
+pipeline test(harness: Harness, task) {
+  with_llm_script(
+    harness.llm,
+    [
+      {text: "answer: TODO finish later", model: "mock", provider: "mock"},
+      {text: "answer: 42", model: "mock-strong", provider: "mock"},
+    ],
+    { ->
+      const policy = harness.llm.routing_policy(
+        {
+          chain: [
+            {provider: "mock", model: "mock", label: "cheap"},
+            {provider: "mock", model: "mock-strong", label: "frontier"},
+          ],
+          escalate_on: [{kind: "lint", forbidden_patterns: ["TODO"], on_fail: "escalate"}],
+          label: "verifier-escalate",
+        },
+      )
+      const result = harness.llm.call("question", nil, {routing: policy})
+      harness.stdio.println(result.text)
+      const attempts = result.routing.attempts
+      harness.stdio.println(len(attempts))
+      harness.stdio.println(attempts[0].label)
+      harness.stdio.println(attempts[0].verifier_outcome)
+      harness.stdio.println(attempts[0].verifier_signals[0].kind)
+      harness.stdio.println(attempts[0].verifier_signals[0].signal)
+      harness.stdio.println(attempts[1].label)
+      harness.stdio.println(attempts[1].verifier_outcome)
+      harness.stdio.println(result.routing.selected)
+      harness.stdio.println(to_string(attempts[0].input_tokens > 0))
+      harness.stdio.println(to_string(attempts[1].output_tokens > 0))
+    },
+  )
+}
+// Per-attempt token counts now ride on the trace so downstream graders
+// can re-cost against alternate pricing tables.

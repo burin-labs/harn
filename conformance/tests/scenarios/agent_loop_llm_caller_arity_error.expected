@@ -1,0 +1,1 @@
+agent_loop: `llm_caller` must be a closure or nil; got int

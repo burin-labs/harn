@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/delete_file.response.json",
+  "title": "tools.delete_file response",
+  "type": "object",
+  "properties": {
+    "path": { "type": "string" },
+    "removed": { "type": "boolean" }
+  },
+  "required": ["path", "removed"],
+  "additionalProperties": false
+}

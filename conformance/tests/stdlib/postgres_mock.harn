@@ -1,0 +1,34 @@
+import "std/postgres"
+
+pipeline default(harness: Harness) {
+  const db = harness.testing.pg_mock_pool(
+    [
+      {
+        sql: "select id, payload from receipts where tenant_id = $1",
+        params: ["tenant-a"],
+        rows: [{id: "r1", payload: {ok: true}, observed_at: "2024-01-02T03:04:05Z"}],
+      },
+      {
+        sql: "insert into audit_records(tenant_id, action) values ($1, $2)",
+        params: ["tenant-a", "receipt.read"],
+        rows_affected: 1,
+      },
+    ],
+  )
+  const rows = pg_query(db, "select id, payload from receipts where tenant_id = $1", ["tenant-a"])
+  harness.stdio.println(rows[0].id)
+  harness.stdio.println(rows[0].payload.ok)
+  harness.stdio.println(
+    pg_query_one(db, "select id, payload from receipts where tenant_id = $1", ["tenant-a"])
+      .observed_at,
+  )
+  const result = pg_execute(
+    db,
+    "insert into audit_records(tenant_id, action) values ($1, $2)",
+    ["tenant-a", "receipt.read"],
+  )
+  harness.stdio.println(result.rows_affected)
+  const calls = pg_mock_calls(db)
+  harness.stdio.println(len(calls))
+  harness.stdio.println(calls[0].params[0])
+}

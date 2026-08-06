@@ -1,0 +1,2 @@
+[wrapper] {{ include "@/prompts/greeting.harn.prompt" }}
+[wrapper] {{ include "@partials/greeting.harn.prompt" }}

@@ -1,0 +1,633 @@
+//! Agent loop configuration, builtin registration, and result building
+//! extracted from `agent.rs` for maintainability.
+
+use crate::value::VmDictExt;
+use std::sync::Arc;
+
+use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
+use crate::value::{VmError, VmValue};
+use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
+
+use super::agent_observe::observed_llm_call;
+use super::helpers::{
+    extract_llm_options, opt_bool, opt_str, system_prompt_event_metadata, system_prompt_metadata,
+    transcript_event, transcript_to_vm_with_event_prefix, DirectiveAuthority, ReminderSource,
+    SystemReminder,
+};
+use super::tools::build_assistant_response_message;
+
+const PREFILL_ASSISTANT_FEEDBACK_KIND: &str = "prefill_assistant";
+
+const AGENT_CONTROL_BUILTINS: &[&VmBuiltinDef] = &[
+    &AGENT_SUBSCRIBE_BUILTIN_DEF,
+    &AGENT_INJECT_FEEDBACK_BUILTIN_DEF,
+    &AGENT_INJECT_HOST_EVENT_BUILTIN_DEF,
+    &PROMPT_EXPLAIN_BUILTIN_DEF,
+];
+
+fn agent_prefill_message(content: &str) -> VmValue {
+    let mut msg = std::collections::BTreeMap::new();
+    msg.put_str("role", "assistant");
+    msg.put_str("content", content);
+    VmValue::dict(msg)
+}
+
+/// Persist model-facing runtime feedback through the same typed directive
+/// lifecycle as every structural reminder. `prefill_assistant` is provider
+/// history rather than a directive and deliberately remains an assistant turn.
+pub(crate) fn inject_agent_feedback(
+    session_id: &str,
+    kind: &str,
+    content: &str,
+) -> Result<(), String> {
+    if kind == PREFILL_ASSISTANT_FEEDBACK_KIND {
+        return crate::agent_sessions::inject_message(session_id, agent_prefill_message(content))
+            .map(|_| ());
+    }
+    let mut reminder = SystemReminder::new(content, ReminderSource::InPipeline, 0);
+    reminder.tags = vec!["runtime_feedback".to_string(), kind.to_string()];
+    reminder.dedupe_key = Some(format!("runtime_feedback/{kind}"));
+    reminder.authority = DirectiveAuthority::Corrective;
+    crate::agent_sessions::inject_reminder(session_id, reminder).map(|_| ())
+}
+
+fn system_prompt_transcript_metadata(system: Option<&String>) -> Option<serde_json::Value> {
+    system
+        .filter(|system| !system.trim().is_empty())
+        .map(|system| serde_json::json!({ "system_prompt": system_prompt_metadata(system) }))
+}
+
+fn system_prompt_transcript_events(system: Option<&String>) -> Vec<VmValue> {
+    system
+        .filter(|system| !system.trim().is_empty())
+        .map(|system| {
+            vec![transcript_event(
+                "system_prompt",
+                "system",
+                "internal",
+                "",
+                Some(system_prompt_event_metadata(system)),
+            )]
+        })
+        .unwrap_or_default()
+}
+
+pub(crate) fn agent_loop_result_from_llm(
+    result: &super::api::LlmResult,
+    opts: super::api::LlmCallOptions,
+) -> serde_json::Value {
+    let mut transcript_messages = opts.messages.clone();
+    transcript_messages.push(build_assistant_response_message(
+        &result.text,
+        &result.blocks,
+        &result.tool_calls,
+        result.thinking.as_deref(),
+        &result.provider,
+        &result.model,
+    ));
+    let transcript_metadata = system_prompt_transcript_metadata(opts.system.as_ref());
+    let prefix_events = system_prompt_transcript_events(opts.system.as_ref());
+    let mut events = Vec::new();
+    events.push(transcript_event(
+        "provider_payload",
+        "assistant",
+        "internal",
+        "",
+        Some(serde_json::json!({
+            "model": result.model.clone(),
+            "input_tokens": result.input_tokens,
+            "output_tokens": result.output_tokens,
+            "tool_calls": result.tool_calls.clone(),
+            "blocks": result.blocks.clone(),
+            "provider_response_id": result.telemetry.request_id.clone(),
+            "thinking_summary": result.thinking_summary,
+            "cost_usd": result.priced_cost_usd(),
+            "route_policy": opts.route_policy.as_label(),
+            "routing_decision": opts.routing_decision.as_ref(),
+            "structural_experiment": opts.applied_structural_experiment.as_ref(),
+        })),
+    ));
+    if let Some(thinking) = result.thinking.clone() {
+        if !thinking.is_empty() {
+            events.push(transcript_event(
+                "private_reasoning",
+                "assistant",
+                "private",
+                &thinking,
+                None,
+            ));
+        }
+    }
+    if let Some(summary) = result.thinking_summary.clone() {
+        if !summary.is_empty() {
+            events.push(transcript_event(
+                "thinking_summary",
+                "assistant",
+                "private",
+                &summary,
+                None,
+            ));
+        }
+    }
+    serde_json::json!({
+        "status": "done",
+        "text": result.text,
+        "visible_text": result.text,
+        "private_reasoning": result.thinking,
+        "thinking_summary": result.thinking_summary,
+        "llm": {
+            "iterations": 1,
+            "duration_ms": 0,
+            "input_tokens": result.input_tokens,
+            "output_tokens": result.output_tokens,
+        },
+        "tools": {
+            "calls": [],
+            "successful": [],
+            "rejected": [],
+            "mode": "",
+        },
+        "transcript": super::helpers::vm_value_to_json(&transcript_to_vm_with_event_prefix(
+            None,
+            opts.transcript_summary,
+            transcript_metadata,
+            &transcript_messages,
+            prefix_events,
+            events,
+            Vec::new(),
+            Some("active"),
+        )),
+    })
+}
+
+/// Assemble the user-facing result dict for `llm_call` from a raw `LlmResult`.
+pub(crate) async fn build_llm_call_result(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    result: &super::api::LlmResult,
+    opts: &super::api::LlmCallOptions,
+) -> Result<VmValue, VmError> {
+    use super::api::vm_build_llm_result;
+    use super::helpers::{expects_structured_output, extract_json};
+    use crate::stdlib::json_to_vm_value;
+
+    let mut transcript_messages = opts.messages.clone();
+    transcript_messages.push(build_assistant_response_message(
+        &result.text,
+        &result.blocks,
+        &result.tool_calls,
+        result.thinking.as_deref(),
+        &result.provider,
+        &result.model,
+    ));
+    let transcript_metadata = system_prompt_transcript_metadata(opts.system.as_ref());
+    let prefix_events = system_prompt_transcript_events(opts.system.as_ref());
+    let mut extra_events = Vec::new();
+    extra_events.push(transcript_event(
+        "provider_payload",
+        "assistant",
+        "internal",
+        "",
+        Some(serde_json::json!({
+            "model": result.model.clone(),
+            "input_tokens": result.input_tokens,
+            "output_tokens": result.output_tokens,
+            "tool_calls": result.tool_calls.clone(),
+            "blocks": result.blocks.clone(),
+            "provider_response_id": result.telemetry.request_id.clone(),
+            "thinking_summary": result.thinking_summary,
+            "structural_experiment": opts.applied_structural_experiment.as_ref(),
+        })),
+    ));
+    if let Some(thinking) = result.thinking.clone() {
+        if !thinking.is_empty() {
+            extra_events.push(transcript_event(
+                "private_reasoning",
+                "assistant",
+                "private",
+                &thinking,
+                None,
+            ));
+        }
+    }
+    if let Some(summary) = result.thinking_summary.clone() {
+        if !summary.is_empty() {
+            extra_events.push(transcript_event(
+                "thinking_summary",
+                "assistant",
+                "private",
+                &summary,
+                None,
+            ));
+        }
+    }
+    let transcript = transcript_to_vm_with_event_prefix(
+        None,
+        opts.transcript_summary.clone(),
+        transcript_metadata,
+        &transcript_messages,
+        prefix_events,
+        extra_events,
+        Vec::new(),
+        Some("active"),
+    );
+
+    let owned_projection;
+    let projection = if let Some(projection) = result.text_projection.as_deref() {
+        projection
+    } else {
+        owned_projection =
+            super::api::build_llm_text_projection(ctx, result, opts.tools.as_ref()).await?;
+        &owned_projection
+    };
+
+    if expects_structured_output(opts) {
+        let parsed = structured_output_candidates(ctx, result, projection, opts.tools.as_ref())
+            .await?
+            .into_iter()
+            .find_map(|candidate| {
+                let json_str = extract_json(&candidate);
+                serde_json::from_str::<serde_json::Value>(&json_str)
+                    .ok()
+                    .map(|jv| json_to_vm_value(&jv))
+            });
+        return Ok(vm_build_llm_result(
+            result,
+            parsed,
+            Some(transcript),
+            projection,
+        ));
+    }
+
+    Ok(vm_build_llm_result(
+        result,
+        None,
+        Some(transcript),
+        projection,
+    ))
+}
+
+async fn structured_output_candidates(
+    ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    result: &super::api::LlmResult,
+    projection: &super::api::LlmTextProjection,
+    tools: Option<&crate::value::VmValue>,
+) -> Result<Vec<String>, VmError> {
+    let mut candidates = Vec::new();
+    push_structured_output_candidate(&mut candidates, result.text.trim().to_string());
+
+    let public_blocks = result
+        .blocks
+        .iter()
+        .filter(|block| {
+            block.get("type").and_then(|value| value.as_str()) == Some("output_text")
+                && block.get("visibility").and_then(|value| value.as_str()) != Some("private")
+        })
+        .filter_map(|block| block.get("text").and_then(|value| value.as_str()))
+        .collect::<String>();
+    push_structured_output_candidate(&mut candidates, public_blocks.trim().to_string());
+
+    for call in &result.tool_calls {
+        if let Some(arguments) = call.get("arguments") {
+            if let Ok(serialized) = serde_json::to_string(arguments) {
+                push_structured_output_candidate(&mut candidates, serialized);
+            }
+        }
+    }
+
+    // The first candidate is `result.text`, whose parse the projection already
+    // owns; every other candidate is a derived string that has to be parsed on
+    // its own.
+    if let Some(parse) = projection.parsed.as_ref() {
+        if !parse.prose.is_empty() {
+            push_structured_output_candidate(&mut candidates, parse.prose.trim().to_string());
+        }
+    }
+    let derived = candidates.clone();
+    for candidate in derived {
+        if candidate == result.text.trim() {
+            continue;
+        }
+        let parsed = super::api::parse_candidate_text_tools(ctx, &candidate, tools).await?;
+        if !parsed.prose.is_empty() {
+            push_structured_output_candidate(&mut candidates, parsed.prose.trim().to_string());
+        }
+    }
+
+    Ok(candidates)
+}
+
+fn push_structured_output_candidate(candidates: &mut Vec<String>, candidate: String) {
+    if candidate.is_empty() || candidates.iter().any(|existing| existing == &candidate) {
+        return;
+    }
+    candidates.push(candidate);
+}
+
+pub(crate) fn register_agent_loop(_vm: &mut Vm) {}
+
+pub fn register_agent_loop_with_bridge(_vm: &mut Vm, bridge: Arc<crate::bridge::HostBridge>) {
+    super::agent_runtime::install_current_host_bridge(bridge);
+}
+
+pub(crate) fn register_agent_control_primitives(vm: &mut Vm) {
+    register_builtin_defs(vm, AGENT_CONTROL_BUILTINS);
+}
+
+/// Subscribe a Harn callback to events for an agent session.
+#[harn_builtin(
+    exposure = "harness.agent.subscribe",
+    effects = ["state.observe@arg0"],
+    sig = "agent_subscribe(session_id: string, callback: closure) -> nil",
+    category = "agent.host"
+)]
+fn agent_subscribe_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let session_id = match args.first() {
+        Some(VmValue::String(s)) => s.to_string(),
+        _ => {
+            return Err(VmError::Runtime(
+                "agent_subscribe(session_id, callback): session_id must be a string".into(),
+            ))
+        }
+    };
+    let callback = args.get(1).cloned().ok_or_else(|| {
+        VmError::Runtime("agent_subscribe(session_id, callback): callback closure required".into())
+    })?;
+    if !matches!(callback, VmValue::Closure(_)) {
+        return Err(VmError::Runtime(
+            "agent_subscribe(session_id, callback): callback must be a closure".into(),
+        ));
+    }
+    crate::agent_sessions::append_subscriber(&session_id, callback);
+    Ok(VmValue::Nil)
+}
+
+/// Inject pending feedback into an agent session.
+#[harn_builtin(
+    exposure = "harness.agent.inject_feedback",
+    effects = ["state.write@arg0"],
+    sig = "agent_inject_feedback(session_id: string, kind: string, content: string) -> nil",
+    category = "agent.host"
+)]
+fn agent_inject_feedback_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let session_id = match args.first() {
+        Some(VmValue::String(s)) => s.to_string(),
+        _ => {
+            return Err(VmError::Runtime(
+                "agent_inject_feedback(session_id, kind, content): session_id must be a string"
+                    .into(),
+            ))
+        }
+    };
+    let kind = match args.get(1) {
+        Some(VmValue::String(s)) => s.to_string(),
+        _ => {
+            return Err(VmError::Runtime(
+                "agent_inject_feedback(session_id, kind, content): kind must be a string".into(),
+            ))
+        }
+    };
+    let content = match args.get(2) {
+        Some(VmValue::String(s)) => s.to_string(),
+        _ => {
+            return Err(VmError::Runtime(
+                "agent_inject_feedback(session_id, kind, content): content must be a string".into(),
+            ))
+        }
+    };
+    inject_agent_feedback(&session_id, &kind, &content).map_err(VmError::Runtime)?;
+    Ok(VmValue::Nil)
+}
+
+/// Inject a typed host-originated event into an agent session.
+#[harn_builtin(
+    exposure = "harness.agent.inject_host_event",
+    effects = ["state.write@arg0"],
+    sig = "agent_inject_host_event(session_id: string, injection: dict) -> dict",
+    category = "agent.host"
+)]
+fn agent_inject_host_event_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let session_id = match args.first() {
+        Some(VmValue::String(s)) => s.to_string(),
+        _ => {
+            return Err(VmError::Runtime(
+                "agent_inject_host_event(session_id, injection): session_id must be a string"
+                    .into(),
+            ))
+        }
+    };
+    let injection = match args.get(1) {
+        Some(VmValue::Dict(_)) => args[1].clone(),
+        _ => {
+            return Err(VmError::Runtime(
+                "agent_inject_host_event(session_id, injection): injection must be a dict".into(),
+            ))
+        }
+    };
+    let result = crate::agent_sessions::inject_host_event(&session_id, injection)
+        .map_err(VmError::Runtime)?;
+    Ok(crate::stdlib::json_to_vm_value(&result))
+}
+
+/// Assemble the system prompt from the given agent options and return the
+/// final string plus per-fragment provenance — the audit primitive for
+/// "why is this in the prompt?" and "what changes if tool X is absent?".
+///
+/// Pass the same `options` dict you would hand `agent_loop` (with `system`
+/// as a string, an ordered fragment list `{content, title?, position?}`, or
+/// `{mode: "replace", content}` for an exclusive root, and `tools`). Returns
+/// `{ system, root, fragments: [{id, source, bucket, included, reason, bytes}],
+/// included, excluded }`. Each tool that carries a
+/// `guidance` string contributes a fragment gated on the tool's own presence,
+/// so you can see exactly which capability-gated instructions are active and
+/// why. Session reminders are layered at live call time and are not included
+/// in this static view.
+#[harn_builtin(
+    exposure = "harness.agent.prompt_explain",
+    effects = ["state.read@dynamic"],
+    sig = "prompt_explain(options: dict?) -> dict", category = "agent"
+)]
+fn prompt_explain_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let options = match args.first() {
+        Some(VmValue::Dict(map)) => Some((**map).clone()),
+        Some(VmValue::Nil) | None => None,
+        _ => {
+            return Err(VmError::Runtime(
+                "prompt_explain(options): options must be a dict or nil".into(),
+            ))
+        }
+    };
+    let assembled = super::helpers::assemble_system_prompt(None, options.as_ref(), &[])?;
+    let mut result = assembled.provenance_json();
+    result["system"] = match &assembled.system {
+        Some(text) => serde_json::Value::String(text.clone()),
+        None => serde_json::Value::Null,
+    };
+    Ok(crate::schema::json_to_vm_value(&result))
+}
+
+/// Register a bridge-aware `llm_call` that emits call_start/call_end notifications.
+pub fn register_llm_call_with_bridge(vm: &mut Vm, bridge: Arc<crate::bridge::HostBridge>) {
+    let b = bridge;
+    let metadata = VmBuiltinMetadata::async_static("llm_call")
+        .signature_static("harness.llm.call(prompt, system?, options?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 3 })
+        .category_static("llm.host")
+        .doc_static("Execute one bridge-observed LLM call and return the normalized result dict.");
+    vm.register_async_builtin_with_metadata(metadata, move |ctx, args| {
+        let bridge = b.clone();
+        async move {
+            let mut opts = extract_llm_options(&args)?;
+            let options = args.get(2).and_then(|a| a.as_dict()).cloned();
+            let user_visible = opt_bool(&options, "user_visible");
+            let _ = crate::llm::structural_experiments::apply_structural_experiment(
+                Some(&ctx),
+                &mut opts,
+                None,
+            )
+            .await?;
+
+            let result = observed_llm_call(
+                &opts,
+                opt_str(&options, "tool_format").as_deref(),
+                Some(&bridge),
+                None,
+                user_visible,
+                true,
+                // Direct `llm_call` host invocations are not part of an
+                // agent loop, so the streaming candidate detector
+                // (harn#692) doesn't fire here.
+                None,
+                None,
+            )
+            .await?;
+
+            build_llm_call_result(Some(&ctx), &result, &opts).await
+        }
+    });
+}
+
+/// Register bridge-aware `llm_call_structured` / `llm_call_structured_safe`.
+/// The bridge path still runs the schema-retry loop locally so the
+/// throws-on-exhausted-retries contract matches the non-bridge path;
+/// the bridge receives per-attempt call_start/call_end notifications
+/// identically to the plain `llm_call` bridge variant. Paired with
+/// `register_llm_call_with_bridge` in the ACP setup.
+pub fn register_llm_call_structured_with_bridge(
+    vm: &mut Vm,
+    bridge: Arc<crate::bridge::HostBridge>,
+) {
+    let b1 = bridge.clone();
+    let structured = VmBuiltinMetadata::async_static("llm_call_structured")
+        .signature_static("llm_call_structured(prompt, schema, options?)")
+        .arity(VmBuiltinArity::Range { min: 2, max: 3 })
+        .category_static("llm.structured")
+        .doc_static("Call an LLM through the bridge for schema-valid JSON data.");
+    vm.register_async_builtin_with_metadata(structured, move |ctx, args| {
+        let bridge = b1.clone();
+        async move {
+            let rewritten = crate::llm::rewrite_structured_args(args)?;
+            let opts = extract_llm_options(&rewritten)?;
+            let options = rewritten.get(2).and_then(|a| a.as_dict()).cloned();
+            let response =
+                crate::llm::execute_llm_call(Some(&ctx), opts, options, Some(&bridge), None)
+                    .await?;
+            Ok(crate::llm::extract_structured_data(response))
+        }
+    });
+    let b2 = bridge.clone();
+    let structured_safe = VmBuiltinMetadata::async_static("llm_call_structured_safe")
+        .signature_static("llm_call_structured_safe(prompt, schema, options?)")
+        .arity(VmBuiltinArity::Range { min: 2, max: 3 })
+        .category_static("llm.structured")
+        .doc_static("Call an LLM through the bridge and return a non-throwing schema envelope.");
+    vm.register_async_builtin_with_metadata(structured_safe, move |ctx, args| {
+        let bridge = b2.clone();
+        async move {
+            let rewritten = match crate::llm::rewrite_structured_args(args) {
+                Ok(v) => v,
+                Err(err) => return Ok(crate::llm::structured_safe_envelope_err(&err)),
+            };
+            let opts = match extract_llm_options(&rewritten) {
+                Ok(opts) => opts,
+                Err(err) => return Ok(crate::llm::structured_safe_envelope_err(&err)),
+            };
+            let options = rewritten.get(2).and_then(|a| a.as_dict()).cloned();
+            match crate::llm::execute_llm_call(Some(&ctx), opts, options, Some(&bridge), None).await
+            {
+                Ok(response) => Ok(crate::llm::structured_safe_envelope_ok(
+                    crate::llm::extract_structured_data(response),
+                )),
+                Err(err) => Ok(crate::llm::structured_safe_envelope_err(&err)),
+            }
+        }
+    });
+    let b3 = bridge;
+    let structured_result = VmBuiltinMetadata::async_static("llm_call_structured_result")
+        .signature_static("llm_call_structured_result(prompt, schema, options?)")
+        .arity(VmBuiltinArity::Range { min: 2, max: 3 })
+        .category_static("llm.structured")
+        .doc_static(
+            "Call an LLM through the bridge and return a diagnostic structured-output envelope.",
+        );
+    vm.register_async_builtin_with_metadata(structured_result, move |_ctx, args| {
+        let bridge = b3.clone();
+        async move {
+            crate::llm::structured_envelope::llm_call_structured_result_impl(args, Some(&bridge))
+                .await
+        }
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn structured_output_candidates_include_tool_call_arguments() {
+        let result = crate::llm::api::LlmResult {
+            attempts: Default::default(),
+            text_projection: None,
+            served_fast: false,
+            text: String::new(),
+            tool_calls: vec![serde_json::json!({
+                "id": "call_1",
+                "type": "tool_call",
+                "name": "json_response",
+                "arguments": {"answer": "ok"},
+            })],
+            raw_tool_calls: Vec::new(),
+            input_tokens: 1,
+            output_tokens: 1,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            cache_supported: true,
+            model: "claude-sonnet-4-6".to_string(),
+            provider: "anthropic".to_string(),
+            thinking: None,
+            thinking_summary: None,
+            stop_reason: None,
+            logprobs: Vec::new(),
+            blocks: Vec::new(),
+            telemetry: crate::llm::api::ProviderTelemetry::default(),
+        };
+
+        let projection = futures::executor::block_on(crate::llm::api::build_llm_text_projection(
+            None, &result, None,
+        ))
+        .expect("projection");
+        let candidates = futures::executor::block_on(structured_output_candidates(
+            None,
+            &result,
+            &projection,
+            None,
+        ))
+        .expect("structured output candidates");
+
+        assert!(candidates
+            .iter()
+            .any(|candidate| candidate == r#"{"answer":"ok"}"#));
+    }
+}

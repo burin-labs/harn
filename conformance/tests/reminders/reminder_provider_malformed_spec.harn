@@ -1,0 +1,22 @@
+import { agent_reminder_providers_fire } from "std/agent/state"
+
+pipeline main(harness: Harness) {
+  harness.agent.clear_reminder_providers()
+  harness.agent.register_reminder_provider(
+    {
+      id: "malformed_spec",
+      subscribes_to: ["session_idle"],
+      evaluate: { _ctx -> return {reminder: {tags: ["bad"]}} },
+    },
+  )
+  const session = harness.agent.open("reminder-provider-malformed-spec")
+  harness.agent.reset(session)
+  agent_reminder_providers_fire(
+    harness.agent,
+    session,
+    "session_idle",
+    {session: {id: session}},
+    {},
+  )
+  harness.agent.clear_reminder_providers()
+}

@@ -1,0 +1,205 @@
+import "../provider_catalog_notice/workflow.harn"
+
+const FIXTURE_DIR = "../provider_catalog_notice_fixtures"
+
+const BASE_CATALOG = {
+  providers: [
+    {name: "anthropic", base_url: "https://api.anthropic.com/v1", chat_endpoint: "/messages"},
+  ],
+  models: [
+    {
+      provider: "anthropic",
+      id: "claude-haiku-4-5-20251001",
+      pricing: {input_per_mtok: 1.0, output_per_mtok: 5.0},
+      capabilities: ["tools", "streaming"],
+      deprecated: false,
+    },
+  ],
+}
+
+fn fixture(fs: HarnessFs, name: string) -> dict {
+  return json_parse(fs.read_text(path_join(FIXTURE_DIR, name + ".json")))
+}
+
+@test
+pipeline test_carried_update_prepares_patch(harness: Harness, task) {
+  const input = fixture(harness.fs, "carried-update")
+  const plan = plan_notice(harness, input.notice, input.extraction, BASE_CATALOG)
+  assert_eq(plan.receipt.disposition, "patch")
+  assert_eq(plan.patch.field, "pricing.input_per_mtok")
+  assert_eq(plan.patch.new_value, 0.8)
+}
+
+@test
+pipeline test_irrelevant_notice_records_no_op(harness: Harness, task) {
+  const input = fixture(harness.fs, "irrelevant")
+  const plan = plan_notice(harness, input.notice, input.extraction, BASE_CATALOG)
+  assert_eq(plan.receipt.disposition, "no_op")
+  assert(contains(plan.receipt.reason, "no catalog change"))
+}
+
+@test
+pipeline test_new_model_on_supported_provider_is_incomplete_add(harness: Harness, task) {
+  const input = fixture(harness.fs, "new-model")
+  const plan = plan_notice(harness, input.notice, input.extraction, BASE_CATALOG)
+  assert_eq(plan.receipt.disposition, "incomplete_add")
+  assert_eq(len(plan.receipt.unresolved_verification), 4)
+}
+
+@test
+pipeline test_ambiguous_current_identity_fails_closed(harness: Harness, task) {
+  const input = fixture(harness.fs, "ambiguous")
+  const catalog = BASE_CATALOG
+    + {
+    models: [
+      {provider: "anthropic", id: "shared", pricing: {input_per_mtok: 1.0}, capabilities: []},
+      {provider: "anthropic", id: "shared", pricing: {input_per_mtok: 1.0}, capabilities: []},
+    ],
+  }
+  const plan = plan_notice(harness, input.notice, input.extraction, catalog)
+  assert_eq(plan.receipt.disposition, "rejected")
+  assert(contains(plan.receipt.reason, "ambiguous"))
+}
+
+@test
+pipeline test_malformed_notice_fails_closed(harness: Harness, task) {
+  const input = fixture(harness.fs, "malformed")
+  const plan = plan_notice(harness, input.notice, input.extraction, BASE_CATALOG)
+  assert_eq(plan.receipt.disposition, "rejected")
+  assert(contains(plan.receipt.reason, "source_id"))
+}
+
+@test
+pipeline test_conflicting_current_row_fails_closed(harness: Harness, task) {
+  const input = fixture(harness.fs, "conflicting-current-row")
+  const plan = plan_notice(harness, input.notice, input.extraction, BASE_CATALOG)
+  assert_eq(plan.receipt.disposition, "rejected")
+  assert(contains(plan.receipt.reason, "conflicts"))
+}
+
+@test
+pipeline test_notice_id_and_classification_are_idempotent(harness: Harness, task) {
+  const input = fixture(harness.fs, "carried-update")
+  const first = plan_notice(harness, input.notice, input.extraction, BASE_CATALOG)
+  const second = plan_notice(harness, input.notice, input.extraction, BASE_CATALOG)
+  assert_eq(first.receipt.notice_id, second.receipt.notice_id)
+  assert_eq(first, second)
+}
+
+@test
+pipeline test_all_typed_mutations_are_narrow(harness: Harness, task) {
+  const source = """
+[providers.anthropic]
+base_url = "https://api.anthropic.com/v1"
+chat_endpoint = "/messages"
+
+[models."claude-haiku-4-5-20251001"]
+name = "Claude Haiku"
+pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00 }
+capabilities = ["tools", "streaming"]
+"""
+  const price = fixture(harness.fs, "carried-update").extraction.candidate
+  const priced = unwrap(apply_candidate_to_source(source, price))
+  assert(contains(priced, "input_per_mtok = 0.8"))
+  assert(contains(priced, "output_per_mtok = 5.00"))
+  const endpoint = price
+    + {
+    kind: "endpoint",
+    field: "chat_endpoint",
+    old_value: "/messages",
+    new_value: "/v2/messages",
+  }
+  const endpoint_out = unwrap(apply_candidate_to_source(source, endpoint))
+  assert(contains(endpoint_out, "chat_endpoint = \"/v2/messages\""))
+  const retirement = price
+    + {
+    kind: "retirement",
+    old_value: false,
+    new_value: true,
+    replacement: "claude-haiku-next",
+  }
+  const retirement_out = unwrap(apply_candidate_to_source(source, retirement))
+  assert(contains(retirement_out, "deprecated = true"))
+  assert(contains(retirement_out, "Use claude-haiku-next"))
+  const capability = price
+    + {
+    kind: "capability",
+    capability: "vision",
+    old_value: false,
+    new_value: true,
+  }
+  const capability_source = """
+[[provider.anthropic]]
+model_match = "claude-haiku-4-5-20251001"
+native_tools = true
+vision = false
+"""
+  const capability_out = unwrap(apply_candidate_to_source(capability_source, capability))
+  assert(contains(capability_out, "vision = true"))
+}
+
+@test
+pipeline test_source_mutation_refuses_ambiguous_owner(harness: Harness, task) {
+  const candidate = fixture(harness.fs, "carried-update").extraction.candidate
+  const duplicate = """
+[models."claude-haiku-4-5-20251001"]
+pricing = { input_per_mtok = 1.0 }
+[models."claude-haiku-4-5-20251001"]
+pricing = { input_per_mtok = 1.0 }
+"""
+  const outcome = apply_candidate_to_source(duplicate, candidate)
+  assert(is_err(outcome))
+  assert(contains(unwrap_err(outcome), "ambiguous"))
+}
+
+@test
+pipeline test_canonical_catalog_shapes_validate_all_non_price_variants(harness: Harness, task) {
+  const input = fixture(harness.fs, "carried-update")
+  const canonical = {
+    providers: [
+      {
+        id: "anthropic",
+        endpoint: {base_url: "https://api.anthropic.com/v1", chat_endpoint: "/messages"},
+      },
+    ],
+    models: [
+      {
+        provider: "anthropic",
+        id: "claude-haiku-4-5-20251001",
+        deprecation: {status: "active"},
+        tool_support: {native: true},
+        modalities: {input: ["text", "image", "audio", "pdf"]},
+        prompt_cache: true,
+        capability_tags: ["files"],
+      },
+    ],
+  }
+  const common = input.extraction.candidate
+  const endpoint = {
+    classification: "candidate",
+    candidate: common
+      + {
+      kind: "endpoint",
+      field: "chat_endpoint",
+      old_value: "/messages",
+      new_value: "/v2/messages",
+    },
+  }
+  assert_eq(plan_notice(harness, input.notice, endpoint, canonical).receipt.disposition, "patch")
+  const retirement = {
+    classification: "candidate",
+    candidate: common + {kind: "retirement", old_value: false, new_value: true},
+  }
+  assert_eq(plan_notice(harness, input.notice, retirement, canonical).receipt.disposition, "patch")
+  const capability = {
+    classification: "candidate",
+    candidate: common
+      + {
+      kind: "capability",
+      capability: "native_tools",
+      old_value: true,
+      new_value: false,
+    },
+  }
+  assert_eq(plan_notice(harness, input.notice, capability, canonical).receipt.disposition, "patch")
+}

@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/terminal_session/send_keys.request.json",
+  "title": "terminal_session.send_keys request",
+  "type": "object",
+  "properties": {
+    "session_id": { "type": "string", "minLength": 1 },
+    "events": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": { "$ref": "#/$defs/input_event" }
+    }
+  },
+  "required": ["session_id", "events"],
+  "additionalProperties": false,
+  "$defs": {
+    "input_event": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "text" },
+            "text": { "type": "string", "maxLength": 65536 }
+          },
+          "required": ["type", "text"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "key" },
+            "key": { "$ref": "#/$defs/key" },
+            "modifiers": {
+              "type": "array",
+              "maxItems": 4,
+              "uniqueItems": true,
+              "items": { "enum": ["ctrl", "control", "alt", "option", "shift", "super", "command", "cmd", "meta", "windows"] }
+            }
+          },
+          "required": ["type", "key"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "key": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "named" },
+            "name": { "enum": ["enter", "return", "escape", "esc", "tab", "backspace", "up", "down", "left", "right", "home", "end", "page_up", "page_down", "insert", "delete"] }
+          },
+          "required": ["kind", "name"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "character" },
+            "value": { "type": "string", "minLength": 1, "maxLength": 4 }
+          },
+          "required": ["kind", "value"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": { "const": "function" },
+            "number": { "type": "integer", "minimum": 1, "maximum": 12 }
+          },
+          "required": ["kind", "number"],
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

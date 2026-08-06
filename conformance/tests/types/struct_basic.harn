@@ -1,0 +1,10 @@
+pipeline test(harness: Harness, task) {
+  struct Point {
+    x: int
+    y: int
+  }
+  // For now, structs are constructed like dicts but tagged
+  const p = {x: 10, y: 20}
+  harness.stdio.log(p.x)
+  harness.stdio.log(p.y)
+}

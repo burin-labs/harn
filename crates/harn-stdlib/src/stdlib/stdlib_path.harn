@@ -1,0 +1,134 @@
+// std/path — Path manipulation utilities
+//
+// Import with: import "std/path"
+/**
+ * Get the file extension without the dot.
+ * File extension of `path` (without the leading dot).
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ext(path) {
+  const e = extname(path)
+  if len(e) > 0 {
+    return e.substring(1)
+  }
+  return ""
+}
+
+/**
+ * Get the filename without extension.
+ * File name of `path` without its extension.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn stem(path) {
+  const base = basename(path)
+  const dot = base.last_index_of(".")
+  if dot <= 0 {
+    return base
+  }
+  return base.substring(0, dot)
+}
+
+/**
+ * Normalize path separators (replace backslash with forward slash).
+ * Normalize `path`, collapsing `.`/`..` segments and redundant separators.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn normalize(path) {
+  return path.replace("\\", "/")
+}
+
+/**
+ * Check if a path is absolute.
+ * Whether `path` is absolute.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn is_absolute(path) {
+  const normalized = normalize(path)
+  const windows_drive_root = len(normalized) >= 3 && normalized.substring(1, 2) == ":"
+    && normalized
+    .substring(2, 3)
+    == "/"
+  return normalized.starts_with("/") || windows_drive_root
+}
+
+/**
+ * Classify a path at the workspace boundary.
+ * Resolve `path` against the workspace root into workspace metadata.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn workspace_info(fs: HarnessFs, path, workspace_root = nil) {
+  return fs.workspace_info(path, workspace_root)
+}
+
+/**
+ * Normalize a path into workspace-relative form when possible.
+ * Normalize `path` relative to the workspace root.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn workspace_normalize(path, workspace_root = nil) {
+  return path_workspace_normalize(path, workspace_root)
+}
+
+/**
+ * Canonicalize an existing workspace path without allowing symlink escapes.
+ * Return the canonical workspace-relative path, or nil when either path is
+ * missing or the canonical target falls outside the canonical workspace root.
+ *
+ * @effects: [fs.read]
+ * @errors: []
+ */
+pub fn workspace_canonicalize_existing(
+  fs: HarnessFs,
+  path: string,
+  workspace_root: string? = nil,
+) -> string? {
+  return fs.workspace_canonicalize_existing(path, workspace_root)
+}
+
+/**
+ * List files in a directory recursively (one level).
+ * List the file paths directly under directory `dir`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn list_files(fs: HarnessFs, dir) {
+  const entries = fs.list_dir(dir)
+  return entries.filter(
+    { name ->
+      const full = path_join(dir, name)
+      const info = fs.stat(full)
+      return info.is_file
+    },
+  )
+}
+
+/**
+ * List subdirectories.
+ * List the subdirectory paths directly under directory `dir`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn list_dirs(fs: HarnessFs, dir) {
+  const entries = fs.list_dir(dir)
+  return entries.filter(
+    { name ->
+      const full = path_join(dir, name)
+      const info = fs.stat(full)
+      return info.is_dir
+    },
+  )
+}

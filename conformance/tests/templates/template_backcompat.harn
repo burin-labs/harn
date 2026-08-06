@@ -1,0 +1,13 @@
+pipeline default(harness: Harness) {
+  // Original pre-v2 syntax must still work unchanged.
+  harness.stdio.println(
+    harness.fs.render_prompt(
+      "fixtures/template/backcompat.prompt",
+      {name: "Alice", greeting: "howdy"},
+    ),
+  )
+  harness.stdio.println("---")
+  harness.stdio.println(
+    harness.fs.render_prompt("fixtures/template/backcompat.prompt", {name: "Bob"}),
+  )
+}

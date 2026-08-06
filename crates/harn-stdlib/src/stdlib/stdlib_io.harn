@@ -1,0 +1,70 @@
+/** std/io - interactive terminal input and stderr helpers. */
+type ReadLineOptions = {prompt?: string, timeout_ms?: int, trim?: bool, echo?: bool, raw?: bool}
+
+type ReadLineResult = {ok: bool, value?: string, status?: string, error?: string}
+
+/**
+ * is_tty returns whether fd 0, 1, or 2 is attached to a terminal.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn is_tty(term: HarnessTerm, fd: int = 0) -> bool {
+  if fd == 0 {
+    return term.is_tty("stdin")
+  }
+  if fd == 1 {
+    return term.is_tty("stdout")
+  }
+  if fd == 2 {
+    return term.is_tty("stderr")
+  }
+  throw "std/io.is_tty: fd must be 0, 1, or 2"
+}
+
+/**
+ * read_line reads one line from stdin and reports ok/eof/timeout/interrupt/error.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn read_line(stdio: HarnessStdio, opts: ReadLineOptions = {}) -> ReadLineResult {
+  return stdio.read_line(opts ?? {})
+}
+
+/**
+ * read_password reads one line with terminal echo disabled.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn read_password(
+  stdio: HarnessStdio,
+  prompt: string = "",
+  timeout_ms: int? = nil,
+) -> ReadLineResult {
+  if timeout_ms == nil {
+    return stdio.read_line({prompt: prompt, echo: false})
+  }
+  return stdio.read_line({prompt: prompt, timeout_ms: timeout_ms, echo: false})
+}
+
+/**
+ * write_stdout writes text to stdout without appending a newline.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn write_stdout(stdio: HarnessStdio, text: string) {
+  stdio.print(text)
+}
+
+/**
+ * write_stderr writes text to stderr without appending a newline.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn write_stderr(stdio: HarnessStdio, text: string) {
+  stdio.eprint(text)
+}

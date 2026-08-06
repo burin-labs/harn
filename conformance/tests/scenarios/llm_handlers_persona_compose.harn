@@ -1,0 +1,72 @@
+// Conformance test for the persona-shaped handler stack from
+// docs/src/stdlib/llm-handlers.md — with_routing as the base caller,
+// with_budget + with_logging composed over it. Verifies that:
+//   1. cheap-by-default escalates to frontier when the predicate fires;
+//   2. with_budget short-circuits once max_calls is exceeded;
+//   3. with_logging fires its sink for every call (including budget exhaustion).
+import { compose, with_budget, with_logging, with_routing } from "std/llm/handlers"
+
+pipeline run(harness: Harness) {
+  const cheap_calls = harness.runtime.atomic(0)
+  const frontier_calls = harness.runtime.atomic(0)
+  const log_records = harness.runtime.atomic(0)
+  const cheap = { _call ->
+    let _ = harness.runtime.atomic_add(cheap_calls, 1)
+    return {
+      ok: true,
+      value: {text: "cheap", model: "mock", provider: "mock", input_tokens: 1, output_tokens: 1},
+    }
+  }
+  const frontier = { _call ->
+    let _ = harness.runtime.atomic_add(frontier_calls, 1)
+    return {
+      ok: true,
+      value: {text: "frontier", model: "mock", provider: "mock", input_tokens: 1, output_tokens: 1},
+    }
+  }
+  const router = with_routing(
+    harness.agent,
+    {
+      default: cheap,
+      routes: [
+        {name: "frontier", when: { call -> call?.opts?.escalate ?? false }, caller: frontier},
+      ],
+    },
+  )
+  const sink = { _record ->
+    let _ = harness.runtime.atomic_add(log_records, 1)
+  }
+  const middleware = compose(
+    [
+      with_logging(harness, {level: "info", sink: sink}),
+      with_budget(harness, {max_calls: 2, on_exceed: "short_circuit"}),
+    ],
+  )
+  const persona = middleware(router)
+  // First call — under budget, default route.
+  const env1 = persona(
+    {prompt: "p1", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
+  )
+  harness.stdio.println(env1.value.text)
+  harness.stdio.println(env1.route_name)
+  // Second call — escalates to frontier.
+  const env2 = persona(
+    {
+      prompt: "p2",
+      system: "",
+      opts: {escalate: true},
+      turn: {iteration: 0, session_id: "", attempt: 1},
+    },
+  )
+  harness.stdio.println(env2.value.text)
+  harness.stdio.println(env2.route_name)
+  // Third call — budget exhausted.
+  const env3 = persona(
+    {prompt: "p3", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
+  )
+  harness.stdio.println(env3.ok)
+  harness.stdio.println(env3.status)
+  harness.stdio.println(harness.runtime.atomic_get(cheap_calls))
+  harness.stdio.println(harness.runtime.atomic_get(frontier_calls))
+  harness.stdio.println(harness.runtime.atomic_get(log_records))
+}

@@ -1,0 +1,411 @@
+# Package authoring
+
+Harn packages are ordinary Harn projects with package metadata, stable exports,
+tests, and optional connector contracts in `harn.toml`. They use the same
+`[dependencies]`, `harn.lock`, and atomic package-generation workflow as applications.
+
+## Create a package
+
+```bash
+harn new package acme-tools
+cd acme-tools
+harn package verify
+harn package docs
+harn package pack
+```
+
+The package template creates:
+
+- `harn.toml` with `[package]` metadata, `[exports]`, and `[dependencies]`
+- `lib/main.harn` with a documented public function
+- `tests/` smoke tests
+- `README.md`, `LICENSE`, `docs/api.md`
+- CI that installs the pinned Harn release and runs the canonical
+  `harn package verify` contract
+
+Consumers can add a local package while developing:
+
+```bash
+harn add ../acme-tools
+harn install
+harn package list
+harn package doctor
+```
+
+Before publishing, replace local path dependencies with registry or git
+dependencies pinned to a version or rev.
+
+## Set up Harn in GitHub Actions
+
+Keep the required Harn version in `.harn-version`. For a package repository,
+call the immutable organization workflow; it owns bootstrap, package
+verification, policy checks, and receipt upload:
+
+```yaml
+jobs:
+  package:
+    uses: burin-labs/.github/.github/workflows/harn-package.yml@<full-commit-sha>
+```
+
+`harn init --template package`, `harn init --template connector`, `harn tool
+new`, and `harn package scaffold openapi` generate the complete caller,
+including merge-queue coverage and the required `CI status` roll-up. Add
+product-specific jobs beside that call; do not copy its installation or
+verification steps.
+
+The reusable workflow delegates bootstrap to Harn's first-party setup action.
+That action reads `.harn-version`, maps the hosted runner to an official Linux,
+macOS, or Windows asset, verifies the archive against the release's
+`SHA256SUMS`, and adds the binary to `PATH`. A cached archive is reused only
+after it matches the published checksum.
+
+This bootstrap is intentionally host-native: Harn cannot execute until the
+verified Harn binary exists. Package behavior, tests, and orchestration should
+remain Harn code after this one installation boundary.
+
+For local development and non-GitHub CI, use the same dependency-free
+bootstrap implementation directly. See
+[Bootstrap an exact Harn release](./dev/bootstrap-harn.md) for immutable
+version pins, explicit cache/install directories, offline operation, proxy
+configuration, and source-build fallback policy.
+
+## Create a tool package
+
+```bash
+harn tool new acme-echo
+cd acme-echo
+harn package verify
+```
+
+The tool template creates a package with a Harn-native registry builder,
+`[[package.tools]]` metadata, a local smoke test that dispatches the tool,
+and CI that exercises the same publish-readiness checks. The generated package
+is intentionally ordinary Harn source; consumers install it with `harn add`,
+import the stable export, and merge it into their own tool registry. The
+builder is typed with `ToolRegistry` from `std/tools` so packages can forward
+registries across public boundaries without falling back to `dict`:
+
+```harn,ignore
+import { ToolRegistry } from "std/tools"
+import { tools } from "acme-echo/tools"
+
+pub fn with_acme_tools(registry: ToolRegistry) -> ToolRegistry {
+  return tools(registry)
+}
+```
+
+## Create an OpenAPI SDK package
+
+```bash
+harn package scaffold openapi \
+  --name acme-sdk-harn \
+  --module-name acme_sdk \
+  --client-name AcmeClient \
+  --spec ./openapi.json \
+  --out ./acme-sdk-harn
+cd acme-sdk-harn
+harn install
+harn package verify
+```
+
+The OpenAPI scaffold uses `harn-openapi` to generate `src/lib.harn`, stores the
+input spec under `openapi/`, writes a `scripts/regen.harn` regeneration path,
+adds a package export for the generated module, and creates a smoke test that
+uses a mocked operation when the spec has a no-argument operation. The package
+is intentionally focused: it wraps the API described by the OpenAPI document,
+not an entire provider product line.
+
+Hand-written `harness.net` calls are fine for private one-off endpoints,
+temporary admin probes, or gaps that are not in the OpenAPI document. Repeated
+provider API coverage, connector helpers, and user-facing package exports
+should use a generated SDK or a small Harn wrapper over one so auth,
+pagination, rate-limit metadata, and package tests stay centralized.
+
+## Create a skill package
+
+```bash
+harn skill new review-helper
+```
+
+`harn skill new` is the singular alias for `harn skill new`. Package authors
+can publish skills by adding `[[package.skills]]` entries that point at
+package-root-relative skill directories containing `SKILL.md`.
+
+## Create a connector package
+
+```bash
+harn new connector echo-connector
+cd echo-connector
+harn package verify .
+harn package verify . --strict
+harn package docs
+harn publish --dry-run
+harn publish
+```
+
+Connector packages use `harn package verify .` as the CI gate. It runs package
+metadata validation, `harn check`, `harn lint`, `harn fmt --check`, connector
+contract fixtures, package-local fixture tests, install/import smoke tests, and
+standalone Harn doc examples. Use `harn connector check .` when you only need
+the lower-level pure-Harn connector contract check.
+
+Use `harn package verify . --strict` for warning-free release admission. It
+makes check and lint warnings fatal, enables strict boundary typing, and records
+the exact source-gate commands in the schema-v2 receipt.
+
+Connector packages should also declare package-facing capability coverage on
+their `[[providers]]` entry so `harn check --connector-matrix` can compare
+provider support:
+
+```toml
+[[providers]]
+id = "acme"
+connector = { harn = "src/lib.harn" }
+capabilities = ["webhook", "oauth", "rate_limit", "pagination", "graphql", "streaming"]
+```
+
+## Manifest metadata
+
+Publishable packages should include:
+
+```toml
+[package]
+name = "acme-tools"
+version = "0.1.0"
+description = "Reusable Harn helpers."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/acme/acme-tools"
+provenance = "https://github.com/acme/acme-tools/releases/tag/v0.1.0"
+harn = ">=0.9,<0.10"
+docs_url = "docs/api.md"
+permissions = ["tool:read_only"]
+host_requirements = ["workspace.read_text"]
+
+[exports]
+lib = "lib/main.harn"
+
+[[package.tools]]
+name = "read-note"
+module = "lib/main.harn"
+symbol = "tools"
+description = "Read a note through the package tool registry."
+permissions = ["tool:read_only"]
+
+[package.tools.input_schema]
+type = "object"
+required = ["path"]
+
+[package.tools.annotations]
+kind = "read"
+side_effect_level = "read_only"
+
+[[package.skills]]
+name = "review"
+path = "skills/review"
+
+[dependencies]
+json-helpers = { git = "https://github.com/acme/json-helpers", tag = "v0.1.0" }
+```
+
+`harn package check` validates required metadata, dependency declarations,
+stable exports, tool and skill declarations, README/license presence, docs
+links, and Harn compatibility. Tool declarations must point at a parseable
+Harn module, provide valid JSON-schema-shaped `input_schema` and
+`output_schema` tables when present, and use policy annotations that match the
+runtime tool annotation schema. Skill declarations must stay inside the package
+root and point at a directory with valid `SKILL.md` front matter. Publish
+readiness rejects path-only dependencies and unsupported Harn version ranges
+because they cannot be reproduced from a registry index. Publishable
+dependencies should use direct git `tag`/`rev` pins or registry `version`
+ranges; `branch` dependencies are accepted with a warning because they are
+moving refs.
+
+`harn package verify` is the owning CI contract. It composes locked dependency
+installation, manifest and publish-readiness validation, Harn check/lint/format
+gates, package tests, consumer install/import smoke coverage, documentation
+drift, package packing, and any applicable connector contract. Use
+`--receipt-out PATH` to persist the versioned JSON receipt; `--json` emits the
+same envelope on standard output. Individual commands remain useful for
+focused local iteration. Add `--strict` in CI when warnings and unvalidated
+boundary types must fail the package contract.
+
+## API docs
+
+Document exported symbols with doc comments:
+
+```harn
+/// Return a greeting for `name`.
+pub fn greet(name: string) -> string {
+  return "Hello, " + name + "!"
+}
+```
+
+Generate docs with:
+
+```bash
+harn package docs
+```
+
+Package exports may be thin facade modules. `harn package check` and
+`harn package docs` follow selective, wildcard, and transitive `pub import`
+re-exports, and render each forwarded symbol using the signature and HarnDoc
+from its original declaration. Keep package boundaries explicit with a curated
+facade instead of adding pass-through wrapper functions only for documentation.
+
+CI should use:
+
+```bash
+harn package docs --check
+```
+
+## Pack and publish dry run
+
+Every `harn package verify` source, documentation, and packing gate uses the
+same package-input policy. It excludes Harn-owned `.harn/` and `.harn-*/`
+runtime directories at any depth, root `docs/dist/` output, Git administrative
+entries, `target/`, and `node_modules/`. Files such as `.harn-version` are
+package content and remain included. `harn package pack` validates those same
+inputs and writes an inspectable artifact at `.harn/dist/<name>-<version>`.
+
+```bash
+harn package pack --dry-run
+harn package pack
+```
+
+`harn publish --dry-run` runs the publish-readiness checks and prints the git
+tag command plus the package-index diff that would be proposed. `harn publish`
+requires a clean git worktree, a non-empty `CHANGELOG.md` entry for the package
+version, and an unused `vX.Y.Z` tag. It then tags and pushes the configured
+remote, and opens a PR against the configured package index. Use
+`--skip-index-pr` to push only the tag when the index entry should be composed
+manually.
+
+## Lockfile provenance
+
+`harn.lock` is the executable record of what was resolved and why. Every
+write captures:
+
+- `version`, `generator_version`, and `protocol_artifact_version` at the
+  top level so downstream automation can detect when the lock was produced
+  by an older Harn line.
+- Per-entry `source`, `commit`, and `content_hash` for git/registry deps,
+  plus the resolved `tag` when a tag was used, `package_version`,
+  `harn_compat`, package `provenance`, and a separate `manifest_digest` taken
+  from the resolved package's `harn.toml`.
+- Exported modules, custom tools, skills, package permissions, and host
+  requirements declared by the resolved package. Hosts and CI can inspect this
+  metadata without reading arbitrary package source.
+- A `[package.registry]` table for entries originally resolved through the
+  registry, preserving the registry source, package name, and exact resolved
+  version so `harn package outdated` can compare against the registry's latest
+  release without re-reading the manifest. Registry dependencies may remain in
+  `harn.toml` as semver ranges, for example
+  `notion-sdk-harn = { version = ">=1.2,<2.0" }`.
+- For registry-v2 Git entries, the immutable commit recorded by the index and
+  the version provenance URL. Installation resolves the declared tag and
+  refuses it if the resulting commit differs from the index.
+
+Path dependencies remain live-linked; their lockfile entry records the
+resolved `path+file://` URI plus the same `package_version` and
+`manifest_digest` so `harn package audit` flags drift without rebuilding.
+
+## Maturing the package surface
+
+Once a manifest and lockfile are in place, these commands cover the
+day-to-day automation surface:
+
+- `harn package list` — summarize locked packages, materialization status,
+  exported modules/tools/skills, and declared permission or host requirements.
+  Use `--json` when the output feeds host UI or CI policy.
+- `harn package doctor` — diagnose missing or stale lockfiles, missing
+  materialized packages, content-hash mismatches, declared host capability
+  gaps, and invalid installed package tool/skill metadata. It is safe for
+  applications: publish-only checks remain under `harn package check`.
+- `harn package outdated` — surface registry version bumps and (with
+  `--remote`) git branch HEAD drift. JSON output matches the report
+  struct documented in
+  [`cli-reference.md`](cli-reference.md#harn-package-outdated).
+- `harn package audit` — verify provenance, compatibility, and content
+  integrity in one pass. `--json` returns a stable `code` per finding so
+  CI can fail on specific issues (yanked registry pins, content-hash
+  tampering, broken `harn` ranges) without parsing prose.
+- `harn package artifacts check` — compare a vendored copy of the
+  protocol artifact manifest (e.g. `spec/protocol-artifacts/manifest.json`
+  in your repo) against the running Harn. The exit code is non-zero on
+  drift, so a downstream that vendors generated TypeScript or Swift
+  bindings can fail CI when those bindings would change after a Harn bump.
+
+## Registry v2
+
+Harn accepts one registry format: `version = 2`. A package row must declare a
+repository-bound `provenance` URL. Every Git-backed version declares both the
+public tag and its immutable resolved commit:
+
+```toml
+version = 2
+
+[[package]]
+name = "@acme/widgets"
+repository = "https://github.com/acme/widgets"
+provenance = "https://github.com/acme/widgets"
+
+[[package.version]]
+version = "1.2.3"
+git = "https://github.com/acme/widgets"
+tag = "v1.2.3"
+rev = "0123456789abcdef0123456789abcdef01234567"
+package = "widgets"
+provenance = "https://github.com/acme/widgets/releases/tag/v1.2.3"
+```
+
+Archive versions use `archive` plus a `sha256:` checksum and the same
+repository-bound provenance rule. Mutable `branch` entries, symbolic `rev`
+values, legacy `sha`, mismatched repositories, duplicate content identities,
+and missing provenance fail at the shared parser used by install, search, info,
+and verification.
+
+Run the same authority in registry CI:
+
+```bash
+harn package registry verify harn-package-index.toml --remote \
+  --receipt-out registry-verification.json
+```
+
+Omit `--remote` for deterministic schema-only verification. With `--remote`,
+Harn resolves every Git tag, compares it to the recorded commit, and reads
+`harn.toml` at that commit to confirm it declares the package name and version
+the entry advertises. Keeping the manifest version in lockstep with the tag is
+therefore mechanically enforced, not a convention.
+
+## Cross-repo bump workflow
+
+When Harn cuts a new release, downstream package authors and host
+integrators (IDE hosts, cloud platforms, third-party connectors) need a
+consistent way to land the bump. The recommended sequence:
+
+1. **Refresh the running Harn binary** in the downstream repo
+   (`fetch-harn`, `make setup`, or whatever the local script is).
+2. **Re-resolve dependencies** with `harn install` so `harn.lock`
+   rewrites with the current `generator_version`,
+   `protocol_artifact_version`, exported package surface, and host
+   requirements.
+3. **Inspect** with `harn package list --json` and `harn package doctor --json`
+   so host requirements and materialized package state are visible before
+   tests start.
+4. **Audit** with `harn package audit --json`. If any package declares a
+   `harn` range that excludes the new line, contact the package owner or
+   pin to a previous tag.
+5. **Check vendored protocol bindings** with
+   `harn package artifacts check path/to/vendored/manifest.json`. If it
+   reports drift, regenerate the bindings (`make gen-protocol-artifacts`
+   inside the downstream repo, or `harn package artifacts manifest
+   --output …` to refresh the vendored copy).
+6. **Surface registry updates** with `harn package outdated --json` and
+   bump dependency versions intentionally; `harn update <alias>` keeps
+   each upgrade in its own commit.
+
+Steps 2–5 are a single CI job for hosts that vendor Harn artifacts:
+`harn install --frozen --json`, then `harn package doctor --json`, then
+`harn package audit --json`, then `harn package artifacts check`. The `--json`
+output is stable across Harn lines, so the same automation script runs against
+multiple Harn versions during a staged rollout.

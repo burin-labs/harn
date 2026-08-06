@@ -1,0 +1,274 @@
+import { agent_capture_events } from "std/agent/events"
+// Live-shape / registration proof for `agent_completion_gate` (std/agent/judge).
+//
+// Catches dead-since-inception drift: it proves the gate bundle produced by
+// `agent_completion_gate` is actually consulted by `agent_loop` at done-time (via
+// the existing `verify_completion` seam), that the gate's host-fact callbacks
+// receive the LIVE payload shape (session_id / task / parsed transcript), and that
+// the ported veto arithmetic drives real loop control. The `facts` callback runs
+// ONLY when the loop invokes the gate closure at done-time, so its recorded
+// observations are direct evidence of live consultation.
+//
+//   A. source-writes gating — a cosmetic-only run is vetoed on every done attempt,
+//      then released by the per-session veto budget (`max_vetoes`).
+//   B. a source write + green verifier is honored immediately, and the callback
+//      recorded the live payload shape it received.
+//   C. a source write + red verifier is a STRICT veto the budget never converts.
+//   D. no host-fact callbacks -> graceful judge-only degradation, surfaced via the
+//      bundle's `_completion_gate.facts_available` flag (never a silent pass).
+import { agent_completion_gate } from "std/agent/judge"
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn events_of(events, kind) {
+  return events.filter({ event -> event.type == kind })
+}
+
+fn event_field_values(events, field) {
+  return join(events.map({ event -> to_string(event[field] ?? "") }), ",")
+}
+
+fn done_turns(n) {
+  let turns = []
+  for i in range(0, n) {
+    turns = turns.appending(
+      llm_text("<user_response>attempt</user_response>\n<done>##DONE##</done>"),
+    )
+  }
+  return turns
+}
+
+pipeline default(harness: Harness) {
+  // --- A. cosmetic-only writes are vetoed, then released by the veto budget ---
+  with_llm_script(
+    harness.llm,
+    done_turns(6),
+    { ->
+      const session = "cg-cosmetic-" + harness.random.uuid()
+      const calls_key = "cg-calls-" + session
+      harness.runtime.store_set(calls_key, 0)
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Implement the feature.",
+          nil,
+          {
+            provider: "mock",
+            loop_until_done: true,
+            max_iterations: 8,
+            max_nudges: 20,
+            session_id: session,
+          }
+            + agent_completion_gate(
+            harness.runtime,
+            {
+              facts: fn(ctx) {
+                harness.runtime.store_set(
+                  calls_key,
+                  (harness.runtime.store_get(calls_key) ?? 0) + 1,
+                )
+                return {source_write_count: 0, cosmetic_write_count: 1, requires_write: true}
+              },
+            },
+          ),
+        ) },
+      )
+      const decisions = events_of(captured.events, "judge_decision")
+      harness.stdio.println("A.status=" + captured.result.status)
+      harness.stdio.println("A.gate_calls=" + to_string(harness.runtime.store_get(calls_key)))
+      harness.stdio.println("A.sources=" + event_field_values(decisions, "source"))
+      harness.stdio.println("A.reasons=" + event_field_values(decisions, "reason"))
+      harness.stdio.println("A.confirms=" + event_field_values(decisions, "confirm"))
+    },
+  )
+  // --- B. source write + green verifier: honored immediately; payload shape seen ---
+  with_llm_script(
+    harness.llm,
+    done_turns(2),
+    { ->
+      const session = "cg-green-" + harness.random.uuid()
+      const probe = "cg-probe-" + session
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Implement the feature.",
+          nil,
+          {
+            provider: "mock",
+            loop_until_done: true,
+            max_iterations: 4,
+            max_nudges: 20,
+            session_id: session,
+          }
+            + agent_completion_gate(
+            harness.runtime,
+            {
+              facts: fn(ctx) {
+                harness.runtime.store_set(probe + ".session_matches", ctx.session_id == session)
+                harness.runtime.store_set(probe + ".has_task", ctx.task != "")
+                harness.runtime.store_set(
+                  probe + ".messages_is_list",
+                  type_of(ctx.messages) == "list",
+                )
+                return {source_write_count: 1, verify: {ok: true}}
+              },
+            },
+          ),
+        ) },
+      )
+      const decisions = events_of(captured.events, "judge_decision")
+      harness.stdio.println("B.status=" + captured.result.status)
+      harness.stdio.println(
+        "B.session_matches=" + to_string(harness.runtime.store_get(probe + ".session_matches")),
+      )
+      harness.stdio.println(
+        "B.has_task=" + to_string(harness.runtime.store_get(probe + ".has_task")),
+      )
+      harness.stdio.println(
+        "B.messages_is_list=" + to_string(harness.runtime.store_get(probe + ".messages_is_list")),
+      )
+      harness.stdio.println("B.sources=" + event_field_values(decisions, "source"))
+      harness.stdio.println("B.reasons=" + event_field_values(decisions, "reason"))
+      harness.stdio.println("B.confirms=" + event_field_values(decisions, "confirm"))
+    },
+  )
+  // --- C. source write + red verifier: strict veto the budget never converts ---
+  with_llm_script(
+    harness.llm,
+    done_turns(4),
+    { ->
+      const session = "cg-red-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Implement the feature.",
+          nil,
+          {
+            provider: "mock",
+            loop_until_done: true,
+            max_iterations: 3,
+            max_nudges: 20,
+            session_id: session,
+          }
+            + agent_completion_gate(
+            harness.runtime,
+            {
+              max_vetoes: 1,
+              facts:
+                fn(ctx) { return {source_write_count: 1, verify: {ok: false, findings: "boom"}} },
+            },
+          ),
+        ) },
+      )
+      harness.stdio.println("C.status=" + captured.result.status)
+      harness.stdio.println("C.is_done=" + to_string(captured.result.status == "done"))
+      harness.stdio.println(
+        "C.sources=" + event_field_values(events_of(captured.events, "judge_decision"), "source"),
+      )
+      harness.stdio.println(
+        "C.reasons=" + event_field_values(events_of(captured.events, "judge_decision"), "reason"),
+      )
+    },
+  )
+  // --- D. no host facts: judge-only degradation, surfaced (never a silent pass) ---
+  const bundle = agent_completion_gate(harness.runtime, {})
+  harness.stdio.println("D.facts_available=" + to_string(bundle._completion_gate.facts_available))
+  with_llm_script(
+    harness.llm,
+    done_turns(2),
+    { ->
+      const session = "cg-degraded-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Answer the question.",
+          nil,
+          {
+            provider: "mock",
+            loop_until_done: true,
+            max_iterations: 4,
+            max_nudges: 20,
+            session_id: session,
+          }
+            + bundle,
+        ) },
+      )
+      harness.stdio.println("D.status=" + captured.result.status)
+      harness.stdio.println(
+        "D.sources=" + event_field_values(events_of(captured.events, "judge_decision"), "source"),
+      )
+      harness.stdio.println(
+        "D.reasons=" + event_field_values(events_of(captured.events, "judge_decision"), "reason"),
+      )
+      harness.stdio.println(
+        "D.confirms=" + event_field_values(events_of(captured.events, "judge_decision"), "confirm"),
+      )
+    },
+  )
+  // --- E. streak escalation + decorator are live and reach structured events ---
+  with_llm_script(
+    harness.llm,
+    done_turns(1),
+    { ->
+      const session = "cg-escalation-" + harness.random.uuid()
+      const decorated_key = "cg-decorated-" + session
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Repair the failing verifier.",
+          nil,
+          {
+            provider: "mock",
+            loop_until_done: true,
+            max_iterations: 1,
+            max_nudges: 20,
+            session_id: session,
+          }
+            + agent_completion_gate(
+            harness.runtime,
+            {
+              escalation_target: "frontier",
+              facts: fn(_ctx) { return {
+                consecutive_failed_after_write: 3,
+                source_write_count: 1,
+                verification_failures_converging: false,
+                verify: {findings: "boom", ok: false},
+              } },
+              feedback_decorator: fn(reason, feedback, verdict) {
+                harness.runtime.store_set(
+                  decorated_key,
+                  reason + ":" + to_string(verdict?.escalation_target ?? ""),
+                )
+                return feedback + " Use language-specific repair guidance."
+              },
+            },
+          ),
+        ) },
+      )
+      const decisions = events_of(captured.events, "judge_decision")
+      harness.stdio.println("E.status=" + captured.result.status)
+      harness.stdio.println("E.decorator=" + to_string(harness.runtime.store_get(decorated_key)))
+      harness.stdio.println("E.reasons=" + event_field_values(decisions, "reason"))
+      harness.stdio.println(
+        "E.escalation_recommended="
+          + event_field_values(decisions, "escalation_recommended"),
+      )
+      harness.stdio.println(
+        "E.escalation_target=" + event_field_values(decisions, "escalation_target"),
+      )
+    },
+  )
+}
+// Consulted once per done attempt: 3 charged vetoes + 1 budget-exhausted allow.
+// Strict veto is never released by the budget (max_vetoes: 1): the run does
+// not reach a clean `done`.

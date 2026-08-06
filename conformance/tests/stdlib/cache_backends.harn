@@ -1,0 +1,60 @@
+/**
+ * std/cache: three backends (mem, fs, sqlite) share one envelope shape and
+ * pass identical hit/miss/expiry behavior. This is the cost-moat substrate
+ * we depend on for crystallization shadow-runs and persona caches.
+ */
+import {
+  cache_clear,
+  cache_get,
+  cache_put,
+  cache_stats,
+  cache_stats_reset,
+  fs_cache,
+  mem_cache,
+  sqlite_cache,
+} from "std/cache"
+
+pipeline default(harness: Harness) {
+  const stamp = harness.random.uuid()
+  const stores = [
+    {label: "mem", store: mem_cache({namespace: "cache-mem-" + stamp, max_entries: 2})},
+    {
+      label: "fs",
+      store: fs_cache(
+        path_join(harness.fs.workspace_temp_dir(), "harn-cache-fs-" + stamp),
+        {namespace: "cache-fs-" + stamp, max_entries: 2},
+      ),
+    },
+    {
+      label: "sqlite",
+      store: sqlite_cache(
+        path_join(harness.fs.workspace_temp_dir(), "harn-cache-sqlite-" + stamp + ".sqlite"),
+        {namespace: "cache-sqlite-" + stamp, max_entries: 2},
+      ),
+    },
+  ]
+  for entry in stores {
+    cache_clear(harness.llm, {store: entry.store})
+    cache_stats_reset(harness.llm, {store: entry.store})
+    const miss = cache_get(harness.llm, "k", {store: entry.store})
+    harness.stdio.println(entry.label + " miss.hit=" + to_string(miss.hit))
+    harness.stdio.println(entry.label + " miss.backend=" + to_string(miss.backend))
+    cache_put(harness.llm, "k", {answer: 42}, {store: entry.store})
+    const hit = cache_get(harness.llm, "k", {store: entry.store})
+    harness.stdio.println(entry.label + " hit.hit=" + to_string(hit.hit))
+    harness.stdio.println(entry.label + " hit.value=" + json_stringify(hit.value))
+    // LRU eviction: after putting 3 keys with max_entries=2, the first key
+    // is evicted regardless of backend.
+    cache_put(harness.llm, "a", "one", {store: entry.store})
+    cache_put(harness.llm, "b", "two", {store: entry.store})
+    cache_put(harness.llm, "c", "three", {store: entry.store})
+    const evicted = cache_get(harness.llm, "a", {store: entry.store})
+    harness.stdio.println(entry.label + " evicted_a=" + to_string(!evicted.hit))
+    const stats = cache_stats(harness.llm, {store: entry.store})
+    harness.stdio.println(entry.label + " stats.hits=" + to_string(stats.hits))
+    harness.stdio.println(entry.label + " stats.misses=" + to_string(stats.misses))
+    cache_clear(harness.llm, {store: entry.store})
+    const cleared = cache_get(harness.llm, "c", {store: entry.store})
+    harness.stdio.println(entry.label + " cleared=" + to_string(!cleared.hit))
+  }
+}

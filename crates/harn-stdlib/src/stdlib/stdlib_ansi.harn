@@ -1,0 +1,355 @@
+// std/ansi - terminal styling helpers with deterministic no-color fallbacks.
+const __ANSI_ESC = hex_decode("1b")
+
+const __ANSI_BEL = hex_decode("07")
+
+const __ANSI_RESET = __ANSI_ESC + "[0m"
+
+type AnsiOptions = {stream?: string, mode?: string, enabled?: bool}
+
+type AnsiStyle = {
+  fg?: string,
+  color?: string,
+  bg?: string,
+  background?: string,
+  bold?: bool,
+  dim?: bool,
+  italic?: bool,
+  underline?: bool,
+  inverse?: bool,
+  strikethrough?: bool,
+}
+
+fn __ansi_options(options) {
+  if type_of(options) == "dict" {
+    return options ?? {}
+  }
+  if type_of(options) == "string" {
+    return {mode: options}
+  }
+  return {}
+}
+
+fn __ansi_color_index(name) {
+  const n = lowercase(replace(name ?? "", "-", "_"))
+  if n == "black" {
+    return 0
+  }
+  if n == "red" {
+    return 1
+  }
+  if n == "green" {
+    return 2
+  }
+  if n == "yellow" {
+    return 3
+  }
+  if n == "blue" {
+    return 4
+  }
+  if n == "magenta" || n == "purple" {
+    return 5
+  }
+  if n == "cyan" {
+    return 6
+  }
+  if n == "white" {
+    return 7
+  }
+  if n == "bright_black" || n == "gray" || n == "grey" {
+    return 8
+  }
+  if n == "bright_red" {
+    return 9
+  }
+  if n == "bright_green" {
+    return 10
+  }
+  if n == "bright_yellow" {
+    return 11
+  }
+  if n == "bright_blue" {
+    return 12
+  }
+  if n == "bright_magenta" || n == "bright_purple" {
+    return 13
+  }
+  if n == "bright_cyan" {
+    return 14
+  }
+  if n == "bright_white" {
+    return 15
+  }
+  return nil
+}
+
+fn __ansi_color_code(name, background) {
+  const index = __ansi_color_index(name)
+  if index == nil {
+    return nil
+  }
+  if index >= 8 {
+    const bright_base = if background {
+      100
+    } else {
+      90
+    }
+    return to_string(bright_base + index - 8)
+  }
+  const base = if background {
+    40
+  } else {
+    30
+  }
+  return to_string(base + index)
+}
+
+fn __ansi_codes(style) {
+  const s = style ?? {}
+  let codes = []
+  if s?.bold ?? false {
+    codes = codes.appending("1")
+  }
+  if s?.dim ?? false {
+    codes = codes.appending("2")
+  }
+  if s?.italic ?? false {
+    codes = codes.appending("3")
+  }
+  if s?.underline ?? false {
+    codes = codes.appending("4")
+  }
+  if s?.inverse ?? false {
+    codes = codes.appending("7")
+  }
+  if s?.strikethrough ?? false {
+    codes = codes.appending("9")
+  }
+  const fg = s?.fg ?? s?.color
+  const fg_code = __ansi_color_code(fg, false)
+  if fg_code != nil {
+    codes = codes.appending(fg_code)
+  }
+  const bg = s?.bg ?? s?.background
+  const bg_code = __ansi_color_code(bg, true)
+  if bg_code != nil {
+    codes = codes.appending(bg_code)
+  }
+  return codes
+}
+
+/**
+ * Return whether ANSI output should be emitted for the requested stream.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ansi_enabled(options: AnsiOptions = {}) -> bool {
+  const opts = __ansi_options(options)
+  if opts?.enabled != nil {
+    return opts.enabled ? true : false
+  }
+  const mode = lowercase(opts?.mode ?? "auto")
+  if mode == "always" {
+    return true
+  }
+  if mode == "never" {
+    return false
+  }
+  return __ansi_enabled(opts?.stream ?? "stdout")
+}
+
+/**
+ * Build an ANSI Select Graphic Rendition escape sequence such as `ansi_escape("1;31")`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ansi_escape(code: string) -> string {
+  return __ANSI_ESC + "[" + code + "m"
+}
+
+/**
+ * Return the terminal reset escape sequence.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ansi_reset() -> string {
+  return __ANSI_RESET
+}
+
+/**
+ * Remove ANSI CSI/OSC escape sequences from text.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ansi_strip(text: string) -> string {
+  const value = text ?? ""
+  const csi = __ANSI_ESC + "\\[[0-9;?]*[ -/]*[@-~]"
+  const without_csi = regex_replace(csi, "", value)
+  const osc = __ANSI_ESC + "\\][^" + __ANSI_BEL + "]*(" + __ANSI_BEL + "|" + __ANSI_ESC + "\\\\)"
+  return regex_replace(osc, "", without_csi)
+}
+
+/**
+ * Return the visible character count after stripping ANSI escapes.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ansi_visible_len(text: string) -> int {
+  return len(ansi_strip(text ?? ""))
+}
+
+/**
+ * Apply a style dict to text when ANSI is enabled.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ansi_style(text: string, style: AnsiStyle = {}, options: AnsiOptions = {}) -> string {
+  const value = text ?? ""
+  if !ansi_enabled(options) {
+    return value
+  }
+  const codes = __ansi_codes(style)
+  if len(codes) == 0 {
+    return value
+  }
+  return ansi_escape(join(codes, ";")) + value + __ANSI_RESET
+}
+
+/**
+ * Apply a foreground color.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ansi_color(text: string, name: string, options: AnsiOptions = {}) -> string {
+  return ansi_style(text, {fg: name}, options)
+}
+
+/**
+ * Apply a background color.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ansi_bg(text: string, name: string, options: AnsiOptions = {}) -> string {
+  return ansi_style(text, {bg: name}, options)
+}
+
+/**
+ * Apply bold styling.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ansi_bold(text: string, options: AnsiOptions = {}) -> string {
+  return ansi_style(text, {bold: true}, options)
+}
+
+/**
+ * Apply dim styling.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ansi_dim(text: string, options: AnsiOptions = {}) -> string {
+  return ansi_style(text, {dim: true}, options)
+}
+
+/**
+ * Apply underline styling.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ansi_underline(text: string, options: AnsiOptions = {}) -> string {
+  return ansi_style(text, {underline: true}, options)
+}
+
+/**
+ * Standard success styling.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ansi_success(text: string, options: AnsiOptions = {}) -> string {
+  return ansi_style(text, {fg: "green", bold: true}, options)
+}
+
+/**
+ * Standard warning styling.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ansi_warn(text: string, options: AnsiOptions = {}) -> string {
+  return ansi_style(text, {fg: "yellow", bold: true}, options)
+}
+
+/**
+ * Standard error styling.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ansi_error(text: string, options: AnsiOptions = {}) -> string {
+  return ansi_style(text, {fg: "red", bold: true}, options)
+}
+
+/**
+ * Standard informational styling.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ansi_info(text: string, options: AnsiOptions = {}) -> string {
+  return ansi_style(text, {fg: "cyan"}, options)
+}
+
+/**
+ * Low-emphasis styling for secondary text.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ansi_muted(text: string, options: AnsiOptions = {}) -> string {
+  return ansi_style(text, {dim: true}, options)
+}
+
+/**
+ * Render an OSC-8 terminal hyperlink when ANSI is enabled; otherwise return the label.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ansi_link(label: string, url: string, options: AnsiOptions = {}) -> string {
+  const text = label ?? ""
+  if !ansi_enabled(options) || trim(url ?? "") == "" {
+    return text
+  }
+  return __ANSI_ESC + "]8;;" + url + __ANSI_BEL + text + __ANSI_ESC + "]8;;" + __ANSI_BEL
+}
+
+/**
+ * Truncate visible text after stripping ANSI escapes.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn ansi_truncate(text: string, max_chars: int, marker: string = "...") -> string {
+  const plain = ansi_strip(text ?? "")
+  const limit = max_chars ?? 0
+  if limit <= 0 || len(plain) <= limit {
+    return plain
+  }
+  const suffix = marker ?? "..."
+  if limit <= len(suffix) {
+    return substring(suffix, 0, limit)
+  }
+  return substring(plain, 0, limit - len(suffix)) + suffix
+}

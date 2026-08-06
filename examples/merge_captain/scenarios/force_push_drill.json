@@ -1,0 +1,54 @@
+{
+  "_type": "merge_captain_playground_scenario",
+  "scenario": "force_push_drill",
+  "description": "Drill for force-with-lease handling: a PR whose author force-pushes mid-sweep. Captain should observe a head_sha change and re-verify checks.",
+  "owner": "burin-labs",
+  "repos": [
+    {
+      "name": "drill",
+      "default_branch": "main",
+      "files": {
+        "README.md": "# drill\n",
+        "src/lib.rs": "pub fn drill() -> i32 { 0 }\n"
+      },
+      "branches": [
+        {
+          "name": "feature/work-in-progress",
+          "files_set": {
+            "src/lib.rs": "pub fn drill() -> i32 { 1 }\n"
+          },
+          "commit_message": "feat(drill): wip"
+        }
+      ]
+    }
+  ],
+  "pull_requests": [
+    {
+      "repo": "drill",
+      "number": 42,
+      "title": "drill: wip",
+      "body": "Author keeps force-pushing.",
+      "state": "open",
+      "head_branch": "feature/work-in-progress",
+      "base_branch": "main",
+      "user": "carol",
+      "labels": [],
+      "checks": [
+        {"name": "ci", "status": "in_progress"}
+      ],
+      "mergeable": null,
+      "mergeable_state": "unknown"
+    }
+  ],
+  "steps": [
+    {
+      "name": "force_push_passing_v2",
+      "description": "Author force-pushes a v2 of the change and CI runs to green.",
+      "actions": [
+        {"kind": "force_push_author", "repo": "drill", "branch": "feature/work-in-progress", "files_set": {"src/lib.rs": "pub fn drill() -> i32 { 2 }\n"}, "commit_message": "feat(drill): v2"},
+        {"kind": "set_check", "repo": "drill", "pr_number": 42, "name": "ci", "status": "completed", "conclusion": "success"},
+        {"kind": "set_mergeability", "repo": "drill", "pr_number": 42, "mergeable": true, "mergeable_state": "clean"}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,76 @@
+import "std/triggers"
+
+fn gated_handler(harness: Harness, event: TriggerEvent) -> dict {
+  const context = harness.runtime.handler_context()
+  const file_path = path_join(
+    harness.fs.workspace_temp_dir(),
+    "trust_graph_shadow_" + (context?.agent ?? "unknown") + ".txt",
+  )
+  harness.fs.write_text(file_path, "approved:" + event.kind)
+  return {autonomy_tier: context?.autonomy_tier, file_path: file_path}
+}
+
+pipeline test(harness: Harness, task) {
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(
+    harness.random.range(100000, 999999),
+  )
+  const agent_id = "shadow-bot-" + unique
+  const file_path = path_join(
+    harness.fs.workspace_temp_dir(),
+    "trust_graph_shadow_" + agent_id + ".txt",
+  )
+  const handle: TriggerHandle = harness.runtime.trigger_register(
+    {
+      id: agent_id,
+      kind: "issue.opened",
+      provider: "webhook",
+      autonomy_tier: "shadow",
+      handler: gated_handler,
+      when: nil,
+      retry: nil,
+      match: {events: ["issue.opened"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      budget: nil,
+      manifest_path: "runtime://trust-graph",
+      package_name: "conformance",
+    },
+  )
+  const first: DispatchHandle = harness.runtime.trigger_fire(
+    handle,
+    {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-shadow-" + unique}},
+  )
+  const denied: list<TrustRecord> = harness.runtime.trust_query(
+    {agent: agent_id, action: "fs.write", outcome: "denied"},
+  )
+  const file_after_first = harness.fs.exists(file_path)
+  const promoted: TrustRecord = harness.runtime.trust_record(
+    agent_id,
+    "trust.promote",
+    "tester",
+    "success",
+    "act_auto",
+  )
+  const promote_records: list<TrustRecord> = harness.runtime.trust_query(
+    {agent: agent_id, action: "trust.promote"},
+  )
+  const second: DispatchHandle = harness.runtime.trigger_fire(
+    handle,
+    {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-auto-" + unique}},
+  )
+  const successes: list<TrustRecord> = harness.runtime.trust_query(
+    {agent: agent_id, action: "webhook.issue.opened", outcome: "success", tier: "act_auto"},
+  )
+  harness.stdio.println(first.status == "dispatched" && first.result?.autonomy_tier == "shadow")
+  harness.stdio.println(!file_after_first)
+  harness.stdio.println(len(denied) == 1 && denied[0]?.autonomy_tier == "shadow")
+  harness.stdio.println(promoted.action == "trust.promote" && promoted.autonomy_tier == "act_auto")
+  harness.stdio.println(len(promote_records) == 1)
+  harness.stdio.println(second.status == "dispatched" && second.error == nil)
+  harness.stdio.println(second.result?.autonomy_tier == "act_auto")
+  harness.stdio.println(harness.fs.exists(file_path))
+  harness.fs.delete(file_path)
+  harness.stdio.println(len(successes) == 1 && successes[0]?.autonomy_tier == "act_auto")
+}

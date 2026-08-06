@@ -1,0 +1,34 @@
+# Seed evidence for local coding-agent model recommendations.
+# `harn eval coding-agent --include-local` writes a fresher
+# `.harn-runs/coding-agent-bench/latest/local_readiness.json`; this file is
+# only the fallback when no local benchmark report exists yet.
+
+[[outcomes]]
+provider = "ollama"
+model = "devstral-small-2:24b"
+selector = "devstral-small-2"
+tool_format = "text"
+class = "passed"
+status = "passed"
+score = 100
+evidence = "First empirical coding-agent fixture passed in text-tool mode."
+
+[[outcomes]]
+provider = "ollama"
+model = "qwen2.5:32b-instruct"
+selector = "ollama:qwen2.5:32b-instruct"
+tool_format = "text"
+class = "provider_transport_failure"
+status = "infra_error"
+score = 35
+evidence = "Initial local run hit an Ollama HTTP 500 / EOF transport path; report separately from model task quality."
+
+[[outcomes]]
+provider = "local"
+model = "gemma-4-26b-a4b-it"
+selector = "local-gemma4"
+tool_format = "text"
+class = "skipped"
+status = "catalog_default"
+score = 0
+evidence = "Bundled fallback records the shipped local QC default without stale failure evidence; run harn eval coding-agent --include-local to replace this seed with local empirical results."

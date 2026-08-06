@@ -1,0 +1,2 @@
+cannot access property `name` on nilable type `{name: string, email: string}?`; the value may be nil at runtime
+use the optional access operator `?.name`, or narrow the value with a `!= nil` guard to drop the nil arm

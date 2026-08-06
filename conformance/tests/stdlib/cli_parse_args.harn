@@ -1,0 +1,63 @@
+// Verifies std/cli's declarative argument parser handles flags, options
+// (with `--key VALUE` and `--key=VALUE` syntaxes), typed parsing, multi-
+// valued options, positional capture, the `--` terminator, `--help`,
+// required-arg validation, and unknown-flag passthrough via `_extras`.
+import { help_text, parse_args } from "std/cli"
+
+const spec = [
+  {kind: "flag", name: "dry_run", flags: ["--dry-run"]},
+  {kind: "flag", name: "verbose", flags: ["--verbose", "-v"]},
+  {kind: "option", name: "model", flags: ["--model", "-m"], default: "claude"},
+  {kind: "option", name: "max", flags: ["--max"], parse: "int", default: 1},
+  {kind: "option", name: "ratio", flags: ["--ratio"], parse: "float"},
+  {kind: "option", name: "tags", flags: ["--tag"], multi: true},
+  {kind: "option", name: "labels", flags: ["--labels"], parse: "list", separator: ","},
+  {kind: "positional", name: "target"},
+  {kind: "positional", name: "extra"},
+]
+
+pipeline default(harness: Harness) {
+  const one = parse_args(
+    [
+      "--dry-run",
+      "-v",
+      "-m",
+      "auto",
+      "--max=3",
+      "--ratio",
+      "0.25",
+      "--tag",
+      "a",
+      "--tag=b",
+      "--labels",
+      "x,y, z",
+      "primary",
+      "secondary",
+      "trailing",
+    ],
+    spec,
+  )
+  harness.stdio.println(one.dry_run)
+  harness.stdio.println(one.verbose)
+  harness.stdio.println(one.model)
+  harness.stdio.println(one.max)
+  harness.stdio.println(one.ratio)
+  harness.stdio.println(one.tags)
+  harness.stdio.println(one.labels)
+  harness.stdio.println(one.target)
+  harness.stdio.println(one.extra)
+  harness.stdio.println(one._positional)
+  harness.stdio.println(one._help)
+  harness.stdio.println(len(one._errors))
+  const two = parse_args(["--unknown-flag", "--", "--max", "raw"], spec)
+  harness.stdio.println(two.dry_run)
+  harness.stdio.println(two.max)
+  harness.stdio.println(two._extras)
+  harness.stdio.println(two._positional)
+  harness.stdio.println(two.target)
+  const help = parse_args(["--help"], spec)
+  harness.stdio.println(help._help)
+  const with_errors = parse_args(["--max", "not-an-int"], spec)
+  harness.stdio.println(len(with_errors._errors) > 0)
+  harness.stdio.println(starts_with(help_text(spec, "demo"), "Usage: demo"))
+}

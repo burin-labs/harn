@@ -1,0 +1,337 @@
+/**
+ * `harn tool new` ported to .harn — see harn#2308 (W8).
+ *
+ * Scaffolds a Harn package that exports one custom tool. The dispatch
+ * shim in crates/harn-cli/src/commands/tool.rs resolves the destination
+ * directory and validates the package alias in Rust, then hands the
+ * pre-computed identifiers to this script via env vars. The script does
+ * the template render + file write loop, and the shim finishes by
+ * generating docs/api.md through `generate_package_docs_impl` (kept in
+ * Rust because it depends on the full package manifest pipeline).
+ *
+ * Inputs (set by the shim before dispatch):
+ *   HARN_TOOL_NAME         — package alias (validated upstream)
+ *   HARN_TOOL_DEST         — absolute path to destination directory
+ *   HARN_TOOL_IDENT        — sanitized Harn identifier derived from name
+ *   HARN_TOOL_HANDLER      — handler function name (handle_<ident>)
+ *   HARN_TOOL_DESCRIPTION  — description string (raw, unescaped)
+ *   HARN_TOOL_HARN_RANGE   — current Harn version range (e.g. ">=0.7,<0.8")
+ *   HARN_TOOL_HARN_VERSION — exact Harn version for generated CI
+ */
+fn __escape_basic_string(value: string) -> string {
+  // Order matters: replace the backslash first so subsequent inserted
+  // backslashes are not re-escaped. The remaining characters mirror the
+  // Rust scaffolder's basic-string escaping for the (deliberately
+  // restricted) inputs we accept — names are ASCII identifiers and the
+  // description is a single user-supplied line. Control characters are
+  // accepted as-is; the Rust dispatch shim rejects multi-line input
+  // before reaching this point.
+  let out = replace(value, "\\", "\\\\")
+  out = replace(out, "\"", "\\\"")
+  out = replace(out, "\n", "\\n")
+  out = replace(out, "\r", "\\r")
+  out = replace(out, "\t", "\\t")
+  return out
+}
+
+fn __harn_string_literal(value: string) -> string {
+  return "\"" + __escape_basic_string(value) + "\""
+}
+
+fn __toml_string_literal(value: string) -> string {
+  // TOML basic-string escaping uses the same escapes for the subset
+  // accepted here. Mirrors crates/harn-cli/src/package/manifest.rs.
+  return __harn_string_literal(value)
+}
+
+fn __strip_trailing_periods(value: string) -> string {
+  // substring(s, start, end) — second arg is an exclusive end index.
+  let out = value
+  while len(out) > 0 && ends_with(out, ".") {
+    out = substring(out, 0, len(out) - 1)
+  }
+  return out
+}
+
+fn __render_harn_toml(package_name: string, description: string, harn_range: string) -> string {
+  const pkg = __toml_string_literal(package_name)
+  const desc = __toml_string_literal(description)
+  const repo = __toml_string_literal("https://github.com/OWNER/" + package_name)
+  const prov = __toml_string_literal(
+    "https://github.com/OWNER/" + package_name + "/releases/tag/v0.1.0",
+  )
+  return "[package]\n"
+    + "name = "
+    + pkg
+    + "\n"
+    + "version = \"0.1.0\"\n"
+    + "description = "
+    + desc
+    + "\n"
+    + "license = \"MIT OR Apache-2.0\"\n"
+    + "repository = "
+    + repo
+    + "\n"
+    + "provenance = "
+    + prov
+    + "\n"
+    + "harn = \""
+    + harn_range
+    + "\"\n"
+    + "docs_url = \"docs/api.md\"\n"
+    + "permissions = [\"tool:read_only\"]\n"
+    + "\n"
+    + "[exports]\n"
+    + "tools = \"lib/tools.harn\"\n"
+    + "\n"
+    + "[[package.tools]]\n"
+    + "name = "
+    + pkg
+    + "\n"
+    + "module = \"lib/tools.harn\"\n"
+    + "symbol = \"tools\"\n"
+    + "description = "
+    + desc
+    + "\n"
+    + "permissions = [\"tool:read_only\"]\n"
+    + "\n"
+    + "[package.tools.input_schema]\n"
+    + "type = \"object\"\n"
+    + "required = [\"text\"]\n"
+    + "\n"
+    + "[package.tools.input_schema.properties.text]\n"
+    + "type = \"string\"\n"
+    + "description = \"Text to echo.\"\n"
+    + "\n"
+    + "[package.tools.output_schema]\n"
+    + "type = \"string\"\n"
+    + "\n"
+    + "[package.tools.annotations]\n"
+    + "kind = \"read\"\n"
+    + "side_effect_level = \"read_only\"\n"
+    + "\n"
+    + "[package.tools.annotations.arg_schema]\n"
+    + "required = [\"text\"]\n"
+    + "\n"
+    + "[dependencies]\n"
+}
+
+fn __render_tools_harn(package_name: string, handler: string, description: string) -> string {
+  const tool_name = __harn_string_literal(package_name)
+  const desc_lit = __harn_string_literal(description)
+  // Mirrors the Rust handler's `description.trim_end_matches('.')` so
+  // the docstring summary reads naturally with the trailing period we
+  // add back in the rendered text.
+  const handler_doc = __strip_trailing_periods(description)
+  return "import { ToolRegistry } from \"std/tools\"\n"
+    + "\n"
+    + "/** "
+    + handler_doc
+    + ". */\n"
+    + "pub fn "
+    + handler
+    + "(args) {\n"
+    + "  const input = schema_expect(\n"
+    + "    args,\n"
+    + "    {type: \"object\", properties: {text: {type: \"string\"}}, required: [\"text\"]},\n"
+    + "  )\n"
+    + "  return input.text\n"
+    + "}\n"
+    + "\n"
+    + "/** Return a tool registry containing `"
+    + package_name
+    + "`. */\n"
+    + "pub fn tools(registry: ToolRegistry? = nil) -> ToolRegistry {\n"
+    + "  let reg = registry ?? tool_registry()\n"
+    + "  reg = tool_define(\n"
+    + "    reg,\n"
+    + "    "
+    + tool_name
+    + ",\n"
+    + "    "
+    + desc_lit
+    + ",\n"
+    + "    {\n"
+    + "      parameters: {text: {type: \"string\", description: \"Text to echo.\"}},\n"
+    + "      returns: {type: \"string\"},\n"
+    + "      annotations: {kind: \"read\", side_effect_level: \"read_only\", arg_schema: {required: [\"text\"]}},\n"
+    + "      handler: "
+    + handler
+    + ",\n"
+    + "    },\n"
+    + "  )\n"
+    + "  return reg\n"
+    + "}\n"
+}
+
+fn __render_main_harn(package_name: string) -> string {
+  const tool_name = __harn_string_literal(package_name)
+  return "import { agent_dispatch_tool_call } from \"std/agent/primitives\"\n"
+    + "import { tools } from \"lib/tools\"\n"
+    + "\n"
+    + "pipeline default(harness: Harness) {\n"
+    + "  const registry = tools()\n"
+    + "  let text = \"hello\"\n"
+    + "  if len(argv) > 0 {\n"
+    + "    text = argv[0]\n"
+    + "  }\n"
+    + "  const result = agent_dispatch_tool_call(\n"
+    + "    harness.tools,\n"
+    + "    {name: "
+    + tool_name
+    + ", arguments: {text: text}},\n"
+    + "    registry,\n"
+    + "  )\n"
+    + "  if !result.ok {\n"
+    + "    throw result.error?.message ?? \"tool call failed\"\n"
+    + "  }\n"
+    + "  harness.stdio.log(result.rendered_result)\n"
+    + "}\n"
+}
+
+fn __render_test_harn(package_name: string, ident: string) -> string {
+  const tool_name = __harn_string_literal(package_name)
+  return "import { agent_dispatch_tool_call } from \"std/agent/primitives\"\n"
+    + "import { tools } from \"../lib/tools\"\n"
+    + "\n"
+    + "pipeline test_"
+    + ident
+    + "_tool(harness: Harness, task) {\n"
+    + "  const registry = tools()\n"
+    + "  const ok = agent_dispatch_tool_call(\n"
+    + "    harness.tools,\n"
+    + "    {name: "
+    + tool_name
+    + ", arguments: {text: \"hello\"}},\n"
+    + "    registry,\n"
+    + "  )\n"
+    + "  assert(ok.ok, ok.error?.message ?? \"tool call should pass\")\n"
+    + "  assert_eq(ok.rendered_result, \"hello\")\n"
+    + "  const bad = agent_dispatch_tool_call(\n"
+    + "    harness.tools,\n"
+    + "    {name: "
+    + tool_name
+    + ", arguments: {}},\n"
+    + "    registry,\n"
+    + "  )\n"
+    + "  assert(!bad.ok, \"schema validation should reject missing text\")\n"
+    + "}\n"
+}
+
+fn __render_readme(package_name: string, description: string) -> string {
+  return "# " + package_name + "\n"
+    + "\n"
+    + description
+    + "\n"
+    + "\n"
+    + "## Develop\n"
+    + "\n"
+    + "```bash\n"
+    + "harn package verify\n"
+    + "```\n"
+    + "\n"
+    + "## Install into another project\n"
+    + "\n"
+    + "```bash\n"
+    + "harn add ../"
+    + package_name
+    + "\n"
+    + "harn install\n"
+    + "```\n"
+    + "\n"
+    + "Consumers import the stable registry builder with:\n"
+    + "\n"
+    + "```harn\n"
+    + "import { tools } from \""
+    + package_name
+    + "/tools\"\n"
+    + "```\n"
+}
+
+fn __render_workflow_yaml() -> string {
+  return "name: CI\n"
+    + "\n"
+    + "on:\n"
+    + "  pull_request:\n"
+    + "  push:\n"
+    + "    branches: [main]\n"
+    + "  merge_group:\n"
+    + "  workflow_dispatch:\n"
+    + "\n"
+    + "permissions:\n"
+    + "  contents: read\n"
+    + "\n"
+    + "jobs:\n"
+    + "  package:\n"
+    + "    uses: burin-labs/.github/.github/workflows/harn-package.yml@bcdcf64e5c7021f649432b77fe2e1f9f489c4824\n"
+    + "\n"
+    + "  status:\n"
+    + "    name: CI status\n"
+    + "    if: always()\n"
+    + "    needs: [package]\n"
+    + "    runs-on: ubuntu-latest\n"
+    + "    steps:\n"
+    + "      - name: Enforce required jobs\n"
+    + "        env:\n"
+    + "          PACKAGE_RESULT: $"
+    + "{{ needs.package.result }}\n"
+    + "        run: test \"$PACKAGE_RESULT\" = success\n"
+}
+
+fn __render_harn_lock(harn_version: string) -> string {
+  return "# This file is auto-generated by Harn. Do not edit.\n"
+    + "\n"
+    + "version = 4\n"
+    + "generator_version = \""
+    + harn_version
+    + "\"\n"
+    + "protocol_artifact_version = \""
+    + harn_version
+    + "\"\n"
+}
+
+fn __write(harness: Harness, dest: string, rel: string, content: string) {
+  const path = path_join(dest, rel)
+  const parent = dirname(path)
+  if parent != "" && !harness.fs.exists(parent) {
+    try {
+      harness.fs.mkdir(parent)
+    } catch (e) {
+      harness.stdio.eprintln("failed to create " + parent + ": " + to_string(e))
+      harness.runtime.exit(1)
+    }
+  }
+  try {
+    harness.fs.write_text(path, content)
+  } catch (e) {
+    harness.stdio.eprintln("failed to write " + path + ": " + to_string(e))
+    harness.runtime.exit(1)
+  }
+}
+
+fn main(harness: Harness) {
+  const name = harness.env.get_or("HARN_TOOL_NAME", "")
+  const dest = harness.env.get_or("HARN_TOOL_DEST", "")
+  const ident = harness.env.get_or("HARN_TOOL_IDENT", "")
+  const handler = harness.env.get_or("HARN_TOOL_HANDLER", "")
+  const description = harness.env.get_or("HARN_TOOL_DESCRIPTION", "")
+  const harn_range = harness.env.get_or("HARN_TOOL_HARN_RANGE", "")
+  const harn_version = harness.env.get_or("HARN_TOOL_HARN_VERSION", "")
+  if name == "" || dest == "" || ident == "" || handler == "" || harn_range == ""
+    || harn_version
+    == "" {
+    harness.stdio.eprintln(
+      "tool new: HARN_TOOL_{NAME,DEST,IDENT,HANDLER,HARN_RANGE,HARN_VERSION} must be set",
+    )
+    harness.runtime.exit(2)
+  }
+  __write(harness, dest, "harn.toml", __render_harn_toml(name, description, harn_range))
+  __write(harness, dest, "harn.lock", __render_harn_lock(harn_version))
+  __write(harness, dest, ".harn-version", harn_version + "\n")
+  __write(harness, dest, "lib/tools.harn", __render_tools_harn(name, handler, description))
+  __write(harness, dest, "main.harn", __render_main_harn(name))
+  __write(harness, dest, "tests/test_tool.harn", __render_test_harn(name, ident))
+  __write(harness, dest, "README.md", __render_readme(name, description))
+  __write(harness, dest, "LICENSE", "MIT OR Apache-2.0\n")
+  __write(harness, dest, ".github/workflows/ci.yml", __render_workflow_yaml())
+}

@@ -1,0 +1,57 @@
+/**
+ * A `with_prompt_rewrite` middleware that replaces the primary `system` must
+ * win over the decomposed `_system_fragments` channel the agent loop attaches
+ * (#2632). Clearing the channel on a system rewrite keeps the two assembly
+ * inputs from fighting — otherwise the assembler would reduce the stale
+ * fragments and silently ignore the rewrite.
+ */
+import { default_llm_caller } from "std/llm/caller"
+import { with_prompt_rewrite } from "std/llm/handlers"
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline test(harness: Harness, task) {
+  // The shape the agent loop hands a caller: a joined `system` string plus the
+  // per-part `_system_fragments` list in opts.
+  const call = {
+    prompt: "hi",
+    system: "ORIGINAL JOINED",
+    opts: {
+      provider: "mock",
+      _system_fragments: [{id: "primary:system", source: "primary", body: "ORIGINAL JOINED"}],
+    },
+    turn: {iteration: 0, session_id: "", attempt: 1},
+  }
+  // Rewriting `system` supersedes the decomposed fragments.
+  with_llm_script(
+    harness.llm,
+    [llm_text("ok")],
+    { ->
+      const rewriter = with_prompt_rewrite(
+        default_llm_caller(harness.agent, harness.llm),
+        fn(prompt, system, opts) { return {system: "REWRITTEN PRIMARY"} },
+      )
+      const _ = rewriter(call)
+      assert(
+        harness.llm.mock_calls()[0].system == "REWRITTEN PRIMARY",
+        "system rewrite wins over fragments",
+      )
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text("ok")],
+    { ->
+      const passthrough = with_prompt_rewrite(
+        default_llm_caller(harness.agent, harness.llm),
+        fn(prompt, system, opts) { return {} },
+      )
+      const _ = passthrough(call)
+      assert(
+        harness.llm.mock_calls()[0].system == "ORIGINAL JOINED",
+        "fragments retained when system untouched",
+      )
+      harness.stdio.log("llm_rewrite_supersedes_system_fragments tests passed")
+    },
+  )
+}
+// Leaving `system` untouched keeps the decomposed fragments authoritative.

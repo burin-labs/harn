@@ -1,0 +1,121 @@
+# Current Together serverless frontier/agent routes observed through
+# `GET /v1/models`. Keep rows here when Harn supports the provider but the
+# model is absent from direct-provider catalogs.
+
+[models."Qwen/Qwen3.7-Max"]
+name = "Qwen3.7 Max (Together)"
+provider = "together"
+context_window = 1000000
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 3.75, cache_read_per_mtok = 0.125 }
+
+tier = "frontier"
+open_weight = true
+strengths = ["reasoning", "coding", "tool_use", "long_context"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
+[models."deepseek-ai/DeepSeek-V4-Pro"]
+name = "DeepSeek V4 Pro (Together)"
+provider = "together"
+context_window = 512000
+equivalence_group = "frontier-agent-coding"
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.74, output_per_mtok = 3.48, cache_read_per_mtok = 0.20 }
+
+tier = "frontier"
+open_weight = true
+strengths = ["agentic", "coding", "long_context", "tool_use", "reasoning"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+[models."zai-org/GLM-5.1"]
+name = "GLM 5.1 (Together)"
+provider = "together"
+context_window = 202752
+equivalence_group = "frontier-agent-coding"
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
+
+tier = "frontier"
+open_weight = true
+strengths = ["agentic", "coding", "long_context", "tool_use", "reasoning"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+[models."zai-org/GLM-5.2"]
+name = "GLM 5.2 (Together)"
+provider = "together"
+# Together serves GLM-5.2 at 262K (fp4), not the model's full 1M window
+# — per-host context caps differ; verified 2026-07-02 on together.ai.
+context_window = 262144
+equivalence_group = "frontier-agent-coding"
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 1.40, output_per_mtok = 4.40, cache_read_per_mtok = 0.26 }
+tier = "frontier"
+open_weight = true
+strengths = ["agentic", "coding", "long_context", "tool_use", "reasoning"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+
+# MiniMax M3 on Together — 524K serverless window, billed at the same
+# $0.30/$1.20 rate as the first-party API. Verified 2026-07-02.
+[models."MiniMaxAI/MiniMax-M3"]
+name = "MiniMax M3 (Together)"
+provider = "together"
+context_window = 524288
+capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok = 0.06 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "tool_use", "reasoning", "long_context", "vision"]
+
+# Kimi K2.7 Code on Together — int4-native weights at the first-party
+# list rate. Verified 2026-07-02.
+[models."moonshotai/Kimi-K2.7-Code"]
+name = "Kimi K2.7 Code (Together)"
+provider = "together"
+context_window = 262144
+capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.95, output_per_mtok = 4.00, cache_read_per_mtok = 0.19 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning"]
+[models."MiniMaxAI/MiniMax-M2.7"]
+name = "MiniMax M2.7 (Together)"
+provider = "together"
+context_window = 196608
+capabilities = ["tools", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.30, output_per_mtok = 1.20, cache_read_per_mtok = 0.06 }
+# Inline metadata matches the minimax-m2.7 equivalence group and keeps this row
+# independent of fragment-order defaults.
+tier = "frontier"
+open_weight = true
+strengths = ["speed", "coding", "agentic", "tool_use", "reasoning", "long_context"]
+
+# Reliable Together serverless sample routes (harn#3645 §4). The prior
+# representative serverless rows were unusable as one-click samples:
+# `Qwen/Qwen3-Coder-Next-FP8` returns `model_not_available` on serverless
+# chat-completions (needs a dedicated endpoint; carried as
+# `availability = "dedicated"` in 20-open-weight-openrouter.toml), and the
+# Together `google/gemma-4-31B-it` route is a reasoning model with an
+# empty-content footgun. These two non-reasoning Turbo routes are live on
+# Together's serverless `/v1/chat/completions` with native tool calls and
+# serve as dependable cheap executor samples. Verified live ids on
+# together.ai/models (Qwen2.5 7B Instruct Turbo, Llama 3.3 70B Instruct
+# Turbo).
+[models."Qwen/Qwen2.5-7B-Instruct-Turbo"]
+name = "Qwen2.5 7B Instruct Turbo (Together)"
+provider = "together"
+context_window = 32768
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.30, output_per_mtok = 0.30 }
+tier = "small"
+open_weight = true
+strengths = ["speed", "cheap", "tool_use"]
+[models."meta-llama/Llama-3.3-70B-Instruct-Turbo"]
+name = "Llama 3.3 70B Instruct Turbo (Together)"
+provider = "together"
+context_window = 131072
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.88, output_per_mtok = 0.88 }
+logical_model = "llama-3.3-70b-instruct"
+equivalence_group = "llama-3.3-70b-instruct"
+served_variant = "together"
+api_dialect = "openai_chat"
+tier = "mid"
+open_weight = true
+strengths = ["tool_use", "cheap"]

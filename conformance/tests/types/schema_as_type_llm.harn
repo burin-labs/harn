@@ -1,0 +1,29 @@
+import { llm_text, with_llm_script } from "std/testing"
+
+type GraderOut = {verdict: "pass" | "fail" | "unclear", summary: string}
+
+pipeline default(harness: Harness) {
+  // First mock returns an invalid enum value; schema retry kicks in.
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("{\"verdict\": \"maybe\", \"summary\": \"x\"}"),
+      llm_text("{\"verdict\": \"pass\", \"summary\": \"ok\"}"),
+    ],
+    { ->
+      const r = harness.llm.call(
+        "Grade this",
+        nil,
+        {
+          provider: "mock",
+          output: {schema: GraderOut, strict: true, validation: "error"},
+          schema_retries: 2,
+        },
+      )
+      harness.stdio.println(r.data.verdict)
+      harness.stdio.println(r.data.summary)
+      harness.stdio.println(len(harness.llm.mock_calls()))
+    },
+  )
+}
+// Two calls happened: first invalid, second valid.

@@ -1,0 +1,31 @@
+/**
+ * Optional subscript `obj?.[index]` — symmetric counterpart to `obj?.member`.
+ * Returns nil when the object is nil; otherwise indexes normally. Lets
+ * connector authors safely chain into lists/dicts that may be nil.
+ */
+pipeline default(harness: Harness) {
+  const xs = [10, 20, 30]
+  harness.stdio.println(xs[0])
+  harness.stdio.println(xs[1])
+  harness.stdio.println(xs[5])
+  // Nil object short-circuits without erroring.
+  const missing = nil
+  harness.stdio.println(missing?.[0])
+  // Mixed chain: optional property + optional subscript + optional property.
+  const payload = {commits: [{timestamp: "2026-01-01T00:00:00Z"}]}
+  harness.stdio.println(payload.commits[0]?.timestamp)
+  // Same chain when an intermediate hop is nil.
+  const empty = {}
+  harness.stdio.println(empty?.commits?.[0]?.timestamp)
+  // Dict subscript by string key.
+  const d = {alpha: 1, beta: 2}
+  harness.stdio.println(d["alpha"])
+  harness.stdio.println(d["missing"])
+  const headers = {"content-type": "text/plain"}
+  harness.stdio.println(headers["content-type"])
+  const dnil = nil
+  harness.stdio.println(dnil?.["alpha"])
+  // Computed index.
+  const i = 2
+  harness.stdio.println(xs[i])
+}

@@ -1,0 +1,727 @@
+//! Run-record I/O, child-run materialization, sidecar extraction, and trigger/trace helpers.
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use super::super::{
+    default_run_dir, new_id, now_unix_seconds_text, parse_json_payload, sync_run_handoffs,
+    CompactionReceipt, RecapMetrics,
+};
+use super::action_graph::{publish_action_graph_event, refresh_run_observability};
+use super::eval_pack::replay_fixture_from_run;
+use super::json::json_usize;
+use super::types::{
+    run_child_record_from_worker_metadata, CompactionEventRecord, DaemonEventRecord,
+    RunChildRecord, RunHitlQuestionRecord, RunRecord, RunStageRecord,
+};
+use crate::agent_events::AgentEvent;
+use crate::event_log::{
+    active_event_log, sanitize_topic_component, AnyEventLog, EventId, EventLog,
+    LogEvent as EventLogRecord, Topic,
+};
+use crate::llm::vm_value_to_json;
+use crate::triggers::{SignatureStatus, TriggerEvent};
+use crate::value::{VmError, VmValue};
+
+pub(super) fn run_child_from_stage_metadata(stage: &RunStageRecord) -> Option<RunChildRecord> {
+    let parent_stage_id = if stage.id.is_empty() {
+        None
+    } else {
+        Some(stage.id.clone())
+    };
+    run_child_record_from_worker_metadata(parent_stage_id, stage.metadata.get("worker")?)
+}
+
+pub(super) fn fill_missing_child_run_fields(existing: &mut RunChildRecord, child: RunChildRecord) {
+    if existing.worker_name.is_empty() {
+        existing.worker_name = child.worker_name;
+    }
+    if existing.parent_stage_id.is_none() {
+        existing.parent_stage_id = child.parent_stage_id;
+    }
+    if existing.session_id.is_none() {
+        existing.session_id = child.session_id;
+    }
+    if existing.parent_session_id.is_none() {
+        existing.parent_session_id = child.parent_session_id;
+    }
+    if existing.mutation_scope.is_none() {
+        existing.mutation_scope = child.mutation_scope;
+    }
+    if existing.approval_policy.is_none() {
+        existing.approval_policy = child.approval_policy;
+    }
+    if existing.task.is_empty() {
+        existing.task = child.task;
+    }
+    if existing.request.is_none() {
+        existing.request = child.request;
+    }
+    if existing.provenance.is_none() {
+        existing.provenance = child.provenance;
+    }
+    if existing.status.is_empty() {
+        existing.status = child.status;
+    }
+    if existing.started_at.is_empty() {
+        existing.started_at = child.started_at;
+    }
+    if existing.finished_at.is_none() {
+        existing.finished_at = child.finished_at;
+    }
+    if existing.run_id.is_none() {
+        existing.run_id = child.run_id;
+    }
+    if existing.run_path.is_none() {
+        existing.run_path = child.run_path;
+    }
+    if existing.snapshot_path.is_none() {
+        existing.snapshot_path = child.snapshot_path;
+    }
+    if existing.execution.is_none() {
+        existing.execution = child.execution;
+    }
+}
+
+pub(super) fn materialize_child_runs_from_stage_metadata(run: &mut RunRecord) {
+    for child in run.stages.iter().filter_map(run_child_from_stage_metadata) {
+        match run
+            .child_runs
+            .iter_mut()
+            .find(|existing| existing.worker_id == child.worker_id)
+        {
+            Some(existing) => fill_missing_child_run_fields(existing, child),
+            None => run.child_runs.push(child),
+        }
+    }
+}
+
+pub(super) fn read_topic_records(
+    log: &AnyEventLog,
+    topic: &Topic,
+) -> Vec<(crate::event_log::EventId, EventLogRecord)> {
+    let mut from = None;
+    let mut records = Vec::new();
+    loop {
+        let batch =
+            futures::executor::block_on(log.read_range(topic, from, 256)).unwrap_or_default();
+        if batch.is_empty() {
+            break;
+        }
+        from = batch.last().map(|(event_id, _)| *event_id);
+        records.extend(batch);
+    }
+    records
+}
+
+#[derive(Clone, Debug)]
+pub struct AgentSessionReplayEvent {
+    pub event_id: EventId,
+    pub kind: String,
+    pub occurred_at_ms: i64,
+    pub event: AgentEvent,
+}
+
+pub async fn load_agent_session_replay_events(
+    session_id: &str,
+) -> Result<Vec<AgentSessionReplayEvent>, VmError> {
+    let Some(log) = active_event_log() else {
+        return Ok(Vec::new());
+    };
+    load_agent_session_replay_events_from_log(log.as_ref(), session_id).await
+}
+
+pub async fn load_agent_session_replay_events_from_log(
+    log: &AnyEventLog,
+    session_id: &str,
+) -> Result<Vec<AgentSessionReplayEvent>, VmError> {
+    let topic = Topic::new(format!(
+        "observability.agent_events.{}",
+        sanitize_topic_component(session_id)
+    ))
+    .map_err(|error| VmError::Runtime(format!("failed to build agent event topic: {error}")))?;
+
+    let mut events = Vec::new();
+    let mut from = None;
+    loop {
+        let batch = log.read_range(&topic, from, 1024).await.map_err(|error| {
+            VmError::Runtime(format!(
+                "failed to read agent event replay topic {}: {error}",
+                topic.as_str()
+            ))
+        })?;
+        let batch_len = batch.len();
+        for (event_id, record) in batch {
+            from = Some(event_id);
+            if record.headers.get("session_id").map(String::as_str) != Some(session_id) {
+                continue;
+            }
+            let Some(event_value) = record.payload.get("event").cloned() else {
+                continue;
+            };
+            let event = serde_json::from_value::<AgentEvent>(event_value).map_err(|error| {
+                VmError::Runtime(format!(
+                    "failed to decode agent event replay record {event_id}: {error}"
+                ))
+            })?;
+            if event.session_id() == session_id {
+                events.push(AgentSessionReplayEvent {
+                    event_id,
+                    kind: record.kind,
+                    occurred_at_ms: record.occurred_at_ms,
+                    event,
+                });
+            }
+        }
+        if batch_len < 1024 {
+            break;
+        }
+    }
+    Ok(events)
+}
+
+pub(super) fn merge_hitl_questions_from_active_log(run: &mut RunRecord) {
+    let Some(log) = active_event_log() else {
+        return;
+    };
+    let topic = Topic::new(crate::HITL_QUESTIONS_TOPIC)
+        .expect("static hitl.questions topic should always be valid");
+    let mut merged = run
+        .hitl_questions
+        .iter()
+        .cloned()
+        .map(|question| (question.request_id.clone(), question))
+        .collect::<BTreeMap<_, _>>();
+
+    for (_, event) in read_topic_records(log.as_ref(), &topic) {
+        if event.kind != "hitl.question_asked" {
+            continue;
+        }
+        let payload = &event.payload;
+        let matches_run = event
+            .headers
+            .get("run_id")
+            .is_some_and(|value| value == &run.id)
+            || payload
+                .get("run_id")
+                .and_then(|value| value.as_str())
+                .is_some_and(|value| value == run.id);
+        if !matches_run {
+            continue;
+        }
+        let request_id = payload
+            .get("request_id")
+            .and_then(|value| value.as_str())
+            .or_else(|| event.headers.get("request_id").map(String::as_str))
+            .unwrap_or_default();
+        let prompt = payload
+            .get("payload")
+            .and_then(|value| value.get("prompt"))
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        if request_id.is_empty() || prompt.is_empty() {
+            continue;
+        }
+        merged.insert(
+            request_id.to_string(),
+            RunHitlQuestionRecord {
+                request_id: request_id.to_string(),
+                prompt: prompt.to_string(),
+                agent: payload
+                    .get("agent")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                trace_id: payload
+                    .get("trace_id")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string),
+                asked_at: payload
+                    .get("requested_at")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+            },
+        );
+    }
+
+    run.hitl_questions = merged.into_values().collect();
+    run.hitl_questions.sort_by(|left, right| {
+        (left.asked_at.as_str(), left.request_id.as_str())
+            .cmp(&(right.asked_at.as_str(), right.request_id.as_str()))
+    });
+}
+
+pub(super) fn signature_status_label(status: &SignatureStatus) -> &'static str {
+    match status {
+        SignatureStatus::Verified => "verified",
+        SignatureStatus::Unsigned => "unsigned",
+        SignatureStatus::Failed { .. } => "failed",
+    }
+}
+
+pub(super) fn trigger_event_from_run(run: &RunRecord) -> Option<TriggerEvent> {
+    run.metadata
+        .get("trigger_event")
+        .cloned()
+        .and_then(|value| serde_json::from_value(value).ok())
+}
+
+pub(super) fn run_trace_id(
+    run: &RunRecord,
+    trigger_event: Option<&TriggerEvent>,
+) -> Option<String> {
+    trigger_event
+        .map(|event| event.trace_id.0.clone())
+        .or_else(|| {
+            run.metadata
+                .get("trace_id")
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        })
+}
+
+pub(super) fn replay_of_event_id_from_run(run: &RunRecord) -> Option<String> {
+    run.metadata
+        .get("replay_of_event_id")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+}
+
+pub(super) fn llm_transcript_sidecar_path(run_path: &Path) -> Option<PathBuf> {
+    let stem = run_path.file_stem()?.to_str()?;
+    let parent = run_path.parent().unwrap_or_else(|| Path::new("."));
+    Some(parent.join(format!("{stem}-llm/llm_transcript.jsonl")))
+}
+
+pub(super) fn compaction_events_from_transcript(
+    transcript: &serde_json::Value,
+    stage_id: Option<&str>,
+    node_id: Option<&str>,
+    location_prefix: &str,
+    persisted_path: Option<&Path>,
+) -> Vec<CompactionEventRecord> {
+    use std::collections::BTreeSet;
+    let transcript_id = transcript
+        .get("id")
+        .and_then(|value| value.as_str())
+        .map(str::to_string);
+    let asset_ids = transcript
+        .get("assets")
+        .and_then(|value| value.as_array())
+        .map(|assets| {
+            assets
+                .iter()
+                .filter_map(|asset| {
+                    asset
+                        .get("id")
+                        .and_then(|value| value.as_str())
+                        .map(str::to_string)
+                })
+                .collect::<BTreeSet<_>>()
+        })
+        .unwrap_or_default();
+    transcript
+        .get("events")
+        .and_then(|value| value.as_array())
+        .map(|events| {
+            events
+                .iter()
+                .filter(|event| {
+                    event.get("kind").and_then(|value| value.as_str()) == Some("compaction")
+                })
+                .map(|event| {
+                    let event_id = event
+                        .get("id")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    compaction_event_record(
+                        event_id,
+                        event.get("metadata"),
+                        transcript_id.clone(),
+                        stage_id,
+                        node_id,
+                        location_prefix,
+                        persisted_path,
+                        &asset_ids,
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Read a compaction event's flat metadata string field, defaulting to empty.
+fn flat_meta_str(metadata: Option<&serde_json::Value>, key: &str) -> String {
+    metadata
+        .and_then(|value| value.get(key))
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// Project one transcript `compaction` event into a [`CompactionEventRecord`].
+///
+/// Prefers the canonical [`CompactionReceipt`] embedded under `metadata.receipt`
+/// (deserialized typed, not scraped key-by-key); when it is absent — a legacy
+/// transcript written before receipts existed — it falls back to reconstructing
+/// the record from the flat event metadata and marks the record
+/// `schema_version: 0` as the explicit migration signal (harn#4995).
+#[allow(clippy::too_many_arguments)]
+fn compaction_event_record(
+    event_id: String,
+    metadata: Option<&serde_json::Value>,
+    transcript_id: Option<String>,
+    stage_id: Option<&str>,
+    node_id: Option<&str>,
+    location_prefix: &str,
+    persisted_path: Option<&Path>,
+    asset_ids: &std::collections::BTreeSet<String>,
+) -> CompactionEventRecord {
+    let receipt = CompactionReceipt::from_event_metadata(metadata);
+    // Snapshot provenance is a persistence concern (it needs the transcript's
+    // asset set and persisted path), so it is computed here in both paths from
+    // whichever snapshot id is available.
+    let snapshot_asset_id = receipt
+        .as_ref()
+        .and_then(|receipt| receipt.snapshot_asset_id.clone())
+        .or_else(|| {
+            metadata
+                .and_then(|value| value.get("snapshot_asset_id"))
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        });
+    let available = snapshot_asset_id
+        .as_ref()
+        .is_some_and(|asset_id| asset_ids.contains(asset_id));
+    let snapshot_location = snapshot_asset_id
+        .as_ref()
+        .map(|asset_id| format!("{location_prefix}.assets[{asset_id}]"))
+        .unwrap_or_else(|| location_prefix.to_string());
+    let snapshot_path = persisted_path.map(|path| path.to_string_lossy().into_owned());
+    let stage_id = stage_id.map(str::to_string);
+    let node_id = node_id.map(str::to_string);
+
+    if let Some(receipt) = receipt {
+        // Prefer the on-disk event id (it is the receipt id), falling back to the
+        // receipt's own id so identity is never lost.
+        let id = if event_id.is_empty() {
+            receipt.receipt_id
+        } else {
+            event_id
+        };
+        return CompactionEventRecord {
+            schema_version: receipt.schema_version,
+            id,
+            transcript_id,
+            stage_id,
+            node_id,
+            mode: receipt.mode,
+            reason: receipt.reason,
+            strategy: receipt.strategy,
+            archived_messages: receipt.archived_messages,
+            estimated_tokens_before: receipt.estimated_tokens_before,
+            estimated_tokens_after: receipt.estimated_tokens_after,
+            snapshot_asset_id,
+            snapshot_location,
+            snapshot_path,
+            available,
+            instruction_mode: receipt.instruction_mode.unwrap_or_default(),
+            instruction_source: receipt.instruction_source,
+            compaction_policy: receipt.compaction_policy,
+            recap: receipt.recap,
+        };
+    }
+
+    CompactionEventRecord {
+        schema_version: 0,
+        id: event_id,
+        transcript_id,
+        stage_id,
+        node_id,
+        mode: flat_meta_str(metadata, "mode"),
+        reason: flat_meta_str(metadata, "reason"),
+        strategy: flat_meta_str(metadata, "strategy"),
+        archived_messages: json_usize(metadata.and_then(|value| value.get("archived_messages"))),
+        estimated_tokens_before: json_usize(
+            metadata.and_then(|value| value.get("estimated_tokens_before")),
+        ),
+        estimated_tokens_after: json_usize(
+            metadata.and_then(|value| value.get("estimated_tokens_after")),
+        ),
+        snapshot_asset_id,
+        snapshot_location,
+        snapshot_path,
+        available,
+        instruction_mode: flat_meta_str(metadata, "instruction_mode"),
+        instruction_source: metadata
+            .and_then(|value| value.get("instruction_source"))
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        compaction_policy: metadata
+            .and_then(|value| value.get("compaction_policy"))
+            .cloned(),
+        recap: metadata
+            .and_then(|value| value.get("recap"))
+            .and_then(|value| serde_json::from_value::<RecapMetrics>(value.clone()).ok()),
+    }
+}
+
+pub(super) fn daemon_events_from_sidecar(run_path: &Path) -> Vec<DaemonEventRecord> {
+    let Some(sidecar_path) = llm_transcript_sidecar_path(run_path) else {
+        return Vec::new();
+    };
+    let Ok(content) = std::fs::read_to_string(sidecar_path) else {
+        return Vec::new();
+    };
+
+    content
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|event| event.get("type").and_then(|value| value.as_str()) == Some("daemon_event"))
+        .filter_map(|event| serde_json::from_value::<DaemonEventRecord>(event).ok())
+        .collect()
+}
+
+pub fn normalize_run_record(value: &VmValue) -> Result<RunRecord, VmError> {
+    let mut run: RunRecord = parse_json_payload(vm_value_to_json(value), "run_record")?;
+    if run.type_name.is_empty() {
+        run.type_name = "run_record".to_string();
+    }
+    if run.id.is_empty() {
+        run.id = new_id("run");
+    }
+    if run.started_at.is_empty() {
+        run.started_at = now_unix_seconds_text();
+    }
+    if run.status.is_empty() {
+        run.status = "running".to_string();
+    }
+    if run.root_run_id.is_none() {
+        run.root_run_id = Some(run.id.clone());
+    }
+    if run.replay_fixture.is_none() {
+        run.replay_fixture = Some(replay_fixture_from_run(&run));
+    }
+    merge_hitl_questions_from_active_log(&mut run);
+    materialize_child_runs_from_stage_metadata(&mut run);
+    sync_run_handoffs(&mut run);
+    if run.observability.is_none() {
+        let persisted_path = run.persisted_path.clone();
+        let persisted = persisted_path.as_deref().map(Path::new);
+        refresh_run_observability(&mut run, persisted);
+    }
+    Ok(run)
+}
+
+pub fn save_run_record(run: &RunRecord, path: Option<&str>) -> Result<String, VmError> {
+    let path = path
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default_run_dir().join(format!("{}.json", run.id)));
+    let mut materialized = run.clone();
+    merge_hitl_questions_from_active_log(&mut materialized);
+    materialize_child_runs_from_stage_metadata(&mut materialized);
+    if materialized.replay_fixture.is_none() {
+        materialized.replay_fixture = Some(replay_fixture_from_run(&materialized));
+    }
+    materialized.persisted_path = Some(path.to_string_lossy().into_owned());
+    sync_run_handoffs(&mut materialized);
+    refresh_run_observability(&mut materialized, Some(&path));
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| VmError::Runtime(format!("failed to create run directory: {e}")))?;
+    }
+    let mut json_value = serde_json::to_value(&materialized)
+        .map_err(|e| VmError::Runtime(format!("failed to encode run record: {e}")))?;
+    crate::redact::current_policy().redact_json_in_place(&mut json_value);
+    let json = serde_json::to_string_pretty(&json_value)
+        .map_err(|e| VmError::Runtime(format!("failed to encode run record: {e}")))?;
+    crate::atomic_io::atomic_write(&path, json.as_bytes())
+        .map_err(|e| VmError::Runtime(format!("failed to persist run record: {e}")))?;
+    if let Some(observability) = materialized.observability.as_ref() {
+        publish_action_graph_event(&materialized, observability, &path);
+    }
+    Ok(path.to_string_lossy().into_owned())
+}
+
+pub fn load_run_record(path: &Path) -> Result<RunRecord, VmError> {
+    let (mut run, _) = load_run_record_snapshot(path)?;
+    refresh_run_observability(&mut run, Some(path));
+    Ok(run)
+}
+
+/// Load one immutable persisted snapshot without consulting derived sidecars.
+///
+/// Auditors use this path so parsing and source hashing refer to the same bytes
+/// and a sidecar symlink cannot widen the caller's read authority. Interactive
+/// consumers should keep using [`load_run_record`], which enriches the snapshot
+/// with current transcript-derived observability.
+pub(super) fn load_run_record_snapshot(path: &Path) -> Result<(RunRecord, Vec<u8>), VmError> {
+    let content = std::fs::read(path)
+        .map_err(|e| VmError::Runtime(format!("failed to read run record: {e}")))?;
+    let mut run: RunRecord = serde_json::from_slice(&content)
+        .map_err(|e| VmError::Runtime(format!("failed to parse run record: {e}")))?;
+    materialize_child_runs_from_stage_metadata(&mut run);
+    if run.replay_fixture.is_none() {
+        run.replay_fixture = Some(replay_fixture_from_run(&run));
+    }
+    run.persisted_path
+        .get_or_insert_with(|| path.to_string_lossy().into_owned());
+    sync_run_handoffs(&mut run);
+    Ok((run, content))
+}
+
+#[cfg(test)]
+mod compaction_projection_tests {
+    use super::*;
+
+    #[test]
+    fn projects_embedded_compaction_receipt_typed() {
+        // A transcript written by the unified path embeds the canonical receipt
+        // under `metadata.receipt`; the record is projected from it (typed), so
+        // reason, recap, policy, and the shared id all survive (harn#4995).
+        let transcript = serde_json::json!({
+            "_type": "transcript",
+            "id": "session-x",
+            "events": [{
+                "id": "compaction-shared-id",
+                "kind": "compaction",
+                "metadata": {
+                    // Flat sibling fields coexist, but the receipt is authoritative.
+                    "mode": "auto",
+                    "strategy": "hybrid",
+                    "receipt": {
+                        "schema_version": 1,
+                        "receipt_id": "compaction-shared-id",
+                        "mode": "auto",
+                        "reason": "threshold",
+                        "strategy": "hybrid",
+                        "engine_strategy": "observation_mask",
+                        "archived_messages": 5,
+                        "estimated_tokens_before": 900,
+                        "estimated_tokens_after": 300,
+                        "snapshot_asset_id": "snap-1",
+                        "instruction_mode": "extend",
+                        "instruction_source": "host",
+                        "compaction_policy": {"scope": "summary"},
+                        "recap": {
+                            "recap_bytes": 128,
+                            "budget_bytes": 16000,
+                            "kept_results_count": 2,
+                            "dropped_count": 1,
+                            "carried_prior_recap": true
+                        }
+                    }
+                }
+            }],
+            "assets": [{"id": "snap-1", "kind": "compaction_source_transcript"}]
+        });
+
+        let events =
+            compaction_events_from_transcript(&transcript, None, None, "run.transcript", None);
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+        // The record id is the shared receipt id, equal to the transcript event id.
+        assert_eq!(event.id, "compaction-shared-id");
+        assert_eq!(event.schema_version, 1);
+        assert_eq!(event.mode, "auto");
+        assert_eq!(event.reason, "threshold");
+        assert_eq!(event.strategy, "hybrid");
+        assert_eq!(event.estimated_tokens_after, 300);
+        assert_eq!(event.snapshot_asset_id.as_deref(), Some("snap-1"));
+        assert!(event.available);
+        assert_eq!(event.snapshot_location, "run.transcript.assets[snap-1]");
+        assert_eq!(event.instruction_mode, "extend");
+        assert_eq!(event.instruction_source.as_deref(), Some("host"));
+        assert_eq!(
+            event.compaction_policy,
+            Some(serde_json::json!({"scope": "summary"}))
+        );
+        let recap = event.recap.expect("recap survives projection");
+        assert_eq!(recap.recap_bytes, 128);
+        assert_eq!(recap.kept_results_count, 2);
+        assert!(recap.carried_prior_recap);
+    }
+
+    #[test]
+    fn migrates_legacy_transcript_without_embedded_receipt() {
+        // A transcript written before receipts existed carries only flat
+        // metadata. It must still project — reason/recap default and the record
+        // is marked `schema_version: 0` as the explicit migration signal.
+        let transcript = serde_json::json!({
+            "_type": "transcript",
+            "id": "session-legacy",
+            "events": [{
+                "id": "compaction-legacy",
+                "kind": "compaction",
+                "metadata": {
+                    "mode": "manual",
+                    "strategy": "truncate",
+                    "archived_messages": 3,
+                    "estimated_tokens_before": 120,
+                    "estimated_tokens_after": 48,
+                    "snapshot_asset_id": "snap-legacy"
+                }
+            }],
+            "assets": [{"id": "snap-legacy", "kind": "compaction_source_transcript"}]
+        });
+
+        let events =
+            compaction_events_from_transcript(&transcript, None, None, "run.transcript", None);
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+        assert_eq!(event.id, "compaction-legacy");
+        assert_eq!(event.schema_version, 0);
+        assert_eq!(event.mode, "manual");
+        assert_eq!(event.reason, "");
+        assert_eq!(event.strategy, "truncate");
+        assert_eq!(event.archived_messages, 3);
+        assert!(event.available);
+        assert!(event.recap.is_none());
+    }
+
+    #[test]
+    fn marks_unavailable_snapshot_from_receipt() {
+        // Manual compaction whose receipt names a snapshot asset that is not
+        // present on the transcript: the record still projects, snapshot
+        // provenance is recorded, and `available` is false.
+        let transcript = serde_json::json!({
+            "_type": "transcript",
+            "id": "session-y",
+            "events": [{
+                "id": "compaction-nosnap",
+                "kind": "compaction",
+                "metadata": {"receipt": {
+                    "schema_version": 1,
+                    "receipt_id": "compaction-nosnap",
+                    "mode": "manual",
+                    "reason": "manual",
+                    "strategy": "truncate",
+                    "engine_strategy": "truncate",
+                    "archived_messages": 2,
+                    "estimated_tokens_before": 100,
+                    "estimated_tokens_after": 50,
+                    "snapshot_asset_id": "missing-asset"
+                }}
+            }],
+            "assets": []
+        });
+
+        let events =
+            compaction_events_from_transcript(&transcript, None, None, "run.transcript", None);
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+        assert_eq!(event.id, "compaction-nosnap");
+        assert_eq!(event.mode, "manual");
+        assert_eq!(event.reason, "manual");
+        assert_eq!(event.snapshot_asset_id.as_deref(), Some("missing-asset"));
+        assert!(!event.available);
+        assert_eq!(
+            event.snapshot_location,
+            "run.transcript.assets[missing-asset]"
+        );
+        assert!(event.recap.is_none());
+    }
+}

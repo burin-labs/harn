@@ -1,0 +1,79 @@
+/**
+ * Fill-nil pack precedence (item 3): per-kind route packs normalize the
+ * provider into each model step; other defaults fill only absent keys and never
+ * override explicit caller input. This is the data-over-code default layer —
+ * defaults are data rows one lower-priority seam under the caller.
+ */
+import { agent_preset, agent_preset_register } from "std/agent/presets"
+
+pipeline default(harness: Harness) {
+  // Pack fills absent keys.
+  const filled = agent_preset(harness, "audit")
+  harness.stdio.println(filled?.provider == nil)
+  harness.stdio.println(filled.models[0].provider)
+  harness.stdio.println(filled.timeout_ms)
+  harness.stdio.println(filled.budget.total_budget_usd == 5.0)
+  harness.stdio.println(len(filled.models) > 0)
+  // Caller input wins over the pack at every key.
+  const overridden = agent_preset(
+    harness,
+    "audit",
+    {
+      timeout_ms: 42,
+      budget: {total_budget_usd: 9.5},
+      models: [{provider: "mock", model: "only-mine"}],
+    },
+  )
+  harness.stdio.println(overridden?.provider == nil)
+  harness.stdio.println(overridden.timeout_ms)
+  harness.stdio.println(overridden.budget.total_budget_usd == 9.5)
+  harness.stdio.println(overridden.models[0].provider)
+  harness.stdio.println(overridden.models[0].model)
+  // A different kind pulls its own (cheaper) pack.
+  const summary = agent_preset(harness, "summary")
+  harness.stdio.println(summary?.provider == nil)
+  harness.stdio.println(summary.models[0].provider)
+  harness.stdio.println(summary.timeout_ms)
+  // Routing is an ownership group: a local/configured route must not inherit a
+  // conflicting preset provider or model ladder from the role pack.
+  const provider_only = agent_preset(harness, "audit", {provider: "llamacpp"})
+  harness.stdio.println(provider_only.provider)
+  harness.stdio.println(provider_only?.models == nil)
+  const configured_pair = agent_preset(
+    harness,
+    "audit",
+    {provider: "llamacpp", model: "gemma4-local"},
+  )
+  harness.stdio.println(configured_pair.provider)
+  harness.stdio.println(configured_pair.model)
+  harness.stdio.println(configured_pair?.models == nil)
+  const nested_route = agent_preset(
+    harness,
+    "audit",
+    {llm_options: {provider: "llamacpp", model: "gemma4-local"}},
+  )
+  harness.stdio.println(nested_route?.provider == nil)
+  harness.stdio.println(nested_route?.models == nil)
+  // User-defined route pack rows move as the same group.
+  agent_preset_register(
+    "route_pack",
+    {
+      pack: {
+        fallback_chain: ["frontier"],
+        provider: "anthropic",
+        models: ["claude-opus-4-8"],
+        timeout_ms: 11,
+      },
+    },
+  )
+  const defaulted_route_pack = agent_preset(harness, "route_pack")
+  harness.stdio.println(defaulted_route_pack?.provider == nil)
+  harness.stdio.println(defaulted_route_pack.fallback_chain[0])
+  harness.stdio.println(defaulted_route_pack.models[0].provider)
+  harness.stdio.println(defaulted_route_pack.models[0].model)
+  const local_route_pack = agent_preset(harness, "route_pack", {provider: "llamacpp"})
+  harness.stdio.println(local_route_pack.provider)
+  harness.stdio.println(local_route_pack?.fallback_chain == nil)
+  harness.stdio.println(local_route_pack?.models == nil)
+  harness.stdio.println(local_route_pack.timeout_ms)
+}

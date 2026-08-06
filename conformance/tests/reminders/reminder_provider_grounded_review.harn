@@ -1,0 +1,89 @@
+import { agent_reminder_providers_fire } from "std/agent/state"
+
+pipeline main(harness: Harness) {
+  const opts = {
+    reminders: {
+      providers: [
+        "-token_pressure",
+        "-idle_nudge",
+        "-tool_output_truncated",
+        "-post_compact_recap",
+        "-resume_continuity",
+        "-project_facts",
+        "-workspace_anchor",
+      ],
+    },
+  }
+  const session = harness.agent.open("reminder-provider-grounded-review")
+  harness.agent.reset(session)
+  const report = agent_reminder_providers_fire(
+    harness.agent,
+    session,
+    "post_tool_use",
+    {
+      session: {id: session},
+      iteration: 3,
+      tool_name: "exec_command",
+      tool: {name: "exec_command", args: {cmd: "cargo check -p demo"}},
+      result: {
+        text: "error[E0425]: cannot find value `missing` in this scope\n --> src/lib.rs:2:5\n",
+      },
+    },
+    opts,
+  )
+  const reminders = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
+  const reminder = reminders[0].reminder
+  harness.stdio.println(report.fired_count)
+  harness.stdio.println(report.reports[0].provider)
+  harness.stdio.println(reminder.tags[0])
+  harness.stdio.println(reminder.tags[1])
+  harness.stdio.println(reminder.ttl_turns)
+  harness.stdio.println(reminder.role_hint)
+  harness.stdio.println(reminder.propagate)
+  harness.stdio.println(contains(reminder.body, "verified:typecheck"))
+  harness.stdio.println(contains(reminder.body, "cannot find value `missing`"))
+  harness.stdio.println(contains(reminder.body, "command=cargo check -p demo"))
+  const verifier_session = harness.agent.open("reminder-provider-grounded-review-verifier")
+  harness.agent.reset(verifier_session)
+  const verifier = agent_reminder_providers_fire(
+    harness.agent,
+    verifier_session,
+    "post_agent_turn",
+    {
+      session: {id: verifier_session},
+      verifier_signals: [
+        {
+          name: "lint gate",
+          kind: "lint",
+          signal: "refine",
+          reason: "lint: forbidden pattern matched: unwrap()",
+        },
+        {name: "typecheck", kind: "typecheck", signal: "accept"},
+      ],
+    },
+    opts,
+  )
+  const verifier_reminder = transcript_events_by_kind(
+    harness.agent.snapshot(verifier_session),
+    "system_reminder",
+  )[0].reminder
+  harness.stdio.println(verifier.fired_count)
+  harness.stdio.println(contains(verifier_reminder.body, "verified:verifier:lint"))
+  harness.stdio.println(contains(verifier_reminder.body, "forbidden pattern matched"))
+  harness.stdio.println(contains(verifier_reminder.body, "typecheck verifier returned accept"))
+  const clean_session = harness.agent.open("reminder-provider-grounded-review-clean")
+  harness.agent.reset(clean_session)
+  const clean = agent_reminder_providers_fire(
+    harness.agent,
+    clean_session,
+    "post_tool_use",
+    {
+      session: {id: clean_session},
+      tool_name: "exec_command",
+      tool: {name: "exec_command", args: {cmd: "cargo test -p demo"}},
+      result: {text: "test result: ok. 12 passed; 0 failed\n"},
+    },
+    opts,
+  )
+  harness.stdio.println(clean.fired_count)
+}

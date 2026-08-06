@@ -1,0 +1,337 @@
+// std/diff - line diff, unified diff, and colored diff renderers.
+import { ansi_dim, ansi_error, ansi_info, ansi_success } from "std/ansi"
+import { render_table } from "std/table"
+
+pub type DiffOptions = {
+  path?: string,
+  from_label?: string,
+  to_label?: string,
+  context?: int,
+  color?: bool,
+  color_mode?: "auto" | "always" | "never",
+}
+
+pub type DiffLineKind = "equal" | "delete" | "insert"
+
+pub type DiffLineOp = {kind: DiffLineKind, line: string, old_line: int, new_line: int}
+
+pub type DiffLines = {
+  changed: bool,
+  insertions: int,
+  deletions: int,
+  old_lines: int,
+  new_lines: int,
+  ops: list<DiffLineOp>,
+}
+
+pub type DiffSummary = {
+  changed: bool,
+  insertions: int,
+  deletions: int,
+  old_lines: int,
+  new_lines: int,
+}
+
+pub type DiffArtifact = {
+  changed: bool,
+  insertions: int,
+  deletions: int,
+  old_lines: int,
+  new_lines: int,
+  diff: string,
+}
+
+pub type ChangesetFileImage = {path: string, before?: string, after?: string}
+
+pub type ChangesetFileSummary = {
+  path: string,
+  classification: "structural" | "reshaped_only" | "unchanged" | "degraded",
+  language?: string,
+  reason?: string,
+}
+
+pub type ChangesetSymbolFact = {
+  name: string,
+  kind: string,
+  path: string,
+  line: int,
+  signature: string,
+  container?: string,
+  access_level?: string,
+  exported?: bool,
+}
+
+pub type ChangesetSymbolChange = {
+  kind: "added" | "removed" | "moved" | "renamed" | "signature_changed",
+  before?: ChangesetSymbolFact,
+  after?: ChangesetSymbolFact,
+}
+
+pub type ChangesetCaller = {path: string, line: int, signature: string}
+
+pub type ChangesetCandidateCallers = {
+  symbol_name: string,
+  relation: "CALLS",
+  match_kind: "name_matched_call",
+  precision: "heuristic",
+  callers: list<ChangesetCaller>,
+}
+
+pub type ChangesetCounts = {
+  files_structural: int,
+  files_reshaped_only: int,
+  files_unchanged: int,
+  files_degraded: int,
+  symbols_added: int,
+  symbols_removed: int,
+  symbols_moved: int,
+  symbols_renamed: int,
+  signatures_changed: int,
+  exported_signatures_changed: int,
+}
+
+pub type ChangesetWarning = {path: string, reason: string}
+
+pub type ChangesetSummary = {
+  schema: "harn.review_changeset.v1",
+  status: "complete" | "degraded",
+  files: list<ChangesetFileSummary>,
+  changes: list<ChangesetSymbolChange>,
+  candidate_callers: list<ChangesetCandidateCallers>,
+  counts: ChangesetCounts,
+  warnings: list<ChangesetWarning>,
+}
+
+fn __diff_label(prefix, path, fallback) {
+  if path == nil || trim(path) == "" {
+    return fallback
+  }
+  return prefix + path
+}
+
+fn __diff_color_line(line, options) {
+  if !(options?.color ?? false) {
+    return line
+  }
+  const color_opts = {mode: options?.color_mode ?? "always"}
+  if starts_with(line, "@@") {
+    return ansi_info(line, color_opts)
+  }
+  if starts_with(line, "+++") || starts_with(line, "---") || starts_with(line, "diff ")
+    || starts_with(
+    line,
+    "index ",
+  ) {
+    return ansi_dim(line, color_opts)
+  }
+  if starts_with(line, "+") {
+    return ansi_success(line, color_opts)
+  }
+  if starts_with(line, "-") {
+    return ansi_error(line, color_opts)
+  }
+  return line
+}
+
+/**
+ * Return a structured line diff `{changed, insertions, deletions, ops}`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn diff_lines(before: string, after: string) -> DiffLines {
+  const result = __diff_line_artifact(before, after, {include_body: false, include_ops: true})
+  return {
+    changed: result.changed,
+    insertions: result.insertions,
+    deletions: result.deletions,
+    old_lines: result.old_lines,
+    new_lines: result.new_lines,
+    ops: result.ops,
+  }
+}
+
+fn __diff_without_final_newline(text) -> string {
+  const value = text ?? ""
+  if value.ends_with("\n") {
+    return value.substring(0, len(value) - 1)
+  }
+  return value
+}
+
+fn __render_unified_diff(body, changed, options) -> string {
+  const opts = options ?? {}
+  const path = opts.path
+  const old_label = opts.from_label ?? __diff_label("a/", path, "before")
+  const new_label = opts.to_label ?? __diff_label("b/", path, "after")
+  if !changed {
+    return ""
+  }
+  const lines = ["--- " + old_label, "+++ " + new_label]
+    + split(
+    __diff_without_final_newline(body),
+    "\n",
+  )
+  return join(lines.map({ line -> __diff_color_line(line, opts) }), "\n")
+}
+
+/**
+ * Compute line-change counts and a unified diff in one pass.
+ *
+ * Use this when a caller needs both forms. It avoids constructing the
+ * line-diff graph twice for the same inputs.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn diff_artifact(before: string, after: string, options: DiffOptions = {}) -> DiffArtifact {
+  const opts = options ?? {}
+  const result = __diff_line_artifact(
+    before,
+    after,
+    {context: opts.context, include_body: true, include_ops: false},
+  )
+  return {
+    changed: result.changed,
+    insertions: result.insertions,
+    deletions: result.deletions,
+    old_lines: result.old_lines,
+    new_lines: result.new_lines,
+    diff: __render_unified_diff(result.body, result.changed, opts),
+  }
+}
+
+/**
+ * Render a unified diff for two text values.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn unified_diff(before: string, after: string, options: DiffOptions = {}) -> string {
+  return diff_artifact(before, after, options).diff
+}
+
+/**
+ * Apply ANSI coloring to an existing unified diff.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn colorize_diff(diff_text: string, options: DiffOptions = {}) -> string {
+  const base = options ?? {}
+  const opts = base + {color: true}
+  return join(split(diff_text ?? "", "\n").map({ line -> __diff_color_line(line, opts) }), "\n")
+}
+
+/**
+ * Return a compact stat dict for two text values.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn diff_summary(before: string, after: string) -> DiffSummary {
+  const result = __diff_line_artifact(before, after, {include_body: false, include_ops: false})
+  return {
+    changed: result.changed,
+    insertions: result.insertions,
+    deletions: result.deletions,
+    old_lines: result.old_lines,
+    new_lines: result.new_lines,
+  }
+}
+
+/**
+ * Compare two source files with tree-sitter and return changed syntax-node
+ * spans. The result is for human review, not patch application: staging and
+ * apply paths should keep using line diffs.
+ *
+ * `options` may be a language string (`"rust"`) or a dict with `language`,
+ * `max_bytes`, `max_nodes`, and `max_graph_edges`. If parsing fails or a limit
+ * is exceeded, the host returns `result: "fallback"` with `mode: "line"` and
+ * a `line_diff` payload instead of throwing.
+ *
+ * @effects: [host]
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: structural_diff("before.rs", "after.rs", "rust")
+ */
+pub fn structural_diff(ast: HarnessAst, path_a: string, path_b: string, options = nil) -> dict {
+  const opts = if type_of(options) == "string" {
+    {language: options}
+  } else {
+    options ?? {}
+  }
+  const payload = ast.structural_diff((opts ?? {}).merging({path_a: path_a, path_b: path_b}))
+    ?? {}
+  return payload.merging(
+    {
+      ok: (payload?.result ?? "") == "ok" || (payload?.result ?? "") == "fallback",
+      structural: (payload?.mode ?? "") == "structural",
+      provenance: {module: "std/diff", helper: "structural_diff"},
+    },
+  )
+}
+
+/**
+ * Summarize explicit before/after file images as a symbol-level changeset.
+ *
+ * Each file is `{path, before?, after?}`. The host applies the shared
+ * tree-sitter language catalog and returns `harn.review_changeset.v1`,
+ * including structural versus reshaped-only files, named symbol changes,
+ * and name-matched candidate `CALLS` relations explicitly labeled heuristic
+ * when an index is available. Unsupported or unparseable files remain visible
+ * as degraded entries.
+ *
+ * @effects: [host]
+ * @errors: [backend]
+ * @api_stability: experimental
+ * @example: changeset_summary(harness.ast, [{path: "src/lib.rs", before: old, after: next}])
+ */
+pub fn changeset_summary(ast: HarnessAst, files: list<ChangesetFileImage>) -> ChangesetSummary {
+  const summary = ast.changeset_summary({files: files})
+  return {
+    schema: summary.schema,
+    status: summary.status,
+    files: summary.files,
+    changes: summary.changes,
+    candidate_callers: summary.candidate_callers,
+    counts: summary.counts,
+    warnings: summary.warnings,
+  }
+}
+
+/**
+ * Render per-file diff stats from entries with `{path, before, after}` or stat fields.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn render_diff_stat(entries: list, options = {}) -> string {
+  let rows = []
+  for entry in entries ?? [] {
+    const stat = if entry?.before != nil || entry?.after != nil {
+      diff_summary(entry?.before ?? "", entry?.after ?? "")
+    } else {
+      entry
+    }
+    rows = rows.appending(
+      {
+        path: entry?.path ?? entry?.file ?? "(text)",
+        insertions: stat?.insertions ?? 0,
+        deletions: stat?.deletions ?? 0,
+      },
+    )
+  }
+  return render_table(
+    rows,
+    {
+      columns: [
+        {key: "path", header: "Path"},
+        {key: "insertions", header: "+", align: "right"},
+        {key: "deletions", header: "-", align: "right"},
+      ],
+      format: options?.format ?? "plain",
+      empty: options?.empty ?? "",
+    },
+  )
+}

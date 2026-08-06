@@ -1,0 +1,411 @@
+# ---------- Local / Ollama ----------------------------------------------------
+#
+# Local providers don't advertise native tool_search or prompt caching.
+# Native-tools coverage depends on the specific model. Qwen 3 / 3.5
+# packages on Ollama expose native tool calling and thinking on the
+# official docs + model pages. Qwen 3.6 adds `preserve_thinking` which
+# Alibaba recommends for multi-turn agentic / coding workflows (the
+# flagship use case we're building for) — keep it on by default.
+
+[[provider.ollama]]
+model_match = "llava*"
+vision_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
+[[provider.ollama]]
+model_match = "bakllava*"
+vision_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+# Caption/vision model with no reasoning capability — match the llava sibling and
+# avoid emitting a spurious "## Reasoning" scaffold.
+thinking_block_style = "none"
+
+[[provider.ollama]]
+model_match = "llama3.2-vision*"
+vision_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+# Caption/vision model with no reasoning capability — match the llava sibling.
+thinking_block_style = "none"
+
+[[provider.ollama]]
+model_match = "llama3.2*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "format_kw"
+recommended_endpoint = "/api/chat"
+text_tool_wire_format_supported = false
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
+[[provider.ollama]]
+model_match = "gemma3*"
+vision_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+# Caption/vision model with no reasoning capability — match the llava sibling.
+thinking_block_style = "none"
+
+# The Ollama-published Gemma 4 12B quants are TEXT-ONLY (vision projector dropped
+# in the conversion — verified via `ollama show gemma4:12b-mlx`), unlike the 26b/
+# 31b builds. Keep this ahead of the `gemma4*` family rule (first match wins).
+[[provider.ollama]]
+model_match = "gemma4:12b*"
+vision_supported = false
+# Ollama honors the `format` kwarg for JSON/schema output (same as the ollama
+# qwen rules). Without the transport field, JSON/schema requests were blocked.
+native_tools = false
+preferred_tool_format = "text"
+structured_output = "format_kw"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+# The Ollama gemma4 quant ships thinking-off (no reasoning trace in this build).
+thinking_block_style = "none"
+
+[[provider.ollama]]
+model_match = "gemma4*"
+vision_supported = true
+# Ollama honors the `format` kwarg for JSON/schema output (same as the ollama
+# qwen rules). Without the transport field, JSON/schema requests were blocked.
+native_tools = false
+preferred_tool_format = "text"
+structured_output = "format_kw"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+# The Ollama gemma4 quant ships thinking-off (no reasoning trace in this build).
+thinking_block_style = "none"
+
+[[provider.ollama]]
+model_match = "qwen3.6*"
+native_tools = false
+# No `preferred_tool_format` pin: this text-channel route inherits the GLOBAL
+# default, which is now `json` (fenced-JSON). json is strictly better here than
+# heredoc — the json call opener is a ```tool fence, NOT the reserved
+# <tool_call> token, so json sidesteps the opener-repetition collapse that
+# forced this row onto a non-native text pin (see reserved_tool_call_token
+# below), and json swept a clean 1.0/1.0/1.0 emission-fidelity bench for
+# local-qwen3.6. To pin heredoc instead, set `preferred_tool_format = "text"`.
+# Qwen3.x reserves <tool_call> as a single special token; serving the tagged
+# (heredoc) text format without the wire remap re-exposes the opener-repetition
+# collapse #2978 fixed — which is exactly why the json default is preferred for
+# this route over heredoc text.
+reserved_tool_call_token = true
+structured_output = "format_kw"
+thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+preserve_thinking = true
+server_parser = "none"
+honors_chat_template_kwargs = false
+recommended_endpoint = "/api/chat"
+text_tool_wire_format_supported = true
+thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.ollama]]
+model_match = "qwen3*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "format_kw"
+thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+server_parser = "ollama_qwen3coder"
+honors_chat_template_kwargs = false
+recommended_endpoint = "/api/generate-raw"
+text_tool_wire_format_supported = false
+thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+# llama.cpp / llama-server speaks OpenAI-compat but is a separate provider
+# entry from Ollama. Broader Qwen/Devstral routes remain on the text-tool
+# contract until their exact runtime/model/template combinations are probed.
+[[provider.llamacpp]]
+model_match = "*qwen3.6*"
+native_tools = false
+# Pinned to `json` (fenced-JSON), the GLOBAL text-channel default — same
+# RESOLVED format as the ollama qwen3.6 sibling above. Pinned explicitly rather
+# than left to inherit because the `llamacpp-qwen3.6` alias / catalogued routes
+# trip the catalog invariant that every catalogued model/alias rule set
+# native_tools + preferred_tool_format. json's call opener is a ```tool fence,
+# NOT the reserved <tool_call> token, so it sidesteps the opener-repetition
+# collapse that forced the old heredoc pin (see reserved_tool_call_token below).
+preferred_tool_format = "json"
+structured_output = "native"
+# A single-tool probe must not promote one quant above its family. The 2026-07-17
+# Burin dogfood trace showed constrained native emission omitting required fields
+# from a 13-action edit schema, despite the old Q4 one-tool native smoke. Keep
+# every llama.cpp Qwen3.6 variant on the measurable JSON text channel until a
+# receipted forced-format family sweep proves otherwise.
+tool_mode_parity = "text_only"
+tool_mode_parity_notes = "2026-07-19 #5162 CUDA receipt: freshly restarted ghcr.io/ggml-org/llama.cpp:server-cuda servers used --jinja, --reasoning-format deepseek, --chat-template-kwargs {\"enable_thinking\":false}, -np 1, -fa on, and q8_0 K/V cache. Six coding-agent fixtures were forced through native and JSON text formats with two replicates per format on Q4_K_XL (native 2/12, text 8/12; -ngl 999, -c 65536), Q5_K_XL (native 0/12, text 8/12; -ngl 999, -c 65536), and Q8_0 base (native 2/12, text 8/12; -ngl 35, -c 16384 because the 36.9 GB model does not fit this 32 GiB GPU). All rows reached high classifier confidence; see .harn-runs/coding-agent-bench/latest/tool_mode_parity_overlay.toml and the per-quant receipts. Native remained unreliable across the family, so keep JSON text tooling; server_parser = none."
+# Qwen3.6's tokenizer reserves <tool_call>/</tool_call> as single special
+# tokens; reusing them as text-format delimiters collapses the agent loop into
+# opener repetition. Remap to a non-special wire form (validated: 5/5 vs 0/5).
+# Kept ON alongside native (matching the mlx sibling): the remap guards the
+# text-channel fallback whenever a heredoc `text` pin re-selects the tagged
+# format; native message.tool_calls never touch the reserved token.
+reserved_tool_call_token = true
+thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+preserve_thinking = true
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.llamacpp]]
+model_match = "*qwen3*"
+native_tools = false
+# Pinned to `json` (fenced-JSON), the GLOBAL text-channel default — same as the
+# qwen3.6 rule above (explicit pin keeps the catalog invariant satisfied for any
+# catalogued qwen3 route). json's ```tool fence sidesteps the reserved
+# <tool_call> token and is delimiter-safe vs heredoc. To pin heredoc, set
+# `preferred_tool_format = "text"`.
+preferred_tool_format = "json"
+structured_output = "native"
+# Qwen3 family reserves <tool_call>/</tool_call> as special tokens; see the
+# qwen3.6 rule above. Remapped to a non-special wire delimiter. Kept ON for the
+# heredoc-pin path; json's ```tool fence already avoids the reserved token.
+reserved_tool_call_token = true
+thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.llamacpp]]
+model_match = "*devstral-small-2*"
+native_tools = false
+# Pinned to `json` (fenced-JSON), the GLOBAL text-channel default (explicit pin
+# keeps the catalog invariant satisfied for the catalogued devstral routes).
+# devstral has NO reserved-token constraint, so there was never a structural
+# reason to stay on heredoc; json is delimiter-safe and root-cause-fixes
+# heredoc's `<<EOF` -> `line 0: <<` content leak. To pin heredoc, set
+# `preferred_tool_format = "text"`.
+preferred_tool_format = "json"
+structured_output = "native"
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
+[[provider.ollama]]
+model_match = "devstral-small-2*"
+native_tools = false
+# Pinned to `json` (fenced-JSON), the GLOBAL text-channel default, matching the
+# llamacpp devstral sibling above (explicit pin keeps the catalog invariant
+# satisfied for the catalogued `devstral-small-2:24b` model + aliases). devstral
+# has NO reserved-token constraint, so there was no structural reason to stay on
+# heredoc; json is delimiter-safe and fixes heredoc's `<<EOF` content leak. To
+# pin heredoc, set `preferred_tool_format = "text"`.
+preferred_tool_format = "json"
+structured_output = "format_kw"
+server_parser = "none"
+honors_chat_template_kwargs = false
+recommended_endpoint = "/api/chat"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
+# Local vLLM / SGLang — same story. The capability rules here gate
+# chat_template_kwargs emission in openai_compat; the actual model has
+# to have been launched with the matching --chat-template.
+[[provider.local]]
+model_match = "*qwen3.6*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+preserve_thinking = true
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.local]]
+model_match = "*qwen3*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.local]]
+model_match = "gemma-4*"
+# vLLM / SGLang serve Gemma 4 over the OpenAI-compatible surface, which exposes
+# native function calling + JSON-schema structured output — same as every hosted
+# gemma-4 sibling (gemini/openrouter/together). Without these explicit fields the
+# route silently degraded to text tools. (DISTINCT from the Ollama-native gemma4
+# quant rule, which ships text-only tools.)
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+# Gemma 4 is genuinely multimodal (text+image) on every served surface, so the
+# local OpenAI-compat route exposes vision just like the gemini/openrouter/
+# together siblings (see 50-gemini-gemma.toml). Without this the emitted
+# `capability_tags` drop `vision` for the local route, contradicting the
+# structured caps and the model's real multimodality (harn#3585).
+vision_supported = true
+server_parser = "none"
+honors_chat_template_kwargs = false
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+# Apple Silicon MLX server. Burin's local MLX route is the coding-tuned
+# Qwen3.6-35B-A3B MoE served via `mlx_lm.server` (text MoE, NOT mlx_vlm) — see
+# burin #2717, which retired the never-downloaded dense vision model
+# `unsloth/Qwen3.6-27B-UD-MLX-4bit`. OpenAI-compat; honors the same
+# `chat_template_kwargs.preserve_thinking` knob as vLLM via the HF chat template.
+# These are the SAME weights as the llama.cpp `qwen3.6-35b-a3b` route
+# (shared equivalence_group), so the same tokenizer caveat applies:
+# `reserved_tool_call_token = true` because Qwen3.6 reserves
+# `<tool_call>`/`</tool_call>` as single special tokens — reusing them as
+# heredoc-text delimiters collapses the loop into opener repetition. native is
+# kept to mirror the probe-validated llama.cpp sibling
+# (`qwen3.6-35b-a3b-ud-q4-k-xl`, validated native on 2026-06-05); the MLX
+# runtime profile still requires a `tool_probe` before native is trusted, and if
+# mlx_lm.server's OpenAI tool_calls come back empty the safe pin is fenced-json
+# (`preferred_tool_format = "json"`), matching the generic `*qwen3.6*` routes.
+[[provider.mlx]]
+model_match = "*qwen3.6*"
+native_tools = true
+preferred_tool_format = "native"
+reserved_tool_call_token = true
+structured_output = "native"
+thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+preserve_thinking = true
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.mlx]]
+model_match = "*qwen3*"
+native_tools = true
+preferred_tool_format = "native"
+vision = true
+structured_output = "native"
+thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"

@@ -1,0 +1,15 @@
+threw=true
+category=budget_exceeded
+kind=terminal
+reason=on_budget_terminate
+strategy=terminate
+state_kind=tokens
+state_limit_value=1000.0
+message_passthrough=tokens budget tripped at 150% (1500 of 1000)
+audit_count=1
+audit_kind=budget_exceeded
+audit_strategy=terminate
+audit_consumed_tokens=1500
+ns_has_terminate=true
+ns_has_graceful_exit=true
+ns_has_warn_and_continue=true

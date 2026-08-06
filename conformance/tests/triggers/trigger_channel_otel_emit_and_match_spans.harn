@@ -1,0 +1,64 @@
+import "std/triggers"
+
+/**
+ * CH-06 (#1877): `harness.channels.append(...)` opens a `SpanKind::ChannelEmit`
+ * span and `transcript.channel.emit` event. When the emit fans out to a
+ * matching trigger binding, the dispatcher opens a `SpanKind::ChannelMatch`
+ * span that links back to the originating ChannelEmit span via
+ * `set_span_link` (P-05 / #1858), and emits a `transcript.channel.match`
+ * event on the `transcript.channel.lifecycle` topic.
+ */
+fn handle_event(harness: Harness, event) {
+  harness.channels.append("ch.otel.fired", {repo: event.provider_payload.payload?.repo})
+}
+
+pipeline default(harness: Harness) {
+  harness.obs.enable_tracing(true)
+  const stream = harness.obs.event_log_subscribe({topic: "transcript.channel.lifecycle"})
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(
+    harness.random.range(100000, 999999),
+  )
+  const _ = harness.runtime.trigger_register(
+    {
+      id: "channel-otel-" + unique,
+      kind: "channel.emit",
+      provider: "channel",
+      autonomy_tier: "act_auto",
+      handler: handle_event,
+      when: nil,
+      retry: nil,
+      match: {events: ["channel:ch.otel.input"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  const _ = harness.channels.append("ch.otel.input", {repo: "harn"})
+  // Drain the lifecycle topic: emit -> match -> nested emit on
+  // `ch.otel.fired`. The match handler runs synchronously inline so
+  // both events land before the test reads them.
+  const first = stream.next().value
+  harness.stdio.println(first.kind)
+  harness.stdio.println(first.payload.name_resolved)
+  harness.stdio.println(first.payload.scope)
+  harness.stdio.println(first.payload.inserted)
+  const second = stream.next().value
+  harness.stdio.println(second.kind)
+  harness.stdio.println(second.payload.name_resolved)
+  harness.stdio.println(second.payload.handler_kind)
+  // Spans: at least one ChannelEmit and one ChannelMatch must be
+  // present, and the match span must carry a link back to the emit.
+  const spans = harness.obs.trace_spans()
+  const emits = spans.filter({ s -> s.kind == "channel_emit" })
+  const matches = spans.filter({ s -> s.kind == "channel_match" })
+  harness.stdio.println(len(emits) >= 1)
+  harness.stdio.println(len(matches) >= 1)
+  const match_span = matches[0]
+  harness.stdio.println(match_span.links != nil)
+  harness.stdio.println(len(match_span.links) >= 1)
+  harness.obs.enable_tracing(false)
+}

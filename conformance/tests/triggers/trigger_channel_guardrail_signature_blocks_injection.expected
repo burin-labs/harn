@@ -1,0 +1,12 @@
+scan-1
+true
+false
+prompt-injection signature matched: instruction_override
+0
+false
+true
+1
+1
+channel_guardrail_blocked
+scan-1
+prompt_injection_signature

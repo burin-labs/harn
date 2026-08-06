@@ -1,0 +1,99 @@
+import { agent_loop } from "std/agent/loop"
+import { agent_preset } from "std/agent/presets"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn preset_agent(harness: Harness, kind, prompt, options = nil) {
+  const opts = agent_preset(harness, kind, options)
+  return agent_loop(harness, prompt, opts?.system, opts)
+}
+
+fn audit_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "inspect",
+    "Read evidence",
+    {
+      handler: { args -> "evidence: " + args.what },
+      parameters: {what: {type: "string", description: "what to inspect"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+pipeline default(harness: Harness) {
+  // audit preset: native completion, no done sentinel; must complete on
+  // final user_response text.
+  with_llm_script(
+    harness.llm,
+    [
+      {tool_calls: [{id: "i1", name: "inspect", arguments: {what: "release"}}]},
+      llm_text("<user_response>Audit complete.</user_response>"),
+    ],
+    { ->
+      const audit = preset_agent(
+        harness,
+        "audit",
+        "Audit the release",
+        {provider: "mock", tools: audit_tools(), tool_format: "native"},
+      )
+      harness.stdio.println(audit.status)
+      harness.stdio.println(audit.text)
+      harness.stdio.println(audit.adaptive_budget.mode)
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(!contains(calls[0].system, "##DONE##"))
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text("Just a summary.")],
+    { ->
+      const summary = preset_agent(harness, "summary", "Summarize.", {provider: "mock"})
+      harness.stdio.println(summary.status)
+      harness.stdio.println(summary.text)
+      harness.stdio.println(summary.llm.iterations)
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text("Local summary.")],
+    { ->
+      const local_summary = preset_agent(
+        harness,
+        "summary",
+        "Summarize locally.",
+        {provider: "mock", model: "mystery-model-7b"},
+      )
+      harness.stdio.println(local_summary.status)
+      harness.stdio.println(local_summary.text)
+      const summary_calls = harness.llm.mock_calls()
+      harness.stdio.println(summary_calls[0]?.tool_choice == nil)
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      {tool_calls: [{id: "r1", name: "inspect", arguments: {what: "fix"}}]},
+      llm_text("<user_response>Fixed.</user_response>"),
+    ],
+    { ->
+      const repair = preset_agent(
+        harness,
+        "repair",
+        "Repair the regression",
+        {provider: "mock", tools: audit_tools(), tool_format: "native"},
+      )
+      harness.stdio.println(repair.status)
+      harness.stdio.println(repair.adaptive_budget.mode)
+      harness.stdio.println(repair.adaptive_budget.max >= repair.adaptive_budget.initial)
+    },
+  )
+}
+// No `##DONE##` sentinel should leak into the system prompt.
+// summary preset: cheap one-shot, no tools, no looping.
+// The summary preset should not inject native-tool options when it has no tools.
+// This keeps local/Ollama-style providers without native tool support usable.
+// repair preset: tool-using with adaptive budget defaults; ends on natural
+// user_response.

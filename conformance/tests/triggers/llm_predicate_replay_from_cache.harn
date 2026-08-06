@@ -1,0 +1,59 @@
+import { with_llm_script } from "std/testing"
+import "std/triggers"
+
+fn handler(harness: Harness, event: TriggerEvent) -> dict {
+  return {handled: true, kind: event.kind}
+}
+
+fn classify(harness: Harness, event: TriggerEvent) -> bool {
+  const result = harness.llm.call(
+    "predicate replay " + event.kind,
+    nil,
+    {provider: "mock", model: "gpt-4o-mini"},
+  )
+  return contains(result.text, "yes")
+}
+
+pipeline test(harness: Harness, task) {
+  with_llm_script(
+    harness.llm,
+    [{text: "yes", input_tokens: 10, output_tokens: 5, model: "gpt-4o-mini"}],
+    { ->
+      const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+        + to_string(
+        harness.random.range(100000, 999999),
+      )
+      const handle: TriggerHandle = harness.runtime.trigger_register(
+        {
+          id: "llm-predicate-replay-" + unique,
+          kind: "issue.opened",
+          provider: "webhook",
+          handler: handler,
+          when: classify,
+          when_budget: nil,
+          retry: nil,
+          match: {events: ["issue.opened"]},
+          events: nil,
+          dedupe_key: nil,
+          filter: nil,
+          budget: nil,
+          manifest_path: nil,
+          package_name: nil,
+        },
+      )
+      const fire: DispatchHandle = harness.runtime.trigger_fire(
+        handle,
+        {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-replay-" + unique}},
+      )
+      const replay: DispatchHandle = harness.runtime.trigger_replay(fire.event_id)
+      const evaluated = harness.runtime.trigger_inspect_lifecycle("predicate.evaluated").filter(
+        { entry -> entry?.headers?.trigger_id == handle.id },
+      )
+      harness.stdio.println(fire.status == "dispatched" && replay.status == "dispatched")
+      harness.stdio.println(len(harness.llm.mock_calls()) == 1)
+      harness.stdio.println(len(evaluated) == 2)
+      harness.stdio.println(!evaluated[0]?.payload?.cached && evaluated[1]?.payload?.cached)
+      harness.stdio.println(evaluated[1]?.payload?.replay_of_event_id == fire.event_id)
+    },
+  )
+}

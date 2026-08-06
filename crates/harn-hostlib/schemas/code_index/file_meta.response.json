@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/file_meta.response.json",
+  "title": "code_index.file_meta response",
+  "description": "File metadata, or null when the requested id/path is unknown.",
+  "type": ["object", "null"],
+  "properties": {
+    "id": { "type": "integer", "minimum": 1 },
+    "path": { "type": "string" },
+    "language": { "type": "string" },
+    "size": { "type": "integer", "minimum": 0 },
+    "line_count": { "type": "integer", "minimum": 0 },
+    "hash": { "type": "string", "description": "FNV-1a 64-bit content hash, decimal-encoded." },
+    "mtime_ms": { "type": "integer" },
+    "last_edit_seq": { "type": "integer", "minimum": 0 }
+  },
+  "required": ["id", "path", "language", "size", "line_count", "hash", "mtime_ms", "last_edit_seq"],
+  "additionalProperties": false
+}

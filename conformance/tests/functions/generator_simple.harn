@@ -1,0 +1,12 @@
+pipeline test(harness: Harness, task) {
+  fn gen() {
+    yield 42
+  }
+  const g = gen()
+  const r1 = g.next()
+  harness.stdio.println(r1.value)
+  harness.stdio.println(r1.done)
+  const r2 = g.next()
+  harness.stdio.println(r2.value)
+  harness.stdio.println(r2.done)
+}

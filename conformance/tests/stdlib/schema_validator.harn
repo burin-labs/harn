@@ -1,0 +1,31 @@
+import "std/schema"
+
+type User = {name: string, role?: string}
+
+pipeline test(harness: Harness, task) {
+  const user_schema = schema_object(
+    {
+      name: schema_field(schema_string() + {min_length: 2}),
+      role: schema_default(schema_string(), "user"),
+    },
+    {additional_properties: false},
+  )
+  const validator = schema_validator(user_schema, {apply_defaults: true})
+  harness.stdio.println(validator.is({name: "Ada"}))
+  harness.stdio.println(is_ok(validator.check({name: "Ada"})))
+  harness.stdio.println(unwrap(validator.parse({name: "Ada"})).role)
+  harness.stdio.println(validator.report({name: "Ada"}).value.role)
+  harness.stdio.println(validator.expect({name: "Ada"}).role)
+  const bad_report = validator.report({name: "A"})
+  harness.stdio.println(!bad_report.ok)
+  harness.stdio.println(len(bad_report.issues))
+  harness.stdio.println(
+    contains(join(validator.errors({name: "A"}), "\n"), "is shorter than 2 characters"),
+  )
+  harness.stdio.println(json_stringify(validator.issues({name: "A"})).contains("\"path\":\"name\""))
+  harness.stdio.println(validator.json_schema().type)
+  harness.stdio.println(validator.openapi_schema().type)
+  const alias_validator = schema_validator(User)
+  harness.stdio.println(alias_validator.is({name: "Kai"}))
+  harness.stdio.println(!alias_validator.is({name: 12}))
+}

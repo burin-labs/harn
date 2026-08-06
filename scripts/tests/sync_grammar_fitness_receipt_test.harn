@@ -1,0 +1,77 @@
+import "../sync_grammar_fitness_receipt.harn"
+
+/** A receipt carrying one language row, at a given version and artifact. */
+fn receipt(language: string, version: string, digest: string) -> string {
+  return json_stringify(
+    {
+      schema_version: 1,
+      corpus: {schema_version: 1, digest: "sha256:corpus"},
+      tree_sitter_runtime: "0.25.0",
+      languages: [
+        {
+          language: language,
+          package: {
+            name: "tree-sitter-${language}",
+            version: version,
+            source: "registry+https://github.com/rust-lang/crates.io-index",
+            checksum: digest,
+            artifact_digest: "sha256:${digest}",
+          },
+          operations: ["parse"],
+          authority: "corpus",
+        },
+      ],
+    },
+  )
+}
+
+@test
+pipeline test_a_moved_grammar_version_is_named(harness: Harness, task) {
+  // Both halves of the identity travel, because a version alone does not say
+  // which artifact was resolved and a digest alone does not say what moved.
+  assert_eq(
+    grammar_drift(receipt("swift", "0.7.2", "aaa"), receipt("swift", "0.7.3", "bbb")),
+    [{language: "swift", from: "0.7.2 (sha256:aaa)", to: "0.7.3 (sha256:bbb)"}],
+  )
+}
+
+@test
+pipeline test_a_republished_artifact_at_one_version_is_drift(harness: Harness, task) {
+  // The case a version comparison alone would miss: same version string, a
+  // different artifact underneath it.
+  assert_eq(
+    grammar_drift(receipt("swift", "0.7.2", "aaa"), receipt("swift", "0.7.2", "bbb")),
+    [{language: "swift", from: "0.7.2 (sha256:aaa)", to: "0.7.2 (sha256:bbb)"}],
+  )
+}
+
+@test
+pipeline test_an_unchanged_grammar_is_not_drift(harness: Harness, task) {
+  assert_eq(grammar_drift(receipt("swift", "0.7.2", "aaa"), receipt("swift", "0.7.2", "aaa")), [])
+}
+
+@test
+pipeline test_a_corpus_only_change_reports_no_grammar_drift(harness: Harness, task) {
+  // The falsifier for the whole feature: an edited corpus must keep taking the
+  // ordinary "regenerate the receipt" advice, or the new message would fire on
+  // every fixture edit and mean nothing.
+  const committed = receipt("swift", "0.7.2", "aaa")
+  const candidate = replace(committed, "sha256:corpus", "sha256:corpus-v2")
+  assert_ne(committed, candidate)
+  assert_eq(grammar_drift(committed, candidate), [])
+}
+
+@test
+pipeline test_an_unreadable_committed_receipt_degrades(harness: Harness, task) {
+  // A drift report explains a failure that is already decided, so malformed
+  // committed bytes must not throw over the check they were meant to clarify.
+  assert_eq(grammar_drift("{not json", receipt("swift", "0.7.3", "bbb")), [])
+  assert_eq(grammar_drift("", receipt("swift", "0.7.3", "bbb")), [])
+}
+
+@test
+pipeline test_a_newly_registered_language_is_not_drift(harness: Harness, task) {
+  // Adding a grammar has no prior artifact to have moved from; the receipt is
+  // stale for the ordinary reason and takes the ordinary advice.
+  assert_eq(grammar_drift(receipt("swift", "0.7.2", "aaa"), receipt("zig", "1.1.0", "ccc")), [])
+}

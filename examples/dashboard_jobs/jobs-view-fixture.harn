@@ -1,0 +1,24 @@
+import { dashboard_job_event, dashboard_jobs_view } from "std/dashboard/jobs"
+
+fn fixture(fs: HarnessFs, name) {
+  const root = fs.workspace_root()
+  return json_parse(
+    fs.read_text(path_join(root, "examples/dashboard_jobs/fixtures/" + name + ".json")),
+  )
+}
+
+pipeline default(harness: Harness) {
+  const local = fixture(harness.fs, "local_job_stream")
+  let events = []
+  for item in local.events {
+    events = events.appending(dashboard_job_event(item.kind, item))
+  }
+  events = events.appending(
+    dashboard_job_event("run.started", fixture(harness.fs, "cloud_managed_run")),
+  )
+  const view = dashboard_jobs_view(harness.obs, events, {title: "Jobs", generated_at: "fixture"})
+  for job in view.jobs {
+    harness.stdio.println(job.job_id + " " + job.status)
+  }
+  harness.stdio.println("jobs=" + to_string(len(view.jobs)))
+}

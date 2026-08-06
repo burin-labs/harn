@@ -1,0 +1,9 @@
+pipeline main(harness: Harness) {
+  const injected = harness.agent.transcript_inject_reminder(transcript(), {body: "hello reminder"})
+  const events = transcript_events_by_kind(injected.transcript, "system_reminder")
+  harness.stdio.println(len(events))
+  harness.stdio.println(events[0].reminder.body)
+  harness.stdio.println(events[0].reminder.source)
+  harness.stdio.println(injected.deduped_count)
+  harness.stdio.println(injected.reminder_id != "")
+}

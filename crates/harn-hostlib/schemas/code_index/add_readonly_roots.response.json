@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/add_readonly_roots.response.json",
+  "title": "code_index.add_readonly_roots response",
+  "type": "object",
+  "properties": {
+    "roots": {
+      "type": "array",
+      "description": "One entry per root added/refreshed in this call.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "root": { "type": "string", "description": "Canonicalised absolute path of the indexed read-only root." },
+          "files_indexed": { "type": "integer", "description": "Files ingested from this root." }
+        },
+        "required": ["root", "files_indexed"],
+        "additionalProperties": false
+      }
+    },
+    "readonly_root_count": { "type": "integer", "description": "Total number of read-only roots now resident." },
+    "readonly_files_indexed": { "type": "integer", "description": "Total files across all resident read-only roots." }
+  },
+  "required": ["roots", "readonly_root_count", "readonly_files_indexed"],
+  "additionalProperties": false
+}

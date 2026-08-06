@@ -1,0 +1,111 @@
+# Rust and local Cargo build outputs.
+/target/
+.target-*/
+.cargo/config.toml
+
+# Local environment and machine-specific files.
+.env
+.env.*
+!.env.example
+!.env.*.example
+.DS_Store
+*.DS_Store
+__pycache__/
+*.py[cod]
+
+# Local agent/runtime state.
+.burin/
+.burin*/
+.harn-runs/
+.harn/receipts/
+.harn/
+.harn*/
+.remember/
+.serena/
+meta_scratch/
+
+# Scratch dir from `scripts/verify_language_spec.harn` (the runtime sandbox
+# forces it into the workspace root; normally removed, but an interrupted run
+# can leak it).
+harn-spec-verify-*/
+
+# Conformance skill fixtures deliberately ship a .harn/ subdir so the
+# project-layer loader (issue #73) has something to discover. The blanket
+# `.harn/` ignore above would drop them otherwise.
+!conformance/tests/**/.harn/
+!conformance/tests/**/.harn/**
+
+# Per-run metadata shards from project_deep_scan tests are ephemeral. Runtime
+# SQLite DBs, checkpoint/workflow dirs, and per-suite timing caches under
+# fixture .harn/ dirs must stay ignored without shadowing shipped manifests.
+conformance/tests/**/.harn/metadata/
+conformance/tests/**/.harn/memory/
+conformance/tests/**/.harn/checkpoints/
+conformance/tests/**/.harn/workflows/
+conformance/tests/**/.harn/*.sqlite
+conformance/tests/**/.harn/*.sqlite-shm
+conformance/tests/**/.harn/*.sqlite-wal
+conformance/tests/**/.harn/*.harn-init.lock
+conformance/tests/**/.harn/test-timings.json
+
+# Shared Claude skill definitions are tracked; local Claude state is not.
+.claude/*
+!.claude/settings.json
+!.claude/commands/
+!.claude/skills/
+!.claude/skills/harn-scripting/
+!.claude/skills/harn-scripting/SKILL.md
+
+# `merge-captain` covers the Harn triad, including private harn-cloud context,
+# so it lives only in burin-code's local `.claude/commands/`.
+.claude/commands/merge-captain.md
+
+# Codex local environment config is reviewed repo setup; other generated
+# environment files remain local state. Shared command and skill definitions
+# are tracked, exactly as the Claude block below tracks its own — without the
+# re-includes they stay reachable only because they were force-added, which
+# leaves them invisible to every ignore-aware tool that reads the rules rather
+# than the index.
+.codex/*
+!.codex/hooks.json
+!.codex/environments/
+.codex/environments/*
+!.codex/environments/environment.toml
+!.codex/commands/
+!.codex/commands/**
+!.codex/skills/
+!.codex/skills/**
+
+# `merge-captain` covers the Harn triad, including private harn-cloud context,
+# so it stays local state here — the same carve-out the `.claude` block makes
+# for its own copy. The re-includes above would otherwise surface it.
+.codex/commands/merge-captain.md
+.codex/skills/merge-captain/
+
+# JavaScript, portal, and website artifacts.
+node_modules/
+/crates/harn-cli/portal-dist/
+# Target-independent CLI AOT payload; generated only for package/release
+# assembly and embedded by harn-cli/build.rs when present.
+/crates/harn-cli/generated/cli-bytecode-manifest.json
+/crates/harn-cli/generated/cli-bytecode/
+docs/dist/
+website/.ssr/
+website/dist/
+website/*.tsbuildinfo
+
+# Tree-sitter native build artifacts.
+tree-sitter-harn/*.dylib
+tree-sitter-harn/*.so
+tree-sitter-harn/*.dll
+tree-sitter-harn/tree-sitter
+
+# qmode experiment and test-run state.
+experiments/burin-mini/.qmode/
+experiments/burin-mini/workspace/.harn/
+
+# Per-iteration logs from scripts/stress_subprocess_tests.sh.
+.stress-logs/
+
+# Local worktrees.
+.worktrees/

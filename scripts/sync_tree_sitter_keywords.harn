@@ -1,0 +1,154 @@
+// Keep the tree-sitter-harn keyword list in sync with the lexer.
+//
+// `crates/harn-lexer/src/token.rs` declares the authoritative vocabulary that
+// generates runtime tokenization and public keyword/literal projections.
+// This script generates tree-sitter's sorted JavaScript projection from that
+// declaration so editor parsing cannot become a second vocabulary owner.
+//
+// Usage:
+//   harn run scripts/sync_tree_sitter_keywords.harn            # drift check (default); exit 1 on mismatch
+//   harn run scripts/sync_tree_sitter_keywords.harn -- --write # rewrite keywords.js from the lexer
+//
+// The check compares membership because formatting is already deterministic
+// and membership is the semantic contract consumed by tree-sitter.
+//
+// Ported from scripts/sync_tree_sitter_keywords.py — behavior-identical
+// (same regexes, same set comparison, same generated file shape).
+const TOKEN_RS = "crates/harn-lexer/src/token.rs"
+
+const KEYWORDS_JS = "tree-sitter-harn/grammar/keywords.js"
+
+/**
+ * Extract every double-quoted string literal body from `text`. Mirrors
+ * the Python `STRING_RE = r'"([^"\\]*)"'` findall.
+ */
+pub fn quoted_strings(text: string) -> list<string> {
+  let out: list<string> = []
+  // Regex: "([^"\\]*)" — a double-quoted string body. The hashed raw
+  // string keeps the embedded quotes escape-free.
+  for m in regex_captures(r#""([^"\\]*)""#, text) {
+    out = out + [m.groups[0]]
+  }
+  return out
+}
+
+/**
+ * Deduplicate a list of strings, preserving first-seen order. Stands in
+ * for Python's `set(...)` where we only need membership + a stable
+ * sorted view for output.
+ */
+pub fn dedup(items: list<string>) -> list<string> {
+  let seen: list<string> = []
+  for item in items {
+    if !seen.contains(item) {
+      seen = seen + [item]
+    }
+  }
+  return seen
+}
+
+/** Items present in `a` but absent from `b` (set difference `a - b`). */
+pub fn difference(a: list<string>, b: list<string>) -> list<string> {
+  let out: list<string> = []
+  for item in a {
+    if !b.contains(item) {
+      out = out + [item]
+    }
+  }
+  return out
+}
+
+/**
+ * Pull the keyword set out of the lexer's declarative vocabulary. The legacy
+ * const form remains supported for isolated script fixtures.
+ */
+pub fn lexer_keywords(text: string) -> list<string>? {
+  const table = regex_captures(r"define_keyword_vocabulary!\s*\{(.*?)\n\}", text, "s")
+  if table.count > 0 {
+    return dedup(quoted_strings(table[0].groups[0]))
+  }
+  const legacy = regex_captures(r"pub const KEYWORDS:\s*&\[&str\]\s*=\s*&\[(.*?)\];", text, "s")
+  if legacy.count == 0 {
+    return nil
+  }
+  return dedup(quoted_strings(legacy[0].groups[0]))
+}
+
+/**
+ * Pull the keyword set out of `module.exports = [ ... ]` in keywords.js.
+ * Line comments are stripped first so commented prose isn't scanned for
+ * string literals.
+ */
+pub fn grammar_keywords(text: string) -> list<string>? {
+  const m = regex_captures(r"module\.exports\s*=\s*\[(.*?)\];", text, "s")
+  if m.count == 0 {
+    return nil
+  }
+  const body = regex_replace(r"//[^\n]*", "", m[0].groups[0])
+  return dedup(quoted_strings(body))
+}
+
+/** Render the @generated keywords.js body from a keyword list. */
+pub fn render_keywords_js(keywords: list<string>) -> string {
+  const ordered = keywords.sorted()
+  let lines = [
+    "// @generated from crates/harn-lexer/src/token.rs (KEYWORDS).",
+    "// Regenerate with `make gen-tree-sitter-keywords`; the lexer is the",
+    "// source of truth. `make check-tree-sitter-keywords` guards drift.",
+    "module.exports = [",
+  ]
+  for kw in ordered {
+    lines = lines + ["  \"${kw}\","]
+  }
+  lines = lines + ["];"]
+  return lines.join("\n") + "\n"
+}
+
+pipeline main(harness: Harness, task) {
+  if !harness.fs.exists(TOKEN_RS) {
+    harness.stdio.eprintln("error: missing ${TOKEN_RS}")
+    return 1
+  }
+  if !harness.fs.exists(KEYWORDS_JS) {
+    harness.stdio.eprintln("error: missing ${KEYWORDS_JS}")
+    return 1
+  }
+  const lexer = lexer_keywords(harness.fs.read_text(TOKEN_RS))
+  if lexer == nil {
+    harness.stdio.eprintln("error: could not find the lexer keyword vocabulary in ${TOKEN_RS}")
+    return 1
+  }
+  if argv.contains("--write") {
+    harness.fs.write_text(KEYWORDS_JS, render_keywords_js(lexer))
+    harness.stdio.println("    Wrote ${lexer.count} keywords to ${KEYWORDS_JS}.")
+    return 0
+  }
+  const grammar = grammar_keywords(harness.fs.read_text(KEYWORDS_JS))
+  if grammar == nil {
+    harness.stdio.eprintln("error: could not find `module.exports = [ ... ]` in ${KEYWORDS_JS}")
+    return 1
+  }
+  const missing = difference(lexer, grammar).sorted()
+  const extra = difference(grammar, lexer).sorted()
+  if missing.count > 0 || extra.count > 0 {
+    harness.stdio.eprintln(
+      "error: tree-sitter keyword list is out of sync with the lexer (crates/harn-lexer/src/token.rs KEYWORDS):",
+    )
+    if missing.count > 0 {
+      harness.stdio.eprintln(
+        "  - missing from tree-sitter-harn/grammar/keywords.js: ${missing.join(", ")}",
+      )
+    }
+    if extra.count > 0 {
+      harness.stdio.eprintln(
+        "  - present in keywords.js but not a lexer keyword: ${extra.join(", ")}",
+      )
+    }
+    harness.stdio.eprintln(
+      "\nhint: run `make gen-tree-sitter-keywords` to regenerate from the lexer, or reconcile the lists by hand.",
+    )
+    return 1
+  }
+  harness.stdio.println("    tree-sitter keyword list OK (${lexer.count} keywords).")
+  return 0
+}

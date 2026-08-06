@@ -1,0 +1,79 @@
+// Verifies std/poll's poll_until / wait_for_status / retry_with_result
+// behave correctly under mock_time. Probes use store_set/store_get so
+// closure mutations survive across calls (Harn closures capture by
+// value).
+import { poll_until, retry_with_result, wait_for_status } from "std/poll"
+
+pipeline default(harness: Harness) {
+  harness.testing.clock_set(1700000000000)
+  harness.runtime.store_set("probe_counter", 0)
+  const value = poll_until(
+    harness.clock,
+    fn() {
+      let n = (harness.runtime.store_get("probe_counter") ?? 0) + 1
+      harness.runtime.store_set("probe_counter", n)
+      if n < 3 {
+        return nil
+      }
+      return "ready"
+    },
+    {timeout_ms: 60000, interval_ms: 100},
+  )
+  harness.stdio.println(value)
+  harness.stdio.println(harness.runtime.store_get("probe_counter"))
+  harness.runtime.store_set("status_counter", 0)
+  const row = wait_for_status(
+    harness,
+    fn() {
+      let n = (harness.runtime.store_get("status_counter") ?? 0) + 1
+      harness.runtime.store_set("status_counter", n)
+      if n == 1 {
+        return {status: "queued"}
+      }
+      if n == 2 {
+        return {status: "running"}
+      }
+      return {status: "completed", url: "https://x"}
+    },
+    ["completed", "failed"],
+    {timeout_ms: 60000, interval_ms: 50},
+    fn(row) { return row?.status },
+  )
+  harness.stdio.println(row.status)
+  harness.stdio.println(row.url)
+  harness.stdio.println(harness.runtime.store_get("status_counter"))
+  const timed_out = poll_until(
+    harness.clock,
+    fn() { return nil },
+    {timeout_ms: 200, interval_ms: 50},
+  )
+  harness.stdio.println(timed_out == nil)
+  harness.runtime.store_set("retry_counter", 0)
+  const retry_report = retry_with_result(
+    harness.clock,
+    fn(attempt) {
+      let n = (harness.runtime.store_get("retry_counter") ?? 0) + 1
+      harness.runtime.store_set("retry_counter", n)
+      if n < 3 {
+        return Err("transient")
+      }
+      return Ok({attempt: attempt})
+    },
+    {max_attempts: 5, base_ms: 10, multiplier: 2.0, cap_ms: 100},
+  )
+  harness.stdio.println(retry_report.ok)
+  harness.stdio.println(retry_report.attempts)
+  harness.stdio.println(retry_report.value.attempt)
+  const exhausted = retry_with_result(
+    harness.clock,
+    fn(attempt) { return Err("permanent") },
+    {max_attempts: 2, base_ms: 5},
+  )
+  harness.stdio.println(exhausted.ok)
+  harness.stdio.println(exhausted.attempts)
+  harness.stdio.println(exhausted.error)
+  harness.runtime.store_delete("probe_counter")
+  harness.runtime.store_delete("status_counter")
+  harness.runtime.store_delete("retry_counter")
+  harness.testing.clock_reset()
+}

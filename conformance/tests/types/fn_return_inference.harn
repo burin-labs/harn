@@ -1,0 +1,28 @@
+pipeline default(harness: Harness) {
+  fn area(w: int, h: int) {
+    return w * h
+  }
+  const a: int = area(3, 4)
+  harness.stdio.println(a)
+  fn label() {
+    return "hi"
+  }
+  const s: string = label()
+  harness.stdio.println(s)
+  // Recursive fn: inference must not loop — the self-call resolves to the
+  // hoisted placeholder (unknown), so `fact` stays dynamic but still runs.
+  fn fact(n: int) {
+    if n <= 1 {
+      return 1
+    }
+    return n * fact(n - 1)
+  }
+  harness.stdio.println(to_string(fact(5)))
+  // Un-annotated param -> return type cannot be known, so it stays dynamic and
+  // binds to any annotation without a static error.
+  fn idish(x) {
+    return x
+  }
+  const d: string = idish("ok")
+  harness.stdio.println(d)
+}

@@ -1,0 +1,17 @@
+import "std/hitl"
+
+type Choice = {answer: string}
+
+pipeline test(harness: Harness, task) {
+  harness.testing.clear()
+  harness.testing.respond("interaction", "question_response", {answer: {answer: "Ada"}})
+  const response: Choice = harness.interaction.ask_user(
+    "Who should review this?",
+    {schema: schema_of(Choice)},
+  )
+  harness.stdio.println(response.answer)
+  harness.testing.clear()
+  harness.testing.respond("interaction", "question_response", {answer: "9"})
+  const selected: int = harness.interaction.ask_user("Pick a number", {default: 0})
+  harness.stdio.println(selected)
+}

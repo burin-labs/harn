@@ -1,0 +1,51 @@
+version = 1
+id = "merge-captain-timeout-ladders"
+name = "Merge Captain value-model gates"
+description = "Gate Merge Captain prompt-pack revisions with deterministic golden fixtures, transcript oracle diffs, and value-model timeout ladders."
+
+[metadata.prompt_pack]
+id = "merge-captain-value-pack-v1"
+golden_fixture = "evals/prompt_pack_value_model.json"
+requires_transcript_oracle_diff = true
+requires_timeout_ladder_results = true
+side_effect_policy = "deterministic Harn code owns all side effects; model outputs are recommendations until validators accept them"
+
+[[ladders]]
+id = "green-pr-value-model"
+persona = "merge_captain"
+severity = "blocking"
+artifact-root = ".harn-runs/merge-captain-timeout-ladder"
+
+[ladders.backend]
+kind = "replay"
+path = "../../examples/personas/merge_captain/transcripts/green_pr.jsonl"
+
+[[ladders.model-routes]]
+id = "gemma-value"
+route = "local/gemma-value"
+provider = "llama.cpp"
+model = "gemma"
+profile = "value"
+max-model-calls = 1
+max-cost-usd = 0.0
+
+[[ladders.timeout-tiers]]
+id = "tiny"
+timeout-ms = 100
+max-tool-calls = 1
+max-model-calls = 1
+max-cost-usd = 0.0
+
+[[ladders.timeout-tiers]]
+id = "balanced"
+timeout-ms = 500
+max-tool-calls = 4
+max-model-calls = 1
+max-cost-usd = 0.0
+
+[[ladders.timeout-tiers]]
+id = "generous"
+timeout-ms = 2000
+max-tool-calls = 8
+max-model-calls = 2
+max-cost-usd = 0.0

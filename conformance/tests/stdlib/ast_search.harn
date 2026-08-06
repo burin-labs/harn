@@ -1,0 +1,117 @@
+import { ast_search } from "std/ast"
+
+/**
+ * End-to-end exercise of `ast.search` (issue #2830) through the `std/ast`
+ * wrapper. Verifies full capture bindings (text + range) across grammars,
+ * inline-source vs file-path input, `max_matches` truncation, and the
+ * structured error variants. The TypeScript case mirrors the first
+ * rule-engine customer (#2824): finding every
+ * `obj?.prop ?? fallback` shape and reading each capture by name.
+ */
+fn write_fixture(fs: HarnessFs, dir: string, name: string, body: string) -> string {
+  const path = path_join(dir, name)
+  fs.write_text(path, body)
+  return path
+}
+
+pipeline default(harness: Harness) {
+  // 1) TypeScript optional-chain + nullish-coalescing, the codemod shape.
+  //    Every capture (`@obj`, `@prop`, `@fallback`) is bound by name.
+  const ts = ast_search(
+    harness.ast,
+    {
+      source: "const a = cfg?.timeout ?? 30;\nconst b = opts?.retries ?? 3;\n",
+      language: "typescript",
+      query:
+        "(binary_expression left: (member_expression object: (_) @obj (optional_chain) property: (property_identifier) @prop) right: (_) @fallback) @match",
+    },
+  )
+  harness.stdio.println(ts.ok && ts.result == "ok")
+  harness.stdio.println(ts.match_count == 2)
+  harness.stdio.println(ts.matches[0].captures.obj.text == "cfg")
+  harness.stdio.println(ts.matches[0].captures.prop.text == "timeout")
+  harness.stdio.println(ts.matches[0].captures.fallback.text == "30")
+  harness.stdio.println(ts.matches[0].text == "cfg?.timeout ?? 30")
+  harness.stdio.println(ts.matches[1].captures.obj.text == "opts")
+  harness.stdio.println(ts.matches[1].captures.fallback.text == "3")
+  // The capture range carries byte + 0-based row/col coordinates.
+  harness.stdio.println(ts.matches[0].captures.obj.range.start_row == 0)
+  harness.stdio.println(ts.matches[1].captures.obj.range.start_row == 1)
+  // 2) Rust: bind two captures per match across multiple matches.
+  const rs = ast_search(
+    harness.ast,
+    {
+      source: "fn main() {\n    let x = 1;\n    let y = 2;\n}\n",
+      language: "rust",
+      query: "(let_declaration pattern: (identifier) @name value: (integer_literal) @value)",
+    },
+  )
+  harness.stdio.println(rs.match_count == 2)
+  harness.stdio.println(
+    rs.matches[0].captures.name.text == "x" && rs.matches[0].captures.value.text == "1",
+  )
+  harness.stdio.println(
+    rs.matches[1].captures.name.text == "y" && rs.matches[1].captures.value.text == "2",
+  )
+  // 3) Python: a third grammar, proving the primitive is grammar-agnostic.
+  const py = ast_search(
+    harness.ast,
+    {
+      source: "def greet(name):\n    return name\n\ndef bye(name):\n    return name\n",
+      language: "python",
+      query: "(function_definition name: (identifier) @fn)",
+    },
+  )
+  harness.stdio.println(py.match_count == 2)
+  harness.stdio.println(py.matches[0].captures.fn.text == "greet")
+  harness.stdio.println(py.matches[1].captures.fn.text == "bye")
+  // 4) `max_matches` truncates in document order and flags it.
+  const capped = ast_search(
+    harness.ast,
+    {
+      source: "let a = 1; let b = 2; let c = 3;\n",
+      language: "rust",
+      query: "(integer_literal) @lit",
+      max_matches: 2,
+    },
+  )
+  harness.stdio.println(capped.match_count == 2 && capped.truncated)
+  harness.stdio.println(capped.matches[0].captures.lit.text == "1")
+  harness.stdio.println(capped.matches[1].captures.lit.text == "2")
+  // 5) File-path input: grammar is inferred from the extension.
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn_ast_search_" + to_string(harness.random.range(100000, 999999)),
+  )
+  harness.fs.mkdir(root)
+  const go_path = write_fixture(
+    harness.fs,
+    root,
+    "lib.go",
+    "package main\n\nfunc Add(a int, b int) int {\n\treturn a + b\n}\n",
+  )
+  const go = ast_search(
+    harness.ast,
+    {path: go_path, query: "(function_declaration name: (identifier) @fn)"},
+  )
+  harness.stdio.println(go.ok && go.language == "go")
+  harness.stdio.println(go.matches[0].captures.fn.text == "Add")
+  // 6) Empty result set is `ok`, not an error.
+  const empty = ast_search(
+    harness.ast,
+    {source: "fn main() {}\n", language: "rust", query: "(integer_literal) @lit"},
+  )
+  harness.stdio.println(empty.ok && empty.match_count == 0 && len(empty.matches) == 0)
+  // 7) Invalid query and unknown grammar surface structured errors.
+  const bad = ast_search(harness.ast, {source: "fn main() {}\n", language: "rust", query: "(((("})
+  harness.stdio.println(!bad.ok && bad.result == "invalid_query")
+  const no_caps = ast_search(
+    harness.ast,
+    {source: "fn main() {}\n", language: "rust", query: "(integer_literal)"},
+  )
+  harness.stdio.println(
+    no_caps.result == "invalid_query" && contains(no_caps.details, "no captures"),
+  )
+  const unknown = ast_search(harness.ast, {source: "whatever", query: "(x) @y"})
+  harness.stdio.println(unknown.result == "unsupported_language")
+}

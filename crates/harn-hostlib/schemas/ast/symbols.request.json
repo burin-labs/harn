@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/symbols.request.json",
+  "title": "ast.symbols request",
+  "description": "Extract a flat symbol list (functions, classes, methods, etc.) from a single source file.",
+  "type": "object",
+  "properties": {
+    "path": { "type": "string" },
+    "language": { "type": "string" },
+    "kinds": {
+      "type": "array",
+      "description": "Optional filter; when omitted all symbol kinds are returned.",
+      "items": { "type": "string" }
+    }
+  },
+  "required": ["path"],
+  "additionalProperties": false
+}

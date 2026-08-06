@@ -1,0 +1,29 @@
+/**
+ * CH-03 (#1874): session-scoped emits from one session MUST NOT fan out to
+ * readers in another session. The resolver produces topic
+ * `channels.session.<session-id>.<name>`, so distinct `session_id` values
+ * own distinct topics.
+ */
+pipeline default(harness: Harness) {
+  const _ = harness.channels.append(
+    "agent.done",
+    {turn: 1},
+    {scope: "session", session_id: "sess-A", id: "A-1"},
+  )
+  const _ = harness.channels.append(
+    "agent.done",
+    {turn: 99},
+    {scope: "session", session_id: "sess-B", id: "B-1"},
+  )
+  const sess_a = harness.channels.events("agent.done", {scope: "session", session_id: "sess-A"})
+  const sess_b = harness.channels.events("agent.done", {scope: "session", session_id: "sess-B"})
+  const sess_c = harness.channels.events("agent.done", {scope: "session", session_id: "sess-C"})
+  harness.stdio.println(len(sess_a))
+  harness.stdio.println(sess_a[0].payload.turn)
+  harness.stdio.println(sess_a[0].scope_id)
+  harness.stdio.println(len(sess_b))
+  harness.stdio.println(sess_b[0].payload.turn)
+  harness.stdio.println(sess_b[0].scope_id)
+  // Session C is empty — no leakage.
+  harness.stdio.println(len(sess_c))
+}

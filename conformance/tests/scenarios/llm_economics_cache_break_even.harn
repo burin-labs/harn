@@ -1,0 +1,30 @@
+// cache_break_even: amortizing path returns integer reuse count; free
+// cache_write returns 1; unpriced model returns recommended=false.
+import { cache_break_even } from "std/llm/economics"
+
+pipeline default(harness: Harness) {
+  // Sonnet 4: input 3.00, cache_read 0.30, cache_write 3.75 (per MTok).
+  // For 10000 prompt tokens reused:
+  //   savings_per_hit = (3.00 - 0.30) / 1e6 * 10000 = 0.027
+  //   write_cost = 3.75 / 1e6 * 10000 = 0.0375
+  //   break_even = ceil(0.0375 / 0.027) = 2
+  const row = cache_break_even(
+    {provider: "anthropic", model: "claude-sonnet-4-20250514", prompt_tokens: 10000},
+  )
+  harness.stdio.println("recommended=" + to_string(row.recommended))
+  harness.stdio.println("reason=" + row.reason)
+  harness.stdio.println("break_even=" + to_string(row.break_even_calls))
+  harness.stdio.println("savings=" + to_string(row.savings_per_hit))
+  // Unknown pricing path.
+  const unknown = cache_break_even(
+    {provider: "nonexistent_provider", model: "ghost-model", prompt_tokens: 1000},
+  )
+  harness.stdio.println("unknown_recommended=" + to_string(unknown.recommended))
+  harness.stdio.println("unknown_reason=" + unknown.reason)
+  harness.stdio.println("unknown_break_even_nil=" + to_string(unknown.break_even_calls == nil))
+  const unknown_cache_tier = cache_break_even(
+    {provider: "deepinfra", model: "deepinfra/deepseek-ai/DeepSeek-V3.2", prompt_tokens: 1000},
+  )
+  harness.stdio.println("unknown_cache_known=" + to_string(unknown_cache_tier.pricing_known))
+  harness.stdio.println("unknown_cache_reason=" + unknown_cache_tier.reason)
+}

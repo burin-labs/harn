@@ -1,0 +1,157 @@
+// std/agent/hypothesis — a keyed store of human/agent hypotheses with a
+// mutable status and free-form provenance, layered on std/session-store.
+//
+// Import: import "std/agent/hypothesis"
+//
+// Each hypothesis is a record identified by `id`, persisted as an `upsert`
+// mutation on a session-store stream whose events carry the special
+// `{kind: "hypothesis"}` tag. Reads project the stream to the latest record
+// per id. Status is a free string so callers can use whichever lifecycle
+// vocabulary fits — e.g. `open`/`confirmed`/`refuted`, or
+// `active`/`verifying`/`confirmed`/`disproven`/`stale`/`archived`. The default
+// status for a newly opened hypothesis is `open`.
+//
+// `session_id` names the stream; pass the same id your reader watches (e.g.
+// `agent.hypotheses`, or a product-specific namespace). `options.root`
+// overrides the storage root, exactly as in std/session-store.
+import "std/session-store"
+
+pub type HypothesisOptions = {
+  root?: string,
+  tenant_id?: string,
+  actor?: string,
+  tags?: list<string>,
+  headers?: dict<string, string>,
+  status?: string,
+}
+
+pub type HypothesisMutationResult = {ok: bool, record?: any, error?: string}
+
+fn hypothesis_stream(session_id: string?) -> string {
+  const sid = to_string(session_id ?? "")
+  if sid == "" {
+    return "agent.hypotheses"
+  }
+  return sid
+}
+
+fn hypothesis_options(options: HypothesisOptions?) -> SessionStoreOptions {
+  return (options ?? {}) + {kind: "hypothesis"}
+}
+
+/**
+ * Open (or overwrite) a hypothesis. `record` must carry an `id`; a missing
+ * `status` defaults to `"open"`. Returns `{ok, record}` on success, or
+ * `{ok: false, error}` when the record has no id.
+ *
+ * @effects: [store.read, store.write, fs.read, fs.write, env.read, time]
+ * @errors: [runtime]
+ */
+pub fn hypothesis_open(
+  agent: HarnessAgent,
+  session_id: string?,
+  record: dict,
+  options: HypothesisOptions? = nil,
+) -> HypothesisMutationResult {
+  const id = to_string(record?.id ?? "")
+  if id == "" {
+    return {ok: false, error: "hypothesis record requires an id"}
+  }
+  const normalized = (record ?? {}) + {status: record?.status ?? "open"}
+  session_store_append(
+    agent,
+    hypothesis_stream(session_id),
+    {operation: "upsert", record: normalized},
+    hypothesis_options(options),
+  )
+  return {ok: true, record: normalized}
+}
+
+/**
+ * Return the current record for `id`, or nil if it is unknown or deleted.
+ *
+ * @effects: [store.read, store.write, fs.read, fs.write, env.read, time]
+ * @errors: [runtime]
+ */
+pub fn hypothesis_get(
+  agent: HarnessAgent,
+  session_id: string?,
+  id: string,
+  options: HypothesisOptions? = nil,
+) -> any? {
+  const target = to_string(id)
+  for record in session_store_project(agent, hypothesis_stream(session_id), options ?? {}) {
+    if to_string(record?.id ?? "") == target {
+      return record
+    }
+  }
+  return nil
+}
+
+/**
+ * Update a hypothesis's status in place (append-only). Returns `{ok, record}`,
+ * or `{ok: false, error}` when the id is unknown.
+ *
+ * @effects: [store.read, store.write, fs.read, fs.write, env.read, time]
+ * @errors: [runtime]
+ */
+pub fn hypothesis_set_status(
+  agent: HarnessAgent,
+  session_id: string?,
+  id: string,
+  status: string,
+  options: HypothesisOptions? = nil,
+) -> HypothesisMutationResult {
+  const current = hypothesis_get(agent, session_id, id, options)
+  if current == nil {
+    return {ok: false, error: "unknown hypothesis"}
+  }
+  const updated = current + {status: to_string(status)}
+  session_store_append(
+    agent,
+    hypothesis_stream(session_id),
+    {operation: "upsert", record: updated},
+    hypothesis_options(options),
+  )
+  return {ok: true, record: updated}
+}
+
+/**
+ * List the current hypotheses, optionally filtered by `options.status`.
+ *
+ * @effects: [store.read, store.write, fs.read, fs.write, env.read, time]
+ * @errors: [runtime]
+ */
+pub fn hypothesis_list(
+  agent: HarnessAgent,
+  session_id: string?,
+  options: HypothesisOptions? = nil,
+) -> list<any> {
+  const records = session_store_project(agent, hypothesis_stream(session_id), options ?? {})
+  const status = to_string((options ?? {})?.status ?? "")
+  if status == "" {
+    return records
+  }
+  return records.filter({ record -> to_string(record?.status ?? "") == status }).to_list()
+}
+
+/**
+ * Remove a hypothesis from the projected collection (append-only tombstone).
+ *
+ * @effects: [store.read, store.write, fs.read, fs.write, env.read, time]
+ * @errors: [runtime]
+ */
+pub fn hypothesis_delete(
+  agent: HarnessAgent,
+  session_id: string?,
+  id: string,
+  options: HypothesisOptions? = nil,
+) -> HypothesisMutationResult {
+  session_store_append(
+    agent,
+    hypothesis_stream(session_id),
+    {operation: "delete", id: to_string(id)},
+    hypothesis_options(options),
+  )
+  return {ok: true}
+}

@@ -1,0 +1,58 @@
+import { end_timing, start_timing, timed } from "std/timing"
+import { workflow_run_repair } from "std/workflow/repair"
+
+/**
+ * Regression (v0.9.16): `workflow_run_repair` -> `workflow_execute` ->
+ * `prepare_workflow_state` used to call `set_tracing_enabled(true)`, which
+ * UNCONDITIONALLY reset the tracing collector. A caller holding an OPEN
+ * enclosing timing span across the workflow run (the bump-fleet pattern: a
+ * run-level `start_timing` span, or `timed(name, {}, { -> workflow_... })`)
+ * had that span STRANDED — its `end_timing` threw
+ * "__timing_end: unknown timing handle" — and already-completed sibling
+ * spans were ERASED from the trace.
+ *
+ * The fix resets the collector only when it is idle. This test opens a
+ * run-level span, completes a sibling span, runs an inline-executor repair
+ * INSIDE the still-open run-level span, and asserts: the sibling survives,
+ * the workflow's own pipeline span is still collected, and the enclosing
+ * span's `end_timing` resolves cleanly.
+ */
+pipeline default(harness: Harness) {
+  // A sibling timing span that completes BEFORE the workflow runs.
+  const sib = timed(harness.clock, "sibling-span", {}, { -> 1 })
+  harness.stdio.println(sib.timing.status)
+  // Run-level span held OPEN across the whole workflow (bump-fleet shape).
+  const run_span = start_timing(harness.clock, "runlevel-span")
+  const token = "GOTOKEN"
+  const out = workflow_run_repair(
+    harness,
+    {
+      task: "Z",
+      executor: { ctx ->
+        let saw = contains(json_stringify(ctx.prior_findings), token)
+        let body = if saw {
+          token
+        } else {
+          "empty"
+        }
+        return {text: body}
+      },
+      verify: { r -> return {ok: contains(to_string(r?.visible_text), token), findings: [token]} },
+      max_attempts: 2,
+    },
+  )
+  // Workflow settled correctly (its own logic + tracing still work).
+  harness.stdio.println(out.ok)
+  harness.stdio.println(len(out.attempts))
+  // The workflow's own pipeline span was collected into the run record.
+  harness.stdio.println(len(out.run.trace_spans) > 0)
+  // The enclosing OPEN span still resolves — no "unknown timing handle".
+  const run_seg = end_timing(harness.clock, run_span, {status: "ok"})
+  harness.stdio.println(run_seg.status)
+  // The sibling that completed before the workflow was NOT erased, and the
+  // enclosing run-level span is present too: both survive among the
+  // collected trace spans.
+  const collected = json_stringify(harness.obs.trace_spans())
+  harness.stdio.println(contains(collected, "sibling-span"))
+  harness.stdio.println(contains(collected, "runlevel-span"))
+}

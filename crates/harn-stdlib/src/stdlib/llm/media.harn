@@ -1,0 +1,219 @@
+fn __llm_media_is_url(source) {
+  return starts_with(source, "http://") || starts_with(source, "https://")
+    || starts_with(
+    source,
+    "data:",
+  )
+}
+
+fn __llm_media_source_field(fs: HarnessFs, source, media_type) {
+  if __llm_media_is_url(source) {
+    return {url: source}
+  }
+  return {base64: bytes_to_base64(fs.read_bytes(source)), media_type: media_type}
+}
+
+/**
+ * media_type_for_path returns a best-effort MIME type from a filename extension.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn media_type_for_path(path, fallback = nil) {
+  const ext = extname(path).lower()
+  if ext == ".png" {
+    return "image/png"
+  }
+  if ext == ".jpg" || ext == ".jpeg" {
+    return "image/jpeg"
+  }
+  if ext == ".webp" {
+    return "image/webp"
+  }
+  if ext == ".gif" {
+    return "image/gif"
+  }
+  if ext == ".pdf" {
+    return "application/pdf"
+  }
+  if ext == ".mp4" || ext == ".m4v" {
+    return "video/mp4"
+  }
+  if ext == ".mov" {
+    return "video/quicktime"
+  }
+  if ext == ".webm" {
+    return "video/webm"
+  }
+  if ext == ".mkv" {
+    return "video/x-matroska"
+  }
+  if ext == ".wav" {
+    return "audio/wav"
+  }
+  if ext == ".mp3" {
+    return "audio/mpeg"
+  }
+  if ext == ".m4a" {
+    return "audio/mp4"
+  }
+  if ext == ".flac" {
+    return "audio/flac"
+  }
+  if ext == ".ogg" || ext == ".oga" {
+    return "audio/ogg"
+  }
+  return fallback ?? "application/octet-stream"
+}
+
+/**
+ * text_content creates a provider-neutral text content block.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn text_content(text) {
+  return {type: "text", text: text}
+}
+
+/**
+ * image_content creates an llm_call-compatible image block from a URL or local path.
+ *
+ * @effects: [llm.call]
+ * @errors: []
+ */
+pub fn image_content(fs: HarnessFs, source, options = nil) {
+  if type_of(source) == "dict" {
+    return source
+  }
+  const opts = options ?? {}
+  const media_type = opts?.media_type ?? opts?.mime_type ?? media_type_for_path(source, "image/png")
+  let block = {type: "image"} + __llm_media_source_field(fs, source, media_type)
+  if block?.media_type == nil {
+    block = block + {media_type: media_type}
+  }
+  if opts?.detail != nil {
+    block = block + {detail: opts.detail}
+  }
+  return block
+}
+
+/**
+ * video_content creates an llm_call-compatible video block from a URL or local path.
+ *
+ * @effects: [llm.call]
+ * @errors: []
+ */
+pub fn video_content(fs: HarnessFs, source, options = nil) {
+  if type_of(source) == "dict" {
+    return source
+  }
+  const opts = options ?? {}
+  const media_type = opts?.media_type ?? opts?.mime_type ?? media_type_for_path(source, "video/mp4")
+  let block = {type: "video"} + __llm_media_source_field(fs, source, media_type)
+  if block?.media_type == nil {
+    block = block + {media_type: media_type}
+  }
+  return block
+}
+
+/**
+ * document_content creates an llm_call-compatible PDF/document block from a URL, file id, or path.
+ *
+ * @effects: [llm.call]
+ * @errors: []
+ */
+pub fn document_content(fs: HarnessFs, source, options = nil) {
+  if type_of(source) == "dict" {
+    return source
+  }
+  const opts = options ?? {}
+  const media_type = opts?.media_type ?? opts?.mime_type
+    ?? media_type_for_path(
+    source,
+    "application/pdf",
+  )
+  if opts?.file_id != nil {
+    return {type: "pdf", file_id: opts.file_id, media_type: media_type}
+  }
+  let block = {type: "pdf"} + __llm_media_source_field(fs, source, media_type)
+  if block?.media_type == nil {
+    block = block + {media_type: media_type}
+  }
+  return block
+}
+
+/**
+ * audio_content creates an llm_call-compatible audio block from a URL, file id, or path.
+ *
+ * @effects: [llm.call]
+ * @errors: []
+ */
+pub fn audio_content(fs: HarnessFs, source, options = nil) {
+  if type_of(source) == "dict" {
+    return source
+  }
+  const opts = options ?? {}
+  const media_type = opts?.media_type ?? opts?.mime_type ?? media_type_for_path(source, "audio/wav")
+  if opts?.file_id != nil {
+    return {type: "audio", file_id: opts.file_id, media_type: media_type}
+  }
+  let block = {type: "audio"} + __llm_media_source_field(fs, source, media_type)
+  if block?.media_type == nil {
+    block = block + {media_type: media_type}
+  }
+  return block
+}
+
+/**
+ * image_message builds a user message containing text plus one image.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn image_message(fs: HarnessFs, source, prompt = "", options = nil) {
+  const text = if prompt == nil || prompt == "" {
+    "Analyze this image."
+  } else {
+    prompt
+  }
+  return {role: "user", content: [text_content(text), image_content(fs, source, options)]}
+}
+
+/**
+ * video_message builds a user message containing text plus one video.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn video_message(fs: HarnessFs, source, prompt = "", options = nil) {
+  const text = if prompt == nil || prompt == "" {
+    "Analyze this video."
+  } else {
+    prompt
+  }
+  return {role: "user", content: [text_content(text), video_content(fs, source, options)]}
+}
+
+/**
+ * image_vision_context returns OCR/vision output beside an LLM-ready image message.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn image_vision_context(fs: HarnessFs, system: HarnessSystem, source, options = nil) {
+  const opts = options ?? {}
+  const image = image_content(fs, source, opts?.image ?? opts)
+  const ocr_result = try {
+    system.vision_ocr(source, opts?.ocr ?? {})
+  } catch (_e) {
+    nil
+  }
+  return {
+    image: image,
+    ocr: ocr_result,
+    messages: [
+      image_message(fs, source, opts?.prompt ?? "Analyze this image.", opts?.image ?? opts),
+    ],
+  }
+}

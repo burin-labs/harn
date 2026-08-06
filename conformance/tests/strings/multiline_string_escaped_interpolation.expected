@@ -1,0 +1,4 @@
+[harn] single=${VAR}
+[harn] shell ${VAR:-default}
+harn world
+[harn] only ${VAR}

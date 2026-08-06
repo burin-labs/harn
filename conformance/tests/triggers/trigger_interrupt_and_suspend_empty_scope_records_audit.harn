@@ -1,0 +1,68 @@
+import { lifecycle_audit_log_take } from "std/lifecycle"
+import "std/triggers"
+
+/**
+ * Verifies the InterruptAndSuspend (#1910) handler's no-targets contract:
+ * when the resolved target list is empty (no workers in scope), the
+ * dispatcher records a single `triggers.interrupt_and_suspend.audit`
+ * roll-up audit with `target_count: 0` / `suspended_count: 0` and returns
+ * a successful `broadcast` dispatch rather than failing. This is the
+ * "panic arrived after every worker already drained" graceful-no-op path.
+ */
+pipeline test(harness: Harness, task) {
+  const _ = lifecycle_audit_log_take(harness.obs)
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(
+    harness.random.range(100000, 999999),
+  )
+  const handle: TriggerHandle = harness.runtime.trigger_register(
+    {
+      id: "trigger-interrupt-empty-" + unique,
+      kind: "issue.opened",
+      provider: "webhook",
+      handler: InterruptAndSuspend(
+        {target_agents: ["worker-does-not-exist-" + unique], reason: "phantom_panic"},
+      ),
+      when: nil,
+      retry: nil,
+      match: {events: ["issue.opened"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  const dispatch = harness.runtime.trigger_fire(
+    handle,
+    {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-" + unique}},
+  )
+  harness.stdio.println(dispatch.status == "dispatched")
+  harness.stdio.println(dispatch.result?.status == "broadcast")
+  harness.stdio.println(dispatch.result?.scope_kind == "concrete")
+  harness.stdio.println(dispatch.result?.target_count)
+  harness.stdio.println(dispatch.result?.suspended_count)
+  harness.stdio.println(dispatch.result?.skipped_count)
+  harness.stdio.println(dispatch.result?.reason == "phantom_panic")
+  const audits = lifecycle_audit_log_take(harness.obs)
+  let broadcast_audits = 0
+  let per_worker_audits = 0
+  let summary_outcome = ""
+  let summary_reason = ""
+  for audit in audits {
+    if audit.kind == "triggers.interrupt_and_suspend.audit" {
+      if audit.payload?.target_count != nil {
+        broadcast_audits = broadcast_audits + 1
+        summary_outcome = audit.payload.outcome
+        summary_reason = audit.payload.reason
+      } else {
+        per_worker_audits = per_worker_audits + 1
+      }
+    }
+  }
+  harness.stdio.println(broadcast_audits)
+  harness.stdio.println(per_worker_audits)
+  harness.stdio.println(summary_outcome)
+  harness.stdio.println(summary_reason)
+}

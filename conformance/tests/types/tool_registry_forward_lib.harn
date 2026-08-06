@@ -1,0 +1,9 @@
+import { ToolRegistry } from "std/tools"
+
+/**
+ * Package-facing registry forwarder: the public boundary names the
+ * producer-owned `ToolRegistry` alias instead of `dict` / `any` / a local copy.
+ */
+pub fn with_ping_tool(registry: ToolRegistry) -> ToolRegistry {
+  return tool_define(registry, "ping", "Return pong", {parameters: {}, handler: { _ -> "pong" }})
+}

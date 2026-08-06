@@ -1,0 +1,66 @@
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline default(harness: Harness) {
+  // llm_call is fail-fast on transient transport errors: there is no hidden
+  // in-call retry budget (the pre-v0.10 `llm_retries` / `llm_backoff_ms`
+  // options were removed). Retry policy is composed via `with_retry` from
+  // std/llm/handlers — see llm_handlers_with_retry*.harn for that surface.
+  with_llm_script(
+    harness.llm,
+    [
+      {error: {category: "server_error", message: "HTTP 503 Service Unavailable"}},
+      llm_text("unreachable without a composed retry handler"),
+    ],
+    { ->
+      const fail_fast = try {
+        harness.llm.call("transport fail-fast", nil, {provider: "mock"})
+      }
+      harness.stdio.println(is_err(fail_fast))
+      harness.stdio.println(unwrap_err(fail_fast)?.kind)
+      harness.stdio.println(unwrap_err(fail_fast)?.reason)
+      harness.stdio.println(len(harness.llm.mock_calls()))
+    },
+  )
+  const schema = {type: "object", required: ["answer"], properties: {answer: {type: "string"}}}
+  // A schema-validation failure is not a transport failure: it consumes the
+  // schema_retries budget only, and with schema_retries: 0 it surfaces on
+  // the first call.
+  with_llm_script(
+    harness.llm,
+    [llm_text("{\"wrong\": true}")],
+    { ->
+      const schema_failure = try {
+        harness.llm.call(
+          "schema failure is not a transport retry",
+          nil,
+          {
+            provider: "mock",
+            output: {schema: schema, strict: true, validation: "error"},
+            schema_retries: 0,
+          },
+        )
+      }
+      harness.stdio.println(is_err(schema_failure))
+      harness.stdio.println(unwrap_err(schema_failure)?.category)
+      harness.stdio.println(len(harness.llm.mock_calls()))
+    },
+  )
+  // The schema-retry loop still re-prompts on invalid structured output.
+  with_llm_script(
+    harness.llm,
+    [llm_text("{\"wrong\": true}"), llm_text("{\"answer\": \"fixed\"}")],
+    { ->
+      const structured = harness.llm.call(
+        "schema retry",
+        nil,
+        {
+          provider: "mock",
+          output: {schema: schema, strict: true, validation: "error"},
+          schema_retries: 1,
+        },
+      )
+      harness.stdio.println(structured.data.answer)
+      harness.stdio.println(len(harness.llm.mock_calls()))
+    },
+  )
+}

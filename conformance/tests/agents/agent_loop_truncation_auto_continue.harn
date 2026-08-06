@@ -1,0 +1,168 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * A value model that hits the output-token cap mid-emit returns a
+ * length-truncation stop_reason with a partial, unparseable tool call. The loop
+ * must AUTO-CONTINUE (re-issue with a raised cap) instead of burning the turn on
+ * parse-guidance — but only on a real length truncation, and bounded so it can't
+ * loop forever. A clean stop with a malformed call must NOT trigger it (that is
+ * the parse-tolerance / reasoning-leak domain).
+ */
+fn note_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "write_note",
+    "Write a note.",
+    {
+      handler: { args -> "wrote " + to_string(args?.path) },
+      parameters: {path: {type: "string", description: "Path to write"}},
+      returns: {type: "string"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+  return tools
+}
+
+/**
+ * A tagged tool-call cut off mid-heredoc: the parser surfaces a TRUNCATED
+ * diagnostic and zero calls. `stop_reason: "length"` marks the token-cap cause.
+ */
+fn truncated_turn() {
+  return {
+    text: "<tool_call>\nwrite_note({ path: \"a.txt\", body: <<EOF\nhello",
+    stop_reason: "length",
+  }
+}
+
+pipeline default(harness: Harness) {
+  // (a) Length truncation + incomplete call -> auto-continue. The re-issue
+  // consumes the next scripted turn (a complete call), dispatches it, then the
+  // loop finishes. The continuation must NOT carry parse-guidance — the whole
+  // point is that we did not burn the turn.
+  with_llm_script(
+    harness.llm,
+    [
+      truncated_turn(),
+      llm_text("<tool_call>\nwrite_note({ path: \"a.txt\" })\n</tool_call>"),
+      llm_text("<done>##DONE##</done>"),
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Write a.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 5,
+          max_nudges: 5,
+          tools: note_tools(),
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.tools.successful[0])
+      harness.stdio.println(len(calls))
+      harness.stdio.println(!contains(json_stringify(calls[1].messages), "parse_guidance"))
+    },
+  )
+  // (b) Still truncated after the cap -> fall back to parse-guidance, no
+  // infinite loop. Two continuations are allowed (default cap), so the third
+  // truncated result falls through; its successor call carries parse-guidance.
+  with_llm_script(
+    harness.llm,
+    [
+      truncated_turn(),
+      truncated_turn(),
+      truncated_turn(),
+      llm_text("<tool_call>\nwrite_note({ path: \"a.txt\" })\n</tool_call>"),
+      llm_text("<done>##DONE##</done>"),
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Write a.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 8,
+          max_nudges: 8,
+          tools: note_tools(),
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(result.status)
+      const retry_messages = json_stringify(calls[3].messages)
+      const retry_directives = calls[3].messages[len(calls[3].messages) - 1].content
+      harness.stdio.println(contains(retry_directives, "<directive authority=\"corrective\">"))
+      require !contains(retry_messages, "parse_guidance"),
+        "truncation fallback omits its internal feedback kind"
+    },
+  )
+  // (c) Clean stop + malformed call -> NOT auto-continue. The same truncated
+  // body but with `stop_reason: "stop"` is the #3137/#3142 domain: parse-guidance
+  // fires immediately on the next call and the continuation count is not inflated.
+  with_llm_script(
+    harness.llm,
+    [
+      {text: "<tool_call>\nwrite_note({ path: \"a.txt\", body: <<EOF\nhello", stop_reason: "stop"},
+      llm_text("<tool_call>\nwrite_note({ path: \"a.txt\" })\n</tool_call>"),
+      llm_text("<done>##DONE##</done>"),
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Write a.txt.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 5,
+          max_nudges: 5,
+          tools: note_tools(),
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(result.status)
+      harness.stdio.println(len(calls))
+      const retry_messages = json_stringify(calls[1].messages)
+      const retry_directives = calls[1].messages[len(calls[1].messages) - 1].content
+      harness.stdio.println(contains(retry_directives, "<directive authority=\"corrective\">"))
+      require !contains(retry_messages, "parse_guidance"),
+        "malformed-call guidance omits its internal feedback kind"
+    },
+  )
+  // (d) Length truncation with billed hidden work but no visible text/tool
+  // calls is still budget exhaustion. Retry with a raised cap instead of
+  // feeding an empty turn into parse/stall accounting.
+  with_llm_script(
+    harness.llm,
+    [{text: "", output_tokens: 342, stop_reason: "length"}, llm_text("<done>##DONE##</done>")],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Think briefly, then finish.",
+        nil,
+        {
+          provider: "mock",
+          tool_format: "text",
+          loop_until_done: true,
+          max_iterations: 3,
+          max_nudges: 3,
+          max_tokens: 64,
+          tools: note_tools(),
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(result.status)
+      harness.stdio.println(len(calls))
+      harness.stdio.println(!contains(json_stringify(calls[1].messages), "parse_guidance"))
+    },
+  )
+}

@@ -1,0 +1,86 @@
+import {
+  workflow_select_artifacts,
+  workflow_select_artifacts_adaptive,
+  workflow_select_stage_artifacts,
+  workflow_stage_context_policy,
+} from "std/workflow/context"
+
+fn ids(artifacts) {
+  let out = []
+  for artifact in artifacts {
+    out = out.appending(artifact.id)
+  }
+  return out
+}
+
+pipeline default(harness: Harness) {
+  const stage_policy = workflow_stage_context_policy({}, {input_kinds: ["summary"]})
+  harness.stdio.println(stage_policy.include_kinds[0])
+  const selected = workflow_select_stage_artifacts(
+    {
+      context_policy: {},
+      input_contract: {input_kinds: ["summary"]},
+      artifacts: [
+        {id: "a", kind: "summary", text: "short", priority: 1, estimated_tokens: 5},
+        {id: "b", kind: "workspace_file", text: "file", priority: 100, estimated_tokens: 1},
+      ],
+    },
+  )
+  harness.stdio.println(json_stringify(ids(selected.artifacts)))
+  const ordered = workflow_select_artifacts(
+    [
+      {id: "low", kind: "summary", priority: 1, relevance: 1.0, estimated_tokens: 10},
+      {id: "pin", kind: "summary", priority: 0, relevance: 0.0, estimated_tokens: 10},
+      {
+        id: "verify",
+        kind: "verification_result",
+        priority: 2,
+        relevance: 0.1,
+        estimated_tokens: 10,
+      },
+    ],
+    {pinned_ids: ["pin"], prioritize_kinds: ["verification_result"], max_artifacts: 2},
+  )
+  harness.stdio.println(json_stringify(ids(ordered)))
+  const adaptive = workflow_select_artifacts_adaptive(
+    [
+      {
+        id: "old-index",
+        kind: "summary",
+        text: "same",
+        priority: 1,
+        freshness: "normal",
+        metadata: {evidence_paths: ["src/index.ts"]},
+      },
+      {
+        id: "new-index",
+        kind: "summary",
+        text: "updated src/index.ts",
+        priority: 1,
+        freshness: "fresh",
+        metadata: {changed_paths: ["src/index.ts"]},
+      },
+      {id: "dup-low", kind: "summary", text: "duplicate", priority: 1},
+      {id: "dup-high", kind: "summary", text: "duplicate", priority: 9},
+    ],
+    {},
+  )
+  harness.stdio.println(json_stringify(ids(adaptive)))
+  harness.stdio.println(!contains(ids(adaptive), "old-index"))
+  harness.stdio.println(contains(ids(adaptive), "dup-high"))
+  harness.stdio.println(!contains(ids(adaptive), "dup-low"))
+  const oversized = workflow_select_artifacts_adaptive(
+    [
+      {
+        id: "big",
+        kind: "summary",
+        text: "0123456789".repeat(300),
+        estimated_tokens: 1000,
+        priority: 1,
+      },
+    ],
+    {max_tokens: 400},
+  )
+  harness.stdio.println(oversized[0].estimated_tokens == 400)
+  harness.stdio.println(len(oversized[0].text) < 3000)
+}

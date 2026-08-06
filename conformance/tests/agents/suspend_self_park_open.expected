@@ -1,0 +1,8 @@
+status=suspended
+initiator=self_initiated
+reason=blocked
+has_conditions=false
+has_auto_trigger=false
+resume_status=running
+final_status=completed
+has_transcript=true

@@ -1,0 +1,15 @@
+suspended=suspended
+stopped=stopped
+worker_status=stopped
+handoff_type=handoff_artifact
+handoff_kind=agent_stop
+has_anchor=true
+has_budget=true
+confidence=true
+children=1
+summary_reason=true
+nested_summary=true
+flat_handoffs=2
+outcome=true
+leaf_status=completed
+hard=cancelled

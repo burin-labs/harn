@@ -1,0 +1,8 @@
+pipeline test(harness: Harness, task) {
+  /* this is a comment */
+  const x = 42
+  harness.stdio.log(x)
+  /* outer /* nested */ still comment */
+  const y = "survived"
+  harness.stdio.log(y)
+}

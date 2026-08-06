@@ -1,0 +1,18 @@
+import { timed } from "std/timing"
+
+pipeline default(harness: Harness) {
+  let caught = nil
+  try {
+    timed(
+      harness.clock,
+      "work.fragile",
+      {phase: "validate"},
+      { ->
+        throw "validation failed"
+      },
+    )
+  } catch (e) {
+    caught = e
+  }
+  harness.stdio.println(caught)
+}

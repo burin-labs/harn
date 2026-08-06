@@ -1,0 +1,875 @@
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::sync::Arc;
+
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::value::{value_structural_hash_key, DictRetain, VmError, VmValue};
+use crate::vm::{AsyncBuiltinCtx, Vm};
+
+fn dict_arg(value: &VmValue, builtin: &str) -> Result<Arc<crate::value::DictMap>, VmError> {
+    match value {
+        VmValue::Dict(d) => Ok(Arc::clone(d)),
+        VmValue::Nil => Ok(Arc::new(crate::value::DictMap::new())),
+        other => Err(VmError::TypeError(format!(
+            "{builtin}: expected dict, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+fn keep_filter_nil(value: &VmValue) -> bool {
+    match value {
+        VmValue::Nil => false,
+        VmValue::String(s) => !s.is_empty() && s.as_str() != "null",
+        _ => true,
+    }
+}
+
+fn key_list_arg<'a>(value: &'a VmValue, builtin: &str) -> Result<&'a [VmValue], VmError> {
+    match value {
+        VmValue::List(items) => Ok(items.as_slice()),
+        VmValue::Set(set) => Ok(set.items()),
+        other => Err(VmError::TypeError(format!(
+            "{builtin}: keys argument must be a list or set, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+fn current_async_vm(ctx: &AsyncBuiltinCtx, _builtin: &str) -> Vm {
+    ctx.child_vm()
+}
+
+fn list_arg<'a>(args: &'a [VmValue], builtin: &str) -> Result<&'a Arc<Vec<VmValue>>, VmError> {
+    match args.first() {
+        Some(VmValue::List(items)) => Ok(items),
+        Some(other) => Err(VmError::TypeError(format!(
+            "{builtin}: first argument must be a list, got {}",
+            other.type_name()
+        ))),
+        None => Err(VmError::Runtime(format!(
+            "{builtin}: first argument must be a list"
+        ))),
+    }
+}
+
+fn positive_usize_arg(args: &[VmValue], index: usize, default: usize, _builtin: &str) -> usize {
+    args.get(index)
+        .and_then(VmValue::as_int)
+        .unwrap_or(default as i64)
+        .max(1) as usize
+}
+
+/// Coerce a discriminator value (returned by a `group_by` / `count_by`
+/// callback) into the canonical dict-key string. Strict-string only:
+/// dict keys are intrinsically `String`, and coercing other types via
+/// `display()` silently merged collidable buckets (`Int(1)` and
+/// `String("1")` both rendered `"1"`). Callers explicitly project to
+/// string via `to_string(...)` so the discriminator is unambiguous at
+/// the call site.
+///
+/// Exposed at crate scope so the method-call path in
+/// `vm/methods/list.rs` enforces the same contract as the free
+/// builtin path here.
+pub(crate) fn string_discriminator(value: &VmValue, builtin: &str) -> Result<String, VmError> {
+    match value {
+        VmValue::String(s) => Ok((**s).to_string()),
+        VmValue::Nil => Err(VmError::TypeError(format!(
+            "{builtin}: callback returned nil; expected a string discriminator (wrap with to_string(...) if you intended a scalar)"
+        ))),
+        other => Err(VmError::TypeError(format!(
+            "{builtin}: callback must return a string discriminator, got {}; wrap with to_string(...) so the bucket key is unambiguous",
+            other.type_name()
+        ))),
+    }
+}
+
+pub(crate) fn register_collection_builtins(vm: &mut Vm) {
+    for def in COLLECTION_ASYNC_BUILTINS {
+        vm.register_builtin_def(def);
+    }
+    register_dict_builder_builtins(vm);
+}
+
+#[harn_builtin(exposure = "pure", effects = [], sig = "chunk(items: list, size: int) -> list", kind = "async", category = "collections")]
+async fn chunk_impl(_ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let items = list_arg(&args, "chunk")?;
+    let size = positive_usize_arg(&args, 1, 1, "chunk");
+    Ok(VmValue::List(Arc::new(
+        items
+            .chunks(size)
+            .map(|chunk| VmValue::List(Arc::new(chunk.to_vec())))
+            .collect(),
+    )))
+}
+
+#[harn_builtin(exposure = "pure", effects = [], sig = "window(items: list, size?: int, step?: int) -> list", kind = "async", category = "collections")]
+async fn window_impl(_ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let items = list_arg(&args, "window")?;
+    let size = positive_usize_arg(&args, 1, 2, "window");
+    let step = positive_usize_arg(&args, 2, 1, "window");
+    if size > items.len() {
+        return Ok(VmValue::List(Arc::new(Vec::new())));
+    }
+    let mut windows = Vec::new();
+    let mut start = 0;
+    while start + size <= items.len() {
+        windows.push(VmValue::List(Arc::new(items[start..start + size].to_vec())));
+        start += step;
+    }
+    Ok(VmValue::List(Arc::new(windows)))
+}
+
+fn required_callable<'a>(
+    args: &'a [VmValue],
+    index: usize,
+    builtin: &str,
+) -> Result<&'a VmValue, VmError> {
+    let callable = args
+        .get(index)
+        .ok_or_else(|| VmError::Runtime(format!("{builtin}: callback is required")))?;
+    if !Vm::is_callable_value(callable) {
+        return Err(VmError::TypeError(format!(
+            "{builtin}: callback must be callable, got {}",
+            callable.type_name()
+        )));
+    }
+    Ok(callable)
+}
+
+#[harn_builtin(exposure = "pure", effects = [], sig = "group_by(items: list, key_fn: closure) -> dict", kind = "async", category = "collections")]
+async fn group_by_impl(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let items = list_arg(&args, "group_by")?;
+    let callable = required_callable(&args, 1, "group_by")?;
+    let mut vm = current_async_vm(&ctx, "group_by");
+    let mut groups: BTreeMap<String, Vec<VmValue>> = BTreeMap::new();
+    for item in items.iter() {
+        let key = vm.call_callable_one(callable, item).await?;
+        let bucket = string_discriminator(&key, "group_by")?;
+        groups.entry(bucket).or_default().push(item.clone());
+    }
+    Ok(VmValue::dict(
+        groups
+            .into_iter()
+            .map(|(key, values)| {
+                (
+                    crate::value::intern_key(&key),
+                    VmValue::List(Arc::new(values)),
+                )
+            })
+            .collect::<crate::value::DictMap>(),
+    ))
+}
+
+#[harn_builtin(exposure = "pure", effects = [], sig = "partition(items: list, predicate: closure) -> dict", kind = "async", category = "collections")]
+async fn partition_impl(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let items = list_arg(&args, "partition")?;
+    let callable = required_callable(&args, 1, "partition")?;
+    let mut vm = current_async_vm(&ctx, "partition");
+    let mut matched = Vec::new();
+    let mut no_match = Vec::new();
+    for item in items.iter() {
+        if vm.call_callable_one(callable, item).await?.is_truthy() {
+            matched.push(item.clone());
+        } else {
+            no_match.push(item.clone());
+        }
+    }
+    Ok(VmValue::dict(BTreeMap::from([
+        ("match".to_string(), VmValue::List(Arc::new(matched))),
+        ("no_match".to_string(), VmValue::List(Arc::new(no_match))),
+    ])))
+}
+
+#[harn_builtin(exposure = "pure", effects = [], sig = "dedup_by(items: list, key_fn: closure) -> list", kind = "async", category = "collections")]
+async fn dedup_by_impl(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let items = list_arg(&args, "dedup_by")?;
+    let callable = required_callable(&args, 1, "dedup_by")?;
+    let mut vm = current_async_vm(&ctx, "dedup_by");
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for item in items.iter() {
+        let key = vm.call_callable_one(callable, item).await?;
+        if seen.insert(value_structural_hash_key(&key)) {
+            out.push(item.clone());
+        }
+    }
+    Ok(VmValue::List(Arc::new(out)))
+}
+
+#[harn_builtin(exposure = "pure", effects = [], sig = "flat_map(items: list, callback: closure) -> list", kind = "async", category = "collections")]
+async fn flat_map_impl(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let items = list_arg(&args, "flat_map")?;
+    let callable = required_callable(&args, 1, "flat_map")?;
+    let mut vm = current_async_vm(&ctx, "flat_map");
+    let mut out = Vec::new();
+    for item in items.iter() {
+        match vm.call_callable_one(callable, item).await? {
+            VmValue::List(inner) => out.extend(inner.iter().cloned()),
+            other => out.push(other),
+        }
+    }
+    Ok(VmValue::List(Arc::new(out)))
+}
+
+async fn take_or_drop_while(
+    ctx: AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+    take: bool,
+    builtin: &str,
+) -> Result<VmValue, VmError> {
+    let items = list_arg(&args, builtin)?;
+    let callable = required_callable(&args, 1, builtin)?;
+    let mut vm = current_async_vm(&ctx, builtin);
+    let mut out = Vec::new();
+    if take {
+        for item in items.iter() {
+            if !vm.call_callable_one(callable, item).await?.is_truthy() {
+                break;
+            }
+            out.push(item.clone());
+        }
+    } else {
+        let mut dropping = true;
+        for item in items.iter() {
+            if dropping {
+                if vm.call_callable_one(callable, item).await?.is_truthy() {
+                    continue;
+                }
+                dropping = false;
+            }
+            out.push(item.clone());
+        }
+    }
+    Ok(VmValue::List(Arc::new(out)))
+}
+
+#[harn_builtin(exposure = "pure", effects = [], sig = "take_while(items: list, predicate: closure) -> list", kind = "async", category = "collections")]
+async fn take_while_impl(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    take_or_drop_while(ctx, args, true, "take_while").await
+}
+
+#[harn_builtin(exposure = "pure", effects = [], sig = "drop_while(items: list, predicate: closure) -> list", kind = "async", category = "collections")]
+async fn drop_while_impl(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    take_or_drop_while(ctx, args, false, "drop_while").await
+}
+
+#[harn_builtin(exposure = "pure", effects = [], sig = "count_by(items: list, key_fn: closure) -> dict", kind = "async", category = "collections")]
+async fn count_by_impl(ctx: AsyncBuiltinCtx, args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let items = list_arg(&args, "count_by")?;
+    let callable = required_callable(&args, 1, "count_by")?;
+    let mut vm = current_async_vm(&ctx, "count_by");
+    let mut counts: BTreeMap<String, i64> = BTreeMap::new();
+    for item in items.iter() {
+        let key = vm.call_callable_one(callable, item).await?;
+        let bucket = string_discriminator(&key, "count_by")?;
+        *counts.entry(bucket).or_insert(0) += 1;
+    }
+    Ok(VmValue::dict(
+        counts
+            .into_iter()
+            .map(|(key, count)| (crate::value::intern_key(&key), VmValue::Int(count)))
+            .collect::<crate::value::DictMap>(),
+    ))
+}
+
+const COLLECTION_ASYNC_BUILTINS: &[&VmBuiltinDef] = &[
+    &CHUNK_IMPL_DEF,
+    &WINDOW_IMPL_DEF,
+    &GROUP_BY_IMPL_DEF,
+    &PARTITION_IMPL_DEF,
+    &DEDUP_BY_IMPL_DEF,
+    &FLAT_MAP_IMPL_DEF,
+    &TAKE_WHILE_IMPL_DEF,
+    &DROP_WHILE_IMPL_DEF,
+    &COUNT_BY_IMPL_DEF,
+];
+
+/// Registers the native fast-paths for the `std/collections` and `std/json`
+/// option-builder helpers. The native paths build each result with one
+/// allocation and avoid per-entry callback dispatch for the `filter_nil`
+/// helpers.
+///
+/// Implementations are individual `#[harn_builtin]`-annotated functions
+/// below; `register_dict_builder_builtins` walks the collected
+/// [`DICT_BUILDER_BUILTINS`] slice.
+fn register_dict_builder_builtins(vm: &mut Vm) {
+    for def in DICT_BUILDER_BUILTINS {
+        vm.register_builtin_def(def);
+    }
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "__dict_filter_nil(d: dict) -> dict", category = "collections"
+)]
+fn dict_filter_nil_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    dict_filter_nil(args.first().unwrap_or(&VmValue::Nil))
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "__dict_merge(a: dict, b: dict) -> dict",
+    category = "collections"
+)]
+fn dict_merge_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    dict_merge(
+        args.first().unwrap_or(&VmValue::Nil),
+        args.get(1).unwrap_or(&VmValue::Nil),
+    )
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "__dict_pick(d: dict, keys: list) -> dict",
+    category = "collections"
+)]
+fn dict_pick_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    dict_pick(
+        args.first().unwrap_or(&VmValue::Nil),
+        args.get(1).unwrap_or(&VmValue::Nil),
+    )
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "__dict_pick_keys(d: dict, keys: list, drop_nil?: bool) -> dict",
+    category = "collections"
+)]
+fn dict_pick_keys_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    dict_pick_keys(
+        args.first().unwrap_or(&VmValue::Nil),
+        args.get(1).unwrap_or(&VmValue::Nil),
+        args.get(2).map(VmValue::is_truthy).unwrap_or(false),
+    )
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "__dict_omit(d: dict, keys: list) -> dict",
+    category = "collections"
+)]
+fn dict_omit_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    dict_omit(
+        args.first().unwrap_or(&VmValue::Nil),
+        args.get(1).unwrap_or(&VmValue::Nil),
+    )
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "clone(value: any) -> any", category = "collections"
+)]
+fn clone_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(shallow_clone(args.first().unwrap_or(&VmValue::Nil)))
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    sig = "deep_clone(value: any) -> any", category = "collections"
+)]
+fn deep_clone_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(deep_clone_value(args.first().unwrap_or(&VmValue::Nil)))
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    aliases = ["__deep_merge"],
+    sig = "deep_merge(a: dict, b: dict) -> dict",
+    category = "collections"
+)]
+fn deep_merge_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    deep_merge_value(
+        args.first().unwrap_or(&VmValue::Nil),
+        args.get(1).unwrap_or(&VmValue::Nil),
+    )
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    aliases = ["__list_unique"],
+    sig = "unique(items: list) -> list",
+    category = "collections"
+)]
+fn unique_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    list_unique(args.first().unwrap_or(&VmValue::Nil))
+}
+
+#[harn_builtin(
+    exposure = "pure",
+    effects = [],
+    aliases = ["__dict_from_pairs"],
+    sig = "dict_from_pairs(pairs: list) -> dict",
+    category = "collections"
+)]
+fn dict_from_pairs_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    dict_from_pairs(args.first().unwrap_or(&VmValue::Nil))
+}
+
+const DICT_BUILDER_BUILTINS: &[&VmBuiltinDef] = &[
+    &DICT_FILTER_NIL_IMPL_DEF,
+    &DICT_MERGE_IMPL_DEF,
+    &DICT_PICK_IMPL_DEF,
+    &DICT_PICK_KEYS_IMPL_DEF,
+    &DICT_OMIT_IMPL_DEF,
+    &CLONE_IMPL_DEF,
+    &DEEP_CLONE_IMPL_DEF,
+    &DEEP_MERGE_IMPL_DEF,
+    &UNIQUE_IMPL_DEF,
+    &DICT_FROM_PAIRS_IMPL_DEF,
+];
+
+// `#[harn_builtin]` auto-registers each emitted DEF via the linkme distributed
+// slice `crate::stdlib::macros::ALL_BUILTIN_DEFS`, so this module needs no
+// separate builtin aggregation.
+
+/// Returns a shallow copy of `value`. Dicts and lists become fresh
+/// allocations independent of the source; primitives are returned by value.
+/// Opaque handles (closures, channels, atomics, MCP clients, etc.) are
+/// returned unchanged because copying them would either be a no-op
+/// (Arc-cloned handle) or violate identity invariants.
+fn shallow_clone(value: &VmValue) -> VmValue {
+    match value {
+        VmValue::Dict(d) => VmValue::dict((**d).clone()),
+        VmValue::List(items) => VmValue::List(std::sync::Arc::new((**items).clone())),
+        VmValue::Set(items) => VmValue::Set(std::sync::Arc::new((**items).clone())),
+        other => other.clone(),
+    }
+}
+
+/// Returns a recursive deep copy of `value`. Dicts and lists are duplicated
+/// and their entries are deep-cloned in turn. Handles and other opaque
+/// runtime values are passed through unchanged (deep copying a channel or
+/// MCP client is undefined and the runtime treats them as identities).
+fn deep_clone_value(value: &VmValue) -> VmValue {
+    match value {
+        VmValue::Dict(d) => {
+            let mut out = BTreeMap::new();
+            for (key, val) in d.iter() {
+                out.insert(key.clone(), deep_clone_value(val));
+            }
+            VmValue::dict(out)
+        }
+        VmValue::List(items) => VmValue::List(std::sync::Arc::new(
+            items.iter().map(deep_clone_value).collect(),
+        )),
+        VmValue::Set(items) => VmValue::Set(std::sync::Arc::new(
+            items.iter().map(deep_clone_value).collect(),
+        )),
+        VmValue::Pair(p) => VmValue::Pair(std::sync::Arc::new((
+            deep_clone_value(&p.0),
+            deep_clone_value(&p.1),
+        ))),
+        other => other.clone(),
+    }
+}
+
+/// Recursively merges `b` into `a`, returning a fresh dict. When both
+/// sides have a dict at the same key, the dicts are merged recursively.
+/// Otherwise the right-hand value wins, matching the shallow `merge`
+/// semantics for terminal nodes. Nil arguments are treated as empty
+/// dicts so that variadic accumulators don't require a base case.
+fn deep_merge_value(a: &VmValue, b: &VmValue) -> Result<VmValue, VmError> {
+    let left = dict_arg(a, "deep_merge")?;
+    let right = dict_arg(b, "deep_merge")?;
+    if right.is_empty() {
+        return Ok(VmValue::Dict(left));
+    }
+    if left.is_empty() {
+        return Ok(VmValue::Dict(right));
+    }
+    let mut merged = Arc::try_unwrap(left).unwrap_or_else(|d| (*d).clone());
+    let right_entries: Vec<(crate::value::HarnStr, VmValue)> = match Arc::try_unwrap(right) {
+        Ok(map) => map.into_iter().collect(),
+        Err(rc) => rc.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+    };
+    for (key, value) in right_entries {
+        match merged.remove(&key) {
+            Some(existing) => match (&existing, &value) {
+                (VmValue::Dict(_), VmValue::Dict(_)) => {
+                    let recursed = deep_merge_value(&existing, &value)?;
+                    merged.insert(key, recursed);
+                }
+                _ => {
+                    merged.insert(key, value);
+                }
+            },
+            None => {
+                merged.insert(key, value);
+            }
+        }
+    }
+    Ok(VmValue::dict(merged))
+}
+
+/// Returns a list with duplicate entries removed while preserving the
+/// first-seen order. Structural equality is used (matching `==` in
+/// scripts) via `value_structural_hash_key`, so two structurally equal
+/// dicts collapse to a single entry.
+fn list_unique(value: &VmValue) -> Result<VmValue, VmError> {
+    let items: &[VmValue] = match value {
+        VmValue::List(items) => items,
+        VmValue::Set(set) => set.items(),
+        VmValue::Nil => return Ok(VmValue::List(std::sync::Arc::new(Vec::new()))),
+        other => {
+            return Err(VmError::TypeError(format!(
+                "unique: expected a list, got {}",
+                other.type_name()
+            )));
+        }
+    };
+    let mut seen: HashSet<String> = HashSet::with_capacity(items.len());
+    let mut out: Vec<VmValue> = Vec::with_capacity(items.len());
+    for item in items.iter() {
+        let key = value_structural_hash_key(item);
+        if seen.insert(key) {
+            out.push(item.clone());
+        }
+    }
+    Ok(VmValue::List(std::sync::Arc::new(out)))
+}
+
+/// Converts a list of `[key, value]` pairs (or `pair(key, value)` values)
+/// into a dict. The conversion is order-independent (BTreeMap), and
+/// later pairs override earlier ones — matching the `__dict_merge`
+/// right-wins convention.
+fn dict_from_pairs(value: &VmValue) -> Result<VmValue, VmError> {
+    let pairs: &[VmValue] = match value {
+        VmValue::List(items) => items,
+        VmValue::Set(set) => set.items(),
+        VmValue::Nil => return Ok(VmValue::dict_map(Default::default())),
+        other => {
+            return Err(VmError::TypeError(format!(
+                "dict_from_pairs: expected a list of [key, value] pairs, got {}",
+                other.type_name()
+            )));
+        }
+    };
+    let mut out = BTreeMap::new();
+    for (index, entry) in pairs.iter().enumerate() {
+        let (key, val) = match entry {
+            VmValue::Pair(p) => (p.0.clone(), p.1.clone()),
+            VmValue::List(items) if items.len() == 2 => (items[0].clone(), items[1].clone()),
+            other => {
+                return Err(VmError::TypeError(format!(
+                    "dict_from_pairs: entry {index} must be a [key, value] list or pair, got {}",
+                    other.type_name()
+                )));
+            }
+        };
+        let key_string = match key {
+            VmValue::String(s) => (*s).to_string(),
+            VmValue::Int(n) => n.to_string(),
+            VmValue::Bool(b) => b.to_string(),
+            other => other.display(),
+        };
+        out.insert(key_string, val);
+    }
+    Ok(VmValue::dict(out))
+}
+
+fn dict_filter_nil(value: &VmValue) -> Result<VmValue, VmError> {
+    let dict = dict_arg(value, "filter_nil")?;
+    if dict.is_empty() || dict.values().all(keep_filter_nil) {
+        return Ok(VmValue::Dict(dict));
+    }
+    let mut out = Arc::try_unwrap(dict).unwrap_or_else(|d| (*d).clone());
+    out.retain(|_, value| keep_filter_nil(value));
+    Ok(VmValue::dict(out))
+}
+
+fn dict_merge(a: &VmValue, b: &VmValue) -> Result<VmValue, VmError> {
+    let left = dict_arg(a, "merge")?;
+    let right = dict_arg(b, "merge")?;
+    if right.is_empty() {
+        return Ok(VmValue::Dict(left));
+    }
+    if left.is_empty() {
+        return Ok(VmValue::Dict(right));
+    }
+    let mut merged = Arc::try_unwrap(left).unwrap_or_else(|d| (*d).clone());
+    match Arc::try_unwrap(right) {
+        Ok(entries) => merged.extend(entries),
+        Err(entries) => merged.extend(entries.iter().map(|(k, v)| (k.clone(), v.clone()))),
+    }
+    Ok(VmValue::dict(merged))
+}
+
+fn dict_pick(data: &VmValue, keys: &VmValue) -> Result<VmValue, VmError> {
+    let dict = dict_arg(data, "pick")?;
+    let keys = key_list_arg(keys, "pick")?;
+    let mut out = BTreeMap::new();
+    for key in keys {
+        let key = key.display();
+        if let Some(value) = dict.get(key.as_str()) {
+            if !matches!(value, VmValue::Nil) {
+                out.insert(key, value.clone());
+            }
+        }
+    }
+    Ok(VmValue::dict(out))
+}
+
+fn dict_pick_keys(data: &VmValue, keys: &VmValue, drop_nil: bool) -> Result<VmValue, VmError> {
+    let dict = dict_arg(data, "pick_keys")?;
+    let keys = key_list_arg(keys, "pick_keys")?;
+    let mut out = BTreeMap::new();
+    for key in keys {
+        let key = key.display();
+        if let Some(value) = dict.get(key.as_str()) {
+            if drop_nil && matches!(value, VmValue::Nil) {
+                continue;
+            }
+            out.insert(key, value.clone());
+        }
+    }
+    Ok(VmValue::dict(out))
+}
+
+fn dict_omit(data: &VmValue, keys: &VmValue) -> Result<VmValue, VmError> {
+    let dict = dict_arg(data, "omit")?;
+    let exclude: BTreeSet<String> = key_list_arg(keys, "omit")?
+        .iter()
+        .map(VmValue::display)
+        .collect();
+    if exclude.is_empty() || dict.keys().all(|k| !exclude.contains(k.as_str())) {
+        return Ok(VmValue::Dict(dict));
+    }
+    let mut out = Arc::try_unwrap(dict).unwrap_or_else(|d| (*d).clone());
+    out.retain(|key, _| !exclude.contains(key.as_str()));
+    Ok(VmValue::dict(out))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dict(entries: &[(&str, VmValue)]) -> VmValue {
+        let mut map = BTreeMap::new();
+        for (k, v) in entries {
+            map.insert((*k).to_string(), v.clone());
+        }
+        VmValue::dict(map)
+    }
+
+    fn keys(items: &[&str]) -> VmValue {
+        VmValue::List(std::sync::Arc::new(
+            items
+                .iter()
+                .map(|k| VmValue::String(arcstr::ArcStr::from(*k)))
+                .collect(),
+        ))
+    }
+
+    #[test]
+    fn filter_nil_drops_nil_empty_and_null_strings() {
+        let input = dict(&[
+            ("keep", VmValue::Int(1)),
+            ("nil_value", VmValue::Nil),
+            ("empty", VmValue::String(arcstr::ArcStr::from(""))),
+            ("null_string", VmValue::String(arcstr::ArcStr::from("null"))),
+            ("kept_zero", VmValue::Int(0)),
+        ]);
+        let result = dict_filter_nil(&input).unwrap();
+        let dict = result.as_dict().expect("dict result");
+        assert_eq!(dict.len(), 2);
+        assert!(dict.contains_key("keep"));
+        assert!(dict.contains_key("kept_zero"));
+    }
+
+    #[test]
+    fn dict_merge_overrides_left_with_right() {
+        let a = dict(&[("a", VmValue::Int(1)), ("b", VmValue::Int(2))]);
+        let b = dict(&[("b", VmValue::Int(3)), ("c", VmValue::Int(4))]);
+        let result = dict_merge(&a, &b).unwrap();
+        let merged = result.as_dict().expect("dict result");
+        assert_eq!(merged.get("a").and_then(VmValue::as_int), Some(1));
+        assert_eq!(merged.get("b").and_then(VmValue::as_int), Some(3));
+        assert_eq!(merged.get("c").and_then(VmValue::as_int), Some(4));
+    }
+
+    #[test]
+    fn dict_merge_treats_nil_argument_as_empty_dict() {
+        let a = dict(&[("a", VmValue::Int(1))]);
+        let result = dict_merge(&a, &VmValue::Nil).unwrap();
+        let merged = result.as_dict().expect("dict result");
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged.get("a").and_then(VmValue::as_int), Some(1));
+    }
+
+    #[test]
+    fn dict_pick_drops_missing_and_nil_values() {
+        let data = dict(&[
+            ("a", VmValue::Int(1)),
+            ("b", VmValue::Nil),
+            ("c", VmValue::Int(3)),
+        ]);
+        let result = dict_pick(&data, &keys(&["a", "b", "missing"])).unwrap();
+        let picked = result.as_dict().expect("dict result");
+        assert_eq!(picked.len(), 1);
+        assert_eq!(picked.get("a").and_then(VmValue::as_int), Some(1));
+    }
+
+    #[test]
+    fn dict_pick_keys_respects_drop_nil_flag() {
+        let data = dict(&[
+            ("a", VmValue::Int(1)),
+            ("b", VmValue::Nil),
+            ("c", VmValue::Int(3)),
+        ]);
+        let kept = dict_pick_keys(&data, &keys(&["a", "b"]), false).unwrap();
+        assert_eq!(kept.as_dict().expect("dict").len(), 2);
+
+        let dropped = dict_pick_keys(&data, &keys(&["a", "b"]), true).unwrap();
+        let dropped = dropped.as_dict().expect("dict");
+        assert_eq!(dropped.len(), 1);
+        assert!(dropped.contains_key("a"));
+    }
+
+    #[test]
+    fn dict_omit_excludes_listed_keys() {
+        let data = dict(&[
+            ("a", VmValue::Int(1)),
+            ("b", VmValue::Int(2)),
+            ("c", VmValue::Int(3)),
+        ]);
+        let result = dict_omit(&data, &keys(&["a", "c"])).unwrap();
+        let kept = result.as_dict().expect("dict result");
+        assert_eq!(kept.len(), 1);
+        assert!(kept.contains_key("b"));
+    }
+
+    #[test]
+    fn shallow_clone_decouples_dict_from_source() {
+        let inner = VmValue::dict_map(Default::default());
+        let source = dict(&[("inner", inner)]);
+        let copy = shallow_clone(&source);
+        match (&source, &copy) {
+            (VmValue::Dict(a), VmValue::Dict(b)) => assert!(!Arc::ptr_eq(a, b)),
+            _ => panic!("expected dicts"),
+        }
+        match (
+            source.as_dict().unwrap().get("inner").unwrap(),
+            copy.as_dict().unwrap().get("inner").unwrap(),
+        ) {
+            (VmValue::Dict(a), VmValue::Dict(b)) => {
+                assert!(Arc::ptr_eq(a, b), "shallow clone shares inner Arc");
+            }
+            _ => panic!("expected nested dicts"),
+        }
+    }
+
+    #[test]
+    fn deep_clone_duplicates_nested_dicts_and_lists() {
+        let inner_dict = dict(&[("k", VmValue::Int(1))]);
+        let inner_list = VmValue::List(std::sync::Arc::new(vec![VmValue::Int(1), VmValue::Int(2)]));
+        let source = dict(&[("d", inner_dict), ("l", inner_list)]);
+        let copy = deep_clone_value(&source);
+
+        let copy_dict = copy.as_dict().unwrap();
+        match copy_dict.get("d").unwrap() {
+            VmValue::Dict(rc) => {
+                let original_inner = source.as_dict().unwrap().get("d").unwrap();
+                let VmValue::Dict(orig_rc) = original_inner else {
+                    panic!()
+                };
+                assert!(!Arc::ptr_eq(rc, orig_rc));
+            }
+            _ => panic!("expected dict at d"),
+        }
+        match copy_dict.get("l").unwrap() {
+            VmValue::List(items) => {
+                let VmValue::List(orig_items) = source.as_dict().unwrap().get("l").unwrap() else {
+                    panic!()
+                };
+                assert!(!Arc::ptr_eq(items, orig_items));
+            }
+            _ => panic!("expected list at l"),
+        }
+    }
+
+    #[test]
+    fn deep_merge_recurses_into_nested_dicts() {
+        let a = dict(&[(
+            "config",
+            dict(&[("retries", VmValue::Int(3)), ("backoff", VmValue::Int(100))]),
+        )]);
+        let b = dict(&[(
+            "config",
+            dict(&[
+                ("retries", VmValue::Int(5)),
+                ("jitter", VmValue::Bool(true)),
+            ]),
+        )]);
+        let merged = deep_merge_value(&a, &b).unwrap();
+        let config = merged
+            .as_dict()
+            .and_then(|d| d.get("config"))
+            .and_then(|v| v.as_dict())
+            .expect("nested dict");
+        assert_eq!(config.get("retries").and_then(VmValue::as_int), Some(5));
+        assert_eq!(config.get("backoff").and_then(VmValue::as_int), Some(100));
+        match config.get("jitter") {
+            Some(VmValue::Bool(true)) => {}
+            other => panic!("expected jitter=true, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn deep_merge_right_wins_when_types_differ() {
+        let a = dict(&[("x", dict(&[("a", VmValue::Int(1))]))]);
+        let b = dict(&[("x", VmValue::Int(99))]);
+        let merged = deep_merge_value(&a, &b).unwrap();
+        assert_eq!(
+            merged
+                .as_dict()
+                .and_then(|d| d.get("x"))
+                .and_then(VmValue::as_int),
+            Some(99)
+        );
+    }
+
+    #[test]
+    fn list_unique_preserves_first_seen_order() {
+        let input = VmValue::List(std::sync::Arc::new(vec![
+            VmValue::Int(1),
+            VmValue::Int(2),
+            VmValue::Int(1),
+            VmValue::Int(3),
+            VmValue::Int(2),
+        ]));
+        let result = list_unique(&input).unwrap();
+        let items = match &result {
+            VmValue::List(items) => items.clone(),
+            _ => panic!("expected list"),
+        };
+        let ints: Vec<i64> = items.iter().filter_map(VmValue::as_int).collect();
+        assert_eq!(ints, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn dict_from_pairs_accepts_two_element_lists() {
+        let pairs = VmValue::List(std::sync::Arc::new(vec![
+            VmValue::List(std::sync::Arc::new(vec![
+                VmValue::String(arcstr::ArcStr::from("a")),
+                VmValue::Int(1),
+            ])),
+            VmValue::List(std::sync::Arc::new(vec![
+                VmValue::String(arcstr::ArcStr::from("b")),
+                VmValue::Int(2),
+            ])),
+        ]));
+        let result = dict_from_pairs(&pairs).unwrap();
+        let d = result.as_dict().unwrap();
+        assert_eq!(d.get("a").and_then(VmValue::as_int), Some(1));
+        assert_eq!(d.get("b").and_then(VmValue::as_int), Some(2));
+    }
+}

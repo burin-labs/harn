@@ -1,0 +1,8 @@
+pipeline test(harness: Harness, task) {
+  type Config = {model: string, max_tokens: int}
+  fn run(config: Config) -> string {
+    return config.model
+  }
+  const cfg = {model: "gpt-4", max_tokens: 100}
+  harness.stdio.log(run(cfg))
+}

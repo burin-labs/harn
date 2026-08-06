@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/write_file.response.json",
+  "title": "tools.write_file response",
+  "type": "object",
+  "properties": {
+    "path": { "type": "string" },
+    "bytes_written": { "type": "integer", "minimum": 0 },
+    "created": { "type": "boolean" }
+  },
+  "required": ["path", "bytes_written", "created"],
+  "additionalProperties": false
+}

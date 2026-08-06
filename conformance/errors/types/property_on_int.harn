@@ -1,0 +1,4 @@
+pipeline default(harness: Harness, task) {
+  const x = 42
+  harness.stdio.log(x.name)
+}

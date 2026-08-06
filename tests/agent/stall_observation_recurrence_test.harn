@@ -1,0 +1,80 @@
+// Run: harn test tests/agent/stall_observation_recurrence_test.harn
+//
+// Regression coverage for cumulative observation recurrence. The action
+// detector must remember a byte-identical (tool, args, result) observation
+// across unrelated calls without turning genuinely changing polling results
+// into a stall.
+import { agent_stall_initial_state, agent_stall_observe_tool_calls } from "std/agent/stall"
+
+const CONFIG = {
+  enabled: true,
+  repair_aware: false,
+  repeat_same_observation: 3,
+  repeat_success: 99,
+  repeat_same_error: 99,
+  no_progress_messages: 99,
+  ping_pong_cycles: 99,
+  hard_stop_after_trips: 2,
+}
+
+fn _observe(agent: HarnessAgent, state, iteration, query, result) {
+  return agent_stall_observe_tool_calls(
+    agent,
+    "unit-observation-recurrence",
+    [{name: "search", arguments: {query: query}}],
+    iteration,
+    CONFIG,
+    state,
+    true,
+    [{tool_name: "search", ok: true, result: result}],
+  )
+}
+
+pipeline test_identical_dead_observation_accrues_across_interleaved_calls(harness: Harness, task) {
+  let state = agent_stall_initial_state()
+  let last = nil
+  let iteration = 0
+  for query in ["dead", "productive-1", "dead", "productive-2", "dead"] {
+    iteration += 1
+    const result = if query == "dead" {
+      {status: "no_matches", matches: []}
+    } else {
+      {status: "matches", matches: [query]}
+    }
+    last = _observe(harness.agent, state, iteration, query, result)
+    state = last.state
+  }
+  assert(last.warning != nil, "the third identical dead observation must be visible")
+  assert_eq(last.warning.pattern, "repeated_observation_recurrence")
+  assert_eq(last.warning.count, 3)
+  assert_eq(last.state.same_observation_streak, 1, "the adjacent streak remains consecutive")
+  assert(!last.hard_stop, "cumulative observation recurrence is advisory-only")
+  const productive = _observe(
+    harness.agent,
+    last.state,
+    6,
+    "productive-3",
+    {status: "matches", matches: ["productive-3"]},
+  )
+  const fourth = _observe(
+    harness.agent,
+    productive.state,
+    7,
+    "dead",
+    {status: "no_matches", matches: []},
+  )
+  assert(fourth.warning == nil, "one cumulative signature emits one bounded advisory")
+  assert(!fourth.hard_stop)
+}
+
+pipeline test_changing_poll_observations_do_not_accrue(harness: Harness, task) {
+  let state = agent_stall_initial_state()
+  let last = nil
+  for version in [1, 2, 3, 4] {
+    last = _observe(harness.agent, state, version, "status", {status: "running", version: version})
+    state = last.state
+    assert(last.warning == nil)
+  }
+  assert_eq(last.state.same_observation_streak, 1)
+  assert(!last.hard_stop)
+}

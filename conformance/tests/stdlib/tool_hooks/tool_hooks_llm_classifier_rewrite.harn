@@ -1,0 +1,58 @@
+import { llm_text, with_llm_script } from "std/testing"
+import { preset_run_command } from "std/tool_hooks"
+
+/**
+ * LLM classifier — confident `rewrite` verdict above threshold (TH-05 #1898).
+ *
+ * The classifier returns a structured JSON verdict with kind=rewrite and a
+ * confidence > threshold. The wrapper dispatches via the rewrite-with-audit
+ * mode so the rewritten command flows to `inner`, the envelope carries the
+ * synthetic catalogue id, and a `tool_hook_classifier_verdict` lifecycle
+ * audit entry records the verdict + scope.
+ */
+pipeline default(harness: Harness) {
+  harness.obs.pipeline_lifecycle_audit_log_take()
+  harness.tools.classifier_cache_clear()
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text(
+        "{\"kind\": \"rewrite\", \"confidence\": 0.92,"
+          + " \"rewritten\": \"npm run lint -- --fix\","
+          + " \"explanation\": \"prefer auto-fix\"}",
+      ),
+    ],
+    { ->
+      const inner = { args -> {ok: true, ran: args.command} }
+      const wrapper = preset_run_command(
+        harness,
+        {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.8}, inner: inner},
+      )
+      const result = wrapper({command: "npm run lint"})
+      harness.stdio.println(result.action)
+      harness.stdio.println(result.rule_id)
+      harness.stdio.println(result.catalogue_id)
+      harness.stdio.println(result.severity)
+      harness.stdio.println(result.explanation)
+      harness.stdio.println(result.original_command)
+      harness.stdio.println(result.command)
+      harness.stdio.println(result.result.ok)
+      harness.stdio.println(result.result.ran)
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(len(calls))
+      harness.stdio.println(contains(to_string(calls[0].system), "shell-command safety reviewer"))
+      const log = harness.obs.pipeline_lifecycle_audit_log_take()
+      harness.stdio.println(len(log))
+      harness.stdio.println(log[0].kind)
+      harness.stdio.println(log[0].payload.kind)
+      harness.stdio.println(log[0].payload.action)
+      harness.stdio.println(log[1].kind)
+      harness.stdio.println(log[2].kind)
+    },
+  )
+}
+/* meta_prompt must have been forwarded to the LLM call as the
+       * `system` channel — verify via the mock recorder. */
+/* `tool_hook_classifier_verdict` always fires; the rewrite mode adds
+       * `tool_rewrite` + `tool_hooks.reminder_injected`. Three audit lines
+       * means the classifier verdict + rewrite + reminder all flowed. */

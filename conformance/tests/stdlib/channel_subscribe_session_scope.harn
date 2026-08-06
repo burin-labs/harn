@@ -1,0 +1,18 @@
+pipeline default(harness: Harness) {
+  const stream = harness.channels.subscribe(
+    "agent.done",
+    {scope: "session", session_id: "sess-sub"},
+  )
+  const receipt = harness.channels.append(
+    "agent.done",
+    {n: 1},
+    {scope: "session", session_id: "sess-sub", id: "channel-subscribe-1"},
+  )
+  const entry = stream.next().value
+  harness.stdio.println(receipt.name_resolved)
+  harness.stdio.println(entry.kind)
+  harness.stdio.println(entry.name_resolved)
+  harness.stdio.println(entry.payload.n)
+  harness.stdio.println(entry.session_id)
+  harness.stdio.println(entry.topic)
+}

@@ -1,0 +1,1035 @@
+import { command_run } from "std/command"
+import "std/schema"
+import { with_temp_dir } from "std/testing"
+// Tests for scripts/check_binary_size.harn and the two-level release size
+// policy it applies — argument parsing, fuse math, the growth verdict, causality
+// attribution, report formatting, and release-workflow default drift. The
+// build/bloat paths shell out and are covered by behavior-parity runs.
+import "../check_binary_size.harn"
+import "../release_binary_size_policy.harn"
+
+fn gha_expression(body: string) -> string {
+  return "$" + "{{ " + body + " }}"
+}
+
+type ReleaseWorkflowStep = {
+  id?: string,
+  name?: string,
+  if?: string,
+  shell?: string,
+  uses?: string,
+  run?: string,
+  env?: {
+    HARN_REQUIRE_CLI_AOT?: string,
+    BINARY_SIZE_FUSE_BYTES?: string,
+    BINARY_SIZE_SOURCE_REF?: string,
+    BINARY_SIZE_TARGET?: string,
+  },
+}
+
+type ReleaseWorkflow = {
+  jobs: {
+    setup: {outputs: {binary_size_fuse_bytes: string}, steps: list<ReleaseWorkflowStep>},
+    prepare_cli_aot: {needs: string, if: string, steps: list<ReleaseWorkflowStep>},
+    build: {needs: list<string>, steps: list<ReleaseWorkflowStep>},
+    release: {needs: list<string>, if: string},
+  },
+}
+
+fn release_workflow(fs: HarnessFs) -> ReleaseWorkflow {
+  const step_schema = schema_object(
+    {
+      name: schema_field(schema_string(), false),
+      id: schema_field(schema_string(), false),
+      if: schema_field(schema_string(), false),
+      shell: schema_field(schema_string(), false),
+      env: schema_field(
+        schema_object(
+          {
+            HARN_REQUIRE_CLI_AOT: schema_field(schema_string(), false),
+            BINARY_SIZE_FUSE_BYTES: schema_field(schema_string(), false),
+            BINARY_SIZE_SOURCE_REF: schema_field(schema_string(), false),
+            BINARY_SIZE_TARGET: schema_field(schema_string(), false),
+          },
+        ),
+        false,
+      ),
+    },
+  )
+  const schema: Schema<ReleaseWorkflow> = schema_object(
+    {
+      jobs: schema_field(
+        schema_object(
+          {
+            setup: schema_field(
+              schema_object(
+                {
+                  outputs: schema_field(
+                    schema_object({binary_size_fuse_bytes: schema_field(schema_string())}),
+                  ),
+                  steps: schema_field(schema_list(step_schema)),
+                },
+              ),
+            ),
+            prepare_cli_aot: schema_field(
+              schema_object(
+                {
+                  needs: schema_field(schema_string()),
+                  if: schema_field(schema_string()),
+                  steps: schema_field(schema_list(step_schema)),
+                },
+              ),
+            ),
+            build: schema_field(
+              schema_object(
+                {
+                  needs: schema_field(schema_list(schema_string())),
+                  steps: schema_field(schema_list(step_schema)),
+                },
+              ),
+            ),
+            release: schema_field(
+              schema_object(
+                {
+                  needs: schema_field(schema_list(schema_string())),
+                  if: schema_field(schema_string()),
+                },
+              ),
+            ),
+          },
+        ),
+      ),
+    },
+  )
+  const path = "../../.github/workflows/build-release-binaries.yml"
+  return unwrap(get_typed_result(yaml_parse(fs.read_text(path)), schema))
+}
+
+fn release_workflow_step(steps: list<ReleaseWorkflowStep>, name: string) -> ReleaseWorkflowStep {
+  for step in steps {
+    if step.name == name {
+      return step
+    }
+  }
+  throw "release workflow step not found: ${name}"
+}
+
+fn defaults() {
+  return {
+    target: "",
+    harn_bin: "",
+    fuse_mb: "",
+    fuse_bytes: "",
+    report_dir: "",
+    baseline_sections: "",
+  }
+}
+
+fn valid_build_identity() -> ReleaseBuildIdentity {
+  return {
+    profile: "release",
+    codegen_units: 8,
+    lto: "thin",
+    strip: "symbols",
+    rustc: "1.95.0",
+    aot_embedded: true,
+  }
+}
+
+fn valid_baseline() -> ReleaseBinarySizeBaseline {
+  return {
+    version: "0.10.51",
+    source_sha: "1347f161a30aaaaa7c36546f2101c65aed2154a7",
+    bytes: 228819544,
+    observed_at: "2026-08-01T23:34:02Z",
+    build_identity: valid_build_identity(),
+  }
+}
+
+/**
+ * 228819544 * 1.12 — inside the 10-15% fuse band, so the fixture is a policy
+ * the contract accepts rather than one that only happens to parse.
+ */
+fn valid_target_policy() -> ReleaseBinarySizeTargetPolicy {
+  return {
+    target: "x86_64-unknown-linux-gnu",
+    distribution_fuse_bytes: 256277889,
+    growth: {warn_bytes: 4194304, warn_percent_hundredths: 200},
+    baseline: valid_baseline(),
+    accepted_growth: [],
+  }
+}
+
+fn valid_policy() -> ReleaseBinarySizePolicy {
+  return {
+    schema_version: 2,
+    default_target: "x86_64-unknown-linux-gnu",
+    targets: [valid_target_policy()],
+  }
+}
+
+fn measurement(bytes: int) -> ReleaseBinarySizeMeasurement {
+  return {
+    target: "x86_64-unknown-linux-gnu",
+    source_sha: "1e5eb3af1bd0f3a5a26e2cb0d7f1b6a6b3f0dd11",
+    bytes: bytes,
+    build_identity: valid_build_identity(),
+  }
+}
+
+// --- parse_args -------------------------------------------------------------
+@test
+pipeline test_parse_args_defaults(harness: Harness, task) {
+  const res = parse_args([], defaults())
+  assert_eq(res.ok, true)
+  assert_eq(res.opts.build_release, true)
+  assert_eq(res.opts.emit_bloat, true)
+  assert_eq(res.opts.fuse_mb, "")
+  assert_eq(res.opts.fuse_mb_explicit, false)
+  assert_eq(res.opts.fuse_bytes, "")
+  assert_eq(res.opts.help, false)
+}
+
+@test
+pipeline test_parse_args_flags(harness: Harness, task) {
+  const res = parse_args(
+    ["--no-build", "--target", "x86_64-unknown-linux-gnu", "--skip-bloat", "--fuse-mb", "50"],
+    defaults(),
+  )
+  assert_eq(res.ok, true)
+  assert_eq(res.opts.build_release, false)
+  assert_eq(res.opts.emit_bloat, false)
+  assert_eq(res.opts.target, "x86_64-unknown-linux-gnu")
+  assert_eq(res.opts.fuse_mb, "50")
+  assert_eq(res.opts.fuse_mb_explicit, true)
+}
+
+@test
+pipeline test_parse_args_bin_and_report_dir(harness: Harness, task) {
+  const res = parse_args(["--bin", "/x/harn", "--report-dir", "out"], defaults())
+  assert_eq(res.opts.harn_bin, "/x/harn")
+  assert_eq(res.opts.report_dir, "out")
+}
+
+@test
+pipeline test_parse_args_missing_value(harness: Harness, task) {
+  const res = parse_args(["--target"], defaults())
+  assert_eq(res.ok, false)
+  assert_eq(res.message, "error: --target requires a value")
+  assert_eq(res.show_usage, false)
+}
+
+@test
+pipeline test_parse_args_missing_path_noun(harness: Harness, task) {
+  assert_eq(parse_args(["--bin"], defaults()).message, "error: --bin requires a path")
+  assert_eq(parse_args(["--report-dir"], defaults()).message, "error: --report-dir requires a path")
+}
+
+@test
+pipeline test_parse_args_unknown_flag_shows_usage(harness: Harness, task) {
+  const res = parse_args(["--wat"], defaults())
+  assert_eq(res.ok, false)
+  assert_eq(res.message, "error: unknown argument: --wat")
+  assert_eq(res.show_usage, true)
+}
+
+@test
+pipeline test_parse_args_help(harness: Harness, task) {
+  assert_eq(parse_args(["-h"], defaults()).opts.help, true)
+  assert_eq(parse_args(["--help"], defaults()).opts.help, true)
+}
+
+// --- parse_fuse_mb / fuse_bytes_of --------------------------------------
+@test
+pipeline test_fuse_parse_valid(harness: Harness, task) {
+  assert_eq(parse_fuse_mb("219.00"), 219.0)
+  assert_eq(parse_fuse_mb("1.2"), 1.2)
+}
+
+@test
+pipeline test_fuse_parse_invalid(harness: Harness, task) {
+  assert_eq(parse_fuse_mb("0"), nil)
+  assert_eq(parse_fuse_mb("-5"), nil)
+  assert_eq(parse_fuse_mb("abc"), nil)
+}
+
+@test
+pipeline test_positive_integer_fuse_parse(harness: Harness, task) {
+  assert_eq(parse_positive_int("230686720"), 230686720)
+  assert_eq(parse_positive_int("0"), nil)
+  assert_eq(parse_positive_int("1.5"), nil)
+  assert_eq(parse_positive_int("+1"), nil)
+}
+
+@test
+pipeline test_fuse_bytes_rounding(harness: Harness, task) {
+  assert_eq(fuse_bytes_of(192.0), 201326592)
+  // awk printf "%.0f", 1.2 * 1024 * 1024 == 1258291
+  assert_eq(fuse_bytes_of(1.2), 1258291)
+}
+
+@test
+pipeline test_fuse_resolution_preserves_exact_bytes_and_override_precedence(
+  harness: Harness,
+  task,
+) {
+  const policy = valid_policy()
+  assert_eq(
+    resolve_distribution_fuse_bytes(
+      policy,
+      "",
+      {fuse_mb: "", fuse_mb_explicit: false, fuse_bytes: ""},
+    ),
+    Ok(256277889),
+  )
+  assert_eq(
+    resolve_distribution_fuse_bytes(
+      policy,
+      "",
+      {fuse_mb: "", fuse_mb_explicit: false, fuse_bytes: "229700000"},
+    ),
+    Ok(229700000),
+  )
+  assert_eq(
+    resolve_distribution_fuse_bytes(
+      policy,
+      "",
+      {fuse_mb: "1.2", fuse_mb_explicit: false, fuse_bytes: "229700000"},
+    ),
+    Ok(229700000),
+  )
+  assert_eq(
+    resolve_distribution_fuse_bytes(
+      policy,
+      "",
+      {fuse_mb: "1.2", fuse_mb_explicit: true, fuse_bytes: "229700000"},
+    ),
+    Ok(1258291),
+  )
+  assert_eq(
+    resolve_distribution_fuse_bytes(
+      policy,
+      "missing-target",
+      {fuse_mb: "", fuse_mb_explicit: false, fuse_bytes: ""},
+    ),
+    Err(
+      "release binary-size policy has no target 'missing-target'; add a target entry or pass an explicit fuse override",
+    ),
+  )
+}
+
+@test
+pipeline test_binary_size_policy_is_typed_and_ratchets_observed_candidate(harness: Harness, task) {
+  const result = read_release_binary_size_policy_result(
+    harness.fs,
+    "../../.github/release-binary-size-policy.json",
+  )
+  assert(
+    is_ok(result),
+    json_stringify(
+      if is_err(result) {
+        unwrap_err(result)
+      } else {
+        {}
+      },
+    ),
+  )
+  const policy = unwrap(result)
+  assert_eq(release_binary_size_policy_errors(policy), [])
+  assert_eq(policy.default_target, "x86_64-unknown-linux-gnu")
+  assert_eq(policy.targets.count, 1)
+  const target = policy.targets[0]
+  assert_eq(target?.distribution_fuse_bytes, 262144000)
+  assert_eq(target?.baseline.version, "0.10.53")
+  assert_eq(target?.baseline.source_sha, "14aad890335fd4a9a0084007cab0383ede96205d")
+  assert_eq(target?.baseline.bytes, 233410816)
+  // The fuse is a fuse, not a ratchet: ~12.3% of headroom, where the schema-1
+  // policy this replaced allowed at most 4 MiB (1.8%) and turned every real
+  // change into a release-day cliff.
+  assert_eq(target?.distribution_fuse_bytes - target?.baseline.bytes, 28733184)
+  assert_eq(target?.growth.warn_bytes, 4194304)
+  assert_eq(target?.growth.warn_percent_hundredths, 200)
+  assert_eq(target?.baseline.build_identity.codegen_units, 8)
+  assert_eq(target?.baseline.build_identity.rustc, "1.95.0")
+  assert_eq(target?.accepted_growth, [])
+  assert_eq(release_binary_size_target_policy(policy, policy.default_target), target)
+}
+
+@test
+pipeline test_binary_size_policy_rejects_invalid_topology(harness: Harness, task) {
+  const target = valid_target_policy()
+  assert_eq(
+    release_binary_size_policy_errors({schema_version: 1, default_target: "missing", targets: []}),
+    [
+      "schema_version must be 2",
+      "targets must not be empty",
+      "default_target must name one target policy",
+    ],
+  )
+  assert_eq(
+    release_binary_size_policy_errors(
+      {schema_version: 2, default_target: target.target, targets: [target, target]},
+    ),
+    ["target must be unique: x86_64-unknown-linux-gnu"],
+  )
+}
+
+@test
+pipeline test_binary_size_policy_rejects_every_invalid_baseline_field(harness: Harness, task) {
+  const target = valid_target_policy()
+  assert_eq(
+    release_binary_size_policy_errors(
+      valid_policy()
+        + {targets: [target + {baseline: target.baseline + {bytes: 0}}]},
+    ),
+    ["x86_64-unknown-linux-gnu: baseline.bytes must be positive"],
+  )
+  assert_eq(
+    release_binary_size_policy_errors(
+      valid_policy() + {targets: [target + {baseline: target.baseline + {version: "next"}}]},
+    ),
+    ["x86_64-unknown-linux-gnu: baseline.version must be a semantic release version"],
+  )
+  assert_eq(
+    release_binary_size_policy_errors(
+      valid_policy() + {targets: [target + {baseline: target.baseline + {source_sha: "short"}}]},
+    ),
+    ["x86_64-unknown-linux-gnu: baseline.source_sha must be a full lowercase Git commit"],
+  )
+  assert_eq(
+    release_binary_size_policy_errors(
+      valid_policy() + {targets: [target + {baseline: target.baseline + {observed_at: "today"}}]},
+    ),
+    ["x86_64-unknown-linux-gnu: baseline.observed_at must be a UTC second-resolution timestamp"],
+  )
+}
+
+@test
+pipeline test_binary_size_policy_enforces_a_fuse_shaped_ceiling(harness: Harness, task) {
+  const target = valid_target_policy()
+  // 228819544 * 1.10 and * 1.15, the exact boundary the contract states.
+  const min_fuse = 251701498
+  const max_fuse = 263142475
+  assert_eq(release_binary_size_policy_errors(valid_policy()), [])
+  assert_eq(
+    release_binary_size_policy_errors(
+      valid_policy() + {targets: [target + {distribution_fuse_bytes: min_fuse}]},
+    ),
+    [],
+  )
+  assert_eq(
+    release_binary_size_policy_errors(
+      valid_policy() + {targets: [target + {distribution_fuse_bytes: max_fuse}]},
+    ),
+    [],
+  )
+  assert_eq(
+    release_binary_size_policy_errors(
+      valid_policy() + {targets: [target + {distribution_fuse_bytes: min_fuse - 1}]},
+    ),
+    [
+      "x86_64-unknown-linux-gnu: distribution_fuse_bytes must leave at least 10% headroom above the baseline (>= ${min_fuse})",
+    ],
+  )
+  assert_eq(
+    release_binary_size_policy_errors(
+      valid_policy() + {targets: [target + {distribution_fuse_bytes: max_fuse + 1}]},
+    ),
+    [
+      "x86_64-unknown-linux-gnu: distribution_fuse_bytes must stay within 15% of the baseline (<= ${max_fuse})",
+    ],
+  )
+}
+
+/**
+ * An acceptance outlives the baseline it was written against only if nothing
+ * stops it, and a stale acceptance silently blesses growth nobody decided on.
+ */
+@test
+pipeline test_accepted_growth_must_name_the_current_baseline(harness: Harness, task) {
+  const target = valid_target_policy()
+  const current = {
+    against_baseline_sha: target.baseline.source_sha,
+    bytes: 8000000,
+    reason: "embed the CLI AOT payload",
+  }
+  assert_eq(
+    release_binary_size_policy_errors(
+      valid_policy() + {targets: [target + {accepted_growth: [current]}]},
+    ),
+    [],
+  )
+  assert_eq(
+    release_binary_size_policy_errors(
+      valid_policy()
+        + {
+        targets: [
+          target
+            + {
+            accepted_growth: [
+              current + {against_baseline_sha: "0000000000000000000000000000000000000000"},
+            ],
+          },
+        ],
+      },
+    ),
+    [
+      "x86_64-unknown-linux-gnu: accepted_growth.against_baseline_sha must be the current baseline 1347f161a30aaaaa7c36546f2101c65aed2154a7, got 0000000000000000000000000000000000000000",
+    ],
+  )
+  assert_eq(
+    release_binary_size_policy_errors(
+      valid_policy() + {targets: [target + {accepted_growth: [current + {reason: "  "}]}]},
+    ),
+    ["x86_64-unknown-linux-gnu: accepted_growth.reason must not be empty"],
+  )
+}
+
+@test
+pipeline test_binary_size_policy_schema_is_closed(harness: Harness, task) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const path = path_join(root, "policy.json")
+      harness.fs.write_text(path, json_stringify(valid_policy() + {notes: "not in the contract"}))
+      assert(is_err(read_release_binary_size_policy_result(harness.fs, path)))
+    },
+    "binary-size-policy-closed",
+  )
+}
+
+@test
+pipeline test_bootstrap_query_matches_typed_policy_contract(harness: Harness, task) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const jq_version = command_run(harness.tools, ["jq", "--version"])
+      assert(jq_version.success, "jq is required to validate the release bootstrap projection")
+      const query_path = path_join(root, "policy.jq")
+      const policy_path = path_join(root, "policy.json")
+      harness.fs.write_text(
+        query_path,
+        harness.fs.read_text("../../.github/release-binary-size-policy.jq"),
+      )
+      const cases = [
+        valid_policy(),
+        valid_policy() + {extra: true},
+        valid_policy() + {schema_version: 1},
+        valid_policy() + {targets: []},
+        valid_policy() + {default_target: "missing"},
+        valid_policy() + {targets: [valid_target_policy(), valid_target_policy()]},
+        valid_policy()
+          + {targets: [valid_target_policy() + {distribution_fuse_bytes: 251701497}]},
+        valid_policy()
+          + {targets: [valid_target_policy() + {distribution_fuse_bytes: 263142476}]},
+        valid_policy()
+          + {
+          targets: [
+            valid_target_policy()
+              + {
+              accepted_growth: [
+                {
+                  against_baseline_sha: "0000000000000000000000000000000000000000",
+                  bytes: 1,
+                  reason: "stale",
+                },
+              ],
+            },
+          ],
+        },
+        valid_policy()
+          + {
+          targets: [
+            valid_target_policy()
+              + {
+              baseline: valid_target_policy().baseline
+                + {
+                build_identity: valid_build_identity() + {codegen_units: 0},
+              },
+            },
+          ],
+        },
+        valid_policy()
+          + {
+          targets: [
+            valid_target_policy()
+              + {baseline: valid_target_policy().baseline + {version: "next"}},
+          ],
+        },
+        valid_policy()
+          + {
+          targets: [
+            valid_target_policy()
+              + {baseline: valid_target_policy().baseline + {source_sha: "short"}},
+          ],
+        },
+        valid_policy()
+          + {
+          targets: [
+            valid_target_policy()
+              + {
+              baseline: valid_target_policy().baseline + {observed_at: "today"},
+            },
+          ],
+        },
+        valid_policy()
+          + {
+          targets: [
+            valid_target_policy() + {baseline: valid_target_policy().baseline + {bytes: 0}},
+          ],
+        },
+        valid_policy() + {targets: [valid_target_policy() + {target: ""}]},
+      ]
+      let index = 0
+      for policy in cases {
+        harness.fs.write_text(policy_path, json_stringify(policy))
+        const typed_result = read_release_binary_size_policy_result(harness.fs, policy_path)
+        const typed_accepts = if is_err(typed_result) {
+          false
+        } else {
+          release_binary_size_policy_errors(unwrap(typed_result)).count == 0
+        }
+        const result = command_run(
+          harness.tools,
+          [
+            "jq",
+            "-er",
+            "--arg",
+            "target",
+            "x86_64-unknown-linux-gnu",
+            "-f",
+            query_path,
+            policy_path,
+          ],
+        )
+        if index == 0 {
+          assert(typed_accepts)
+          assert(result.success)
+          assert_eq(result.stdout.trim(), "256277889")
+        } else {
+          assert(!typed_accepts)
+          assert(!result.success)
+        }
+        index = index + 1
+      }
+    },
+    "binary-size-policy-bootstrap-parity",
+  )
+}
+
+@test
+pipeline test_workflow_projects_typed_binary_size_policy(harness: Harness, task) {
+  const workflow = release_workflow(harness.fs)
+  assert_eq(
+    workflow.jobs.setup.outputs.binary_size_fuse_bytes,
+    gha_expression("steps.binary-size-policy.outputs.fuse_bytes"),
+  )
+  const policy_step = release_workflow_step(
+    workflow.jobs.setup.steps,
+    "Resolve release binary-size policy",
+  )
+  assert_eq(policy_step.id, "binary-size-policy")
+  assert_eq(policy_step.shell, "bash")
+  assert_eq(policy_step.env?.BINARY_SIZE_TARGET, "x86_64-unknown-linux-gnu")
+  assert_eq(
+    release_workflow_step(workflow.jobs.build.steps, "Check the distribution fuse").env
+      ?.BINARY_SIZE_FUSE_BYTES,
+    gha_expression("needs.setup.outputs.binary_size_fuse_bytes"),
+  )
+}
+
+@test
+pipeline test_workflow_preserves_bloat_after_a_failed_size_gate(harness: Harness, task) {
+  const measured_target = "matrix.target == 'x86_64-unknown-linux-gnu'"
+  const diagnostic_mode = measured_target
+    + " && (needs.setup.outputs.build_mode == 'warm' || (needs.setup.outputs.build_mode == 'benchmark' && inputs.benchmark_cargo_bloat) || steps.binary_size_fuse.outcome == 'failure' || steps.binary_size_growth.outcome == 'failure')"
+  const diagnostics = "always() && " + diagnostic_mode
+  const steps = release_workflow(harness.fs).jobs.build.steps
+  const bloat = release_workflow_step(steps, "Generate cargo-bloat report")
+  // Install precedes both size gates, so it cannot read their outcome. It must
+  // stay unconditional on the measured target or a size failure would try to
+  // attribute itself with cargo-bloat missing.
+  assert_eq(release_workflow_step(steps, "Install cargo-bloat").if, measured_target)
+  assert_eq(bloat.if, diagnostics)
+  assert_eq(bloat["continue-on-error"], true)
+  assert(bloat.run?.contains("cargo-bloat-deserialize.txt") ?? false)
+  assert_eq(
+    release_workflow_step(steps, "Check the distribution fuse").if,
+    "matrix.target == 'x86_64-unknown-linux-gnu'",
+  )
+  assert_eq(
+    release_workflow_step(steps, "Upload binary-size report").if,
+    "always() && matrix.target == 'x86_64-unknown-linux-gnu'",
+  )
+}
+
+@test
+pipeline test_benchmark_cargo_bloat_opt_in_is_not_silently_ignored(harness: Harness, task) {
+  const resolve = release_workflow_step(
+    release_workflow(harness.fs).jobs.setup.steps,
+    "Resolve release context",
+  )
+  assert(
+    resolve.run?.contains("benchmark_cargo_bloat requires benchmark_only=true")
+      ?? false,
+  )
+}
+
+@test
+pipeline test_release_workflow_generates_aot_once_for_release_and_benchmark_targets(
+  harness: Harness,
+  task,
+) {
+  const workflow = release_workflow(harness.fs)
+  const checkout = workflow.jobs.prepare_cli_aot.steps[0]
+  const generator = release_workflow_step(
+    workflow.jobs.prepare_cli_aot.steps,
+    "Generate and verify target-independent CLI AOT payload",
+  )
+  const restore = release_workflow_step(
+    workflow.jobs.build.steps,
+    "Restore target-independent CLI AOT payload",
+  )
+  const build = release_workflow_step(workflow.jobs.build.steps, "Build")
+  const aot_condition =
+    "needs.setup.outputs.is_release == 'true' || needs.setup.outputs.build_mode == 'benchmark'"
+  assert_eq(workflow.jobs.prepare_cli_aot.needs, "setup")
+  assert_eq(workflow.jobs.prepare_cli_aot.if, "needs.setup.outputs.should_build_binaries == 'true'")
+  assert_eq(checkout.if, aot_condition)
+  assert_eq(generator.if, aot_condition)
+  assert_eq(generator.run, "make gen-cli-aot && make check-cli-aot")
+  assert_eq(restore.if, aot_condition)
+  assert_eq(restore.uses, "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c")
+  assert_eq(build.env?.HARN_REQUIRE_CLI_AOT, "$" + "{{ (" + aot_condition + ") && '1' || '0' }}")
+  assert_eq(workflow.jobs.build.needs.contains("prepare_cli_aot"), true)
+  assert_eq(workflow.jobs.release.needs.contains("prepare_cli_aot"), true)
+  assert_eq(workflow.jobs.release.if.contains("needs.prepare_cli_aot.result"), true)
+}
+
+// --- format_mib -------------------------------------------------------------
+@test
+pipeline test_format_mib_two_decimals(harness: Harness, task) {
+  assert_eq(format_mib(1536000), "1.46")
+  assert_eq(format_mib(2097152), "2.00")
+  assert_eq(format_mib(1258291), "1.20")
+  assert_eq(format_mib(105906176), "101.00")
+}
+
+// --- default_bin_path -------------------------------------------------------
+@test
+pipeline test_default_bin_path_host(harness: Harness, task) {
+  assert_eq(default_bin_path("/r/target", ""), "/r/target/release/harn")
+}
+
+@test
+pipeline test_default_bin_path_target_triple(harness: Harness, task) {
+  assert_eq(
+    default_bin_path("/r/target", "x86_64-unknown-linux-gnu"),
+    "/r/target/x86_64-unknown-linux-gnu/release/harn",
+  )
+}
+
+@test
+pipeline test_default_bin_path_windows_exe(harness: Harness, task) {
+  assert_eq(
+    default_bin_path("/r/target", "x86_64-pc-windows-msvc"),
+    "/r/target/x86_64-pc-windows-msvc/release/harn.exe",
+  )
+}
+
+// --- report_lines -----------------------------------------------------------
+@test
+pipeline test_report_lines_shape(harness: Harness, task) {
+  const lines = report_lines("/r/target/release/harn", "", 1536000, 1258291)
+  assert_eq(
+    lines,
+    [
+      "harn binary size",
+      "================",
+      "binary: /r/target/release/harn",
+      "target: host",
+      "bytes: 1536000",
+      "mib: 1.46",
+      "distribution_fuse_bytes: 1258291",
+      "distribution_fuse_mib: 1.20",
+    ],
+  )
+}
+
+@test
+pipeline test_report_lines_named_target(harness: Harness, task) {
+  const lines = report_lines("/b", "aarch64-apple-darwin", 10, 20)
+  assert_eq(lines[3], "target: aarch64-apple-darwin")
+}
+
+// --- the two levels ---------------------------------------------------------
+/**
+ * The fuse is the distribution safety property. It does not care how the
+ * artifact was built, because an oversized artifact is undistributable whatever
+ * produced it.
+ */
+@test
+pipeline test_the_fuse_fails_closed_regardless_of_comparability(harness: Harness, task) {
+  const entry = valid_target_policy()
+  const over = measurement(entry.distribution_fuse_bytes + 1)
+  const verdict = evaluate_release_binary_size(entry, over)
+  assert_eq(verdict.fuse, "breached")
+  // An artifact this far past the fuse is also past the growth thresholds, and
+  // both are reported: the operator gets the ceiling breach and the delta that
+  // produced it, not one standing in for the other.
+  assert_eq(verdict.growth, "warn")
+  assert_eq(verdict.failures.count, 2)
+  assert(verdict.failures[0]?.starts_with("distribution fuse:") ?? false)
+  // Not comparable, so no growth conclusion — and the fuse still fires.
+  const incomparable = evaluate_release_binary_size(
+    entry,
+    over + {build_identity: valid_build_identity() + {codegen_units: 16}},
+  )
+  assert_eq(incomparable.fuse, "breached")
+  assert_eq(incomparable.growth, "not-comparable")
+  assert_eq(incomparable.failures.count, 1)
+  assert_eq(
+    evaluate_release_binary_size(entry, measurement(entry.distribution_fuse_bytes)).fuse,
+    "ok",
+  )
+}
+
+/**
+ * Both thresholds, not either. A few megabytes on a 200+ MiB artifact is noise,
+ * and a large ratio on a small one is not a distribution concern.
+ */
+@test
+pipeline test_the_growth_signal_needs_both_thresholds(harness: Harness, task) {
+  const entry = valid_target_policy()
+  const baseline = entry.baseline.bytes
+  // 4 MiB is 1.83% of this baseline: over the byte floor, under the ratio.
+  assert_eq(evaluate_release_binary_size(entry, measurement(baseline + 4194304)).growth, "ok")
+  // 2.00% is 4577990 bytes: over both.
+  assert_eq(evaluate_release_binary_size(entry, measurement(baseline + 4577990)).growth, "warn")
+  // A ratio crossing under the byte floor cannot fire on its own.
+  const tiny = entry
+    + {
+    baseline: entry.baseline + {bytes: 1000000},
+    growth: {warn_bytes: 4194304, warn_percent_hundredths: 200},
+  }
+  assert_eq(evaluate_release_binary_size(tiny, measurement(1500000)).growth, "ok")
+  assert_eq(evaluate_release_binary_size(entry, measurement(baseline)).growth, "ok")
+  assert_eq(evaluate_release_binary_size(entry, measurement(baseline - 5000000)).growth, "ok")
+}
+
+/**
+ * The v0.10.52 shape. Identical source and toolchain, codegen units 16 -> 8,
+ * 8,407,168 bytes of difference — a number with no product meaning. The policy
+ * declines to draw a growth conclusion and says which field diverged.
+ */
+@test
+pipeline test_the_growth_signal_is_withheld_when_the_build_is_not_comparable(
+  harness: Harness,
+  task,
+) {
+  const entry = valid_target_policy()
+  const grown = measurement(entry.baseline.bytes + 8407168)
+  assert_eq(evaluate_release_binary_size(entry, grown).growth, "warn")
+  const verdict = evaluate_release_binary_size(
+    entry,
+    grown + {build_identity: valid_build_identity() + {codegen_units: 16}},
+  )
+  assert_eq(verdict.comparability, "not-comparable")
+  assert_eq(verdict.growth, "not-comparable")
+  assert_eq(verdict.divergent_identity_fields, ["codegen_units"])
+  assert_eq(verdict.failures, [])
+  const rebuilt = evaluate_release_binary_size(
+    entry,
+    grown
+      + {
+      build_identity: valid_build_identity()
+        + {
+        rustc: "1.96.0",
+        strip: "debuginfo",
+        aot_embedded: false,
+      },
+    },
+  )
+  assert_eq(rebuilt.divergent_identity_fields, ["strip", "rustc", "aot_embedded"])
+}
+
+/** A crossing is a decision, and the decision is written down. */
+@test
+pipeline test_an_accepted_growth_clears_the_signal_and_names_its_reason(harness: Harness, task) {
+  const entry = valid_target_policy()
+  const grown = measurement(entry.baseline.bytes + 6000000)
+  assert_eq(evaluate_release_binary_size(entry, grown).growth, "warn")
+  const accepted = entry
+    + {
+    accepted_growth: [
+      {
+        against_baseline_sha: entry.baseline.source_sha,
+        bytes: 8000000,
+        reason: "embed the CLI AOT payload for offline start",
+      },
+    ],
+  }
+  const verdict = evaluate_release_binary_size(accepted, grown)
+  assert_eq(verdict.growth, "accepted")
+  assert_eq(verdict.accepted_reason, "embed the CLI AOT payload for offline start")
+  assert_eq(verdict.failures, [])
+  // An acceptance covers what it says it covers and no more.
+  assert_eq(
+    evaluate_release_binary_size(accepted, measurement(entry.baseline.bytes + 8000001)).growth,
+    "warn",
+  )
+}
+
+// --- causality attribution --------------------------------------------------
+/**
+ * The discrimination raw bytes cannot make, on the numbers the v0.10.52
+ * incident actually reported. `.text`, `.eh_frame`, and `.gcc_except_table`
+ * carry 97% of the movement while `.rodata` barely shifts: codegen duplication
+ * and layout, not eight megabytes of removed product.
+ *
+ * The deltas are the measurements published in #6020; the absolute before/after
+ * sizes here are only their carrier, since the two artifacts are not archived.
+ */
+@test
+pipeline test_classify_growth_separates_codegen_layout_from_content(harness: Harness, task) {
+  const codegen_units_16_to_8 = [
+    {name: ".text", before: 100000000, after: 100000000 - 6155200, delta: -6155200},
+    {name: ".eh_frame", before: 20000000, after: 20000000 - 1053992, delta: -1053992},
+    {name: ".gcc_except_table", before: 9000000, after: 9000000 - 599028, delta: -599028},
+    {name: ".rodata", before: 40000000, after: 40000000 - 225280, delta: -225280},
+  ]
+  const layout = classify_growth(codegen_units_16_to_8)
+  assert_eq(layout.classification, "codegen-layout")
+  assert_eq(layout.codegen_bytes, -7808220)
+  assert_eq(layout.content_bytes, -225280)
+  // The opposite shape: an embedded asset lands in .rodata and barely moves
+  // generated code. The same report must not call this a layout change.
+  const embedded_asset = [
+    {name: ".rodata", before: 40000000, after: 48000000, delta: 8000000},
+    {name: ".text", before: 100000000, after: 100050000, delta: 50000},
+  ]
+  const content = classify_growth(embedded_asset)
+  assert_eq(content.classification, "content")
+  assert_eq(content.content_bytes, 8000000)
+  assert_eq(classify_growth([]).classification, "unchanged")
+}
+
+@test
+pipeline test_parse_elf_sections_reads_the_size_table(harness: Harness, task) {
+  const table = """
+harn  :
+section                size      addr
+.text             104857600   4194304
+.rodata            41943040 109051904
+.eh_frame          20971520 150994944
+Total             167772160
+"""
+  const sections = parse_elf_sections(table)
+  assert_eq(sections.count, 3)
+  assert_eq(sections[0], {name: ".text", bytes: 104857600})
+  assert_eq(sections[2], {name: ".eh_frame", bytes: 20971520})
+  assert_eq(parse_elf_sections(""), [])
+}
+
+@test
+pipeline test_elf_section_deltas_rank_by_magnitude_and_drop_unchanged(harness: Harness, task) {
+  const before = [
+    {name: ".text", bytes: 100},
+    {name: ".rodata", bytes: 50},
+    {name: ".bss", bytes: 7},
+  ]
+  const after = [
+    {name: ".text", bytes: 90},
+    {name: ".rodata", bytes: 500},
+    {name: ".bss", bytes: 7},
+  ]
+  const deltas = elf_section_deltas(before, after)
+  assert_eq(deltas.count, 2)
+  assert_eq(deltas[0]?.name, ".rodata")
+  assert_eq(deltas[0]?.delta, 450)
+  assert_eq(deltas[1]?.name, ".text")
+  assert_eq(deltas[1]?.delta, -10)
+}
+
+/**
+ * A blocked release has to carry its own attribution: which fuse, which
+ * baseline, and what both sides were built with. Otherwise diagnosing it costs
+ * a second exact release build.
+ */
+@test
+pipeline test_verdict_report_lines_carry_both_build_identities(harness: Harness, task) {
+  const entry = valid_target_policy()
+  const grown = measurement(entry.baseline.bytes + 6000000)
+  const lines = verdict_report_lines(evaluate_release_binary_size(entry, grown), entry, grown)
+  assert(lines.contains("distribution_fuse: ok"))
+  assert(lines.contains("growth: warn"))
+  assert(lines.contains("comparability: comparable"))
+  assert(lines.contains("delta_bytes: 6000000"))
+  assert(lines.contains("baseline_source_sha: ${entry.baseline.source_sha}"))
+  assert(
+    lines.contains(
+      "baseline_build_identity: profile=release codegen_units=8 lto=thin strip=symbols rustc=1.95.0 aot_embedded=true",
+    ),
+  )
+  assert(
+    lines.contains(
+      "observed_build_identity: profile=release codegen_units=8 lto=thin strip=symbols rustc=1.95.0 aot_embedded=true",
+    ),
+  )
+}
+
+/**
+ * The fuse is pure bash and pure arithmetic so it holds even when the binary it
+ * just measured cannot run; the growth signal needs that binary. Collapsing
+ * them back into one step is the regression this contract exists to prevent.
+ */
+@test
+pipeline test_workflow_evaluates_the_growth_signal_after_the_fuse(harness: Harness, task) {
+  const steps = release_workflow(harness.fs).jobs.build.steps
+  const fuse = release_workflow_step(steps, "Check the distribution fuse")
+  const growth = release_workflow_step(steps, "Evaluate the binary-size growth signal")
+  assert_eq(fuse.id, "binary_size_fuse")
+  assert_eq(growth.id, "binary_size_growth")
+  assert(!(fuse.run?.contains("harn run") ?? true), "the fuse must not depend on the built binary")
+  assert(growth.run?.contains("scripts/check_binary_size.harn") ?? false)
+  assert_eq(
+    growth.if,
+    "always() && matrix.target == 'x86_64-unknown-linux-gnu' && steps.binary_size_fuse.outcome == 'success'",
+  )
+  assert_eq(
+    growth.env?.BINARY_SIZE_FUSE_BYTES,
+    gha_expression("needs.setup.outputs.binary_size_fuse_bytes"),
+  )
+  // The attested revision, not the tag that asked for the build.
+  assert(growth.run?.contains("HARN_BUILD_REVISION") ?? false)
+  assert(growth.run?.contains("export BINARY_SIZE_SOURCE_SHA=") ?? false)
+  assert_eq(growth.env?.BINARY_SIZE_SOURCE_REF, gha_expression("needs.setup.outputs.ref"))
+}
+
+/**
+ * Tag recovery runs the policy from the dispatch ref but the size script from
+ * the source checkout. Recovering a tag cut before the policy contract existed
+ * must therefore skip the growth signal rather than fail on that script's own
+ * hardcoded default (#6257) — v0.10.51's would reject 218.05 MiB while the
+ * fuse it just cleared is 250 MiB.
+ */
+@test
+pipeline test_workflow_skips_the_growth_signal_for_pre_contract_sources(harness: Harness, task) {
+  const steps = release_workflow(harness.fs).jobs.build.steps
+  const growth = release_workflow_step(steps, "Evaluate the binary-size growth signal")
+  const run = growth.run ?? ""
+  const contract_at = run.index_of(".github/release-binary-size-policy.json")
+  const invoke_at = run.index_of("scripts/check_binary_size.harn")
+  assert(contract_at >= 0, "the growth step must test for the policy contract")
+  assert(invoke_at >= 0, "the growth step must invoke the size script")
+  // Ordering is the whole point: a check after the invocation prevents nothing.
+  assert(contract_at < invoke_at, "the contract check must precede the invocation")
+  // A skip that reads as a pass is the failure mode this guard must not have.
+  assert(run.contains("::notice::"), "an unevaluated growth signal must announce itself")
+  assert(run.contains("growth_signal: not-evaluated"), "the report must record the skip")
+  assert(run.contains("exit 0"), "a pre-contract source is not a release failure")
+  // Exporting a legacy BINARY_SIZE_BUDGET_MB would also make recovery pass, but
+  // it is a shim with no retirement condition. Matched as an assignment so the
+  // workflow comment explaining that choice does not satisfy the check.
+  assert(!run.contains("BINARY_SIZE_BUDGET_MB="), "no legacy budget-name alias")
+}

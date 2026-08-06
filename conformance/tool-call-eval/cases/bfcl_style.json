@@ -1,0 +1,446 @@
+[
+  {
+    "id": "bfcl_style_weather_current",
+    "prompt": "What is the weather in Boston in celsius?",
+    "tools": [
+      {
+        "name": "get_current_weather",
+        "description": "Get current weather for a city.",
+        "parameters": {
+          "location": {"type": "string"},
+          "unit": {"type": "string", "enum": ["celsius", "fahrenheit"]}
+        }
+      }
+    ],
+    "expected": {
+      "kind": "exact",
+      "name": "get_current_weather",
+      "args": {"location": "Boston", "unit": "celsius"}
+    },
+    "source": "bfcl_style_synthetic:simple",
+    "tags": ["bfcl_style", "simple"]
+  },
+  {
+    "id": "bfcl_style_stock_quote",
+    "prompt": "Look up the latest quote for NVDA.",
+    "tools": [
+      {
+        "name": "get_stock_quote",
+        "description": "Fetch a stock quote by ticker.",
+        "parameters": {
+          "ticker": {"type": "string"}
+        }
+      }
+    ],
+    "expected": {"kind": "exact", "name": "get_stock_quote", "args": {"ticker": "NVDA"}},
+    "source": "bfcl_style_synthetic:simple",
+    "tags": ["bfcl_style", "finance"]
+  },
+  {
+    "id": "bfcl_style_book_flight",
+    "prompt": "Find flights from SFO to JFK on 2026-06-12 for one adult.",
+    "tools": [
+      {
+        "name": "search_flights",
+        "description": "Search available flights.",
+        "parameters": {
+          "origin": {"type": "string"},
+          "destination": {"type": "string"},
+          "date": {"type": "string", "description": "ISO date"},
+          "adults": {"type": "integer"}
+        }
+      }
+    ],
+    "expected": {
+      "kind": "exact",
+      "name": "search_flights",
+      "args": {"origin": "SFO", "destination": "JFK", "date": "2026-06-12", "adults": 1}
+    },
+    "source": "bfcl_style_synthetic:simple",
+    "tags": ["bfcl_style", "travel"]
+  },
+  {
+    "id": "bfcl_style_rest_holiday",
+    "prompt": "Fetch public holidays in Canada for 2026.",
+    "tools": [
+      {
+        "name": "get_public_holidays",
+        "description": "Call the public-holidays endpoint.",
+        "parameters": {
+          "year": {"type": "integer"},
+          "country_code": {"type": "string"}
+        }
+      }
+    ],
+    "expected": {
+      "kind": "exact",
+      "name": "get_public_holidays",
+      "args": {"year": 2026, "country_code": "CA"}
+    },
+    "source": "bfcl_style_synthetic:rest",
+    "tags": ["bfcl_style", "rest"]
+  },
+  {
+    "id": "bfcl_style_sql_select",
+    "prompt": "Select email from users where id is 42.",
+    "tools": [
+      {
+        "name": "sql_execute",
+        "description": "Execute a constrained SQL operation.",
+        "parameters": {
+          "sql_keyword": {"type": "string", "enum": ["SELECT", "INSERT", "UPDATE", "DELETE"]},
+          "table_name": {"type": "string"},
+          "columns": {"type": "array", "items": {"type": "string"}},
+          "conditions": {"type": "object"}
+        }
+      }
+    ],
+    "expected": {
+      "kind": "exact",
+      "name": "sql_execute",
+      "args": {
+        "sql_keyword": "SELECT",
+        "table_name": "users",
+        "columns": ["email"],
+        "conditions": {"id": 42}
+      }
+    },
+    "source": "bfcl_style_synthetic:sql",
+    "tags": ["bfcl_style", "sql"]
+  },
+  {
+    "id": "bfcl_style_calendar_create",
+    "prompt": "Schedule a design review tomorrow at 10:00 for 30 minutes.",
+    "tools": [
+      {
+        "name": "create_calendar_event",
+        "description": "Create a calendar event.",
+        "parameters": {
+          "title": {"type": "string"},
+          "relative_date": {"type": "string"},
+          "time": {"type": "string"},
+          "duration_minutes": {"type": "integer"}
+        }
+      }
+    ],
+    "expected": {
+      "kind": "exact",
+      "name": "create_calendar_event",
+      "args": {
+        "title": "design review",
+        "relative_date": "tomorrow",
+        "time": "10:00",
+        "duration_minutes": 30
+      }
+    },
+    "source": "bfcl_style_synthetic:simple",
+    "tags": ["bfcl_style", "calendar"]
+  },
+  {
+    "id": "bfcl_style_multiple_weather_vs_news",
+    "prompt": "Will it rain in Seattle today?",
+    "tools": [
+      {
+        "name": "get_current_weather",
+        "description": "Get weather for a city.",
+        "parameters": {
+          "location": {"type": "string"}
+        }
+      },
+      {
+        "name": "search_news",
+        "description": "Search recent news.",
+        "parameters": {
+          "query": {"type": "string"}
+        }
+      }
+    ],
+    "expected": {"kind": "exact", "name": "get_current_weather", "args": {"location": "Seattle"}},
+    "source": "bfcl_style_synthetic:multiple",
+    "tags": ["bfcl_style", "multiple"]
+  },
+  {
+    "id": "bfcl_style_multiple_news_vs_weather",
+    "prompt": "Find recent news about the Harn programming language.",
+    "tools": [
+      {
+        "name": "get_current_weather",
+        "description": "Get weather for a city.",
+        "parameters": {
+          "location": {"type": "string"}
+        }
+      },
+      {
+        "name": "search_news",
+        "description": "Search recent news.",
+        "parameters": {
+          "query": {"type": "string"}
+        }
+      }
+    ],
+    "expected": {
+      "kind": "exact",
+      "name": "search_news",
+      "args": {"query": "Harn programming language"}
+    },
+    "source": "bfcl_style_synthetic:multiple",
+    "tags": ["bfcl_style", "multiple"]
+  },
+  {
+    "id": "bfcl_style_multiple_translate",
+    "prompt": "Translate 'good morning' to Spanish.",
+    "tools": [
+      {
+        "name": "summarize_text",
+        "description": "Summarize text.",
+        "parameters": {
+          "text": {"type": "string"}
+        }
+      },
+      {
+        "name": "translate_text",
+        "description": "Translate text to a target language.",
+        "parameters": {
+          "text": {"type": "string"},
+          "target_language": {"type": "string"}
+        }
+      }
+    ],
+    "expected": {
+      "kind": "exact",
+      "name": "translate_text",
+      "args": {"text": "good morning", "target_language": "Spanish"}
+    },
+    "source": "bfcl_style_synthetic:multiple",
+    "tags": ["bfcl_style", "multiple"]
+  },
+  {
+    "id": "bfcl_style_email_send",
+    "prompt": "Email Alex the subject 'Launch checklist' with body 'Please review by Friday'.",
+    "tools": [
+      {
+        "name": "send_email",
+        "description": "Send an email.",
+        "parameters": {
+          "recipient": {"type": "string"},
+          "subject": {"type": "string"},
+          "body": {"type": "string"}
+        }
+      }
+    ],
+    "expected": {
+      "kind": "exact",
+      "name": "send_email",
+      "args": {
+        "recipient": "Alex",
+        "subject": "Launch checklist",
+        "body": "Please review by Friday"
+      }
+    },
+    "source": "bfcl_style_synthetic:simple",
+    "tags": ["bfcl_style", "email"]
+  },
+  {
+    "id": "bfcl_style_shopping_search",
+    "prompt": "Search for noise cancelling headphones under 200 dollars.",
+    "tools": [
+      {
+        "name": "search_products",
+        "description": "Search products by query and optional maximum price.",
+        "parameters": {
+          "query": {"type": "string"},
+          "max_price_usd": {"type": "number", "required": false}
+        }
+      }
+    ],
+    "expected": {
+      "kind": "exact",
+      "name": "search_products",
+      "args": {"query": "noise cancelling headphones", "max_price_usd": 200}
+    },
+    "source": "bfcl_style_synthetic:simple",
+    "tags": ["bfcl_style", "shopping"]
+  },
+  {
+    "id": "bfcl_style_route_distance",
+    "prompt": "Calculate driving distance from Oakland to Sacramento.",
+    "tools": [
+      {
+        "name": "calculate_route",
+        "description": "Calculate a route.",
+        "parameters": {
+          "origin": {"type": "string"},
+          "destination": {"type": "string"},
+          "mode": {"type": "string", "enum": ["driving", "walking", "transit"]}
+        }
+      }
+    ],
+    "expected": {
+      "kind": "exact",
+      "name": "calculate_route",
+      "args": {"origin": "Oakland", "destination": "Sacramento", "mode": "driving"}
+    },
+    "source": "bfcl_style_synthetic:rest",
+    "tags": ["bfcl_style", "maps"]
+  },
+  {
+    "id": "bfcl_style_crm_lookup",
+    "prompt": "Find the CRM contact for Priya Shah at Acme.",
+    "tools": [
+      {
+        "name": "crm_find_contact",
+        "description": "Find a CRM contact.",
+        "parameters": {
+          "name": {"type": "string"},
+          "company": {"type": "string", "required": false}
+        }
+      }
+    ],
+    "expected": {
+      "kind": "exact",
+      "name": "crm_find_contact",
+      "args": {"name": "Priya Shah", "company": "Acme"}
+    },
+    "source": "bfcl_style_synthetic:enterprise",
+    "tags": ["bfcl_style", "crm"]
+  },
+  {
+    "id": "bfcl_style_ticket_create",
+    "prompt": "Open a high priority ticket titled 'OAuth callback failing'.",
+    "tools": [
+      {
+        "name": "create_ticket",
+        "description": "Create an issue tracker ticket.",
+        "parameters": {
+          "title": {"type": "string"},
+          "priority": {"type": "string", "enum": ["low", "medium", "high"]}
+        }
+      }
+    ],
+    "expected": {
+      "kind": "exact",
+      "name": "create_ticket",
+      "args": {"title": "OAuth callback failing", "priority": "high"}
+    },
+    "source": "bfcl_style_synthetic:enterprise",
+    "tags": ["bfcl_style", "issue_tracker"]
+  },
+  {
+    "id": "bfcl_style_unit_conversion",
+    "prompt": "Convert 12 miles to kilometers.",
+    "tools": [
+      {
+        "name": "convert_units",
+        "description": "Convert a numeric value between units.",
+        "parameters": {
+          "value": {"type": "number"},
+          "from_unit": {"type": "string"},
+          "to_unit": {"type": "string"}
+        }
+      }
+    ],
+    "expected": {
+      "kind": "exact",
+      "name": "convert_units",
+      "args": {"value": 12, "from_unit": "miles", "to_unit": "kilometers"}
+    },
+    "source": "bfcl_style_synthetic:simple",
+    "tags": ["bfcl_style", "math"]
+  },
+  {
+    "id": "bfcl_style_package_track",
+    "prompt": "Track package 1Z999AA10123456784.",
+    "tools": [
+      {
+        "name": "track_package",
+        "description": "Track a package by carrier tracking number.",
+        "parameters": {
+          "tracking_number": {"type": "string"}
+        }
+      }
+    ],
+    "expected": {
+      "kind": "exact",
+      "name": "track_package",
+      "args": {"tracking_number": "1Z999AA10123456784"}
+    },
+    "source": "bfcl_style_synthetic:rest",
+    "tags": ["bfcl_style", "logistics"]
+  },
+  {
+    "id": "bfcl_style_timer_set",
+    "prompt": "Set a timer for 15 minutes named tea.",
+    "tools": [
+      {
+        "name": "set_timer",
+        "description": "Set a timer.",
+        "parameters": {
+          "minutes": {"type": "integer"},
+          "label": {"type": "string", "required": false}
+        }
+      }
+    ],
+    "expected": {"kind": "exact", "name": "set_timer", "args": {"minutes": 15, "label": "tea"}},
+    "source": "bfcl_style_synthetic:simple",
+    "tags": ["bfcl_style", "timer"]
+  },
+  {
+    "id": "bfcl_style_inventory_check",
+    "prompt": "Check if SKU HARN-TEE-M is in stock at warehouse west.",
+    "tools": [
+      {
+        "name": "inventory_lookup",
+        "description": "Look up SKU inventory.",
+        "parameters": {
+          "sku": {"type": "string"},
+          "warehouse": {"type": "string", "required": false}
+        }
+      }
+    ],
+    "expected": {
+      "kind": "exact",
+      "name": "inventory_lookup",
+      "args": {"sku": "HARN-TEE-M", "warehouse": "west"}
+    },
+    "source": "bfcl_style_synthetic:enterprise",
+    "tags": ["bfcl_style", "inventory"]
+  },
+  {
+    "id": "bfcl_style_metric_query",
+    "prompt": "Query p95 latency for service api-gateway over the last hour.",
+    "tools": [
+      {
+        "name": "metrics_query",
+        "description": "Query service metrics.",
+        "parameters": {
+          "metric": {"type": "string"},
+          "service": {"type": "string"},
+          "window": {"type": "string"}
+        }
+      }
+    ],
+    "expected": {
+      "kind": "exact",
+      "name": "metrics_query",
+      "args": {"metric": "p95 latency", "service": "api-gateway", "window": "last hour"}
+    },
+    "source": "bfcl_style_synthetic:enterprise",
+    "tags": ["bfcl_style", "observability"]
+  },
+  {
+    "id": "bfcl_style_repo_search",
+    "prompt": "Search the repository for uses of llm_call.",
+    "tools": [
+      {
+        "name": "repo_search",
+        "description": "Search code in a repository.",
+        "parameters": {
+          "query": {"type": "string"}
+        }
+      }
+    ],
+    "expected": {"kind": "exact", "name": "repo_search", "args": {"query": "llm_call"}},
+    "source": "bfcl_style_synthetic:code",
+    "tags": ["bfcl_style", "code"]
+  }
+]

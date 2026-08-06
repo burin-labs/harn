@@ -1,0 +1,379 @@
+import {
+  AlarmKind,
+  AssignmentPolicy,
+  CaseSet,
+  ExperimentArm,
+  ExperimentBudget,
+  ExperimentDecisionInput,
+  ExperimentDecisionPolicy,
+  ExperimentGuardrail,
+  ExperimentManifest,
+  ExperimentMetric,
+  ExperimentMetrics,
+  ExperimentSplitPolicy,
+  ExperimentValidationContext,
+  GuardrailAlarm,
+  MetricBounds,
+  MetricDirection,
+  MetricPair,
+  PairedObservation,
+  decide_experiment,
+  plan_assignments,
+  promote_experiment,
+  realize_assignment,
+  register_experiment,
+  validate_experiment_manifest,
+} from "std/eval/experiment"
+import { bounded_cs } from "std/eval/sequential"
+
+fn manifest() -> ExperimentManifest {
+  const baseline_config: dict<string, unknown> = {cache: "off"}
+  const candidate_config: dict<string, unknown> = {cache: "on"}
+  const baseline: ExperimentArm = {id: "baseline", config: baseline_config, complexity: 0}
+  const simple: ExperimentArm = {id: "simple", config: candidate_config, complexity: 1}
+  const replicate: ExperimentArm = {id: "replicate", config: candidate_config, complexity: 2}
+  const decision: ExperimentDecisionPolicy = {delta: 0.05, epsilon: 0.1, ladder: [3, 5, 10, 80]}
+  const up: MetricDirection = "up"
+  const down: MetricDirection = "down"
+  const primary_bounds: MetricBounds = {lo: 0.0, hi: 1.0}
+  const cost_bounds: MetricBounds = {lo: 0.0, hi: 5.0}
+  const absolute: AlarmKind = "absolute"
+  const cost_alarm: GuardrailAlarm = {kind: absolute, threshold: 0.1}
+  const primary: ExperimentMetric = {id: "success", direction: up, bounds: primary_bounds}
+  const cost: ExperimentGuardrail = {
+    id: "cost",
+    direction: down,
+    bounds: cost_bounds,
+    alarm: cost_alarm,
+  }
+  const metrics: ExperimentMetrics = {primary: primary, guardrails: [cost]}
+  const assignment: AssignmentPolicy = {
+    mode: "randomized_block",
+    seed: "seed-42",
+    blocking_factors: ["host", "time_slot"],
+  }
+  const iterate: CaseSet = {id: "tune", digest: "tune-v1", cases: ["case-a", "case-b"]}
+  const gate: CaseSet = {id: "holdout", digest: "holdout-v1", cases: ["case-z"]}
+  const splits: ExperimentSplitPolicy = {iterate: iterate, gate: gate, promotion: "explicit"}
+  const budget: ExperimentBudget = {max_spend_usd: 10.0, max_trials_per_case: 80}
+  const value: ExperimentManifest = {
+    schema: "harn.experiment.v1",
+    experiment_id: "portable-cache-policy",
+    hypothesis: "A bounded cache policy improves success without excess cost.",
+    owner: "runtime-team",
+    baseline: baseline,
+    candidates: [simple, replicate],
+    decision: decision,
+    metrics: metrics,
+    assignment: assignment,
+    splits: splits,
+    budget: budget,
+  }
+  return value
+}
+
+fn context() -> ExperimentValidationContext {
+  return {supported_blocking_factors: ["host", "time_slot"], host_identity_available: true}
+}
+
+fn expect_invalid(value, label: string) {
+  require !is_ok(validate_experiment_manifest(value, context())), label
+}
+
+fn test_manifest_contract() {
+  const valid = unwrap(validate_experiment_manifest(manifest(), context()))
+  const guardrail = manifest().metrics.guardrails[0]
+  require guardrail != nil, "the fixture carries one guardrail"
+  require valid.experiment_id == "portable-cache-policy", "a valid manifest is typed"
+  require valid.candidates[0].id != valid.candidates[1].id, "A/A arms retain distinct identities"
+  require hash_value(valid.candidates[0].config) == hash_value(valid.candidates[1].config),
+    "byte-identical A/A configs are valid because config is not arm identity"
+  expect_invalid(manifest() + {schema: "future.experiment.v2"}, "unknown schemas fail closed")
+  expect_invalid(manifest() + {baseline: nil}, "a missing baseline is rejected structurally")
+  expect_invalid(
+    manifest()
+      + {
+      candidates: [
+        {id: "same", config: {}, complexity: 0},
+        {id: "same", config: {}, complexity: 1},
+      ],
+    },
+    "duplicate arms are rejected",
+  )
+  expect_invalid(
+    manifest() + {decision: {delta: 0.05, epsilon: 0.0, ladder: [1]}},
+    "zero epsilon is rejected",
+  )
+  expect_invalid(
+    manifest()
+      + {decision: {delta: 1.0, epsilon: 0.1, ladder: [3, 2]}},
+    "invalid delta and ladder are rejected",
+  )
+  expect_invalid(
+    manifest()
+      + {
+      metrics: manifest().metrics
+        + {primary: manifest().metrics.primary + {direction: "sideways"}},
+    },
+    "unknown metric directions are rejected structurally",
+  )
+  expect_invalid(
+    manifest()
+      + {
+      metrics: manifest().metrics
+        + {
+        guardrails: [guardrail + {alarm: {kind: "absolute", threshold: 0.0}}],
+      },
+    },
+    "malformed alarms are rejected",
+  )
+  expect_invalid(manifest() + {splits: nil}, "missing split policy is rejected")
+  expect_invalid(
+    manifest()
+      + {
+      splits: manifest().splits
+        + {
+        gate: manifest().splits.gate
+          + {digest: "other-digest", cases: ["case-a"]},
+      },
+    },
+    "iterate and frozen gate case sets must be disjoint",
+  )
+  expect_invalid(
+    manifest() + {assignment: manifest().assignment + {mode: "round_robin"}},
+    "non-random assignment is rejected",
+  )
+  expect_invalid(
+    manifest()
+      + {assignment: manifest().assignment + {blocking_factors: ["host", "rack"]}},
+    "unknown blocking factors are rejected against host capabilities",
+  )
+  expect_invalid(
+    manifest()
+      + {assignment: manifest().assignment + {blocking_factors: ["time_slot"]}},
+    "host blocking is required when host identity is observable",
+  )
+  expect_invalid(manifest() + {unexpected: true}, "experiment-owned records reject unknown fields")
+}
+
+fn test_registration_and_assignment() {
+  const registration = register_experiment(
+    unwrap(validate_experiment_manifest(manifest(), context())),
+  )
+  require registration.phase == "iterate", "registration starts on the iterate split"
+  require registration.case_set.digest == "tune-v1", "iterate cases are frozen"
+  require registration.gate_case_set.digest == "holdout-v1", "gate cases are frozen"
+  const block = {host: "host-a", time_slot: "slot-1"}
+  const first = plan_assignments(registration, "case-a", 0, block)
+  const replay = plan_assignments(registration, "case-a", 0, block)
+  require first == replay, "randomized assignment is deterministic on replay"
+  require len(first.assignments) == 3, "each balanced block contains baseline and both candidates"
+  let ids: list<string> = []
+  for assignment in first.assignments {
+    ids = ids + [assignment.arm_id]
+  }
+  require ids.sorted() == ["baseline", "replicate", "simple"], "each arm appears exactly once"
+  const realized = realize_assignment(first, "simple", block)
+  require realized.host == "host-a", "host identity is recorded in the realized receipt"
+  require realized.time_slot == "slot-1", "time slot is recorded in the realized receipt"
+  const drift = try {
+    realize_assignment(first, "simple", {host: "host-b", time_slot: "slot-1"})
+  }
+  require is_err(drift), "a host cannot realize a different block than it was assigned"
+  const holdout = try {
+    plan_assignments(registration, "case-z", 0, block)
+  }
+  require is_err(holdout), "iterate registration cannot spend frozen gate cases"
+}
+
+fn observation(
+  registration,
+  arm_id: string,
+  case_id: string,
+  trial_index: int,
+  baseline_success: float,
+  treatment_success: float,
+  baseline_cost: float,
+  treatment_cost: float,
+) -> PairedObservation {
+  const block = {
+    host: if trial_index % 2 == 0 {
+      "host-a"
+    } else {
+      "host-b"
+    },
+    time_slot: "slot-" + to_string(trial_index % 4),
+  }
+  const plan = plan_assignments(registration, case_id, trial_index, block)
+  const metrics: list<MetricPair> = [
+    {id: "success", baseline: baseline_success, treatment: treatment_success},
+    {id: "cost", baseline: baseline_cost, treatment: treatment_cost},
+  ]
+  return {
+    arm_id: arm_id,
+    case_id: case_id,
+    trial_index: trial_index,
+    metrics: metrics,
+    baseline_assignment: realize_assignment(plan, "baseline", block),
+    candidate_assignment: realize_assignment(plan, arm_id, block),
+  }
+}
+
+fn winner_input(registration) -> ExperimentDecisionInput {
+  let observations: list<PairedObservation> = []
+  for case_id in ["case-a", "case-b"] {
+    let trial = 0
+    while trial < 80 {
+      observations = observations
+        + [
+        observation(registration, "simple", case_id, trial, 0.0, 1.0, 1.0, 1.0),
+        observation(registration, "replicate", case_id, trial, 1.0, 0.0, 1.0, 1.0),
+      ]
+      trial = trial + 1
+    }
+  }
+  return {observations: observations, phase_spend_usd: 0.32, budget_spent: true}
+}
+
+fn test_decision_and_promotion() {
+  const registration = register_experiment(
+    unwrap(validate_experiment_manifest(manifest(), context())),
+  )
+  const decision = decide_experiment(registration, winner_input(registration))
+  require decision.verdict == "ITERATE_WINNER", "a separated safe candidate wins tune"
+  require decision.winner == "simple", "the better candidate is selected"
+  require decision.promotion_required, "tune wins require explicit promotion"
+  require len(decision.realized_assignments) > 0, "decision preserves realized assignment evidence"
+  const replicate = decision.candidates[1]
+  require replicate != nil, "the decision preserves the replicate candidate"
+  require replicate.status == "regressed_on_primary",
+    "typed outcomes let any scheduler stop a primary-eliminated arm"
+  const guardrail = decision.guardrails[0]
+  let expected_values: list<float> = []
+  let index = 0
+  while index < 160 {
+    expected_values = expected_values + [-0.1]
+    index = index + 1
+  }
+  const expected = bounded_cs(expected_values, 0.05 / 4.0, -5.1, 4.9)
+  require guardrail.lo == expected.lo && guardrail.hi == expected.hi,
+    "family delta is split across two candidates times primary-plus-guardrail cells"
+  const promoted = promote_experiment(registration, decision)
+  require promoted.registration.phase == "gate", "promotion creates a gate registration"
+  require promoted.registration.case_set.cases == ["case-z"],
+    "promotion unlocks only frozen gate cases"
+  require promoted.registration.prior_spend_usd == decision.spend_usd,
+    "promotion carries iterate spend into the gate budget"
+  require len(promoted.registration.candidates) == 1,
+    "gate registration compares only the baseline and tune winner"
+  const gate_observation: PairedObservation = observation(
+    promoted.registration,
+    "simple",
+    "case-z",
+    0,
+    0.0,
+    1.0,
+    1.0,
+    1.0,
+  )
+  const over_budget = try {
+    decide_experiment(
+      promoted.registration,
+      {observations: [gate_observation], phase_spend_usd: 10.0, budget_spent: false},
+    )
+  }
+  require is_err(over_budget), "the gate cannot reset the whole-experiment spend ceiling"
+  const premature = try {
+    promote_experiment(registration, decision + {verdict: "RUNNING", winner: nil})
+  }
+  require is_err(premature), "nonterminal decisions cannot unlock the gate"
+}
+
+fn test_guardrail_veto() {
+  const one = manifest() + {candidates: [manifest().candidates[0]]}
+  const registration = register_experiment(unwrap(validate_experiment_manifest(one, context())))
+  let observations: list<PairedObservation> = []
+  for case_id in ["case-a", "case-b"] {
+    let trial = 0
+    while trial < 80 {
+      observations = observations
+        + [
+        observation(registration, "simple", case_id, trial, 0.0, 1.0, 1.0, 2.0),
+      ]
+      trial = trial + 1
+    }
+  }
+  const decision = decide_experiment(
+    registration,
+    {observations: observations, phase_spend_usd: 0.16, budget_spent: true},
+  )
+  require decision.verdict == "GUARDRAIL_VETO", "a proven harmful leader is vetoed distinctly"
+  require decision.winner == nil, "a vetoed leader cannot be promoted"
+  const candidate = decision.candidates[0]
+  require candidate != nil, "the decision preserves the vetoed candidate"
+  require candidate.status == "regressed_on_guardrail",
+    "the candidate terminal status records its guardrail regression"
+  require !decision.no_decision, "a guardrail veto is a terminal decision"
+}
+
+fn test_baseline_beats_a_known_bad_candidate() {
+  const one = manifest() + {candidates: [manifest().candidates[0]]}
+  const registration = register_experiment(unwrap(validate_experiment_manifest(one, context())))
+  let observations: list<PairedObservation> = []
+  for case_id in ["case-a", "case-b"] {
+    let trial = 0
+    while trial < 80 {
+      observations = observations
+        + [
+        observation(registration, "simple", case_id, trial, 1.0, 0.0, 1.0, 1.0),
+      ]
+      trial = trial + 1
+    }
+  }
+  const decision = decide_experiment(
+    registration,
+    {observations: observations, phase_spend_usd: 0.16, budget_spent: false},
+  )
+  require decision.verdict == "BASELINE", "a proven worse candidate selects the baseline early"
+  require decision.winner == nil, "a baseline verdict has no candidate winner"
+  const candidate = decision.candidates[0]
+  require candidate != nil, "the decision preserves the known-bad candidate"
+  require candidate.status == "regressed_on_primary",
+    "the known-bad candidate records its primary regression"
+  require !decision.no_decision, "a baseline verdict is terminal rather than unresolved"
+}
+
+fn test_identical_arms_do_not_manufacture_a_winner() {
+  const registration = register_experiment(
+    unwrap(validate_experiment_manifest(manifest(), context())),
+  )
+  let observations: list<PairedObservation> = []
+  for case_id in ["case-a", "case-b"] {
+    let trial = 0
+    while trial < 80 {
+      observations = observations
+        + [
+        observation(registration, "simple", case_id, trial, 0.0, 0.0, 1.0, 1.0),
+        observation(registration, "replicate", case_id, trial, 0.0, 0.0, 1.0, 1.0),
+      ]
+      trial = trial + 1
+    }
+  }
+  const decision = decide_experiment(
+    registration,
+    {observations: observations, phase_spend_usd: 0.32, budget_spent: true},
+  )
+  require decision.verdict == "MEASURED_NO_DIFFERENCE",
+    "byte-identical A/A arms resolve as measured no difference"
+  require decision.winner == nil, "A/A evidence never manufactures a winner"
+}
+
+pipeline default(harness: Harness, _task) {
+  test_manifest_contract()
+  test_registration_and_assignment()
+  test_decision_and_promotion()
+  test_guardrail_veto()
+  test_baseline_beats_a_known_bad_candidate()
+  test_identical_arms_do_not_manufacture_a_winner()
+  harness.stdio.println("experiment-contract-ok")
+}

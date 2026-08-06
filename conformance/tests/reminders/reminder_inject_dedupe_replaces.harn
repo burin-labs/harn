@@ -1,0 +1,16 @@
+pipeline main(harness: Harness) {
+  const first = harness.agent.transcript_inject_reminder(
+    transcript(),
+    {body: "old", dedupe_key: "slot", ttl_turns: 2},
+  )
+  const second = harness.agent.transcript_inject_reminder(
+    first.transcript,
+    {body: "new", dedupe_key: "slot", ttl_turns: 3},
+  )
+  const events = transcript_events_by_kind(second.transcript, "system_reminder")
+  harness.stdio.println(second.deduped_count)
+  harness.stdio.println(len(events))
+  harness.stdio.println(events[0].text)
+  harness.stdio.println(events[0].reminder.body)
+  harness.stdio.println(events[0].reminder.ttl_turns)
+}

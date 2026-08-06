@@ -1,0 +1,44 @@
+pipeline main(harness: Harness) {
+  let stage_tools = tool_registry()
+  stage_tools = tool_define(
+    stage_tools,
+    "edit",
+    "Edit a file",
+    {handler: { args -> "" }, parameters: {path: {type: "string"}}, returns: {type: "string"}},
+  )
+  stage_tools = tool_define(
+    stage_tools,
+    "run",
+    "Run a command",
+    {handler: { args -> "" }, parameters: {command: {type: "string"}}, returns: {type: "string"}},
+  )
+  const flow = workflow_graph(
+    {
+      name: "policy_guardrails",
+      entry: "act",
+      capability_policy: {capabilities: {workspace: ["read_text"]}, side_effect_level: "read_only"},
+      nodes: {
+        act: {
+          kind: "stage",
+          mode: "agent",
+          tools: stage_tools,
+          capability_policy: {
+            capabilities: {workspace: ["write_text"], process: ["exec"]},
+            side_effect_level: "process_exec",
+          },
+        },
+      },
+    },
+  )
+  const ceiling = {
+    tools: ["read"],
+    capabilities: {workspace: ["read_text"]},
+    side_effect_level: "read_only",
+  }
+  const report = workflow_validate(flow, ceiling)
+  harness.stdio.println(!report?.valid)
+  harness.stdio.println(len(report?.errors) >= 1)
+  harness.stdio.println(contains(join(report?.errors, "\n"), "host ceiling"))
+  const policy = workflow_policy_report(flow, ceiling)
+  harness.stdio.println(!policy?.validation?.valid)
+}

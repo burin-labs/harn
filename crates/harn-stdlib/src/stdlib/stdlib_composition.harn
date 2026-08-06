@@ -1,0 +1,326 @@
+import { agent_dispatch_tool_call } from "std/agent/primitives"
+
+fn __composition_registry(harness: Harness, value) {
+  if value == nil {
+    const current = harness.tools.current_registry()
+    if current == nil {
+      return tool_registry()
+    }
+    return __composition_registry(harness, current)
+  }
+  if type_of(value) == "dict" && type_of(value?.tools) == "list" {
+    return value
+  }
+  if type_of(value) == "list" {
+    return {_type: "tool_registry", tools: value}
+  }
+  throw "composition_mcp: tools must be a tool registry, list, or nil"
+}
+
+fn __composition_mcp_tool(entry) {
+  if type_of(entry) != "dict" {
+    return false
+  }
+  if entry?.executor == "mcp_server" || entry?._mcp_server != nil || entry?.mcp_server != nil
+    || entry
+    ?._mcp_tool_name
+    != nil {
+    return true
+  }
+  const function = entry?.function
+  if type_of(function) == "dict" {
+    return function?.executor == "mcp_server" || function?._mcp_server != nil
+      || function?.mcp_server
+      != nil
+      || function?._mcp_tool_name != nil
+  }
+  return false
+}
+
+fn __composition_mcp_registry(harness: Harness, value) {
+  const registry = __composition_registry(harness, value)
+  let tools = []
+  for entry in registry?.tools ?? [] {
+    if __composition_mcp_tool(entry) {
+      tools = tools.appending(entry)
+    }
+  }
+  return registry + {tools: tools}
+}
+
+fn __composition_mcp_ranked_names(registry, query, options) {
+  const text = trim(to_string(query ?? ""))
+  if text == "" {
+    return nil
+  }
+  const opts = options ?? {}
+  const ranked = __host_tool_search_score(
+    text,
+    registry,
+    {strategy: opts?.strategy ?? "bm25", max_results: opts?.limit ?? opts?.max_results ?? 20},
+  )
+  let names = []
+  for item in ranked {
+    if item?.tool_name != nil {
+      names = names.appending(item.tool_name)
+    }
+  }
+  return names
+}
+
+fn __composition_mcp_servers(manifest) {
+  let servers = []
+  for binding in manifest?.bindings ?? [] {
+    const metadata = binding?.metadata ?? {}
+    const server = metadata?._mcp_server ?? metadata?.mcp_server
+    if server != nil && !contains(servers, server) {
+      servers = servers.appending(server)
+    }
+  }
+  return servers
+}
+
+fn __composition_execute_options(opts, dispatcher) {
+  let out = {dispatcher: dispatcher}
+  for key in [
+    "session_id",
+    "run_id",
+    "max_operations",
+    "timeout_ms",
+    "max_output_bytes",
+    "max_concurrent_operations",
+    "max_concurrent",
+    "max_concurrent_per_server",
+    "per_server_concurrency",
+    "trusted_servers",
+    "trusted_mcp_servers",
+    "trust_annotations",
+    "trust_mcp_annotations",
+    "call_timeout_ms",
+    "retry",
+  ] {
+    if opts?.[key] != nil {
+      out = out + {[key]: opts[key]}
+    }
+  }
+  return out
+}
+
+fn __composition_dispatch_value(result, name) {
+  if result?.ok ?? false {
+    return result?.result
+  }
+  throw result?.error ?? result?.rendered_result
+    ?? ("composition_mcp_execute: tool failed: " + name)
+}
+
+fn __composition_mcp_reduced_result(report, opts) {
+  if opts?.include_report ?? false {
+    return report
+  }
+  const run = report?.run ?? {}
+  return {
+    ok: report?.ok ?? false,
+    result: run?.result,
+    error: run?.error,
+    failure_category: run?.failure_category,
+    run_id: run?.run_id,
+    child_call_count: len(report?.child_calls ?? []),
+  }
+}
+
+/**
+ * composition_mcp_manifest builds a Code Mode binding manifest from only MCP-served tools.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn composition_mcp_manifest(harness: Harness, tools = nil, options = nil) {
+  const opts = options ?? {}
+  const registry = __composition_mcp_registry(harness, tools)
+  return composition_binding_manifest(registry, opts?.manifest_options ?? opts)
+}
+
+/**
+ * composition_mcp_api returns the manifest plus prompt-visible Harn API for MCP Code Mode.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: composition_mcp_api(tool_registry, {query: "issues"})
+ */
+pub fn composition_mcp_api(harness: Harness, tools = nil, options = nil) {
+  const opts = options ?? {}
+  const registry = __composition_mcp_registry(harness, tools)
+  const names = __composition_mcp_ranked_names(registry, opts?.query, opts)
+  const selected = if names == nil {
+    registry
+  } else {
+    tool_select(registry, names)
+  }
+  const manifest = composition_binding_manifest(selected, opts?.manifest_options ?? opts)
+  return {
+    manifest: manifest,
+    harn_api: composition_harn_api(manifest),
+    tool_count: len(manifest.bindings),
+    servers: __composition_mcp_servers(manifest),
+  }
+}
+
+/**
+ * composition_mcp_search searches MCP tools with the same scorer as tool_search and returns a Code Mode API slice.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: composition_mcp_search(tool_registry, "issues", {limit: 5})
+ */
+pub fn composition_mcp_search(harness: Harness, tools = nil, query = "", options = nil) {
+  const opts = options ?? {}
+  return composition_mcp_api(harness, tools, opts + {query: query})
+}
+
+/**
+ * composition_mcp_execute runs a Harn Code Mode snippet and dispatches child calls through the agent tool path.
+ *
+ * @effects: [host, mcp]
+ * @errors: []
+ * @api_stability: experimental
+ * @example: composition_mcp_execute(harness, "return github_search({query: \"bug\"})", tools)
+ */
+pub fn composition_mcp_execute(harness: Harness, snippet, tools = nil, options = nil) {
+  const opts = options ?? {}
+  const source_tools = opts?.tools ?? tools
+  const registry = __composition_mcp_registry(harness, source_tools)
+  const manifest = opts?.manifest
+    ?? composition_binding_manifest(
+    registry,
+    opts?.manifest_options ?? opts,
+  )
+  const dispatch_opts = opts?.dispatch_options ?? opts
+  const dispatch = { name, input ->
+    let result = agent_dispatch_tool_call(
+      harness.tools,
+      {name: name, arguments: input},
+      registry,
+      dispatch_opts,
+    )
+    return __composition_dispatch_value(result, name)
+  }
+  const report = harness.tools.composition_execute(
+    snippet,
+    manifest,
+    __composition_execute_options(opts, dispatch),
+  )
+  return __composition_mcp_reduced_result(report, opts)
+}
+
+/**
+ * composition_mcp_tools builds the compact Code Mode MCP profile registry.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn composition_mcp_tools(harness: Harness, registry = nil, options = nil) {
+  const opts = options ?? {}
+  let tools = registry ?? tool_registry()
+  tools = tool_define(
+    tools,
+    "harn.code.search_examples",
+    "Search curated examples for governed composition snippets",
+    {
+      parameters: {
+        query: {type: "string", required: false},
+        limit: {type: "integer", required: false},
+      },
+      returns: {type: "array"},
+      annotations: {kind: "search", side_effect_level: "read_only", inline_result: true},
+      handler: { args ->
+        return composition_search_examples(args?.query ?? "", args?.limit ?? opts?.limit ?? 10)
+      },
+    },
+  )
+  tools = tool_define(
+    tools,
+    "harn.code.generate_harn_api",
+    "Generate a typed Harn Code Mode API from an MCP tool surface or binding manifest",
+    {
+      parameters: {
+        tools: {type: "array", required: false},
+        manifest: {type: "object", required: false},
+        query: {type: "string", required: false},
+        limit: {type: "integer", required: false},
+      },
+      returns: {type: "object"},
+      annotations: {kind: "search", side_effect_level: "read_only", inline_result: true},
+      handler: { args ->
+        const call_args = args ?? {}
+        const manifest = call_args?.manifest
+        if manifest != nil {
+          return {
+            manifest: manifest,
+            harn_api: composition_harn_api(manifest),
+            tool_count: len(manifest?.bindings ?? []),
+            servers: __composition_mcp_servers(manifest),
+          }
+        }
+        return composition_mcp_api(harness, call_args?.tools ?? opts?.tools, opts + call_args)
+      },
+    },
+  )
+  tools = tool_define(
+    tools,
+    "harn.code.execute_composition",
+    "Execute a read-only Harn composition snippet against a binding manifest",
+    {
+      parameters: {
+        snippet: {type: "string"},
+        manifest: {type: "object", required: false},
+        state: {type: "object", required: false},
+        session_id: {type: "string", required: false},
+        run_id: {type: "string", required: false},
+        max_operations: {type: "integer", required: false},
+        timeout_ms: {type: "integer", required: false},
+        max_output_bytes: {type: "integer", required: false},
+        max_concurrent: {type: "integer", required: false},
+        max_concurrent_per_server: {type: "integer", required: false},
+        trusted_servers: {type: "array", required: false},
+        trust_annotations: {type: "boolean", required: false},
+        call_timeout_ms: {type: "integer", required: false},
+        retry: {type: "object", required: false},
+        tools: {type: "array", required: false},
+        include_report: {type: "boolean", required: false},
+      },
+      returns: {type: "object"},
+      annotations: {kind: "think", side_effect_level: "read_only", inline_result: true},
+      handler: { args ->
+        const call_args = args ?? {}
+        if call_args?.tools != nil || opts?.tools != nil {
+          return composition_mcp_execute(
+            harness,
+            call_args.snippet,
+            call_args?.tools ?? opts?.tools,
+            opts + call_args,
+          )
+        }
+        return harness.tools.composition_execute(
+          call_args.snippet,
+          call_args.manifest,
+          opts + call_args,
+        )
+      },
+    },
+  )
+  return tools
+}
+
+/**
+ * composition_crystallization_input converts a composition report into a crystallization trace.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn composition_crystallization_input(report, options = nil) {
+  return composition_crystallization_trace(report, options ?? {})
+}

@@ -1,0 +1,25 @@
+pipeline test(harness: Harness, task) {
+  // List concat correctness
+  harness.stdio.log([1, 2] + [3, 4])
+  harness.stdio.log([] + [1])
+  harness.stdio.log([1] + [])
+  // Dict merge
+  harness.stdio.log({a: 1} + {b: 2})
+  // Dict merge override
+  harness.stdio.log({a: 1} + {a: 2})
+  // Dict merge preserves keys
+  harness.stdio.log({a: 1, b: 2} + {b: 3, c: 4})
+  // String concat
+  harness.stdio.log("hello" + " " + "world")
+  // Repeated concat builds correctly
+  let list = []
+  let n = 0
+  while n < 50 {
+    list = list + [n]
+    n = n + 1
+  }
+  assert_eq(len(list), 50)
+  assert_eq(list[0], 0)
+  assert_eq(list[49], 49)
+  harness.stdio.log("concat ok")
+}

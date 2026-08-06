@@ -1,0 +1,1478 @@
+pub import {
+  GitCheckoutDirtyPolicy,
+  GitCheckoutOptions,
+  GitCheckoutReceipt,
+  GitCheckoutStep,
+  GitCheckoutStepReceipt,
+  git_checkout_plan,
+} from "std/git/checkout"
+import { git_checkout_run } from "std/git/checkout"
+pub import {
+  GitBranchResult,
+  GitCommandResult,
+  GitConflict,
+  GitConflictsData,
+  GitConflictsReceipt,
+  GitDescribeData,
+  GitDescribeReceipt,
+  GitDiffData,
+  GitDiffReceipt,
+  GitDiscoverData,
+  GitDiscoverReceipt,
+  GitFetchData,
+  GitFetchReceipt,
+  GitLsRemoteData,
+  GitLsRemoteReceipt,
+  GitMergeBaseData,
+  GitMergeBaseReceipt,
+  GitOutputRef,
+  GitPlannedData,
+  GitPushData,
+  GitPushReceipt,
+  GitRebaseData,
+  GitRebaseReceipt,
+  GitReceipt,
+  GitRemoteRef,
+  GitRepo,
+  GitStatusData,
+  GitStatusEntry,
+  GitStatusReceipt,
+  GitTagListData,
+  GitTagListReceipt,
+  GitWorktreeCreateData,
+  GitWorktreeCreateReceipt,
+  GitWorktreeRemoveData,
+  GitWorktreeRemoveReceipt,
+} from "std/git/contracts"
+/**
+ * std/git — typed local git operations with audit receipts.
+ *
+ * Import: import "std/git"
+ */
+import { process_result_success, process_result_text, process_run } from "std/runtime"
+
+type GitRunOptions = {
+  repo?: string | GitRepo | GitReceipt,
+  cwd?: string,
+  timeout_ms?: int,
+  env_remove?: list<string>,
+  stdin?: string,
+  env?: dict,
+  env_mode?: string,
+  capture?: dict,
+  max_inline_bytes?: int,
+  background?: bool,
+  background_after_ms?: int,
+  progress_interval_ms?: int,
+  progress_max_inline_bytes?: int,
+  policy_context?: dict,
+}
+
+type GitLogOptions = {
+  repo?: string | GitRepo | GitReceipt,
+  cwd?: string,
+  timeout_ms?: int,
+  env_remove?: list<string>,
+  capture?: dict,
+  max_inline_bytes?: int,
+  rev?: string,
+  rev_range?: string,
+  format?: string,
+  max_count?: int,
+  limit?: int,
+  oneline?: bool,
+  decorate?: bool,
+  paths?: list<string>,
+}
+
+type GitShowOptions = {
+  repo?: string | GitRepo | GitReceipt,
+  cwd?: string,
+  timeout_ms?: int,
+  env_remove?: list<string>,
+  capture?: dict,
+  max_inline_bytes?: int,
+  stat?: bool,
+  patch?: bool,
+}
+
+type GitTagListOptions = {pattern?: string, sort?: string}
+
+type GitDescribeOptions = {tags?: bool, match?: string, rev?: string}
+
+type GitLsRemoteOptions = {
+  repo?: string | GitRepo | GitReceipt,
+  refs?: list<string>,
+  tags?: bool,
+  heads?: bool,
+}
+
+type GitSwitchOptions = {
+  repo?: string | GitRepo | GitReceipt,
+  cwd?: string,
+  timeout_ms?: int,
+  env_remove?: list<string>,
+  capture?: dict,
+  max_inline_bytes?: int,
+  create?: bool,
+  force_create?: bool,
+  detach?: bool,
+  discard_changes?: bool,
+}
+
+type GitPullOptions = {
+  repo?: string | GitRepo | GitReceipt,
+  cwd?: string,
+  timeout_ms?: int,
+  env_remove?: list<string>,
+  capture?: dict,
+  max_inline_bytes?: int,
+  quiet?: bool,
+  prune?: bool,
+}
+
+type GitToolGroup = "read" | "mutation"
+
+type GitToolOperation = "status" \
+  | "current_branch" \
+  | "log" \
+  | "diff" \
+  | "branch_list" \
+  | "remote_list" \
+  | "show" \
+  | "discover" \
+  | "conflicts" \
+  | "merge_base" \
+  | "fetch" \
+  | "switch" \
+  | "pull_ff_only" \
+  | "rebase"
+
+type GitToolCatalogOptions = {
+  include_mutations?: bool,
+  enabled_operations?: list<string> | string,
+  operations?: list<string> | string,
+  disabled_operations?: list<string> | string,
+  limit?: int,
+  max_results?: int,
+}
+
+type GitToolCatalogEntry = {
+  operation: GitToolOperation,
+  group: GitToolGroup,
+  description: string,
+  keywords: list<string>,
+  parameters: dict,
+  side_effect_level: "read_only" | "process_exec",
+}
+
+type GitToolSearchMatch = {
+  operation: GitToolOperation,
+  group: GitToolGroup,
+  description: string,
+  keywords: list<string>,
+  parameters: dict,
+  side_effect_level: "read_only" | "process_exec",
+  score: int,
+}
+
+type GitToolSearchResult = {
+  query: string,
+  strategy: string,
+  operations: list<string>,
+  matches: list<GitToolSearchMatch>,
+  total: int,
+}
+
+type GitToolRunArgs = {
+  repo?: string | GitRepo | GitReceipt,
+  path?: string,
+  rev?: string,
+  rev_range?: string,
+  range?: string,
+  paths?: list<string>,
+  left?: string,
+  right?: string,
+  format?: string,
+  max_count?: int,
+  limit?: int,
+  oneline?: bool,
+  decorate?: bool,
+  stat?: bool,
+  patch?: bool,
+  branch?: string,
+  remote?: string,
+  refspecs?: list<string>,
+  quiet?: bool,
+  prune?: bool,
+  create?: bool,
+  force_create?: bool,
+  detach?: bool,
+  discard_changes?: bool,
+  base_ref?: string,
+}
+
+type GitToolRegistryOptions = {
+  repo?: string | GitRepo | GitReceipt,
+  cwd?: string,
+  enabled_tools?: list<string> | string,
+  disabled_tools?: list<string> | string,
+  names?: dict,
+  descriptions?: dict,
+  annotations?: dict,
+  tool_config?: dict,
+  defer_loading?: bool,
+  namespace?: string,
+  include_mutations?: bool,
+  enabled_operations?: list<string> | string,
+  operations?: list<string> | string,
+  disabled_operations?: list<string> | string,
+}
+
+/**
+ * git_env_remove returns ambient git env vars stripped from local git subprocesses.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn git_env_remove() -> list<string> {
+  return [
+    "GIT_DIR",
+    "GIT_INDEX_FILE",
+    "GIT_WORK_TREE",
+    "GIT_NAMESPACE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_PREFIX",
+  ]
+}
+
+/**
+ * git_noninteractive_env returns the prompt-guard env applied to every local
+ * git subprocess so a credential / host-key prompt fails fast instead of
+ * hanging a TTY-less runtime (`harn serve`, `@job`, CI).
+ *
+ * `GIT_TERMINAL_PROMPT=0` disables git's own prompting; an empty
+ * `GIT_ASKPASS`/`SSH_ASKPASS` refuses an external passphrase helper; and an
+ * `ssh -oBatchMode=yes` transport makes ssh non-interactive. This guard never
+ * removes credentials — auth via env, `.netrc`, credential helpers, or a
+ * loaded ssh-agent still works because those paths are non-interactive. It is
+ * merged (`env_mode: "merge"`) so inherited PATH/HOME/credentials survive, and
+ * a caller can re-enable prompting by passing its own `env`/`env_mode`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn git_noninteractive_env() -> dict {
+  return {
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_ASKPASS: "",
+    SSH_ASKPASS: "",
+    GIT_SSH_COMMAND: "ssh -oBatchMode=yes",
+  }
+}
+
+fn __git_non_empty_string(value, label) -> string {
+  if type_of(value) != "string" || value == "" {
+    throw "std/git: " + label + " must be a non-empty string"
+  }
+  return value
+}
+
+fn __git_ref_arg(value, label) -> string {
+  const text = __git_non_empty_string(value, label)
+  if starts_with(text, "-") {
+    throw "std/git: " + label + " must not start with '-'"
+  }
+  if contains(text, "\n") {
+    throw "std/git: " + label + " must not contain newlines"
+  }
+  return text
+}
+
+fn __git_sort_arg(value) -> string {
+  const text = __git_non_empty_string(value, "sort")
+  if contains(text, "\n") || contains(text, "\r") {
+    throw "std/git: sort must not contain newlines"
+  }
+  return text
+}
+
+fn __git_string_list(value, label) -> list<string> {
+  if value == nil {
+    return []
+  }
+  if type_of(value) != "list" {
+    throw "std/git: " + label + " must be a list<string>"
+  }
+  for item in value {
+    if type_of(item) != "string" {
+      throw "std/git: " + label + " entries must be strings"
+    }
+  }
+  return value
+}
+
+/**
+ * git_repo_path normalizes a repo path, repo dict, or git receipt into a filesystem path.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn git_repo_path(repo = ".") -> string {
+  if repo == nil {
+    return "."
+  }
+  if type_of(repo) == "string" {
+    return __git_non_empty_string(repo, "repo")
+  }
+  if type_of(repo) == "dict" {
+    if repo?.repo != nil {
+      return git_repo_path(repo.repo)
+    }
+    if repo?.data?.repo != nil {
+      return git_repo_path(repo.data.repo)
+    }
+    for key in ["root", "path", "cwd"] {
+      if type_of(repo?.[key]) == "string" && repo[key] != "" {
+        return repo[key]
+      }
+    }
+  }
+  throw "std/git: repo must be a path string, repo dict, or git receipt"
+}
+
+fn __git_run_options(repo, options) -> dict {
+  const opts = options ?? {}
+  let out = {
+    cwd: git_repo_path(opts?.repo ?? opts?.cwd ?? repo ?? "."),
+    timeout_ms: opts?.timeout_ms ?? 120000,
+    env_remove: opts?.env_remove ?? git_env_remove(),
+    env: git_noninteractive_env() + (opts?.env ?? {}),
+    env_mode: opts?.env_mode ?? "merge",
+  }
+  for key in [
+    "stdin",
+    "capture",
+    "background",
+    "background_after_ms",
+    "progress_interval_ms",
+    "progress_max_inline_bytes",
+    "policy_context",
+  ] {
+    if opts[key] != nil {
+      out = out + {[key]: opts[key]}
+    }
+  }
+  if opts?.max_inline_bytes != nil {
+    const base_capture = out?.capture ?? {}
+    out = out + {capture: base_capture + {max_inline_bytes: opts.max_inline_bytes}}
+  }
+  return out
+}
+
+/**
+ * Non-interactive by default: a credential / host-key prompt fails
+ * fast instead of hanging a TTY-less runtime. Caller `env` keys win,
+ * and `env_mode: "merge"` keeps inherited PATH/HOME/credentials.
+ */
+fn __git_with_repo(repo, options) -> GitRunOptions {
+  const opts = options ?? {}
+  return opts + {repo: repo}
+}
+
+fn __git_argv(args) -> list<string> {
+  const parts = __git_string_list(args, "args")
+  if len(parts) == 0 {
+    throw "std/git: args must be a non-empty list"
+  }
+  if parts[0] == "git" {
+    return parts
+  }
+  return ["git"] + parts
+}
+
+fn __git_result(result, argv, cwd) -> GitCommandResult {
+  const raw = result ?? {}
+  const success = process_result_success(raw)
+  const status = if raw?.status != nil {
+    raw.status
+  } else if success {
+    "completed"
+  } else {
+    "failed"
+  }
+  return raw
+    + {
+    ok: success,
+    success: success,
+    status: status,
+    exit_code: raw?.exit_code,
+    timed_out: raw?.timed_out ?? (raw?.status == "timed_out"),
+    command_id: raw?.command_id,
+    handle_id: raw?.handle_id,
+    argv: argv,
+    command_args: argv,
+    cwd: cwd,
+    stdout: raw?.stdout ?? "",
+    stderr: raw?.stderr ?? "",
+    combined: process_result_text(raw),
+    output_path: raw?.output_path,
+    stdout_path: raw?.stdout_path,
+    stderr_path: raw?.stderr_path,
+  }
+}
+
+/**
+ * git_run runs one argv-mode local git command. Pass args without the leading `git`.
+ *
+ * @effects: [process]
+ * @errors: []
+ */
+pub fn git_run(
+  process: HarnessProcess,
+  args: list<string>,
+  options: GitRunOptions = {},
+) -> GitCommandResult {
+  const argv = __git_argv(args)
+  const run_options = __git_run_options(options.repo ?? ".", options)
+  return __git_result(process_run(process, argv, run_options), argv, run_options.cwd)
+}
+
+/**
+ * git_discover discovers repository root/git-dir metadata with a receipt.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn git_discover(process: HarnessProcess, path = ".") -> GitDiscoverReceipt {
+  return process.git_repo_discover(path)
+}
+
+/**
+ * git_status returns structured porcelain status with a git receipt.
+ *
+ * @effects: [process, fs.read]
+ * @errors: []
+ */
+pub fn git_status(process: HarnessProcess, repo = ".") -> GitStatusReceipt {
+  return process.git_status(repo)
+}
+
+/**
+ * git_conflicts returns structured unmerged paths with a git receipt.
+ *
+ * @effects: [process, fs.read]
+ * @errors: []
+ */
+pub fn git_conflicts(process: HarnessProcess, repo = ".") -> GitConflictsReceipt {
+  return process.git_conflicts(repo)
+}
+
+/**
+ * git_diff returns diff text in a git receipt.
+ *
+ * @effects: [process, fs.read]
+ * @errors: []
+ */
+pub fn git_diff(process: HarnessProcess, repo = ".", selector = nil) -> GitDiffReceipt {
+  return process.git_diff(repo, selector)
+}
+
+/**
+ * git_merge_base returns the merge-base OID in a git receipt.
+ *
+ * @effects: [process, fs.read]
+ * @errors: []
+ */
+pub fn git_merge_base(
+  process: HarnessProcess,
+  left: string,
+  right: string,
+  repo = ".",
+) -> GitMergeBaseReceipt {
+  return process.git_merge_base(repo, __git_ref_arg(left, "left"), __git_ref_arg(right, "right"))
+}
+
+/**
+ * Return local tags as structured `data.tags` in an audited receipt.
+ *
+ * @effects: [process, fs.read]
+ * @errors: []
+ */
+pub fn git_tag_list(
+  process: HarnessProcess,
+  repo = ".",
+  options: GitTagListOptions = {},
+) -> GitTagListReceipt {
+  const pattern = if options.pattern == nil {
+    nil
+  } else {
+    __git_ref_arg(options.pattern, "pattern")
+  }
+  const sort = if options.sort == nil {
+    nil
+  } else {
+    __git_sort_arg(options.sort)
+  }
+  return process.git_tag_list(repo, {pattern: pattern, sort: sort})
+}
+
+/**
+ * Return a parsed `git describe` result in an audited receipt.
+ *
+ * @effects: [process, fs.read]
+ * @errors: []
+ */
+pub fn git_describe(
+  process: HarnessProcess,
+  repo = ".",
+  options: GitDescribeOptions = {},
+) -> GitDescribeReceipt {
+  const pattern = if options.match == nil {
+    nil
+  } else {
+    __git_ref_arg(options.match, "match")
+  }
+  const rev = if options.rev == nil {
+    nil
+  } else {
+    __git_ref_arg(options.rev, "rev")
+  }
+  return process.git_describe(repo, {tags: options.tags ?? false, match: pattern, rev: rev})
+}
+
+/**
+ * Return remote refs as structured `data.refs` in an audited receipt.
+ *
+ * @effects: [process, network]
+ * @errors: []
+ */
+pub fn git_ls_remote(
+  process: HarnessProcess,
+  remote: string,
+  options: GitLsRemoteOptions = {},
+) -> GitLsRemoteReceipt {
+  const refs = __git_string_list(options.refs, "refs").map({ name -> __git_ref_arg(name, "refs") })
+  return process.git_ls_remote(
+    git_repo_path(options.repo ?? "."),
+    __git_ref_arg(remote, "remote"),
+    {refs: refs, tags: options.tags ?? false, heads: options.heads ?? false},
+  )
+}
+
+/**
+ * git_rebase rebases the current branch and returns a git receipt.
+ *
+ * @effects: [process, fs.write]
+ * @errors: []
+ */
+pub fn git_rebase(process: HarnessProcess, base_ref: string, repo = ".") -> GitRebaseReceipt {
+  return process.git_rebase(repo, __git_ref_arg(base_ref, "base_ref"))
+}
+
+/**
+ * git_push pushes a refspec and returns a git receipt.
+ *
+ * `options.no_verify` skips the checkout's pre-push hook. Use it for ref
+ * plumbing — deleting a ref, or republishing an OID the remote already holds —
+ * where nothing new reaches the remote for a hook to validate, and the hook
+ * would otherwise impose the repository's branch and tracking state on an
+ * operation that does not depend on either.
+ *
+ * It composes with `lease`, which is the case ref plumbing usually wants:
+ * deleting a ref you have observed at an exact OID. The lease still names the
+ * OID the push may replace, so skipping the hook does not widen what reaches
+ * the remote.
+ *
+ * @effects: [process, network]
+ * @errors: []
+ */
+pub fn git_push(
+  process: HarnessProcess,
+  remote: string,
+  refspec: string,
+  repo = ".",
+  lease = nil,
+  options: dict = {},
+) -> GitPushReceipt {
+  return process.git_push(
+    repo,
+    __git_ref_arg(remote, "remote"),
+    __git_ref_arg(refspec, "refspec"),
+    lease,
+    options,
+  )
+}
+
+/**
+ * git_worktree_create creates a git worktree and returns a git receipt.
+ *
+ * @effects: [process, fs.write]
+ * @errors: []
+ */
+pub fn git_worktree_create(
+  process: HarnessProcess,
+  branch: string,
+  path: string,
+  repo = ".",
+  options: dict = {},
+) -> GitWorktreeCreateReceipt {
+  return process.git_worktree_create(
+    repo,
+    __git_ref_arg(branch, "branch"),
+    __git_non_empty_string(path, "path"),
+    options,
+  )
+}
+
+/**
+ * git_worktree_remove removes a git worktree and returns a git receipt.
+ *
+ * @effects: [process, fs.write]
+ * @errors: []
+ */
+pub fn git_worktree_remove(
+  process: HarnessProcess,
+  path: string,
+  options: dict = {},
+) -> GitWorktreeRemoveReceipt {
+  return process.git_worktree_remove(__git_non_empty_string(path, "path"), options)
+}
+
+/**
+ * git_current_branch returns the current branch name from the local checkout.
+ *
+ * @effects: [process]
+ * @errors: []
+ */
+pub fn git_current_branch(
+  process: HarnessProcess,
+  repo = ".",
+  options: GitRunOptions = {},
+) -> GitBranchResult {
+  const result = git_run(process, ["branch", "--show-current"], __git_with_repo(repo, options))
+  const branch = trim(result.stdout)
+  return result + {branch: branch, detached: result.success && branch == ""}
+}
+
+/**
+ * git_log returns local commit log text from the checkout.
+ *
+ * @effects: [process]
+ * @errors: []
+ */
+pub fn git_log(
+  process: HarnessProcess,
+  repo = ".",
+  options: GitLogOptions = {},
+) -> GitCommandResult {
+  const opts = options
+  if opts.rev != nil && opts.rev_range != nil {
+    throw "std/git: git_log accepts rev or rev_range, not both"
+  }
+  let args = ["log"]
+  const format = opts.format
+  const oneline = opts.oneline ?? (format == nil)
+  if oneline {
+    args = args + ["--oneline"]
+  } else if format != nil {
+    args = args + ["--format=" + __git_non_empty_string(format, "format")]
+  }
+  const max_count = opts.max_count ?? opts.limit
+  if max_count != nil {
+    args = args + ["--max-count", to_string(max_count)]
+  }
+  if opts.decorate != nil {
+    if opts.decorate {
+      args = args + ["--decorate"]
+    } else {
+      args = args + ["--no-decorate"]
+    }
+  }
+  if opts.rev != nil {
+    args = args + [__git_ref_arg(opts.rev, "rev")]
+  }
+  if opts.rev_range != nil {
+    args = args + [__git_ref_arg(opts.rev_range, "rev_range")]
+  }
+  const paths = __git_string_list(opts.paths, "paths")
+  if len(paths) > 0 {
+    args = args + ["--"] + paths
+  }
+  return git_run(process, args, __git_with_repo(repo, opts))
+}
+
+/**
+ * git_show returns `git show` output for a ref.
+ *
+ * @effects: [process]
+ * @errors: []
+ */
+pub fn git_show(
+  process: HarnessProcess,
+  rev: string,
+  repo = ".",
+  options: GitShowOptions = {},
+) -> GitCommandResult {
+  const opts = options
+  let args = ["show"]
+  if opts.stat ?? true {
+    args = args + ["--stat"]
+  }
+  if opts.patch ?? true {
+    args = args + ["--patch"]
+  }
+  args = args + [__git_ref_arg(rev, "rev")]
+  return git_run(process, args, __git_with_repo(repo, opts))
+}
+
+/**
+ * git_branch_list returns local branch refs.
+ *
+ * @effects: [process]
+ * @errors: []
+ */
+pub fn git_branch_list(
+  process: HarnessProcess,
+  repo = ".",
+  options: GitRunOptions = {},
+) -> GitCommandResult {
+  return git_run(process, ["branch", "--list"], __git_with_repo(repo, options))
+}
+
+/**
+ * git_remote_list returns configured remotes.
+ *
+ * @effects: [process]
+ * @errors: []
+ */
+pub fn git_remote_list(
+  process: HarnessProcess,
+  repo = ".",
+  options: GitRunOptions = {},
+) -> GitCommandResult {
+  return git_run(process, ["remote", "-v"], __git_with_repo(repo, options))
+}
+
+/**
+ * git_switch switches the local checkout to a branch or ref.
+ *
+ * @effects: [process]
+ * @errors: []
+ */
+pub fn git_switch(
+  process: HarnessProcess,
+  branch: string,
+  repo = ".",
+  options: GitSwitchOptions = {},
+) -> GitCommandResult {
+  const opts = options
+  if (opts.create ?? false) && (opts.force_create ?? false) {
+    throw "std/git: git_switch accepts create or force_create, not both"
+  }
+  let args = ["switch"]
+  if opts.create ?? false {
+    args = args + ["-c"]
+  }
+  if opts.force_create ?? false {
+    args = args + ["-C"]
+  }
+  if opts.detach ?? false {
+    args = args + ["--detach"]
+  }
+  if opts.discard_changes ?? false {
+    args = args + ["--discard-changes"]
+  }
+  args = args + [__git_ref_arg(branch, "branch")]
+  return git_run(process, args, __git_with_repo(repo, opts))
+}
+
+/**
+ * git_pull_ff_only runs `git pull --ff-only` for the local checkout.
+ *
+ * @effects: [process, network, fs.write]
+ * @errors: []
+ */
+pub fn git_pull_ff_only(
+  process: HarnessProcess,
+  repo = ".",
+  remote = "origin",
+  branch: string? = nil,
+  options: GitPullOptions = {},
+) -> GitCommandResult {
+  const opts = options
+  let args = ["pull", "--ff-only"]
+  if opts.quiet ?? false {
+    args = args + ["--quiet"]
+  }
+  if opts.prune ?? false {
+    args = args + ["--prune"]
+  }
+  args = args + [__git_ref_arg(remote, "remote")]
+  if branch != nil {
+    args = args + [__git_ref_arg(branch, "branch")]
+  }
+  return git_run(process, args, __git_with_repo(repo, opts))
+}
+
+/**
+ * git_fetch fetches from a configured remote and returns a git receipt.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn git_fetch(
+  process: HarnessProcess,
+  remote = "origin",
+  repo = ".",
+  refspecs: list<string> = [],
+) -> GitFetchReceipt {
+  return process.git_fetch(
+    repo,
+    __git_ref_arg(remote, "remote"),
+    __git_string_list(refspecs, "refspecs"),
+  )
+}
+
+/**
+ * Synchronize a checkout to an exact remote base ref and return every decision
+ * and command as a typed receipt. An injected runner receives the same
+ * `GitCheckoutStep` values production executes, so fixtures cannot drift from
+ * the canonical argv plan.
+ *
+ * @effects: [process]
+ * @errors: [ValueError]
+ */
+pub fn git_checkout_sync(
+  process: HarnessProcess,
+  options: GitCheckoutOptions,
+) -> GitCheckoutReceipt {
+  const repo = git_repo_path(options.repo ?? ".")
+  const runner = options.runner
+    ?? fn(step) { return git_run(process, step.argv.slice(1), {repo: repo}) }
+  return git_checkout_run(options + {repo: repo, runner: runner})
+}
+
+fn __git_list_contains(values, needle) -> bool {
+  if type_of(values) == "string" {
+    return values == needle
+  }
+  if type_of(values) != "list" {
+    return false
+  }
+  for value in values {
+    if value == needle {
+      return true
+    }
+  }
+  return false
+}
+
+fn __git_catalog_all() {
+  return [
+    {
+      operation: "status",
+      group: "read",
+      description: "Inspect dirty, staged, untracked, and branch status.",
+      keywords: ["status", "dirty", "changed", "staged", "untracked", "porcelain", "files"],
+      parameters: {repo: {type: "string", required: false}},
+      side_effect_level: "read_only",
+    },
+    {
+      operation: "current_branch",
+      group: "read",
+      description: "Return the current checked out branch name.",
+      keywords: ["branch", "current", "checkout", "head", "where am i"],
+      parameters: {repo: {type: "string", required: false}},
+      side_effect_level: "read_only",
+    },
+    {
+      operation: "log",
+      group: "read",
+      description: "Inspect recent commits or history for a ref, range, or path.",
+      keywords: ["log", "history", "commit", "commits", "recent", "rev", "range"],
+      parameters: {
+        repo: {type: "string", required: false},
+        rev: {type: "string", required: false},
+        rev_range: {type: "string", required: false},
+        format: {type: "string", required: false},
+        max_count: {type: "integer", required: false},
+        limit: {type: "integer", required: false},
+        oneline: {type: "boolean", required: false},
+        decorate: {type: "boolean", required: false},
+        paths: {type: "array", items: {type: "string"}, required: false},
+      },
+      side_effect_level: "read_only",
+    },
+    {
+      operation: "diff",
+      group: "read",
+      description: "Inspect local diff text for a range or selected paths.",
+      keywords: ["diff", "patch", "changes", "range", "files"],
+      parameters: {
+        repo: {type: "string", required: false},
+        range: {type: "string", required: false},
+        paths: {type: "array", items: {type: "string"}, required: false},
+      },
+      side_effect_level: "read_only",
+    },
+    {
+      operation: "branch_list",
+      group: "read",
+      description: "List local branches.",
+      keywords: ["branch", "branches", "list", "refs"],
+      parameters: {repo: {type: "string", required: false}},
+      side_effect_level: "read_only",
+    },
+    {
+      operation: "remote_list",
+      group: "read",
+      description: "List configured git remotes.",
+      keywords: ["remote", "remotes", "origin", "url", "fetch", "push"],
+      parameters: {repo: {type: "string", required: false}},
+      side_effect_level: "read_only",
+    },
+    {
+      operation: "show",
+      group: "read",
+      description: "Show a commit, tag, or ref with stat and patch output.",
+      keywords: ["show", "commit", "tag", "patch", "stat", "ref"],
+      parameters: {
+        repo: {type: "string", required: false},
+        rev: {type: "string"},
+        stat: {type: "boolean", required: false},
+        patch: {type: "boolean", required: false},
+      },
+      side_effect_level: "read_only",
+    },
+    {
+      operation: "discover",
+      group: "read",
+      description: "Discover repository root and git-dir metadata.",
+      keywords: ["discover", "root", "repo", "repository", "gitdir", "worktree"],
+      parameters: {path: {type: "string", required: false}},
+      side_effect_level: "read_only",
+    },
+    {
+      operation: "conflicts",
+      group: "read",
+      description: "Inspect unresolved merge conflict paths.",
+      keywords: ["conflict", "conflicts", "merge", "unmerged", "status"],
+      parameters: {repo: {type: "string", required: false}},
+      side_effect_level: "read_only",
+    },
+    {
+      operation: "merge_base",
+      group: "read",
+      description: "Find the merge-base OID for two refs.",
+      keywords: ["merge-base", "merge", "base", "ancestor", "refs"],
+      parameters: {
+        repo: {type: "string", required: false},
+        left: {type: "string"},
+        right: {type: "string"},
+      },
+      side_effect_level: "read_only",
+    },
+    {
+      operation: "fetch",
+      group: "mutation",
+      description: "Fetch refs from an existing remote.",
+      keywords: ["fetch", "remote", "origin", "refs", "download"],
+      parameters: {
+        repo: {type: "string", required: false},
+        remote: {type: "string", required: false},
+        refspecs: {type: "array", items: {type: "string"}, required: false},
+      },
+      side_effect_level: "process_exec",
+    },
+    {
+      operation: "switch",
+      group: "mutation",
+      description: "Switch the checkout to a branch or ref.",
+      keywords: ["switch", "checkout", "branch", "change branch", "create branch"],
+      parameters: {
+        repo: {type: "string", required: false},
+        branch: {type: "string"},
+        create: {type: "boolean", required: false},
+        force_create: {type: "boolean", required: false},
+        detach: {type: "boolean", required: false},
+        discard_changes: {type: "boolean", required: false},
+      },
+      side_effect_level: "process_exec",
+    },
+    {
+      operation: "pull_ff_only",
+      group: "mutation",
+      description: "Fast-forward pull from a remote branch.",
+      keywords: ["pull", "fast-forward", "ff-only", "update", "origin", "main"],
+      parameters: {
+        repo: {type: "string", required: false},
+        remote: {type: "string", required: false},
+        branch: {type: "string", required: false},
+        quiet: {type: "boolean", required: false},
+        prune: {type: "boolean", required: false},
+      },
+      side_effect_level: "process_exec",
+    },
+    {
+      operation: "rebase",
+      group: "mutation",
+      description: "Rebase the current branch onto another ref.",
+      keywords: ["rebase", "base", "branch", "history"],
+      parameters: {repo: {type: "string", required: false}, base_ref: {type: "string"}},
+      side_effect_level: "process_exec",
+    },
+  ]
+}
+
+/**
+ * git_tool_catalog returns searchable git operation metadata.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn git_tool_catalog(options: GitToolCatalogOptions = {}) -> list<GitToolCatalogEntry> {
+  const opts = options
+  const include_mutations = opts.include_mutations ?? false
+  const enabled = opts.enabled_operations ?? opts.operations
+  const disabled = opts.disabled_operations ?? []
+  let out = []
+  for entry in __git_catalog_all() {
+    if entry.group == "mutation" && !include_mutations {
+      continue
+    }
+    if enabled != nil && !__git_list_contains(enabled, "all")
+      && !__git_list_contains(
+      enabled,
+      entry.operation,
+    )
+      && !__git_list_contains(enabled, entry.group) {
+      continue
+    }
+    if __git_list_contains(disabled, entry.operation)
+      || __git_list_contains(disabled, entry.group) {
+      continue
+    }
+    out = out.appending(entry)
+  }
+  return out
+}
+
+fn __git_search_tokens(text) {
+  const normalized = regex_replace("[^A-Za-z0-9_./:-]+", " ", lowercase(to_string(text ?? "")))
+  return split(trim(normalized), " ").filter({ token -> token != "" })
+}
+
+fn __git_catalog_score(query, tokens, entry) {
+  const q = lowercase(trim(to_string(query ?? "")))
+  const name = lowercase(entry.operation)
+  const description = lowercase(entry.description)
+  const keywords = lowercase(join(entry.keywords ?? [], " "))
+  let score = 0
+  if q != "" {
+    if q == name {
+      score = score + 100
+    }
+    if contains(name, q) {
+      score = score + 25
+    }
+    if contains(description, q) {
+      score = score + 12
+    }
+    if contains(keywords, q) {
+      score = score + 12
+    }
+  }
+  for token in tokens {
+    if token == name {
+      score = score + 30
+    } else if contains(name, token) {
+      score = score + 10
+    }
+    if contains(keywords, token) {
+      score = score + 8
+    }
+    if contains(description, token) {
+      score = score + 4
+    }
+  }
+  return score
+}
+
+fn __git_insert_ranked(ranked, entry) {
+  let out = []
+  let inserted = false
+  for existing in ranked {
+    if !inserted && entry.score > existing.score {
+      out = out.appending(entry)
+      inserted = true
+    }
+    out = out.appending(existing)
+  }
+  if !inserted {
+    out = out.appending(entry)
+  }
+  return out
+}
+
+/**
+ * git_find_tool ranks git operations for a natural-language query.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn git_find_tool(query: string, options: GitToolCatalogOptions = {}) -> GitToolSearchResult {
+  const opts = options
+  const tokens = __git_search_tokens(query)
+  let ranked: list<GitToolSearchMatch> = []
+  for entry in git_tool_catalog(opts) {
+    const score = __git_catalog_score(query, tokens, entry)
+    if score > 0 || len(tokens) == 0 {
+      ranked = __git_insert_ranked(ranked, entry + {score: score})
+    }
+  }
+  const limit = opts.limit ?? opts.max_results ?? 5
+  let matches: list<GitToolSearchMatch> = []
+  let idx = 0
+  while idx < len(ranked) && idx < limit {
+    matches = matches + [ranked[idx]]
+    idx = idx + 1
+  }
+  let operation_names: list<string> = []
+  for entry in matches {
+    operation_names = operation_names + [to_string(entry.operation)]
+  }
+  const result: GitToolSearchResult = {
+    query: query,
+    strategy: "stdlib.git.lexical",
+    operations: operation_names,
+    matches: matches,
+    total: len(ranked),
+  }
+  return result
+}
+
+/**
+ * git_run_tool dispatches one catalogued git operation by name.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn git_run_tool(
+  process: HarnessProcess,
+  operation: GitToolOperation,
+  args: GitToolRunArgs = {},
+  options: GitToolCatalogOptions = {},
+) -> unknown {
+  const opts = options
+  const request = args
+  const op = __git_non_empty_string(operation, "operation")
+  const entry = git_tool_catalog(opts).find({ item -> item.operation == op })
+  if entry == nil {
+    throw "std/git: git operation not available: " + op
+  }
+  const repo = __git_tool_repo(request, opts)
+  if op == "status" {
+    return git_status(process, repo)
+  }
+  if op == "current_branch" {
+    return git_current_branch(process, repo, request)
+  }
+  if op == "log" {
+    return git_log(process, repo, request)
+  }
+  if op == "diff" {
+    let selector = {}
+    if request.range != nil {
+      selector = selector + {range: request.range}
+    }
+    if request.paths != nil {
+      selector = selector + {paths: request.paths}
+    }
+    if len(selector.keys()) == 0 {
+      return git_diff(process, repo, nil)
+    }
+    return git_diff(process, repo, selector)
+  }
+  if op == "branch_list" {
+    return git_branch_list(process, repo, request)
+  }
+  if op == "remote_list" {
+    return git_remote_list(process, repo, request)
+  }
+  if op == "show" {
+    return git_show(process, __git_non_empty_string(request.rev, "rev"), repo, request)
+  }
+  if op == "discover" {
+    return git_discover(process, request.path ?? repo)
+  }
+  if op == "conflicts" {
+    return git_conflicts(process, repo)
+  }
+  if op == "merge_base" {
+    return git_merge_base(
+      process,
+      __git_non_empty_string(request.left, "left"),
+      __git_non_empty_string(request.right, "right"),
+      repo,
+    )
+  }
+  if op == "fetch" {
+    return git_fetch(process, request.remote ?? "origin", repo, request.refspecs ?? [])
+  }
+  if op == "switch" {
+    return git_switch(process, __git_non_empty_string(request.branch, "branch"), repo, request)
+  }
+  if op == "pull_ff_only" {
+    return git_pull_ff_only(process, repo, request.remote ?? "origin", request.branch, request)
+  }
+  if op == "rebase" {
+    return git_rebase(process, __git_non_empty_string(request.base_ref, "base_ref"), repo)
+  }
+  throw "std/git: git operation not implemented: " + op
+}
+
+fn __git_tool_enabled(options, key, group) -> bool {
+  const opts = options ?? {}
+  const enabled = opts?.enabled_tools
+    ?? [
+    "git_status",
+    "git_current_branch",
+    "git_log",
+    "git_diff",
+    "git_branch_list",
+    "git_remote_list",
+  ]
+  const disabled = opts?.disabled_tools ?? []
+  if __git_list_contains(disabled, key) || __git_list_contains(disabled, group) {
+    return false
+  }
+  return __git_list_contains(enabled, "all") || __git_list_contains(enabled, key)
+    || __git_list_contains(
+    enabled,
+    group,
+  )
+}
+
+fn __git_tool_name(options, key) -> string {
+  return (options ?? {})?.names?.[key] ?? key
+}
+
+fn __git_tool_description(options, key, fallback) -> string {
+  return (options ?? {})?.descriptions?.[key] ?? fallback
+}
+
+fn __git_tool_annotations(options, key, defaults) -> dict {
+  const opts = options ?? {}
+  const shared = opts?.annotations?.["*"] ?? {}
+  const local = opts?.annotations?.[key] ?? {}
+  return defaults + shared + local
+}
+
+fn __git_tool_config(options, key, config) {
+  const opts = options ?? {}
+  let out = config
+  if opts?.defer_loading != nil {
+    out = out + {defer_loading: opts.defer_loading}
+  }
+  if opts?.namespace != nil {
+    out = out + {namespace: opts.namespace}
+  }
+  const shared = opts?.tool_config?.["*"] ?? {}
+  const local = opts?.tool_config?.[key] ?? {}
+  return out + shared + local
+}
+
+fn __git_tool_repo(args, options) {
+  return args?.repo ?? (options ?? {})?.repo ?? (options ?? {})?.cwd ?? "."
+}
+
+fn __git_catalog_tool_key(entry) -> string {
+  return "git_" + entry.operation
+}
+
+fn __git_catalog_tool_annotations(entry, opts, key) {
+  if entry.group == "mutation" {
+    return __git_tool_annotations(
+      opts,
+      key,
+      {kind: "execute", side_effect_level: "process_exec", inline_result: true},
+    )
+  }
+  return __git_tool_annotations(opts, key, {kind: "read", side_effect_level: "read_only"})
+}
+
+fn __git_catalog_tool_run_options(entry, opts) {
+  if entry.group == "mutation" {
+    return opts + {include_mutations: true}
+  }
+  return opts
+}
+
+fn __git_define_catalog_tool(process: HarnessProcess, tools, entry, opts) {
+  const key = __git_catalog_tool_key(entry)
+  if !__git_tool_enabled(opts, key, entry.group) {
+    return tools
+  }
+  const run_opts = __git_catalog_tool_run_options(entry, opts)
+  return tool_define(
+    tools,
+    __git_tool_name(opts, key),
+    __git_tool_description(opts, key, entry.description),
+    __git_tool_config(
+      opts,
+      key,
+      {
+        parameters: entry.parameters,
+        returns: {type: "object"},
+        annotations: __git_catalog_tool_annotations(entry, opts, key),
+        handler: { args -> git_run_tool(process, entry.operation, args, run_opts) },
+      },
+    ),
+  )
+}
+
+/**
+ * git_tools builds a narrow agent tool registry from the std/git operation catalog.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn git_tools(
+  process: HarnessProcess,
+  registry: {_type: "tool_registry", tools: list}? = nil,
+  options: GitToolRegistryOptions = {},
+) -> {_type: "tool_registry", tools: list} {
+  const opts = options
+  let tools = registry ?? tool_registry()
+  for entry in __git_catalog_all() {
+    tools = __git_define_catalog_tool(process, tools, entry, opts)
+  }
+  return tools
+}
+
+fn __git_toolbox_enabled(options, key) -> bool {
+  const opts = options ?? {}
+  const enabled = opts?.enabled_tools ?? ["find_git_tool", "run_git_tool"]
+  const disabled = opts?.disabled_tools ?? []
+  if __git_list_contains(disabled, key) || __git_list_contains(disabled, "toolbox") {
+    return false
+  }
+  return __git_list_contains(enabled, "all") || __git_list_contains(enabled, "toolbox")
+    || __git_list_contains(
+    enabled,
+    key,
+  )
+}
+
+fn __git_toolbox_find_options(opts, args) {
+  let out = opts
+  if args?.max_results != nil {
+    out = out + {max_results: args.max_results}
+  }
+  return out
+}
+
+fn __git_toolbox_run_annotations(opts, key) {
+  if opts?.include_mutations ?? false {
+    return __git_tool_annotations(
+      opts,
+      key,
+      {kind: "execute", side_effect_level: "process_exec", inline_result: true},
+    )
+  }
+  return __git_tool_annotations(opts, key, {kind: "read", side_effect_level: "read_only"})
+}
+
+/**
+ * git_toolbox_tools builds a two-tool find/run git surface optimized for small local models.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn git_toolbox_tools(
+  process: HarnessProcess,
+  registry: {_type: "tool_registry", tools: list}? = nil,
+  options: GitToolRegistryOptions = {},
+) -> {_type: "tool_registry", tools: list} {
+  const opts = options
+  let tools = registry ?? tool_registry()
+  if __git_toolbox_enabled(opts, "find_git_tool") {
+    const key = "find_git_tool"
+    tools = tool_define(
+      tools,
+      __git_tool_name(opts, key),
+      __git_tool_description(
+        opts,
+        key,
+        "Find available local git operations for a natural-language goal. Use the returned operation with run_git_tool.",
+      ),
+      __git_tool_config(
+        opts,
+        key,
+        {
+          parameters: {query: {type: "string"}, max_results: {type: "integer", required: false}},
+          returns: {type: "object"},
+          annotations: __git_tool_annotations(
+            opts,
+            key,
+            {kind: "read", side_effect_level: "read_only"},
+          ),
+          handler: { args -> git_find_tool(args.query, __git_toolbox_find_options(opts, args)) },
+        },
+      ),
+    )
+  }
+  if __git_toolbox_enabled(opts, "run_git_tool") {
+    const key = "run_git_tool"
+    tools = tool_define(
+      tools,
+      __git_tool_name(opts, key),
+      __git_tool_description(
+        opts,
+        key,
+        "Run one available local git operation by operation id. Call find_git_tool first when unsure.",
+      ),
+      __git_tool_config(
+        opts,
+        key,
+        {
+          parameters: {
+            operation: {type: "string"},
+            repo: {type: "string", required: false},
+            path: {type: "string", required: false},
+            rev: {type: "string", required: false},
+            rev_range: {type: "string", required: false},
+            range: {type: "string", required: false},
+            paths: {type: "array", items: {type: "string"}, required: false},
+            left: {type: "string", required: false},
+            right: {type: "string", required: false},
+            format: {type: "string", required: false},
+            max_count: {type: "integer", required: false},
+            limit: {type: "integer", required: false},
+            oneline: {type: "boolean", required: false},
+            decorate: {type: "boolean", required: false},
+            stat: {type: "boolean", required: false},
+            patch: {type: "boolean", required: false},
+            branch: {type: "string", required: false},
+            remote: {type: "string", required: false},
+            refspecs: {type: "array", items: {type: "string"}, required: false},
+            quiet: {type: "boolean", required: false},
+            prune: {type: "boolean", required: false},
+            create: {type: "boolean", required: false},
+            force_create: {type: "boolean", required: false},
+            detach: {type: "boolean", required: false},
+            discard_changes: {type: "boolean", required: false},
+            base_ref: {type: "string", required: false},
+          },
+          returns: {type: "object"},
+          annotations: __git_toolbox_run_annotations(opts, key),
+          handler: { args -> git_run_tool(process, args.operation, args, opts) },
+        },
+      ),
+    )
+  }
+  return tools
+}

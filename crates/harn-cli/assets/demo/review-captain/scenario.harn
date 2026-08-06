@@ -1,0 +1,85 @@
+/**
+ * review-captain demo: a review_captain persona inspects a 5-file
+ * diff, asks one clarifying question (HITL surfaced via the structured
+ * receipt), then emits a verdict with reasoning and a cost rollup.
+ *
+ * The two model prompts live in sibling `.harn.prompt` template files
+ * (review.harn.prompt, clarification.harn.prompt) and are filled with
+ * `harness.fs.render_prompt(path, bindings)`. The demo runner materializes the whole
+ * scenario directory, so file-backed prompts (and imported modules) work
+ * fully offline, the same way a real Harn project is laid out.
+ *
+ * Runs offline against the bundled `tape.jsonl` fixture under
+ * `assets/demo/review-captain/`. The same script runs against a real provider
+ * via `harn demo review-captain --live`.
+ */
+fn diff_summary() {
+  return {
+    repo: "burin-labs/widgets",
+    pr_number: 502,
+    files: [
+      {path: "src/retry.ts", loc_added: 86, loc_removed: 12, risk: "high"},
+      {path: "src/retry.test.ts", loc_added: 124, loc_removed: 0, risk: "low"},
+      {path: "src/http.ts", loc_added: 14, loc_removed: 8, risk: "medium"},
+      {path: "docs/retry.md", loc_added: 38, loc_removed: 0, risk: "low"},
+      {path: "package.json", loc_added: 1, loc_removed: 1, risk: "medium"},
+    ],
+  }
+}
+
+fn total_added(files) {
+  let total = 0
+  for f in files {
+    total = total + f.loc_added
+  }
+  return total
+}
+
+fn render_review_prompt(fs: HarnessFs, diff) {
+  return fs.render_prompt(
+    "review.harn.prompt",
+    {
+      pr: diff.pr_number,
+      file_count: len(diff.files),
+      files: diff.files,
+      total_added: total_added(diff.files),
+    },
+  )
+}
+
+fn render_clarification_prompt(fs: HarnessFs, pr, answer) {
+  return fs.render_prompt("clarification.harn.prompt", {pr: pr, answer: answer})
+}
+
+pipeline default(harness: Harness, _task) {
+  const diff = diff_summary()
+  const system = "You are review_captain, a thorough code reviewer."
+  const review_prompt = render_review_prompt(harness.fs, diff)
+  const initial_envelope = harness.llm.call(review_prompt, system)
+  harness.stdio.println("=== review_captain · stage 1 (initial scan) ===")
+  harness.stdio.println(initial_envelope.text)
+  harness.stdio.println("")
+  const author_answer =
+    "Yes, the retry middleware is intended to wrap idempotent requests only; non-idempotent calls bypass it via the `safe: false` opt-out."
+  const clarification_prompt = render_clarification_prompt(
+    harness.fs,
+    diff.pr_number,
+    author_answer,
+  )
+  const final_envelope = harness.llm.call(clarification_prompt, system)
+  const receipt = {
+    persona: "review_captain",
+    execution_mode: "advisory",
+    approval_required: false,
+    repo: diff.repo,
+    pr_number: diff.pr_number,
+    files_reviewed: len(diff.files),
+    clarifying_question_asked: true,
+    clarifying_question_answer: author_answer,
+    final_verdict: final_envelope.text,
+    receipt_kind: "review_receipt",
+  }
+  harness.stdio.println("=== review_captain · stage 2 (final verdict) ===")
+  harness.stdio.println(json_stringify(receipt))
+  return receipt
+}

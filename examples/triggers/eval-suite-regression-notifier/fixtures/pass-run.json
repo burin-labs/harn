@@ -1,0 +1,41 @@
+{
+  "_type": "run_record",
+  "id": "eval-notifier-pass",
+  "workflow_id": "run",
+  "workflow_name": "eval_notifier",
+  "task": "eval notifier passing case",
+  "status": "completed",
+  "started_at": "2026-04-22T00:00:00Z",
+  "finished_at": "2026-04-22T00:00:01Z",
+  "usage": {
+    "total_duration_ms": 1000,
+    "total_cost": 0.01,
+    "input_tokens": 1,
+    "output_tokens": 1,
+    "call_count": 1,
+    "models": ["mock"]
+  },
+  "stages": [
+    {
+      "id": "stage_1",
+      "node_id": "run",
+      "kind": "stage",
+      "status": "completed",
+      "outcome": "success",
+      "started_at": "2026-04-22T00:00:00Z",
+      "finished_at": "2026-04-22T00:00:01Z",
+      "visible_text": "eval notifier case passed"
+    }
+  ],
+  "completed_nodes": ["run"],
+  "replay_fixture": {
+    "_type": "replay_fixture",
+    "id": "eval-notifier-pass-fixture",
+    "source_run_id": "eval-notifier-pass",
+    "workflow_id": "run",
+    "workflow_name": "eval_notifier",
+    "created_at": "2026-04-22T00:00:01Z",
+    "expected_status": "completed",
+    "stage_assertions": []
+  }
+}

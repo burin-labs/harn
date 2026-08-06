@@ -1,0 +1,200 @@
+/** Shared render helpers for `harn models lora *` commands. */
+import {
+  print_list,
+  render_command,
+  safe_bool,
+  safe_dict,
+  safe_list,
+  safe_string,
+} from "std/cli/render"
+
+/**
+ * Render the PEFT save policy carried by a LoRA training contract.
+ *
+ * @effects: [stdio.write]
+ * @errors: []
+ */
+pub fn render_peft_save_policy(stdio: HarnessStdio, policy: dict) {
+  const modules_to_save = safe_list(policy["modules_to_save"])
+  if len(modules_to_save) > 0 {
+    stdio.println(
+      "  modules to save: " + join(modules_to_save.map({ item -> safe_string(item, "") }), ", "),
+    )
+  } else {
+    stdio.println("  modules to save: none")
+  }
+  stdio.println("  embedding save policy: " + safe_string(policy["save_embedding_layers"], ""))
+  stdio.println("  weight tying policy: " + safe_string(policy["tied_embedding_policy"], ""))
+  print_list(stdio, "PEFT save notes", safe_list(policy["notes"]))
+}
+
+/**
+ * Render the tool-catalog prompt/inference contract for LoRA training.
+ *
+ * @effects: [stdio.write]
+ * @errors: []
+ */
+pub fn render_tool_catalog_contract(stdio: HarnessStdio, contract: dict) {
+  const policy = safe_string(contract["policy"], "")
+  if policy == "" {
+    return
+  }
+  stdio.println("  tool catalog policy: " + policy)
+  const catalog_id = safe_string(contract["catalog_id"], "")
+  if catalog_id != "" {
+    stdio.println("  tool catalog id: " + catalog_id)
+  }
+  const catalog_hash = safe_string(contract["catalog_hash"], "")
+  if catalog_hash != "" {
+    stdio.println("  tool catalog hash: " + catalog_hash)
+  }
+  stdio.println("  training catalog: " + safe_string(contract["training_catalog"], ""))
+  stdio.println("  inference catalog: " + safe_string(contract["inference_catalog"], ""))
+  stdio.println("  prompt catalog: " + safe_string(contract["prompt_catalog_requirement"], ""))
+  print_list(stdio, "tool catalog notes", safe_list(contract["notes"]))
+  print_list(stdio, "tool catalog gates", safe_list(contract["promotion_gates"]))
+}
+
+fn __trainer_identity_line(value: unknown) -> string {
+  const identity = safe_dict(value)
+  const kind = safe_string(identity["kind"], "")
+  const fingerprint = safe_string(identity["value"], "")
+  if kind == "" || fingerprint == "" {
+    return ""
+  }
+  return kind + "=" + fingerprint
+}
+
+/**
+ * Render the trainer-stack identity gate carried by LoRA receipts.
+ *
+ * @effects: [stdio.write]
+ * @errors: []
+ */
+pub fn render_trainer_identity_check(stdio: HarnessStdio, value: unknown) {
+  const check = safe_dict(value)
+  const status = safe_string(check["status"], "")
+  if status == "" {
+    return
+  }
+  const promotable = if safe_bool(check["promotable"], false) {
+    "yes"
+  } else {
+    "no"
+  }
+  stdio.println("  trainer identity: " + status + " promotable=" + promotable)
+  const expected = __trainer_identity_line(check["expected"])
+  if expected != "" {
+    stdio.println("  expected trainer identity: " + expected)
+  }
+  const observed = __trainer_identity_line(check["observed"])
+  if observed != "" {
+    stdio.println("  observed trainer identity: " + observed)
+  }
+  print_list(stdio, "trainer identity errors", safe_list(check["errors"]))
+}
+
+/**
+ * Render the Harn-normalized trainer-environment attestation gate.
+ *
+ * @effects: [stdio.write]
+ * @errors: []
+ */
+pub fn render_trainer_environment_check(stdio: HarnessStdio, value: unknown) -> nil {
+  const check = safe_dict(value)
+  const status = safe_string(check["status"], "")
+  if status == "" {
+    return
+  }
+  const promotable = if safe_bool(check["promotable"], false) {
+    "yes"
+  } else {
+    "no"
+  }
+  stdio.println("  trainer environment: " + status + " promotable=" + promotable)
+  const attestation = safe_dict(check["attestation"])
+  const digest = safe_string(attestation["digest"], "")
+  if digest != "" {
+    stdio.println("  trainer environment attestation: " + digest)
+  }
+  print_list(stdio, "trainer environment errors", safe_list(check["errors"]))
+}
+
+fn __probe_case_line(value: unknown) -> string {
+  const probe = safe_dict(value)
+  const id = safe_string(probe["id"], "")
+  if id == "" {
+    return ""
+  }
+  const requirement = safe_string(probe["requirement"], "")
+  const expected = safe_string(probe["expected"], "")
+  const receipt = safe_string(probe["receipt"], "")
+  const rationale = safe_string(probe["rationale"], "")
+  let line = id
+  if requirement != "" {
+    line = line + " [" + requirement + "]"
+  }
+  if expected != "" {
+    line = line + ": " + expected
+  }
+  if receipt != "" {
+    line = line + " (receipt " + receipt + ")"
+  }
+  if rationale != "" {
+    line = line + " - " + rationale
+  }
+  return line
+}
+
+/**
+ * Render the behavioral probe matrix required before a LoRA promotion.
+ *
+ * @effects: [stdio.write]
+ * @errors: []
+ */
+pub fn render_required_probe_cases(stdio: HarnessStdio, value: unknown) {
+  const probe_cases = safe_list(value)
+  if len(probe_cases) == 0 {
+    return
+  }
+  stdio.println("  required probe cases:")
+  for item in probe_cases {
+    const line = __probe_case_line(item)
+    if line != "" {
+      stdio.println("    - " + line)
+    }
+  }
+}
+
+/**
+ * Render the per-case promotion probe commands and expected output receipts.
+ *
+ * @effects: [stdio.write]
+ * @errors: []
+ */
+pub fn render_probe_command_templates(stdio: HarnessStdio, value: unknown) {
+  const command_templates = safe_list(value)
+  if len(command_templates) == 0 {
+    return
+  }
+  stdio.println("  probe command templates:")
+  for item in command_templates {
+    const template = safe_dict(item)
+    const case_id = safe_string(template["case_id"], "")
+    if case_id == "" {
+      continue
+    }
+    const receipt = safe_string(template["receipt"], "")
+    const summary_path = safe_string(template["summary_path"], "")
+    let line = case_id
+    if receipt != "" {
+      line = line + " -> " + receipt
+    }
+    if summary_path != "" {
+      line = line + " (" + summary_path + ")"
+    }
+    stdio.println("    - " + line)
+    render_command(stdio, "probe " + case_id, safe_list(template["command"]))
+    print_list(stdio, "probe " + case_id + " notes", safe_list(template["notes"]))
+  }
+}

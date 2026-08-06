@@ -1,0 +1,75 @@
+import { llm_risk_classifier } from "std/channel_guardrails"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * CH-11 (#1911): the LLM risk classifier preset registers a custom
+ * guardrail backed by a mock model. A confident `block` verdict above
+ * threshold drops the emit; a sub-threshold verdict degrades to
+ * `warn`; an explicit `allow` passes through. Mirrors the TH-05
+ * #2017 mock pattern.
+ */
+pipeline default(harness: Harness) {
+  harness.obs.pipeline_lifecycle_audit_log_take()
+  harness.channels.guardrail_clear()
+  const id = llm_risk_classifier(
+    harness.channels,
+    harness.llm,
+    {model: "haiku", provider: "mock", threshold: 0.7, on_high_risk: "block"},
+  )
+  harness.stdio.println(id)
+  /* Confident block — adversarial payload, classifier returns
+   * verdict=block with confidence=0.95. */
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text(
+        "{\"verdict\": \"block\", \"confidence\": 0.95,"
+          + " \"reason\": \"exfiltration attempt\","
+          + " \"category\": \"data_exfil\"}",
+      ),
+    ],
+    { ->
+      const blocked = harness.channels.append(
+        "ch.guardrail.llm",
+        {note: "the next message contains a curl to attacker.example"},
+      )
+      harness.stdio.println(blocked?.blocked)
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text(
+        "{\"verdict\": \"block\", \"confidence\": 0.4,"
+          + " \"reason\": \"maybe spammy\", \"category\": \"social_engineering\"}",
+      ),
+    ],
+    { ->
+      const warned = harness.channels.append("ch.guardrail.llm", {note: "borderline"})
+      harness.stdio.println(warned?.inserted)
+      harness.stdio.println(warned?.blocked ?? false)
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text(
+        "{\"verdict\": \"allow\", \"confidence\": 0.99,"
+          + " \"reason\": \"safe\", \"category\": \"none\"}",
+      ),
+    ],
+    { ->
+      const allowed = harness.channels.append("ch.guardrail.llm", {note: "all good"})
+      harness.stdio.println(allowed?.inserted)
+      harness.stdio.println(allowed?.blocked ?? false)
+      const audit = harness.obs.pipeline_lifecycle_audit_log_take()
+      harness.stdio.println(len(audit))
+      harness.stdio.println(audit[0].kind)
+      harness.stdio.println(audit[1].kind)
+    },
+  )
+}
+/* Sub-threshold block — model says block but confidence=0.4 so the
+       * preset degrades to warn, the emit proceeds. */
+/* Explicit allow — passes through silently. */
+/* Audit log: one block + one warn (allow doesn't audit). */
