@@ -1522,6 +1522,10 @@ jobs:
           echo "${HOME}/.local/bin" >> "$GITHUB_PATH"
           "${HOME}/.local/bin/actionlint" -version
       - run: make lint-actions-source
+      - name: Check Dependabot config
+        # Always-on delivery-policy gate owned by burin-labs/.github. Harn's
+        # family-membership deepening stays in `make check-dependabot-groups`.
+        uses: burin-labs/.github/.github/actions/check-dependabot-config@5dc4bd22107335cb29ccf8b13ca05fc5f2322468
       # Keep the required hygiene gate deterministic. Online audits such as
       # `known-vulnerable-actions` depend on the GitHub Advisories API, whose
       # transport failures are indistinguishable from audit failures to

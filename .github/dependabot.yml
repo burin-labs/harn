@@ -74,6 +74,7 @@ updates:
       - "/crates/harn-cli/portal"
       - "/editors/vscode"
       - "/tree-sitter-harn"
+      - "/website"
     schedule:
       interval: "weekly"
       day: "monday"
