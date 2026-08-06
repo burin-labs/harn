@@ -363,13 +363,13 @@ pub(super) fn repair_for_ambient_capability_plan(
     }
 }
 
-/// Names whose value is read as a first-class reference somewhere in `program`.
+/// Every bare-identifier value read in `program`, with its span.
 ///
 /// A call names its callee directly, so a bare identifier expression is always
 /// a value read: a registry entry (`handler: web_search_handler`), a callback
 /// argument, a dispatcher stored in a dict. Every such reference invokes the
 /// callable at its declared arity through a call site the fixer cannot see, so
-/// its parameter list is observable and must not move.
+/// its parameter list is observable and must not move without a wrap.
 ///
 /// Names this file binds locally are excluded. Reading `repo_root` where the
 /// file says `const repo_root = ...` is a read of that local, not of some
@@ -381,16 +381,6 @@ pub(super) fn repair_for_ambient_capability_plan(
 /// a file that both binds a name locally AND dispatches a callable of that name
 /// is pathological, and the opposite error silently rewires a call nothing can
 /// type-check.
-pub(super) fn collect_value_references(program: &[SNode], names: &mut BTreeSet<String>) {
-    for site in collect_value_reference_sites(program) {
-        names.insert(site.name);
-    }
-}
-
-/// Every bare-identifier value read in `program`, with its span.
-///
-/// Same local-binding exclusion as [`collect_value_references`]: a `const` or
-/// parameter of the same name is a read of that local, not of a callable.
 pub(super) fn collect_value_reference_sites(
     program: &[SNode],
 ) -> Vec<super::value_wrap::ValueReferenceSite> {

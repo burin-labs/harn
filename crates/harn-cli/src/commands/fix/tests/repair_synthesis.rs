@@ -296,8 +296,10 @@ fn value_references_skip_locally_bound_names() {
         "}\n",
     );
     let program = harn_parser::parse_source(source).unwrap();
-    let mut names = BTreeSet::new();
-    super::signature_threading::collect_value_references(&program, &mut names);
+    let names = super::signature_threading::collect_value_reference_sites(&program)
+        .into_iter()
+        .map(|site| site.name)
+        .collect::<BTreeSet<_>>();
     for local in ["repo_root", "shell_argv", "renamed", "first"] {
         assert!(!names.contains(local), "`{local}` is a local binding");
     }
@@ -317,8 +319,10 @@ fn value_references_still_catch_a_bare_handler_reference() {
         "}\n",
     );
     let program = harn_parser::parse_source(source).unwrap();
-    let mut names = BTreeSet::new();
-    super::signature_threading::collect_value_references(&program, &mut names);
+    let names = super::signature_threading::collect_value_reference_sites(&program)
+        .into_iter()
+        .map(|site| site.name)
+        .collect::<BTreeSet<_>>();
     assert!(
         names.contains("handler"),
         "a bare reference must still freeze"
