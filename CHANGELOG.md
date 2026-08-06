@@ -9,6 +9,96 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.59
+
+### Breaking
+
+- Numeric type acceptance is one rule everywhere: widening only. A declared `int`
+  parameter or schema field requires an `int` and rejects a `float` (including
+  JSON `3.0`). A declared `float` / `number` accepts `float` or `int`.
+
+  This removes the old native-only parameter leniency that accepted `2.5` for
+  `int`, and the payload-schema path that rejected a whole `int` for `float`.
+  Bindings and the portable kernel already used the asymmetric rule; native
+  parameters and `schema_*` now match them.
+
+  Tool-call JSON Schema export keeps advertising `int` as `"integer"` rather than
+  rewriting it to `"number"`, matching the values the runtime accepts.
+- A type annotation on a struct field is now checked at construction against the
+  value that lands in it. `struct User { name: string }` rejects
+  `User { name: 12345 }` (and `User({"name": 12345})`) instead of producing an
+  instance whose `name` is an int.
+
+  This closes the last site where a written annotation described a value and was
+  not enforced. Binding and parameter checks that read struct fields through a
+  shape (`{name: string}`) were already trustworthy only when the fields they
+  read were themselves checked; unenforced construction silently weakened them.
+
+  Unannotated fields are unchanged, and `any` remains the written opt-out.
+  Widening still holds (`int` satisfies a declared `float`), and `T?` still
+  accepts `nil`.
+
+  The portable program artifact is version 4: construction emits the existing
+  `AssertBindingType` shape check for annotated fields. Artifacts built by earlier
+  releases must be recompiled.
+
+### Added
+
+- **Interactive apps can preserve exact logo text and record model-job media
+  lineage (#5894).** `MediaAsset` carries optional parent asset URIs,
+  `std/media/composition` exports reopenable design documents with editable SVG
+  plus PNG, logo studio writes those layered exports, and test-bench tapes
+  record `model_job` lifecycle events with output-asset digests.
+- **Shared agent/run lifecycle registry owns wire status, transitions, and
+  protocol projections (#6049).** `AgentLifecycleState` /
+  `AgentLifecycleEvent` / `AgentLifecycle` in `harn-vm` are the compile-time
+  owner for canonical statuses, terminal/resumable classification,
+  compatibility aliases, and valid transitions (including suspend/resume,
+  cancellation, failure, completion, and delegated-worker join). Worker
+  bridge statuses and generated protocol artifacts project from that
+  registry so a new state cannot land silently.
+- **Documented the ACP SDK evaluation: keep the hand-rolled adapter until an
+  unmodified Zed session proves an `agent-client-protocol` cutover (#6088).**
+  ADR 0006 records the ownership split, extension escape hatches, and revisit
+  checklist; `docs/src/dev/acp-maintenance.md` is the maintainer entry point.
+- **Documented the decision to keep Harn's A2A adapter instead of adopting
+  `a2a-lf` (#6089).** ADR 0005 records that the official SDK speaks A2A v1 wire
+  shapes that fail Harn's pinned 0.3.0 conformance fixtures without a shim, so
+  the bespoke adapter and schema pin stay the contract of record.
+- Always-on Actions hygiene now runs the shared `burin-labs/.github`
+  Dependabot delivery-policy checker, and the website npm lockfile is covered
+  by Dependabot so it receives version updates rather than security-only PRs.
+
+### Changed
+
+- **`make test` now requires cargo-nextest instead of falling back to
+  `cargo test` (#6145).** The silent fallback widened coverage into the E2E
+  tier (no profile filter) and switched isolation from one process per test
+  to threads in one process, so release audits could fail or pass for reasons
+  unrelated to the product. Install nextest via `make setup`, or use the
+  explicit `make test-cargo` escape hatch when those semantics are intended.
+
+### Fixed
+
+- `harn fix --apply --dry-run --capability-migrations-only` now converges the same
+  multi-pass plan a real apply uses, counts post-apply diagnostics against that
+  would-be tree, and restores the filesystem afterward — so dry-run can no longer
+  report a fake net-negative against the untouched sources.
+
+  Value-referenced callables that need a capability are wrapped at each hand-over
+  site (`{ args -> f(harness, args) }`) instead of freezing the whole signature,
+  so registry handlers migrate without breaking the invisible `handler(args)`
+  dispatch. When a wrap cannot be synthesized, the freeze reason names the
+  callable and the escaping reference's `file:line`.
+- `harn check` now applies every diagnostic inside a destructuring pattern's
+  default expression. Defaults previously ran a binary-op-only check, so a call
+  with too few arguments, an unknown callee, or a bad capability method was
+  invisible there — `{flag = false || probe(info)}` type-checked clean and threw
+  at run time.
+- Keep ambient capability-method lookup unique after the CLI installs the
+  process builtin manifest, so `harn check` with
+  `HARN_LEGACY_AMBIENT_CAPABILITIES` still resolves names like `store_set`.
+
 ## v0.10.58
 
 ### Breaking
