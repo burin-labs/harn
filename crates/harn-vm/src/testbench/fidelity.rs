@@ -712,6 +712,7 @@ fn record_kind_tag(kind: &TapeRecordKind) -> &'static str {
         TapeRecordKind::FileDelete { .. } => "file_delete",
         TapeRecordKind::ProcessSpawn { .. } => "process_spawn",
         TapeRecordKind::McpJsonRpc { .. } => "mcp_json_rpc",
+        TapeRecordKind::ModelJob { .. } => "model_job",
         TapeRecordKind::Unknown => "unknown",
     }
 }

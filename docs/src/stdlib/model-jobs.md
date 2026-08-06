@@ -124,11 +124,30 @@ Each `MediaAsset` includes:
 
 - an `asset://sha256/<digest>` URI and SHA-256 digest;
 - MIME type, byte size, kind, and current path;
-- optional dimensions, duration, producing job, and metadata.
+- optional dimensions, duration, producing job, and metadata;
+- optional `parents` — parent asset URIs for edit/candidate lineage.
+
+Image-edit jobs copy verified request input URIs into each output asset's
+`parents` list so sketch → candidate lineage stays structural.
 
 `media_asset_store_result` rejects bytes whose signature does not match the
 declared MIME type. `media_asset_verify_result` re-reads the file and rejects a
 changed digest, size, MIME type, or identity.
+
+## Exact-text composition
+
+Import `std/media/composition` when an app must preserve user-authored lettering
+instead of hoping an image model renders it. Build a
+`harn.design_document.v1` with at least one image layer and one text layer, then
+call `design_document_export_result` to write:
+
+- a reopenable `.design.json` document;
+- an editable `.svg` whose text nodes carry the exact strings;
+- a `.png` of the verified image layer for hosts that need a bitmap.
+
+`design_document_with_exact_text` is the common logo helper: one background
+asset plus one lettering layer. Exported SVG and PNG assets record parent URIs
+so design lineage stays structural alongside model-job `parents`.
 
 ## Test and replay backends
 
@@ -137,6 +156,11 @@ It has no network effects. Use it for job-state and UI tests.
 
 `model_job_replay_backend(receipt)` replays recorded states and asset paths. It
 rejects a different request digest and never falls back to the live provider.
+
+When a test-bench run emits a tape, model-job transcript events are recorded as
+`model_job` tape kinds with job identifiers, state, redacted event payload, and
+output-asset digests. Fake and replay backends therefore exercise the same
+cassette shape as a live adapter without calling a model.
 
 `comfyui_backend(endpoint, build_workflow, options)` implements the same
 interface over ComfyUI. Its graph builder is separate, so any API-format ComfyUI

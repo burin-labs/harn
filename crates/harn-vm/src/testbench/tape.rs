@@ -231,6 +231,19 @@ pub enum TapeRecordKind {
         request_payload: TapePayload,
         response_payload: TapePayload,
     },
+    /// Asynchronous model-job lifecycle event (`harn.model_job_event.v1`)
+    /// observed through the host event bridge. Asset digests named in the
+    /// event payload let fidelity checks reason about media lineage without
+    /// calling a live model.
+    ModelJob {
+        job_id: String,
+        request_id: String,
+        backend: String,
+        state: String,
+        event_kind: String,
+        event: TapePayload,
+        asset_digests: Vec<String>,
+    },
     /// Catch-all for record kinds emitted by a newer producer. Lets
     /// older fidelity checkers compare what they understand and flag
     /// the rest as `Unknown` divergence rather than refusing to load.
@@ -253,6 +266,7 @@ impl TapeRecordKind {
             Self::FileDelete { .. } => "file_delete",
             Self::ProcessSpawn { .. } => "process_spawn",
             Self::McpJsonRpc { .. } => "mcp_json_rpc",
+            Self::ModelJob { .. } => "model_job",
             Self::Unknown => "unknown",
         }
     }
@@ -515,6 +529,7 @@ fn visit_payloads(kind: &TapeRecordKind, mut visit: impl FnMut(&TapePayload)) {
             visit(request_payload);
             visit(response_payload);
         }
+        TapeRecordKind::ModelJob { event, .. } => visit(event),
         TapeRecordKind::ClockRead { .. }
         | TapeRecordKind::ClockSleep { .. }
         | TapeRecordKind::FileRead { .. }
@@ -640,6 +655,81 @@ pub fn install_recorder(recorder: Arc<TapeRecorder>) -> TapeRecorderGuard {
 /// untouched because nothing installs a recorder outside testbench mode.
 pub fn active_recorder() -> Option<Arc<TapeRecorder>> {
     ACTIVE_RECORDER.with(|slot| slot.borrow().clone())
+}
+
+/// Record a model-job lifecycle event in the active unified tape.
+///
+/// Called from the host event bridge so fake, replay, and live backends share
+/// one cassette shape. Missing recorders are a no-op.
+pub fn record_model_job_event(payload: &serde_json::Value) {
+    let Some(recorder) = active_recorder() else {
+        return;
+    };
+    let policy = crate::redact::current_policy();
+    let redacted = policy.redact_json(payload);
+    let event_bytes = serde_json::to_vec(&redacted).unwrap_or_default();
+    let event = recorder.payload_from_bytes(event_bytes);
+    let job_id = redacted
+        .get("job_id")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string();
+    let request_id = redacted
+        .get("request_id")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string();
+    let backend = redacted
+        .get("backend")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string();
+    let state = redacted
+        .get("state")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string();
+    let event_kind = redacted
+        .get("kind")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string();
+    let mut asset_digests = Vec::new();
+    if let Some(assets) = redacted.get("assets").and_then(|value| value.as_array()) {
+        for asset in assets {
+            if let Some(digest) = asset
+                .get("sha256")
+                .and_then(|value| value.as_str())
+                .filter(|value| !value.is_empty())
+            {
+                asset_digests.push(digest.to_string());
+            } else if let Some(uri) = asset.get("uri").and_then(|value| value.as_str()) {
+                if let Some(digest) = uri.strip_prefix("asset://sha256/") {
+                    if !digest.is_empty() {
+                        asset_digests.push(digest.to_string());
+                    }
+                }
+            }
+        }
+    }
+    if let Some(digest) = redacted
+        .get("asset_digest")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+    {
+        asset_digests.push(digest.to_string());
+    }
+    asset_digests.sort();
+    asset_digests.dedup();
+    recorder.record(TapeRecordKind::ModelJob {
+        job_id,
+        request_id,
+        backend,
+        state,
+        event_kind,
+        event,
+        asset_digests,
+    });
 }
 
 /// Record an MCP JSON-RPC exchange in the active unified tape, if one
@@ -856,5 +946,46 @@ mod tests {
         let snapshot = recorder.snapshot(TapeHeader::current(None, None, Vec::new()));
         assert_eq!(snapshot.records[0].seq, 0);
         assert_eq!(snapshot.records[1].seq, 1);
+    }
+
+    #[test]
+    fn records_model_job_events_with_asset_digests() {
+        let recorder = Arc::new(TapeRecorder::new());
+        let _guard = install_recorder(Arc::clone(&recorder));
+        record_model_job_event(&serde_json::json!({
+            "schema": "harn.model_job_event.v1",
+            "kind": "output",
+            "job_id": "job-1",
+            "request_id": "req-1",
+            "backend": "fixture",
+            "state": "succeeded",
+            "assets": [
+                {
+                    "uri": "asset://sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                }
+            ]
+        }));
+        let snapshot = recorder.snapshot(TapeHeader::current(None, None, Vec::new()));
+        assert_eq!(snapshot.records.len(), 1);
+        match &snapshot.records[0].kind {
+            TapeRecordKind::ModelJob {
+                job_id,
+                event_kind,
+                asset_digests,
+                ..
+            } => {
+                assert_eq!(job_id, "job-1");
+                assert_eq!(event_kind, "output");
+                assert_eq!(
+                    asset_digests,
+                    &vec![
+                        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                            .to_string()
+                    ]
+                );
+            }
+            other => panic!("unexpected tape kind: {other:?}"),
+        }
     }
 }

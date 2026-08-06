@@ -183,6 +183,36 @@ fn __model_job_output_bytes(
   return Ok(io.fs.read_bytes(destination))
 }
 
+fn __model_job_parent_uris(job: ModelJob) -> list<string>? {
+  const parents = job.metadata?.input_uris
+  if parents == nil || type_of(parents) != "list" || len(parents) == 0 {
+    return nil
+  }
+  let uris: list<string> = []
+  for parent in parents {
+    const uri = trim(to_string(parent))
+    if uri != "" {
+      uris = uris + [uri]
+    }
+  }
+  return len(uris) == 0 ? nil : uris
+}
+
+fn __model_job_request_input_uris(request: ModelJobRequest) -> list<string>? {
+  const inputs = request.inputs ?? []
+  if len(inputs) == 0 {
+    return nil
+  }
+  let uris: list<string> = []
+  for asset in inputs {
+    const uri = trim(to_string(asset?.uri ?? ""))
+    if uri != "" {
+      uris = uris + [uri]
+    }
+  }
+  return len(uris) == 0 ? nil : uris
+}
+
 fn __model_job_store_outputs(
   io: ModelJobIo,
   job: ModelJob,
@@ -198,6 +228,7 @@ fn __model_job_store_outputs(
       ),
     )
   }
+  const parents = __model_job_parent_uris(job)
   let assets: list<MediaAsset> = []
   for output in outputs {
     const content = __model_job_output_bytes(io, job, output)
@@ -216,6 +247,9 @@ fn __model_job_store_outputs(
     }
     if output.duration_ms != nil {
       asset_options.duration_ms = output.duration_ms
+    }
+    if parents != nil {
+      asset_options.parents = parents
     }
     if output.metadata != nil {
       asset_options.metadata = output.metadata
@@ -374,8 +408,13 @@ pub fn model_job_submit_result(
   if first.error != nil {
     job.error = first.error
   }
-  if first.metadata != nil {
-    job.metadata = first.metadata
+  let metadata = first.metadata
+  const input_uris = __model_job_request_input_uris(request)
+  if input_uris != nil {
+    metadata = (metadata ?? {}) + {input_uris: input_uris}
+  }
+  if metadata != nil {
+    job.metadata = metadata
   }
   const event = __model_job_event(job, "submitted", submitted_at_ms)
   __model_job_emit(harness.agent, event, options)

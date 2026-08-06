@@ -36,6 +36,7 @@ still has no direct worker, file, network, or model authority.
 |---|---|
 | Harn app | Product state, event handling, prompts, jobs, file rules, replay |
 | `std/ui` | Typed documents, events, effects, validation, shared renderer |
+| `std/media` | Durable assets, parent lineage, exact-text design documents, SVG/PNG export |
 | Harn host | Files, network, process isolation, MCP transport, browser startup and shutdown |
 | Browser | Pointer capture, canvas rasterization, DOM, accessibility primitives |
 

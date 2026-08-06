@@ -93,8 +93,9 @@ sleeps. Use the standalone host for the final pointer, focus, accessibility,
 and screenshot checks.
 
 For a larger app that restores drawings after restart, runs local and hosted
-image models, cancels work, writes result files, and replays recorded output,
-run:
+image models, cancels work, preserves exact logo text as a deterministic layer,
+exports a reopenable design document plus editable SVG and PNG, and replays
+recorded output, run:
 
 ```sh
 harn app run examples/apps/logo-studio.harn
@@ -107,9 +108,20 @@ environment. The app paints its working state before sending the hosted call.
 Unlike the queued ComfyUI path, that hosted request cannot be canceled after it
 has been sent.
 
+Exact lettering belongs in `std/media/composition`, not in the stochastic image
+prompt. Keep a dedicated logo-text field, ask the model to polish the mark
+without rendering words, then export with `design_document_export_result`. The
+design document and SVG keep real text nodes; the PNG is the verified image
+layer. Edit jobs also record the sketch URI on each candidate's `parents` list.
+
+Prove the path in process with `conformance/tests/stdlib/logo_studio_path.harn`
+(`ui.test.run` plus a fake model backend). Use the standalone host for pointer,
+focus, accessibility, and screenshot checks.
+
 The local path below used a mouse sketch, two directions, and FLUX.2 Klein on
 an RTX 5090. The app uploaded the verified canvas capture, showed the returned
-image, and wrote the same content-addressed PNG to the selected path.
+image, and exported the layered design document, editable SVG, and PNG through
+the selected output stem.
 
 ![Logo Studio after a local FLUX.2 image edit](assets/logo-studio-local-flux.png)
 

@@ -69,6 +69,8 @@ fidelity checkers still produce a structured report.
 | `file_write` | `path`, `content_hash`, `len_bytes` | `harness.fs.write_text(...)`, `harness.fs.append(...)`, `harness.fs.append_locked(...)` |
 | `file_delete` | `path` | `remove_file(...)` |
 | `process_spawn` | `program`, `args`, `cwd`, `exit_code`, `duration_ms`, `stdout_payload`, `stderr_payload` | Sandboxed subprocess invocation |
+| `mcp_json_rpc` | `server`, `method`, digests, latency, redacted request/response payloads | MCP client exchanges |
+| `model_job` | `job_id`, `request_id`, `backend`, `state`, `event_kind`, event payload, `asset_digests` | Asynchronous model-job lifecycle events and output-asset lineage |
 
 Every record carries the wrapping fields:
 
