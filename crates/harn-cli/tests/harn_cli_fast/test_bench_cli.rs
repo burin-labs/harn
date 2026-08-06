@@ -974,3 +974,93 @@ pipeline default(harness: Harness) {
         assert_eq!(friction_events[0].kind, "missing_context");
     }
 }
+
+#[test]
+fn emit_tape_records_model_job_lifecycle_events() {
+    let temp = TempDir::new().unwrap();
+    let script = write_file(
+        temp.path(),
+        "model_job_tape.harn",
+        r#"
+import {
+  ModelJobObservation,
+  ModelJobOutput,
+  ModelJobRequest,
+  ModelJobRunOptions,
+  ModelOutputSpec,
+  ModelTask,
+  model_job_fake_backend,
+  model_job_run_result,
+} from "std/model_job"
+
+pipeline default(harness: Harness) {
+  const png = bytes_from_base64(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  )
+  const task_kind: ModelTask = "image.generate"
+  const output_spec: ModelOutputSpec = {mime_type: "image/png", width: 1, height: 1}
+  const request: ModelJobRequest = {
+    id: "tape-1",
+    task: task_kind,
+    prompt: "fixture",
+    output: output_spec,
+    model: "fixture",
+  }
+  const output: ModelJobOutput = {
+    name: "out.png",
+    mime_type: "image/png",
+    bytes: png,
+    width: 1,
+    height: 1,
+  }
+  const observations: list<ModelJobObservation> = [
+    {job_id: "job-tape", state: "succeeded", progress: 1.0, outputs: [output]},
+  ]
+  const root = harness.fs.mkdtemp_in_workspace("model-job-tape-")
+  const session = harness.agent.open("model-job-tape")
+  harness.agent.reset(session)
+  const run_options: ModelJobRunOptions = {
+    interval_ms: 0,
+    asset_root: root,
+    session_id: session,
+  }
+  const receipt = unwrap(
+    model_job_run_result(
+      harness,
+      model_job_fake_backend("tape-fixture", observations),
+      request,
+      run_options,
+    ),
+  )
+  harness.stdio.println(receipt.job.state)
+}
+"#,
+    );
+    let tape_path = temp.path().join("model_job.tape");
+    let workspace = temp.path().to_path_buf();
+    let script_clone = script.clone();
+    let tape_for_run = tape_path.clone();
+    let outcome = run_under_testbench(workspace.clone(), script, move || {
+        Testbench::builder()
+            .paused_clock_at_ms(1_700_000_000_000)
+            .fs_overlay(workspace)
+            .emit_tape_for(
+                tape_for_run,
+                Some(script_clone.to_string_lossy().into_owned()),
+                Vec::new(),
+            )
+            .build()
+    });
+    assert_eq!(outcome.exit_code, 0, "stderr: {}", outcome.stderr);
+    let tape = EventTape::load(&tape_path).expect("load model_job tape");
+    assert!(
+        tape.records
+            .iter()
+            .any(|record| matches!(record.kind, TapeRecordKind::ModelJob { .. })),
+        "expected model_job tape records, got {:?}",
+        tape.records
+            .iter()
+            .map(|record| record.kind.label())
+            .collect::<Vec<_>>()
+    );
+}
