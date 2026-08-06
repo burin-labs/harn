@@ -1,5 +1,11 @@
 import "std/schema"
 
+// Harn-local family membership and catch-all update-types policy.
+// Structural Dependabot *delivery* invariants (catch-all presence across list
+// styles, lockfile coverage, cargo directory scope, frozen override ceilings)
+// are owned by burin-labs/.github `check-dependabot-config` and run in CI
+// without a Harn binary. Do not re-implement those here.
+
 type DependabotGroup = {
   patterns: list<string>,
   exclude_patterns: list<string>,

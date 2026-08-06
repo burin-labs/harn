@@ -1537,6 +1537,14 @@ jobs:
           annotations: true
           min-severity: medium
           min-confidence: medium
+      - name: Check Dependabot config
+        # Structural delivery invariants (catch-all presence, lockfile coverage,
+        # cargo scope, override ceilings). Family membership and catch-all
+        # update-types stay in `make check-dependabot-groups`. Always-on: the
+        # failures are absences of dependency PRs. Owned by burin-labs/.github.
+        uses: burin-labs/.github/.github/actions/check-dependabot-config@5dc4bd22107335cb29ccf8b13ca05fc5f2322468
+        with:
+          require-lockfiles: "true"
 
   setup-harn-action:
     name: Setup Harn action (${{ matrix.os }})

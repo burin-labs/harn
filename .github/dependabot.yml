@@ -1,5 +1,10 @@
 version: 2
 
+# Structural delivery policy (catch-all presence, lockfile coverage, cargo
+# scope) is enforced by burin-labs/.github `check-dependabot-config`.
+# Harn-local family membership and catch-all update-types are enforced by
+# `make check-dependabot-groups`.
+
 updates:
   - package-ecosystem: "cargo"
     directories:
@@ -74,6 +79,7 @@ updates:
       - "/crates/harn-cli/portal"
       - "/editors/vscode"
       - "/tree-sitter-harn"
+      - "/website"
     schedule:
       interval: "weekly"
       day: "monday"
