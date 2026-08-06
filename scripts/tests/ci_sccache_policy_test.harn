@@ -19,10 +19,7 @@ fn hosted_lane(cache_key: string, write_cache: bool = false) {
       ...lane,
       permissions: {contents: "read", actions: "write"},
       steps: [
-        {
-          uses: "./.github/actions/rust-cache",
-          with: {"shared-key": cache_key, save: "true"},
-        },
+        {uses: "./.github/actions/rust-cache", with: {"shared-key": cache_key, save: "true"}},
       ],
     }
   }
@@ -171,14 +168,13 @@ pipeline test_rejects_cache_writer_without_actions_write(harness: Harness, task)
     ...valid,
     jobs: {
       ...valid.jobs,
-      "rust-cache-refresh": {
-        ...valid.jobs["rust-cache-refresh"],
-        permissions: {contents: "read"},
-      },
+      "rust-cache-refresh": {...valid.jobs["rust-cache-refresh"], permissions: {contents: "read"}},
     },
   }
   const errors = ci_linux_lane_policy_errors(invalid)
-  assert(errors.contains("ci.yml:rust-cache-refresh must grant actions: write to persist rust-cache"))
+  assert(
+    errors.contains("ci.yml:rust-cache-refresh must grant actions: write to persist rust-cache"),
+  )
 }
 
 @test
