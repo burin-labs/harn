@@ -359,9 +359,7 @@ mod ambient_install_regression {
         // Project the same contracts the CLI installs before `harn check`.
         let entries: &'static [&'static harn_builtin_registry::BuiltinManifestEntry] = Box::leak(
             harn_capability_contracts::manifest()
-                .iter()
-                .copied()
-                .collect::<Vec<_>>()
+                .to_vec()
                 .into_boxed_slice(),
         );
         harn_builtin_registry::install_builtin_manifest(entries);
