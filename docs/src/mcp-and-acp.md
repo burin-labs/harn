@@ -1403,7 +1403,9 @@ builtins.
 
 A2A exposes exported Harn functions as a peer-agent HTTP server that other
 agents can interact with. The server implements A2A protocol version 0.3.0 and
-uses the shared `harn-serve` dispatch core.
+uses the shared `harn-serve` dispatch core. Harn keeps this adapter rather than
+adopting the official `a2a-lf` Rust SDK; see
+[ADR 0005](./adr/0005-a2a-keep-bespoke-adapter.md).
 
 ### Running the server
 
