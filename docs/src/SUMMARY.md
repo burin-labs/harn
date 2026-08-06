@@ -323,6 +323,7 @@
 - [ADR 0002: Compile-time capability invariants](./adr/0002-compile-time-capability-invariants.md)
 - [ADR 0003: Use the official Rust MCP SDK](./adr/0003-mcp-hand-rolled-vs-rmcp.md)
 - [ADR 0004: VM multithreading via Send values + share-nothing isolates](./adr/0004-vm-multithreading.md)
+- [ADR 0005: Keep Harn's A2A adapter; do not adopt a2a-lf](./adr/0005-a2a-keep-bespoke-adapter.md)
 
 # Operations
 
