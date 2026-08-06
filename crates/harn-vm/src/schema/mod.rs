@@ -115,10 +115,7 @@ pub fn validate_value_against_canonical_schema(
     let result = validate::validate_schema_value(
         data,
         schema,
-        validate::ValidationOptions {
-            apply_defaults,
-            numeric_compat: false,
-        },
+        validate::ValidationOptions { apply_defaults },
     );
     if result.errors.is_empty() {
         Ok(result.value)

@@ -258,7 +258,6 @@ fn a_wide_array_of_ref_items_is_not_charged_a_document_wide_budget() {
         &canonical,
         ValidationOptions {
             apply_defaults: false,
-            numeric_compat: false,
         },
     );
     assert!(
@@ -278,7 +277,6 @@ fn a_wide_array_of_ref_items_is_not_charged_a_document_wide_budget() {
         &canonical,
         ValidationOptions {
             apply_defaults: false,
-            numeric_compat: false,
         },
     );
     assert_eq!(
@@ -311,7 +309,6 @@ fn validation_depth_limit_returns_error_without_panicking() {
         &schema,
         ValidationOptions {
             apply_defaults: false,
-            numeric_compat: false,
         },
     );
 
@@ -333,7 +330,6 @@ fn validation_ref_cycle_returns_error_without_panicking() {
         &schema,
         ValidationOptions {
             apply_defaults: false,
-            numeric_compat: false,
         },
     );
 
@@ -556,7 +552,6 @@ fn union_defaults_come_from_the_matching_same_shape_branch() {
         &schema,
         ValidationOptions {
             apply_defaults: true,
-            numeric_compat: false,
         },
     );
 

@@ -13,7 +13,6 @@ use super::type_check::{
 #[derive(Clone, Copy, Debug)]
 pub(super) struct ValidationOptions {
     pub(super) apply_defaults: bool,
-    pub(super) numeric_compat: bool,
 }
 
 pub(super) fn validate_schema_value(
@@ -178,7 +177,7 @@ fn first_param_validation_error_body(
     }
 
     if let Some(expected_type) = schema_type_name(schema) {
-        if !value_matches_type(value, expected_type, options.numeric_compat) {
+        if !value_matches_type(value, expected_type) {
             return Some(format!(
                 "parameter '{}' expected {}, got {} ({})",
                 param_name,

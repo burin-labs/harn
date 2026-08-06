@@ -1202,15 +1202,6 @@ permissive in four ways:
   identity for them. Structs and enums *do* have nominal identity and are
   checked by name.
 
-#### Known divergence
-
-A declared `int` **binding** requires an `int`. A declared `int` **parameter**
-also accepts a `float`, because the parameter guard shares its implementation
-with schema validation, where JSON's single number type makes that leniency
-load-bearing. The portable kernel is strict at both sites. This is a real
-inconsistency in the native runtime, tracked separately; it does not affect
-which values a binding accepts.
-
 ### Runtime parameter type enforcement
 
 In addition to compile-time checking, function parameters with type annotations
@@ -1223,10 +1214,13 @@ TypeError: parameter 'name' expected string, got int (42)
 ```
 
 The following types are enforced at runtime: `int`, `float`, `string`, `bytes`,
-`bool`, `list`, `dict`, `set`, `nil`, and `closure`. `int` and `float` are mutually
-compatible (passing an `int` to a `float` parameter is allowed, and vice versa).
-Union types, `list<T>`, `dict<string, V>`, and nested shapes are also checked at
-runtime when the parameter annotation can be lowered into a runtime schema.
+`bool`, `list`, `dict`, `set`, `nil`, and `closure`. Numeric acceptance is the
+same rule bindings and the portable kernel use: an `int` parameter requires an
+`int`, and a `float` / `number` parameter accepts `float` or `int` (widening
+only). Payload schema checks (`schema_is`, `schema_expect`, …) use that same
+asymmetric rule. Union types, `list<T>`, `dict<string, V>`, and nested shapes
+are also checked at runtime when the parameter annotation can be lowered into a
+runtime schema.
 
 ### Runtime shape validation
 

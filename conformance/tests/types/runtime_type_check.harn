@@ -4,7 +4,7 @@ pipeline test(harness: Harness, task) {
     return a + b
   }
   assert_eq(add(2, 3), 5)
-  // Float coercion is allowed for int params
+  // Widening: an int satisfies a float parameter. Narrowing does not.
   fn double(x: float) -> float {
     return x * 2
   }

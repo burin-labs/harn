@@ -528,6 +528,60 @@ mod browser_tests {
     }
 
     #[wasm_bindgen_test]
+    fn browser_worker_matches_native_runtime_failure_corpus_exactly() {
+        // Closes the numeric drift gap: a float into an int parameter must
+        // fail identically in the browser worker and the native portable
+        // kernel (harn#6267). PURE_CASES alone cannot catch this, because
+        // they only assert successful completions.
+        for case in RUNTIME_FAILURE_CASES {
+            let native_program = harn_kernel::compile_program(
+                case.source,
+                case.entry,
+                harn_kernel::EntryKind::Function,
+            )
+            .unwrap_or_else(|diagnostics| panic!("{} did not compile: {diagnostics:?}", case.id));
+            let input =
+                harn_kernel::DataValue::from_json(serde_json::from_str(case.input_json).unwrap())
+                    .unwrap();
+            let harn_kernel::Execution::Failed {
+                diagnostic: native_diagnostic,
+            } = harn_kernel::start(&native_program, input, &harn_kernel::GrantSet::pure())
+            else {
+                panic!(
+                    "{} completed natively; expected {}",
+                    case.id, case.expected_code
+                )
+            };
+            assert_eq!(
+                native_diagnostic.code, case.expected_code,
+                "{} native code drifted",
+                case.id
+            );
+
+            let compiled = compile(case.source, case.entry, "function");
+            assert!(compiled.ok(), "{} did not compile in browser", case.id);
+            let browser = start(
+                &compiled.artifact_bytes(),
+                case.input_json,
+                r#"{"capabilities":[]}"#,
+            )
+            .unwrap_or_else(|error| panic!("{} failed to start: {error:?}", case.id));
+            assert_eq!(
+                browser.status(),
+                "failed",
+                "{} did not fail in browser",
+                case.id
+            );
+            assert_eq!(
+                browser.diagnostic_json(),
+                serde_json::to_string(&native_diagnostic).unwrap(),
+                "{} browser diagnostics diverged",
+                case.id
+            );
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn browser_benchmark_statistics_use_the_kernel_contract() {
         let statistics: serde_json::Value = serde_json::from_str(
             &summarize_benchmark_samples("[30,10,40,20]")

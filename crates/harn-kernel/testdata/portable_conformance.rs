@@ -260,6 +260,44 @@ pub const PURE_CASES: &[PureCase] = &[
         input_json: "3",
         expected_json: r#"["Ok",[2],2]"#,
     },
+    PureCase {
+        // Widening: a whole int satisfies a float parameter. This is the
+        // half of harn#6267 that payload schemas used to get wrong.
+        id: "float-param-accepts-int",
+        source: r"
+            fn takes_float(x: float) -> float { return x + 0.0 }
+            fn reduce(input: int) -> float { return takes_float(input) }
+        ",
+        entry: "reduce",
+        input_json: "3",
+        expected_json: "3.0",
+    },
+];
+
+/// Runtime failures that every portable executor must agree on.
+///
+/// Unlike [`PURE_CASES`], these are expected to fail after a successful
+/// compile. The int←float case is the drift that used to slip past
+/// `browser_worker_matches_native_portable_corpus_exactly` (harn#6267).
+pub struct RuntimeFailureCase {
+    pub id: &'static str,
+    pub source: &'static str,
+    pub entry: &'static str,
+    pub input_json: &'static str,
+    pub expected_code: &'static str,
+}
+
+pub const RUNTIME_FAILURE_CASES: &[RuntimeFailureCase] = &[
+    RuntimeFailureCase {
+        id: "int-param-rejects-float",
+        source: r"
+            fn takes_int(n: int) -> int { return n }
+            fn reduce(input) { return takes_int(input) }
+        ",
+        entry: "reduce",
+        input_json: "2.5",
+        expected_code: "argument_type",
+    },
 ];
 
 pub struct InvalidCase {

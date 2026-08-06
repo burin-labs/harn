@@ -68,14 +68,7 @@ pub(crate) fn schema_result_value(
         Ok(schema) => schema,
         Err(error) => return result_err_value(vec![ValidationIssue::new("schema", error)], None),
     };
-    let result = validate_schema_value(
-        data,
-        &normalized,
-        ValidationOptions {
-            apply_defaults,
-            numeric_compat: false,
-        },
-    );
+    let result = validate_schema_value(data, &normalized, ValidationOptions { apply_defaults });
     if result.errors.is_empty() {
         result_ok_value(result.value)
     } else {
@@ -98,14 +91,7 @@ pub(crate) fn schema_report_value(
             )
         }
     };
-    let result = validate_schema_value(
-        data,
-        &normalized,
-        ValidationOptions {
-            apply_defaults,
-            numeric_compat: false,
-        },
-    );
+    let result = validate_schema_value(data, &normalized, ValidationOptions { apply_defaults });
     let ok = result.errors.is_empty();
     schema_report_from_issues(ok, result.errors, Some(result.value))
 }
@@ -143,7 +129,6 @@ pub(crate) fn schema_is_value(data: &VmValue, schema: &VmValue) -> Result<bool, 
         &normalized,
         ValidationOptions {
             apply_defaults: false,
-            numeric_compat: false,
         },
     )
     .errors
@@ -157,14 +142,7 @@ pub(crate) fn schema_expect_value(
 ) -> Result<VmValue, VmError> {
     let normalized = canonicalize_schema_value(schema)
         .map_err(|error| VmError::Thrown(VmValue::String(arcstr::ArcStr::from(error))))?;
-    let result = validate_schema_value(
-        data,
-        &normalized,
-        ValidationOptions {
-            apply_defaults,
-            numeric_compat: false,
-        },
-    );
+    let result = validate_schema_value(data, &normalized, ValidationOptions { apply_defaults });
     if result.errors.is_empty() {
         Ok(result.value)
     } else {
@@ -191,7 +169,6 @@ pub(crate) fn schema_assert_canonical_param(
 ) -> Result<(), VmError> {
     let options = ValidationOptions {
         apply_defaults: false,
-        numeric_compat: true,
     };
     let schema_dict = schema.schema.as_ref();
     if let Some(error) =

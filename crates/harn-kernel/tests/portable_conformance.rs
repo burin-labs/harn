@@ -58,3 +58,23 @@ fn invalid_corpus_has_stable_diagnostics() {
         );
     }
 }
+
+#[test]
+fn runtime_failure_corpus_rejects_as_documented() {
+    for case in RUNTIME_FAILURE_CASES {
+        let program = compile_program(case.source, case.entry, EntryKind::Function)
+            .unwrap_or_else(|diagnostics| panic!("{} did not compile: {diagnostics:?}", case.id));
+        let input = DataValue::from_json(serde_json::from_str(case.input_json).unwrap()).unwrap();
+        let Execution::Failed { diagnostic } = start(&program, input, &GrantSet::pure()) else {
+            panic!(
+                "{} completed; expected failure {}",
+                case.id, case.expected_code
+            )
+        };
+        assert_eq!(
+            diagnostic.code, case.expected_code,
+            "{} drifted: {}",
+            case.id, diagnostic.message
+        );
+    }
+}
