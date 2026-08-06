@@ -1,16 +1,17 @@
-//! Widening the function-type alias that fixes a value-referenced arity.
+//! Value-referenced callables migrate by wrapping the hand-over site.
 //!
-//! #6146 froze these callables; #6153 asks the tool to perform the mechanical
-//! remedy its own message describes. Every test here is either the provable
-//! case or one of the shapes that must keep the refusal — a half-sound
-//! rewriter inside an auto-applied migration is worse than declining.
+//! #6146 froze these callables; #6153 asked the tool to widen a governing
+//! `type X = fn(...)` alias when that was the only escape. Wrapping the
+//! reference as `{ args -> f(harness, args) }` is the more general repair: it
+//! keeps the alias's arity intact (including exported aliases) and covers
+//! registry list/dict hand-overs the alias pass cannot prove. Alias widening
+//! remains as a narrower path when it still fires; these tests lock the
+//! wrap-first behavior the fleet needs.
 
 use super::*;
 
-/// The shape from the issue. `resolve_thing` owns the ambient capability use,
-/// its only value read is `run`'s parameter default, and the parameter's type
-/// is a local `fn(...)` alias — so the alias, the definition, and the dispatch
-/// can all move together.
+/// The shape from #6153. `resolve_thing` owns the ambient capability use and
+/// escapes through a parameter default typed by a local `fn(...)` alias.
 const PROVABLE: &str = concat!(
     "type ResolverFn = fn(string) -> string\n",
     "\n",
@@ -37,81 +38,123 @@ fn migrate(source: &str) -> String {
     fs::read_to_string(&script).unwrap()
 }
 
+fn assert_resolve_thing_gained_carrier(migrated: &str) {
+    let params = callable_params(migrated, "resolve_thing");
+    assert!(
+        params.len() >= 2 && params.last() == Some(&param("request", "string")),
+        "resolve_thing must gain a carrier and keep request: {migrated}"
+    );
+}
+
 #[test]
-fn the_alias_the_definition_and_the_dispatch_move_together() {
+fn the_hand_over_is_wrapped_and_the_body_gains_its_carrier() {
     let migrated = migrate(PROVABLE);
+    assert_resolve_thing_gained_carrier(&migrated);
     assert!(
-        migrated.contains("type ResolverFn = fn(Harness, string) -> string"),
-        "the alias must widen: {migrated}"
+        migrated.contains("{ request -> resolve_thing("),
+        "the parameter-default hand-over must be wrapped: {migrated}"
     );
+    // The alias keeps the pre-migration arity — the closure is what matches it.
     assert!(
-        migrated.contains("fn resolve_thing(harness: Harness, request: string)"),
-        "the definition must widen: {migrated}"
-    );
-    // The one the sketch omitted. A value call's arity is not checked
-    // statically, so leaving this behind produces a program that passes
-    // `harn check` and then fails at run time with `Arity mismatch`.
-    assert!(
-        migrated.contains("return resolver(harness, \"q\")"),
-        "the dispatch must gain the capability argument: {migrated}"
+        migrated.contains("type ResolverFn = fn(string) -> string"),
+        "wrapping must not force the alias to move: {migrated}"
     );
 }
 
-/// An exported alias can be named by a file this pass never saw.
+/// An exported alias can be named by a file this pass never saw. Wrapping
+/// keeps its arity, so the migration can still proceed.
 #[test]
-fn an_exported_alias_keeps_the_refusal() {
+fn an_exported_alias_is_preserved_by_the_wrap() {
     let source = PROVABLE.replace("type ResolverFn", "pub type ResolverFn");
-    assert_eq!(migrate(&source), source, "an exported alias must not move");
+    let migrated = migrate(&source);
+    assert_resolve_thing_gained_carrier(&migrated);
+    assert!(
+        migrated.contains("pub type ResolverFn = fn(string) -> string"),
+        "exported alias arity must be preserved: {migrated}"
+    );
+    assert!(
+        migrated.contains("{ request -> resolve_thing("),
+        "hand-over must be wrapped: {migrated}"
+    );
 }
 
-/// A second parameter typed by the alias whose default is not a migrating
-/// callable would be retyped without the migration ever reasoning about it.
+/// A second parameter typed by the alias is safe under wrap: the alias arity
+/// never moves, so `other(pick: ResolverFn)` keeps type-checking.
 #[test]
-fn a_second_use_of_the_alias_keeps_the_refusal() {
+fn a_second_use_of_the_alias_still_typechecks_after_wrap() {
     let source = PROVABLE.replace(
         "pub fn run(",
         "fn other(pick: ResolverFn) -> string {\n  return pick(\"z\")\n}\n\npub fn run(",
     );
-    assert_eq!(
-        migrate(&source),
-        source,
-        "an unaccounted alias use must not move"
+    let migrated = migrate(&source);
+    assert_resolve_thing_gained_carrier(&migrated);
+    assert!(
+        migrated.contains("fn other(pick: ResolverFn)"),
+        "sibling alias use must be untouched: {migrated}"
     );
 }
 
-/// A value read outside a parameter default is a dispatch this pass cannot
-/// follow — exactly the case #6146 froze.
+/// A registry list hand-over is the burin-code shape — wrap it.
 #[test]
-fn a_value_read_outside_a_parameter_default_keeps_the_refusal() {
+fn a_value_read_outside_a_parameter_default_is_wrapped() {
     let source = PROVABLE.replace(
         "pub fn run(",
-        "fn registry() -> list {\n  return [resolve_thing]\n}\n\npub fn run(",
+        "fn registry(harness: Harness) -> list {\n  return [resolve_thing]\n}\n\npub fn run(",
     );
-    assert_eq!(migrate(&source), source, "an escaping value must not move");
-}
-
-/// Nothing in scope can supply the capability the widened dispatch needs.
-#[test]
-fn a_dispatch_with_no_harness_in_scope_keeps_the_refusal() {
-    let source = PROVABLE.replace(
-        "pub fn run(harness: Harness, resolver:",
-        "pub fn run(resolver:",
+    let migrated = migrate(&source);
+    assert_resolve_thing_gained_carrier(&migrated);
+    assert!(
+        migrated.contains("{ request -> resolve_thing("),
+        "registry hand-over must be wrapped: {migrated}"
     );
-    assert_eq!(
-        migrate(&source),
-        source,
-        "a dispatch with no capability to pass must not move"
+    assert!(
+        !migrated.contains("return [resolve_thing]"),
+        "bare list hand-over must not survive: {migrated}"
     );
 }
 
-/// The refusal is still reported, not silent — #6219's frozen list must name
-/// the callable in every shape above.
+/// When the only container has no way to receive a harness (host entry), the
+/// wrap is refused and the freeze names the escape site.
 #[test]
-fn a_refused_widening_is_still_reported_as_frozen() {
+fn a_host_entry_container_keeps_the_refusal() {
+    let source = concat!(
+        "@host_entry\n",
+        "pub fn run(resolver: ResolverFn = resolve_thing) -> string {\n",
+        "  return resolver(\"q\")\n",
+        "}\n",
+        "\n",
+        "type ResolverFn = fn(string) -> string\n",
+        "\n",
+        "fn resolve_thing(request: string) -> string {\n",
+        "  return read_text(request)\n",
+        "}\n",
+    );
+    let migrated = migrate(source);
+    assert!(
+        migrated.contains("fn resolve_thing(request: string)"),
+        "host-entry container must leave the callee frozen: {migrated}"
+    );
+}
+
+/// The refusal is still reported, not silent — the frozen list must name the
+/// callable when the wrap cannot proceed.
+#[test]
+fn a_refused_wrap_is_still_reported_as_frozen() {
     let temp = tempfile::TempDir::new().unwrap();
     fs::write(
         temp.path().join("app.harn"),
-        PROVABLE.replace("type ResolverFn", "pub type ResolverFn"),
+        concat!(
+            "@host_entry\n",
+            "pub fn run(resolver: ResolverFn = resolve_thing) -> string {\n",
+            "  return resolver(\"q\")\n",
+            "}\n",
+            "\n",
+            "type ResolverFn = fn(string) -> string\n",
+            "\n",
+            "fn resolve_thing(request: string) -> string {\n",
+            "  return read_text(request)\n",
+            "}\n",
+        ),
     )
     .unwrap();
 
@@ -126,15 +169,14 @@ fn a_refused_widening_is_still_reported_as_frozen() {
         plan.frozen_callables
             .iter()
             .any(|frozen| frozen.name == "resolve_thing"),
-        "a refused widening must still name the frozen callable: {:?}",
+        "a refused wrap must still name the frozen callable: {:?}",
         plan.frozen_callables
     );
 }
 
-/// The provable case must NOT be reported as frozen — the report is a
-/// blocked-here signal, and a widened callable is not blocked.
+/// A successfully wrapped callable must NOT be reported as frozen.
 #[test]
-fn a_widened_callable_is_not_reported_as_frozen() {
+fn a_wrapped_callable_is_not_reported_as_frozen() {
     let temp = tempfile::TempDir::new().unwrap();
     fs::write(temp.path().join("app.harn"), PROVABLE).unwrap();
 
@@ -147,7 +189,7 @@ fn a_widened_callable_is_not_reported_as_frozen() {
 
     assert!(
         plan.frozen_callables.is_empty(),
-        "a widened callable must not be reported as frozen: {:?}",
+        "a wrapped callable must not be reported as frozen: {:?}",
         plan.frozen_callables
     );
 }

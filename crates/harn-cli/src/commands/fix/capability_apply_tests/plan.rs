@@ -112,6 +112,7 @@ fn capability_plan_repairs_imported_helpers_without_type_diagnostics() {
         &[],
         &BTreeSet::new(),
         &Default::default(),
+        &mut Vec::new(),
     )
     .unwrap();
 
@@ -144,6 +145,7 @@ fn capability_plan_repairs_imported_helpers_without_type_diagnostics() {
         &[],
         &BTreeSet::new(),
         &Default::default(),
+        &mut Vec::new(),
     )
     .unwrap();
     assert!(
@@ -170,6 +172,7 @@ fn capability_plan_preserves_explicit_imported_capability_expressions() {
         &[],
         &BTreeSet::new(),
         &Default::default(),
+        &mut Vec::new(),
     )
     .unwrap();
 
@@ -197,6 +200,7 @@ fn capability_plan_preserves_an_unknown_capability_identifier_when_ordinary_args
         &[],
         &BTreeSet::new(),
         &Default::default(),
+        &mut Vec::new(),
     )
     .unwrap();
 
@@ -233,6 +237,7 @@ fn capability_plan_uses_inferred_capability_types_to_repair_a_different_missing_
         &[],
         &BTreeSet::new(),
         &Default::default(),
+        &mut Vec::new(),
     )
     .unwrap();
 
@@ -263,6 +268,7 @@ fn capability_plan_disambiguates_shadowed_inferred_bindings_by_declaration() {
         &[],
         &BTreeSet::new(),
         &Default::default(),
+        &mut Vec::new(),
     )
     .unwrap();
 
@@ -295,6 +301,7 @@ fn capability_plan_completes_a_partial_imported_capability_prefix() {
         &[],
         &BTreeSet::new(),
         &Default::default(),
+        &mut Vec::new(),
     )
     .unwrap();
     let edits = repairs
@@ -338,6 +345,7 @@ fn capability_plan_completes_a_partial_imported_capability_prefix() {
             &[],
             &BTreeSet::new(),
             &Default::default(),
+            &mut Vec::new(),
         )
         .unwrap()
         .is_empty(),
@@ -369,6 +377,7 @@ fn capability_plan_resolves_private_imported_capability_aliases() {
         &[],
         &BTreeSet::new(),
         &Default::default(),
+        &mut Vec::new(),
     )
     .unwrap();
 

@@ -39,9 +39,10 @@ pub(super) fn print_human_plan(plan: &RepairPlan) {
 
 /// Name what the migration could not re-sign.
 ///
-/// Without this a frozen owner aborts the file's whole repair and the run
-/// prints `no repairable diagnostics found` — which reads as "nothing to do"
-/// rather than "blocked here" (#6153).
+/// Without this a frozen owner aborts *its* repair and the run can print
+/// `no repairable diagnostics found` when every ambient use sat in frozen
+/// callables — which reads as "nothing to do" rather than "blocked here"
+/// (#6153). Sibling callables still migrate as their own repairs.
 pub(super) fn print_frozen_callables(frozen: &[FrozenCallableWire]) {
     if frozen.is_empty() {
         return;

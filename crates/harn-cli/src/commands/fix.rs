@@ -35,6 +35,8 @@ mod value_escape;
 use value_escape::{FrozenCallable, FrozenCause, ValueEscape};
 #[path = "fix/repair_synthesis.rs"]
 mod repair_synthesis;
+#[path = "fix/value_wrap.rs"]
+mod value_wrap;
 use repair_synthesis::{
     synthesize_ambient_capability_repair, synthesize_missing_capability_argument_repair,
     synthesize_missing_harness_repair, synthesize_missing_root_argument_repair,
@@ -65,7 +67,7 @@ use apply::{
 use reporting::{print_apply_result, print_human_plan, skipped_files_error};
 use signature_threading::{
     add_call_argument_edit, add_harness_param_edit, build_reverse_callers, collect_callable_infos,
-    collect_value_references, harness_param_name_for_insert, propagate_harness_requirements,
+    harness_param_name_for_insert, propagate_harness_requirements,
     repair_for_ambient_capability_plan,
 };
 use wire::*;
@@ -97,10 +99,17 @@ struct CallableInfo {
     insert_offset: usize,
     has_params: bool,
     bound_names: BTreeSet<String>,
+    /// Parameter names in declaration order. The wrap that preserves a
+    /// value-referenced callable's observable arity uses this list (#6146).
+    param_names: Vec<String>,
     harness_binding: Option<String>,
+    /// Declared `@host_entry` (#6193). Distinct from [`Self::frozen_cause`]: a
+    /// host entry that is also value-referenced still must not gain a parameter
+    /// the host was never asked to pass.
+    is_host_entry: bool,
     /// Set when something outside the fixer's view calls this at its declared
     /// arity, so a `harness` parameter must not be introduced. `None` is the
-    /// ordinary case.
+    /// ordinary case — or the case the wrap pass can repair.
     frozen_cause: Option<FrozenCause>,
     /// The edits that must land with this callable's new parameter when its
     /// arity is fixed by a `type X = fn(...)` the migration may move: the alias
@@ -398,8 +407,10 @@ fn build_plan_with_options(
     // A callable whose value is read as a first-class reference is invoked at
     // its declared arity through a call site no per-file pass can see — a
     // registry entry in one module dispatching a handler defined in another.
-    // Collect those names across the whole program before planning any file.
+    // Collect those names (and their hand-over sites) across the whole program
+    // before planning any file.
     let mut referenced_by_value = BTreeSet::new();
+    let mut escape_sites: BTreeMap<String, Vec<(String, usize)>> = BTreeMap::new();
     for file in &files {
         let Ok(source) = std::fs::read_to_string(file) else {
             continue;
@@ -407,9 +418,17 @@ fn build_plan_with_options(
         let Ok(program) = harn_parser::parse_source(&source) else {
             continue;
         };
-        collect_value_references(&program, &mut referenced_by_value);
+        let file_label = file.to_string_lossy().into_owned();
+        for site in signature_threading::collect_value_reference_sites(&program) {
+            referenced_by_value.insert(site.name.clone());
+            escape_sites
+                .entry(site.name)
+                .or_default()
+                .push((file_label.clone(), site.span.line));
+        }
     }
     let referenced_by_value = &referenced_by_value;
+    let escape_sites = &escape_sites;
     // The same fact as a value reference, arrived at from the opposite
     // direction: `harn.toml` names the callables the runtime enters, so the
     // registration is visible — it just is not a call site (#6272).
@@ -435,6 +454,7 @@ fn build_plan_with_options(
             &mut candidates,
             &mut ValueEscape {
                 referenced_by_value,
+                escape_sites,
                 manifest_handlers: manifest_host_entries.names_for(file),
                 frozen: &mut frozen_callables,
             },
@@ -472,6 +492,7 @@ fn build_plan_with_options(
         &candidates,
         referenced_by_value,
         &manifest_host_entries,
+        &mut frozen_callables,
     )?;
     if !whole_program_repairs.is_empty() {
         // `--code` narrows what this pass *does*, not what it *saw*: the plan
