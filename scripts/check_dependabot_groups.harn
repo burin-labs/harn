@@ -5,7 +5,6 @@ import "std/schema"
 // styles, lockfile coverage, cargo directory scope, frozen override ceilings)
 // are owned by burin-labs/.github `check-dependabot-config` and run in CI
 // without a Harn binary. Do not re-implement those here.
-
 type DependabotGroup = {
   patterns: list<string>,
   exclude_patterns: list<string>,
