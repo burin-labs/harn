@@ -184,7 +184,7 @@ impl AgentLifecycleState {
             if state.wire_name() == trimmed {
                 return Some(state);
             }
-            if state.aliases().iter().any(|alias| *alias == trimmed) {
+            if state.aliases().contains(&trimmed) {
                 return Some(state);
             }
         }
