@@ -133,10 +133,7 @@ fn ambient_harness_method_entries() -> Vec<&'static harn_builtin_registry::Built
     // owners as ambiguous (two identical matches), which breaks ambient check.
     let installed = harn_builtin_registry::installed_manifest();
     if installed.is_empty() {
-        harn_capability_contracts::manifest()
-            .iter()
-            .copied()
-            .collect()
+        harn_capability_contracts::manifest().to_vec()
     } else {
         installed
     }
