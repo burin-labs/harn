@@ -1133,30 +1133,13 @@ fn hosted_compile_lane_errors(workflow, job_name: string) -> list<string> {
     }
   }
   const caches = matching_steps(job, RUST_CACHE_ACTION)
-  // Post-merge refresh writes both Linux merge-gate keys in one job (#5003).
-  const expected_cache_count = if job_name == "rust-cache-refresh" {
-    2
-  } else {
-    1
-  }
-  if len(caches) != expected_cache_count {
+  if len(caches) != 1 {
+    errors = errors + ["ci.yml:${job_name} must configure ${RUST_CACHE_ACTION} exactly once"]
+  } else if trim(caches[0]?.if ?? "") != "" {
     errors = errors
       + [
-      if job_name == "rust-cache-refresh" {
-        "ci.yml:${job_name} must configure ${RUST_CACHE_ACTION} twice (workspace-tests + package-audit)"
-      } else {
-        "ci.yml:${job_name} must configure ${RUST_CACHE_ACTION} exactly once"
-      },
+      "ci.yml:${job_name} must restore rust-cache unconditionally, not behind a runner tier",
     ]
-  } else {
-    for cache in caches {
-      if trim(cache?.if ?? "") != "" {
-        errors = errors
-          + [
-          "ci.yml:${job_name} must restore rust-cache unconditionally, not behind a runner tier",
-        ]
-      }
-    }
   }
   if CI_CACHE_WRITE_JOBS.contains(job_name)
     && trim(job?.permissions?.actions ?? "")
@@ -1179,23 +1162,29 @@ fn rust_cache_refresh_errors(workflow) -> list<string> {
       "ci.yml:rust-cache-refresh must run only when changes.outputs.rust_cache_refresh is true",
     ]
   }
-  const caches = matching_steps(job, RUST_CACHE_ACTION)
-  let cache_keys: list<string> = []
-  for cache in caches {
-    cache_keys = cache_keys + [trim(cache?.with?.["shared-key"] ?? "")]
+  // Matrix legs write each Linux merge-gate key with that lane's env fingerprint.
+  let matrix_keys: list<string> = []
+  for entry in job?.strategy?.matrix?.include ?? [] {
+    matrix_keys = matrix_keys + [trim(entry?.cache_key ?? "")]
   }
-  if len(caches) != 2
-    || !save_requested(caches[0])
-    || !save_requested(caches[1]) {
+  if !matrix_keys.contains("workspace-tests") || !matrix_keys.contains("package-audit") {
     errors = errors
       + [
-      "ci.yml:rust-cache-refresh must authorize workspace-tests and package-audit rust-cache saves",
+      "ci.yml:rust-cache-refresh must matrix-write workspace-tests and package-audit cache keys",
     ]
-  } else if !cache_keys.contains("workspace-tests")
-    || !cache_keys.contains("package-audit") {
+  }
+  const caches = matching_steps(job, RUST_CACHE_ACTION)
+  if len(caches) != 1 || !save_requested(caches[0]) {
+    errors = errors
+      + ["ci.yml:rust-cache-refresh must authorize a matrix rust-cache save"]
+  } else if !contains(trim(caches[0]?.with?.["shared-key"] ?? ""), "matrix.cache_key") {
+    errors = errors
+      + ["ci.yml:rust-cache-refresh must bind rust-cache shared-key to matrix.cache_key"]
+  }
+  if contains(to_string(job?.env ?? {}), "CARGO_BUILD_JOBS") {
     errors = errors
       + [
-      "ci.yml:rust-cache-refresh must write the shared workspace-tests and package-audit cache keys",
+      "ci.yml:rust-cache-refresh must not set job-level CARGO_BUILD_JOBS (breaks Swatinem key parity)",
     ]
   }
   const headroom = step_by_name(job?.steps ?? [], "Reserve cache headroom for Linux CI")
@@ -1203,16 +1192,10 @@ fn rust_cache_refresh_errors(workflow) -> list<string> {
     errors = errors
       + ["ci.yml:rust-cache-refresh must reserve Actions cache headroom before saving"]
   }
-  const warm = step_by_name(job?.steps ?? [], "Warm shared Cargo graph")
-  if !contains(trim(warm?.run ?? ""), "warm_rust_cache.sh") {
-    errors = errors + ["ci.yml:rust-cache-refresh must warm through scripts/ci/warm_rust_cache.sh"]
-  }
-  const warm_audit = step_by_name(job?.steps ?? [], "Warm package-audit Cargo graph")
-  if !contains(trim(warm_audit?.run ?? ""), "warm_package_audit_cache.sh") {
+  const warm = step_by_name(job?.steps ?? [], "Warm Cargo graph")
+  if !contains(trim(warm?.run ?? ""), "matrix.warm_script") {
     errors = errors
-      + [
-      "ci.yml:rust-cache-refresh must warm package-audit through scripts/ci/warm_package_audit_cache.sh",
-    ]
+      + ["ci.yml:rust-cache-refresh must warm through matrix.warm_script"]
   }
   return errors
 }
@@ -1435,10 +1418,23 @@ pub fn ci_cache_policy_errors(
         }
         if uses == policy.rust_cache_action && save_requested(step) {
           const shared_key = trim(step?.with?.["shared-key"] ?? "")
-          const writer = writer_key(workflow, job, shared_key)
-          observed_writers = observed_writers + [writer]
-          if !writer_allowed(policy, workflow, job, shared_key) {
-            errors = errors + ["${writer} is not an authorized persistent cache writer"]
+          // Expand matrix.cache_key writers (rust-cache-refresh dual Linux keys).
+          let expanded_keys: list<string> = [shared_key]
+          if contains(shared_key, "matrix.cache_key") {
+            expanded_keys = []
+            for entry in jobs[job]?.strategy?.matrix?.include ?? [] {
+              const matrix_key = trim(entry?.cache_key ?? "")
+              if matrix_key != "" {
+                expanded_keys = expanded_keys + [matrix_key]
+              }
+            }
+          }
+          for key in expanded_keys {
+            const writer = writer_key(workflow, job, key)
+            observed_writers = observed_writers + [writer]
+            if !writer_allowed(policy, workflow, job, key) {
+              errors = errors + ["${writer} is not an authorized persistent cache writer"]
+            }
           }
         }
         const pruning_requested = lowercase(
