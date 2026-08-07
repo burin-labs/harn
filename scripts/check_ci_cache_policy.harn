@@ -1134,7 +1134,11 @@ fn hosted_compile_lane_errors(workflow, job_name: string) -> list<string> {
   }
   const caches = matching_steps(job, RUST_CACHE_ACTION)
   // Post-merge refresh writes both Linux merge-gate keys in one job (#5003).
-  const expected_cache_count = if job_name == "rust-cache-refresh" { 2 } else { 1 }
+  const expected_cache_count = if job_name == "rust-cache-refresh" {
+    2
+  } else {
+    1
+  }
   if len(caches) != expected_cache_count {
     errors = errors
       + [

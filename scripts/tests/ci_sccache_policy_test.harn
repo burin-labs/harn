@@ -111,10 +111,7 @@ fn workflow() {
             with: {"shared-key": "package-audit", save: "true"},
           },
           {name: "Warm shared Cargo graph", run: "./scripts/ci/warm_rust_cache.sh"},
-          {
-            name: "Warm package-audit Cargo graph",
-            run: "./scripts/ci/warm_package_audit_cache.sh",
-          },
+          {name: "Warm package-audit Cargo graph", run: "./scripts/ci/warm_package_audit_cache.sh"},
         ],
       },
       "rust-test": rust_test,
