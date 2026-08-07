@@ -8,12 +8,22 @@ fn gha_expression(body: string) -> string {
  * A Linux compile lane as #6017 leaves it: one runner, one unconditional
  * cache, and no trace of the retired sccache daemon.
  */
-fn hosted_lane(cache_key: string) {
-  return {
+fn hosted_lane(cache_key: string, write_cache: bool = false) {
+  let lane = {
     "runs-on": "ubuntu-latest",
     env: {HARN_RUNNER_TIER: "github-hosted"},
     steps: [{uses: "./.github/actions/rust-cache", with: {"shared-key": cache_key}}],
   }
+  if write_cache {
+    lane = {
+      ...lane,
+      permissions: {contents: "read", actions: "write"},
+      steps: [
+        {uses: "./.github/actions/rust-cache", with: {"shared-key": cache_key, save: "true"}},
+      ],
+    }
+  }
+  return lane
 }
 
 fn workflow() {
@@ -44,10 +54,11 @@ fn workflow() {
   }
   return {
     jobs: {
-      "package-audit": hosted_lane("package-audit"),
+      "package-audit": hosted_lane("package-audit", true),
       "rust-check-inputs": hosted_lane("rust-check-inputs"),
       "rust-checks": {
         ...rust_with_flags,
+        permissions: {contents: "read", actions: "write"},
         strategy: {
           matrix: {
             include: [
@@ -79,6 +90,19 @@ fn workflow() {
             run:
               "scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --profile ci -E 'not test(landlock)'",
           },
+        ],
+      },
+      "rust-cache-refresh": {
+        "runs-on": "ubuntu-latest",
+        if: "needs.changes.outputs.rust_cache_refresh == 'true'",
+        permissions: {contents: "read", actions: "write"},
+        env: {HARN_RUNNER_TIER: "github-hosted"},
+        steps: [
+          {
+            uses: "./.github/actions/rust-cache",
+            with: {"shared-key": "workspace-tests", save: "true"},
+          },
+          {name: "Warm shared Cargo graph", run: "./scripts/ci/warm_rust_cache.sh"},
         ],
       },
       "rust-test": rust_test,
@@ -135,6 +159,36 @@ fn windows_cache_pair() {
 @test
 pipeline test_accepts_single_rung_hosted_linux_lanes(harness: Harness, task) {
   assert_eq(ci_linux_lane_policy_errors(workflow()), [])
+}
+
+@test
+pipeline test_rejects_cache_writer_without_actions_write(harness: Harness, task) {
+  const valid = workflow()
+  const invalid = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "rust-cache-refresh": {...valid.jobs["rust-cache-refresh"], permissions: {contents: "read"}},
+    },
+  }
+  const errors = ci_linux_lane_policy_errors(invalid)
+  assert(
+    errors.contains("ci.yml:rust-cache-refresh must grant actions: write to persist rust-cache"),
+  )
+}
+
+@test
+pipeline test_rejects_missing_main_scoped_cache_refresh(harness: Harness, task) {
+  const valid = workflow()
+  let jobs = {}
+  for {key: name, value: job} in valid.jobs {
+    if name != "rust-cache-refresh" {
+      jobs[name] = job
+    }
+  }
+  const errors = ci_linux_lane_policy_errors({...valid, jobs: jobs})
+  assert(errors.contains("ci.yml:rust-cache-refresh must define the hosted Linux compile lane"))
+  assert(errors.contains("ci.yml:rust-cache-refresh must define the main-scoped cache writer"))
 }
 
 @test

@@ -119,7 +119,18 @@ const RUST_CACHE_ACTION = "./.github/actions/rust-cache"
 
 // The Linux lanes that compile Rust. Each restores the coarse rust-cache and
 // nothing else.
-const HOSTED_COMPILE_LANES = ["package-audit", "rust-checks", "rust-check-inputs"]
+const HOSTED_COMPILE_LANES = [
+  "package-audit",
+  "rust-checks",
+  "rust-check-inputs",
+  "rust-cache-refresh",
+]
+
+// Authorized ci.yml cache writers must grant actions: write. The workflow
+// top-level token is contents/read-only; without a job-level grant, Swatinem
+// save fails under continue-on-error and the Linux workspace-tests cache stays
+// empty (#5003).
+const CI_CACHE_WRITE_JOBS = ["package-audit", "rust-checks", "rust-cache-refresh"]
 
 // Sizing and port for the host-owned sccache daemon the retired rungs ran.
 // A hosted runner starts no daemon, so carrying these would configure nothing.
@@ -1130,6 +1141,39 @@ fn hosted_compile_lane_errors(workflow, job_name: string) -> list<string> {
       "ci.yml:${job_name} must restore rust-cache unconditionally, not behind a runner tier",
     ]
   }
+  if CI_CACHE_WRITE_JOBS.contains(job_name)
+    && trim(job?.permissions?.actions ?? "")
+    != "write" {
+    errors = errors + ["ci.yml:${job_name} must grant actions: write to persist rust-cache"]
+  }
+  return errors
+}
+
+/** Keep the post-merge main-scoped cache refresher wired to proof reuse. */
+fn rust_cache_refresh_errors(workflow) -> list<string> {
+  const job = workflow?.jobs?.["rust-cache-refresh"]
+  if job == nil {
+    return ["ci.yml:rust-cache-refresh must define the main-scoped cache writer"]
+  }
+  let errors: list<string> = []
+  if trim(job?.if ?? "") != "needs.changes.outputs.rust_cache_refresh == 'true'" {
+    errors = errors
+      + [
+      "ci.yml:rust-cache-refresh must run only when changes.outputs.rust_cache_refresh is true",
+    ]
+  }
+  const caches = matching_steps(job, RUST_CACHE_ACTION)
+  if len(caches) != 1 || !save_requested(caches[0]) {
+    errors = errors
+      + ["ci.yml:rust-cache-refresh must authorize a workspace-tests rust-cache save"]
+  } else if trim(caches[0]?.with?.["shared-key"] ?? "") != "workspace-tests" {
+    errors = errors
+      + ["ci.yml:rust-cache-refresh must write the shared workspace-tests cache key"]
+  }
+  const warm = step_by_name(job?.steps ?? [], "Warm shared Cargo graph")
+  if !contains(trim(warm?.run ?? ""), "warm_rust_cache.sh") {
+    errors = errors + ["ci.yml:rust-cache-refresh must warm through scripts/ci/warm_rust_cache.sh"]
+  }
   return errors
 }
 
@@ -1306,6 +1350,7 @@ pub fn ci_linux_lane_policy_errors(workflow) -> list<string> {
   }
   errors = errors + archived_workspace_test_consumer_errors(workflow, "rust-test")
   errors = errors + colocated_rust_proof_errors(workflow)
+  errors = errors + rust_cache_refresh_errors(workflow)
   for {key: job_name, value: job} in workflow?.jobs ?? {} {
     if len(matching_steps(job, RETIRED_SCCACHE_ACTION)) > 0 {
       errors = errors
