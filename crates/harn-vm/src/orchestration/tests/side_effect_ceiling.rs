@@ -5,8 +5,8 @@ use crate::tool_annotations::{SideEffectLevel, ToolAnnotations};
 
 use super::super::tool_enforcement::enforce_current_policy_for_tool_with_side_effect_grant;
 use super::super::{
-    enforce_current_policy_for_builtin, enforce_current_policy_for_capability,
-    enforce_current_policy_for_tool,
+    allow_trusted_bridge_calls, enforce_current_policy_for_builtin,
+    enforce_current_policy_for_capability, enforce_current_policy_for_tool,
     enforce_current_policy_for_tool_with_annotations_and_side_effect_grant, pop_execution_policy,
     push_execution_policy, CapabilityPolicy,
 };
@@ -140,5 +140,40 @@ fn dispatch_catalog_annotations_fill_an_unannotated_mode_ceiling() {
             .expect("typed side-effect details")
             .required_level,
         SideEffectLevel::ProcessExec
+    );
+}
+
+#[test]
+fn trusted_bridge_depth_exempts_harness_state_reads_like_bridged_builtins() {
+    // Tool execution policies often omit `state.read`. Manifest PreToolUse
+    // hooks still need session/store reads; invoke_vm_hook_handler raises
+    // trusted-bridge depth for exactly that class of first-party entry.
+    push_execution_policy(CapabilityPolicy {
+        capabilities: BTreeMap::from([("workspace".to_string(), vec!["read_text".to_string()])]),
+        ..Default::default()
+    });
+
+    let denied = enforce_current_policy_for_capability(
+        harn_builtin_meta::CapabilityId::Runtime,
+        "store_get",
+        &[crate::value::VmValue::String(
+            "burin.hooks.current_session_id".into(),
+        )],
+    );
+    assert!(
+        denied.is_err(),
+        "restricted capabilities without state:read must deny store_get"
+    );
+
+    let _trusted = allow_trusted_bridge_calls();
+    let allowed = enforce_current_policy_for_capability(
+        harn_builtin_meta::CapabilityId::Agent,
+        "current_id",
+        &[],
+    );
+    pop_execution_policy();
+    assert!(
+        allowed.is_ok(),
+        "trusted bridge depth must exempt harness methods the same way it exempts bridged builtins"
     );
 }
