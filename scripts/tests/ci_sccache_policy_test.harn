@@ -96,7 +96,15 @@ fn workflow() {
         "runs-on": "ubuntu-latest",
         if: "needs.changes.outputs.rust_cache_refresh == 'true'",
         permissions: {contents: "read", actions: "write"},
-        env: {HARN_RUNNER_TIER: "github-hosted"},
+        env: {HARN_RUNNER_TIER: "github-hosted", RUSTFLAGS: gha_expression("matrix.rustflags")},
+        strategy: {
+          matrix: {
+            include: [
+              {cache_key: "workspace-tests", warm_script: "./scripts/ci/warm_rust_cache.sh"},
+              {cache_key: "package-audit", warm_script: "./scripts/ci/warm_package_audit_cache.sh"},
+            ],
+          },
+        },
         steps: [
           {
             name: "Reserve cache headroom for Linux CI",
@@ -104,9 +112,9 @@ fn workflow() {
           },
           {
             uses: "./.github/actions/rust-cache",
-            with: {"shared-key": "workspace-tests", save: "true"},
+            with: {"shared-key": gha_expression("matrix.cache_key"), save: "true"},
           },
-          {name: "Warm shared Cargo graph", run: "./scripts/ci/warm_rust_cache.sh"},
+          {name: "Warm Cargo graph", run: gha_expression("matrix.warm_script")},
         ],
       },
       "rust-test": rust_test,
