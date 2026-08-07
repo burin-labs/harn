@@ -170,6 +170,17 @@ pub(super) fn collect_callable_infos(
             _ => {}
         }
     }
+    // Syntax alone identifies bare retired-builtin calls, but a callable in
+    // this file wins name resolution over that ambient fallback. Normalize the
+    // collected facts here so every repair planner sees the resolved meaning.
+    let local_callable_names = infos
+        .iter()
+        .map(|info| info.name.clone())
+        .collect::<BTreeSet<_>>();
+    for info in &mut infos {
+        info.ambient_capability_calls
+            .retain(|call| !local_callable_names.contains(&call.name));
+    }
     infos
 }
 
