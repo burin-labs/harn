@@ -288,8 +288,9 @@ jobs:
             # rust-cache save-if is hard-gated to refs/heads/main, and GHA cache
             # entries are scoped to the writing ref. Exact-SHA proof reuse skips
             # the compile lanes on main, so without a dedicated refresher the
-            # shared Linux workspace-tests cache never receives a main-scoped
-            # write and every merge_group compiles from a cold (or missing) restore.
+            # shared Linux workspace-tests / package-audit caches never receive
+            # a main-scoped write and every merge_group compiles from a cold
+            # (or missing) restore.
             if [ "${F_RUST}" = "true" ]; then
               rust_cache_refresh=true
               echo "::notice::changes: scheduling main-scoped Rust cache refresh for the next merge_group"
@@ -637,20 +638,22 @@ jobs:
   # Post-merge main-scoped cache writer. merge_group builds are the required
   # proofs but cannot populate a cache other refs can read; main push would
   # normally save, but exact-SHA proof reuse skips those compile lanes. This
-  # job restores → warms → saves the shared workspace-tests key so the next
-  # merge_group is not forced through a cold Linux compile (#5003).
+  # job restores → warms → saves the shared workspace-tests and package-audit
+  # keys so the next merge_group is not forced through cold Linux compiles
+  # (#5003).
   rust-cache-refresh:
     name: Refresh Rust cache
     needs: [changes]
     if: needs.changes.outputs.rust_cache_refresh == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # Both Linux merge-gate graphs (workspace-tests + package-audit) warm here
+    # when exact-SHA proof reuse skips their writer lanes on main.
+    timeout-minutes: 45
     permissions:
       contents: read
       actions: write
     env:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
-      RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
       HARN_RUNNER_TIER: github-hosted
       CARGO_BUILD_JOBS: "4"
     steps:
@@ -665,17 +668,25 @@ jobs:
           packages: mold
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
-      # Free ~1.5 GiB under the 10 GiB repo cache ceiling before Swatinem saves.
-      # Without this, release + Windows/macOS nightlies fill the pool and GitHub
-      # LRU-evicts the just-written workspace-tests entry (#5003).
+      # Free ~3 GiB under the 10 GiB repo cache ceiling before Swatinem saves
+      # both Linux merge-gate keys. Without this, release + Windows/macOS
+      # nightlies fill the pool and GitHub LRU-evicts the just-written entries
+      # (#5003).
       - name: Reserve cache headroom for Linux CI
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./scripts/prune_ci_cache_generations.sh --ensure-headroom 1610612736
+        run: ./scripts/prune_ci_cache_generations.sh --ensure-headroom 3221225472
       - uses: ./.github/actions/rust-cache
         continue-on-error: true
         with:
           shared-key: workspace-tests
+          cache-on-failure: true
+          cache-bin: false
+          save: "true"
+      - uses: ./.github/actions/rust-cache
+        continue-on-error: true
+        with:
+          shared-key: package-audit
           cache-on-failure: true
           cache-bin: false
           save: "true"
@@ -684,7 +695,13 @@ jobs:
         with:
           tool: nextest@0.9.132
       - name: Warm shared Cargo graph
+        env:
+          # Match rust-check-inputs / workspace-tests mold linkage.
+          RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
         run: ./scripts/ci/warm_rust_cache.sh
+      - name: Warm package-audit Cargo graph
+        # No mold/RUSTFLAGS: must fingerprint-match the package-audit job.
+        run: ./scripts/ci/warm_package_audit_cache.sh
 
   # FALLBACK-ONLY consumer. By default the environment-neutral suite executes
   # inside the warm Rust workspace tests leg (see rust-checks), so this job skips and

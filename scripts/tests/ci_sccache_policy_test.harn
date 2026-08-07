@@ -100,13 +100,21 @@ fn workflow() {
         steps: [
           {
             name: "Reserve cache headroom for Linux CI",
-            run: "./scripts/prune_ci_cache_generations.sh --ensure-headroom 1610612736",
+            run: "./scripts/prune_ci_cache_generations.sh --ensure-headroom 3221225472",
           },
           {
             uses: "./.github/actions/rust-cache",
             with: {"shared-key": "workspace-tests", save: "true"},
           },
+          {
+            uses: "./.github/actions/rust-cache",
+            with: {"shared-key": "package-audit", save: "true"},
+          },
           {name: "Warm shared Cargo graph", run: "./scripts/ci/warm_rust_cache.sh"},
+          {
+            name: "Warm package-audit Cargo graph",
+            run: "./scripts/ci/warm_package_audit_cache.sh",
+          },
         ],
       },
       "rust-test": rust_test,
