@@ -99,6 +99,10 @@ fn workflow() {
         env: {HARN_RUNNER_TIER: "github-hosted"},
         steps: [
           {
+            name: "Reserve cache headroom for Linux CI",
+            run: "./scripts/prune_ci_cache_generations.sh --ensure-headroom 1610612736",
+          },
+          {
             uses: "./.github/actions/rust-cache",
             with: {"shared-key": "workspace-tests", save: "true"},
           },

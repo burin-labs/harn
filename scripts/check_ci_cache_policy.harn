@@ -1170,6 +1170,11 @@ fn rust_cache_refresh_errors(workflow) -> list<string> {
     errors = errors
       + ["ci.yml:rust-cache-refresh must write the shared workspace-tests cache key"]
   }
+  const headroom = step_by_name(job?.steps ?? [], "Reserve cache headroom for Linux CI")
+  if !contains(trim(headroom?.run ?? ""), "prune_ci_cache_generations.sh --ensure-headroom") {
+    errors = errors
+      + ["ci.yml:rust-cache-refresh must reserve Actions cache headroom before saving"]
+  }
   const warm = step_by_name(job?.steps ?? [], "Warm shared Cargo graph")
   if !contains(trim(warm?.run ?? ""), "warm_rust_cache.sh") {
     errors = errors + ["ci.yml:rust-cache-refresh must warm through scripts/ci/warm_rust_cache.sh"]

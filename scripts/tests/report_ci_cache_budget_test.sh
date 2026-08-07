@@ -142,6 +142,82 @@ if grep -Eq '^cache delete (101|102) ' "$tmp/budget-prune-gh.log"; then
   exit 1
 fi
 
+# Linux merge-gate caches are protected: when Windows is the only eligible
+# resident that covers the deficit, delete it instead of workspace-tests.
+cat >"$tmp/bin/gh" <<'MOCK'
+#!/usr/bin/env bash
+set -euo pipefail
+args="$*"
+printf '%s\n' "$args" >>"$MOCK_GH_LOG"
+if [[ "$args" == *'/actions/cache/usage'* ]]; then
+  printf '{"full_name":"burin-labs/harn","active_caches_size_in_bytes":2000,"active_caches_count":3}\n'
+elif [[ "$args" == *'/actions/caches?per_page=100'* ]]; then
+  if grep -q '^cache delete 202 --repo burin-labs/harn$' "$MOCK_GH_LOG"; then
+    printf '%s\n' '[{"actions_caches":[{"id":201,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-current","size_in_bytes":1610612736},{"id":203,"ref":"refs/heads/main","key":"v0-rust-workspace-tests-Linux-x64-current","size_in_bytes":1610612736}]}]'
+  else
+    printf '%s\n' '[{"actions_caches":[{"id":201,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-current","size_in_bytes":1610612736},{"id":202,"ref":"refs/heads/main","key":"v0-rust-workspace-windows-current","size_in_bytes":3758096384},{"id":203,"ref":"refs/heads/main","key":"v0-rust-workspace-tests-Linux-x64-current","size_in_bytes":1610612736}]}]'
+  fi
+elif [[ "$args" == cache\ delete\ *\ --repo\ burin-labs/harn ]]; then
+  exit 0
+else
+  echo "unexpected gh arguments: $args" >&2
+  exit 64
+fi
+MOCK
+chmod +x "$tmp/bin/gh"
+# 5 GiB policy: release 0.4 + windows 3.0 + linux-tests 1.5 = 4.9 GiB.
+# Enforcing the budget deletes Windows and keeps the protected Linux graph.
+printf '%s\n' '{"storage_limit_bytes":5368709120}' >"$tmp/protect-policy.json"
+PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/protect-gh.log" \
+  HARN_ENFORCE_CACHE_BUDGET=1 HARN_CACHE_POLICY_PATH="$tmp/protect-policy.json" \
+  GITHUB_REPOSITORY=burin-labs/harn \
+  "$repo_root/scripts/report_ci_cache_budget.sh" >"$tmp/protect.json"
+jq -e '
+  .within_budget == true and
+  (.budget_enforcement.deleted | map(.id)) == [202]
+' "$tmp/protect.json" >/dev/null
+grep -Fxq 'cache delete 202 --repo burin-labs/harn' "$tmp/protect-gh.log"
+if grep -Eq '^cache delete (201|203) ' "$tmp/protect-gh.log"; then
+  echo "budget enforcement must preserve release and Linux workspace-tests caches" >&2
+  cat "$tmp/protect-gh.log" >&2
+  exit 1
+fi
+
+# Reserve 1.5 GiB headroom under the same 5 GiB ceiling (listed ceiling 3.5 GiB).
+PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/headroom-gh.log" \
+  HARN_CACHE_POLICY_PATH="$tmp/protect-policy.json" \
+  GITHUB_REPOSITORY=burin-labs/harn \
+  "$repo_root/scripts/prune_ci_cache_generations.sh" --ensure-headroom 1610612736 \
+  >"$tmp/headroom.json"
+jq -e '
+  .mode == "ensure_headroom" and
+  .listed_ceiling_bytes == 3758096384 and
+  (.deleted | map(.id)) == [202]
+' "$tmp/headroom.json" >/dev/null
+
+# Restore the baseline mock for the remaining authorization-failure case.
+cat >"$tmp/bin/gh" <<'MOCK'
+#!/usr/bin/env bash
+set -euo pipefail
+args="$*"
+printf '%s\n' "$args" >>"$MOCK_GH_LOG"
+if [[ "$args" == *'/actions/cache/usage'* ]]; then
+  if [[ "${MOCK_API_ERROR:-}" == "usage" ]]; then
+    echo "mock API authorization failure" >&2
+    exit 1
+  fi
+  printf '{"full_name":"burin-labs/harn","active_caches_size_in_bytes":%s,"active_caches_count":2}\n' "${MOCK_USAGE_BYTES:-3000}"
+elif [[ "$args" == *'/actions/caches?per_page=100'* ]]; then
+  printf '[{"total_count":2,"actions_caches":[{"id":1,"ref":"refs/heads/main","key":"v0-rust-release-linux","size_in_bytes":%s},{"id":2,"ref":"refs/pull/9/merge","key":"sccache/a/b/c","size_in_bytes":1000}]}]\n' "${MOCK_LISTED_RELEASE_BYTES:-2000}"
+elif [[ "$args" == cache\ delete\ *\ --repo\ burin-labs/harn ]]; then
+  exit 0
+else
+  echo "unexpected gh arguments: $args" >&2
+  exit 64
+fi
+MOCK
+chmod +x "$tmp/bin/gh"
+
 if PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/error-gh.log" MOCK_API_ERROR=usage \
   GITHUB_REPOSITORY=burin-labs/harn \
   "$repo_root/scripts/report_ci_cache_budget.sh" >"$tmp/error.json" 2>"$tmp/error.err"; then

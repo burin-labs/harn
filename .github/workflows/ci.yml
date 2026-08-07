@@ -665,6 +665,13 @@ jobs:
           packages: mold
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
+      # Free ~1.5 GiB under the 10 GiB repo cache ceiling before Swatinem saves.
+      # Without this, release + Windows/macOS nightlies fill the pool and GitHub
+      # LRU-evicts the just-written workspace-tests entry (#5003).
+      - name: Reserve cache headroom for Linux CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/prune_ci_cache_generations.sh --ensure-headroom 1610612736
       - uses: ./.github/actions/rust-cache
         continue-on-error: true
         with:
