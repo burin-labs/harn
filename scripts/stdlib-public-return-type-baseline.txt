@@ -589,7 +589,6 @@ crates/harn-stdlib/src/stdlib/agent/scratchpad.harn::agent_scratchpad_reorganize
 crates/harn-stdlib/src/stdlib/agent/scratchpad.harn::agent_scratchpad_reorganize_if_due
 crates/harn-stdlib/src/stdlib/agent/sitrep.harn::agent_sitrep
 crates/harn-stdlib/src/stdlib/agent/sitrep.harn::agent_sitrep_append
-crates/harn-stdlib/src/stdlib/agent/sitrep.harn::agent_sitrep_preferred_routes
 crates/harn-stdlib/src/stdlib/agent/skills.harn::agent_skills_match
 crates/harn-stdlib/src/stdlib/agent/stall_config.harn::__agent_stall_closure
 crates/harn-stdlib/src/stdlib/agent/stall_config.harn::__agent_stall_opt_int

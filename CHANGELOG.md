@@ -9,6 +9,40 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.63
+
+### Breaking
+
+- LLM calls now reject caller-selected portable generation and prompt-cache
+  options that the resolved provider/model route cannot represent, instead of
+  silently dropping them in individual adapters. The terminal `invalid_request`
+  is raised before rate limiting or provider transport; custom cache routes must
+  declare prompt-cache support and selectable TTL values.
+
+### Fixed
+
+- Provider catalogs now identify an automatic model only through a reviewed,
+  measured eligibility receipt. The bundled automatic route uses the 100-trial
+  Burin meter holdout for Fireworks GPT-OSS 120B, and catalog validation rejects
+  missing, malformed, or ambiguous automatic defaults.
+- **Workflow-scoped agent loops can initialize under an `llm.call`-only
+  capability ceiling (#6314).** Model and provider configuration reads now
+  use the LLM catalog effect, while the runtime-owned context and current
+  session reads declare a bounded `llm.call` authorization. Generic state
+  reads remain denied and every infrastructure read remains visible in effect
+  receipts.
+- Diagnostic excerpts no longer panic on non-ASCII text. Orchestration payload
+  parse errors, daemon trigger/event summaries, and `harn agents conformance`
+  response-body quotes cut their excerpt on a byte index, so any multi-byte
+  character straddling the limit aborted the process on the exact path that
+  exists to report bad input. Every excerpt now goes through
+  `harn_vm::text::truncate`, the one owner of shortening-with-a-marker, which
+  cuts on character boundaries and charges the `…` against the caller's stated
+  ceiling instead of appending it past the limit.
+- Bound merge-queue and same-repository PR CI below the hosted compile floor with
+  one persistent Rust producer and live artifact handoff while retaining
+  GitHub-owned Linux sandbox and Harn behavior proofs.
+
 ## v0.10.62
 
 ### Added

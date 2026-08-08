@@ -250,6 +250,54 @@ pipeline test(harness: Harness, task) {
   harness.testing.http_mock_clear()
   harness.testing.http_mock(
     "GET",
+    "https://api.example.com/connector/retry-after-opt-out",
+    {
+      responses: [
+        {status: 429, body: "limited", headers: {"Retry-After": "60"}},
+        {status: 200, body: "ok"},
+      ],
+    },
+  )
+  // `respect_retry_after` inside the documented `retry` sub-dict must be
+  // honored like every other knob there: the caller opted out of the header
+  // exactly so a 60s Retry-After cannot abort the retry loop via cap_ms.
+  const opt_out = connector_http_request(
+    harness.clock,
+    harness.net,
+    "GET",
+    "https://api.example.com/connector/retry-after-opt-out",
+    {retry: {max_attempts: 2, base_ms: 0, cap_ms: 1, respect_retry_after: false}},
+  )
+  const opt_out_calls = harness.testing.http_mock_calls({include_sensitive: true})
+  assert_eq(opt_out.ok, true)
+  assert_eq(opt_out.status, 200)
+  assert_eq(len(opt_out_calls), 2)
+  harness.stdio.println(
+    "retry_after_opt_out:" + to_string(opt_out.status) + ":" + to_string(len(opt_out_calls)),
+  )
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
+    "GET",
+    "https://api.example.com/connector/retry-on-policy",
+    {responses: [{status: 404, body: "eventually"}, {status: 200, body: "ok"}]},
+  )
+  const retry_on_policy = connector_http_request(
+    harness.clock,
+    harness.net,
+    "GET",
+    "https://api.example.com/connector/retry-on-policy",
+    {retry: {max_attempts: 2, base_ms: 0, cap_ms: 1, retry_on: [404]}},
+  )
+  const retry_on_calls = harness.testing.http_mock_calls({include_sensitive: true})
+  assert_eq(retry_on_policy.ok, true)
+  assert_eq(retry_on_policy.status, 200)
+  assert_eq(len(retry_on_calls), 2)
+  harness.stdio.println(
+    "retry_on_policy:" + to_string(retry_on_policy.status) + ":" + to_string(len(retry_on_calls)),
+  )
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
+    "GET",
     "https://api.example.com/connector/redacted-error",
     {status: 500, body: "provider secret payload"},
   )

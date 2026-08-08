@@ -1,5 +1,5 @@
 true
-anthropic
+agent_frontier
 120000
 true
 true
@@ -9,7 +9,7 @@ true
 mock
 only-mine
 true
-openai
+agent_cheap
 60000
 llamacpp
 true

@@ -1849,12 +1849,12 @@ mod tests {
         );
     }
 
-    // Verbose output with NO failure signal still masks down to the preview.
+    // No failure signal → terse mask; a multibyte tail at byte 120 panicked.
     #[test]
     fn default_mask_without_failure_lines_stays_terse() {
-        let lines: Vec<String> = (0..40).map(|i| format!("plain line {i}")).collect();
-        let content = lines.join("\n");
-        let masked = default_mask_tool_result("tool", &content);
+        let mut lines: Vec<String> = (0..40).map(|i| format!("plain line {i}")).collect();
+        lines[0] = format!("{}日本語テキスト", "x".repeat(118));
+        let masked = default_mask_tool_result("tool", &lines.join("\n"));
         assert!(masked.contains("masked]"), "should mask: {masked}");
         assert!(
             !masked.contains("failure lines preserved"),

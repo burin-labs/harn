@@ -123,7 +123,7 @@ while IFS= read -r run_id; do
   if "$jq_bin" -e --slurpfile contract "$contract_path" '
     . as $response
     | (($contract[0].merge_group_jobs | map(.name))
-        + ["Audit scripts", "Windows cross-compile check"])
+        + ["Check repository policies", "Windows cross-compile check", "Write CI timing report"])
       as $required
     | all(
         $required[];

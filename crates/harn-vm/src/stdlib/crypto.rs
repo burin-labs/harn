@@ -1181,26 +1181,8 @@ fn url_encode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 )]
 fn url_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let val = display_arg(args);
-    let mut result = Vec::new();
-    let bytes = val.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Some(Ok(byte)) = val.get(i + 1..i + 3).map(|hex| u8::from_str_radix(hex, 16)) {
-                result.push(byte);
-                i += 3;
-                continue;
-            }
-        }
-        if bytes[i] == b'+' {
-            result.push(b' ');
-        } else {
-            result.push(bytes[i]);
-        }
-        i += 1;
-    }
     Ok(VmValue::String(arcstr::ArcStr::from(
-        String::from_utf8_lossy(&result).into_owned(),
+        crate::http::percent_decode(&val),
     )))
 }
 
@@ -1755,12 +1737,18 @@ C/edCMRM78P8eQTBCDUTK1ywSYaszvQZvneiW6gNtWEJndSreEcyyUdVvg==\n\
     }
 
     #[test]
-    fn url_decode_multibyte_after_percent_does_not_panic() {
-        // Regression: the escape decoder sliced a fixed two-byte window after
-        // '%', which panicked mid-character when a multi-byte char followed.
+    fn url_decode_is_byte_based_and_boundary_safe() {
         let mut vm = vm();
-        let result = call(&mut vm, "url_decode", vec![s("100%€5")]).unwrap();
-        assert_eq!(result.display(), "100%€5");
+        // A `%` followed by a multi-byte character used to slice the string
+        // at a non-boundary byte offset and panic.
+        let raw = call(&mut vm, "url_decode", vec![s("%日x")]).unwrap();
+        assert_eq!(raw.display(), "%日x");
+        let multi = call(&mut vm, "url_decode", vec![s("%E6%97%A5+%F0%9F%99%82")]).unwrap();
+        assert_eq!(multi.display(), "日 🙂");
+        // `u8::from_str_radix` accepts a leading sign, so the old decoder
+        // treated `%+A` as byte 0x0A; a malformed escape must pass through.
+        let signed = call(&mut vm, "url_decode", vec![s("a%+Ab")]).unwrap();
+        assert_eq!(signed.display(), "a% Ab");
     }
 
     #[test]

@@ -350,7 +350,7 @@ fn check_link_budget(
 }
 
 fn project_link_cost_usd(result: &crate::llm::api::LlmResult) -> Option<f64> {
-    result.priced_cost_usd()
+    result.usage().cost_usd
 }
 
 pub(super) fn duration_ms(elapsed: Duration) -> u64 {

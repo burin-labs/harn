@@ -1,12 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ "${RUN_PROMPT_PROSE_RATCHET:-false}" == "true" ]]; then
-  make lint-no-rust-prompt-prose
-else
-  echo "Skipping prompt-prose ratchet (no protected prompt paths changed)."
-fi
-
 # Cargo does not inspect source contents once its timestamp-based fingerprint
 # says a unit is fresh, and it does not replay diagnostics from that prior
 # compile. A restored target/build directory can therefore contain a

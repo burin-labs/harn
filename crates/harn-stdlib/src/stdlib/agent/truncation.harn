@@ -58,7 +58,9 @@ pub fn agent_truncate_prompt_text(
 ) -> string {
   const value = to_string(text ?? "")
   const truncated = truncate_text(value, limit)
-  if len(value) > limit {
+  // Match truncate_text's own no-op guard: `limit <= 0` disables the cap, so
+  // nothing was dropped and no boundary event may claim otherwise.
+  if limit > 0 && len(value) > limit {
     let _ = agent_report_truncation(agent, value, substring(value, 0, limit), detail)
   }
   return truncated

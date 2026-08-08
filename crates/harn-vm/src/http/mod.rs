@@ -340,7 +340,12 @@ fn normalize_headers(value: Option<&VmValue>) -> crate::value::DictMap {
     }
 }
 
-fn percent_decode(input: &str) -> String {
+/// Decode `%XX` escapes and `+` spaces entirely in byte space.
+///
+/// Also the implementation behind the `url_decode` script builtin: indexing
+/// the `&str` by escape offsets panics when `%` is followed by a multi-byte
+/// character, so every decoder routes through this one byte-based copy.
+pub(crate) fn percent_decode(input: &str) -> String {
     let bytes = input.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;

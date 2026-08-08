@@ -54,6 +54,9 @@ deterministic evidence, and [[harn-product-quality]] for user-facing behavior.
 - Use `stop_after_successful_tools` for terminal tools.
 - Prefer lifecycle events and progress records over recurring prose nudges.
 - Keep model routing and fallback policy explicit.
+- Built-in presets use named catalog ladders. Override routing with one owner
+  (`provider` + `model`, inline `models`, or `ladder`) rather than splicing a
+  caller route into the preset's catalog route.
 - Use a completion judge only for a claim it can actually evaluate.
 
 ## Control events

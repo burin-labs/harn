@@ -24,6 +24,28 @@ fn bump_workflow_errors(workflow, text: string) -> list<string> {
   if node == nil || node?.if != "inputs.node-version != ''" {
     errors = errors + ["optional Node setup must be gated by node-version"]
   }
+  const package_manager = steps.find(
+    { step -> step?.name == "Activate caller Node.js package manager" },
+  )
+  if package_manager == nil || package_manager?.if != "inputs.node-version != ''" {
+    errors = errors + ["package-manager activation must share the Node setup gate"]
+  }
+  if package_manager?.get("working-directory") != "package" {
+    errors = errors + ["package-manager activation must inspect the consumer package"]
+  }
+  const package_manager_command = to_string(package_manager?.run ?? "")
+  for required in [
+    "packageManager",
+    "npm|pnpm|yarn",
+    "corepack enable",
+    "actual_version=",
+    "--version",
+    "packageManager must pin an exact version",
+  ] {
+    if !package_manager_command.contains(required) {
+      errors = errors + ["package-manager bootstrap must remain deterministic: " + required]
+    }
+  }
   const driver_install = steps.find({ step -> step?.name == "Install bump driver dependencies" })
   if driver_install?.get("working-directory") != ".harn-runtime/scripts/bump-driver" {
     errors = errors + ["provider dependencies must install from the target runtime's driver lock"]

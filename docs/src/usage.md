@@ -65,7 +65,8 @@ Each group reports:
 - `input_tokens` / `output_tokens`
 - `cache_read_tokens` / `cache_write_tokens`
 - `cache_savings_usd` — sum of the runtime's per-call cache-savings estimate
-- `cache_hit_ratio` — call-weighted mean of `cache_read / (input + cache_read)`
+- `cache_hit_ratio` — call-weighted mean of the runtime's normalized
+  per-call prompt-cache ratio
 - `mean_response_ms`
 - `cumulative_cost_usd` — running cost total, on the `day`/`week`/`month` series
 

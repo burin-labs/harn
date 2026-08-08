@@ -1,4 +1,6 @@
 // std/agent/sitrep — concise post-turn summaries for end users.
+import { ModelLadderStep } from "std/llm/options"
+
 //
 // The TUI / IDE wants a tiny "what just happened" note at the end of each
 // turn (or at the end of a conversation). This module owns the prompt
@@ -10,7 +12,7 @@
 //       -> {summary, lines, model_used, provider_used}
 //   agent_sitrep_append(harness.fs, harness.llm, transcript_or_messages, opts?)
 //       -> transcript with a system-role summary message appended
-//   agent_sitrep_preferred_routes()
+//   agent_sitrep_preferred_routes(harness.llm)
 //       -> the default reverse-chronological route list (newest/best first)
 //
 // Routes are tried in order; the first one whose provider has resolvable
@@ -22,22 +24,10 @@
 // tokens. The default routes pick small, fast, cheap models tuned for
 // summarization.
 // Reverse-chronological order: newest / strongest summarizers first, then
-// progressively cheaper / more local fallbacks. Routes that name a single
-// {provider, model} resolve straight through; routes that name only a
-// provider use that provider's qc_default model.
-const __SITREP_DEFAULT_ROUTES = [
-  {provider: "anthropic", model: "claude-haiku-4-5-20251001"},
-  {provider: "openai", model: "gpt-4o-mini"},
-  {provider: "gemini", model: "gemini-2.5-flash"},
-  {provider: "openrouter", model: "google/gemini-2.5-flash"},
-  {provider: "deepseek", model: "deepseek-v4-flash"},
-  {provider: "groq", model: "llama-3.3-70b"},
-  {provider: "cerebras", model: "gpt-oss-120b"},
-  {provider: "together", model: "Qwen/Qwen3-Coder-Next-FP8"},
-  {provider: "ollama", model: "llama3.2"},
-  {provider: "local", model: "gemma-4-e4b-it"},
-  {provider: "mock"},
-]
+// progressively cheaper / more local fallbacks. The `sitrep` model ladder in
+// the runtime catalog owns the provider/model rows; this module only filters
+// the projected steps by credential availability.
+const __SITREP_LADDER = "sitrep"
 
 const __SITREP_SYSTEM_PROMPT =
   "You distill agent transcripts into concise 3-sentence situation reports for end users. Be specific, factual, and never invent details the transcript does not contain. Treat tool calls and tool results as authoritative when they conflict with surrounding prose."
@@ -137,12 +127,12 @@ fn __sitrep_route_is_available(route, available) {
   return available[provider]
 }
 
-fn __sitrep_resolved_routes(opts) {
+fn __sitrep_resolved_routes(llm: HarnessLlm, opts) {
   const explicit = opts?.routes
   if type_of(explicit) == "list" && len(explicit) > 0 {
     return explicit
   }
-  return __SITREP_DEFAULT_ROUTES
+  return llm.model_ladder(__SITREP_LADDER)?.steps ?? []
 }
 
 fn __sitrep_pick_route(llm: HarnessLlm, opts) -> {provider: string, model: string}? {
@@ -150,7 +140,7 @@ fn __sitrep_pick_route(llm: HarnessLlm, opts) -> {provider: string, model: strin
     return {provider: to_string(opts.provider), model: to_string(opts.model)}
   }
   const available = __sitrep_available_providers(llm)
-  for candidate in __sitrep_resolved_routes(opts) {
+  for candidate in __sitrep_resolved_routes(llm, opts) {
     if __sitrep_route_is_available(candidate, available) {
       const resolved_model = candidate?.model ?? llm.qc_default_model(candidate.provider)
       if resolved_model != nil && resolved_model != "" {
@@ -290,6 +280,6 @@ pub fn agent_sitrep_append(fs: HarnessFs, llm: HarnessLlm, input, opts = nil) {
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_sitrep_preferred_routes() {
-  return __SITREP_DEFAULT_ROUTES
+pub fn agent_sitrep_preferred_routes(llm: HarnessLlm) -> list<ModelLadderStep> {
+  return __sitrep_resolved_routes(llm, {})
 }

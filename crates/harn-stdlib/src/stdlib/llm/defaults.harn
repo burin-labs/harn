@@ -1,255 +1,29 @@
 // @harn-entrypoint-category llm.stdlib
 //
-// std/llm/defaults — task-pinned, provider/lineage-aware option packs that
+// std/llm/defaults — task-pinned, catalog-aware option packs that
 // produce a complete `llm_call`-ready dict by layering:
 //
 //   1. resolved_options(opts)         (runtime catalog defaults)
-//   2. lineage + scale patch          (quality/latency calibration)
-//   3. lineage + policy patch         (provider-neutral reasoning intent;
-//                                       skipped when `thinking` or `effort`
-//                                       pins a low-level setting)
-//   4. task overlay                   (only fills unset fields)
-//   5. recommend_max_output_tokens()  (only when prompt is provided and
-//                                       neither user nor scale calibration
-//                                       already set max_tokens)
-//   6. user opts                      (highest precedence — wins)
+//   2. task overlay                   (only fills unset fields)
+//   3. harness.llm reasoning policy   (capability-owned lowering)
+//   4. recommend_max_output_tokens()  (only when prompt is provided and
+//                                       no max_tokens is already present)
+//   5. user opts                      (highest precedence — wins)
 //
 // User opts always win. Example: pack_for({reasoning_task: "judge", temperature: 0.42})
 // returns temperature == 0.42 (overrides judge's 0.0 task default).
 //
-// Calibration sources (each table cites its source above the lookup fn):
-//   - Anthropic extended thinking budgets:
-//     <https://platform.claude.com/docs/en/build-with-claude/extended-thinking>
-//   - Anthropic Opus 4.7 adaptive thinking (manual budget returns 400):
-//     <https://platform.claude.com/docs/en/about-claude/models/whats-new-claude-4-7>
-//   - OpenAI reasoning_effort levels:
-//     <https://developers.openai.com/api/docs/guides/reasoning>
-//   - OpenAI GPT-5.6 ("none"-allowed, no "minimal", through "max"):
-//     <https://developers.openai.com/api/docs/models/gpt-5.6-sol>
-//   - Gemini thinkingBudget (0=off, -1=dynamic, max 24576 Flash / 32768 Pro):
-//     <https://ai.google.dev/gemini-api/docs/thinking>
-//   - Ollama num_predict default 128:
-//     <https://docs.ollama.com/modelfile>
-//   - Per-task temperature/top_p/output defaults: tunable; not a
-//     published recommendation. Match commonly-cited cookbook values.
-import { agent_emit_event } from "std/agent/state"
+// Model and provider reasoning quirks belong to the runtime capability
+// matrix. This module deliberately contains no model-ID, provider-family, or
+// lineage branches.
 import { recommend_max_output_tokens } from "std/llm/budget"
-import { lineage_of, resolved_options } from "std/llm/catalog"
+import { resolved_options } from "std/llm/catalog"
 
 fn __has_key(d, key) {
   if type_of(d) != "dict" {
     return false
   }
   return contains(d.keys(), key)
-}
-
-// -------------------------------------------------------------------------------------------------
-// reasoning-policy patches
-// -------------------------------------------------------------------------------------------------
-
-/**
- * Map a provider-neutral reasoning policy to a lineage-specific patch.
- * An empty dict means "omit the low-level reasoning knob entirely".
- *
- * - Anthropic Sonnet/Opus (pre-4.7): extended thinking budgets per
- * <https://platform.claude.com/docs/en/build-with-claude/extended-thinking>
- * - Anthropic Opus 4.7+: adaptive thinking; manual budgets return 400 —
- * strip the field. See __maybe_emit_strip for the warn event.
- * - Anthropic Haiku 4.x: no extended-thinking support; omit.
- * - OpenAI GPT-5: reasoning_effort levels per
- * <https://developers.openai.com/api/docs/guides/reasoning>; "off" maps to
- * "none" for GPT-5.6 and "minimal" for older GPT-5 models.
- * - OpenAI legacy GPT-4o/4.1: omit.
- * - Gemini 2.5 Flash max thinkingBudget = 24576; Pro max = 32768; Harn
- * lowers typed `thinking` to native generationConfig.thinkingConfig.
- * "auto" maps to adaptive/dynamic thinking per
- * <https://ai.google.dev/gemini-api/docs/thinking>).
- * - Ollama qwen3: host injects /no_think capability-side; don't
- * duplicate. All other Ollama: omit.
- */
-fn __reasoning_policy_patch(lineage, model, policy) {
-  const thinking = policy
-  if lineage == "claude-sonnet-opus" {
-    if thinking == "off" {
-      return {}
-    }
-    if thinking == "low" {
-      return {thinking: {enabled: true, budget_tokens: 1024}}
-    }
-    if thinking == "high" {
-      return {thinking: {enabled: true, budget_tokens: 16000}}
-    }
-    // medium and auto both map to a moderate budget; non-adaptive families
-    // can't honor "auto" the way Opus 4.7 can, so we treat auto≡medium.
-    return {thinking: {enabled: true, budget_tokens: 4096}}
-  }
-  if lineage == "claude-opus-adaptive" {
-    // Opus 4.7+ rejects manual `thinking` budgets — always omit.
-    return {}
-  }
-  if lineage == "claude-haiku" {
-    return {}
-  }
-  if lineage == "openai-gpt5" {
-    if thinking == "off" {
-      if model.starts_with("gpt-5.6") {
-        return {effort: "none"}
-      }
-      return {effort: "minimal"}
-    }
-    if thinking == "low" {
-      return {effort: "low"}
-    }
-    if thinking == "high" {
-      return {effort: "high"}
-    }
-    return {effort: "medium"}
-  }
-  if lineage == "openai-legacy" {
-    return {}
-  }
-  if lineage == "gemini-pro" {
-    if thinking == "off" {
-      return {thinking: {mode: "disabled"}}
-    }
-    if thinking == "low" {
-      return {thinking: {mode: "enabled", budget_tokens: 1024}}
-    }
-    if thinking == "high" {
-      return {thinking: {mode: "enabled", budget_tokens: 16384}}
-    }
-    if thinking == "auto" {
-      return {thinking: {mode: "adaptive"}}
-    }
-    // medium.
-    return {thinking: {mode: "enabled", budget_tokens: 8192}}
-  }
-  if lineage == "gemini-flash" {
-    if thinking == "off" {
-      return {thinking: {mode: "disabled"}}
-    }
-    if thinking == "low" {
-      return {thinking: {mode: "enabled", budget_tokens: 1024}}
-    }
-    if thinking == "high" {
-      // Flash max budget 24576.
-      return {thinking: {mode: "enabled", budget_tokens: 24576}}
-    }
-    if thinking == "auto" {
-      return {thinking: {mode: "adaptive"}}
-    }
-    return {thinking: {mode: "enabled", budget_tokens: 8192}}
-  }
-  // qwen3, gemma4, and generic lineages have no thinking knob to set here;
-  // the host's capability-driven /no_think directive (Qwen3) handles "off".
-  // Future Gemini lineages should branch here when their thinking controls
-  // diverge from the current Pro/Flash shapes.
-  return {}
-}
-
-// -------------------------------------------------------------------------------------------------
-// reasoning-scale patches
-// -------------------------------------------------------------------------------------------------
-
-//
-// reasoning_scale ∈ {"small","medium","large","auto"}. The three
-// sizes map to the old fast/balanced/quality calibration internally.
-//
-// Anthropic temperatures sweep 0.2 / 0.7 / 1.0 (cookbook values).
-// max_tokens caps reflect typical Claude messages-API budgets:
-// Sonnet/Opus 1024/4096/8192; Haiku is capped lower (1024/2048/4096).
-// OpenAI GPT-5 lineage piggybacks on reasoning_effort; GPT-4o/4.1 use
-// temperature only (their max_tokens default flows from the catalog).
-// Gemini scale calibration maps to typed thinking steps, which the native
-// provider lowers to generationConfig.thinkingConfig.
-// Ollama exposes num_predict (default 128 per Modelfile reference) so
-// we override it for "balanced" / "quality" to give meaningful output.
-@complexity(allow)
-fn __reasoning_scale_patch(lineage, scale) {
-  const kind = if scale == "small" {
-    "fast"
-  } else if scale == "large" {
-    "quality"
-  } else {
-    "balanced"
-  }
-  if lineage == "claude-sonnet-opus" {
-    if kind == "fast" {
-      return {temperature: 0.2, max_tokens: 1024}
-    }
-    if kind == "quality" {
-      // Quality bumps the thinking budget to medium (4096) implicitly via
-      // the layered thinking patch — we don't double-set it here.
-      return {temperature: 1.0, max_tokens: 8192}
-    }
-    return {temperature: 0.7, max_tokens: 4096}
-  }
-  if lineage == "claude-opus-adaptive" {
-    if kind == "fast" {
-      return {temperature: 0.2, max_tokens: 1024}
-    }
-    if kind == "quality" {
-      // Opus 4.7+ does its own adaptive thinking; no manual thinking knob.
-      return {temperature: 1.0, max_tokens: 8192}
-    }
-    return {temperature: 0.7, max_tokens: 4096}
-  }
-  if lineage == "claude-haiku" {
-    if kind == "fast" {
-      return {temperature: 0.2, max_tokens: 1024}
-    }
-    if kind == "quality" {
-      return {temperature: 1.0, max_tokens: 4096}
-    }
-    return {temperature: 0.7, max_tokens: 2048}
-  }
-  if lineage == "openai-gpt5" {
-    if kind == "fast" || kind == "low" {
-      return {effort: "low"}
-    }
-    if kind == "quality" || kind == "high" {
-      return {effort: "high"}
-    }
-    return {effort: "medium"}
-  }
-  if lineage == "openai-legacy" {
-    if kind == "fast" {
-      return {temperature: 0.2}
-    }
-    if kind == "quality" {
-      return {temperature: 1.0, max_tokens: 8192}
-    }
-    return {temperature: 0.7}
-  }
-  if lineage == "gemini-pro" {
-    if kind == "fast" {
-      return {thinking: {mode: "disabled"}}
-    }
-    if kind == "quality" {
-      return {thinking: {mode: "enabled", budget_tokens: 16384}}
-    }
-    return {thinking: {mode: "enabled", budget_tokens: 4096}}
-  }
-  if lineage == "gemini-flash" {
-    if kind == "fast" {
-      return {thinking: {mode: "disabled"}}
-    }
-    if kind == "quality" {
-      return {thinking: {mode: "enabled", budget_tokens: 16384}}
-    }
-    return {thinking: {mode: "enabled", budget_tokens: 2048}}
-  }
-  if lineage == "qwen3" || lineage == "gemma4" {
-    if kind == "fast" {
-      return {provider_options: {ollama: {num_predict: 512}}}
-    }
-    if kind == "quality" {
-      return {provider_options: {ollama: {num_predict: 4096}}}
-    }
-    return {provider_options: {ollama: {num_predict: 2048}}}
-  }
-  // generic
-  return {}
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -304,25 +78,6 @@ fn __safe_resolved_options(llm: HarnessLlm, opts) {
   return unwrap(r)
 }
 
-fn __maybe_emit_strip(agent: HarnessAgent, opts, requested) {
-  // Best-effort warn when manual thinking is stripped on adaptive Opus. If no
-  // session_id is in opts (the usual case for pack_for), skip silently.
-  // This mirrors the "emit when bound; punt otherwise" pattern from
-  // std/llm/budget.
-  const sid = opts?.session_id ?? opts?._session_id
-  if sid == nil || sid == "" {
-    return
-  }
-  try {
-    agent_emit_event(
-      agent,
-      sid,
-      "pack_thinking_stripped",
-      {model: opts?.model, requested: requested, reason: "claude_opus_adaptive"},
-    )
-  }
-}
-
 fn __fill_unset(result, overlay) {
   // task_overlay's "fill only when unset" semantics. Iterate overlay keys,
   // assign only those missing from result.
@@ -335,6 +90,19 @@ fn __fill_unset(result, overlay) {
   return out
 }
 
+// `pack_for` has a richer task vocabulary than the runtime reasoning policy.
+// Lower task profiles onto the canonical reasoning-task vocabulary before the
+// capability owner selects a reasoning level.
+fn __reasoning_task(task) {
+  if task == "judge" {
+    return "verify"
+  }
+  if task == "refine" || task == "json" {
+    return "chat"
+  }
+  return task
+}
+
 // -------------------------------------------------------------------------------------------------
 // public API
 // -------------------------------------------------------------------------------------------------
@@ -342,8 +110,9 @@ fn __fill_unset(result, overlay) {
 /**
  * pack_for(opts) -> dict
  *
- * Returns an `llm_call`-ready options dict, calibrated for the model's
- * provider/lineage and pinned to a task. User opts always win.
+ * Returns an `llm_call`-ready options dict, resolved through the runtime
+ * catalog and capability-owned reasoning policy, then pinned to a task. User
+ * opts always win.
  *
  * Required: opts.model
  * Optional: every canonical `llm_call` option, including `reasoning_policy`,
@@ -354,14 +123,10 @@ fn __fill_unset(result, overlay) {
  * → result has temperature == 0.42 (user override wins over judge's 0.0
  * default).
  *
- * Side effect: when a knob conflicts with a known model constraint
- * (e.g. manual thinking on Opus 4.7), may emit an agent event tagged
- * "pack_thinking_stripped" if a session_id is present in opts.
- *
  * @effects: []
  * @errors: []
  */
-pub fn pack_for(agent: HarnessAgent, llm: HarnessLlm, opts) {
+pub fn pack_for(_agent: HarnessAgent, llm: HarnessLlm, opts) {
   if type_of(opts) != "dict" {
     throw "pack_for: opts must be a dict"
   }
@@ -378,32 +143,23 @@ pub fn pack_for(agent: HarnessAgent, llm: HarnessLlm, opts) {
     {model: model}
   }
   let result = __safe_resolved_options(llm, resolved_input)
-  // Lineage classification uses the inferred provider in the catalog.
-  const lineage = lineage_of(llm, model)
-  // 2. Scale calibration. `reasoning_scale` is the policy input; `effort` is
-  //    a canonical low-level request setting and is never consumed here.
-  const caller_pinned_reasoning = __has_key(opts, "thinking") || __has_key(opts, "effort")
-  const scale = opts?.reasoning_scale ?? "medium"
-  let scale_patch = __reasoning_scale_patch(lineage, scale)
-  if caller_pinned_reasoning {
-    scale_patch = scale_patch.removing("thinking").removing("effort")
-  }
-  result = result + scale_patch
-  // 3. Policy lowering. Direct `thinking` or `effort` always wins and bypasses
-  //    this provider-neutral policy layer.
-  if !caller_pinned_reasoning {
-    const policy = opts?.reasoning_policy ?? "auto"
-    if lineage == "claude-opus-adaptive" && policy != "auto" && policy != nil {
-      __maybe_emit_strip(agent, opts, policy)
-    }
-    result = result + __reasoning_policy_patch(lineage, model, policy)
-  }
-  // 4. Task overlay — only fill fields not already set above.
+  // 2. Task overlay — only fill fields not already set by the catalog.
   const reasoning_task = opts?.reasoning_task ?? "chat"
   const overlay = __task_overlay(reasoning_task)
   result = __fill_unset(result, overlay)
-  // 5. Recommended max_tokens when caller supplied a prompt and neither
-  //    they nor the scale patch already set max_tokens.
+  // 3. Runtime reasoning policy. Capability/catalog data owns every route-
+  //    specific decision; explicit low-level `thinking`/`effort` still wins.
+  result = llm.apply_reasoning_policy(
+    result
+      + opts
+      + {
+      reasoning_policy: opts?.reasoning_policy ?? "auto",
+      reasoning_scale: opts?.reasoning_scale ?? "medium",
+      reasoning_task: __reasoning_task(reasoning_task),
+    },
+  )
+  // 4. Recommended max_tokens when caller supplied a prompt and no catalog,
+  //    task, or caller setting already supplies one.
   if opts?.prompt != nil && opts?.max_tokens == nil && !__has_key(result, "max_tokens") {
     const recommended = try {
       recommend_max_output_tokens(
@@ -421,11 +177,11 @@ pub fn pack_for(agent: HarnessAgent, llm: HarnessLlm, opts) {
       result = result + {max_tokens: unwrap(recommended)}
     }
   }
-  // 6. Canonical user options — highest precedence. Policy keys remain in the
+  // 5. Canonical user options — highest precedence. Policy keys remain in the
   //    returned request for introspection; direct `thinking` and `effort` pins
   //    replace any generated low-level setting.
   result = result + opts
-  // 7. Re-pin model. resolved_options already set provider, but if the
+  // 6. Re-pin model. resolved_options already set provider, but if the
   //    caller passed a different model id at the top level it must win.
   result = result + {model: model}
   return result

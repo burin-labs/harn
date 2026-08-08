@@ -2308,8 +2308,9 @@ When using `agent_preset(kind, options)`, preset pack rows fill only absent
 keys. Model routing is grouped: any explicit route at top level or under
 `llm_options` (`provider`, `model`, `models`, `ladder`, `routing`, or related
 policy keys) suppresses the entire built-in route. Preset ladders use canonical
-model-step records with a provider on each rung. A caller's direct `provider`
-plus `model` remains a direct route and is not mixed with `models`.
+catalog `[model_ladders.*]` rows; preset code contains only the stable ladder
+name. A caller's direct `provider` plus `model` remains a direct route and is
+not mixed with `models`.
 
 Profiles preload common loop budgets and retry counts. Explicit keys
 override the profile:
@@ -4136,16 +4137,17 @@ Nine opinionated modules wrap common LLM patterns:
   pricing_known=true.
 - `std/llm/defaults` — `pack_for(opts)` and convenience wrappers
   (`pack_chat`, `pack_agent`, `pack_refine`, `pack_judge`,
-  `pack_summarize`, `pack_code`, `pack_json`). Calibrated for
-  Anthropic Sonnet/Opus/Haiku 4.x, OpenAI GPT-5/5.5/5.6/4o/4.1, Gemini
-  2.5 Pro/Flash, Ollama Qwen3/Llama 3.x.
+  `pack_summarize`, `pack_code`, `pack_json`). Resolves catalog defaults,
+  task defaults, and the capability-owned reasoning policy without stdlib
+  model/provider branches.
 - `std/llm/safe` — `safe_call`, `safe_field`, `dict_get_ci`,
   `with_case_insensitive_keys`, `structured_envelope_or_default`,
   `judge_payload`, `verdict_normalize`, `schema_retry_nudge_for`.
 - `std/llm/prompts` — `system_prelude`, `tool_use_prelude`,
   `structured_output_preface`.
 - `std/llm/catalog` — `model_info(selector)`, `execution_contract(selector)`,
-  `resolved_options(opts)`, `has_capability(model, cap)`,
+  `resolved_options(opts)`, `named_model_ladder(name)`,
+  `has_capability(model, cap)`,
   `family_of(model_id)`, `lineage_of(model_id)`,
   `complementary_reviewer(opts)`. `execution_contract` is the secret-free
   durable receipt for an effective model route; it omits arbitrary operator
@@ -4440,6 +4442,9 @@ const result = harness.llm.call("Summarize this PR.", nil, {
 
 // Named ladder resolved from the catalog ([model_ladders.<name>]).
 const result = harness.llm.call("Summarize this PR.", nil, {ladder: "frugal"})
+
+// Inspect a named ladder without starting a call.
+const routes = harness.llm.model_ladder("frugal").steps
 ```
 
 Each step is `{model, provider?, options?, label?}`; a bare string is sugar for
@@ -4478,7 +4483,8 @@ Composition rules:
 `ladder:` names a catalog ladder declared under `[model_ladders.<name>]` (for
 example the built-in `frugal` haiku → sonnet → opus escalation), keeping the
 step list data-driven and shared across surfaces instead of hand-rolled at each
-call site.
+call site. `harness.llm.model_ladder(name)` returns the same catalog row for
+stdlib policy and tooling that need to inspect its ordered steps.
 
 ## Composable tool middleware
 

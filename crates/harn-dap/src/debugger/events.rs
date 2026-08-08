@@ -1,5 +1,5 @@
 use harn_vm::agent_events::WorkerEvent;
-use harn_vm::llm::{take_agent_trace, AgentTraceEvent};
+use harn_vm::llm::{take_agent_trace, usage::LlmUsage, AgentTraceEvent};
 use serde_json::json;
 
 use super::state::Debugger;
@@ -61,22 +61,13 @@ impl Debugger {
             if let AgentTraceEvent::LlmCall {
                 call_id,
                 model,
-                input_tokens,
-                output_tokens,
-                cache_tokens,
+                usage,
                 duration_ms,
                 iteration,
             } = event
             {
-                let payload = json!({
-                    "call_id": call_id,
-                    "model": model,
-                    "prompt_tokens": input_tokens,
-                    "completion_tokens": output_tokens,
-                    "cache_tokens": cache_tokens,
-                    "total_ms": duration_ms,
-                    "iteration": iteration,
-                });
+                let payload =
+                    llm_telemetry_payload(&call_id, &model, &usage, duration_ms, iteration);
                 let body_str = serde_json::to_string(&payload).unwrap_or_default();
                 let seq = self.next_seq();
                 out.push(DapResponse::event(
@@ -292,6 +283,61 @@ impl Debugger {
                 ));
             }
             self.output = output;
+        }
+    }
+}
+
+fn llm_telemetry_payload(
+    call_id: &str,
+    model: &str,
+    usage: &LlmUsage,
+    duration_ms: u64,
+    iteration: usize,
+) -> serde_json::Value {
+    let mut payload = serde_json::to_value(usage).expect("LlmUsage must serialize");
+    let fields = payload
+        .as_object_mut()
+        .expect("LlmUsage must serialize as a JSON object");
+    fields.insert("call_id".to_string(), call_id.into());
+    fields.insert("model".to_string(), model.into());
+    fields.insert("duration_ms".to_string(), duration_ms.into());
+    fields.insert("iteration".to_string(), iteration.into());
+    payload
+}
+
+#[cfg(test)]
+mod telemetry_tests {
+    use super::*;
+
+    #[test]
+    fn dap_telemetry_projects_canonical_usage_names_without_legacy_aliases() {
+        let usage = LlmUsage {
+            input_tokens: 100,
+            output_tokens: 20,
+            cost_usd: Some(0.0123),
+            cache_read_tokens: 40,
+            cache_write_tokens: 8,
+            cache_supported: true,
+            cache_hit_ratio: Some(0.4),
+            cache_savings_usd: 0.001,
+            cache_hit: true,
+            served_fast: false,
+        };
+
+        let payload = llm_telemetry_payload("call-1", "model-1", &usage, 42, 3);
+
+        assert_eq!(payload["input_tokens"], json!(100));
+        assert_eq!(payload["output_tokens"], json!(20));
+        assert_eq!(payload["cache_read_tokens"], json!(40));
+        assert_eq!(payload["cache_write_tokens"], json!(8));
+        assert_eq!(payload["duration_ms"], json!(42));
+        for legacy in [
+            "prompt_tokens",
+            "completion_tokens",
+            "cache_tokens",
+            "total_ms",
+        ] {
+            assert!(payload.get(legacy).is_none(), "retained legacy {legacy}");
         }
     }
 }

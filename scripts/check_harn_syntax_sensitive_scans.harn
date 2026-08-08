@@ -1,5 +1,12 @@
 import { help_requested, parse, parser } from "std/cli/argparse"
 import { find_files } from "std/fs"
+import { rules_search } from "std/rules"
+
+const LLM_POLICY_FILES = [
+  "crates/harn-stdlib/src/stdlib/agent/presets.harn",
+  "crates/harn-stdlib/src/stdlib/agent/sitrep.harn",
+  "crates/harn-stdlib/src/stdlib/llm/defaults.harn",
+]
 
 const SKIP_SEGMENTS = [
   "/.git/",
@@ -263,6 +270,43 @@ pub fn check_harn_syntax_sensitive_scans(
   return {root: resolved_root, findings: findings, violation_count: len(findings)}
 }
 
+/**
+ * Structurally reject volatile model/provider identity literals at the three
+ * stdlib policy seams retired by the LLM-stack cutover. The rule runs on Harn
+ * string-literal syntax nodes, so comments and prose examples do not create
+ * false positives. Capability, catalog, and provider adapter paths remain the
+ * explicit ownership boundary and are not scanned.
+ */
+pub fn llm_policy_identity_findings(fs: HarnessFs, rules: HarnessRules, root: string) -> list {
+  const rule_path = path_join(root, "scripts/rules/llm_policy_model_identity.toml")
+  const rule = fs.read_text(rule_path)
+  let findings = []
+  for rel in LLM_POLICY_FILES {
+    const path = path_join(root, rel)
+    if !fs.exists(path) {
+      continue
+    }
+    const result = rules_search(rules, {rule: rule, source: fs.read_text(path), language: "harn"})
+    if !result.ok {
+      throw "LLM policy ownership rule failed for " + rel + ": "
+        + to_string(result?.error ?? result)
+    }
+    for found in result.matches ?? [] {
+      findings = findings.appending(
+        line_finding(
+          rel,
+          found.start_row + 1,
+          "llm-policy-model-identity",
+          "Move volatile model/provider identity "
+            + found.text
+            + " to capability or catalog source data.",
+        ),
+      )
+    }
+  }
+  return findings
+}
+
 fn render_report(report: dict) -> string {
   if report.violation_count == 0 {
     return "harn syntax-sensitive scan check passed: no stale Harn binding regexes, removed syntax examples, or retired async options found."
@@ -312,11 +356,17 @@ fn main(harness: Harness) {
     harness.runtime.exit(2)
   }
   const parsed = unwrap(parsed_result).options
-  const report = check_harn_syntax_sensitive_scans(
+  let report = check_harn_syntax_sensitive_scans(
     harness.fs,
     harness.process,
     to_string(parsed?.root ?? ""),
   )
+  const ownership_findings = llm_policy_identity_findings(harness.fs, harness.rules, report.root)
+  report = {
+    root: report.root,
+    findings: report.findings + ownership_findings,
+    violation_count: report.violation_count + len(ownership_findings),
+  }
   if parsed?.json ?? false {
     harness.stdio.println(json_stringify_pretty(report))
   } else {

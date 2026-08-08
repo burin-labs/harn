@@ -104,20 +104,7 @@ pub fn estimate_text_tokens_detail(text, model = nil) {
  * @errors: []
  */
 pub fn context_window_for(llm: HarnessLlm, model) {
-  const info = try {
-    llm.model_info(model)
-  }
-  if is_err(info) {
-    return 8192
-  }
-  const resolved = unwrap(info)
-  if type_of(resolved) != "dict" {
-    return 8192
-  }
-  const catalog = resolved?.catalog
-  if type_of(catalog) != "dict" {
-    return 8192
-  }
+  const catalog = __model_catalog(llm, model).catalog
   const cw = catalog?.runtime_context_window ?? catalog?.context_window
   if cw == nil {
     return 8192
@@ -125,22 +112,33 @@ pub fn context_window_for(llm: HarnessLlm, model) {
   return to_int(cw)
 }
 
-fn __model_max_output_tokens(llm: HarnessLlm, model) {
+// One owner for the tolerant model_info -> {provider, catalog} resolution:
+// an unknown model resolves to empty facts instead of throwing, so every
+// budget reader shares the same fallback behavior.
+fn __model_catalog(llm: HarnessLlm, model) {
   const info = try {
     llm.model_info(model)
   }
   if is_err(info) {
-    return 16384
+    return {provider: "", catalog: nil}
   }
   const resolved = unwrap(info)
   if type_of(resolved) != "dict" {
-    return 16384
+    return {provider: "", catalog: nil}
   }
   const catalog = resolved?.catalog
-  if type_of(catalog) != "dict" {
-    return 16384
+  return {
+    provider: to_string(resolved?.provider ?? ""),
+    catalog: if type_of(catalog) == "dict" {
+      catalog
+    } else {
+      nil
+    },
   }
-  const mot = catalog?.max_output_tokens
+}
+
+fn __model_max_output_tokens(llm: HarnessLlm, model) {
+  const mot = __model_catalog(llm, model).catalog?.max_output_tokens
   if mot == nil {
     return 16384
   }
@@ -225,20 +223,15 @@ pub fn budget_summary(llm: HarnessLlm, opts) {
     throw "budget_summary: opts must be a dict"
   }
   const model = opts?.model ?? ""
-  const info = llm.model_info(model)
-  const provider = if type_of(info) == "dict" {
-    to_string(info?.provider ?? "")
-  } else {
-    ""
-  }
-  const catalog = if type_of(info) == "dict" {
-    info?.catalog
-  } else {
-    nil
-  }
+  const resolved = __model_catalog(llm, model)
+  const provider = resolved.provider
+  const catalog = resolved.catalog
   let assumptions = []
-  const ctx = if type_of(catalog) == "dict" && catalog?.context_window != nil {
-    to_int(catalog.context_window)
+  // Same preference order as context_window_for: the summary must explain
+  // the window recommend_max_output_tokens actually uses.
+  const raw_ctx = catalog?.runtime_context_window ?? catalog?.context_window
+  const ctx = if raw_ctx != nil {
+    to_int(raw_ctx)
   } else {
     assumptions = assumptions.appending("context_window unknown - using 8192 fallback")
     8192

@@ -522,6 +522,7 @@ pub(super) fn dump_llm_response(
     let telemetry = serde_json::to_value(&result.telemetry).unwrap_or(serde_json::Value::Null);
     let parsed_tool_calls = raw_tool_receipts::merged_tool_calls_for_observability(result);
     let loop_state = decode_loop_state(&result.text);
+    let usage = result.usage();
     let mut event = serde_json::json!({
         "type": "provider_call_response",
         "iteration": iteration,
@@ -545,25 +546,6 @@ pub(super) fn dump_llm_response(
         // response text. Decode it once at Harn's transcript boundary so
         // observability consumers do not each maintain their own text parser.
         "loop_state": loop_state,
-        "input_tokens": result.input_tokens,
-        "output_tokens": result.output_tokens,
-        "cost_usd": result.priced_cost_usd(),
-        "cache_read_tokens": result.cache_read_tokens,
-        "cache_write_tokens": result.cache_write_tokens,
-        "cache_hit_ratio": crate::llm::cost::cache_hit_ratio(
-            result.input_tokens,
-            result.cache_read_tokens,
-            result.cache_write_tokens,
-        ),
-        "cache_savings_usd": crate::llm::cost::cache_savings_usd_for_provider(
-            &result.provider,
-            &result.model,
-            result.input_tokens,
-            result.cache_read_tokens,
-            result.cache_write_tokens,
-        ),
-        // Explicit bool for easy cache-regression spotting in tailed logs.
-        "cache_hit": result.cache_read_tokens > 0,
         "thinking": result.thinking,
         "thinking_summary": result.thinking_summary,
         // Provider-reported finish/stop reason (`stop` / `length` /
@@ -581,6 +563,7 @@ pub(super) fn dump_llm_response(
         "provider_telemetry": telemetry,
         "structural_experiment": structural_experiment,
     });
+    usage.project_onto_event(&mut event);
     raw_tool_receipts::project_onto_event(&mut event, result);
     append_llm_transcript_entry(&event);
 }

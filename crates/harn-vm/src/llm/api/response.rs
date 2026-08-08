@@ -208,7 +208,7 @@ fn preview_chars(s: &str, max_chars: usize) -> String {
     s.chars().take(max_chars).collect()
 }
 
-fn parse_tool_arguments(arguments: Option<&serde_json::Value>) -> serde_json::Value {
+pub(super) fn parse_tool_arguments(arguments: Option<&serde_json::Value>) -> serde_json::Value {
     match arguments {
         Some(serde_json::Value::String(text)) => serde_json::from_str(text).unwrap_or_else(|err| {
             serde_json::json!({

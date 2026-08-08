@@ -196,23 +196,10 @@ impl ProviderAttempts {
 }
 
 impl LlmResult {
-    /// Price this exact provider result without collapsing unknown pricing to
-    /// zero. VM-return and provider-observability projections use this contract
-    /// so their usage costs cannot disagree.
-    pub(crate) fn priced_cost_usd(&self) -> Option<f64> {
-        let detail = crate::llm::cost::pricing_detail_for_tier(
-            &self.provider,
-            &self.model,
-            self.served_fast,
-            self.input_tokens,
-        )?;
-        Some(crate::llm::cost::project_call_cost(
-            &detail,
-            self.input_tokens,
-            self.output_tokens,
-            self.cache_read_tokens,
-            self.cache_write_tokens,
-        ))
+    /// Return the one normalized accounting view used by every public
+    /// projection of this provider result.
+    pub(crate) fn usage(&self) -> crate::llm::usage::LlmUsage {
+        crate::llm::usage::LlmUsage::from_result(self)
     }
 
     /// True when the completion carries nothing the agent loop can act on: no
@@ -232,99 +219,7 @@ impl LlmResult {
 }
 
 fn build_usage_dict(result: &LlmResult) -> crate::value::DictMap {
-    let cache_hit_ratio = crate::llm::cost::cache_hit_ratio(
-        result.input_tokens,
-        result.cache_read_tokens,
-        result.cache_write_tokens,
-    );
-    let cache_savings_usd = crate::llm::cost::cache_savings_usd_for_provider(
-        &result.provider,
-        &result.model,
-        result.input_tokens,
-        result.cache_read_tokens,
-        result.cache_write_tokens,
-    );
-
-    let mut usage = crate::value::DictMap::new();
-    usage.insert(
-        crate::value::intern_key("input_tokens"),
-        VmValue::Int(result.input_tokens),
-    );
-    usage.insert(
-        crate::value::intern_key("output_tokens"),
-        VmValue::Int(result.output_tokens),
-    );
-    usage.insert(
-        crate::value::intern_key("cost_usd"),
-        result
-            .priced_cost_usd()
-            .map_or(VmValue::Nil, VmValue::Float),
-    );
-    usage.insert(
-        crate::value::intern_key("cache_read_tokens"),
-        VmValue::Int(result.cache_read_tokens),
-    );
-    usage.insert(
-        crate::value::intern_key("cache_write_tokens"),
-        VmValue::Int(result.cache_write_tokens),
-    );
-    usage.insert(
-        crate::value::intern_key("cache_supported"),
-        VmValue::Bool(result.cache_supported),
-    );
-    if result.cache_supported {
-        usage.insert(
-            crate::value::intern_key("cache_hit_ratio"),
-            VmValue::Float(cache_hit_ratio),
-        );
-        usage.insert(crate::value::intern_key("cache_visibility"), VmValue::Nil);
-    } else {
-        // Native local runtimes report no cache field; a 0.0 ratio here would
-        // mislabel a local model as a 100% cache miss. Surface the unknown
-        // explicitly instead of fabricating a number.
-        usage.insert(crate::value::intern_key("cache_hit_ratio"), VmValue::Nil);
-        usage.put_str("cache_visibility", "unsupported");
-    }
-    usage.insert(
-        crate::value::intern_key("cache_savings_usd"),
-        VmValue::Float(cache_savings_usd),
-    );
-    // Provider-request accounting belongs in `usage` because `usage` is the
-    // single owner of ALL accounting for this call. Keeping it here means a
-    // consumer that already reads usage gets retry pressure without learning a
-    // second location, which is how #5847 stayed invisible: the counters a
-    // reader could reach all counted agent iterations.
-    let attempts = &result.attempts;
-    let mut attempts_dict = crate::value::DictMap::new();
-    attempts_dict.insert(
-        crate::value::intern_key("total"),
-        VmValue::Int(i64::from(attempts.total)),
-    );
-    attempts_dict.insert(
-        crate::value::intern_key("retries"),
-        VmValue::Int(i64::from(attempts.retries())),
-    );
-    attempts_dict.insert(
-        crate::value::intern_key("rate_limited"),
-        VmValue::Int(i64::from(attempts.rate_limited)),
-    );
-    attempts_dict.insert(
-        crate::value::intern_key("empty_completion"),
-        VmValue::Int(i64::from(attempts.empty_completion)),
-    );
-    attempts_dict.insert(
-        crate::value::intern_key("other"),
-        VmValue::Int(i64::from(attempts.other)),
-    );
-    usage.insert(
-        crate::value::intern_key("provider_attempts"),
-        VmValue::dict(attempts_dict),
-    );
-    usage.insert(
-        crate::value::intern_key("served_fast"),
-        VmValue::Bool(result.served_fast),
-    );
-    usage
+    result.usage().to_vm_dict(&result.attempts)
 }
 
 /// Some local/open-weight routes emit their reasoning INLINE in the text
@@ -1141,9 +1036,9 @@ mod cache_supported_serde_tests {
         priced.model = "claude-sonnet-4-20250514".to_string();
         priced.input_tokens = 1_000;
         priced.output_tokens = 1_000;
-        let uncached_cost = priced.priced_cost_usd().expect("catalog-priced result");
+        let uncached_cost = priced.usage().cost_usd.expect("catalog-priced result");
         priced.cache_read_tokens = 800;
-        let expected_cost = priced.priced_cost_usd().expect("cache-priced result");
+        let expected_cost = priced.usage().cost_usd.expect("cache-priced result");
         assert!(expected_cost < uncached_cost);
         let priced_value = vm_build_llm_result(
             &priced,
@@ -1166,7 +1061,7 @@ mod cache_supported_serde_tests {
         let mut unpriced = priced;
         unpriced.provider = "nonexistent_provider".to_string();
         unpriced.model = "ghost-model".to_string();
-        assert_eq!(unpriced.priced_cost_usd(), None);
+        assert_eq!(unpriced.usage().cost_usd, None);
         let unpriced_value = vm_build_llm_result(
             &unpriced,
             None,
@@ -1193,7 +1088,7 @@ mod cache_supported_serde_tests {
         let mut zero_priced = unpriced;
         zero_priced.provider = "local".to_string();
         zero_priced.model = "no-such-local-model".to_string();
-        assert_eq!(zero_priced.priced_cost_usd(), Some(0.0));
+        assert_eq!(zero_priced.usage().cost_usd, Some(0.0));
         let zero_priced_value = vm_build_llm_result(
             &zero_priced,
             None,
