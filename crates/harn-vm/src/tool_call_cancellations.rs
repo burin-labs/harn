@@ -34,7 +34,11 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+#[cfg(debug_assertions)]
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(debug_assertions)]
+use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::Notify;
@@ -162,18 +166,86 @@ thread_local! {
         RefCell::new(HashMap::new());
 }
 
+// The production registry intentionally stays thread-local: every VM and its
+// cancellation ingress run on one LocalSet thread, while separate embedded VMs
+// may reuse the same session/call ids. In debug builds, mirror only registration
+// ownership process-wide so a future runtime refactor cannot silently turn a
+// cross-thread cancellation into `NotFound`.
+#[cfg(debug_assertions)]
+type RegistrationKey = (String, String);
+
+#[cfg(debug_assertions)]
+fn affinity_owners() -> &'static Mutex<HashMap<RegistrationKey, HashSet<std::thread::ThreadId>>> {
+    static OWNERS: OnceLock<Mutex<HashMap<RegistrationKey, HashSet<std::thread::ThreadId>>>> =
+        OnceLock::new();
+    OWNERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(debug_assertions)]
+fn track_affinity(session_id: &str, call_id: &str, owner: std::thread::ThreadId) {
+    affinity_owners()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .entry((session_id.to_string(), call_id.to_string()))
+        .or_default()
+        .insert(owner);
+}
+
+#[cfg(debug_assertions)]
+fn untrack_affinity(session_id: &str, call_id: &str, owner: std::thread::ThreadId) {
+    let key = (session_id.to_string(), call_id.to_string());
+    let mut owners_by_key = affinity_owners()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if let Some(owners) = owners_by_key.get_mut(&key) {
+        owners.remove(&owner);
+        if owners.is_empty() {
+            owners_by_key.remove(&key);
+        }
+    }
+}
+
+#[cfg(debug_assertions)]
+fn assert_no_foreign_registration(session_id: &str, call_id: &str) {
+    let current = std::thread::current().id();
+    let key = (session_id.to_string(), call_id.to_string());
+    let owners_by_key = affinity_owners()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let foreign_owner = owners_by_key
+        .get(&key)
+        .and_then(|owners| owners.iter().find(|owner| **owner != current));
+    debug_assert!(
+        foreign_owner.is_none(),
+        "tool-call cancellation registry affinity violated: \
+         ({session_id}, {call_id}) is registered on {foreign_owner:?}, \
+         but lookup ran on {current:?}"
+    );
+}
+
 /// RAII guard that unregisters the (session_id, call_id) entry on drop
 /// and signals the matching handle's `completed` future.
 pub struct Guard {
     session_id: String,
     call_id: String,
     handle: Handle,
+    #[cfg(debug_assertions)]
+    owner_thread: std::thread::ThreadId,
 }
 
 impl Drop for Guard {
     fn drop(&mut self) {
         if self.call_id.is_empty() {
             return;
+        }
+        #[cfg(debug_assertions)]
+        {
+            let current = std::thread::current().id();
+            debug_assert_eq!(
+                self.owner_thread, current,
+                "tool-call cancellation guard dropped off its registration thread"
+            );
+            untrack_affinity(&self.session_id, &self.call_id, self.owner_thread);
         }
         self.handle.mark_completed();
         REGISTRY.with(|registry| {
@@ -206,22 +278,31 @@ pub fn register(
         session_id: session_id.clone(),
         call_id: call_id.clone(),
         handle: handle.clone(),
+        #[cfg(debug_assertions)]
+        owner_thread: std::thread::current().id(),
     };
     REGISTRY.with(|registry| {
         registry
             .borrow_mut()
             .insert((session_id, call_id), handle.clone());
     });
+    #[cfg(debug_assertions)]
+    track_affinity(&guard.session_id, &guard.call_id, guard.owner_thread);
     Some((handle, guard))
 }
 
 pub fn lookup(session_id: &str, call_id: &str) -> Option<Handle> {
-    REGISTRY.with(|registry| {
+    let handle = REGISTRY.with(|registry| {
         registry
             .borrow()
             .get(&(session_id.to_string(), call_id.to_string()))
             .cloned()
-    })
+    });
+    #[cfg(debug_assertions)]
+    if handle.is_none() {
+        assert_no_foreign_registration(session_id, call_id);
+    }
+    handle
 }
 
 /// List all in-flight handles for a session — used by introspection and
@@ -304,6 +385,16 @@ pub fn cancel(
 /// this so a reused worker thread does not accumulate stale handles
 /// across the suite.
 pub fn reset_registry() {
+    #[cfg(debug_assertions)]
+    {
+        let owner = std::thread::current().id();
+        let removed_keys: Vec<_> =
+            REGISTRY.with(|registry| registry.borrow_mut().drain().map(|entry| entry.0).collect());
+        for (session_id, call_id) in removed_keys {
+            untrack_affinity(&session_id, &call_id, owner);
+        }
+    }
+    #[cfg(not(debug_assertions))]
     REGISTRY.with(|registry| registry.borrow_mut().clear());
 }
 
@@ -398,5 +489,34 @@ mod tests {
             .collect();
         ids.sort();
         assert_eq!(ids, vec!["call_x".to_string(), "call_y".to_string()]);
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn cross_thread_cancel_trips_the_affinity_invariant() {
+        clear_registry_for_test();
+        let (registered_tx, registered_rx) = std::sync::mpsc::sync_channel(0);
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(0);
+
+        let result = std::thread::scope(|scope| {
+            scope.spawn(move || {
+                let _registration =
+                    register("sess_affinity", "call_affinity", "tool").expect("registered");
+                registered_tx.send(()).expect("announce registration");
+                release_rx.recv().expect("wait for cancellation");
+            });
+
+            registered_rx.recv().expect("registration should be live");
+            let result = std::panic::catch_unwind(|| {
+                cancel("sess_affinity", "call_affinity", "cancelled", false)
+            });
+            release_tx.send(()).expect("release registration thread");
+            result
+        });
+
+        assert!(
+            result.is_err(),
+            "cross-thread cancellation of a live registration must trip the debug affinity invariant"
+        );
     }
 }
