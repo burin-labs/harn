@@ -876,18 +876,20 @@ fn format_call(span: Span, args: Vec<ConstValue>) -> Result<ConstValue, ConstEva
     if let [ConstValue::Dict(entries)] = rest.as_slice() {
         let mut result = String::with_capacity(template.len());
         let mut rest_str = template.as_str();
-        while let Some(open) = rest_str.find('{') {
-            result.push_str(&rest_str[..open]);
-            if let Some(close) = rest_str[open..].find('}') {
-                let key = &rest_str[open + 1..open + close];
+        while let Some((head, after_open)) = rest_str.split_once('{') {
+            result.push_str(head);
+            if let Some((key, after_close)) = after_open.split_once('}') {
                 if let Some((_, val)) = entries.iter().find(|(k, _)| k == key) {
                     result.push_str(&val.display());
                 } else {
-                    result.push_str(&rest_str[open..open + close + 1]);
+                    result.push('{');
+                    result.push_str(key);
+                    result.push('}');
                 }
-                rest_str = &rest_str[open + close + 1..];
+                rest_str = after_close;
             } else {
-                result.push_str(&rest_str[open..]);
+                result.push('{');
+                result.push_str(after_open);
                 rest_str = "";
                 break;
             }
@@ -899,14 +901,14 @@ fn format_call(span: Span, args: Vec<ConstValue>) -> Result<ConstValue, ConstEva
     let mut result = String::with_capacity(template.len());
     let mut rest_iter = rest.iter();
     let mut tail = template.as_str();
-    while let Some(pos) = tail.find("{}") {
-        result.push_str(&tail[..pos]);
+    while let Some((head, rest_of_template)) = tail.split_once("{}") {
+        result.push_str(head);
         if let Some(arg) = rest_iter.next() {
             result.push_str(&arg.display());
         } else {
             result.push_str("{}");
         }
-        tail = &tail[pos + 2..];
+        tail = rest_of_template;
     }
     result.push_str(tail);
     Ok(ConstValue::String(result))

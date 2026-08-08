@@ -227,9 +227,9 @@ pub(super) async fn stream_sse_frames(
             format!("SSE read failed for {path}: {}", net::reqwest_error(&error))
         })?;
         buffer.push_str(&String::from_utf8_lossy(&chunk));
-        while let Some(idx) = buffer.find("\n\n") {
-            let raw = buffer[..idx].to_string();
-            buffer = buffer[idx + 2..].to_string();
+        while let Some((raw, rest)) = buffer.split_once("\n\n") {
+            let raw = raw.to_string();
+            buffer = rest.to_string();
             if raw.trim().is_empty() {
                 continue;
             }

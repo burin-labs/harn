@@ -140,10 +140,10 @@ fn extract_toml_value(path: &Path, key: &str) -> Option<String> {
         if in_package
             && (trimmed.starts_with(&format!("{key} ")) || trimmed.starts_with(&format!("{key}=")))
         {
-            if let Some(eq_idx) = trimmed.find('=') {
-                let mut value = trimmed[eq_idx + 1..].trim().to_string();
-                if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
-                    value = value[1..value.len() - 1].to_string();
+            if let Some((_, after)) = trimmed.split_once('=') {
+                let mut value = after.trim().to_string();
+                if let Some(inner) = value.strip_prefix('"').and_then(|v| v.strip_suffix('"')) {
+                    value = inner.to_string();
                 }
                 return Some(value);
             }

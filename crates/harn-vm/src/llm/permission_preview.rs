@@ -317,6 +317,11 @@ fn proposed_text_for_object(
     None
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "start comes from match_indices(old) on old_text, so start and start + old.len() \
+              are both match boundaries"
+)]
 fn apply_exact_patch(old_text: &str, object: &Map<String, JsonValue>) -> Option<String> {
     let old = string_field(
         object,

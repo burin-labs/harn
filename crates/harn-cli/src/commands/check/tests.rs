@@ -332,6 +332,7 @@ pipeline main() {
         .iter()
         .find(|d| d.message.contains("render_prompt target"))
         .expect("expected render_prompt target diagnostic");
+    #[expect(clippy::string_slice, reason = "test input is ASCII")]
     let span_text = &source[render_diag.span.start..render_diag.span.end];
     assert_eq!(
         span_text, "\"missing.prompt\"",

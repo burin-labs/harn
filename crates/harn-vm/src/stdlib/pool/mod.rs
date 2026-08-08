@@ -507,6 +507,7 @@ fn next_pool_id() -> String {
 /// name)` always maps to the same id so reloads after restart bind to
 /// the existing JSONL file. The hash never includes raw user input on
 /// the filesystem path (see [`pipeline_pool_file_path`]).
+#[expect(clippy::string_slice, reason = "blake3 hex digest is ASCII")]
 fn deterministic_pool_id(scope: PoolScope, scope_id: &str, name: &str) -> String {
     let mut hasher = blake3::Hasher::new();
     hasher.update(scope.as_str().as_bytes());
@@ -1141,6 +1142,7 @@ async fn pool_create_sync(
     Ok(snapshot)
 }
 
+#[expect(clippy::string_slice, reason = "blake3 hex digest is ASCII")]
 fn pipeline_pool_file_path(dir_override: Option<&str>, pipeline_id: &str, name: &str) -> PathBuf {
     let mut hasher = blake3::Hasher::new();
     hasher.update(pipeline_id.as_bytes());

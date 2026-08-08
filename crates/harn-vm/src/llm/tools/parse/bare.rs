@@ -1,3 +1,10 @@
+#![expect(
+    clippy::string_slice,
+    reason = "scan offsets advance only over checked ASCII bytes, ASCII ident/prefix \
+              lengths, find/starts_with matches, and parser-consumed byte counts, all \
+              char boundaries in the same string"
+)]
+
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 

@@ -261,6 +261,10 @@ fn visit_callable_body(node: &SNode, visitor: &mut impl FnMut(&SNode)) {
     }
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "open_paren is from find('('); close_paren is a char_indices offset past it"
+)]
 pub(super) fn callable_param_insert(source: &str, span: Span) -> Option<(usize, bool)> {
     let region = source.get(span.start..span.end)?;
     let open_paren = region.find('(')?;
@@ -458,6 +462,10 @@ pub(super) fn harness_param_name_for_insert(info: &CallableInfo) -> Option<&'sta
     None
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "paren offsets come from find on ASCII delimiters, so they are char boundaries"
+)]
 pub(super) fn add_call_argument_edit(source: &str, span: &Span, arg_name: &str) -> Option<FixEdit> {
     let region = source.get(span.start..span.end)?;
     let open_paren = region.find('(')?;
@@ -496,6 +504,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[expect(clippy::string_slice, reason = "test input is ASCII")]
     fn multiline_parameter_insertion_has_no_trailing_whitespace() {
         let source = "fn load(\n  path: string,\n) {}\n";
         let span = Span::with_offsets(0, source.len(), 1, 1);
@@ -515,6 +524,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::string_slice, reason = "test input is ASCII")]
     fn multiline_call_insertion_has_no_trailing_whitespace() {
         let source = "load(\n  \"config.json\",\n)";
         let span = Span::with_offsets(0, source.len(), 1, 1);

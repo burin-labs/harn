@@ -1,3 +1,9 @@
+#![expect(
+    clippy::string_slice,
+    reason = "every slice offset here is accumulated from char_indices/len_utf8 \
+              walks or ASCII token lengths over the same buffer being sliced"
+)]
+
 use crate::value::VmDictExt;
 use std::collections::BTreeMap;
 use std::sync::Arc;

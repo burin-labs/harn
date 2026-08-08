@@ -91,6 +91,7 @@ impl<'a> Formatter<'a> {
         self.output.push('\n');
     }
 
+    #[expect(clippy::string_slice, reason = "node spans come from the lexer on char boundaries")]
     pub(crate) fn source_slice(&self, node: &SNode) -> &str {
         &self.source[node.span.start..node.span.end]
     }

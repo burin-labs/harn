@@ -553,12 +553,8 @@ fn print_status_text(state: &playground::PlaygroundState) {
     }
 }
 
-fn short_sha(sha: &str) -> &str {
-    if sha.len() > 7 {
-        &sha[..7]
-    } else {
-        sha
-    }
+fn short_sha(sha: &str) -> String {
+    harn_vm::text::clip_end(sha, 7)
 }
 
 fn print_json(value: &Value) {

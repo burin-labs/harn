@@ -155,8 +155,8 @@ fn pwd_parameter_expansion_suffix(value: &str) -> Option<&str> {
     if !yields_pwd_when_set.iter().any(|op| rest.starts_with(op)) {
         return None;
     }
-    let close = rest.find('}')?;
-    Some(&rest[close + 1..])
+    let (_, suffix) = rest.split_once('}')?;
+    Some(suffix)
 }
 
 fn is_bare_current_directory_contents_glob(value: &str) -> bool {

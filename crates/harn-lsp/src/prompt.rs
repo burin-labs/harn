@@ -15,6 +15,12 @@
 //! cursor is inside, and which slot within it — and never to what the
 //! template means.
 
+#![expect(
+    clippy::string_slice,
+    reason = "every offset here is a char boundary: found via find/rfind of ASCII delimiters, \
+              an ASCII byte scan, char_indices/len_utf8 walks, or SourceText::offset"
+)]
+
 use harn_vm::stdlib::template::filters::{self, FILTERS};
 use harn_vm::stdlib::template::outline::{self, OutlineBlockKind};
 use harn_vm::stdlib::template::vocabulary::{self, Directive, DirectiveRole, DIRECTIVES, SECTIONS};
@@ -68,7 +74,9 @@ pub(crate) fn completions(source: &SourceText, position: Position) -> Vec<Comple
     if directive.comment || inside_raw_block(source, offset) {
         return Vec::new();
     }
-    let body = &source[directive.body_start..offset];
+    // The cursor can sit between `{{` and a `-` trim marker, which puts
+    // `body_start` past it; that reads as an empty body, not a panic.
+    let body = &source[directive.body_start.min(offset)..offset];
     let slot = classify(body);
     let replace = Range {
         start: source.position(offset - slot.partial().len()),

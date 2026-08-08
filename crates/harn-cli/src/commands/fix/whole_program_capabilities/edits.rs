@@ -275,6 +275,10 @@ pub(super) fn signature_edit(
     })
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "colon and equals offsets come from find on ASCII delimiters, so char boundaries"
+)]
 fn parameter_type_span(source: &str, param: &TypedParam) -> Option<Span> {
     let region = source.get(param.span.start..param.span.end)?;
     let colon = region.find(':')? + 1;

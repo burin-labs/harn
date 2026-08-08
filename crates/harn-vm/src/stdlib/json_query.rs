@@ -1,3 +1,9 @@
+#![expect(
+    clippy::string_slice,
+    reason = "the jq parser slices `source` only at `pos` offsets advanced by \
+              char len_utf8, ASCII bytes, or starts_with-matched prefix lengths"
+)]
+
 use std::collections::BTreeMap;
 
 use crate::value::{string_char_count, values_equal, VmValue};

@@ -26,6 +26,13 @@
 //! twelfth did not, and a detector three layers away went quiet on a real
 //! dropped dialect. `units_tile_the_source` in `tests.rs` pins it empirically.
 
+#![expect(
+    clippy::string_slice,
+    reason = "the cursor and every unit offset advance only over checked ASCII bytes, \
+              starts_with/find-matched tag lengths, and scan/parser-returned ends, all \
+              char boundaries in `src`"
+)]
+
 mod frames;
 mod head;
 mod spec;

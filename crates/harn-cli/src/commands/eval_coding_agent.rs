@@ -1374,12 +1374,12 @@ fn parse_env_line(line: &str) -> Result<Option<(String, String)>, String> {
 }
 
 fn unquote_env_value(value: &str) -> String {
-    if value.len() >= 2 {
-        let bytes = value.as_bytes();
-        if (bytes[0] == b'"' && bytes[value.len() - 1] == b'"')
-            || (bytes[0] == b'\'' && bytes[value.len() - 1] == b'\'')
+    for quote in ['"', '\''] {
+        if let Some(inner) = value
+            .strip_prefix(quote)
+            .and_then(|rest| rest.strip_suffix(quote))
         {
-            return value[1..value.len() - 1].to_string();
+            return inner.to_string();
         }
     }
     value.to_string()

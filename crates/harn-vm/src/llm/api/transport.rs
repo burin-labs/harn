@@ -49,7 +49,7 @@ fn parse_ollama_tool_arguments(arguments: &serde_json::Value) -> serde_json::Val
                 "__parse_error": format!(
                     "Could not parse tool arguments as JSON: {}. Raw input: {}",
                     err,
-                    &text[..text.len().min(200)]
+                    crate::text::truncate_end_bytes(text, 200)
                 )
             })
         }),

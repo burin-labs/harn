@@ -72,6 +72,10 @@ pub fn capability_binding_for_schema(
 /// Module and method names may both contain underscores, so each boundary is
 /// tried against `capability_binding_for_schema` instead of maintaining a
 /// second module-name table in compatibility consumers.
+#[expect(
+    clippy::string_slice,
+    reason = "match_indices('_') cuts at a one-byte char, so both slice ends are char boundaries"
+)]
 pub fn capability_binding_for_legacy_hostlib_name(
     name: &str,
 ) -> Option<(CapabilityId, &'static str)> {

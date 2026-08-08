@@ -585,6 +585,10 @@ fn unavailable_response(message: &str) -> VmValue {
     )
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "slices cut at ASCII `{`/`}`/`:` delimiters verified by starts_with/ends_with"
+)]
 fn route_template_match(template: &str, path: &str) -> Option<crate::value::DictMap> {
     let template_segments: Vec<&str> = template.trim_matches('/').split('/').collect();
     let path_segments: Vec<&str> = path.trim_matches('/').split('/').collect();

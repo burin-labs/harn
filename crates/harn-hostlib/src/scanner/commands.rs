@@ -206,8 +206,8 @@ fn detect_makefile_targets(root: &Path, commands: &mut BTreeMap<String, String>)
             continue;
         }
         let trimmed = trimmed.trim();
-        if let Some(colon_idx) = trimmed.find(':') {
-            let target = trimmed[..colon_idx].trim();
+        if let Some((target, _)) = trimmed.split_once(':') {
+            let target = target.trim();
             if !target.is_empty() && !target.contains(' ') {
                 commands.insert(format!("make {target}"), "Makefile target".to_string());
             }

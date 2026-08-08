@@ -605,10 +605,10 @@ fn public_function_signature_complete(line: &str) -> bool {
     let Some(rest) = line.strip_prefix("pub fn ") else {
         return false;
     };
-    let Some(name_end) = rest.find('(') else {
+    let Some((_, after_paren)) = rest.split_once('(') else {
         return false;
     };
-    matching_paren_len(&rest[name_end + 1..]).is_some()
+    matching_paren_len(after_paren).is_some()
 }
 
 fn parse_harndoc(lines: &[&str], start: usize) -> (Option<String>, usize) {
@@ -634,6 +634,7 @@ fn parse_harndoc(lines: &[&str], start: usize) -> (Option<String>, usize) {
     ((!text.is_empty()).then_some(text), index)
 }
 
+#[expect(clippy::string_slice, reason = "bounds come from str::find and char_indices")]
 fn parse_public_function_line(line: &str, doc: Option<String>) -> Option<StdlibPublicFunction> {
     let rest = line.strip_prefix("pub fn ")?.trim();
     let name_end = rest.find('(')?;
@@ -696,6 +697,7 @@ fn matching_paren_len(input: &str) -> Option<usize> {
     None
 }
 
+#[expect(clippy::string_slice, reason = "offsets come from char_indices and 1-byte ','")]
 fn split_top_level_params(params: &str) -> Vec<&str> {
     let mut out = Vec::new();
     let mut depth = 0isize;

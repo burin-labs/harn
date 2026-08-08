@@ -100,6 +100,10 @@ pub(super) fn tool_result_message_for_provider(
 /// leading `[result of ...]` framing and the `text` field's human summary if one
 /// is recoverable, else a generic note; the image itself rides alongside as a
 /// content block, so the text only needs to orient the model.
+#[expect(
+    clippy::string_slice,
+    reason = "offsets come from find() of ASCII markers on the sliced string"
+)]
 fn screenshot_result_summary(observation: &str) -> String {
     // Pull the handler's short `text: "..."` summary out of the display string
     // when present (e.g. `text: Clicked left at (100, 200). Captured ...`).

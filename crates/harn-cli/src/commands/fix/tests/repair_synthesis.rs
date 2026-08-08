@@ -5,6 +5,7 @@
 use super::*;
 
 #[test]
+#[expect(clippy::string_slice, reason = "test input is ASCII")]
 fn callable_param_insert_handles_dict_defaults_before_body() {
     let source = "pub fn poll(check, options: dict = {}) -> any {\n  harness.clock.now_ms()\n}\n";
     let (offset, has_params) = super::signature_threading::callable_param_insert(

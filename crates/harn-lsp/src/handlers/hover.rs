@@ -101,6 +101,10 @@ pub(crate) fn resolve_hover_target(
     best.map(|sym| HoverTarget::Symbol(Box::new(sym.clone())))
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "offset comes from SourceText::offset and line_start follows an ASCII newline"
+)]
 fn line_prefix_at_position(source: &SourceText, position: Position) -> Option<&str> {
     let offset = source.offset(position);
     if offset == source.len() && source.position(offset).line < position.line {
@@ -276,6 +280,7 @@ impl HarnLsp {
             None => return Ok(None),
         };
 
+        #[expect(clippy::string_slice, reason = "paren_pos comes from char_indices over prefix")]
         let before = &prefix[..paren_pos];
         let name: String = before
             .chars()

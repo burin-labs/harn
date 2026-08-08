@@ -440,7 +440,9 @@ fn starts_quoted_phrase(raw_token: &str) -> bool {
     let Some(quote @ ('\'' | '"')) = token.chars().next() else {
         return false;
     };
-    !token[quote.len_utf8()..].contains(quote)
+    #[expect(clippy::string_slice, reason = "quote is token's first char, so its len is a boundary")]
+    let rest = &token[quote.len_utf8()..];
+    !rest.contains(quote)
 }
 
 /// cmd.exe `rmdir`/`rd`/`del`/`erase` wipe judge. The danger signature is a
@@ -509,6 +511,7 @@ pub(super) fn rm_targets_workspace(args: &[&str]) -> bool {
                     recursive = true;
                 }
             } else {
+                #[expect(clippy::string_slice, reason = "arg starts with an ASCII '-'")]
                 let opt = &arg[1..];
                 // PowerShell `-Recurse` (and prefix-abbreviations `-r`, `-rec`,
                 // `-recurse`): `recurse` starts with `opt`, so `-r`/`-rec` match.
@@ -671,7 +674,12 @@ pub(super) fn strip_outer_shell_quotes(payload: &str) -> String {
     if !matches!(first, '\'' | '"') || !trimmed.ends_with(first) || trimmed.len() < 2 {
         return trimmed.to_string();
     }
-    trimmed[first.len_utf8()..trimmed.len() - first.len_utf8()].to_string()
+    #[expect(
+        clippy::string_slice,
+        reason = "first is an ASCII quote present at both ends of trimmed"
+    )]
+    let inner = &trimmed[first.len_utf8()..trimmed.len() - first.len_utf8()];
+    inner.to_string()
 }
 
 /// A target string that resolves to the entire working directory or a drive
@@ -687,6 +695,10 @@ pub(super) fn is_workspace_wipe_target(arg: &str) -> bool {
         || is_drive_root(&arg)
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "offsets are byte lengths of ASCII prefixes verified by starts_with"
+)]
 pub(super) fn is_pwd_workspace_target(token: &ShellToken, arg: &str) -> bool {
     if starts_with_unquoted(token, arg, "$pwd") {
         let rest = &arg["$pwd".len()..];
@@ -740,7 +752,9 @@ pub(super) fn is_drive_root(arg: &str) -> bool {
         return false;
     }
     // After `x:` the remainder must be empty, a bare separator, or a root glob.
-    matches!(&arg[2..], "" | "\\" | "/" | "\\*" | "/*" | "\\*.*" | "*.*")
+    #[expect(clippy::string_slice, reason = "the first two bytes are verified ASCII above")]
+    let rest = &arg[2..];
+    matches!(rest, "" | "\\" | "/" | "\\*" | "/*" | "\\*.*" | "*.*")
 }
 
 /// True when a `find` invocation roots at the cwd (`.` / `./`) and carries a

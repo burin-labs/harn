@@ -217,6 +217,7 @@ async fn init(args: ModelsBatchExecuteInitArgs) -> Result<ExecutionState, String
     verify_source(&prepare, "/manifest", &paths.manifest, "prepare manifest")?;
 
     let manifest_sha = hash_file(&paths.manifest)?;
+    #[expect(clippy::string_slice, reason = "hash_file returns ASCII hex digits")]
     let execution_id = format!("batch-{}", &manifest_sha[..24]);
     let request_ids = manifest_request_ids(&manifest)?;
     let job_ids = receipt_job_ids(&prepare)?;
@@ -734,6 +735,7 @@ fn validate_state(state: &ExecutionState) -> Result<(), String> {
         }
     }
     let manifest = read_object(&state.paths.manifest, "batch manifest")?;
+    #[expect(clippy::string_slice, reason = "hash_file returns ASCII hex digits")]
     let expected_execution_id = format!("batch-{}", &hash_file(&state.paths.manifest)?[..24]);
     if state.execution_id != expected_execution_id {
         return Err("batch execution identity changed".to_string());
@@ -1175,6 +1177,7 @@ fn bool_env(value: bool) -> &'static str {
     }
 }
 
+#[expect(clippy::string_slice, reason = "sha256 returns ASCII hex digits")]
 fn operation_id(state: &ExecutionState, kind: &str) -> String {
     let material = format!("{}:{}:{}", state.execution_id, state.revision + 1, kind);
     format!("op-{}", &sha256(material.as_bytes())[..24])

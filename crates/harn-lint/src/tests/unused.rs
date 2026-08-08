@@ -418,6 +418,7 @@ fn test_fix_unused_variable_simple_let_binding_with_type() {
     let fix = get_fix(&diags, "unused-variable").expect("expected autofix");
     assert_eq!(fix.len(), 1, "expected single-edit fix");
     let edit = &fix[0];
+    #[expect(clippy::string_slice, reason = "test input is ASCII")]
     let renamed = {
         let before = &source[..edit.span.start];
         let after = &source[edit.span.end..];

@@ -266,6 +266,10 @@ pub(super) fn recoverable_tool_result(
 /// Extract the named missing parameters from a validator `reason` of the form
 /// `"Tool 'x' is missing required parameter(s): a, b. ..."`. Returns the
 /// comma-separated parameter list (e.g. `"a, b"`) when present, else `None`.
+#[expect(
+    clippy::string_slice,
+    reason = "start is find() of the ASCII marker plus its length; end is find() on the tail"
+)]
 fn extract_missing_params(reason: &str) -> Option<String> {
     let marker = "missing required parameter(s):";
     let start = reason.find(marker)? + marker.len();

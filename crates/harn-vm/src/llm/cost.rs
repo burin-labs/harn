@@ -1123,6 +1123,10 @@ fn format_usd_amount(amount: f64, precision: Option<usize>, sign_always: bool) -
     // Defer rounding to the libc formatter so that values like 81.0 that
     // arrive as 80.999… don't split into "$80." + "1.0000".
     let rounded = format!("{:.*}", precision, amount.abs());
+    #[expect(
+        clippy::string_slice,
+        reason = "idx comes from find('.') on the ASCII-formatted number"
+    )]
     let (whole_str, frac_part) = match rounded.find('.') {
         Some(idx) => (&rounded[..idx], &rounded[idx + 1..]),
         None => (rounded.as_str(), ""),

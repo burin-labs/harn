@@ -159,7 +159,7 @@ fn parse_go(text: &str) -> Vec<Diagnostic> {
     for line in text.lines() {
         let trimmed = line.trim_start();
         // ./pkg/foo.go:12:3: undefined: bar
-        let (head, _) = match trimmed.split_once(": ") {
+        let (head, tail) = match trimmed.split_once(": ") {
             Some(parts) => parts,
             None => continue,
         };
@@ -174,7 +174,7 @@ fn parse_go(text: &str) -> Vec<Diagnostic> {
             continue;
         };
         let column = col.and_then(|c| c.parse::<i64>().ok());
-        let message = trimmed[head.len() + 2..].to_string();
+        let message = tail.to_string();
         if message.is_empty() {
             continue;
         }
@@ -206,9 +206,7 @@ fn parse_generic_line(line: &str) -> Option<Diagnostic> {
     // Pattern A: <head>: <severity>: <message> — head becomes path[:line[:col]].
     for sev in SEVERITIES {
         let needle = format!(": {sev}: ");
-        if let Some(idx) = line.find(needle.as_str()) {
-            let head = &line[..idx];
-            let message = &line[idx + needle.len()..];
+        if let Some((head, message)) = line.split_once(needle.as_str()) {
             let (path, line_no, column) = parse_path_position(head)?;
             return Some(Diagnostic {
                 severity: Severity::parse(sev).unwrap(),

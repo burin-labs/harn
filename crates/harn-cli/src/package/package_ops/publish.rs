@@ -1,3 +1,8 @@
+#![expect(
+    clippy::string_slice,
+    reason = "all offsets are regex match ends or cumulative split_inclusive('\\n') line lengths"
+)]
+
 use super::*;
 
 use crate::format::shell_quote_path;

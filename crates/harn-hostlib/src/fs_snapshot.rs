@@ -861,6 +861,10 @@ fn snapshot_dir(root: &Path, session_id: &str, snapshot_id: &str) -> PathBuf {
     dir
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "the sha256 hex digest is ASCII, so byte offset 12 is a char boundary"
+)]
 fn sanitize_component(input: &str) -> String {
     let sanitized: String = input
         .chars()

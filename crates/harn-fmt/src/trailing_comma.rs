@@ -116,6 +116,7 @@ struct BracketPair {
 
 impl BracketPair {
     fn evaluate(&self, source: &str) -> Option<TrailingCommaIssue> {
+        #[expect(clippy::string_slice, reason = "bracket offsets are lexer token char boundaries")]
         let inner = &source[self.open_byte + 1..self.close_byte];
         if inner.trim().is_empty() {
             return None;
@@ -321,6 +322,7 @@ fn apply_edits(source: &str, edits: Vec<FixEdit>) -> String {
     FixEdit::apply_all(source, &edits)
 }
 
+#[expect(clippy::string_slice, reason = "start is a lexer token offset, always a char boundary")]
 fn span_at_offset(source: &str, start: usize, end: usize) -> Span {
     let line = source[..start].bytes().filter(|b| *b == b'\n').count() + 1;
     let line_start = source[..start].rfind('\n').map(|idx| idx + 1).unwrap_or(0);

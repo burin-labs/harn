@@ -146,13 +146,16 @@ fn split_params(input: &str) -> Vec<String> {
 
 fn unquote_param(value: &str) -> String {
     let trimmed = value.trim();
-    if !(trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2) {
+    let Some(inner) = trimmed
+        .strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+    else {
         return trimmed.to_string();
-    }
+    };
 
     let mut out = String::new();
     let mut escaped = false;
-    for ch in trimmed[1..trimmed.len() - 1].chars() {
+    for ch in inner.chars() {
         if escaped {
             out.push(ch);
             escaped = false;

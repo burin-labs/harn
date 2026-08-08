@@ -173,26 +173,25 @@ fn parse_asset(raw: &str) -> Result<AssetDoc, String> {
 }
 
 fn extract_int(raw: &str, key: &str) -> Option<i64> {
-    let idx = raw.find(key)?;
-    let after = &raw[idx + key.len()..];
-    let colon = after.find(':')?;
-    let rest = after[colon + 1..].trim_start();
+    let (_, after) = raw.split_once(key)?;
+    let (_, rest) = after.split_once(':')?;
+    let rest = rest.trim_start();
     let end = rest
         .find(|c: char| !c.is_ascii_digit() && c != '-')
         .unwrap_or(rest.len());
-    rest[..end].parse::<i64>().ok()
+    #[expect(clippy::string_slice, reason = "`end` comes from find on `rest`, a char boundary")]
+    let digits = &rest[..end];
+    digits.parse::<i64>().ok()
 }
 
 fn extract_vectors(raw: &str) -> Result<HashMap<String, Vec<f32>>, String> {
     let key = "\"vectors\"";
-    let idx = raw
-        .find(key)
+    let (_, after) = raw
+        .split_once(key)
         .ok_or_else(|| "static embedding asset missing `vectors`".to_string())?;
-    let after = &raw[idx + key.len()..];
-    let open = after
-        .find('{')
+    let (_, body) = after
+        .split_once('{')
         .ok_or_else(|| "`vectors` is not an object".to_string())?;
-    let body = &after[open + 1..];
     let mut map = HashMap::new();
     let bytes = body.as_bytes();
     let mut i = 0usize;

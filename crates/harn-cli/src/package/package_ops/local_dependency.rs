@@ -330,6 +330,7 @@ fn local_dependency_alias(
 
     let digest = sha256_hex(dependency_path.as_bytes());
     for length in (8..=digest.len()).step_by(4) {
+        #[expect(clippy::string_slice, reason = "sha256_hex output is ASCII hex digits")]
         let candidate = format!("{preferred}-{}", &digest[..length]);
         validate_package_alias(&candidate)?;
         if !ctx.manifest.dependencies.contains_key(&candidate) {

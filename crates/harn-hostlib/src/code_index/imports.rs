@@ -234,14 +234,14 @@ fn resolve_dotted(
 ) -> Option<FileId> {
     let mut cleaned = raw.to_string();
     for prefix in &rule.strip_prefixes {
-        if cleaned.starts_with(prefix) {
-            cleaned = cleaned[prefix.len()..].to_string();
+        if let Some(stripped) = cleaned.strip_prefix(prefix) {
+            cleaned = stripped.to_string();
         }
     }
     // Second pass — handles chained prefixes (e.g. `import qualified`).
     for prefix in &rule.strip_prefixes {
-        if cleaned.starts_with(prefix) {
-            cleaned = cleaned[prefix.len()..].to_string();
+        if let Some(stripped) = cleaned.strip_prefix(prefix) {
+            cleaned = stripped.to_string();
         }
     }
     for suffix in &rule.strip_suffixes {
@@ -365,6 +365,10 @@ fn resolve_relative(
     None
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "both bounds are positions of ASCII quote bytes, so they are char boundaries"
+)]
 fn extract_string_literal(text: &str) -> Option<String> {
     let bytes = text.as_bytes();
     let first = bytes.iter().position(|b| *b == b'"' || *b == b'\'')?;

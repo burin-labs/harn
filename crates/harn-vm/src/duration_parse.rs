@@ -41,10 +41,8 @@ pub(crate) fn split_amount_unit(raw: &str) -> Option<(&str, String)> {
     if split == 0 {
         return None; // no numeric prefix
     }
-    Some((
-        &trimmed[..split],
-        trimmed[split..].trim().to_ascii_lowercase(),
-    ))
+    let (amount, unit) = trimmed.split_at(split);
+    Some((amount, unit.trim().to_ascii_lowercase()))
 }
 
 /// Canonical milliseconds-per-unit for the duration vocabulary shared across

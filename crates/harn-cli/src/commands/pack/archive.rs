@@ -1079,8 +1079,10 @@ fn decode_hex_32(raw: &str) -> Result<[u8; 32], String> {
     let mut bytes = [0_u8; 32];
     for (idx, slot) in bytes.iter_mut().enumerate() {
         let start = idx * 2;
-        let end = start + 2;
-        *slot = u8::from_str_radix(&trimmed[start..end], 16).map_err(|error| {
+        let pair = trimmed.get(start..start + 2).ok_or_else(|| {
+            format!("workflow bundle signature public_key contains invalid hex at byte {idx}")
+        })?;
+        *slot = u8::from_str_radix(pair, 16).map_err(|error| {
             format!(
                 "workflow bundle signature public_key contains invalid hex at byte {idx}: {error}"
             )

@@ -592,8 +592,8 @@ fn parse_ini_value(text: &str, section: &str, key: &str) -> Option<String> {
         if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
             continue;
         }
-        if line.starts_with('[') && line.ends_with(']') {
-            in_section = &line[1..line.len() - 1] == section;
+        if let Some(name) = line.strip_prefix('[').and_then(|rest| rest.strip_suffix(']')) {
+            in_section = name == section;
             continue;
         }
         if !in_section {

@@ -1666,6 +1666,10 @@ impl TypeChecker {
         }])
     }
 
+    #[expect(
+        clippy::string_slice,
+        reason = "callers build start from a get-validated region start plus find of ASCII text"
+    )]
     fn source_span_for_offsets(source: &str, start: usize, end: usize) -> Span {
         let prefix = &source[..start.min(source.len())];
         let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;

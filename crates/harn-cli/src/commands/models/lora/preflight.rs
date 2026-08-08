@@ -443,6 +443,10 @@ fn text_tool_name(body: &str, regexes: &ExportRegexes) -> Option<String> {
     if name.is_empty() || !regexes.tool_name.is_match(name) {
         return None;
     }
+    #[expect(
+        clippy::string_slice,
+        reason = "name is body's first split segment, so name.len() is a char boundary"
+    )]
     let remainder = body[name.len()..].trim_start();
     if remainder.starts_with('(') {
         Some(name.to_string())

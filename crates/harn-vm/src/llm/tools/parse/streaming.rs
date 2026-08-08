@@ -34,6 +34,13 @@
 //! completes, so the candidate stream is purely additional UX
 //! observability — never the source of truth for dispatch.
 
+#![expect(
+    clippy::string_slice,
+    reason = "buffer offsets advance only over checked ASCII bytes at line starts, \
+              starts_with-matched tag lengths, find_close_tag results, and \
+              parser-consumed byte counts — all char boundaries"
+)]
+
 use std::collections::BTreeSet;
 
 use crate::agent_events::{AgentEvent, ToolCallErrorCategory, ToolCallStatus};

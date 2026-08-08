@@ -31,6 +31,7 @@ fn BadName(a: int, b: int, c: string) -> int {
         .iter()
         .find(|d| d.rule == "naming-convention")
         .expect("expected naming-convention warning");
+    #[expect(clippy::string_slice, reason = "test input is ASCII")]
     let underlined = &source[warning.span.start..warning.span.end];
     assert_eq!(
         underlined, "fn BadName",
@@ -51,6 +52,7 @@ struct bad_name {
         .iter()
         .find(|d| d.rule == "naming-convention")
         .expect("expected naming-convention warning");
+    #[expect(clippy::string_slice, reason = "test input is ASCII")]
     let underlined = &source[warning.span.start..warning.span.end];
     assert_eq!(
         underlined, "struct bad_name",

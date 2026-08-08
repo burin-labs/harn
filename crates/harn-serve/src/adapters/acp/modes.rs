@@ -390,9 +390,7 @@ pub(super) fn validate_model_selector(raw: &str) -> Result<Option<String>, Strin
 /// OpenAI route paths use `/` (e.g. `anthropic/claude-opus-4-7`), while
 /// Ollama tag selectors use `:` (e.g. `ollama:llama3.2:latest`).
 fn split_provider_prefix(value: &str) -> Option<(&str, &str)> {
-    let position = value.find([':', '/'])?;
-    let (provider, rest) = value.split_at(position);
-    Some((provider, &rest[1..]))
+    value.split_once([':', '/'])
 }
 
 /// Capability ceiling enforced while a prompt runs in this mode. Harn's

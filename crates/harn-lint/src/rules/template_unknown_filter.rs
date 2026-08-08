@@ -61,6 +61,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::string_slice,
+        reason = "diagnostic spans are template-lexer byte offsets into the fixture"
+    )]
     fn typo_points_at_the_name_and_offers_a_fix() {
         let source = "héllo {{ name | uppr }}\n";
         let diagnostics = unknown_filters(source);

@@ -79,6 +79,7 @@ fn receipt_signing_material(receipt_root_hash: &str) -> String {
     format!("harn.session.receipt.v1\nroot={receipt_root_hash}\n")
 }
 
+#[expect(clippy::string_slice, reason = "hex::encode output is ASCII")]
 pub fn key_id_for(verifying_key: &VerifyingKey) -> String {
     let mut hasher = Sha256::new();
     hasher.update(verifying_key.as_bytes());

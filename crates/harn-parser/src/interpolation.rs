@@ -42,6 +42,10 @@ mod tests {
     use crate::Node;
 
     #[test]
+    #[expect(
+        clippy::string_slice,
+        reason = "expression spans come from the lexer and lie on char boundaries"
+    )]
     fn parses_a_hole_into_spans_that_address_the_containing_source() {
         let source = "const label = \"é ${platform()}\"\n";
 

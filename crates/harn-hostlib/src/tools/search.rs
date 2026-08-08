@@ -416,6 +416,10 @@ fn row_to_value(rwp: RowWithPath) -> VmValue {
     ])
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "start/end come from floor/next_char_boundary, so they are char boundaries"
+)]
 fn clip_text(value: &str, max_bytes: usize, anchor_byte: Option<usize>) -> (String, bool) {
     if value.len() <= max_bytes {
         return (value.to_string(), false);
@@ -462,6 +466,10 @@ fn floor_char_boundary(value: &str, mut index: usize) -> usize {
     index
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "the only caller passes an index already floored to a char boundary"
+)]
 fn next_char_boundary(value: &str, index: usize) -> usize {
     if index >= value.len() {
         return value.len();

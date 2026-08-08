@@ -803,6 +803,10 @@ fn third_argument_literal(rest: &str) -> Option<String> {
 /// Event-type literals the module emits through the host path. Both the
 /// builtin and the `__emit_event` wrapper take the name as their third
 /// argument, so one shape covers every emitter.
+#[expect(
+    clippy::string_slice,
+    reason = "offsets come from find/rfind on `source` plus ASCII literal lengths"
+)]
 fn emitted_event_types(source: &str) -> Vec<String> {
     let mut found = Vec::new();
     for call in ["agent_emit_event(", "__emit_event("] {

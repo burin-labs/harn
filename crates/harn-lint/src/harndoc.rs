@@ -352,8 +352,10 @@ pub(crate) fn extract_harndoc(source: &str, span: &Span) -> Option<String> {
         return None;
     }
     let above_trim = above.trim_start();
-    if above_trim.starts_with("/**") && above_trim.ends_with("*/") && above_trim.len() >= 5 {
-        let inner = &above_trim[3..above_trim.len() - 2];
+    if let Some(inner) = above_trim
+        .strip_prefix("/**")
+        .and_then(|rest| rest.strip_suffix("*/"))
+    {
         let text = inner.trim();
         return Some(text.to_string());
     }

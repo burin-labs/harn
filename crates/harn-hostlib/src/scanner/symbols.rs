@@ -398,6 +398,10 @@ fn truncate_signature(rest: &str, max_len: usize) -> String {
             }
         }
     }
+    #[expect(
+        clippy::string_slice,
+        reason = "`end` is `i + ch.len_utf8()` from char_indices, a char boundary"
+    )]
     let candidate = if end > 0 { &rest[..end] } else { rest };
     harn_vm::text::truncate_end(candidate, max_len)
 }

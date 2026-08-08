@@ -778,6 +778,11 @@ impl<'a> Linter<'a> {
                         .is_some_and(|s| matches!(s.node, Node::ReturnStmt { .. }));
                     if then_returns && else_returns {
                         // Rewrite `} else { <body> }` as `}\n<indent><body>`.
+                        #[expect(
+                            clippy::string_slice,
+                            reason = "span offsets are lexer byte offsets into src, and \
+                                      line_start is rfind-derived, so all are char boundaries"
+                        )]
                         let fix = self.source.and_then(|src| {
                             let then_last = then_body.last()?;
                             let else_first = else_b.first()?;

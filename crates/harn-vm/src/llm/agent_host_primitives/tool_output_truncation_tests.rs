@@ -10,6 +10,7 @@ async fn explicit_hook_truncation_emits_even_when_final_length_is_unchanged() {
         pattern: "read_file".to_string(),
         pre: None,
         post: Some(Arc::new(|_name, result: &str| {
+            #[expect(clippy::string_slice, reason = "test input is ASCII")]
             let kept = &result[..result.len() - 4];
             crate::orchestration::PostToolAction::Truncate {
                 result: format!("{kept}TAIL"),

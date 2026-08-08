@@ -29,6 +29,7 @@ fn write_hello_script(dir: &std::path::Path) -> std::path::PathBuf {
     path
 }
 
+#[expect(clippy::string_slice, reason = "start comes from find('{'), an ASCII char boundary")]
 fn parse_envelope(out: &std::process::Output) -> serde_json::Value {
     let stdout = String::from_utf8_lossy(&out.stdout);
     let trimmed = stdout.trim();

@@ -113,6 +113,7 @@ pub fn regex_captures(pattern: &str, text: &str, flags: &str) -> Result<Vec<Rege
         let whole = captures
             .get(0)
             .expect("regex capture always includes the full match");
+        #[expect(clippy::string_slice, reason = "regex match bounds are char boundaries")]
         let gap = &text[scanned_byte..whole.start()];
         chars_before += gap.chars().count();
         newlines_before += gap.bytes().filter(|byte| *byte == b'\n').count();

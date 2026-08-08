@@ -346,6 +346,7 @@ fn coding_agent_eval_pack_manifest(
     })
 }
 
+#[expect(clippy::string_slice, reason = "hex::encode output is ASCII hex digits")]
 fn coding_agent_ledger_namespace(run_dir: &Path) -> Result<String, String> {
     let output_dir = run_dir
         .parent()

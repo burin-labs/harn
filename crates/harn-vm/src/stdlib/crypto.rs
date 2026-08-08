@@ -1186,7 +1186,10 @@ fn url_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(byte) = u8::from_str_radix(&val[i + 1..i + 3], 16) {
+            if let Some(Ok(byte)) = val
+                .get(i + 1..i + 3)
+                .map(|hex| u8::from_str_radix(hex, 16))
+            {
                 result.push(byte);
                 i += 3;
                 continue;

@@ -226,6 +226,7 @@ pipeline default(task) {
         .iter()
         .find(|d| d.rule == "cyclomatic-complexity")
         .expect("expected a cyclomatic-complexity warning");
+    #[expect(clippy::string_slice, reason = "test input is ASCII")]
     let underlined = &source[warning.span.start..warning.span.end];
     assert_eq!(
         underlined, "fn complicated_runner",

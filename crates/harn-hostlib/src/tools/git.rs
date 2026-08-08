@@ -242,6 +242,10 @@ fn run_blame(
         if let Some(rest) = line.strip_prefix("author ") {
             current_author = rest.to_string();
         } else if line.len() >= 40 && line.chars().take(40).all(|c| c.is_ascii_hexdigit()) {
+            #[expect(
+                clippy::string_slice,
+                reason = "the first 40 chars are checked ASCII hex, so byte 40 is a char boundary"
+            )]
             current_sha = line[..40].to_string();
         } else if let Some(stripped) = line.strip_prefix('\t') {
             line_no += 1;

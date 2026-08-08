@@ -771,6 +771,10 @@ fn structured_tool_result_messages(
     Some(messages)
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "body offsets are regex match boundaries on text, so char boundaries"
+)]
 fn tool_result_blocks(content: &str, regexes: &ExportRegexes) -> Option<Vec<ToolResultBlock>> {
     let text = content.trim();
     if text.is_empty() {
