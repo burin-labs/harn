@@ -138,6 +138,7 @@ jobs:
     outputs:
       ref: ${{ steps.resolve.outputs.ref }}
       is_release: ${{ steps.resolve.outputs.is_release }}
+      is_prerelease: ${{ steps.resolve.outputs.is_prerelease }}
       version: ${{ steps.resolve.outputs.version }}
       major_minor: ${{ steps.resolve.outputs.major_minor }}
       should_build_binaries: ${{ steps.resolve.outputs.should_build_binaries }}
@@ -216,8 +217,11 @@ jobs:
           RELEASE_BUILD_INPUTS_CHANGED: ${{ steps.release-build-inputs.outputs.release_build_inputs || 'false' }}
           GH_TOKEN: ${{ github.token }}
         run: |
+          # shellcheck source=scripts/lib/release_version.sh
+          source scripts/lib/release_version.sh
           REF="${INPUT_TAG:-$REF_NAME}"
           IS_RELEASE=false
+          IS_PRERELEASE=false
           SHOULD_BUILD_BINARIES=false
           SHOULD_FINALIZE_RELEASE=false
           SHOULD_PUBLISH_CONTAINER=false
@@ -239,7 +243,7 @@ jobs:
                   select((.databaseId | tostring) != env.GITHUB_RUN_ID) |
                   select(
                     (.event == "workflow_dispatch") or
-                    (.event == "push" and ((.headBranch // "") | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")))
+                    (.event == "push" and ((.headBranch // "") | test("^v[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$")))
                   ) |
                   "\(.databaseId)\t\(.event)\t\(.headBranch // "<unknown>")\t\(.url)"'
             done
@@ -294,16 +298,14 @@ jobs:
 
           release_container_tags_missing() {
             local version="$1"
-            local major_minor="$2"
+            local make_latest="$2"
             local anonymous_docker_config
             anonymous_docker_config="${RUNNER_TEMP}/anonymous-docker-config"
             rm -rf "$anonymous_docker_config"
             mkdir -p "$anonymous_docker_config"
             MISSING_PUBLIC_CONTAINER_TAGS=()
-            CONTAINER_TAGS=("$version")
-            if [[ "$MAKE_LATEST" == "true" ]]; then
-              CONTAINER_TAGS+=("$major_minor" latest)
-            fi
+            release_publication_plan "$version" "$make_latest"
+            CONTAINER_TAGS=("${RELEASE_CONTAINER_TAGS[@]}")
             for TAG in "${CONTAINER_TAGS[@]}"; do
               IMAGE="ghcr.io/burin-labs/harn:${TAG}"
               if docker --config "$anonymous_docker_config" manifest inspect "$IMAGE" >/dev/null 2>&1; then
@@ -440,8 +442,8 @@ jobs:
               RUNNER_PROFILE=policy
             fi
             FULL_BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" "$RUNNER_PROFILE")"
-            if [[ ! "$REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              echo "::error::expected tag of form vX.Y.Z, got '$REF'"
+            if ! release_tag_is_canonical "$REF"; then
+              echo "::error::expected canonical release tag, got '$REF'"
               exit 1
             fi
             if [[ "$EVENT_NAME" != "workflow_dispatch" ]] && (( REQUESTED_TARGET_COUNT > 0 )); then
@@ -453,6 +455,8 @@ jobs:
               exit 1
             fi
             VERSION="${REF#v}"
+            release_publication_plan "$VERSION" false
+            IS_PRERELEASE="$RELEASE_IS_PRERELEASE"
           elif [[ "$EVENT_NAME" == "schedule" ]]; then
             # Cron-driven warm-cache run. Normally proceed — the whole point
             # is to refresh the cache against GitHub's 7-day eviction — but
@@ -500,7 +504,7 @@ jobs:
           fi
           MAJOR_MINOR="$(echo "$VERSION" | awk -F. '{print $1"."$2}')"
 
-          if [[ "$IS_RELEASE" == "true" ]]; then
+          if [[ "$IS_RELEASE" == "true" && "$IS_PRERELEASE" == "false" ]]; then
             LATEST_REPO_TAG="$(
               git ls-remote --tags origin 'refs/tags/v*' \
                 | awk '{print $2}' \
@@ -518,6 +522,13 @@ jobs:
             else
               echo "::notice::Recovering historical $REF; preserving GitHub /releases/latest and moving container tags at $LATEST_REPO_TAG."
             fi
+          elif [[ "$IS_RELEASE" == "true" ]]; then
+            echo "::notice::Prerelease $REF publishes an exact-version container only and preserves GitHub /releases/latest plus rolling container tags."
+          fi
+          release_publication_plan "$VERSION" "$MAKE_LATEST"
+          IS_PRERELEASE="$RELEASE_IS_PRERELEASE"
+          MAKE_LATEST="$RELEASE_MAKE_LATEST"
+          if [[ "$IS_RELEASE" == "true" ]]; then
             EXPECTED_ARCHIVES=(
               "harn-aarch64-apple-darwin.tar.gz"
               "harn-aarch64-unknown-linux-gnu.tar.gz"
@@ -548,7 +559,7 @@ jobs:
               echo "::notice::Explicit release-recovery target subset requested for $REF: $(jq -r '.[]' <<<"$REQUESTED_TARGETS_JSON" | paste -sd ' ' -)"
               echo "::notice::Selected build matrix: $BUILD_MATRIX"
               if jq -e 'index("x86_64-unknown-linux-gnu") or index("aarch64-unknown-linux-gnu")' <<<"$REQUESTED_TARGETS_JSON" >/dev/null; then
-                if release_container_tags_missing "$VERSION" "$MAJOR_MINOR"; then
+                if release_container_tags_missing "$VERSION" "$MAKE_LATEST"; then
                   SHOULD_PUBLISH_CONTAINER=true
                   echo "::notice::Linux release target is being rebuilt and container tags are missing or private: ${MISSING_PUBLIC_CONTAINER_TAGS[*]}. Publishing container tags after release finalization."
                 else
@@ -597,17 +608,17 @@ jobs:
                 BUILD_MATRIX="$(jq -c --argjson targets "$TARGETS_JSON" '[.[] | select(.target as $target | $targets | index($target))]' <<<"$FULL_BUILD_MATRIX")"
                 echo "::notice::Rebuilding only missing archive targets: ${MISSING_ARCHIVE_TARGETS[*]}"
               fi
-              if (( ${#MISSING_ASSETS[@]} > 0 )) || [[ "$RELEASE_PRERELEASE" == "true" ]]; then
+              if (( ${#MISSING_ASSETS[@]} > 0 )) || [[ "$RELEASE_PRERELEASE" != "$IS_PRERELEASE" ]]; then
                 SHOULD_FINALIZE_RELEASE=true
               fi
               if (( ${#MISSING_ASSETS[@]} > 0 )) && (( ${#MISSING_ARCHIVE_TARGETS[@]} == 0 )); then
                 echo "::notice::Only release metadata is missing for $REF; skipping binary build matrix and regenerating release metadata from existing archives."
               fi
-              if [[ "$RELEASE_PRERELEASE" == "true" ]] && (( ${#MISSING_ASSETS[@]} == 0 )); then
-                echo "::notice::Release $REF has all assets but is still marked prerelease; finalizing without rebuilding."
+              if [[ "$RELEASE_PRERELEASE" != "$IS_PRERELEASE" ]] && (( ${#MISSING_ASSETS[@]} == 0 )); then
+                echo "::notice::Release $REF has all assets but its prerelease flag is $RELEASE_PRERELEASE (expected $IS_PRERELEASE); correcting without rebuilding."
               fi
 
-              if release_container_tags_missing "$VERSION" "$MAJOR_MINOR"; then
+              if release_container_tags_missing "$VERSION" "$MAKE_LATEST"; then
                 SHOULD_PUBLISH_CONTAINER=true
                 SHOULD_FINALIZE_RELEASE=true
                 echo "::notice::Release container tags are missing or private: ${MISSING_PUBLIC_CONTAINER_TAGS[*]}. Re-verifying release archives before publishing container tags."
@@ -620,6 +631,7 @@ jobs:
           {
             echo "ref=$REF"
             echo "is_release=$IS_RELEASE"
+            echo "is_prerelease=$IS_PRERELEASE"
             echo "version=$VERSION"
             echo "major_minor=$MAJOR_MINOR"
             echo "should_build_binaries=$SHOULD_BUILD_BINARIES"
@@ -641,6 +653,7 @@ jobs:
             echo "| Ref | $REF |"
             echo "| Version | $VERSION |"
             echo "| Release mode | $IS_RELEASE |"
+            echo "| Prerelease | $IS_PRERELEASE |"
             echo "| Build mode | $BUILD_MODE |"
             echo "| Runner profile | $RUNNER_PROFILE |"
             echo "| Build binaries | $SHOULD_BUILD_BINARIES |"
@@ -1843,8 +1856,9 @@ jobs:
 
       - name: Finalize GitHub release
         # Every leg has landed. Attach SHA256SUMS + the asset manifest, write
-        # the real notes, and clear the prerelease placeholder created by
-        # prepare_release. Only the highest repository semver tag may move
+        # the real notes, and set the intentional channel selected by the tag.
+        # Stable builds clear the temporary placeholder; prerelease builds keep
+        # the release marked prerelease. Only the highest stable tag may move
         # /releases/latest (and thus install.sh / `harn upgrade`); historical
         # recovery preserves that pointer. The per-arch archives were already
         # uploaded incrementally by each build leg; re-listing them here is a
@@ -1853,7 +1867,7 @@ jobs:
         with:
           tag_name: ${{ needs.setup.outputs.ref }}
           body_path: release-notes.md
-          prerelease: false
+          prerelease: ${{ needs.setup.outputs.is_prerelease }}
           make_latest: ${{ needs.setup.outputs.make_latest }}
           files: |
             artifacts/*.tar.gz

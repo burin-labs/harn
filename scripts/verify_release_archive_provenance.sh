@@ -5,6 +5,9 @@ readonly predicate_type="https://harnlang.com/attestations/release-archive/v1"
 readonly predicate_schema="harn.release_archive_provenance.v1"
 readonly signer_workflow=".github/workflows/build-release-binaries.yml"
 readonly legacy_max_version="0.10.40"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/release_version.sh
+source "$script_dir/lib/release_version.sh"
 
 usage() {
   cat <<'EOF'
@@ -41,8 +44,8 @@ if [[ -z "$artifacts_dir" || -z "$tag" || -z "$repo" ]]; then
   usage >&2
   exit 2
 fi
-if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "error: expected tag vX.Y.Z, got '$tag'" >&2
+if ! release_tag_is_canonical "$tag"; then
+  echo "error: expected canonical release tag, got '$tag'" >&2
   exit 2
 fi
 if [[ ! "$repo" =~ ^[^/]+/[^/]+$ ]]; then
@@ -79,7 +82,7 @@ sha256_file() {
 
 semver_le() {
   local left_major left_minor left_patch right_major right_minor right_patch
-  IFS=. read -r left_major left_minor left_patch <<<"$1"
+  IFS=. read -r left_major left_minor left_patch <<<"${1%%-*}"
   IFS=. read -r right_major right_minor right_patch <<<"$2"
   (( left_major < right_major ||
     (left_major == right_major && left_minor < right_minor) ||

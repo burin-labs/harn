@@ -72,6 +72,10 @@ jobs:
       mode: ${{ steps.resolve.outputs.mode }}
       tag: ${{ steps.resolve.outputs.tag }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          sparse-checkout: scripts/lib/release_version.sh
       - name: Resolve smoke mode
         id: resolve
         shell: bash
@@ -83,15 +87,22 @@ jobs:
           WORKFLOW_RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
           set -euo pipefail
+          # shellcheck source=scripts/lib/release_version.sh
+          source scripts/lib/release_version.sh
 
           extract_release_tag() {
             local ref="$1"
-            if [[ "$ref" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              printf '%s\n' "$ref"
-            elif [[ "$ref" =~ ^release/v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
-              printf 'v%s\n' "${BASH_REMATCH[1]}"
-            elif [[ "$ref" =~ ^release-attempt/v([0-9]+\.[0-9]+\.[0-9]+)/ ]]; then
-              printf 'v%s\n' "${BASH_REMATCH[1]}"
+            local candidate=""
+            if [[ "$ref" == v* ]]; then
+              candidate="$ref"
+            elif [[ "$ref" == release/v* ]]; then
+              candidate="${ref#release/}"
+            elif [[ "$ref" == release-attempt/v*/* ]]; then
+              candidate="${ref#release-attempt/}"
+              candidate="${candidate%%/*}"
+            fi
+            if release_tag_is_canonical "$candidate"; then
+              printf '%s\n' "$candidate"
             fi
           }
 
@@ -116,7 +127,7 @@ jobs:
 
             tag="$(extract_release_tag "$WORKFLOW_RUN_HEAD_BRANCH")"
             if [[ -z "$tag" ]]; then
-              echo "::error::Could not extract release tag vX.Y.Z from workflow_run head_branch '$WORKFLOW_RUN_HEAD_BRANCH'"
+              echo "::error::Could not extract a canonical release tag from workflow_run head_branch '$WORKFLOW_RUN_HEAD_BRANCH'"
               exit 1
             fi
           elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
@@ -128,8 +139,8 @@ jobs:
             exit 0
           fi
 
-          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Expected release tag vX.Y.Z, got '$tag'"
+          if ! release_tag_is_canonical "$tag"; then
+            echo "::error::Expected canonical release tag, got '$tag'"
             exit 1
           fi
 

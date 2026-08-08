@@ -1,5 +1,6 @@
 import { help_requested, parse, parser } from "std/cli/argparse"
 import "std/schema"
+import { is_v_release_semver } from "std/semver"
 
 /**
  * What this script requires of `gh repo view --json nameWithOwner`.
@@ -127,18 +128,18 @@ fn arg_spec() {
 
 fn main(harness: Harness) -> int {
   if help_requested(argv) {
-    harness.stdio.eprintln("usage: scripts/check_release_smoke.sh vX.Y.Z")
+    harness.stdio.eprintln("usage: scripts/check_release_smoke.sh vVERSION")
     return 2
   }
   const parsed_result = parse(arg_spec(), argv)
   if is_err(parsed_result) {
-    harness.stdio.eprintln("usage: scripts/check_release_smoke.sh vX.Y.Z")
+    harness.stdio.eprintln("usage: scripts/check_release_smoke.sh vVERSION")
     return 2
   }
   const tag = to_string(unwrap(parsed_result).options?.tag ?? "")
   const gh_bin = to_string(unwrap(parsed_result).options?.gh_bin ?? "gh")
-  if regex_captures(r"^v\d+\.\d+\.\d+$", tag).count != 1 {
-    harness.stdio.eprintln("usage: scripts/check_release_smoke.sh vX.Y.Z")
+  if !is_v_release_semver(tag) {
+    harness.stdio.eprintln("usage: scripts/check_release_smoke.sh vVERSION")
     return 2
   }
   try {

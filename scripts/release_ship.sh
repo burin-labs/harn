@@ -61,9 +61,9 @@ log_step() {
 usage() {
   cat <<'EOF'
 Usage:
-  ./scripts/release_ship.sh --prepare --bump patch|minor|major [--audit-receipt path] [--skip-dry-run]  # release_harn.harn only
-  ./scripts/release_ship.sh --prepare --materialize-candidate --bump patch|minor|major                  # release_harn.harn only
-  ./scripts/release_ship.sh --bump patch|minor|major [--skip-dry-run] [--base main]   # recovery
+  ./scripts/release_ship.sh --prepare --bump KIND [--preid ID] [--audit-receipt path] [--skip-dry-run]  # release_harn.harn only
+  ./scripts/release_ship.sh --prepare --materialize-candidate --bump KIND [--preid ID]                  # release_harn.harn only
+  ./scripts/release_ship.sh --bump KIND [--preid ID] [--skip-dry-run] [--base main]   # recovery
   ./scripts/release_ship.sh --finalize [--skip-dry-run] [--reaudit] [--notes-output path] [--skip-github-release] [--base main]
 
 Merge-queue-safe release sequence for a prepared Harn release.
@@ -253,7 +253,12 @@ stage_version_bump_manifests() {
 
 next_version() {
   local bump="$1"
-  release_metadata next --bump "$bump"
+  local preid="${2:-}"
+  if [[ -n "$preid" ]]; then
+    release_metadata next --bump "$bump" --preid "$preid"
+  else
+    release_metadata next --bump "$bump"
+  fi
 }
 
 export_warmed_harn_bin() {
@@ -576,7 +581,11 @@ open_bump_pr() {
 
   export_warmed_harn_bin
   log_step "Version bump"
-  "$RELEASE_GATE_SCRIPT" prepare --bump "$BUMP"
+  local prepare_args=(prepare --bump "$BUMP")
+  if [[ -n "$PREID" ]]; then
+    prepare_args+=(--preid "$PREID")
+  fi
+  "$RELEASE_GATE_SCRIPT" "${prepare_args[@]}"
   local actual_next
   actual_next="$(current_version)"
   if [[ "$actual_next" != "$next" ]]; then
@@ -662,7 +671,12 @@ prepare_here() {
   regenerate_derived_files
 
   log_step "Version bump (in place)"
-  "$RELEASE_GATE_SCRIPT" prepare --bump "$BUMP" --allow-dirty
+  local prepare_args=(prepare --bump "$BUMP")
+  if [[ -n "$PREID" ]]; then
+    prepare_args+=(--preid "$PREID")
+  fi
+  prepare_args+=(--allow-dirty)
+  "$RELEASE_GATE_SCRIPT" "${prepare_args[@]}"
   local actual_next
   actual_next="$(current_version)"
   if [[ "$actual_next" != "$next" ]]; then
@@ -771,6 +785,7 @@ push_tag_if_needed() {
 }
 
 BUMP="patch"
+PREID=""
 SKIP_DRY_RUN=0
 SKIP_AUDIT=0
 AUDIT_RECEIPT=""
@@ -784,6 +799,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --bump)
       BUMP="${2:-}"
+      shift 2
+      ;;
+    --preid)
+      PREID="${2:-}"
       shift 2
       ;;
     --prepare)
@@ -847,10 +866,24 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$BUMP" in
-  patch|minor|major) ;;
+  patch|minor|major|premajor|preminor|prepatch|prerelease) ;;
   *)
-    echo "error: --bump must be patch, minor, or major"
+    echo "error: --bump must be patch, minor, major, premajor, preminor, prepatch, or prerelease"
     exit 1
+    ;;
+esac
+case "$BUMP" in
+  premajor|preminor|prepatch|prerelease)
+    if [[ -z "$PREID" ]]; then
+      echo "error: --preid is required for prerelease bumps"
+      exit 1
+    fi
+    ;;
+  *)
+    if [[ -n "$PREID" ]]; then
+      echo "error: --preid is only valid for prerelease bumps"
+      exit 1
+    fi
     ;;
 esac
 
@@ -907,7 +940,7 @@ if [[ -z "$PREVIOUS_VERSION" ]]; then
 fi
 
 if [[ "$MODE" == "prepare-here" ]]; then
-  NEXT_VERSION="$(next_version "$BUMP")"
+  NEXT_VERSION="$(next_version "$BUMP" "$PREID")"
   if [[ "$NEXT_VERSION" == "$PREVIOUS_VERSION" ]]; then
     echo "error: --bump $BUMP would leave version unchanged at $PREVIOUS_VERSION"
     exit 1
@@ -923,7 +956,7 @@ if [[ "$MODE" == "prepare-here" ]]; then
 fi
 
 if [[ "$MODE" == "bump-pr" ]]; then
-  NEXT_VERSION="$(next_version "$BUMP")"
+  NEXT_VERSION="$(next_version "$BUMP" "$PREID")"
   if [[ "$NEXT_VERSION" == "$PREVIOUS_VERSION" ]]; then
     echo "error: version did not change"
     exit 1

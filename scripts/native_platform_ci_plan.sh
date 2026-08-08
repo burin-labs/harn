@@ -222,7 +222,7 @@ if [[ "$event_name" != "push" && "$event_name" != "pull_request" ]]; then
   exit 0
 fi
 
-if [[ ( "$event_name" == "pull_request" && "$head_ref" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+$ ) || "$event_name" == "push" ]] \
+if [[ ( "$event_name" == "pull_request" && "$head_ref" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ) || "$event_name" == "push" ]] \
   && release_metadata_only "$changed_files"; then
   echo false
   exit 0

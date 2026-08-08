@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -lt 1 || ! "$1" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "usage: scripts/check_release_smoke.sh vX.Y.Z" >&2
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/release_version.sh
+source "$script_dir/lib/release_version.sh"
+
+if [[ $# -lt 1 ]] || ! release_tag_is_canonical "$1"; then
+  echo "usage: scripts/check_release_smoke.sh vVERSION" >&2
   exit 2
 fi
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 exec "$script_dir/harn_bin.sh" run "$script_dir/check_release_smoke.harn" -- "$@"

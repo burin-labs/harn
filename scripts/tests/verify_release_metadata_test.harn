@@ -131,6 +131,10 @@ pipeline test_current_version_missing(harness: Harness, task) {
 @test
 pipeline test_changelog_versions(harness: Harness, task) {
   assert_eq(changelog_versions(CHANGELOG), ["0.8.71", "0.8.70"])
+  assert_eq(
+    changelog_versions("## v0.9.0-rc.1\n\n- candidate\n\n## v0.8.71\n"),
+    ["0.9.0-rc.1", "0.8.71"],
+  )
 }
 
 @test
@@ -159,12 +163,13 @@ pipeline test_section_body_empty(harness: Harness, task) {
 @test
 pipeline test_detect_misformatted(harness: Harness, task) {
   assert_eq(detect_misformatted_headings("## v0.7.41 "), ["## v0.7.41 "])
-  assert_eq(detect_misformatted_headings("## v0.7.41-rc1"), ["## v0.7.41-rc1"])
+  assert_eq(detect_misformatted_headings("## v0.7.41-rc..1"), ["## v0.7.41-rc..1"])
 }
 
 @test
 pipeline test_detect_misformatted_clean(harness: Harness, task) {
   assert_eq(detect_misformatted_headings(CHANGELOG), [])
+  assert_eq(detect_misformatted_headings("## v0.7.41-rc1"), [])
   assert_eq(detect_misformatted_headings("## v0.5 series (0.5.0)"), [])
 }
 
@@ -173,6 +178,9 @@ pipeline test_is_bump_ahead(harness: Harness, task) {
   assert_eq(is_bump_ahead("0.8.71", "0.8.72"), true)
   assert_eq(is_bump_ahead("0.8.71", "0.9.0"), true)
   assert_eq(is_bump_ahead("0.8.71", "1.0.0"), true)
+  assert_eq(is_bump_ahead("0.8.71", "0.8.72-rc.0"), true)
+  assert_eq(is_bump_ahead("0.8.72-rc.0", "0.8.72-rc.1"), true)
+  assert_eq(is_bump_ahead("0.8.72-rc.1", "0.8.72"), true)
 }
 
 @test
@@ -194,6 +202,8 @@ pipeline test_has_duplicates(harness: Harness, task) {
 pipeline test_is_descending(harness: Harness, task) {
   assert_eq(is_descending(["1.0.1", "1.0.0", "0.9.9"]), true)
   assert_eq(is_descending(["1.0.0", "1.0.1"]), false)
+  assert_eq(is_descending(["1.0.0", "1.0.0-rc.1", "1.0.0-rc.0", "0.9.9"]), true)
+  assert_eq(is_descending(["1.0.0-rc.0", "1.0.0-rc.1"]), false)
   assert_eq(is_descending(["1.0.0"]), true)
 }
 
@@ -206,6 +216,12 @@ pipeline test_check_metadata_ok(harness: Harness, task) {
 pipeline test_check_metadata_bump_ahead(harness: Harness, task) {
   const changelog = "# Changelog\n\n## v0.8.72\n\n- Next release.\n\n## v0.8.71\n\n- Prior.\n"
   assert_eq(check_metadata(CARGO, changelog), "0.8.72")
+}
+
+@test
+pipeline test_check_metadata_prerelease_bump_ahead(harness: Harness, task) {
+  const changelog = "# Changelog\n\n## v0.8.72-rc.0\n\n- Candidate.\n\n## v0.8.71\n\n- Prior.\n"
+  assert_eq(check_metadata(CARGO, changelog), "0.8.72-rc.0")
 }
 
 @test
@@ -244,7 +260,7 @@ pipeline test_check_metadata_version_mismatch(harness: Harness, task) {
   assert_eq(
     r,
     "error: Cargo.toml version 0.8.71 does not match top changelog entry 0.9.5 "
-      + "(and the delta is not a single patch/minor/major bump)",
+      + "(and the delta is not one requested release bump)",
   )
 }
 
@@ -270,8 +286,8 @@ pipeline test_check_metadata_misformatted(harness: Harness, task) {
   assert_eq(
     r,
     "error: CHANGELOG.md has heading(s) that look like version markers but "
-      + "don't match the canonical `## vX.Y.Z` regex (no trailing whitespace, "
-      + "no suffix):\n  ## v0.8.71 ",
+      + "don't match canonical stable or prerelease SemVer (no trailing whitespace "
+      + "or build metadata):\n  ## v0.8.71 ",
   )
 }
 

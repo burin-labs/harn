@@ -18,6 +18,7 @@
  * Runs in the pre-push hook so local pushes reject retroactive CHANGELOG drift
  * before CI.
  */
+import { parse_release } from "std/semver"
 import {
   commit_messages_since,
   flag_value,
@@ -41,17 +42,7 @@ pub fn heading_version(line: string) -> string? {
     return nil
   }
   const rest = line.substring(prefix.len(), line.len())
-  // rest must be exactly N+.N+.N+ (three dot-separated non-empty digit runs).
-  const parts = rest.split(".")
-  if parts.count != 3 {
-    return nil
-  }
-  for part in parts {
-    if part.len() == 0 || !is_all_digits(part) {
-      return nil
-    }
-  }
-  return rest
+  return parse_release(rest) == nil ? nil : rest
 }
 
 /** True when every character of `s` is an ASCII digit and `s` is non-empty. */

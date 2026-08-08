@@ -560,6 +560,8 @@ test-pr-gate-scripts:
 	./scripts/tests/release_ship_fragment_guard_test.sh
 	./scripts/tests/release_ship_tag_push_idempotent_test.sh
 	./scripts/tests/verify_release_archive_provenance_test.sh
+	./scripts/tests/release_version_test.sh
+	./scripts/tests/release_publication_policy_test.sh
 	./scripts/tests/merge_group_path_gate_test.sh
 	./scripts/tests/affected_crate_args_test.sh
 	./scripts/tests/hook_fast_default_mode_test.sh
