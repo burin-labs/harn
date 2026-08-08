@@ -1,0 +1,44 @@
+import "std/agent/best_of_n"
+
+pipeline default(harness: Harness) {
+  const gen = { i -> {id: i} }
+  // 1. host signal selects a winner.
+  const r1 = best_of_n_candidates({k: 3, generate: gen, select_callback: { c -> 1 }})
+  harness.stdio.println(
+    "${r1.reason} idx=${r1.selected_index} id=${r1.candidate.id} n=${len(r1.candidates)}",
+  )
+  // 2. nil winner -> deterministic fallthrough to the last candidate.
+  const r2 = best_of_n_candidates({k: 3, generate: gen, select_callback: { c -> nil }})
+  harness.stdio.println("${r2.reason} idx=${r2.selected_index}")
+  // 3. out-of-range winner -> fallthrough.
+  const r3 = best_of_n_candidates({k: 3, generate: gen, select_callback: { c -> 99 }})
+  harness.stdio.println("${r3.reason} idx=${r3.selected_index}")
+  // 4. spec_contract false -> abort to single-candidate path (one generated).
+  const r4 = best_of_n_candidates(
+    {k: 3, generate: gen, select_callback: { c -> 1 }, spec_contract_callback: { -> false }},
+  )
+  harness.stdio.println(
+    "${r4.reason} idx=${r4.selected_index} n=${len(r4.candidates)} contract=${r4.contract_ok}",
+  )
+  // 5. spec_contract true -> normal best-of-N.
+  const r5 = best_of_n_candidates(
+    {k: 2, generate: gen, select_callback: { c -> 0 }, spec_contract_callback: { -> true }},
+  )
+  harness.stdio.println("${r5.reason} idx=${r5.selected_index} contract=${r5.contract_ok}")
+  // 6. k=1 short-circuits to a single candidate, no select needed.
+  const r6 = best_of_n_candidates({k: 1, generate: gen})
+  harness.stdio.println("${r6.reason} idx=${r6.selected_index} n=${len(r6.candidates)}")
+  // 7. missing generate callback.
+  const r7 = best_of_n_candidates({k: 3})
+  harness.stdio.println(r7.reason)
+  // 8. a failing candidate is skipped, not fatal.
+  const gen_flaky = { i ->
+    if i == 1 {
+      assert(false, "boom")
+    } else {
+      {id: i}
+    }
+  }
+  const r8 = best_of_n_candidates({k: 3, generate: gen_flaky, select_callback: { c -> 0 }})
+  harness.stdio.println("${r8.reason} n=${len(r8.candidates)} id=${r8.candidate.id}")
+}

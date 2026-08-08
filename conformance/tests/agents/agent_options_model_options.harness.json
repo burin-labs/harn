@@ -1,0 +1,9 @@
+{
+  "mode": "mock",
+  "env": {
+    "HARN_RELEASE_PROVIDER": "mock",
+    "HARN_RELEASE_MODEL": "gpt-4o",
+    "HARN_PLANNER_MODEL": "gpt-5.4-preview"
+  },
+  "expect_stdio": "mock\ngpt-4o\nnative\ntrue\ntrue\neffort,prompt_cache\ngpt-5.4-preview\nhigh\ntrue\ntrue\nenabled\ntrue\ndisabled\ntrue\ntrue\ntrue\n"
+}

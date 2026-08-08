@@ -1,0 +1,16 @@
+pipeline test(harness: Harness, task) {
+  // mcp_serve should accept a tool_registry and store it.
+  // We can't test the full MCP server loop in conformance tests
+  // (it blocks on stdin), but we can verify it accepts valid input.
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "echo",
+    "Echo input back",
+    {parameters: {text: "string"}, handler: { args -> args.text }},
+  )
+  // mcp_serve stores the registry and returns nil
+  const result = harness.tools.mcp_tools(tools)
+  assert(result == nil, "mcp_serve should return nil")
+  harness.stdio.log("mcp_serve accepted tool_registry")
+}

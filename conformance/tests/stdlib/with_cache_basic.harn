@@ -1,0 +1,56 @@
+/**
+ * with_cache: the generic memoization wrapper.
+ *
+ * Confirms:
+ *  - first call invokes compute, second returns cached value
+ *  - the envelope form surfaces hit/miss
+ *  - TTL honors the unified clock (mock_time advances the mocked source
+ *    of truth that backs the cache's expiry check)
+ */
+import { cache_clear, mem_cache, with_cache, with_cache_envelope } from "std/cache"
+
+pipeline default(harness: Harness) {
+  const store = mem_cache({namespace: "with-cache-basic-" + harness.random.uuid(), ttl: "5s"})
+  cache_clear(harness.llm, {store: store})
+  const compute_count = harness.runtime.atomic(0)
+  const opts = {store: store}
+  const first = with_cache_envelope(
+    harness,
+    "key",
+    fn() {
+      let _ = harness.runtime.atomic_add(compute_count, 1)
+      return {answer: 41 + harness.runtime.atomic_get(compute_count)}
+    },
+    opts,
+  )
+  harness.stdio.println("first.hit=" + to_string(first.hit))
+  harness.stdio.println("first.value=" + json_stringify(first.value))
+  const second = with_cache_envelope(
+    harness,
+    "key",
+    fn() {
+      let _ = harness.runtime.atomic_add(compute_count, 1)
+      return {answer: 999}
+    },
+    opts,
+  )
+  harness.stdio.println("second.hit=" + to_string(second.hit))
+  harness.stdio.println("second.value=" + json_stringify(second.value))
+  harness.stdio.println("compute_count=" + to_string(harness.runtime.atomic_get(compute_count)))
+  // Transparent (non-envelope) form returns just the value.
+  const plain = with_cache(harness, "key", fn() { return {answer: 999} }, opts)
+  harness.stdio.println("plain=" + json_stringify(plain))
+  // TTL via the unified clock: advancing past 5s evicts the entry on read.
+  harness.testing.clock_set(1000000000000)
+  const ttl_store = mem_cache({namespace: "with-cache-ttl-" + harness.random.uuid(), ttl: "5s"})
+  const ttl_opts = {store: ttl_store}
+  cache_clear(harness.llm, ttl_opts)
+  with_cache_envelope(harness, "ttl-key", fn() { return "stored-once" }, ttl_opts)
+  const fresh = with_cache_envelope(harness, "ttl-key", fn() { return "would-recompute" }, ttl_opts)
+  harness.stdio.println("fresh.hit=" + to_string(fresh.hit))
+  harness.testing.clock_advance(6000)
+  const stale = with_cache_envelope(harness, "ttl-key", fn() { return "recomputed" }, ttl_opts)
+  harness.stdio.println("stale.hit=" + to_string(stale.hit))
+  harness.stdio.println("stale.value=" + to_string(stale.value))
+  harness.testing.clock_reset()
+}

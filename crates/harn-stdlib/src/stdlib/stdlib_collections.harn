@@ -1,0 +1,136 @@
+// std/collections — Collection utilities.
+/**
+ * Options for `pick_keys`.
+ *
+ * `drop_nil` removes selected keys whose value is `nil` from the result;
+ * defaults to `false`.
+ */
+type PickKeysOptions = {drop_nil?: bool}
+
+/**
+ * Remove entries from a dict where the value is nil, an empty string, or the
+ * literal "null" string. Generic over the value type so a typed input
+ * (`dict<string, V>` or a structural shape) projects back to a dict with the
+ * same value contract instead of collapsing to untyped `dict`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn filter_nil<V>(d: dict<string, V>) -> dict<string, V> {
+  return __dict_filter_nil(d ?? {})
+}
+
+/**
+ * Project a dict onto an explicit list of keys, preserving the original value
+ * contract. Pass `{drop_nil: true}` to omit keys whose value resolves to nil
+ * after lookup. Missing keys are silently dropped.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn pick_keys<V>(
+  d: dict<string, V>,
+  selected_keys: list<string>,
+  options: PickKeysOptions = {},
+) -> dict<string, V> {
+  if type_of(d) != "dict" {
+    return {}
+  }
+  const drop_nil = options.drop_nil ?? false
+  return __dict_pick_keys(d, selected_keys, drop_nil)
+}
+
+/**
+ * Recursively merges `b` into `a`. When both sides have a dict at the
+ * same key, the dicts are merged recursively; otherwise the right-hand
+ * value wins. Nil arguments are treated as empty dicts so variadic
+ * accumulators don't need a base case.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn deep_merge<R1, R2>(a: {...R1}, b: {...R2}) -> {...R1, ...R2} {
+  return __deep_merge(a ?? {}, b ?? {})
+}
+
+/**
+ * Returns the list with duplicate entries removed, preserving the
+ * first-seen order. Equality is structural — dicts and lists with
+ * identical contents collapse to a single entry.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn unique<T>(values: list<T>) -> list<T> {
+  return __list_unique(values ?? [])
+}
+
+/**
+ * Convert a list of `[key, value]` pairs (or `pair(key, value)`
+ * values) into a dict. Later pairs override earlier ones — matching
+ * `__dict_merge`. Pair with `map(items, { it -> [it.id, it] })` to
+ * build a lookup table from a list of records.
+ *
+ * @effects: []
+ * @errors: [TypeError]
+ * @example: dict_from_pairs([["a", 1], ["b", 2]])
+ */
+pub fn dict_from_pairs<V>(pairs: list<list<V>>) -> dict<string, V> {
+  return __dict_from_pairs(pairs ?? [])
+}
+
+/**
+ * Build a dict that indexes the items by the value returned from the
+ * key function. The last item per key wins, matching `dict_from_pairs`.
+ * Equivalent to `dict_from_pairs(map(items, { it -> [key_fn(it), it] }))`.
+ *
+ * @effects: []
+ * @errors: [TypeError]
+ * @example: index_by(records, { r -> r.id })
+ */
+pub fn index_by<V>(items: list<V>, key_fn) -> dict<string, V> {
+  let pairs = []
+  for item in items ?? [] {
+    pairs = pairs + [[to_string(key_fn(item)), item]]
+  }
+  return __dict_from_pairs(pairs)
+}
+
+/**
+ * Sum the non-nil values produced by `project` for each item.
+ *
+ * Nil projections are skipped so callers do not need a `?? 0` default inside
+ * the projection. Numeric validation follows the runtime list-sum contract.
+ *
+ * @effects: []
+ * @errors: [TypeError]
+ * @example: sum_by(rows, { row -> row?.input_tokens })
+ */
+pub fn sum_by<T>(items: list<T>, project) -> int | float {
+  let total = 0
+  for item in items ?? [] {
+    const value = project(item)
+    if value != nil {
+      total = total + value
+    }
+  }
+  return total
+}
+
+/**
+ * Count items where `predicate(item)` is truthy without materializing a
+ * filtered list.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: count_where(rows, { row -> row.status == "pass" })
+ */
+pub fn count_where<T>(items: list<T>, predicate) -> int {
+  let count = 0
+  for item in items ?? [] {
+    if predicate(item) {
+      count = count + 1
+    }
+  }
+  return count
+}

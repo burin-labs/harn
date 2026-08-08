@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/fs/drop_snapshot.request.json",
+  "title": "fs.drop_snapshot request",
+  "type": "object",
+  "properties": {
+    "session_id": { "type": "string", "minLength": 1 },
+    "snapshot_id": { "type": "string", "minLength": 1 }
+  },
+  "required": ["session_id", "snapshot_id"],
+  "additionalProperties": false
+}

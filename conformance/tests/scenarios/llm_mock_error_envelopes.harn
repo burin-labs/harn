@@ -1,0 +1,33 @@
+import { with_llm_script } from "std/testing"
+
+pipeline default(harness: Harness, task) {
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        error: {
+          status: 503,
+          kind: "transient",
+          reason: "upstream_unavailable",
+          message: "upstream unavailable",
+          retry_after_ms: 120,
+        },
+      },
+      {text: "recovered", tool_calls: []},
+    ],
+    { ->
+      const first = harness.llm.call_safe("first", nil, {provider: "mock", model: "mock-model"})
+      harness.stdio.println(first.ok)
+      harness.stdio.println(first.response == nil)
+      harness.stdio.println(first.error.status)
+      harness.stdio.println(first.error.kind)
+      harness.stdio.println(first.error.reason)
+      harness.stdio.println(first.error.category)
+      harness.stdio.println(first.error.provider)
+      harness.stdio.println(first.error.model)
+      harness.stdio.println(first.error.retry_after_ms)
+      const second = harness.llm.call("second", nil, {provider: "mock", model: "mock-model"})
+      harness.stdio.println(second.text)
+    },
+  )
+}

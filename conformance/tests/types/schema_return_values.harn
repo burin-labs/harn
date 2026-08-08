@@ -1,0 +1,38 @@
+import "std/schema"
+
+type Payload = {x: string}
+
+pipeline test(harness: Harness, task) {
+  const dict_schema = {type: "dict", required: ["x"], properties: {x: {type: "string"}}}
+  const checked = try {
+    schema_check({x: "ok"}, dict_schema)
+  }
+  if is_ok(checked) {
+    harness.stdio.println("OK " + json_stringify(unwrap(checked)))
+  }
+  const direct_checked = schema_check({x: "direct"}, dict_schema)
+  harness.stdio.println(unwrap(direct_checked).x)
+  const object_schema = {type: "object", required: ["x"], properties: {x: {type: "string"}}}
+  harness.stdio.println(json_stringify(unwrap(schema_check({x: "object"}, object_schema))))
+  const list_schema = {type: "list", items: {type: "int"}}
+  const checked_list = unwrap(schema_check([1, 2, 3], list_schema))
+  harness.stdio.println(json_stringify(checked_list))
+  const default_schema = {
+    type: "dict",
+    required: ["name"],
+    properties: {name: {type: "string"}, role: {type: "string", default: "user"}},
+  }
+  const parsed = unwrap(schema_parse({name: "Ada"}, default_schema))
+  harness.stdio.println(parsed.name + ":" + parsed.role)
+  const typed: Payload = unwrap(schema_check({x: "typed"}, schema_of(Payload)))
+  harness.stdio.println(typed.x)
+  const typed_checked: Result<Payload, string> = try {
+    schema_check({x: "trytyped"}, schema_of(Payload))
+  }
+  harness.stdio.println(unwrap(typed_checked).x)
+  const helper_value = get_typed_value({x: "helper"}, dict_schema)
+  harness.stdio.println(helper_value.x)
+  const failed = schema_check({x: 1}, dict_schema)
+  harness.stdio.println(is_err(failed))
+  harness.stdio.println(unwrap_err(failed).value.x)
+}

@@ -1,0 +1,7 @@
+// Owning module: defines the helper AND transitively pulls in `x` (the
+// cyclic edge). `b -> m -> x -> b` is a real import cycle.
+import "cyclic_import_call_m"
+
+pub fn helper() -> string {
+  return "HELPER-OK"
+}

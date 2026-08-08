@@ -1,0 +1,16 @@
+pipeline test(harness: Harness, task) {
+  fn count_values(values: list<int>) -> int {
+    return len(values)
+  }
+  harness.stdio.log(false)
+  harness.stdio.log(true)
+  harness.stdio.log(!true)
+  const values: list<int>? = [1, 2]
+  if values != nil && count_values(values) > 0 {
+    harness.stdio.log("and narrowed")
+  }
+  const more_values: list<int>? = [3]
+  if more_values == nil || count_values(more_values) > 0 {
+    harness.stdio.log("or narrowed")
+  }
+}

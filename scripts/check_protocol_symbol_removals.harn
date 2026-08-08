@@ -1,0 +1,285 @@
+/*
+ * Fail when this branch removes a symbol from the published protocol bindings
+ * without declaring it.
+ *
+ * `spec/protocol-artifacts/` is a downstream contract, not an internal file.
+ * Burin Code, and any integrator generating against these bindings, compiles
+ * against the exported names. `check-protocol-artifacts` cannot see a removal:
+ * it regenerates the artifacts and compares, so a constant the generator stops
+ * emitting simply disappears from both sides and the check stays green.
+ *
+ * The gap is not hypothetical. #6072 collapsed the MCP draft/stable version
+ * pair into a single `MCP_PROTOCOL_VERSION`. That was deliberate and carried a
+ * `breaking` changelog entry — but the entry never named
+ * `MCP_DRAFT_PROTOCOL_VERSION`, `MCP_STABLE_PROTOCOL_VERSION`, or their Swift
+ * spellings, so the first thing that reported the removal was a Swift compile
+ * error in a downstream repin two days later.
+ *
+ * Declaring the removal is the whole point: the trailer lands in the commit
+ * message, which is where an integrator bisecting a broken build looks.
+ *
+ *   Allow-Protocol-Removal: MCP_DRAFT_PROTOCOL_VERSION mcpDraftProtocolVersion
+ *
+ * This guard reads committed files only; it never runs the generator, so it is
+ * a `source` preflight check and is trustworthy the moment you save a file.
+ */
+import {
+  commit_messages_since,
+  flag_value,
+  git_show_at,
+  resolve_base_ref,
+  resolve_commit,
+  trailer_values,
+} from "./git_base.harn"
+
+const REMOVAL_TRAILER = "Allow-Protocol-Removal:"
+
+const BASE_ENV_VAR = "PROTOCOL_SYMBOL_GUARD_BASE"
+
+/**
+ * The projections whose exported names downstream code binds to.
+ *
+ * `manifest.json` is deliberately absent: it is a semantic description that
+ * consumers read as data, not a set of symbols they compile against, and its
+ * keys are already covered by the artifact drift check.
+ */
+const WATCHED = [
+  {path: "spec/protocol-artifacts/harn-protocol.ts", language: "ts"},
+  {path: "spec/protocol-artifacts/HarnProtocol.swift", language: "swift"},
+  {path: "spec/protocol-artifacts/harn-protocol.rs", language: "rust"},
+]
+
+const TS_PATTERNS = [
+  r"^export\s+const\s+([A-Za-z_][A-Za-z0-9_]*)",
+  r"^export\s+type\s+([A-Za-z_][A-Za-z0-9_]*)",
+  r"^export\s+interface\s+([A-Za-z_][A-Za-z0-9_]*)",
+  r"^export\s+enum\s+([A-Za-z_][A-Za-z0-9_]*)",
+  r"^export\s+function\s+([A-Za-z_][A-Za-z0-9_]*)",
+]
+
+const SWIFT_PATTERNS = [
+  r"^\s*public\s+static\s+let\s+([A-Za-z_][A-Za-z0-9_]*)",
+  r"^\s*public\s+struct\s+([A-Za-z_][A-Za-z0-9_]*)",
+  r"^\s*public\s+enum\s+([A-Za-z_][A-Za-z0-9_]*)",
+  r"^\s*public\s+protocol\s+([A-Za-z_][A-Za-z0-9_]*)",
+  r"^\s*public\s+typealias\s+([A-Za-z_][A-Za-z0-9_]*)",
+]
+
+const RUST_PATTERNS = [
+  r"^pub\s+const\s+([A-Za-z_][A-Za-z0-9_]*)",
+  r"^pub\s+struct\s+([A-Za-z_][A-Za-z0-9_]*)",
+  r"^pub\s+enum\s+([A-Za-z_][A-Za-z0-9_]*)",
+  r"^pub\s+type\s+([A-Za-z_][A-Za-z0-9_]*)",
+  r"^pub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)",
+]
+
+fn patterns_for(language: string) -> list<string> {
+  if language == "ts" {
+    return TS_PATTERNS
+  }
+  if language == "swift" {
+    return SWIFT_PATTERNS
+  }
+  return RUST_PATTERNS
+}
+
+/** Every exported symbol name declared in `text`, sorted and deduplicated. */
+pub fn exported_symbols(text: string, language: string) -> list<string> {
+  const patterns = patterns_for(language)
+  let seen: list<string> = []
+  for line in text.split("\n") {
+    for pattern in patterns {
+      const captures = regex_captures(pattern, line)
+      if captures.count == 0 {
+        continue
+      }
+      const groups = captures[0].groups
+      if groups.count == 0 {
+        continue
+      }
+      const name = groups[0]
+      if name != "" && !seen.contains(name) {
+        seen = seen + [name]
+      }
+    }
+  }
+  return seen.sorted()
+}
+
+/** Names present in `before` and absent from `after`. */
+pub fn removed_symbols(before: list<string>, after: list<string>) -> list<string> {
+  let gone: list<string> = []
+  for name in before {
+    if !after.contains(name) {
+      gone = gone + [name]
+    }
+  }
+  return gone.sorted()
+}
+
+/** Removals the branch never declared. */
+pub fn undeclared_removals(removed: list<string>, declared: list<string>) -> list<string> {
+  let missing: list<string> = []
+  for name in removed {
+    if !declared.contains(name) {
+      missing = missing + [name]
+    }
+  }
+  return missing.sorted()
+}
+
+pub fn failure_report(base: string, findings: list<dict>) -> string {
+  let lines = [
+    "Published protocol symbols were removed without a declaration (base " + base + "):",
+    "",
+  ]
+  for finding in findings {
+    lines = lines + [finding.path + ":"]
+    for name in finding.undeclared {
+      lines = lines + ["  - " + name]
+    }
+  }
+  lines = lines
+    + [
+    "",
+    "These names are a downstream contract: integrators generate against these",
+    "bindings and compile against the exported names, so removing one breaks",
+    "their build at their next repin, not here.",
+    "",
+    "If the removal is intended, declare it on a commit in this branch:",
+    "",
+    "    " + REMOVAL_TRAILER + " <symbol> [<symbol> ...]",
+    "",
+    "and say what replaces it in the changelog fragment. The trailer is what an",
+    "integrator bisecting a broken build will find.",
+  ]
+  return lines.join("\n")
+}
+
+/**
+ * Say what was compared. A guard that inspected nothing — because the base ref
+ * predates these files, or a path was renamed out from under the watch list —
+ * otherwise reports the same clean exit as a branch that removed nothing.
+ */
+fn scope_line(
+  base: string,
+  resolved: string,
+  inspected: int,
+  compared: int,
+  symbols: int,
+  probe_failures: int,
+) -> string {
+  return "check_protocol_symbol_removals: base=" + base
+    + " resolved="
+    + if resolved == "" {
+    "none"
+  } else {
+    resolved.substring(0, 12)
+  }
+    + " watched="
+    + to_string(WATCHED.count)
+    + " readable_at_head="
+    + to_string(inspected)
+    + " compared_against_base="
+    + to_string(compared)
+    + " symbols="
+    + to_string(symbols)
+    + " probe_failures="
+    + to_string(probe_failures)
+}
+
+/**
+ * What to print when git could not answer for some watched path.
+ *
+ * Exiting 0 here would certify a comparison that never happened, which is the
+ * failure mode this guard exists to remove from a neighbouring check.
+ */
+pub fn probe_failure_report(base: string, failures: list<dict>) -> string {
+  let lines = [
+    "check_protocol_symbol_removals could not read the base revision (" + base + "):",
+    "",
+  ]
+  for failure in failures {
+    lines = lines + ["  " + failure.path + ": " + failure.error]
+  }
+  const tail = [
+    "",
+    "The guard compares exported symbols at HEAD against the same files at the",
+    "base ref. With the base unreadable it cannot tell a removal from a clean",
+    "branch, so it fails rather than reporting a comparison it did not make.",
+    "",
+    "In CI this usually means the base commit was never fetched: give the",
+    "checkout enough history (`fetch-depth: 0`) or point the guard at a ref that",
+    "is present, via --base or " + BASE_ENV_VAR + ".",
+  ]
+  return (lines + tail).join("\n")
+}
+
+pipeline main(harness: Harness, task) {
+  const base = resolve_base_ref(
+    harness.env,
+    harness.process,
+    flag_value(argv, "--base"),
+    BASE_ENV_VAR,
+  )
+  const resolved = resolve_commit(harness.process, base)
+  if resolved.error != "" {
+    harness.stdio.println(scope_line(base, "", 0, 0, 0, WATCHED.count))
+    harness.stdio.eprintln(
+      probe_failure_report(base, [{path: "(base ref)", error: resolved.error}]),
+    )
+    return 1
+  }
+  const messages = commit_messages_since(harness.process, base)
+  const declared = trailer_values(messages, REMOVAL_TRAILER)
+  let findings: list<dict> = []
+  let inspected = 0
+  let compared = 0
+  let symbol_total = 0
+  let unreadable: list<string> = []
+  let probe_failures: list<dict> = []
+  for entry in WATCHED {
+    if !harness.fs.exists(entry.path) {
+      unreadable = unreadable + [entry.path + " (missing at HEAD)"]
+      continue
+    }
+    inspected = inspected + 1
+    const head_symbols = exported_symbols(harness.fs.read_text(entry.path), entry.language)
+    symbol_total = symbol_total + head_symbols.count
+    const base_show = git_show_at(harness.process, base, entry.path)
+    if base_show.error != "" {
+      probe_failures = probe_failures + [{path: entry.path, error: base_show.error}]
+      continue
+    }
+    if !base_show.found {
+      // The file did not exist at the base ref: nothing could have been removed.
+      unreadable = unreadable + [entry.path + " (absent at base " + base + ")"]
+      continue
+    }
+    compared = compared + 1
+    const base_symbols = exported_symbols(base_show.text, entry.language)
+    const removed = removed_symbols(base_symbols, head_symbols)
+    const missing = undeclared_removals(removed, declared)
+    if missing.count > 0 {
+      findings = findings + [{path: entry.path, undeclared: missing}]
+    }
+  }
+  harness.stdio.println(
+    scope_line(base, resolved.sha, inspected, compared, symbol_total, probe_failures.count),
+  )
+  for note in unreadable {
+    harness.stdio.println("  not compared: " + note)
+  }
+  if declared.count > 0 {
+    harness.stdio.println("  declared removals: " + declared.join(", "))
+  }
+  if findings.count > 0 {
+    harness.stdio.eprintln(failure_report(base, findings))
+    return 1
+  }
+  if probe_failures.count > 0 {
+    harness.stdio.eprintln(probe_failure_report(base, probe_failures))
+    return 1
+  }
+  return 0
+}

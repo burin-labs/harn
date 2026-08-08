@@ -1,0 +1,3 @@
+fn main(harness: Harness) {
+  harness.stdio.println(harness.env.get("KEY"))
+}

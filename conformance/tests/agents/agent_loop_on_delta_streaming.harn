@@ -1,0 +1,26 @@
+import { agent_loop } from "std/agent/loop"
+import { AgentLoopOptions } from "std/agent/options"
+import { llm_stream_text, with_llm_script } from "std/testing"
+
+pipeline default(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [llm_stream_text(["Hello ", "wor", "ld"])],
+    { ->
+      const opts: AgentLoopOptions = {
+        provider: "mock",
+        max_iterations: 1,
+        on_delta: { delta -> harness.stdio.print(delta) },
+      }
+      const result = agent_loop(harness, "greet", nil, opts)
+      harness.stdio.println("")
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.visible_text)
+    },
+  )
+}
+// The `on_delta` seam fires once per streamed visible-text chunk, in order.
+// Printing each delta with no separator reconstructs the transcript text, so the
+// first output line is exactly the concatenation of the chunks — the golden pins
+// it equal to the turn's `visible_text`. A wrong order or a dropped chunk would
+// change that line and fail the case.

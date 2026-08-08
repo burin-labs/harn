@@ -1,0 +1,279 @@
+{
+  "a2aTask": {
+    "contextId": "ctx-7",
+    "id": "task-1",
+    "status": {
+      "message": {
+        "id": "msg-1",
+        "parts": [
+          {
+            "text": "ok",
+            "type": "text"
+          }
+        ],
+        "role": "agent"
+      },
+      "state": "working"
+    }
+  },
+  "artifactVersion": "0.10.62",
+  "envelopes": {
+    "agentEventNotification": {
+      "jsonrpc": "2.0",
+      "method": "_harn/agentEvent",
+      "params": {
+        "annotations": {
+          "kind": "edit",
+          "side_effect_level": "workspace_write"
+        },
+        "kind": "composition_child_call",
+        "operationIndex": 0,
+        "policyContext": {
+          "approval": "denied",
+          "ceiling": "workspace_write"
+        },
+        "rawInput": {
+          "content": "...",
+          "path": "src/lib.rs"
+        },
+        "requestedSideEffectLevel": "workspace_write",
+        "runId": "cmp-42",
+        "sessionId": "sess-42",
+        "toolCallId": "tool-cmp-42",
+        "toolName": "tool.write_file"
+      }
+    },
+    "errorResponse": {
+      "error": {
+        "code": -32000,
+        "data": {
+          "schema": "harn.acp.prompt_error.v1",
+          "terminalClass": "tool_policy_rejected"
+        },
+        "message": "Provider-looking prose is not the authority"
+      },
+      "id": "abc",
+      "jsonrpc": "2.0"
+    },
+    "planSessionUpdateNotification": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "sess-42",
+        "update": {
+          "entries": [
+            {
+              "content": "Verify bindings.",
+              "status": "pending"
+            }
+          ],
+          "harnPlanDocument": {
+            "_type": "plan_document",
+            "comments": [],
+            "created_at": "2026-01-01T00:00:00Z",
+            "current_revision": {
+              "author": {
+                "id": "fixture-agent"
+              },
+              "created_at": "2026-01-01T00:00:00Z",
+              "markdown": "# Plan\n\n## Steps\n- [pending] Verify bindings.\n\nApproval: unrequested",
+              "operation": {
+                "event_id": "fixture-plan-create",
+                "kind": "create"
+              },
+              "plan": {
+                "_type": "plan_artifact",
+                "approval": {
+                  "state": "unrequested"
+                },
+                "assumptions": [],
+                "id": "plan_f7d34d0e2cb8",
+                "open_questions": [],
+                "schema_version": "harn.plan.v1",
+                "steps": [
+                  {
+                    "content": "Verify bindings.",
+                    "id": "step-1",
+                    "priority": null,
+                    "status": "pending"
+                  }
+                ],
+                "summary": "",
+                "title": "Plan",
+                "tool": "update_plan",
+                "verification_commands": []
+              },
+              "revision_id": "plan_revision_af4a908e49c76c9e",
+              "source": {
+                "kind": "fixture"
+              }
+            },
+            "document_id": "plan_document_f7d34d0e2cb8",
+            "resolution_receipts": [],
+            "schema_version": "harn.plan_document.v1",
+            "updated_at": "2026-01-01T00:00:00Z"
+          },
+          "sessionUpdate": "plan"
+        }
+      }
+    },
+    "request": {
+      "id": 17,
+      "jsonrpc": "2.0",
+      "method": "session/prompt",
+      "params": {
+        "prompt": [
+          {
+            "text": "hi",
+            "type": "text"
+          }
+        ],
+        "sessionId": "sess-42"
+      }
+    },
+    "response": {
+      "id": 17,
+      "jsonrpc": "2.0",
+      "result": {
+        "_meta": {
+          "harn": {
+            "terminal": {
+              "kind": "policy_budget",
+              "owner": "policy",
+              "reason": "max_iterations"
+            }
+          }
+        },
+        "stopReason": "max_turn_requests"
+      }
+    },
+    "sessionUpdateNotification": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "sess-42",
+        "update": {
+          "_meta": {
+            "harn": {
+              "durationMs": 12.5,
+              "executionDurationMs": 11.2,
+              "executor": "harn_builtin",
+              "parsing": false
+            }
+          },
+          "kind": "read",
+          "rawInput": {
+            "path": "README.md"
+          },
+          "sessionUpdate": "tool_call",
+          "status": "in_progress",
+          "title": "Read README.md",
+          "toolCallId": "call-001"
+        }
+      }
+    }
+  },
+  "harnAgentEventMethod": "_harn/agentEvent",
+  "harnProviderCatalogMethod": "_harn/providerCatalog",
+  "mcpDiscoverResult": {
+    "_meta": {
+      "io.modelcontextprotocol/serverInfo": {
+        "name": "harn",
+        "version": "0.10.62"
+      }
+    },
+    "cacheScope": "private",
+    "capabilities": {
+      "tools": {}
+    },
+    "instructions": "Use MCP 2026-07-28. Harn server endpoints do not emulate older lifecycles.",
+    "resultType": "complete",
+    "supportedVersions": [
+      "2026-07-28"
+    ],
+    "ttlMs": 0
+  },
+  "mcpInputRequiredResult": {
+    "inputRequests": {
+      "confirm": {
+        "method": "elicitation/create",
+        "params": {
+          "message": "Confirm the action",
+          "mode": "form",
+          "requestedSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "properties": {
+              "confirmed": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "confirmed"
+            ],
+            "type": "object"
+          }
+        }
+      }
+    },
+    "requestState": "opaque-state",
+    "resultType": "input_required"
+  },
+  "mcpTool": {
+    "description": "Echoes input",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "x": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "echo",
+    "title": "Echo"
+  },
+  "mcpUnsupportedProtocolVersionError": {
+    "error": {
+      "code": -32022,
+      "data": {
+        "requested": "2026-01-01",
+        "supported": [
+          "2026-07-28"
+        ]
+      },
+      "message": "Unsupported protocol version"
+    },
+    "id": 19,
+    "jsonrpc": "2.0"
+  },
+  "toolCallReceipt": {
+    "args_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "audit": {
+      "layers": [
+        {
+          "name": "with_required_reason",
+          "status": "ok"
+        }
+      ],
+      "summary": "Read README.md for context"
+    },
+    "duration_ms": 12,
+    "emit_order": 0,
+    "emitted_at": "2026-05-16T00:00:00Z",
+    "error_category": null,
+    "executor": "harn",
+    "iteration": 1,
+    "kind": "read",
+    "model": "mock",
+    "provider": "mock",
+    "reason": "Read README.md for context",
+    "result_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+    "run_id": "run-42",
+    "schema_version": 1,
+    "session_id": "sess-42",
+    "status": "ok",
+    "tool_call_id": "call-001",
+    "tool_name": "read_file",
+    "turn_index": 0
+  }
+}

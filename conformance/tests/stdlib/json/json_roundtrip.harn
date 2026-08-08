@@ -1,0 +1,26 @@
+pipeline test(harness: Harness, task) {
+  // Parse JSON object
+  const obj = json_parse("{\"name\": \"alice\", \"age\": 30}")
+  harness.stdio.log(obj.name)
+  harness.stdio.log(obj.age)
+  // Parse JSON array
+  const arr = json_parse("[1, 2, 3]")
+  harness.stdio.log(arr[0])
+  harness.stdio.log(arr.count)
+  // Parse primitives
+  harness.stdio.log(json_parse("true"))
+  harness.stdio.log(json_parse("null"))
+  harness.stdio.log(json_parse("42"))
+  harness.stdio.log(json_parse("\"hello\""))
+  // Roundtrip
+  const data = {x: 1, y: [2, 3]}
+  const json = json_stringify(data)
+  const parsed = json_parse(json)
+  harness.stdio.log(parsed.x)
+  harness.stdio.log(parsed.y)
+  const full_range = json_parse(
+    json_stringify({pre_epoch: -2208988800, max_i64: 9223372036854775807}),
+  )
+  harness.stdio.log(full_range.pre_epoch)
+  harness.stdio.log(full_range.max_i64)
+}

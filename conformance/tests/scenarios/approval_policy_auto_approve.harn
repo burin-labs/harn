@@ -1,0 +1,32 @@
+import { agent_loop } from "std/agent/loop"
+
+fn read_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "read_file",
+    "Read a file",
+    {
+      handler: { args -> "" },
+      parameters: {path: {type: "string", description: "Path"}},
+      returns: {type: "string"},
+    },
+  )
+  return tools
+}
+
+pipeline main(harness: Harness) {
+  const result = agent_loop(
+    harness,
+    "Call read",
+    "You are helpful",
+    {
+      provider: "mock",
+      tools: read_tools(),
+      tool_format: "native",
+      max_iterations: 1,
+      approval_policy: {auto_approve: ["read*"], auto_deny: ["shell*"]},
+    },
+  )
+  harness.stdio.println(len(result?.tools?.rejected) == 0)
+}

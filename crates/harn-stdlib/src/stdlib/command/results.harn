@@ -1,0 +1,51 @@
+/** Common fields guaranteed by normalized command results. */
+pub type CommandResult = {
+  success: bool,
+  ok: bool,
+  status: string,
+  exit_code: int?,
+  cwd: string,
+  stdout: string,
+  stderr: string,
+  ...rest,
+}
+
+/**
+ * Build a normalized successful command-result dict for tests and harness adapters.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn command_result_ok(stdout: string = "", extra = nil) -> CommandResult {
+  const base = extra ?? {}
+  return base
+    + {
+    success: true,
+    ok: true,
+    status: "completed",
+    exit_code: 0,
+    cwd: base?.cwd ?? "",
+    stdout: stdout,
+    stderr: "",
+  }
+}
+
+/**
+ * Build a normalized failed command-result dict for tests and harness adapters.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn command_result_fail(exit_code: int = 1, stderr: string = "", extra = nil) -> CommandResult {
+  const base = extra ?? {}
+  return base
+    + {
+    success: false,
+    ok: false,
+    status: "failed",
+    exit_code: exit_code,
+    cwd: base?.cwd ?? "",
+    stdout: base?.stdout ?? "",
+    stderr: stderr,
+  }
+}

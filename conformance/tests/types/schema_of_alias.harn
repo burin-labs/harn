@@ -1,0 +1,18 @@
+type GraderOut = {verdict: "pass" | "fail" | "unclear", score: 0 | 1 | 2, summary: string}
+
+pipeline test(harness: Harness, task) {
+  const s = schema_of(GraderOut)
+  harness.stdio.println(s.type)
+  harness.stdio.println(s.required)
+  harness.stdio.println(s.properties.verdict.enum)
+  harness.stdio.println(s.properties.score.enum)
+  // Positive round-trip: a conforming value validates.
+  const ok = {verdict: "pass", score: 2, summary: "ok"}
+  harness.stdio.println(schema_is(ok, s))
+  // Negative: enum violation on verdict.
+  const bad_verdict = {verdict: "nope", score: 0, summary: "x"}
+  harness.stdio.println(schema_is(bad_verdict, s))
+  // Negative: enum violation on int literal.
+  const bad_score = {verdict: "fail", score: 5, summary: "x"}
+  harness.stdio.println(schema_is(bad_score, s))
+}

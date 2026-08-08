@@ -1,0 +1,85 @@
+import { UiDocument, UiEffectKind, UiElement, UiEvent, UiUpdate } from "std/ui/contracts"
+
+pub type UiEventHandler = fn(dict) -> UiUpdate
+
+pub type UiTestOptions = {follow_scheduled?: bool, max_steps?: int}?
+
+pub type UiTestTrace = {
+  schema: "harn.ui_test_trace.v1",
+  events: list<UiEvent>,
+  updates: list<UiUpdate>,
+}
+
+/**
+ * Drive an event handler in process and optionally follow scheduled events.
+ * Delays are ignored: tests control time at the event boundary and never sleep.
+ *
+ * @effects: []
+ * @errors: [invalid_argument, handler_error]
+ */
+pub fn run(
+  handle: UiEventHandler,
+  initial_events: list<UiEvent>,
+  options: UiTestOptions = nil,
+) -> UiTestTrace {
+  const max_steps = options?.max_steps ?? 100
+  if max_steps <= 0 {
+    throw "std/ui/testing: max_steps must be positive"
+  }
+  let queue = initial_events
+  let events: list<UiEvent> = []
+  let updates: list<UiUpdate> = []
+  let steps = 0
+  while len(queue) > 0 {
+    if steps >= max_steps {
+      throw "std/ui/testing: event handler exceeded max_steps"
+    }
+    const event = queue[0]
+    queue = queue.slice(1, len(queue))
+    const update = handle({event: event})
+    events = events + [event]
+    updates = updates + [update]
+    if options?.follow_scheduled ?? true {
+      for effect in update.effects {
+        if effect.kind == "send_event" && effect.event != nil {
+          queue = queue + [effect.event]
+        }
+      }
+    }
+    steps = steps + 1
+  }
+  return {schema: "harn.ui_test_trace.v1", events: events, updates: updates}
+}
+
+/**
+ * Find one rendered element by its stable ID.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn element(document: UiDocument, id: string) -> UiElement? {
+  for element in document.elements {
+    if element.id == id {
+      return element
+    }
+  }
+  return nil
+}
+
+/**
+ * Count effects of one closed kind across an event-handler trace.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn effect_count(trace: UiTestTrace, kind: UiEffectKind) -> int {
+  let count = 0
+  for update in trace.updates {
+    for effect in update.effects {
+      if effect.kind == kind {
+        count = count + 1
+      }
+    }
+  }
+  return count
+}

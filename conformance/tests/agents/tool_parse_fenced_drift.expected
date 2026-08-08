@@ -1,0 +1,199 @@
+# json fence accepts with a violation
+  calls=1 errors=0 violations=1 stray=0
+  call a {}
+  vio "protocol_violation: a tool call was emitted in a ```json fence; the contract requires a bare ```tool fence. Accepted this turn, but switch to ```tool."
+  prose=""
+  answer=null
+  done=null
+# tool_code fence drift
+  calls=1 errors=0 violations=1 stray=0
+  call a {"k":1}
+  vio "protocol_violation: a tool call was emitted in a ```tool_code fence; the contract requires a bare ```tool fence. Accepted this turn, but switch to ```tool."
+  prose=""
+  answer=null
+  done=null
+# tool-with-language fence drift
+  calls=1 errors=0 violations=1 stray=0
+  call a {"k":1}
+  vio "protocol_violation: a tool call was emitted in a ```tool python fence; the contract requires a bare ```tool fence. Accepted this turn, but switch to ```tool."
+  prose=""
+  answer=null
+  done=null
+# function_call fence drift
+  calls=1 errors=0 violations=1 stray=0
+  call a {"k":1}
+  vio "protocol_violation: a tool call was emitted in a ```function_call fence; the contract requires a bare ```tool fence. Accepted this turn, but switch to ```tool."
+  prose=""
+  answer=null
+  done=null
+# tilde tool fence drift
+  calls=1 errors=0 violations=1 stray=0
+  call a {"k":1}
+  vio "protocol_violation: a tool call was emitted in a ~~~tool fence; the contract requires a bare ```tool fence. Accepted this turn, but switch to ```tool."
+  prose=""
+  answer=null
+  done=null
+# invalid body in a drifted fence
+  calls=0 errors=1 violations=1 stray=0
+  err "The ```tool block is not valid JSON: expected ident at line 1 column 2 (near `not json`). Pass multi-line or code-bearing fields as ordinary JSON string values (escape newlines as \\n, quotes as \\\", backslashes as \\\\); backticks need no escaping."
+  vio "protocol_violation: a tool call was emitted in a ```tool_code fence; the contract requires a bare ```tool fence. Accepted this turn, but switch to ```tool."
+  prose=""
+  answer=null
+  done=null
+# bare json object
+  calls=1 errors=0 violations=1 stray=0
+  call a {"k":1}
+  vio "protocol_violation: a tool call was emitted as a bare JSON object; the contract requires wrapping each `{ \"name\": ..., \"args\": { ... } }` object in a ```tool fence. Accepted this turn, but switch to ```tool."
+  prose=""
+  answer=null
+  done=null
+# legacy tagged markup under the json protocol
+  calls=0 errors=0 violations=1 stray=0
+  vio "protocol_violation: `<tool_call>...</tool_call>` markup was emitted while `tool_format` is `json`; wrap each call as a strict JSON object inside a ```tool fence instead."
+  prose="<tool_call>\na({})\n</tool_call>"
+  answer=null
+  done=null
+# prose before a canonical tool fence
+  calls=1 errors=0 violations=0 stray=0
+  call a {"k":1}
+  prose="Here is the call:"
+  answer=null
+  done=null
+# chat template envelope with inline argument calls
+  calls=2 errors=0 violations=1 stray=0
+  call look {"file":"src/writer.zig"}
+  call look {"file":"src/parser.zig"}
+  vio "protocol_violation: a tool call was emitted in a chat-template tool envelope while `tool_format` is `json`; accepted this turn, but emit canonical ```tool JSON blocks next turn."
+  prose=""
+  answer=null
+  done=null
+# chat template envelope with per-call close markers
+  calls=2 errors=0 violations=1 stray=0
+  call a {"k":1}
+  call b {"v":2}
+  vio "protocol_violation: a tool call was emitted in a chat-template tool envelope while `tool_format` is `json`; accepted this turn, but emit canonical ```tool JSON blocks next turn."
+  prose=""
+  answer=null
+  done=null
+# malformed chat template envelope dispatches nothing
+  calls=0 errors=1 violations=0 stray=0
+  err "The `<tool_calls>` chat-template envelope is malformed: a JSON tool object ended before its closing `}`. Re-emit complete calls as canonical ```tool JSON blocks; incomplete entries were not executed."
+  prose="<tool_calls>\n<tool>\n{\"name\":\"look\",\"file\":\"src/writer.zig\""
+  answer=null
+  done=null
+# truncated second marker drops the first call too
+  calls=0 errors=1 violations=0 stray=0
+  err "The `<tool_calls>` chat-template envelope is malformed: a `<tool>` marker ended without a complete JSON object. Re-emit complete calls as canonical ```tool JSON blocks; incomplete entries were not executed."
+  prose="<tool_calls><tool>{\"name\":\"look\",\"file\":\"src/lib.rs\"}<tool></tool_calls>"
+  answer=null
+  done=null
+# unmatched tool close marker
+  calls=0 errors=1 violations=0 stray=0
+  err "The `<tool_calls>` chat-template envelope is malformed: found an unmatched `</tool>` close without a preceding `<tool>` marker. Re-emit complete calls as canonical ```tool JSON blocks; incomplete entries were not executed."
+  prose="<tool_calls></tool></tool_calls>"
+  answer=null
+  done=null
+# envelope without a tool marker
+  calls=0 errors=1 violations=0 stray=0
+  err "The `<tool_calls>` chat-template envelope is malformed: the envelope contained no `<tool>` marker. Re-emit complete calls as canonical ```tool JSON blocks; incomplete entries were not executed."
+  prose="<tool_calls>{\"name\":\"look\",\"file\":\"src/writer.zig\"}</tool_calls>"
+  answer=null
+  done=null
+# tool_code tag with inline json args
+  calls=1 errors=0 violations=1 stray=0
+  call look {"file":"src/writer.zig","intent":"read"}
+  vio "protocol_violation: a tool call was emitted in a chat-template tool envelope while `tool_format` is `json`; accepted this turn, but emit canonical ```tool JSON blocks next turn."
+  prose=""
+  answer=null
+  done=null
+# tool_code tag with multiple json objects
+  calls=2 errors=0 violations=1 stray=0
+  call a {"k":1}
+  call b {"v":2}
+  vio "protocol_violation: a tool call was emitted in a chat-template tool envelope while `tool_format` is `json`; accepted this turn, but emit canonical ```tool JSON blocks next turn."
+  prose=""
+  answer=null
+  done=null
+# bare tool_call tag wrapping json
+  calls=1 errors=0 violations=1 stray=0
+  call look {"file":"a.rs"}
+  vio "protocol_violation: a tool call was emitted in a chat-template tool envelope while `tool_format` is `json`; accepted this turn, but emit canonical ```tool JSON blocks next turn."
+  prose=""
+  answer=null
+  done=null
+# envelope with a garbage body
+  calls=0 errors=1 violations=0 stray=0
+  err "The `<tool_calls>` chat-template envelope is malformed: expected a JSON tool object, found `lol this is not json at all\n</tool_code>`. Re-emit complete calls as canonical ```tool JSON blocks; incomplete entries were not executed."
+  prose="<tool_code>\nlol this is not json at all\n</tool_code>"
+  answer=null
+  done=null
+# xml envelope, three calls, no close
+  calls=3 errors=0 violations=1 stray=0
+  call look {"file":"src/writer.zig"}
+  call look {"file":"src/parser.zig"}
+  call look {"file":"src/root.zig"}
+  vio "protocol_violation: a tool call was emitted in a chat-template tool envelope while `tool_format` is `json`; accepted this turn, but emit canonical ```tool JSON blocks next turn."
+  prose=""
+  answer=null
+  done=null
+# xml envelope, one call with two args
+  calls=1 errors=0 violations=1 stray=0
+  call look {"file":"src/writer.zig","intent":"read"}
+  vio "protocol_violation: a tool call was emitted in a chat-template tool envelope while `tool_format` is `json`; accepted this turn, but emit canonical ```tool JSON blocks next turn."
+  prose=""
+  answer=null
+  done=null
+# xml envelope, multiline arg value kept verbatim
+  calls=1 errors=0 violations=1 stray=0
+  call write {"content":"line one\nline two"}
+  vio "protocol_violation: a tool call was emitted in a chat-template tool envelope while `tool_format` is `json`; accepted this turn, but emit canonical ```tool JSON blocks next turn."
+  prose=""
+  answer=null
+  done=null
+# truncated inner xml tag dispatches nothing
+  calls=0 errors=1 violations=0 stray=0
+  err "The `<tool_calls>` chat-template envelope is malformed: the `<file>` argument tag was not closed with `</file>` before end of output. Re-emit complete calls as canonical ```tool JSON blocks; incomplete entries were not executed."
+  prose="<tool_calls>\n<look>\n<file>\nsrc/writer.zig"
+  answer=null
+  done=null
+# duplicate xml argument tag is ambiguous
+  calls=0 errors=1 violations=0 stray=0
+  err "The `<tool_calls>` chat-template envelope is malformed: the `<look>` call repeated the `<file>` argument; a call with an ambiguous duplicate argument is not executed. Re-emit complete calls as canonical ```tool JSON blocks; incomplete entries were not executed."
+  prose="<tool_calls>\n<look>\n<file>\na.rs\n</file>\n<file>\nb.rs\n</file>\n</look>\n</tool_calls>"
+  answer=null
+  done=null
+# literal tool_code close inside a json string
+  calls=1 errors=0 violations=1 stray=0
+  call write {"content":"</tool_code>"}
+  vio "protocol_violation: a tool call was emitted in a chat-template tool envelope while `tool_format` is `json`; accepted this turn, but emit canonical ```tool JSON blocks next turn."
+  prose=""
+  answer=null
+  done=null
+# literal envelope close inside a tool-marker json string
+  calls=1 errors=0 violations=1 stray=0
+  call write {"content":"</tool_calls>"}
+  vio "protocol_violation: a tool call was emitted in a chat-template tool envelope while `tool_format` is `json`; accepted this turn, but emit canonical ```tool JSON blocks next turn."
+  prose=""
+  answer=null
+  done=null
+# literal envelope close inside an xml arg value
+  calls=1 errors=0 violations=1 stray=0
+  call write {"content":"</tool_calls>"}
+  vio "protocol_violation: a tool call was emitted in a chat-template tool envelope while `tool_format` is `json`; accepted this turn, but emit canonical ```tool JSON blocks next turn."
+  prose=""
+  answer=null
+  done=null
+# prose before an envelope
+  calls=1 errors=0 violations=1 stray=0
+  call look {"file":"src/writer.zig"}
+  vio "protocol_violation: a tool call was emitted in a chat-template tool envelope while `tool_format` is `json`; accepted this turn, but emit canonical ```tool JSON blocks next turn."
+  prose="I will read the writer next."
+  answer=null
+  done=null
+# prose after an envelope close
+  calls=1 errors=0 violations=1 stray=0
+  call look {"file":"a.rs"}
+  vio "protocol_violation: a tool call was emitted in a chat-template tool envelope while `tool_format` is `json`; accepted this turn, but emit canonical ```tool JSON blocks next turn."
+  prose="Done reading."
+  answer=null
+  done=null

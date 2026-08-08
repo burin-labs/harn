@@ -1,0 +1,9 @@
+pipeline default(harness: Harness) {
+  const x = 99
+  let result = ""
+  match x {
+    1 -> { result = "one" }
+    other -> { result = "value is " + to_string(other) }
+  }
+  harness.stdio.println(result)
+}

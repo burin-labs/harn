@@ -1,0 +1,12 @@
+pipeline test(harness: Harness, task) {
+  gen fn many() -> Stream<int> {
+    emit 1
+    emit 2
+    emit 3
+  }
+  for n in many() {
+    harness.stdio.println(n)
+    break
+  }
+  harness.stdio.println("after break")
+}

@@ -1,0 +1,34 @@
+name: Install sccache (version-pinned)
+description: >
+  Sole entry point for installing sccache. Pins the version so every client on a
+  runner agrees with the host-supervised server.
+
+# Why this action exists, and why the pin is load-bearing rather than hygiene:
+#
+# sccache allows exactly ONE server per user, and a client whose version differs
+# from the running server SHUTS THAT SERVER DOWN and starts its own. The
+# self-hosted Linux runners host many concurrent worker processes on a single
+# machine (`-wN` suffixes are workers, not hosts) plus a systemd-supervised
+# server on the default port. So an unpinned install here does not merely affect
+# the job that installs it: the first job to arrive with a newer sccache tears
+# down the shared server, and every other job compiling on that box at that
+# moment dies with "Connection reset by peer (os error 104)" — attributed to
+# whatever innocent job happened to be mid-compile.
+#
+# `mozilla-actions/sccache-action` installs the LATEST sccache when no version is
+# given, so leaving it unpinned means the next upstream sccache release silently
+# introduces that skew with no change on our side. That is exactly how
+# burin-labs/burin-code#5328 happened.
+#
+# VERSION is therefore coupled to the version installed on the self-hosted hosts
+# at ~/.local/bin/sccache and run by the `sccache-server` systemd user unit.
+# Changing it here REQUIRES re-provisioning those hosts to match, and vice versa.
+# `check_ci_cache_policy.harn` enforces that this action is the only place
+# `mozilla-actions/sccache-action` may be referenced.
+
+runs:
+  using: composite
+  steps:
+    - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+      with:
+        version: "v0.16.0"

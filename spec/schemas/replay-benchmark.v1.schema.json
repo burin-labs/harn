@@ -1,0 +1,218 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/replay-benchmark.v1.schema.json",
+  "title": "Harn replay benchmark report",
+  "type": "object",
+  "required": ["schema_version", "cloud_ingest", "suite", "summary", "fixtures"],
+  "properties": {
+    "schema_version": {
+      "const": "harn.replay_benchmark.report.v1"
+    },
+    "cloud_ingest": {
+      "type": "object",
+      "required": [
+        "kind",
+        "leaderboard_key",
+        "report_schema_version",
+        "replay_trace_schema_version",
+        "artifact_contract"
+      ],
+      "properties": {
+        "kind": {
+          "const": "harn_cloud.replay_determinism.leaderboard.v1"
+        },
+        "leaderboard_key": { "type": "string" },
+        "report_schema_version": { "type": "string" },
+        "replay_trace_schema_version": { "type": "string" },
+        "artifact_contract": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "suite": {
+      "type": "object",
+      "required": ["name", "fixture_count", "source_paths"],
+      "properties": {
+        "name": { "type": "string" },
+        "fixture_count": { "type": "integer", "minimum": 0 },
+        "source_paths": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "passed",
+        "failed",
+        "deterministic_fixtures",
+        "drifted_fixtures",
+        "mean_replay_fidelity_score",
+        "mean_permission_decision_preservation_score",
+        "tool_call_drift_count",
+        "transcript_drift_count",
+        "observed_interactions",
+        "llm_input_tokens",
+        "llm_output_tokens"
+      ],
+      "properties": {
+        "passed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "deterministic_fixtures": { "type": "integer", "minimum": 0 },
+        "drifted_fixtures": { "type": "integer", "minimum": 0 },
+        "mean_replay_fidelity_score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "mean_permission_decision_preservation_score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "tool_call_drift_count": { "type": "integer", "minimum": 0 },
+        "transcript_drift_count": { "type": "integer", "minimum": 0 },
+        "observed_interactions": { "type": "integer", "minimum": 0 },
+        "llm_input_tokens": { "type": "integer", "minimum": 0 },
+        "llm_output_tokens": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "fixtures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "name",
+          "expectation",
+          "passed",
+          "deterministic",
+          "metrics",
+          "receipt"
+        ],
+        "properties": {
+          "path": { "type": "string" },
+          "name": { "type": "string" },
+          "description": { "type": ["string", "null"] },
+          "expectation": { "enum": ["match", "drift"] },
+          "passed": { "type": "boolean" },
+          "deterministic": { "type": "boolean" },
+          "first_run_counts": { "type": "object" },
+          "second_run_counts": { "type": "object" },
+          "first_divergence": { "type": ["object", "null"] },
+          "metrics": {
+            "type": "object",
+            "required": [
+              "determinism_score",
+              "replay_fidelity_score",
+              "permission_decision_preservation_score",
+              "tool_call_drift_count",
+              "transcript_drift_count",
+              "runtime_cost",
+              "debugging_time_to_root_cause_proxy",
+              "category_scores"
+            ],
+            "properties": {
+              "determinism_score": { "type": "number", "minimum": 0, "maximum": 1 },
+              "replay_fidelity_score": { "type": "number", "minimum": 0, "maximum": 1 },
+              "permission_decision_preservation_score": { "type": "number", "minimum": 0, "maximum": 1 },
+              "tool_call_drift_count": { "type": "integer", "minimum": 0 },
+              "transcript_drift_count": { "type": "integer", "minimum": 0 },
+              "runtime_cost": {
+                "type": "object",
+                "required": [
+                  "observed_interactions",
+                  "event_log_entries",
+                  "trigger_firings",
+                  "llm_interactions",
+                  "protocol_interactions",
+                  "approval_interactions",
+                  "effect_receipts",
+                  "persona_runtime_states",
+                  "agent_transcript_deltas",
+                  "final_artifacts",
+                  "policy_decisions",
+                  "llm_input_tokens",
+                  "llm_output_tokens"
+                ],
+                "properties": {
+                  "observed_interactions": { "type": "integer", "minimum": 0 },
+                  "event_log_entries": { "type": "integer", "minimum": 0 },
+                  "trigger_firings": { "type": "integer", "minimum": 0 },
+                  "llm_interactions": { "type": "integer", "minimum": 0 },
+                  "protocol_interactions": { "type": "integer", "minimum": 0 },
+                  "approval_interactions": { "type": "integer", "minimum": 0 },
+                  "effect_receipts": { "type": "integer", "minimum": 0 },
+                  "persona_runtime_states": { "type": "integer", "minimum": 0 },
+                  "agent_transcript_deltas": { "type": "integer", "minimum": 0 },
+                  "final_artifacts": { "type": "integer", "minimum": 0 },
+                  "policy_decisions": { "type": "integer", "minimum": 0 },
+                  "llm_input_tokens": { "type": "integer", "minimum": 0 },
+                  "llm_output_tokens": { "type": "integer", "minimum": 0 },
+                  "observed_cost_usd": { "type": "number", "minimum": 0 }
+                },
+                "additionalProperties": false
+              },
+              "debugging_time_to_root_cause_proxy": {
+                "type": "object",
+                "required": [
+                  "proxy_kind",
+                  "first_divergence_path",
+                  "first_divergence_depth",
+                  "drift_surface_count",
+                  "estimated_triage_steps"
+                ],
+                "properties": {
+                  "proxy_kind": { "type": "string" },
+                  "first_divergence_path": { "type": ["string", "null"] },
+                  "first_divergence_depth": { "type": "integer", "minimum": 0 },
+                  "drift_surface_count": { "type": "integer", "minimum": 0 },
+                  "estimated_triage_steps": { "type": "integer", "minimum": 0 }
+                },
+                "additionalProperties": false
+              },
+              "category_scores": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "required": [
+                    "compared",
+                    "matched",
+                    "drift_count",
+                    "first_run_count",
+                    "second_run_count"
+                  ],
+                  "properties": {
+                    "compared": { "type": "boolean" },
+                    "matched": { "type": "boolean" },
+                    "drift_count": { "type": "integer", "minimum": 0 },
+                    "first_run_count": { "type": "integer", "minimum": 0 },
+                    "second_run_count": { "type": "integer", "minimum": 0 }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "receipt": {
+            "type": "object",
+            "required": [
+              "ingest_kind",
+              "report_schema_version",
+              "replay_trace_schema_version",
+              "canonical_first_sha256",
+              "canonical_second_sha256",
+              "benchmark_receipt_sha256"
+            ],
+            "properties": {
+              "ingest_kind": { "const": "harn_cloud.replay_determinism.leaderboard.v1" },
+              "report_schema_version": { "type": "string" },
+              "replay_trace_schema_version": { "type": "string" },
+              "canonical_first_sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+              "canonical_second_sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+              "benchmark_receipt_sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

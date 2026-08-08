@@ -1,0 +1,30 @@
+import { render } from "std/disclosure"
+
+pipeline default(harness: Harness) {
+  const chain = {sub: "user:kenneth", act: {sub: "agent:merge-captain", act: {sub: "agent:burin"}}}
+  const config = {
+    identities: {
+      "user:kenneth": {
+        name: "Kenneth Sinder",
+        email: "kenneth@example.com",
+        github: "kennethsinder",
+      },
+      "agent:merge-captain": {
+        name: "Merge Captain",
+        email: "merge-captain@bots.example",
+        github: "merge-captain-bot",
+      },
+      "agent:burin": {name: "Burin", email: "burin@bots.example", github: "burin-bot"},
+    },
+  }
+  const options = {project: false, env: false, config: config}
+  harness.stdio.println(render(harness.env, harness.fs, chain, "git", options))
+  harness.stdio.println(render(harness.env, harness.fs, chain, "slack", options))
+  const github = render(harness.env, harness.fs, chain, "github", options)
+  harness.stdio.println(github.kind)
+  harness.stdio.println(github.mode)
+  harness.stdio.println(github.author.subject)
+  harness.stdio.println(github.author.github)
+  harness.stdio.println(github.co_author.subject)
+  harness.stdio.println(github.co_author.github)
+}

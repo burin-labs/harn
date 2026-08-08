@@ -1,0 +1,25 @@
+import "std/postgres"
+
+/**
+ * pg_savepoint / pg_release_savepoint / pg_rollback_to_savepoint are
+ * transactional control statements that the mock pool can accept as
+ * no-ops. The test asserts the call surface compiles and routes through
+ * the mock fixture matcher (no real Postgres required).
+ */
+pipeline default(harness: Harness) {
+  const db = harness.testing.pg_mock_pool(
+    [
+      {sql: "SAVEPOINT \"step1\"", rows_affected: 0},
+      {sql: "RELEASE SAVEPOINT \"step1\"", rows_affected: 0},
+      {sql: "ROLLBACK TO SAVEPOINT \"step1\"", rows_affected: 0},
+    ],
+  )
+  harness.stdio.println(pg_savepoint(db, "step1"))
+  harness.stdio.println(pg_release_savepoint(db, "step1"))
+  harness.stdio.println(pg_rollback_to_savepoint(db, "step1"))
+  const calls = pg_mock_calls(db)
+  harness.stdio.println(len(calls))
+  for call in calls {
+    harness.stdio.println(call.sql)
+  }
+}

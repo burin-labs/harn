@@ -1,0 +1,22 @@
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Fenced JSON inside a markdown code block: the envelope sets
+ * extracted_json: true so callers can tell the model wrapped its
+ * answer in prose / fences.
+ */
+pipeline default(harness: Harness) {
+  const schema = {type: "object", required: ["k"], properties: {k: {type: "string"}}}
+  with_llm_script(
+    harness.llm,
+    [llm_text("Sure thing!\n```json\n{\"k\": \"v\"}\n```\nDone.")],
+    { ->
+      const r = harness.llm.call_structured_result("Q?", schema, {provider: "mock"})
+      harness.stdio.println(r.ok)
+      harness.stdio.println(r.data.k)
+      harness.stdio.println(r.extracted_json)
+      harness.stdio.println(r.attempts)
+      harness.stdio.println(r.repaired)
+    },
+  )
+}

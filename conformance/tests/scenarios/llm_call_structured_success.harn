@@ -1,0 +1,42 @@
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * `harness.llm.call_structured(prompt, schema, options?)` returns the
+ * validated data directly — no `.data` unwrap. The helper forces
+ * a strict canonical `output` contract and
+ * `schema_retries: 3` unless the caller overrides them.
+ */
+pipeline default(harness: Harness) {
+  const schema = {
+    type: "object",
+    required: ["name", "age"],
+    properties: {name: {type: "string"}, age: {type: "integer"}},
+  }
+  with_llm_script(
+    harness.llm,
+    [llm_text("{\"name\": \"Ada\", \"age\": 36}")],
+    { ->
+      const summary = harness.llm.call_structured("Summarize", schema, {provider: "mock"})
+      harness.stdio.println(summary.name)
+      harness.stdio.println(summary.age)
+      harness.stdio.println(len(harness.llm.mock_calls()))
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text("{\"name\": \"Grace\", \"age\": 42}")],
+    { ->
+      const grace = harness.llm.call_structured(
+        "Summarize",
+        schema,
+        {provider: "mock", system: "You are precise."},
+      )
+      harness.stdio.println(grace.name)
+      const calls = harness.llm.mock_calls()
+      harness.stdio.println(calls[0].system)
+    },
+  )
+}
+// A single call was made — no schema retry needed.
+// The forced options are applied by the helper, so a user-provided
+// `system` lands in the standard slot.

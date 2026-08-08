@@ -1,0 +1,530 @@
+// Sweep scheduler.
+//
+// One sweep iterates every configured repo, discovers open PRs (live or
+// from fixture), classifies each PR, persists the resulting checkpoint,
+// runs whatever local action the classification calls for, and records
+// the merge receipt. Newly opened PRs are picked up automatically
+// because discovery runs every sweep; PRs that disappear from the open
+// list because they were merged or closed receive a final receipt and
+// have their checkpoint dropped.
+import { handles_kind } from "approval"
+import {
+  forget_checkpoint,
+  list_all_checkpoints,
+  prior_state_for,
+  save_checkpoint,
+} from "checkpoint_store"
+import { classify, verify } from "classifier"
+import {
+  add_label,
+  comment,
+  enqueue_merge_queue,
+  get_pr_details,
+  list_open_prs,
+  request_review,
+  update_branch,
+} from "github_adapter"
+import { run_local_verify } from "local_verify"
+import { from_github } from "observation"
+import { load_policy } from "policy"
+import { build_receipt, summarize_sweep } from "receipt"
+import { invoke_for_ci_failure, invoke_for_merge_conflict } from "repair_worker"
+import { is_terminal } from "states"
+
+fn _gen_sweep_id() {
+  return "sweep-${to_string(harness.clock.now_ms())}"
+}
+
+/**
+ * Decide whether the deterministic harness should hand this
+ * classification off to the repair worker checkpoint instead of
+ * running the inline action. Returns the bundle kind to dispatch
+ * (`"ci_failure"` / `"merge_conflict"`) or nil to keep the existing
+ * apply_action path.
+ *
+ * Repair worker dispatch is opt-in per repo via
+ * `policy.repair_worker = { enabled: true, handles_kinds: [...] }`.
+ * The classifier stays pure: it never mentions the worker.
+ */
+pub fn repair_worker_kind_for(policy, classification) {
+  if classification.action == "run_local_verification"
+    && handles_kind(
+    policy.repair_worker,
+    "ci_failure",
+  ) {
+    return "ci_failure"
+  }
+  if classification.state == "dirty" && classification.action == "comment"
+    && handles_kind(
+    policy.repair_worker,
+    "merge_conflict",
+  ) {
+    return "merge_conflict"
+  }
+  return nil
+}
+
+fn _outcome_from_repair_run(run, dry_run) {
+  if dry_run {
+    return "repair_worker_dry_run"
+  }
+  return "repair_worker_${run.status}"
+}
+
+fn _command_for_repair_run(run) {
+  return {
+    action: "run_repair_worker",
+    bundle_kind: run.bundle?.kind,
+    status: run.status,
+    approval_state: run.approval_state,
+    blocking_actions: run.blocking_actions ?? [],
+    validation_errors: run.validation_errors ?? [],
+    output_summary: if run.output != nil {
+      {
+        diagnosis: run.output.diagnosis,
+        files_changed_count: len(run.output.files_changed ?? []),
+        tests_run_count: len(run.output.tests_run ?? []),
+        commits_created_count: len(run.output.commits_created ?? []),
+        pushed: run.output.push_result?.pushed ?? false,
+      }
+    } else {
+      nil
+    },
+  }
+}
+
+/** Apply the action a classification calls for, returning an outcome string. */
+pub fn apply_action(
+  clock: HarnessClock,
+  process: HarnessProcess,
+  adapter,
+  policy,
+  observation,
+  classification,
+  dry_run,
+) {
+  const action = classification.action
+  if action == "noop" || action == "wait" {
+    return {outcome: "wait", commands: []}
+  }
+  if action == "mark_merged" {
+    return {outcome: "merged", commands: []}
+  }
+  if action == "archive" {
+    return {outcome: "closed", commands: []}
+  }
+  if action == "update_branch" {
+    const resp = update_branch(adapter, observation.repo, observation.number, dry_run)
+    return {
+      outcome: if dry_run {
+        "dry_run"
+      } else {
+        "branch_updated"
+      },
+      commands: [{action: "update_branch", response: resp}],
+    }
+  }
+  if action == "enqueue_merge_queue" {
+    const resp = enqueue_merge_queue(
+      adapter,
+      observation.repo,
+      observation.number,
+      policy.merge_method,
+      dry_run,
+    )
+    return {
+      outcome: if dry_run {
+        "dry_run"
+      } else {
+        "enqueued"
+      },
+      commands: [{action: "enqueue_merge_queue", response: resp}],
+    }
+  }
+  if action == "request_review" {
+    const resp = request_review(adapter, observation.repo, observation.number, [], dry_run)
+    return {
+      outcome: if dry_run {
+        "dry_run"
+      } else {
+        "review_requested"
+      },
+      commands: [{action: "request_review", response: resp}],
+    }
+  }
+  if action == "comment" {
+    const body = "merge_captain: ${classification.reason}"
+    const resp = comment(adapter, observation.repo, observation.number, body, dry_run)
+    return {
+      outcome: if dry_run {
+        "dry_run"
+      } else {
+        "commented"
+      },
+      commands: [{action: "comment", body: body, response: resp}],
+    }
+  }
+  if action == "add_label" {
+    const label = "merge-captain-blocked"
+    const resp = add_label(adapter, observation.repo, observation.number, label, dry_run)
+    return {
+      outcome: if dry_run {
+        "dry_run"
+      } else {
+        "labeled"
+      },
+      commands: [{action: "add_label", label: label, response: resp}],
+    }
+  }
+  if action == "run_local_verification" {
+    const results = run_local_verify(clock, process, policy.local_verification, dry_run)
+    return {
+      outcome: if dry_run {
+        "dry_run"
+      } else {
+        "verified"
+      },
+      commands: [{action: "run_local_verification", results: results}],
+    }
+  }
+  if action == "escalate_human" {
+    return {outcome: "escalated", commands: [{action: "escalate_human"}]}
+  }
+  return {outcome: "noop", commands: []}
+}
+
+fn _dispatch_repair_worker(harness: Harness, kind, args) {
+  const observation = args.observation
+  const policy = args.policy
+  const parent_receipt_ref = {
+    sweep_id: args.sweep_id,
+    repo: observation.repo,
+    pr_number: observation.number,
+    prior_state: args.prior,
+    classification_reason: args.classification.reason,
+  }
+  const common = {
+    observation: observation,
+    policy: policy,
+    sweep_id: args.sweep_id,
+    parent_receipt_ref: parent_receipt_ref,
+    prior_state: args.prior,
+    classification_reason: args.classification.reason,
+    dry_run: args.dry_run,
+    executor: args.repair_executor,
+    agent_options: args.repair_agent_options,
+    harness: args.repair_harness,
+    allowed_write_scope: args.allowed_write_scope,
+  }
+  if kind == "merge_conflict" {
+    return invoke_for_merge_conflict(
+      harness.clock,
+      harness,
+      common + {conflict_paths: args.conflict_paths ?? []},
+    )
+  }
+  return invoke_for_ci_failure(
+    harness.clock,
+    harness,
+    common + {failing_check_logs: args.failing_check_logs ?? []},
+  )
+}
+
+/** Process a single PR: classify, persist, act, build receipt. */
+pub fn process_pr(harness: Harness, args) {
+  const adapter = args.adapter
+  const policy = args.policy
+  const raw_pr = args.pr
+  const checkpoint_handle = args.checkpoint_handle
+  const sweep_id = args.sweep_id
+  const dry_run = args.dry_run
+  const detail = get_pr_details(adapter, policy.repo, raw_pr.number)
+  if detail == nil {
+    return nil
+  }
+  const observation = from_github(detail.pr, detail.checks, policy.required_checks)
+  const prior = prior_state_for(
+    harness.agent,
+    checkpoint_handle,
+    observation.repo,
+    observation.number,
+  )
+  const classification = classify(observation, policy, prior)
+  const edge = verify(prior, classification)
+  if !edge.ok {
+    const safe_class = {
+      state: classification.state,
+      action: "escalate_human",
+      reason: "${classification.reason} (illegal transition; ${edge.error})",
+      evidence: classification.evidence,
+    }
+    const action_result = apply_action(
+      harness.clock,
+      harness.process,
+      adapter,
+      policy,
+      observation,
+      safe_class,
+      dry_run,
+    )
+    save_checkpoint(
+      harness.agent,
+      harness.clock,
+      checkpoint_handle,
+      sweep_id,
+      observation,
+      safe_class,
+    )
+    return build_receipt(
+      {
+        sweep_id: sweep_id,
+        observed_at: harness.clock.now_ms(),
+        policy: policy,
+        observation: observation,
+        classification: safe_class,
+        prior_state: prior,
+        commands_run: action_result.commands,
+        outcome: action_result.outcome,
+        dry_run: dry_run,
+      },
+    )
+  }
+  const repair_kind = repair_worker_kind_for(policy, classification)
+  if repair_kind != nil {
+    const extras = if args.repair_extras_for != nil {
+      args.repair_extras_for(observation) ?? {}
+    } else {
+      {}
+    }
+    const run = _dispatch_repair_worker(
+      harness,
+      repair_kind,
+      {
+        observation: observation,
+        policy: policy,
+        sweep_id: sweep_id,
+        prior: prior,
+        classification: classification,
+        dry_run: dry_run,
+        repair_executor: args.repair_executor,
+        repair_agent_options: args.repair_agent_options,
+        repair_harness: args.repair_harness,
+        conflict_paths: extras.conflict_paths ?? [],
+        failing_check_logs: extras.failing_check_logs ?? [],
+        allowed_write_scope: extras.allowed_write_scope ?? args.allowed_write_scope,
+      },
+    )
+    save_checkpoint(
+      harness.agent,
+      harness.clock,
+      checkpoint_handle,
+      sweep_id,
+      observation,
+      classification,
+    )
+    return build_receipt(
+      {
+        sweep_id: sweep_id,
+        observed_at: harness.clock.now_ms(),
+        policy: policy,
+        observation: observation,
+        classification: classification,
+        prior_state: prior,
+        commands_run: [_command_for_repair_run(run)],
+        outcome: _outcome_from_repair_run(run, dry_run),
+        dry_run: dry_run,
+        repair_run: run,
+      },
+    )
+  }
+  const action_result = apply_action(
+    harness.clock,
+    harness.process,
+    adapter,
+    policy,
+    observation,
+    classification,
+    dry_run,
+  )
+  if is_terminal(classification.state) {
+    forget_checkpoint(harness.agent, checkpoint_handle, observation.repo, observation.number)
+  } else {
+    save_checkpoint(
+      harness.agent,
+      harness.clock,
+      checkpoint_handle,
+      sweep_id,
+      observation,
+      classification,
+    )
+  }
+  return build_receipt(
+    {
+      sweep_id: sweep_id,
+      observed_at: harness.clock.now_ms(),
+      policy: policy,
+      observation: observation,
+      classification: classification,
+      prior_state: prior,
+      commands_run: action_result.commands,
+      outcome: action_result.outcome,
+      dry_run: dry_run,
+    },
+  )
+}
+
+/** Reconcile PRs that disappeared from the open list (merged or closed remotely). */
+pub fn reconcile_disappeared(harness: Harness, args) {
+  const adapter = args.adapter
+  const checkpoint_handle = args.checkpoint_handle
+  const policy = args.policy
+  const sweep_id = args.sweep_id
+  const dry_run = args.dry_run
+  const observed_numbers = args.observed_numbers
+  let receipts = []
+  const stale = list_all_checkpoints(harness.agent, checkpoint_handle).filter(
+    { env -> env.repo == policy.repo && !observed_numbers.contains(env.number) },
+  )
+  for env in stale {
+    const detail = get_pr_details(adapter, env.repo, env.number)
+    const final_obs = if detail != nil {
+      from_github(detail.pr, detail.checks, policy.required_checks)
+    } else {
+      {
+        repo: env.repo,
+        number: env.number,
+        title: env.snapshot?.title ?? "",
+        head_sha: env.head_sha,
+        base_ref: env.snapshot?.base_ref ?? "main",
+        head_ref: env.snapshot?.head_ref ?? "",
+        state: "closed",
+        draft: false,
+        merged: false,
+        mergeable: nil,
+        mergeable_state: "unknown",
+        behind_by: 0,
+        labels: env.snapshot?.labels ?? [],
+        review_decision: "REVIEW_REQUIRED",
+        approvals: env.snapshot?.approvals ?? 0,
+        in_merge_queue: false,
+        merge_group_active: false,
+        checks: [],
+        missing_required_checks: [],
+        failed_required_checks: [],
+      }
+    }
+    const next_state = if final_obs.merged {
+      "merged"
+    } else {
+      "closed"
+    }
+    const action = if final_obs.merged {
+      "mark_merged"
+    } else {
+      "archive"
+    }
+    const synthetic = {
+      state: next_state,
+      action: action,
+      reason: "PR no longer in open list",
+      evidence: {previously: env.last_state},
+    }
+    const action_result = apply_action(
+      harness.clock,
+      harness.process,
+      adapter,
+      policy,
+      final_obs,
+      synthetic,
+      dry_run,
+    )
+    forget_checkpoint(harness.agent, checkpoint_handle, env.repo, env.number)
+    const receipt = build_receipt(
+      {
+        sweep_id: sweep_id,
+        observed_at: harness.clock.now_ms(),
+        policy: policy,
+        observation: final_obs,
+        classification: synthetic,
+        prior_state: env.last_state,
+        commands_run: action_result.commands,
+        outcome: action_result.outcome,
+        dry_run: dry_run,
+      },
+    )
+    receipts = receipts + [receipt]
+  }
+  return receipts
+}
+
+/** Run a single sweep across all configured repos. */
+pub fn sweep(harness: Harness, args) {
+  const adapter = args.adapter
+  const policies = args.policies
+  const checkpoint_handle = args.checkpoint_handle
+  const dry_run = args.dry_run ?? true
+  const sweep_id = args.sweep_id ?? _gen_sweep_id()
+  const started_at = harness.clock.now_ms()
+  let all_receipts = []
+  for policy in policies {
+    let receipts_for_repo = []
+    let observed_numbers = []
+    const open_prs = list_open_prs(adapter, policy.repo)
+    const trimmed = if len(open_prs) > policy.max_in_flight {
+      open_prs[0:policy.max_in_flight]
+    } else {
+      open_prs
+    }
+    for pr in trimmed {
+      observed_numbers = observed_numbers + [pr.number]
+      const receipt = process_pr(
+        harness,
+        {
+          adapter: adapter,
+          policy: policy,
+          pr: pr,
+          checkpoint_handle: checkpoint_handle,
+          sweep_id: sweep_id,
+          dry_run: dry_run,
+          repair_executor: args.repair_executor,
+          repair_agent_options: args.repair_agent_options,
+          repair_harness: args.repair_harness,
+          repair_extras_for: args.repair_extras_for,
+        },
+      )
+      if receipt != nil {
+        receipts_for_repo = receipts_for_repo + [receipt]
+      }
+    }
+    const disappeared = reconcile_disappeared(
+      harness,
+      {
+        adapter: adapter,
+        policy: policy,
+        checkpoint_handle: checkpoint_handle,
+        sweep_id: sweep_id,
+        dry_run: dry_run,
+        observed_numbers: observed_numbers,
+      },
+    )
+    all_receipts = all_receipts + receipts_for_repo + disappeared
+  }
+  const finished_at = harness.clock.now_ms()
+  return summarize_sweep(all_receipts, sweep_id, started_at, finished_at)
+}
+
+/** Helper for fixture-based runs: load a list of policy json paths. */
+pub fn load_policies(fs: HarnessFs, paths) {
+  let ok_policies = []
+  let errors = []
+  for path in paths {
+    const raw = fs.read_text(path)
+    const res = load_policy(raw)
+    if res.ok {
+      ok_policies = ok_policies + [res.policy]
+    } else {
+      errors = errors + ["${path}: ${res.error}"]
+    }
+  }
+  return {policies: ok_policies, errors: errors}
+}

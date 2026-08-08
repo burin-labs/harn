@@ -1,0 +1,10 @@
+pipeline test(harness: Harness, task) {
+  const rng_a = harness.random.seed(42)
+  const rng_b = harness.random.seed(42)
+  assert_eq(rng_a.f64(), rng_b.f64())
+  assert_eq(rng_a.range(10, 99), rng_b.range(10, 99))
+  assert_eq(rng_a.choice(["alpha", "beta", "gamma"]), rng_b.choice(["alpha", "beta", "gamma"]))
+  assert_eq(rng_a.shuffle([1, 2, 3, 4, 5]), rng_b.shuffle([1, 2, 3, 4, 5]))
+  assert_eq(harness.random.choice(["only"]), "only")
+  harness.stdio.log("seeded rng ok")
+}

@@ -1,0 +1,45 @@
+pipeline main(harness: Harness) {
+  const tools = [
+    {
+      name: "read_file",
+      description: "Read a file",
+      parameters: {type: "object", required: ["path"]},
+      annotations: {
+        kind: "read",
+        side_effect_level: "read_only",
+        arg_schema: {path_params: ["path"]},
+        capabilities: {workspace: ["read_text"]},
+        inline_result: true,
+      },
+      metadata: {mock_output: {text: "hello"}},
+    },
+  ]
+  const manifest = composition_binding_manifest(tools)
+  harness.stdio.println(manifest.schema_version)
+  harness.stdio.println(manifest.bindings[0].binding)
+  harness.stdio.println(manifest.bindings[0].policy.disposition)
+  const report = harness.tools.composition_execute(
+    "let file = read_file({path: \"README.md\"})\nreturn file.text",
+    manifest,
+    {run_id: "conformance-composition"},
+  )
+  harness.stdio.println(report.ok)
+  harness.stdio.println(report.child_calls[0].tool_name)
+  harness.stdio.println(report.run.result)
+  const denied_manifest = composition_binding_manifest(
+    [
+      {
+        name: "write_file",
+        parameters: {type: "object"},
+        annotations: {kind: "edit", side_effect_level: "workspace_write"},
+      },
+    ],
+  )
+  const denied = harness.tools.composition_execute(
+    "return write_file(harness, {path: \"x\", content: \"bad\"})",
+    denied_manifest,
+    {run_id: "conformance-denied"},
+  )
+  harness.stdio.println(denied.ok)
+  harness.stdio.println(denied.run.failure_category)
+}

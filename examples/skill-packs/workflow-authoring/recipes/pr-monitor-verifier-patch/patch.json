@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "id": "pr-monitor-verifier-001",
+  "summary": "Insert a deterministic verifier between query_logs and notify, with a repair branch back to verify on failure.",
+  "operations": [
+    {
+      "op": "insert_node",
+      "node_id": "verify_logs",
+      "node": {
+        "kind": "action",
+        "task_label": "Verify summary cites file:line and an error string"
+      }
+    },
+    {
+      "op": "insert_node",
+      "node_id": "repair_logs",
+      "node": {
+        "kind": "agent",
+        "task_label": "Repair summary if verification failed"
+      }
+    },
+    {
+      "op": "add_edge",
+      "from": "query_logs",
+      "to": "verify_logs"
+    },
+    {
+      "op": "add_edge",
+      "from": "verify_logs",
+      "to": "notify",
+      "branch": "verify_pass"
+    },
+    {
+      "op": "add_edge",
+      "from": "verify_logs",
+      "to": "repair_logs",
+      "branch": "verify_fail"
+    },
+    {
+      "op": "add_edge",
+      "from": "repair_logs",
+      "to": "verify_logs"
+    },
+    {
+      "op": "upsert_prompt_capsule",
+      "capsule_id": "verify-logs",
+      "capsule": {
+        "node_id": "verify_logs",
+        "prompt": "Confirm the previous summary cites at least one file:line reference and one error string from the deploy logs."
+      }
+    }
+  ]
+}

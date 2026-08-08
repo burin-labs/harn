@@ -1,0 +1,23 @@
+import { llm_text, with_llm_script } from "std/testing"
+
+type GraderOut = {verdict: "pass" | "fail", summary: string}
+
+pipeline default(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [llm_text("{\"verdict\": \"pass\", \"summary\": \"ok\"}")],
+    { ->
+      const r = harness.llm.call(
+        "Grade this",
+        nil,
+        {provider: "mock", output: {schema: GraderOut, strict: true, validation: "error"}},
+      )
+      const v: "pass" | "fail" = r.data.verdict
+      const s: string = r.data.summary
+      harness.stdio.println(v)
+      harness.stdio.println(s)
+    },
+  )
+}
+// r.data is statically typed as GraderOut here — these accesses
+// type-check without an explicit schema_is guard.

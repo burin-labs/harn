@@ -1,0 +1,23 @@
+/**
+ * An `if` with no `else` arm falls through to `nil` on the falsy
+ * path, so the expression's static type is `T | nil`, not `T`.
+ * `let x: int = if cond { 1 }` must be a type error; `int?` works.
+ * Adding `?? default` collapses the union back to `T`.
+ */
+pipeline default(harness: Harness) {
+  const cond = true
+  const maybe: int? = if cond {
+    42
+  }
+  harness.stdio.println(maybe)
+  const with_default: int = if cond {
+    7
+  }
+    ?? 0
+  harness.stdio.println(with_default + 1)
+  const cond2 = false
+  const none: int? = if cond2 {
+    9
+  }
+  harness.stdio.println(none)
+}

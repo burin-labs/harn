@@ -1,0 +1,55 @@
+# syntax=docker/dockerfile:1.7
+
+FROM --platform=$BUILDPLATFORM debian:bookworm-slim AS unpack
+
+ARG TARGETARCH
+
+WORKDIR /work
+
+COPY release-container/${TARGETARCH}/harn.tar.gz /tmp/harn.tar.gz
+
+RUN set -eux; \
+    mkdir -p /out/usr/local/bin /out/etc/harn /out/var/lib/harn/state; \
+    tar -xzf /tmp/harn.tar.gz -C /out/usr/local/bin harn harn-container-probe; \
+    chmod 0755 /out/usr/local/bin/harn /out/usr/local/bin/harn-container-probe; \
+    printf "# Mount a Harn orchestrator manifest here.\n" > /out/etc/harn/triggers.toml
+
+FROM gcr.io/distroless/cc-debian12
+
+WORKDIR /var/lib/harn
+
+# Inject listener auth and provider secrets at runtime via
+# HARN_ORCHESTRATOR_API_KEYS, HARN_ORCHESTRATOR_HMAC_SECRET,
+# HARN_PROVIDER_*, HARN_SECRET_*,
+# OPENAI_API_KEY, ANTHROPIC_API_KEY, or similar provider-specific env vars.
+#
+# HARN_ORCHESTRATOR_LISTEN intentionally defaults to loopback so a bare
+# `docker run -p 8080:8080 burin-labs/harn` cannot accidentally expose
+# an unauthenticated orchestrator on the host's public interface.
+# Operators that DO want the orchestrator on a public interface must
+# opt in explicitly AND configure auth:
+#
+#   docker run -p 8080:8080 \
+#     -e HARN_ORCHESTRATOR_LISTEN=0.0.0.0:8080 \
+#     -e HARN_ORCHESTRATOR_API_KEYS=<key1,key2> \
+#     burin-labs/harn
+#
+# When HARN_ORCHESTRATOR_LISTEN is non-loopback and no API key/HMAC is
+# configured, the orchestrator refuses to start.
+ENV HARN_SECRET_PROVIDERS=env \
+    HARN_ORCHESTRATOR_API_KEYS= \
+    HARN_ORCHESTRATOR_HMAC_SECRET= \
+    HARN_ORCHESTRATOR_MANIFEST=/etc/harn/triggers.toml \
+    HARN_ORCHESTRATOR_LISTEN=127.0.0.1:8080 \
+    HARN_ORCHESTRATOR_STATE_DIR=/var/lib/harn/state \
+    RUST_LOG=info
+
+COPY --from=unpack --chown=10001:10001 /out/ /
+
+EXPOSE 8080
+
+USER 10001:10001
+
+ENTRYPOINT ["/usr/local/bin/harn", "orchestrator", "serve"]
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD ["/usr/local/bin/harn-container-probe"]

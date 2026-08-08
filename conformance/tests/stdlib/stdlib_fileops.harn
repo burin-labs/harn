@@ -1,0 +1,33 @@
+pipeline default(harness: Harness) {
+  const tmp = harness.fs.workspace_temp_dir()
+  const test_dir = path_join(tmp, "harn_test_fileops")
+  harness.fs.mkdir(test_dir)
+  // path_join
+  const p = path_join(test_dir, "hello.txt")
+  harness.stdio.println(p != "")
+  // write and read
+  harness.fs.write_text(p, "hello world")
+  harness.stdio.println(harness.fs.exists(p))
+  const content = harness.fs.read_text(p)
+  harness.stdio.println(content)
+  // append
+  harness.fs.append(p, " appended")
+  harness.stdio.println(harness.fs.read_text(p))
+  // stat
+  const info = harness.fs.stat(p)
+  harness.stdio.println(info.is_file)
+  harness.stdio.println(info.is_dir)
+  // copy
+  const p2 = path_join(test_dir, "copy.txt")
+  harness.fs.copy(p, p2)
+  harness.stdio.println(harness.fs.exists(p2))
+  harness.stdio.println(harness.fs.read_text(p2))
+  // list_dir
+  const files = harness.fs.list_dir(test_dir)
+  harness.stdio.println(files.count)
+  // delete
+  harness.fs.delete(p)
+  harness.stdio.println(harness.fs.exists(p))
+  // cleanup
+  harness.fs.delete(test_dir)
+}

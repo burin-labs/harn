@@ -1,0 +1,57 @@
+import { agent_loop } from "std/agent/loop"
+import { with_llm_script } from "std/testing"
+
+fn edit_tools() {
+  const tools = tool_registry()
+  return tool_define(
+    tools,
+    "apply_fix",
+    "Apply a corrective edit",
+    {
+      handler: { _args -> "edit applied" },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+}
+
+fn verify_after_tool_stop(payload) {
+  if payload.stop_reason == "natural" && payload.iteration == 0 {
+    return "verification required after edit"
+  }
+  return nil
+}
+
+pipeline default(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      {text: "", tool_calls: [{id: "edit-1", name: "apply_fix", arguments: {}}]},
+      {text: "verified now ##DONE##"},
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Apply the fix and finish only after verification.",
+        nil,
+        {
+          provider: "mock",
+          tools: edit_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 4,
+          session_id: "stop-after-verify-" + harness.random.uuid(),
+          done_sentinel: "##DONE##",
+          stop_after_successful_tools: ["apply_fix"],
+          verify_completion: verify_after_tool_stop,
+        },
+      )
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.llm.iterations)
+      harness.stdio.println(
+        contains(json_stringify(harness.llm.mock_calls()), "verification required after edit"),
+      )
+    },
+  )
+}

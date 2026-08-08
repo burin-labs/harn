@@ -1,0 +1,13 @@
+/*
+ * One-way aggregate for the agent loop's implementation modules. Harn module
+ * imports currently cross the boundary through public exports, so the child
+ * modules intentionally expose internal `__...` helpers here. Keep leaves
+ * dependency-free where possible: importing a mutually dependent helper set
+ * can leave a runtime module closure without an otherwise valid builtin.
+ */
+pub import "std/agent/loop_foundation"
+pub import "std/agent/loop_resource_dispatch"
+pub import "std/agent/loop_result_status"
+pub import "std/agent/loop_tool_calls"
+pub import "std/agent/loop_turn_options"
+pub import "std/agent/loop_turn_scope"

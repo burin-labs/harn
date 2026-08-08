@@ -1,0 +1,20 @@
+pipeline test(harness: Harness, task) {
+  fn add(a, b, c) {
+    return a + b + c
+  }
+  // Spread all args
+  const args = [1, 2, 3]
+  harness.stdio.log(add(...args))
+  // Mixed: positional + spread
+  harness.stdio.log(add(10, ...[20, 30]))
+  // Spread in builtin calls
+  const items = ["hello", " ", "world"]
+  harness.stdio.log(join(items, ""))
+  // Spread with a variable holding a list
+  fn sum4(a, b, c, d) {
+    return a + b + c + d
+  }
+  const first = [100, 200]
+  const second = [300, 400]
+  harness.stdio.log(sum4(...first, ...second))
+}

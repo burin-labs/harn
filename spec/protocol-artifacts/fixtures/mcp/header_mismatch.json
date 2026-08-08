@@ -1,0 +1,38 @@
+{
+  "name": "harn.mcp.header_mismatch",
+  "description": "Streamable HTTP request whose Mcp-Method header disagrees with the JSON-RPC body. Stable servers must answer with -32020 instead of dispatching the wrong handler.",
+  "kind": "http_header_exchange",
+  "documents": [
+    {
+      "MCP-Protocol-Version": "2026-07-28",
+      "Mcp-Method": "tools/list",
+      "Mcp-Name": ""
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 42,
+      "method": "tools/call",
+      "params": {
+        "name": "echo",
+        "arguments": {"message": "spoofed"},
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientInfo": {"name": "harn-mcp-compat-client", "version": "0.1.0"},
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 42,
+      "error": {
+        "code": -32020,
+        "message": "Mcp-Method header does not match request body",
+        "data": {
+          "headerValue": "tools/list",
+          "bodyMethod": "tools/call"
+        }
+      }
+    }
+  ]
+}

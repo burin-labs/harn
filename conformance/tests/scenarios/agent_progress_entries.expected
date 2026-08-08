@@ -1,0 +1,4 @@
+message_is_nil=true
+entry_count=2
+first=Inspect code:completed:high
+second=Run tests:pending:none

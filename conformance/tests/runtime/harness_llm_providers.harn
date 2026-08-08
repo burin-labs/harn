@@ -1,0 +1,16 @@
+fn main(harness: Harness) {
+  const entries = harness.llm.providers()
+  harness.stdio.println(len(entries) > 0)
+  const first = entries[0]
+  harness.stdio.println(first.name != nil)
+  harness.stdio.println(first.available || !first.available)
+  harness.stdio.println(first.credential_status != nil)
+  let all_valid = true
+  for entry in entries {
+    const s = entry.credential_status
+    if s != "ok" && s != "missing" && s != "not_required" && s != "deferred" {
+      all_valid = false
+    }
+  }
+  harness.stdio.println(all_valid)
+}

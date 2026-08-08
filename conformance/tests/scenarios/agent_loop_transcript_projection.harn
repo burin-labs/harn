@@ -1,0 +1,189 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * agent_loop applies transcript_projection at each turn boundary,
+ * emits a transcript.projection event into the immutable raw transcript,
+ * and never destroys audit lineage. This test drives a failed-then-
+ * recovered tool call through the mock provider and checks that the
+ * projected prefix omits the failure while the raw transcript keeps
+ * both turns intact.
+ */
+fn flaky_tool(runtime: HarnessRuntime, flaky_calls) {
+  let tools = tool_registry()
+  const handler = fn(_args) {
+    const previous_calls = runtime.atomic_add(flaky_calls, 1)
+    if previous_calls == 0 {
+      throw "tool error: first try"
+    }
+    return "ok"
+  }
+  tools = tool_define(
+    tools,
+    "run",
+    "Run a step.",
+    {
+      handler: handler,
+      parameters: {step: {type: "string", required: true}},
+      returns: {type: "string"},
+    },
+  )
+  return tools
+}
+
+fn gc_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "read_stale",
+    "Return a stale observation.",
+    {
+      handler: fn(_args) {
+        let stale = "src/stale.rs\n"
+        for i in range(0, 60) {
+          stale = stale + "stale output line " + to_string(i) + "\n"
+        }
+        return stale
+      },
+      parameters: {},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "read_live",
+    "Return a live observation.",
+    {
+      handler: fn(_args) {
+        let live = "src/live.rs\nLIVE_SENTINEL\n"
+        for i in range(0, 60) {
+          live = live + "live output line " + to_string(i) + "\n"
+        }
+        return live
+      },
+      parameters: {},
+    },
+  )
+  return tools
+}
+
+pipeline default(harness: Harness) {
+  const flaky_calls = harness.runtime.atomic(0)
+  harness.runtime.atomic_set(flaky_calls, 0)
+  with_llm_script(
+    harness.llm,
+    [
+      {tool_calls: [{id: "call_1", name: "run", arguments: {step: "first"}}]},
+      {tool_calls: [{id: "call_2", name: "run", arguments: {step: "second"}}]},
+      llm_text("Finished. ##DONE##"),
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "kick it off",
+        "You are a test agent.",
+        {
+          provider: "mock",
+          tools: flaky_tool(harness.runtime, flaky_calls),
+          tool_format: "native",
+          max_iterations: 6,
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          transcript_projection: {policy: "clean_tool_repair"},
+        },
+      )
+      harness.stdio.println("status:" + result.status)
+      const raw_messages = transcript_messages(result.transcript)
+      const raw_text = json_stringify(raw_messages)
+      require harness.runtime.atomic_get(flaky_calls) == 2, "flaky tool was invoked twice"
+      require len(split(raw_text, "tool error: first try")) - 1 == 1,
+        "first tool call failed exactly once"
+      require contains(raw_text, "[result of run]\\nok\\n[end of run result]"),
+        "second tool call succeeded"
+      harness.stdio.println("raw_message_count:" + to_string(len(raw_messages)))
+      const events = transcript_events_by_kind(result.transcript, "transcript.projection")
+      harness.stdio.println("projection_events:" + to_string(len(events) > 0))
+      harness.stdio.println("projection_policy:" + events[0].metadata.policy)
+      harness.stdio.println(
+        "projection_safety_blocked:" + to_string(events[0].metadata.provider_safety_blocked),
+      )
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        tool_calls: [
+          {id: "read_stale_1", name: "read_stale", arguments: {}},
+          {id: "read_live_1", name: "read_live", arguments: {}},
+        ],
+      },
+      llm_text(
+        json_stringify(
+          {
+            schema: "harn.agent_scratchpad.v1",
+            goals: [{text: "complete projection GC task", source_ref: "user:initial"}],
+            open_items: [],
+            facts: [{text: "Continue from src/live.rs and LIVE_SENTINEL", source_ref: "turn:4"}],
+            refs: [
+              {id: "user:initial", kind: "user_input", label: "Initial task"},
+              {id: "turn:4", kind: "tool", label: "read_live returned src/live.rs"},
+            ],
+          },
+        ),
+      ),
+      llm_text("Done with projection GC. ##DONE##"),
+    ],
+    { ->
+      const gc_result = agent_loop(
+        harness,
+        "complete projection GC task",
+        "You are a projection test agent.",
+        {
+          provider: "mock",
+          tools: gc_tools(),
+          tool_format: "native",
+          max_iterations: 3,
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          transcript_projection: {
+            policy: "reachability_gc",
+            root_window: 1,
+            min_chars: 100,
+            require_write_barrier: true,
+          },
+          scratchpad: {enabled: true, reorganize_every: 1, reorganizer: {provider: "mock"}},
+        },
+      )
+      const gc_calls = harness.llm.mock_calls()
+      const projected_stale_body = json_stringify(gc_calls[2].messages[2].content)
+      const projected_live_body = json_stringify(gc_calls[2].messages[3].content)
+      const gc_events = transcript_events_by_kind(gc_result.transcript, "transcript.projection")
+      const gc_projection = gc_events[len(gc_events) - 1]
+      harness.stdio.println("gc_status:" + gc_result.status)
+      harness.stdio.println(
+        "gc_scratchpad_barrier:" + to_string(gc_projection.metadata.redacted_count > 0),
+      )
+      harness.stdio.println(
+        "gc_has_scratchpad_root:"
+          + to_string(
+          gc_projection.metadata.roots_consulted.contains("scratchpad"),
+        ),
+      )
+      harness.stdio.println(
+        "gc_has_write_barrier:"
+          + to_string(
+          gc_projection.metadata.roots_consulted.contains("write_barrier"),
+        ),
+      )
+      harness.stdio.println(
+        "gc_projected_reclaimed:"
+          + to_string(
+          contains(projected_stale_body, "reclaimed by reachability_gc"),
+        ),
+      )
+      harness.stdio.println(
+        "gc_live_preserved:" + to_string(contains(projected_live_body, "LIVE_SENTINEL")),
+      )
+    },
+  )
+}

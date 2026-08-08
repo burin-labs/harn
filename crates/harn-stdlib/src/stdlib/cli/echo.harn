@@ -1,0 +1,9 @@
+/**
+ * Demo embedded CLI script for the dispatch wedge (harn#2294).
+ * Prints `argv` as a JSON array so dispatch tests can assert end-to-end
+ * round-trip fidelity for argv → script → stdout. Real ported
+ * subcommands live in sibling files under `stdlib/cli/`.
+ */
+fn main(harness: Harness) {
+  harness.stdio.println(json_stringify(argv))
+}

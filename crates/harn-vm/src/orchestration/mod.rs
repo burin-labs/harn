@@ -1,0 +1,288 @@
+use std::path::PathBuf;
+use std::{cell::RefCell, thread_local};
+
+use serde::{Deserialize, Serialize};
+
+use crate::llm::vm_value_to_json;
+use crate::value::{VmError, VmValue};
+
+/// Current time as a decimal Unix-seconds string.
+///
+/// Renamed from `now_rfc3339`, which it never was: the orchestration records
+/// it stamps (`created_at`, `generated_at`, `selected_at`) carry values like
+/// `"1753000000"`, not RFC3339. Correcting the *format* would change the shape
+/// of already-persisted records, so the name is corrected here instead — both
+/// to stop the next reader assuming RFC3339 and to keep this from being folded
+/// into `harn_clock::system_now_rfc3339` as if it were another copy.
+pub(crate) fn now_unix_seconds_text() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    format!("{ts}")
+}
+
+pub(crate) fn new_id(prefix: &str) -> String {
+    format!("{prefix}_{}", uuid::Uuid::now_v7())
+}
+
+pub(crate) fn default_run_dir() -> PathBuf {
+    let base = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    crate::runtime_paths::run_root(&base)
+}
+
+mod hooks;
+pub use hooks::*;
+#[cfg(test)]
+mod tests_lazy_hooks;
+
+mod pipeline_lifecycle;
+pub use pipeline_lifecycle::*;
+
+mod settlement_agent;
+pub use settlement_agent::*;
+
+mod lifecycle_receipts;
+pub use lifecycle_receipts::*;
+
+mod command_policy;
+pub use command_policy::*;
+
+mod tool_precheck;
+pub use tool_precheck::*;
+
+mod compaction;
+pub use compaction::*;
+
+mod repair_ledger;
+
+mod compact_lifecycle;
+pub use compact_lifecycle::*;
+
+mod compaction_receipt;
+pub use compaction_receipt::*;
+
+mod compaction_policy_registry;
+pub use compaction_policy_registry::*;
+
+pub mod agent_inbox;
+
+mod artifacts;
+pub use artifacts::*;
+
+mod assemble;
+pub use assemble::*;
+
+mod handoffs;
+pub use handoffs::*;
+
+mod friction;
+pub use friction::*;
+
+mod crystallize;
+pub use crystallize::*;
+
+mod release_fixture;
+pub use release_fixture::*;
+
+mod replay_oracle;
+pub use replay_oracle::*;
+
+mod replay_bench;
+pub use replay_bench::*;
+
+mod policy;
+#[cfg(test)]
+pub(crate) use policy::swap_execution_policy_stack;
+pub use policy::*;
+
+mod ambient_scope;
+pub use ambient_scope::blocking::run_blocking_with_ambient;
+pub(crate) use ambient_scope::{
+    scope_ambient, scope_ambient_transaction, scope_approval_policy, scope_autonomy_policy,
+    scope_command_policy, scope_dynamic_permissions, scope_inline_subtask, scope_run_event_sink,
+    scope_spawned_source_dir, AmbientExecutionScope,
+};
+pub use ambient_scope::{
+    scope_execution_policy, scope_llm_runtime_overrides,
+    scope_llm_runtime_overrides_with_provider_endpoints,
+};
+
+mod stage_options;
+pub use stage_options::*;
+
+mod workflow;
+pub use workflow::*;
+
+mod workflow_bundle;
+pub use workflow_bundle::*;
+
+mod workflow_patch;
+pub use workflow_patch::*;
+
+mod safe_function_tools;
+pub use safe_function_tools::*;
+
+mod nested_invocation;
+pub use nested_invocation::*;
+
+#[cfg(test)]
+mod workflow_test_fixtures;
+
+mod records;
+pub use records::*;
+
+mod run_review;
+pub use run_review::*;
+
+mod training_example;
+pub use training_example::*;
+
+mod context_eval;
+pub use context_eval::*;
+
+mod skill_gate;
+pub use skill_gate::*;
+
+mod merge_captain_audit;
+pub use merge_captain_audit::*;
+
+mod merge_captain_driver;
+pub use merge_captain_driver::*;
+
+mod merge_captain_ladder;
+pub use merge_captain_ladder::*;
+
+mod merge_captain_iteration;
+pub use merge_captain_iteration::*;
+
+pub mod playground;
+
+thread_local! {
+    static CURRENT_MUTATION_SESSION: RefCell<Option<MutationSessionRecord>> = const { RefCell::new(None) };
+    /// Workflow-level skill context, installed by `workflow_execute` so
+    /// every per-node agent loop constructed inside `execute_stage_node`
+    /// can pick up the same `skills:` / `skill_match:` registry without
+    /// threading a new parameter through every helper. Cleared on
+    /// workflow exit (success or error) by `WorkflowSkillContextGuard`.
+    static CURRENT_WORKFLOW_SKILL_CONTEXT: RefCell<Option<WorkflowSkillContext>> = const { RefCell::new(None) };
+}
+
+/// Skill wiring threaded from `workflow_execute` into the per-stage
+/// agent loops via thread-local context. The workflow runner pins itself
+/// to one task via `LocalSet`, so every stage observes the same context
+/// without cross-task synchronization.
+#[derive(Clone, Default)]
+pub struct WorkflowSkillContext {
+    pub registry: Option<VmValue>,
+    pub match_config: Option<VmValue>,
+}
+
+pub fn install_workflow_skill_context(context: Option<WorkflowSkillContext>) {
+    CURRENT_WORKFLOW_SKILL_CONTEXT.with(|slot| {
+        *slot.borrow_mut() = context;
+    });
+}
+
+pub fn current_workflow_skill_context() -> Option<WorkflowSkillContext> {
+    CURRENT_WORKFLOW_SKILL_CONTEXT.with(|slot| slot.borrow().clone())
+}
+
+/// RAII guard that clears the workflow skill context on drop. Paired
+/// with `install_workflow_skill_context` at the top of `execute_workflow`
+/// so the context never leaks past a workflow's scope.
+pub struct WorkflowSkillContextGuard;
+
+impl Drop for WorkflowSkillContextGuard {
+    fn drop(&mut self) {
+        install_workflow_skill_context(None);
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct MutationSessionRecord {
+    pub session_id: String,
+    pub parent_session_id: Option<String>,
+    pub run_id: Option<String>,
+    pub worker_id: Option<String>,
+    pub execution_kind: Option<String>,
+    pub mutation_scope: String,
+    /// Declarative per-tool approval policy for this session. When `None`,
+    /// no policy-driven approval is requested; the session update stream
+    /// remains the only host-observable surface for tool dispatch.
+    pub approval_policy: Option<ToolApprovalPolicy>,
+}
+
+impl MutationSessionRecord {
+    pub fn normalize(mut self) -> Self {
+        if self.session_id.is_empty() {
+            self.session_id = new_id("session");
+        }
+        if self.mutation_scope.is_empty() {
+            self.mutation_scope = "read_only".to_string();
+        }
+        self
+    }
+}
+
+pub fn install_current_mutation_session(session: Option<MutationSessionRecord>) {
+    CURRENT_MUTATION_SESSION.with(|slot| {
+        *slot.borrow_mut() = session.map(MutationSessionRecord::normalize);
+    });
+}
+
+pub fn current_mutation_session() -> Option<MutationSessionRecord> {
+    CURRENT_MUTATION_SESSION.with(|slot| slot.borrow().clone())
+}
+
+/// Per-task ambient-scope swap of the current mutation session. See
+/// `orchestration::ambient_scope`: the mutation session attributes audit
+/// records, `run_id`, approval policy, and secret-access scope to the running
+/// task, so a worker holding it across an `.await` must keep its OWN copy rather
+/// than read whatever a cooperatively-scheduled fan-out sibling left behind. The
+/// helper is `pub(crate)` — only the ambient combinator moves whole sessions;
+/// ordinary code uses `install_current_mutation_session`/`current_mutation_session`.
+pub(crate) fn swap_mutation_session(
+    next: Option<MutationSessionRecord>,
+) -> Option<MutationSessionRecord> {
+    CURRENT_MUTATION_SESSION.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), next))
+}
+
+/// How much of the offending payload a deserialization error quotes back.
+const PAYLOAD_SNIPPET_MAX_BYTES: usize = 600;
+
+pub(crate) fn parse_json_payload<T: for<'de> Deserialize<'de>>(
+    json: serde_json::Value,
+    label: &str,
+) -> Result<T, VmError> {
+    let payload = json.to_string();
+    let mut deserializer = serde_json::Deserializer::from_str(&payload);
+    let mut tracker = serde_path_to_error::Track::new();
+    let path_deserializer = serde_path_to_error::Deserializer::new(&mut deserializer, &mut tracker);
+    T::deserialize(path_deserializer).map_err(|error| {
+        let snippet = crate::text::truncate_end_bytes(&payload, PAYLOAD_SNIPPET_MAX_BYTES);
+        VmError::Runtime(format!(
+            "{label} parse error at {}: {} | payload={}",
+            tracker.path(),
+            error,
+            snippet
+        ))
+    })
+}
+
+pub(crate) fn parse_json_value<T: for<'de> Deserialize<'de>>(
+    value: &VmValue,
+) -> Result<T, VmError> {
+    parse_json_payload(vm_value_to_json(value), "orchestration")
+}
+
+#[cfg(test)]
+mod tests;
+
+#[cfg(test)]
+mod policy_restriction_tests;
+
+#[cfg(test)]
+mod typed_options_parity;

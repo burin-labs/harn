@@ -1,0 +1,33 @@
+import { verify_then_act } from "std/personas/prelude"
+
+pipeline test(harness: Harness, task) {
+  const receipt_options = {
+    persona: "merge_captain",
+    step: "merge_pr",
+    trace_id: "trace-prelude",
+    started_at: "2026-05-03T00:00:00Z",
+    completed_at: "2026-05-03T00:00:00Z",
+  }
+  const accepted = verify_then_act(
+    fn() { return Ok({clean: true}) },
+    fn() { return "merged" },
+    receipt_options,
+  )
+  harness.stdio.println(accepted.status)
+  harness.stdio.println(accepted.verified)
+  harness.stdio.println(accepted.acted)
+  harness.stdio.println(accepted.result)
+  harness.stdio.println(accepted.receipt.schema)
+  harness.stdio.println(accepted.receipt.status)
+  harness.stdio.println(len(accepted.receipt.tool_calls))
+  const blocked = verify_then_act(
+    fn() { return false },
+    fn() {
+      throw "actor should not run"
+    },
+    receipt_options,
+  )
+  harness.stdio.println(blocked.status)
+  harness.stdio.println(blocked.acted)
+  harness.stdio.println(blocked.result == nil)
+}

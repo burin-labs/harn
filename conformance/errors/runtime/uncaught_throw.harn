@@ -1,0 +1,3 @@
+pipeline test(harness: Harness, task) {
+  throw "fatal"
+}

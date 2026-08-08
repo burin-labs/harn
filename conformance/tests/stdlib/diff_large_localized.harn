@@ -1,0 +1,18 @@
+import { diff_artifact, diff_lines } from "std/diff"
+
+pipeline test(harness: Harness, task) {
+  let lines = []
+  for index in range(0, 2000) {
+    lines = lines.appending("line " + to_string(index))
+  }
+  const changed = lines[:1000] + ["changed line"] + lines[1001:]
+  const before = join(lines, "\n")
+  const after = join(changed, "\n")
+  const result = diff_lines(before, after)
+  const artifact = diff_artifact(before, after, {path: "large.harn", context: 2})
+  harness.stdio.println(result.changed)
+  harness.stdio.println(result.insertions == 1 && result.deletions == 1)
+  harness.stdio.println(artifact.insertions == 1 && artifact.deletions == 1)
+  harness.stdio.println(contains(artifact.diff, "-line 1000"))
+  harness.stdio.println(contains(artifact.diff, "+changed line"))
+}

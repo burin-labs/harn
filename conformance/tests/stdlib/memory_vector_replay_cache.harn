@@ -1,0 +1,52 @@
+import "std/memory"
+
+pipeline default(harness: Harness) {
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-memory-replay-" + harness.random.uuid(),
+  )
+  harness.testing.clear()
+  harness.testing.respond(
+    "embed",
+    "text_response",
+    {vector: [0.6, 0.8], dim: 2, model: "fake"},
+    nil,
+    true,
+  )
+  memory_open(
+    harness.memory,
+    "agent/replay",
+    {backend: "vector", embed_dim: 2, embed_model_hint: "fake", root: root},
+  )
+  // First round: stores call memory.embed (cache miss → host).
+  memory_store(
+    harness.memory,
+    "agent/replay",
+    "alpha",
+    "first observation",
+    nil,
+    {root: root, now: "2026-05-15T00:00:00Z"},
+  )
+  memory_store(
+    harness.memory,
+    "agent/replay",
+    "beta",
+    "second observation",
+    nil,
+    {root: root, now: "2026-05-15T00:00:01Z"},
+  )
+  const first_recall = memory_recall(harness.memory, "agent/replay", "topic", 5, {root: root})
+  harness.stdio.println(len(first_recall))
+  const first_calls = harness.testing.calls().count
+  harness.stdio.println(first_calls >= 3)
+  // Replay: clear mocks entirely. Cached embeddings on disk must satisfy
+  // recall without re-calling the host.
+  harness.testing.clear()
+  const second_recall = memory_recall(harness.memory, "agent/replay", "topic", 5, {root: root})
+  harness.stdio.println(len(second_recall) == len(first_recall))
+  harness.stdio.println(harness.testing.calls().count == 0)
+  // Same (namespace, query, mode, model_hint, top_k) tape → same order.
+  harness.stdio.println(first_recall[0].id == second_recall[0].id)
+  harness.stdio.println(first_recall[1].id == second_recall[1].id)
+  harness.fs.delete(root)
+}

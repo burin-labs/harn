@@ -1,0 +1,136 @@
+import {
+  MediaAssetOptions,
+  media_asset_store_result,
+  media_asset_verify_result,
+} from "std/media/asset"
+import {
+  ModelJobObservation,
+  ModelJobOutput,
+  ModelJobRequest,
+  ModelJobRunOptions,
+  ModelJobState,
+  ModelOutputSpec,
+  ModelTask,
+  model_job_fake_backend,
+  model_job_replay_backend,
+  model_job_run_result,
+} from "std/model_job"
+
+pipeline test(harness: Harness, task) {
+  const png = bytes_from_base64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB")
+  const task_kind: ModelTask = "image.generate"
+  const output_spec: ModelOutputSpec = {mime_type: "image/png", width: 1, height: 1}
+  const request: ModelJobRequest = {
+    id: "logo-1",
+    task: task_kind,
+    prompt: "A blue flower mark",
+    output: output_spec,
+    model: "fixture",
+    seed: 7,
+  }
+  const queued: ModelJobState = "queued"
+  const running: ModelJobState = "running"
+  const succeeded: ModelJobState = "succeeded"
+  const output: ModelJobOutput = {
+    name: "logo.png",
+    mime_type: "image/png",
+    bytes: png,
+    width: 1,
+    height: 1,
+  }
+  const first_observation: ModelJobObservation = {
+    job_id: "job-1",
+    state: queued,
+    backend_state: "pending",
+  }
+  const second_observation: ModelJobObservation = {
+    job_id: "job-1",
+    state: running,
+    backend_state: "executing",
+    progress: 0.5,
+  }
+  const third_observation: ModelJobObservation = {
+    job_id: "job-1",
+    state: succeeded,
+    backend_state: "complete",
+    progress: 1.0,
+    outputs: [output],
+  }
+  const observations: list<ModelJobObservation> = [
+    first_observation,
+    second_observation,
+    third_observation,
+  ]
+  const root = harness.fs.mkdtemp_in_workspace("model-assets-")
+  const session = harness.agent.open("model-job-lifecycle")
+  harness.agent.reset(session)
+  const run_options: ModelJobRunOptions = {
+    interval_ms: 0,
+    max_attempts: 4,
+    asset_root: root,
+    session_id: session,
+  }
+  const first = unwrap(
+    model_job_run_result(
+      harness,
+      model_job_fake_backend("fixture", observations),
+      request,
+      run_options,
+    ),
+  )
+  harness.stdio.log(first.job.state)
+  harness.stdio.log(to_string(len(first.events)))
+  harness.stdio.log(first.assets[0]?.uri ?? "missing")
+  harness.stdio.log(to_string(is_ok(media_asset_verify_result(harness.fs, first.assets[0]))))
+  const transcript_events = transcript_events_by_kind(harness.agent.snapshot(session), "model_job")
+  harness.stdio.log(to_string(len(transcript_events)))
+  harness.stdio.log(transcript_events[0]?.metadata?.schema ?? "missing")
+  const replay = unwrap(
+    model_job_run_result(harness, model_job_replay_backend(first), request, run_options),
+  )
+  harness.stdio.log(replay.job.state)
+  harness.stdio.log(to_string(replay.assets[0]?.sha256 == first.assets[0]?.sha256))
+  const _ = harness.testing.clock_set(1700000000000)
+  const timed_out = model_job_run_result(
+    harness,
+    model_job_fake_backend("timeout-fixture", [first_observation, second_observation]),
+    request + {id: "logo-timeout"},
+    {timeout_ms: 100, interval_ms: 100, asset_root: root, session_id: session},
+  )
+  harness.stdio.log(unwrap_err(timed_out).kind)
+  harness.stdio.log(to_string(harness.clock.monotonic_ms()))
+  const after_timeout = transcript_events_by_kind(harness.agent.snapshot(session), "model_job")
+  harness.stdio.log(to_string(len(after_timeout) - len(transcript_events)))
+  harness.stdio.log(after_timeout[len(after_timeout) - 1]?.metadata?.kind ?? "missing")
+  const sketch_options: MediaAssetOptions = {
+    mime_type: "image/png",
+    width: 1,
+    height: 1,
+    root: root,
+  }
+  const sketch = unwrap(media_asset_store_result(harness.fs, png, sketch_options))
+  const edit_task: ModelTask = "image.edit"
+  const edit_request: ModelJobRequest = {
+    id: "logo-edit",
+    task: edit_task,
+    prompt: "Polish the sketch",
+    output: output_spec,
+    model: "fixture",
+    inputs: [sketch],
+    seed: 7,
+  }
+  const edit = unwrap(
+    model_job_run_result(
+      harness,
+      model_job_fake_backend(
+        "fixture-edit",
+        [{job_id: "job-edit", state: "succeeded", progress: 1.0, outputs: [output]}],
+      ),
+      edit_request,
+      run_options,
+    ),
+  )
+  harness.stdio.log(to_string(edit.assets[0]?.parents[0] == sketch.uri))
+  harness.stdio.log(to_string(is_ok(media_asset_verify_result(harness.fs, edit.assets[0]))))
+  const _ = harness.testing.clock_reset()
+}

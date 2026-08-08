@@ -1,0 +1,224 @@
+use std::path::{Path, PathBuf};
+
+use sha2::{Digest, Sha256};
+
+pub const HARN_STATE_DIR_ENV: &str = "HARN_STATE_DIR";
+pub const HARN_RUN_DIR_ENV: &str = "HARN_RUN_DIR";
+pub const HARN_WORKTREE_DIR_ENV: &str = "HARN_WORKTREE_DIR";
+const NEXTEST_ENV: &str = "NEXTEST";
+const NEXTEST_RUN_ID_ENV: &str = "NEXTEST_RUN_ID";
+const NEXTEST_BINARY_ID_ENV: &str = "NEXTEST_BINARY_ID";
+const NEXTEST_TEST_NAME_ENV: &str = "NEXTEST_TEST_NAME";
+const NEXTEST_ATTEMPT_ID_ENV: &str = "NEXTEST_ATTEMPT_ID";
+
+#[cfg(test)]
+pub(crate) fn test_env_lock() -> &'static std::sync::Mutex<()> {
+    use std::sync::{Mutex, OnceLock};
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+fn resolve_root_value(base_dir: &Path, env_value: Option<&str>, default_relative: &str) -> PathBuf {
+    match env_value {
+        Some(value) if !value.trim().is_empty() => {
+            let candidate = PathBuf::from(value);
+            if candidate.is_absolute() {
+                candidate
+            } else {
+                base_dir.join(candidate)
+            }
+        }
+        _ => base_dir.join(default_relative),
+    }
+}
+
+fn resolve_root(base_dir: &Path, env_key: &str, default_relative: &str) -> PathBuf {
+    let env_value = std::env::var(env_key).ok();
+    resolve_root_value(base_dir, env_value.as_deref(), default_relative)
+}
+
+pub fn state_root(base_dir: &Path) -> PathBuf {
+    let state_env_value = std::env::var(HARN_STATE_DIR_ENV).ok();
+    state_root_value(
+        base_dir,
+        state_env_value.as_deref(),
+        nextest_state_root().as_deref(),
+    )
+}
+
+pub fn run_root(base_dir: &Path) -> PathBuf {
+    resolve_root(base_dir, HARN_RUN_DIR_ENV, ".harn-runs")
+}
+
+fn worktree_root_value(
+    base_dir: &Path,
+    state_env_value: Option<&str>,
+    worktree_env_value: Option<&str>,
+) -> PathBuf {
+    match worktree_env_value {
+        Some(value) if !value.trim().is_empty() => {
+            let candidate = PathBuf::from(value);
+            if candidate.is_absolute() {
+                candidate
+            } else {
+                base_dir.join(candidate)
+            }
+        }
+        _ => resolve_root_value(base_dir, state_env_value, ".harn").join("worktrees"),
+    }
+}
+
+pub fn worktree_root(base_dir: &Path) -> PathBuf {
+    let state_env_value = std::env::var(HARN_STATE_DIR_ENV).ok();
+    let worktree_env_value = std::env::var(HARN_WORKTREE_DIR_ENV).ok();
+    worktree_root_value(
+        base_dir,
+        state_env_value.as_deref(),
+        worktree_env_value.as_deref(),
+    )
+}
+
+pub fn store_path(base_dir: &Path) -> PathBuf {
+    state_root(base_dir).join("store.json")
+}
+
+pub fn checkpoint_dir(base_dir: &Path) -> PathBuf {
+    state_root(base_dir).join("checkpoints")
+}
+
+pub fn metadata_dir(base_dir: &Path) -> PathBuf {
+    state_root(base_dir).join("metadata")
+}
+
+pub fn event_log_dir(base_dir: &Path) -> PathBuf {
+    event_log_dir_at_state_root(&state_root(base_dir))
+}
+
+pub fn event_log_sqlite_path(base_dir: &Path) -> PathBuf {
+    event_log_sqlite_path_at_state_root(&state_root(base_dir))
+}
+
+/// Event-log directory under an already-resolved state root.
+///
+/// Callers that own their state root exactly — an orchestrator told where to
+/// keep its state, an embedder running concurrent isolated VMs — use this and
+/// the sibling sqlite helper instead of the `base_dir` forms, which route
+/// through [`state_root`] and therefore let an absolute `HARN_STATE_DIR`
+/// discard the caller's path entirely.
+pub fn event_log_dir_at_state_root(state_root: &Path) -> PathBuf {
+    state_root.join("events")
+}
+
+/// Sqlite event-log path under an already-resolved state root. See
+/// [`event_log_dir_at_state_root`].
+pub fn event_log_sqlite_path_at_state_root(state_root: &Path) -> PathBuf {
+    state_root.join("events.sqlite")
+}
+
+pub fn workflow_dir(base_dir: &Path) -> PathBuf {
+    state_root(base_dir).join("workflows")
+}
+
+fn state_root_value(
+    base_dir: &Path,
+    state_env_value: Option<&str>,
+    nextest_root: Option<&Path>,
+) -> PathBuf {
+    match state_env_value {
+        Some(value) if !value.trim().is_empty() => {
+            resolve_root_value(base_dir, Some(value), ".harn")
+        }
+        _ => nextest_root
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| base_dir.join(".harn")),
+    }
+}
+
+/// Nextest runs each test attempt in its own process and identifies that
+/// attempt in the environment. Keep default runtime state inside the attempt
+/// instead of letting concurrent tests persist transcripts into the checkout's
+/// shared `.harn` database. Explicit `HARN_STATE_DIR` still wins in
+/// [`state_root`], and child processes inherit the same Nextest identity.
+fn nextest_state_root() -> Option<PathBuf> {
+    std::env::var_os(NEXTEST_ENV)?;
+    let identity = [
+        std::env::var(NEXTEST_RUN_ID_ENV).ok()?,
+        std::env::var(NEXTEST_BINARY_ID_ENV).ok()?,
+        std::env::var(NEXTEST_TEST_NAME_ENV).ok()?,
+        std::env::var(NEXTEST_ATTEMPT_ID_ENV).ok()?,
+    ];
+    Some(nextest_state_root_for_identity(
+        &std::env::temp_dir(),
+        identity.iter().map(String::as_str),
+    ))
+}
+
+fn nextest_state_root_for_identity<'a>(
+    temp_dir: &Path,
+    identity: impl IntoIterator<Item = &'a str>,
+) -> PathBuf {
+    let mut hasher = Sha256::new();
+    for part in identity {
+        hasher.update((part.len() as u64).to_le_bytes());
+        hasher.update(part.as_bytes());
+    }
+    let digest = hasher.finalize();
+    temp_dir
+        .join("harn-nextest-state")
+        .join(hex::encode(&digest[..16]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn defaults_resolve_under_base_dir() {
+        let base = Path::new("/tmp/harn-runtime-paths");
+        assert_eq!(resolve_root_value(base, None, ".harn"), base.join(".harn"));
+        assert_eq!(
+            resolve_root_value(base, None, ".harn-runs"),
+            base.join(".harn-runs")
+        );
+        assert_eq!(
+            worktree_root_value(base, None, None),
+            base.join(".harn").join("worktrees")
+        );
+        assert_eq!(
+            resolve_root_value(base, None, ".harn").join("events"),
+            base.join(".harn").join("events")
+        );
+        assert_eq!(
+            resolve_root_value(base, None, ".harn").join("workflows"),
+            base.join(".harn").join("workflows")
+        );
+        assert_eq!(
+            resolve_root_value(base, None, ".harn").join("events.sqlite"),
+            base.join(".harn").join("events.sqlite")
+        );
+    }
+
+    #[test]
+    fn nextest_default_state_is_attempt_scoped_but_explicit_state_still_wins() {
+        let base = Path::new("/workspace");
+        let temp = Path::new("/tmp");
+        let first =
+            nextest_state_root_for_identity(temp, ["run-1", "harn-vm", "test-a", "attempt-1"]);
+        let same =
+            nextest_state_root_for_identity(temp, ["run-1", "harn-vm", "test-a", "attempt-1"]);
+        let other =
+            nextest_state_root_for_identity(temp, ["run-1", "harn-vm", "test-b", "attempt-1"]);
+
+        assert_eq!(first, same);
+        assert_ne!(first, other);
+        assert_eq!(state_root_value(base, None, Some(&first)), first);
+        assert_eq!(
+            state_root_value(base, Some("/operator/state"), Some(&other)),
+            PathBuf::from("/operator/state")
+        );
+        assert_eq!(
+            state_root_value(base, Some("relative-state"), Some(&other)),
+            base.join("relative-state")
+        );
+    }
+}

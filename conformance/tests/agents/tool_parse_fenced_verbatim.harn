@@ -1,0 +1,223 @@
+// The verbatim content lane: count-anchored heredocs trailing a ```tool block.
+//
+// JSON-escaping a large file body is where the fenced lane used to lose data —
+// a doubled backslash transform mangled a 900-line payload on the way through.
+// The fix is to let an argument value be the opener `<<TAG:N`, with the real
+// bytes following the JSON header as `<<TAG:N` ... `TAG`, where N is the exact
+// newline count of the body. The count, not the tag, is authoritative: that is
+// what lets the body contain a line equal to the close tag, a ```tool
+// separator, `<<EOF`, `</tool_calls>`, or a bare `}` and still round-trip.
+//
+// Everything ambiguous fails loud with zero calls: a wrong count, a declared
+// body that never arrives, a body whose tag does not match its declaration, two
+// declarations sharing one body, a counted close with trailing bytes on the tag
+// line, a count that overflows, and a trailing body no argument asked for.
+// Half-applying a file edit is worse than any of them.
+import { probe_json } from "_tool_parse_probe"
+
+pipeline main(harness: Harness) {
+  // A body containing a line that is exactly the close tag. The count wins.
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "body containing the tag line round trips",
+    """```tool
+{ "name": "write_file", "args": { "path": "a.txt", "content": "<<END:5" } }
+<<END:5
+before
+END
+middle
+END
+after
+END
+```""",
+  )
+  // Every literal the fenced lane promises to carry: a bare fence, a heredoc
+  // opener, a lone brace, both envelope close tags, and backticks.
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "body with all promised literals round trips",
+    """```tool
+{ "name": "write_file", "args": { "path": "b.txt", "content": "<<T:8" } }
+<<T:8
+```
+<<EOF
+}
+</tool>
+</tool_calls>
+const raw = `go run`;
+```
+EOF
+T
+```""",
+  )
+  // An empty body is a valid segment.
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "empty counted body",
+    """```tool
+{ "name": "write_file", "args": { "path": "empty.txt", "content": "<<T:0" } }
+<<T:0
+T
+```""",
+  )
+  // A ```tool separator inside a counted body is content, not a block split.
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "tool fence inside a counted body is content",
+    """```tool
+{ "name": "write_file", "args": { "path": "d.txt", "content": "<<T:3" } }
+<<T:3
+line a
+```tool
+line c
+T
+```""",
+  )
+  // Two verbatim arguments in one call bind by their opener string, so the
+  // trailing bodies may appear in any order relative to the JSON keys.
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "two bodies matched by opener",
+    """```tool
+{ "name": "edit_file", "args": { "path": "x.rs", "old_string": "<<OLD:1", "new_string": "<<NEW:2" } }
+<<NEW:2
+NEW a\b
+NEW c
+NEW
+<<OLD:1
+OLD "q"
+OLD
+```""",
+  )
+  // Verbatim coexists with batching: a plain read object and a verbatim write
+  // object in one block both dispatch, and the body binds only the write.
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "verbatim coexists with a batched object",
+    """```tool
+{ "name": "read_file", "args": { "path": "a.zig" } }
+{ "name": "write_file", "args": { "path": "b.zig", "content": "<<C:1" } }
+<<C:1
+const x = "a\tb";
+C
+```""",
+  )
+  // A CRLF body keeps every carriage return, and a CRLF close line works.
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "crlf counted close round trips",
+    "```tool\r\n{\"name\":\"write_file\",\"args\":{\"content\":\"<<C:1\"}}\r\n<<C:1\r\nbody\r\n  C\r\n```",
+  )
+  // A value that is literally `<<EOF` with no trailing body stays a string.
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "literal heredoc opener value without a body",
+    """```tool
+{"name": "write_file", "args": {"path": "a", "content": "<<EOF"}}
+```""",
+  )
+  // A pure-JSON block is untouched by the verbatim lane.
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "pure json block is unchanged",
+    """```tool
+{"name": "write_file", "args": {"path": "a", "content": "x\ny"}}
+```""",
+  )
+  // The rejections.
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "wrong declared count fails loud",
+    """```tool
+{ "name": "write_file", "args": { "path": "a", "content": "<<C:5" } }
+<<C:5
+l1
+l2
+C
+```""",
+  )
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "count overflow never downgrades",
+    """```tool
+{ "name": "write_file", "args": { "content": "<<C:184467440737095516160" } }
+<<C:184467440737095516160
+body
+C
+```""",
+  )
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "counted close with a trailing suffix",
+    """```tool
+{ "name": "write_file", "args": { "content": "<<C:1" } }
+<<C:1
+body
+C trailing payload
+```""",
+  )
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "counted declaration with no body",
+    """```tool
+{"name":"write_file","args":{"content":"<<C:1"}}
+```""",
+  )
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "counted body with a mismatched tag",
+    """```tool
+{"name":"write_file","args":{"content":"<<C:1"}}
+<<D:1
+body
+D
+```""",
+  )
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "one of two counted bodies missing",
+    """```tool
+{"name":"edit_file","args":{"old":"<<OLD:1","new":"<<NEW:1"}}
+<<OLD:1
+before
+OLD
+```""",
+  )
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "duplicate declarations need distinct bodies",
+    """```tool
+{"name":"edit_file","args":{"old":"<<BODY:1","new":"<<BODY:1"}}
+<<BODY:1
+only one
+BODY
+```""",
+  )
+  probe_json(
+    harness.agent,
+    harness.stdio,
+    "orphan trailing heredoc",
+    """```tool
+{ "name": "write_file", "args": { "path": "a", "content": "x" } }
+<<ORPHAN:1
+stray
+ORPHAN
+```""",
+  )
+}

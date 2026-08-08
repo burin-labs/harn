@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Portable Harn Kernel</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+        background: #07110f;
+        color: #e8f5ef;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 32px; }
+      main { width: min(880px, 100%); display: grid; gap: 22px; }
+      .eyebrow { color: #76ddb4; font: 600 12px/1.2 ui-monospace, monospace; letter-spacing: .14em; text-transform: uppercase; }
+      h1 { margin: 8px 0 4px; font-size: clamp(34px, 7vw, 64px); line-height: .98; letter-spacing: -.045em; }
+      .lede { max-width: 680px; color: #a9beb6; font-size: 18px; line-height: 1.6; }
+      .card { border: 1px solid #244039; border-radius: 18px; padding: 24px; background: linear-gradient(145deg, #0d1d19, #091512); box-shadow: 0 28px 80px #0008; }
+      .status { display: flex; align-items: center; gap: 10px; color: #9eb4ac; font: 13px/1.4 ui-monospace, monospace; }
+      .dot { width: 9px; height: 9px; border-radius: 50%; background: #f0b95e; box-shadow: 0 0 16px currentColor; }
+      .ready .dot { background: #4ee0a1; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 22px; }
+      .metric { border: 1px solid #1c352f; border-radius: 14px; padding: 18px; background: #07110f80; }
+      .metric small { color: #759087; text-transform: uppercase; letter-spacing: .1em; }
+      .count { margin-top: 8px; font: 700 64px/1 ui-monospace, monospace; color: #76ddb4; }
+      pre { margin: 8px 0 0; color: #cce3da; white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.5 ui-monospace, monospace; }
+      .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+      button { appearance: none; border: 1px solid #31584e; border-radius: 10px; padding: 10px 15px; background: #12332b; color: #ecfff7; font: 600 14px/1.2 inherit; cursor: pointer; }
+      button:hover { background: #194a3d; }
+      button.secondary { background: transparent; color: #9fb7ae; }
+      .contract { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; overflow: hidden; border: 1px solid #244039; border-radius: 14px; background: #244039; }
+      .contract div { background: #0b1815; padding: 16px; font: 13px/1.5 ui-monospace, monospace; }
+      .contract strong { display: block; color: #77deb5; margin-bottom: 3px; }
+      details { border: 1px solid #244039; border-radius: 14px; overflow: hidden; background: #0b1815; }
+      summary { padding: 14px 18px; cursor: pointer; color: #9eb4ac; font: 600 12px/1.4 ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; }
+      .source { margin: 0; padding: 18px; border-top: 1px solid #244039; overflow-x: auto; white-space: pre; color: #b8cbc4; font: 13px/1.65 ui-monospace, monospace; }
+      .harn-keyword { color: #f3a6d8; font-weight: 600; }
+      .harn-literal { color: #ffca76; }
+      .harn-builtin { color: #64d8c0; }
+      .harn-type { color: #8ebeff; }
+      .harn-string { color: #b9db8b; }
+      .harn-number { color: #e5b8ff; }
+      .harn-comment { color: #647d74; font-style: italic; }
+      @media (max-width: 650px) { .grid, .contract { grid-template-columns: 1fr; } body { padding: 20px; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="eyebrow">Portable kernel · browser proof</div>
+        <h1>One Harn program.<br />Any trusted host.</h1>
+        <p class="lede">This reducer is compiled by Harn’s canonical frontend and executed by the shared kernel inside a dedicated Web Worker. The page owns presentation; the worker owns deterministic state.</p>
+      </header>
+      <section class="card">
+        <div id="status" class="status"><span class="dot"></span><span>loading Wasm worker…</span></div>
+        <div class="grid">
+          <div class="metric"><small>Reducer count</small><div id="count" class="count">—</div></div>
+          <div class="metric"><small>Serializable state</small><pre id="state">waiting for worker</pre></div>
+        </div>
+        <div class="actions">
+          <button data-event="increment" data-amount="1">Increment</button>
+          <button data-event="increment" data-amount="10">Add ten</button>
+          <button data-event="decrement" data-amount="1">Decrement</button>
+          <button data-event="reset" data-amount="0" class="secondary">Reset</button>
+          <button id="restore" class="secondary">Restore saved state</button>
+        </div>
+      </section>
+      <section class="contract" aria-label="Execution contract">
+        <div><strong>completed(value)</strong>Commit the next reducer state.</div>
+        <div><strong>suspended(request)</strong>Ask the host for typed authority.</div>
+        <div><strong>failed(diagnostic)</strong>Fail closed with a stable code.</div>
+      </section>
+      <details open>
+        <summary>Canonical Harn reducer source · generated vocabulary highlighting</summary>
+        <pre class="source"><code id="source">loading reducer.harn…</code></pre>
+      </details>
+    </main>
+    <script type="module">
+      const worker = new Worker(new URL("./demo/worker.js", import.meta.url), { type: "module" });
+      const status = document.querySelector("#status");
+      const count = document.querySelector("#count");
+      const state = document.querySelector("#state");
+      let savedState = null;
+
+      function escapeHtml(text) {
+        return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+      }
+
+      function highlightHarn(source, vocabulary) {
+        const classes = new Map();
+        for (const word of vocabulary.keywords) classes.set(word, vocabulary.tokenCategories.keyword);
+        for (const word of vocabulary.literals) classes.set(word, vocabulary.tokenCategories.literal);
+        for (const word of vocabulary.builtins) classes.set(word, vocabulary.tokenCategories.builtin);
+        const token = /\/\/[^\n]*|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|\b\d+(?:\.\d+)?\b|\b[A-Za-z_][A-Za-z0-9_]*\b/g;
+        let html = "";
+        let cursor = 0;
+        for (const match of source.matchAll(token)) {
+          html += escapeHtml(source.slice(cursor, match.index));
+          const value = match[0];
+          const kind = value.startsWith("//") || value.startsWith("/*") ? vocabulary.tokenCategories.comment
+            : value.startsWith('"') ? vocabulary.tokenCategories.string
+            : /^\d/.test(value) ? vocabulary.tokenCategories.number
+            : classes.get(value) ?? (/^[A-Z]/.test(value) ? vocabulary.tokenCategories.typeName : "");
+          html += kind ? `<span class="${kind}">${escapeHtml(value)}</span>` : escapeHtml(value);
+          cursor = match.index + value.length;
+        }
+        return html + escapeHtml(source.slice(cursor));
+      }
+
+      Promise.all([
+        fetch("./demo/reducer.harn").then((response) => response.text()),
+        fetch("./demo/language-vocabulary.json").then((response) => response.json()),
+      ]).then(([source, vocabulary]) => {
+        document.querySelector("#source").innerHTML = highlightHarn(source, vocabulary);
+      });
+
+      worker.onmessage = ({ data }) => {
+        if (data.kind === "ready" || data.kind === "state") {
+          savedState ??= data.state;
+          count.textContent = data.state.count;
+          state.textContent = JSON.stringify(data.state, null, 2);
+          status.className = "status ready";
+          status.lastElementChild.textContent = `worker · artifact ${data.digest.slice(0, 12)} · ${data.elapsedMs.toFixed(2)} ms`;
+        } else if (data.kind === "error") {
+          status.className = "status";
+          status.lastElementChild.textContent = data.message;
+        }
+      };
+
+      document.querySelectorAll("[data-event]").forEach((button) => {
+        button.addEventListener("click", () => worker.postMessage({
+          kind: "event",
+          event: { kind: button.dataset.event, amount: Number(button.dataset.amount) },
+        }));
+      });
+      document.querySelector("#restore").addEventListener("click", () => {
+        if (savedState) worker.postMessage({ kind: "restore", state: savedState });
+      });
+    </script>
+  </body>
+</html>

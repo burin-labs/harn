@@ -1,0 +1,53 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn pre_hook_tools() {
+  const registry = tool_registry()
+  return tool_define(
+    registry,
+    "pre_hook_tool",
+    "Return a marker for pre-tool hook tests.",
+    {parameters: {}, handler: { _args -> "tool-result" }},
+  )
+}
+
+pipeline main(harness: Harness) {
+  harness.tools.clear_hooks()
+  harness.tools.register_hook(
+    {
+      pattern: "pre_hook_tool",
+      pre: { _event ->
+        return {reminder: {body: "pre tool reminder", tags: ["pre"], dedupe_key: "pre-hook"}}
+      },
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      {tool_calls: [{id: "pre_tool_1", name: "pre_hook_tool", arguments: {}}]},
+      llm_text("<done>##DONE##</done>"),
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "call the pre-hook tool",
+        nil,
+        {
+          provider: "mock",
+          tools: pre_hook_tools(),
+          tool_format: "native",
+          max_iterations: 2,
+          loop_until_done: true,
+          session_id: "hook-pre-tool-emits-reminder",
+        },
+      )
+      const events = transcript_events_by_kind(result.transcript, "system_reminder")
+      harness.stdio.println(result.status)
+      harness.stdio.println(len(events))
+      harness.stdio.println(events[0].reminder.body)
+      harness.stdio.println(events[0].reminder.tags[0])
+      harness.stdio.println(events[0].reminder.source)
+      harness.tools.clear_hooks()
+    },
+  )
+}

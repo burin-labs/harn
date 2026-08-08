@@ -1,0 +1,19 @@
+// `@command(name?, description?, hint?)` is compile-time metadata
+// consumed by the ACP adapter to populate `available_commands_update`.
+// At runtime the attached pipeline declaration behaves like any other
+// pipeline; nothing is rewritten by this attribute. This test pins the
+// parser/typechecker contract — the attribute compiles without warnings
+// and the surrounding program runs.
+@command(name: "review", description: "Review the diff", hint: "focus area")
+pipeline review_branch(harness: Harness, task) {
+  return "reviewed"
+}
+
+@command(description: "Plan the work")
+pipeline plan(harness: Harness, task) {
+  return "planned"
+}
+
+pipeline default(harness: Harness, task) {
+  harness.stdio.log("attributes_command ok")
+}

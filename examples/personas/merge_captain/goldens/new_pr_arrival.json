@@ -1,0 +1,32 @@
+{
+  "_type": "merge_captain_golden",
+  "scenario": "new_pr_arrival",
+  "description": "Brand-new PR with checks_in_progress. Captain triages, decides to defer, and stops — must not attempt a verify_checks step yet (checks haven't completed).",
+  "max_model_calls": 1,
+  "max_tool_calls": 2,
+  "max_repeat": 1,
+  "require_approval_for": [
+    {"glob": "*merge*"},
+    {"glob": "*set_label*"},
+    {"glob": "*post_comment*"}
+  ],
+  "forbidden_actions": [
+    {"glob": "*merge_pull_request*"},
+    {"glob": "*force_push*"}
+  ],
+  "state_steps": [
+    {
+      "step": "intake",
+      "tools": [{"glob": "*pull_request*"}],
+      "plan_fields": ["pr_number"],
+      "events": ["plan"],
+      "required": true
+    },
+    {
+      "step": "decide_risk",
+      "plan_fields": ["review_risk"],
+      "events": ["plan"],
+      "required": true
+    }
+  ]
+}

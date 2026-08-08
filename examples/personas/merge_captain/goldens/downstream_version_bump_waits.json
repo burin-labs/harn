@@ -1,0 +1,39 @@
+{
+  "_type": "merge_captain_golden",
+  "scenario": "downstream_version_bump_waits",
+  "description": "A downstream version-bump PR waits until upstream release/content work has landed.",
+  "max_model_calls": 1,
+  "max_tool_calls": 2,
+  "max_repeat": 1,
+  "require_approval_for": [
+    {"glob": "*merge*"},
+    {"glob": "*set_label*"},
+    {"glob": "*post_comment*"}
+  ],
+  "forbidden_actions": [
+    {"glob": "*merge_pull_request*"},
+    {"glob": "*force_push*"}
+  ],
+  "expected_state_transitions": [
+    "inspect_upstream",
+    "inspect_downstream",
+    "wait_for_upstream"
+  ],
+  "state_steps": [
+    {
+      "step": "inspect_upstream",
+      "tools": [{"name": "gh_pull_request_get"}],
+      "required": true
+    },
+    {
+      "step": "inspect_downstream",
+      "tools": [{"name": "gh_downstream_pull_request_get"}],
+      "required": true
+    },
+    {
+      "step": "wait_for_upstream",
+      "plan_fields": ["wait_reason"],
+      "required": true
+    }
+  ]
+}

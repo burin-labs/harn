@@ -1,0 +1,12 @@
+true
+frontier-cascade
+3
+anthropic
+ollama
+llama4:70b
+3
+3
+5000
+0.5
+abort
+billing.routing_decision

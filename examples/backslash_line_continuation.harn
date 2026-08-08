@@ -1,0 +1,5 @@
+pipeline main(harness: Harness) {
+  const same_worker = true
+  harness.stdio.println(same_worker)
+  harness.stdio.println(true)
+}

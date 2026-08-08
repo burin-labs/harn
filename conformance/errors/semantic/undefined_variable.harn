@@ -1,0 +1,3 @@
+pipeline default(harness: Harness, task) {
+  harness.stdio.log(undefined_var)
+}

@@ -1,0 +1,25 @@
+/** Test circuit breaker builtins */
+pipeline default(harness: Harness, task) {
+  // Create a circuit breaker with threshold=3
+  const cb = harness.runtime.circuit_breaker("test_cb", 3, 60000)
+  harness.stdio.println(type_of(cb))
+  harness.stdio.println(cb)
+  // Initially closed
+  harness.stdio.println(harness.runtime.circuit_check("test_cb"))
+  // Record failures below threshold
+  harness.stdio.println(harness.runtime.circuit_record_failure("test_cb"))
+  harness.stdio.println(harness.runtime.circuit_check("test_cb"))
+  harness.stdio.println(harness.runtime.circuit_record_failure("test_cb"))
+  harness.stdio.println(harness.runtime.circuit_check("test_cb"))
+  // Third failure opens the circuit
+  harness.stdio.println(harness.runtime.circuit_record_failure("test_cb"))
+  harness.stdio.println(harness.runtime.circuit_check("test_cb"))
+  // Reset clears the circuit
+  harness.runtime.circuit_reset("test_cb")
+  harness.stdio.println(harness.runtime.circuit_check("test_cb"))
+  // Record success also resets
+  harness.runtime.circuit_record_failure("test_cb")
+  harness.runtime.circuit_record_failure("test_cb")
+  harness.runtime.circuit_record_success("test_cb")
+  harness.stdio.println(harness.runtime.circuit_check("test_cb"))
+}

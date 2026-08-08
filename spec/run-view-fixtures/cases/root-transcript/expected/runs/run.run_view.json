@@ -1,0 +1,130 @@
+{
+  "artifacts": [
+    {
+      "estimated_tokens": 9,
+      "id": "artifact_summary",
+      "kind": "summary",
+      "lineage": [
+        "stage_answer"
+      ],
+      "preview": "Sanitized ticket summary for fixture clients.",
+      "source": "fixture",
+      "stage": "stage_answer",
+      "title": "Ticket summary"
+    }
+  ],
+  "checkpoints": [
+    {
+      "completed_count": 1,
+      "id": "checkpoint_after_answer",
+      "last_stage_id": "stage_answer",
+      "persisted_at": "2026-01-02T00:00:03Z",
+      "ready_count": 0,
+      "reason": "completed"
+    }
+  ],
+  "failure": null,
+  "metadata": {
+    "artifact_count": 1,
+    "checkpoint_count": 1,
+    "child_run_count": 0,
+    "execution": null,
+    "observability_present": false,
+    "planner_round_count": 0,
+    "record_type": "run_record",
+    "replay_fixture_id": null,
+    "stage_count": 1,
+    "tool_recording_count": 0,
+    "transition_count": 0
+  },
+  "pending": {
+    "approvals": [],
+    "auth": [],
+    "nodes": []
+  },
+  "producer": {
+    "name": "harn",
+    "version": "fixture"
+  },
+  "projection": {
+    "last_event_id": null,
+    "prefix_hash": null,
+    "projection_hash": "sha256:3c96a71b55794afe84fe4b455ffcb1fde668d31351fdd8a86d0e5928e1c816c9",
+    "projection_id": "run_view:run_root_transcript:3c96a71b5579"
+  },
+  "providers": [
+    {
+      "call_count": 1,
+      "cost_usd": 0.02,
+      "input_tokens": 12,
+      "model": "fixture-model",
+      "output_tokens": 8,
+      "provider": "fixture-provider"
+    }
+  ],
+  "run": {
+    "child_runs": [],
+    "duration_ms": 3000,
+    "finished_at": "2026-01-02T00:00:03Z",
+    "parent_run_id": null,
+    "parent_session_id": null,
+    "root_run_id": null,
+    "run_id": "run_root_transcript",
+    "run_path": "spec/run-view-fixtures/cases/root-transcript/records/run.json",
+    "session_id": "session_root_transcript",
+    "started_at": "2026-01-02T00:00:00Z",
+    "status": "completed",
+    "task": "Summarize a sanitized support ticket",
+    "workflow_id": "workflow_view_fixture",
+    "workflow_name": "View fixture"
+  },
+  "schema": "harn.run_view.v1",
+  "schema_version": 1,
+  "stages": [
+    {
+      "artifact_refs": [
+        "artifact_summary"
+      ],
+      "attempt_count": 0,
+      "branch": null,
+      "duration_ms": 3000,
+      "error": null,
+      "finished_at": "2026-01-02T00:00:03Z",
+      "id": "stage_answer",
+      "kind": "llm",
+      "model": "fixture-model",
+      "node_id": "answer",
+      "outcome": "ok",
+      "provider": "fixture-provider",
+      "started_at": "2026-01-02T00:00:00Z",
+      "status": "completed",
+      "usage": {
+        "call_count": 0,
+        "input_tokens": 0,
+        "models": [],
+        "output_tokens": 0,
+        "total_cost": 0.0,
+        "total_duration_ms": 0
+      },
+      "visible_text": "The ticket is resolved."
+    }
+  ],
+  "transcript": {
+    "event_count": 1,
+    "message_count": 2,
+    "present": true,
+    "source": "run_root",
+    "summary": "Root transcript captured the customer-safe answer."
+  },
+  "usage": {
+    "call_count": 1,
+    "input_tokens": 12,
+    "models": [
+      "fixture-model"
+    ],
+    "output_tokens": 8,
+    "total_cost": 0.02,
+    "total_duration_ms": 3000
+  },
+  "visible_text": "The ticket is resolved."
+}

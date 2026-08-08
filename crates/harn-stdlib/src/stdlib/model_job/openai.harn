@@ -1,0 +1,280 @@
+import { media_asset_verify_result } from "std/media/asset"
+import {
+  ModelBackend,
+  ModelJobError,
+  ModelJobOutput,
+  ModelJobRequest,
+  model_job_error,
+} from "std/model_job/contracts"
+
+pub type OpenAiImageQuality = "auto" | "low" | "medium" | "high"
+
+pub type OpenAiImageFormat = "png" | "jpeg" | "webp"
+
+pub type OpenAiImageBackground = "auto" | "opaque" | "transparent"
+
+pub type OpenAiImageBackendOptions = {
+  api_key: string,
+  endpoint?: string,
+  model?: string,
+  quality?: OpenAiImageQuality,
+  output_format?: OpenAiImageFormat,
+  background?: OpenAiImageBackground,
+  size?: string,
+  timeout_ms?: int,
+  max_response_bytes?: int,
+  organization?: string,
+  project?: string,
+}
+
+fn __openai_endpoint(endpoint) -> string {
+  const clean = trim(to_string(endpoint ?? "https://api.openai.com/v1"))
+  if clean == "" {
+    throw "std/model_job/openai: endpoint is required"
+  }
+  return ends_with(clean, "/") ? substring(clean, 0, len(clean) - 1) : clean
+}
+
+fn __openai_headers(options: OpenAiImageBackendOptions) -> dict {
+  let headers = {authorization: "Bearer " + options.api_key, "content-type": "application/json"}
+  if trim(to_string(options.organization ?? "")) != "" {
+    headers["openai-organization"] = options.organization
+  }
+  if trim(to_string(options.project ?? "")) != "" {
+    headers["openai-project"] = options.project
+  }
+  return headers
+}
+
+fn __openai_input_result(
+  harness: Harness,
+  request: ModelJobRequest,
+) -> Result<unknown, ModelJobError> {
+  const inputs = request.inputs ?? []
+  if request.task == "image.edit"
+    && len(inputs) == 0
+    && trim(to_string(request.params?.previous_response_id ?? "")) == "" {
+    return Err(
+      model_job_error(
+        "invalid_request",
+        "OpenAI image edit requires an input asset or previous_response_id",
+      ),
+    )
+  }
+  if len(inputs) == 0 {
+    return Ok(request.prompt)
+  }
+  let content = [{type: "input_text", text: request.prompt}]
+  for asset in inputs {
+    const verified = media_asset_verify_result(harness.fs, asset)
+    if !is_ok(verified) {
+      return Err(
+        model_job_error(
+          "asset_mismatch",
+          "OpenAI image input failed asset verification",
+          {detail: unwrap_err(verified)},
+        ),
+      )
+    }
+    const encoded = bytes_to_base64(harness.fs.read_bytes(asset.path))
+    content = content
+      + [
+      {
+        type: "input_image",
+        image_url: "data:" + asset.mime_type + ";base64," + encoded,
+        detail: "auto",
+      },
+    ]
+  }
+  return Ok([{role: "user", content: content}])
+}
+
+fn __openai_tool(request: ModelJobRequest, options: OpenAiImageBackendOptions) -> dict {
+  let image_tool = {
+    type: "image_generation",
+    action: request.task == "image.edit" ? "edit" : "generate",
+    quality: options.quality ?? "auto",
+    output_format: options.output_format ?? "png",
+    background: options.background ?? "auto",
+  }
+  if trim(to_string(options.size ?? "")) != "" {
+    image_tool.size = options.size
+  } else if request.output.width != nil && request.output.height != nil {
+    image_tool.size = to_string(request.output.width) + "x" + to_string(request.output.height)
+  }
+  return image_tool
+}
+
+fn __openai_outputs_result(
+  response,
+  format: OpenAiImageFormat,
+) -> Result<list<ModelJobOutput>, ModelJobError> {
+  let outputs: list<ModelJobOutput> = []
+  const mime_type = if format == "jpeg" {
+    "image/jpeg"
+  } else {
+    "image/" + format
+  }
+  for item in response?.output ?? [] {
+    if item?.type == "image_generation_call" && trim(to_string(item?.result ?? "")) != "" {
+      const decoded = try {
+        bytes_from_base64(item.result)
+      }
+      if !is_ok(decoded) {
+        return Err(
+          model_job_error(
+            "malformed_output",
+            "OpenAI image result was not valid base64",
+            {detail: unwrap_err(decoded)},
+          ),
+        )
+      }
+      outputs = outputs
+        + [
+        {
+          name: to_string(item?.id ?? "openai-image") + "." + format,
+          mime_type: mime_type,
+          bytes: unwrap(decoded),
+          metadata: {
+            response_id: response?.id,
+            image_call_id: item?.id,
+            revised_prompt: item?.revised_prompt,
+          },
+        },
+      ]
+    }
+  }
+  return Ok(outputs)
+}
+
+fn __openai_mime_type(format: OpenAiImageFormat) -> string {
+  return format == "jpeg" ? "image/jpeg" : "image/" + format
+}
+
+/**
+ * Build a synchronous image backend over the OpenAI Responses API.
+ *
+ * Generation takes a prompt. Editing accepts verified MediaAsset inputs or a
+ * `params.previous_response_id` from an earlier response.
+ *
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn openai_responses_image_backend(options: OpenAiImageBackendOptions) -> ModelBackend {
+  if trim(options.api_key) == "" {
+    throw "std/model_job/openai: api_key is required"
+  }
+  const base = __openai_endpoint(options.endpoint)
+  const backend_id = "openai-responses-images:" + base
+  const format = options.output_format ?? "png"
+  return {
+    id: backend_id,
+    submit: fn(harness, request) {
+      if request.task != "image.generate" && request.task != "image.edit" {
+        return Err(
+          model_job_error(
+            "invalid_request",
+            "OpenAI image backend supports image.generate and image.edit",
+            {backend: backend_id},
+          ),
+        )
+      }
+      if request.output.mime_type != __openai_mime_type(format) {
+        return Err(
+          model_job_error(
+            "invalid_request",
+            "OpenAI output format does not match request.output.mime_type",
+            {
+              backend: backend_id,
+              detail: {expected: __openai_mime_type(format), requested: request.output.mime_type},
+            },
+          ),
+        )
+      }
+      const input = __openai_input_result(harness, request)
+      if !is_ok(input) {
+        return Err(unwrap_err(input))
+      }
+      let body = {
+        model: request.model ?? options.model ?? "gpt-5.6-sol",
+        input: unwrap(input),
+        tools: [__openai_tool(request, options)],
+      }
+      if trim(to_string(request.params?.previous_response_id ?? "")) != "" {
+        body.previous_response_id = request.params.previous_response_id
+      }
+      const response = harness.net.post(
+        base + "/responses",
+        json_stringify(body),
+        {
+          headers: __openai_headers(options),
+          timeout_ms: options.timeout_ms ?? 300000,
+          max_response_bytes: options.max_response_bytes ?? 67108864,
+        },
+      )
+      if response?.status < 200 || response?.status >= 300 {
+        return Err(
+          model_job_error(
+            "backend",
+            "OpenAI image request returned HTTP " + to_string(response?.status),
+            {backend: backend_id, retryable: response?.status >= 500, detail: response?.body},
+          ),
+        )
+      }
+      const decoded = try {
+        json_parse(response?.body ?? "")
+      }
+      if !is_ok(decoded) {
+        return Err(
+          model_job_error(
+            "backend",
+            "OpenAI image response contained malformed JSON",
+            {backend: backend_id, detail: unwrap_err(decoded)},
+          ),
+        )
+      }
+      const payload = unwrap(decoded)
+      const output_result = __openai_outputs_result(payload, format)
+      if !is_ok(output_result) {
+        const error = unwrap_err(output_result)
+        return Err(
+          model_job_error(
+            error.kind,
+            error.message,
+            {backend: backend_id, retryable: error.retryable, detail: error.detail},
+          ),
+        )
+      }
+      const outputs = unwrap(output_result)
+      if len(outputs) == 0 {
+        return Err(
+          model_job_error(
+            "malformed_output",
+            "OpenAI response contained no completed image",
+            {backend: backend_id, detail: payload?.status},
+          ),
+        )
+      }
+      return Ok(
+        {
+          job_id: to_string(payload?.id ?? request.id),
+          state: "succeeded",
+          backend_state: to_string(payload?.status ?? "completed"),
+          progress: 1.0,
+          outputs: outputs,
+          metadata: {response_id: payload?.id, usage: payload?.usage},
+        },
+      )
+    },
+    inspect: fn(_harness, job) { return Err(
+      model_job_error(
+        "invalid_transition",
+        "OpenAI Responses image calls complete during submit and cannot be inspected",
+        {backend: backend_id, job_id: job.id},
+      ),
+    ) },
+    cancel: fn(_harness, job) { return Ok(
+      {job_id: job.id, state: "canceled", backend_state: "cancel_requested"},
+    ) },
+  }
+}

@@ -1,0 +1,17 @@
+rewrite
+tool_hooks_classifier:haiku:0.8
+tool_hooks/llm_classifier
+warning
+prefer auto-fix
+npm run lint
+npm run lint -- --fix
+true
+npm run lint -- --fix
+1
+true
+3
+tool_hook_classifier_verdict
+rewrite
+rewrite
+tool_rewrite
+tool_hooks.reminder_injected

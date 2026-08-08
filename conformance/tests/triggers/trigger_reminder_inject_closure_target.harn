@@ -1,0 +1,78 @@
+import "std/triggers"
+
+/**
+ * Verifies the ReminderInject (#1876) handler's closure-form target
+ * resolution: when `target` is a closure, the dispatcher runs it with the
+ * trigger event and uses the returned string as the session id. This lets
+ * a single trigger registration route different events to different
+ * sessions based on payload contents.
+ */
+pipeline test(harness: Harness, task) {
+  const acme_session = harness.agent.open("trigger-reminder-inject-closure-acme")
+  const widget_session = harness.agent.open("trigger-reminder-inject-closure-widget")
+  harness.agent.reset(acme_session)
+  harness.agent.reset(widget_session)
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(
+    harness.random.range(100000, 999999),
+  )
+  const handle: TriggerHandle = harness.runtime.trigger_register(
+    {
+      id: "trigger-reminder-inject-closure-" + unique,
+      kind: "issue.opened",
+      provider: "webhook",
+      handler: ReminderInject(
+        {
+          target: { event ->
+            if event.tenant_id == "acme" {
+              return "trigger-reminder-inject-closure-acme"
+            }
+            return "trigger-reminder-inject-closure-widget"
+          },
+          body: "Routed to {{ event.tenant_id }}.",
+        },
+      ),
+      when: nil,
+      retry: nil,
+      match: {events: ["issue.opened"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  const to_acme = harness.runtime.trigger_fire(
+    handle,
+    {
+      provider: "webhook",
+      kind: "issue.opened",
+      tenant_id: "acme",
+      headers: {x_delivery: "evt-acme-" + unique},
+    },
+  )
+  const to_widget = harness.runtime.trigger_fire(
+    handle,
+    {
+      provider: "webhook",
+      kind: "issue.opened",
+      tenant_id: "widget",
+      headers: {x_delivery: "evt-widget-" + unique},
+    },
+  )
+  harness.stdio.println(to_acme.result?.target_session_id == acme_session)
+  harness.stdio.println(to_widget.result?.target_session_id == widget_session)
+  const acme_reminders = transcript_events_by_kind(
+    harness.agent.snapshot(acme_session),
+    "system_reminder",
+  )
+  const widget_reminders = transcript_events_by_kind(
+    harness.agent.snapshot(widget_session),
+    "system_reminder",
+  )
+  harness.stdio.println(len(acme_reminders))
+  harness.stdio.println(len(widget_reminders))
+  harness.stdio.println(acme_reminders[0].reminder.body)
+  harness.stdio.println(widget_reminders[0].reminder.body)
+}

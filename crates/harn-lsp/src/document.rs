@@ -1,0 +1,793 @@
+use harn_parser::analysis::{
+    AnalysisDatabase, AnalysisError, SourceId, SourceVersion, TypeCheckConfig,
+};
+use harn_parser::{Node, SNode};
+use harn_vm::stdlib::template::outline::OutlineBlock;
+use tower_lsp::lsp_types::*;
+
+use crate::document_kind::DocumentKind;
+use crate::helpers::{
+    diagnostic_data_value, lexer_error_to_diagnostic, lint_span_to_range,
+    parser_error_to_diagnostic, span_to_full_range, span_to_range,
+};
+use crate::rules::{RuleDiagnostic, RuleWorkspace};
+use crate::source_text::SourceText;
+use crate::symbols::{build_symbol_table, SymbolInfo};
+
+pub(crate) struct DocumentState {
+    /// The document text and the line index positions resolve against. Both
+    /// are replaced together on every version bump, so a position conversion
+    /// can never consult an index built for older text.
+    pub(crate) source: SourceText,
+    pub(crate) language_id: String,
+    /// Which language pipeline this document goes through. Fixed when
+    /// the document is first seen; a buffer does not change language.
+    pub(crate) kind: DocumentKind,
+    analysis: AnalysisDatabase,
+    source_id: SourceId,
+    version: SourceVersion,
+    pub(crate) cached_ast: Option<Vec<SNode>>,
+    /// Block geometry of a [`DocumentKind::Prompt`] document, cached so
+    /// folding doesn't re-parse the template per request. Empty for
+    /// every other kind, and for a template that doesn't parse.
+    pub(crate) prompt_outline: Vec<OutlineBlock>,
+    pub(crate) symbols: Vec<SymbolInfo>,
+    pub(crate) diagnostics: Vec<Diagnostic>,
+    pub(crate) lint_diagnostics: Vec<harn_lint::LintDiagnostic>,
+    pub(crate) type_diagnostics: Vec<harn_parser::TypeDiagnostic>,
+    pub(crate) rule_diagnostics: Vec<RuleDiagnostic>,
+    pub(crate) invariant_diagnostics: Vec<harn_ir::InvariantDiagnostic>,
+    pub(crate) inlay_hints: Vec<harn_parser::InlayHintInfo>,
+    pub(crate) dirty: bool,
+}
+
+impl DocumentState {
+    /// A Harn document, parsed immediately. Tests only: a real document
+    /// arrives either through [`Self::new_for_language_with_rules`] when
+    /// the client opens it, or through [`Self::placeholder`] when the
+    /// client edits one we never saw opened.
+    #[cfg(test)]
+    pub(crate) fn new(source: String) -> Self {
+        let mut state = Self::new_unparsed(
+            source,
+            crate::document_kind::HARN_LANGUAGE_ID,
+            DocumentKind::Harn,
+        );
+        state.reparse_if_dirty();
+        state
+    }
+
+    pub(crate) fn new_for_language_with_rules(
+        source: String,
+        language_id: impl Into<String>,
+        uri: &Url,
+        rule_workspace: &RuleWorkspace,
+    ) -> Self {
+        let language_id = language_id.into();
+        let kind = DocumentKind::classify(uri, &language_id);
+        let mut state = Self::new_unparsed(source, language_id, kind);
+        state.reparse_if_dirty_with_rules(Some(uri), Some(rule_workspace));
+        state
+    }
+
+    /// Stand-in for a document the client is editing but never opened.
+    /// Classified from its URI so an edit to a prompt buffer isn't
+    /// briefly run through the Harn pipeline.
+    pub(crate) fn placeholder(uri: &Url) -> Self {
+        Self::new_unparsed(String::new(), "", DocumentKind::classify(uri, ""))
+    }
+
+    fn new_unparsed(source: String, language_id: impl Into<String>, kind: DocumentKind) -> Self {
+        let language_id = language_id.into();
+        let mut analysis = AnalysisDatabase::new();
+        let source_id = SourceId::new("document");
+        analysis.set_source(source_id.clone(), source.clone(), SourceVersion(1));
+        Self {
+            source: SourceText::new(source),
+            language_id,
+            kind,
+            analysis,
+            source_id,
+            version: SourceVersion(1),
+            cached_ast: None,
+            prompt_outline: Vec::new(),
+            symbols: Vec::new(),
+            diagnostics: Vec::new(),
+            lint_diagnostics: Vec::new(),
+            type_diagnostics: Vec::new(),
+            rule_diagnostics: Vec::new(),
+            invariant_diagnostics: Vec::new(),
+            inlay_hints: Vec::new(),
+            dirty: true,
+        }
+    }
+
+    pub(crate) fn update_source(&mut self, source: String) {
+        self.version = SourceVersion(self.version.0 + 1);
+        self.analysis
+            .set_source(self.source_id.clone(), source.clone(), self.version);
+        self.source = SourceText::new(source);
+        self.dirty = true;
+    }
+
+    /// Reparse without a workspace, so rule-engine diagnostics are
+    /// skipped. Tests only: the server always has a rule workspace.
+    #[cfg(test)]
+    pub(crate) fn reparse_if_dirty(&mut self) {
+        self.reparse_if_dirty_with_rules(None, None);
+    }
+
+    pub(crate) fn reparse_if_dirty_with_rules(
+        &mut self,
+        uri: Option<&Url>,
+        rule_workspace: Option<&RuleWorkspace>,
+    ) {
+        if !self.dirty {
+            return;
+        }
+
+        self.diagnostics.clear();
+        self.lint_diagnostics.clear();
+        self.type_diagnostics.clear();
+        self.rule_diagnostics.clear();
+        self.invariant_diagnostics.clear();
+        self.inlay_hints.clear();
+        self.symbols.clear();
+        self.cached_ast = None;
+        self.prompt_outline.clear();
+
+        match self.kind {
+            DocumentKind::Harn => self.analyze_harn_program(uri),
+            DocumentKind::Prompt => self.analyze_prompt_template(uri),
+            // The language-agnostic rule engine below is all we have to
+            // offer a document in some other language.
+            DocumentKind::Other => {}
+        }
+
+        self.append_rule_diagnostics(uri, rule_workspace);
+        self.dirty = false;
+    }
+
+    fn analyze_harn_program(&mut self, uri: Option<&Url>) {
+        let analysis = match self
+            .analysis
+            .typecheck(&self.source_id, TypeCheckConfig::new())
+        {
+            Ok(analysis) => analysis,
+            Err(error) => {
+                match error {
+                    AnalysisError::Lex { error, .. } => {
+                        self.diagnostics.push(lexer_error_to_diagnostic(&error));
+                    }
+                    AnalysisError::Parse { errors, .. } => {
+                        for error in &errors {
+                            self.diagnostics.push(parser_error_to_diagnostic(error));
+                        }
+                    }
+                    AnalysisError::MissingSource(_) => {}
+                }
+                return;
+            }
+        };
+        let program = analysis.program;
+        let type_diags = analysis.diagnostics;
+        self.inlay_hints = analysis.inlay_hints;
+        for diag in &type_diags {
+            let severity = match diag.severity {
+                harn_parser::DiagnosticSeverity::Error => DiagnosticSeverity::ERROR,
+                harn_parser::DiagnosticSeverity::Warning => DiagnosticSeverity::WARNING,
+            };
+            let range = if let Some(span) = &diag.span {
+                span_to_range(span)
+            } else {
+                Range {
+                    start: Position::new(0, 0),
+                    end: Position::new(0, 1),
+                }
+            };
+            self.diagnostics.push(Diagnostic {
+                range,
+                severity: Some(severity),
+                source: Some("harn-typecheck".to_string()),
+                code: Some(NumberOrString::String(diag.code.to_string())),
+                message: diag.message.clone(),
+                data: Some(diagnostic_data_value(
+                    diag.code.to_string(),
+                    diag.repair.as_ref(),
+                )),
+                ..Default::default()
+            });
+        }
+        self.type_diagnostics = type_diags;
+
+        let invariant_report = harn_ir::analyze_program(&program);
+        for diag in &invariant_report.diagnostics {
+            let range = span_to_range(&diag.span);
+            self.diagnostics.push(Diagnostic {
+                range,
+                severity: Some(DiagnosticSeverity::ERROR),
+                source: Some("harn-invariant".to_string()),
+                message: format!("[{}] {}", diag.invariant, diag.message),
+                ..Default::default()
+            });
+        }
+        self.invariant_diagnostics = invariant_report.diagnostics;
+
+        let file_path = uri.and_then(|uri| uri.to_file_path().ok());
+        let has_selective_import = program
+            .iter()
+            .any(|node| matches!(&node.node, Node::SelectiveImport { .. }));
+        let module_graph = file_path
+            .as_deref()
+            .filter(|_| has_selective_import)
+            .map(|file_path| harn_modules::build_with_source(file_path, &self.source));
+        if let (Some(file_path), Some(module_graph)) = (file_path.as_deref(), module_graph.as_ref())
+        {
+            for issue in module_graph.selective_import_issues(file_path) {
+                let code = harn_parser::DiagnosticCode::ImportSymbolMissing.to_string();
+                self.diagnostics.push(Diagnostic {
+                    range: span_to_full_range(&issue.span, &self.source),
+                    severity: Some(DiagnosticSeverity::ERROR),
+                    source: Some("harn-preflight".to_string()),
+                    code: Some(NumberOrString::String(code.clone())),
+                    message: issue.message(),
+                    data: Some(serde_json::json!({
+                        "code": code,
+                        "help": issue.help(),
+                    })),
+                    ..Default::default()
+                });
+            }
+        }
+        let is_stdlib_source = file_path
+            .as_deref()
+            .is_some_and(harn_lint::path_is_stdlib_source);
+        let project_lint = file_path
+            .as_deref()
+            .and_then(|path| harn_modules::project_config::load_for_path(path).ok())
+            .map(|config| config.lint)
+            .unwrap_or_default();
+        let disabled_rules = project_lint.disabled.clone().unwrap_or_default();
+        let lint_options = harn_lint::LintOptions {
+            file_path: file_path.as_deref(),
+            require_file_header: project_lint.require_file_header.unwrap_or(false),
+            require_docstrings: project_lint.require_docstrings.unwrap_or(false),
+            require_stdlib_metadata: is_stdlib_source,
+            require_public_api_types: project_lint.require_public_api_types.unwrap_or(false),
+            complexity_threshold: project_lint.complexity_threshold,
+            persona_step_allowlist: &project_lint.persona_step_allowlist,
+            severity_overrides: project_lint.severity.clone(),
+            ..Default::default()
+        };
+        let externally_imported_names = std::collections::HashSet::new();
+        let lint_diags = if let (Some(file_path), Some(module_graph)) =
+            (file_path.as_deref(), module_graph.as_ref())
+        {
+            harn_lint::lint_with_module_graph(
+                &program,
+                &disabled_rules,
+                Some(&self.source),
+                &externally_imported_names,
+                module_graph,
+                file_path,
+                &lint_options,
+            )
+        } else {
+            harn_lint::lint_with_options(
+                &program,
+                &disabled_rules,
+                Some(&self.source),
+                &externally_imported_names,
+                &lint_options,
+            )
+        };
+        self.publish_lint_diagnostics(lint_diags);
+
+        self.symbols = build_symbol_table(&program, &self.source);
+        self.cached_ast = Some(program);
+    }
+
+    /// Diagnose a prompt template with exactly the rules `harn lint`
+    /// applies to it — template parse errors plus the
+    /// `template-*` rules — and cache the block outline that folding
+    /// ranges are built from.
+    fn analyze_prompt_template(&mut self, uri: Option<&Url>) {
+        let project_lint = uri
+            .and_then(|uri| uri.to_file_path().ok())
+            .and_then(|path| harn_modules::project_config::load_for_path(&path).ok())
+            .map(|config| config.lint)
+            .unwrap_or_default();
+        let disabled_rules = project_lint.disabled.unwrap_or_default();
+        self.publish_lint_diagnostics(harn_lint::lint_prompt_template(
+            &self.source,
+            project_lint.template_variant_branch_threshold,
+            &disabled_rules,
+        ));
+        // A template that doesn't parse has no trustworthy geometry, and
+        // the parse failure is already among the diagnostics above.
+        self.prompt_outline =
+            harn_vm::stdlib::template::outline::parse(&self.source).unwrap_or_default();
+    }
+
+    fn publish_lint_diagnostics(&mut self, lint_diags: Vec<harn_lint::LintDiagnostic>) {
+        for ld in &lint_diags {
+            let severity = match ld.severity {
+                harn_lint::LintSeverity::Info => DiagnosticSeverity::INFORMATION,
+                harn_lint::LintSeverity::Warning => DiagnosticSeverity::WARNING,
+                harn_lint::LintSeverity::Error => DiagnosticSeverity::ERROR,
+            };
+            let lint_repair = ld.repair();
+            self.diagnostics.push(Diagnostic {
+                range: lint_span_to_range(ld, &self.source),
+                severity: Some(severity),
+                source: Some("harn-lint".to_string()),
+                code: Some(NumberOrString::String(ld.code.to_string())),
+                message: format!("[{}] {}", ld.rule, ld.message),
+                data: Some(diagnostic_data_value(
+                    ld.code.to_string(),
+                    lint_repair.as_ref(),
+                )),
+                ..Default::default()
+            });
+        }
+        self.lint_diagnostics = lint_diags;
+    }
+
+    fn append_rule_diagnostics(
+        &mut self,
+        uri: Option<&Url>,
+        rule_workspace: Option<&RuleWorkspace>,
+    ) {
+        let (Some(uri), Some(rule_workspace)) = (uri, rule_workspace) else {
+            return;
+        };
+        self.rule_diagnostics =
+            rule_workspace.diagnostics_for_document(uri, &self.language_id, &self.source);
+        self.diagnostics.extend(
+            self.rule_diagnostics
+                .iter()
+                .map(|item| item.diagnostic.clone()),
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DocumentState;
+    use crate::rules::RuleWorkspace;
+    use std::path::Path;
+    use tower_lsp::lsp_types::{
+        Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Url,
+    };
+
+    fn write(path: &Path, content: &str) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, content).unwrap();
+    }
+
+    fn selective_import_diagnostic(message: &str, help: &str) -> Diagnostic {
+        Diagnostic {
+            range: Range::new(Position::new(0, 0), Position::new(0, 38)),
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: Some(NumberOrString::String("HARN-IMP-002".to_string())),
+            source: Some("harn-preflight".to_string()),
+            message: message.to_string(),
+            data: Some(serde_json::json!({
+                "code": "HARN-IMP-002",
+                "help": help,
+            })),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn update_source_marks_document_dirty_until_reparse() {
+        let mut state = DocumentState::new("pipeline default(task) { log(1) }\n".to_string());
+        assert!(!state.dirty, "fresh parse should clear dirty flag");
+        assert!(
+            state.cached_ast.is_some(),
+            "fresh parse should cache the AST"
+        );
+
+        state.update_source("pipeline default(task) { let = }\n".to_string());
+        assert!(state.dirty, "source update should mark the document dirty");
+        assert!(
+            state.cached_ast.is_some(),
+            "cached AST should remain available until debounce reparses"
+        );
+
+        state.reparse_if_dirty();
+        assert!(!state.dirty, "reparse should clear dirty flag");
+        assert!(
+            !state.diagnostics.is_empty(),
+            "invalid source should produce diagnostics after reparse"
+        );
+    }
+
+    #[test]
+    fn unchanged_document_reuses_analysis_cache() {
+        let mut state = DocumentState::new("pipeline default(task) { log(1) }\n".to_string());
+        let initial = state.analysis.stats();
+
+        state.update_source("pipeline default(task) { log(1) }\n".to_string());
+        state.reparse_if_dirty();
+
+        let after = state.analysis.stats();
+        assert_eq!(after.lex_runs, initial.lex_runs);
+        assert_eq!(after.parse_runs, initial.parse_runs);
+        assert_eq!(after.typecheck_runs, initial.typecheck_runs);
+    }
+
+    #[test]
+    fn invariant_violations_surface_as_lsp_diagnostics() {
+        let state = DocumentState::new(
+            r#"
+@invariant("approval.reachability")
+fn handler(fs: HarnessFs) {
+  fs.write_text("src/main.rs", "unsafe")
+}
+"#
+            .to_string(),
+        );
+
+        assert!(
+            state
+                .diagnostics
+                .iter()
+                .any(|diag| diag.source.as_deref() == Some("harn-invariant")),
+            "expected invariant diagnostics, got {:?}",
+            state
+                .diagnostics
+                .iter()
+                .map(|diag| (&diag.source, &diag.message))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn stdlib_return_type_lint_surfaces_as_lsp_diagnostic() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp
+            .path()
+            .join("crates/harn-stdlib/src/stdlib/stdlib_demo.harn");
+        write(&path, "pub fn missing_contract() {\n  return 1\n}\n");
+        let workspace = RuleWorkspace::from_root(temp.path());
+        let uri = Url::from_file_path(&path).unwrap();
+        let state = DocumentState::new_for_language_with_rules(
+            "pub fn missing_contract() {\n  return 1\n}\n".to_string(),
+            "harn",
+            &uri,
+            &workspace,
+        );
+
+        assert!(
+            state.diagnostics.iter().any(|diag| {
+                matches!(
+                    diag.code.as_ref(),
+                    Some(tower_lsp::lsp_types::NumberOrString::String(code)) if code == "HARN-STD-102"
+                )
+            }),
+            "expected HARN-STD-102 LSP diagnostic, got {:?}",
+            state
+                .diagnostics
+                .iter()
+                .map(|diag| (&diag.code, &diag.message))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn project_public_api_type_policy_surfaces_as_lsp_diagnostics() {
+        let temp = tempfile::tempdir().unwrap();
+        write(
+            &temp.path().join("harn.toml"),
+            "[lint]\nrequire_public_api_types = true\n\n[lint.severity]\nmissing-public-api-type = \"error\"\n",
+        );
+        let path = temp.path().join("src/main.harn");
+        let source = "pub pipeline ship(task) {\n  return task\n}\n";
+        write(&path, source);
+        let workspace = RuleWorkspace::from_root(temp.path());
+        let uri = Url::from_file_path(&path).unwrap();
+        let state = DocumentState::new_for_language_with_rules(
+            source.to_string(),
+            "harn",
+            &uri,
+            &workspace,
+        );
+
+        let diagnostics = state
+            .diagnostics
+            .iter()
+            .map(|diagnostic| {
+                (
+                    diagnostic.code.clone(),
+                    diagnostic.severity,
+                    diagnostic.source.clone(),
+                    diagnostic.message.clone(),
+                    diagnostic.range,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            diagnostics,
+            vec![
+                (
+                    Some(tower_lsp::lsp_types::NumberOrString::String(
+                        "HARN-LNT-067".to_string(),
+                    )),
+                    Some(tower_lsp::lsp_types::DiagnosticSeverity::ERROR),
+                    Some("harn-lint".to_string()),
+                    "[missing-public-api-type] public pipeline `ship` parameter `task` is missing an explicit type".to_string(),
+                    tower_lsp::lsp_types::Range::new(
+                        tower_lsp::lsp_types::Position::new(0, 18),
+                        tower_lsp::lsp_types::Position::new(0, 19),
+                    ),
+                ),
+                (
+                    Some(tower_lsp::lsp_types::NumberOrString::String(
+                        "HARN-LNT-067".to_string(),
+                    )),
+                    Some(tower_lsp::lsp_types::DiagnosticSeverity::ERROR),
+                    Some("harn-lint".to_string()),
+                    "[missing-public-api-type] public pipeline `ship` is missing an explicit return type".to_string(),
+                    tower_lsp::lsp_types::Range::new(
+                        tower_lsp::lsp_types::Position::new(0, 13),
+                        tower_lsp::lsp_types::Position::new(0, 14),
+                    ),
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn absent_selective_import_surfaces_from_unsaved_lsp_source() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("main.harn");
+        write(
+            &temp.path().join("types.harn"),
+            "pub type Receipt = {ok: bool}\n",
+        );
+        write(&path, "import { Receipt } from \"./types\"\n");
+        let source = "import { StaleReceipt } from \"./types\"\n";
+        let workspace = RuleWorkspace::from_root(temp.path());
+        let uri = Url::from_file_path(&path).unwrap();
+
+        let state = DocumentState::new_for_language_with_rules(
+            source.to_string(),
+            "harn",
+            &uri,
+            &workspace,
+        );
+        assert_eq!(
+            state.diagnostics,
+            vec![selective_import_diagnostic(
+                "imported symbol `StaleReceipt` does not exist in `./types`",
+                "update the import to a symbol exported by `./types`",
+            )]
+        );
+    }
+
+    #[test]
+    fn private_selective_import_surfaces_full_lsp_diagnostic() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("main.harn");
+        write(
+            &temp.path().join("types.harn"),
+            "pub type Receipt = {ok: bool}\ntype LocalReceipt = {ok: bool}\n",
+        );
+        write(&path, "import { Receipt } from \"./types\"\n");
+        let source = "import { LocalReceipt } from \"./types\"\n";
+        let workspace = RuleWorkspace::from_root(temp.path());
+        let uri = Url::from_file_path(&path).unwrap();
+
+        let state = DocumentState::new_for_language_with_rules(
+            source.to_string(),
+            "harn",
+            &uri,
+            &workspace,
+        );
+
+        assert_eq!(
+            state.diagnostics,
+            vec![selective_import_diagnostic(
+                "imported symbol `LocalReceipt` is not exported by `./types` — it is defined there but not `pub`",
+                "mark `LocalReceipt` as `pub` in `./types` to export it",
+            )]
+        );
+    }
+
+    #[test]
+    fn non_harn_documents_run_rules_without_harn_parse_diagnostics() {
+        let temp = tempfile::tempdir().unwrap();
+        write(
+            &temp.path().join("harn.toml"),
+            "[rules]\nruleDirs = [\"rules\"]\n",
+        );
+        write(
+            &temp.path().join("rules/no-debugger.toml"),
+            r#"
+id = "no-debugger"
+language = "typescript"
+message = "remove debugger statements"
+severity = "warning"
+safety = "behavior-preserving"
+fix = ""
+
+[rule]
+regex = "debugger;"
+"#,
+        );
+
+        let workspace = RuleWorkspace::from_root(temp.path());
+        let uri = Url::from_file_path(temp.path().join("src/main.ts")).unwrap();
+        let state = DocumentState::new_for_language_with_rules(
+            "function f() { debugger; }\n".to_string(),
+            "typescript",
+            &uri,
+            &workspace,
+        );
+
+        assert!(
+            state.cached_ast.is_none(),
+            "TypeScript should not parse as Harn"
+        );
+        assert_eq!(state.rule_diagnostics.len(), 1);
+        assert_eq!(state.diagnostics.len(), 1);
+        assert_eq!(state.diagnostics[0].source.as_deref(), Some("harn-rules"));
+    }
+
+    fn prompt_document(source: &str) -> DocumentState {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("greet.harn.prompt");
+        write(&path, source);
+        DocumentState::new_for_language_with_rules(
+            source.to_string(),
+            "harn-prompt",
+            &Url::from_file_path(&path).unwrap(),
+            &RuleWorkspace::from_root(temp.path()),
+        )
+    }
+
+    #[test]
+    fn prompt_documents_are_linted_as_templates_not_parsed_as_harn() {
+        // Prose that is nonsense as Harn, plus a directive the template
+        // lint rules have something to say about.
+        let state = prompt_document(concat!(
+            "You are a helpful assistant; answer briefly.\n",
+            "{{ if llm.provider == \"anthropic\" }}\n",
+            "Use XML tags.\n",
+            "{{ end }}\n",
+        ));
+
+        assert!(
+            state.cached_ast.is_none(),
+            "a prompt template is never parsed as a Harn program"
+        );
+        assert_eq!(
+            state.diagnostics.len(),
+            1,
+            "expected only the template lint finding, got {:?}",
+            state
+                .diagnostics
+                .iter()
+                .map(|diag| (&diag.source, &diag.message))
+                .collect::<Vec<_>>()
+        );
+        let diag = &state.diagnostics[0];
+        assert_eq!(diag.source.as_deref(), Some("harn-lint"));
+        assert!(
+            diag.message
+                .starts_with("[template-provider-identity-branch]"),
+            "unexpected message: {}",
+            diag.message
+        );
+        // Anchored on the `{{ if }}` directive, not on the prose above it.
+        assert_eq!(
+            diag.range,
+            Range::new(Position::new(1, 0), Position::new(1, 1))
+        );
+    }
+
+    #[test]
+    fn a_prompt_that_does_not_parse_reports_it_at_the_failing_directive() {
+        let state = prompt_document("intro\n{{ if missing_end }}\nbody\n");
+
+        let diag = state
+            .diagnostics
+            .first()
+            .expect("expected a template parse diagnostic");
+        assert_eq!(diag.source.as_deref(), Some("harn-lint"));
+        assert!(
+            diag.message.contains("missing matching `{{ end }}`"),
+            "unexpected message: {}",
+            diag.message
+        );
+        assert_eq!(diag.range.start, Position::new(1, 0));
+        assert_eq!(
+            diag.severity,
+            Some(DiagnosticSeverity::ERROR),
+            "an unparseable template is an error, not a warning"
+        );
+    }
+
+    #[test]
+    fn an_unknown_filter_is_reported_on_its_name() {
+        let state = prompt_document("Hello {{ name | uppr }}.\n");
+
+        let diagnostic = state
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.message.contains("unknown template filter"))
+            .expect("expected an unknown-filter diagnostic");
+        assert_eq!(diagnostic.source.as_deref(), Some("harn-lint"));
+        assert_eq!(
+            diagnostic.range,
+            Range::new(Position::new(0, 16), Position::new(0, 20))
+        );
+        assert_eq!(diagnostic.severity, Some(DiagnosticSeverity::ERROR));
+        assert!(diagnostic.message.contains("did you mean `upper`?"));
+    }
+
+    #[test]
+    fn a_clean_prompt_produces_no_diagnostics() {
+        let state = prompt_document("Hello {{ name }}, welcome.\n");
+        assert_eq!(state.diagnostics, Vec::new());
+        assert!(state.cached_ast.is_none());
+    }
+
+    #[test]
+    fn a_bare_dot_prompt_file_is_a_template_even_when_mislabelled() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("system.prompt");
+        let source = "Answer in one sentence.\n";
+        write(&path, source);
+        let state = DocumentState::new_for_language_with_rules(
+            source.to_string(),
+            // A client that never learned Harn's prompt language id.
+            "plaintext",
+            &Url::from_file_path(&path).unwrap(),
+            &RuleWorkspace::from_root(temp.path()),
+        );
+
+        assert_eq!(state.kind, crate::document_kind::DocumentKind::Prompt);
+        assert_eq!(state.diagnostics, Vec::new());
+    }
+
+    #[test]
+    fn typecheck_diagnostics_carry_repair_data_envelope() {
+        // A `let x = 1; x = 2` reassigns an immutable binding —
+        // HARN-OWN-001 with a `bindings/make-mutable` repair. The
+        // LSP-side code-action provider reads the safety class from
+        // `Diagnostic.data` to decide whether to auto-apply.
+        let state =
+            DocumentState::new("pipeline main() {\n  const x = 1\n  x = 2\n}\n".to_string());
+        let diag = state
+            .diagnostics
+            .iter()
+            .find(|d| {
+                matches!(
+                    d.code.as_ref(),
+                    Some(tower_lsp::lsp_types::NumberOrString::String(code)) if code == "HARN-OWN-001"
+                )
+            })
+            .expect("expected ImmutableAssignment diagnostic");
+        let data = diag.data.as_ref().expect("repair data should be attached");
+        assert_eq!(
+            data.get("code").and_then(|v| v.as_str()),
+            Some("HARN-OWN-001")
+        );
+        assert_eq!(
+            data.get("repair_id").and_then(|v| v.as_str()),
+            Some("bindings/make-mutable")
+        );
+        let repair = data.get("repair").expect("data.repair should be present");
+        assert_eq!(
+            repair.get("id").and_then(|v| v.as_str()),
+            Some("bindings/make-mutable")
+        );
+        assert_eq!(
+            repair.get("safety").and_then(|v| v.as_str()),
+            Some("scope-local")
+        );
+    }
+}

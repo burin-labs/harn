@@ -1,0 +1,81 @@
+import {
+  BumpKind,
+  ReleaseVersion,
+  compare_release,
+  is_prerelease,
+  is_prerelease_identifier,
+  is_v_release_semver,
+  next,
+  parse,
+  parse_release,
+  version_from_release_branch,
+} from "std/semver"
+
+fn typed_next(current: string, bump: BumpKind, identifier: string) -> string {
+  return next(current, bump, identifier)
+}
+
+fn release_text(version: ReleaseVersion?) -> string {
+  if version == nil {
+    return "<nil>"
+  }
+  return "${version.major}.${version.minor}.${version.patch}-${version.prerelease ?? "stable"}"
+}
+
+pipeline test(harness: Harness, task) {
+  // The legacy parser remains intentionally stable-only.
+  harness.stdio.log(parse("1.2.3-rc.1") == nil)
+  harness.stdio.log(release_text(parse_release("1.2.3")))
+  harness.stdio.log(release_text(parse_release("v1.2.3-rc.1")))
+  harness.stdio.log(release_text(parse_release("1.2.3+build.1")))
+  harness.stdio.log(release_text(parse_release("1.2.3-01")))
+  harness.stdio.log(release_text(parse_release("01.2.3-rc.1")))
+  harness.stdio.log(is_v_release_semver("v1.2.3"))
+  harness.stdio.log(is_v_release_semver("v1.2.3-rc.1"))
+  harness.stdio.log(is_v_release_semver("v1.2.3+build.1"))
+  harness.stdio.log(is_prerelease("1.2.3-rc.1"))
+  harness.stdio.log(is_prerelease("1.2.3"))
+  harness.stdio.log(is_prerelease_identifier("rc"))
+  harness.stdio.log(is_prerelease_identifier("beta.preview"))
+  harness.stdio.log(is_prerelease_identifier("beta-2"))
+  harness.stdio.log(is_prerelease_identifier("01"))
+  harness.stdio.log(is_prerelease_identifier("rc.01"))
+  harness.stdio.log(is_prerelease_identifier("rc..1"))
+  harness.stdio.log(compare_release("1.2.3-rc.1", "1.2.3-rc.2"))
+  harness.stdio.log(compare_release("1.2.3-rc.2", "1.2.3"))
+  harness.stdio.log(compare_release("1.2.3-beta.11", "1.2.3-rc.1"))
+  harness.stdio.log(compare_release("1.2.3", "1.2.3"))
+  harness.stdio.log(typed_next("1.2.3", "premajor", "rc"))
+  harness.stdio.log(typed_next("1.2.3", "preminor", "beta"))
+  harness.stdio.log(typed_next("1.2.3", "prepatch", "rc"))
+  harness.stdio.log(typed_next("1.2.3", "prerelease", "rc"))
+  harness.stdio.log(typed_next("1.2.4-rc.0", "prerelease", "rc"))
+  harness.stdio.log(typed_next("1.2.4-rc.9", "prerelease", "rc"))
+  harness.stdio.log(typed_next("1.2.4-rc", "prerelease", "rc"))
+  harness.stdio.log(typed_next("1.2.4-beta.7", "prerelease", "rc"))
+  const missing_identifier = try {
+    typed_next("1.2.3", "prepatch", "")
+  } catch (e) {
+    e
+  }
+  harness.stdio.log(missing_identifier)
+  const leading_zero_identifier = try {
+    typed_next("1.2.3", "prepatch", "rc.01")
+  } catch (e) {
+    e
+  }
+  harness.stdio.log(leading_zero_identifier)
+  const numeric_tail_overflow = try {
+    typed_next("1.2.4-rc.999999999999999999999999999999", "prerelease", "rc")
+  } catch (e) {
+    e
+  }
+  harness.stdio.log(numeric_tail_overflow)
+  // Stable bumps promote a prerelease base instead of skipping it.
+  harness.stdio.log(typed_next("2.0.0-rc.2", "major", ""))
+  harness.stdio.log(typed_next("1.3.0-beta.2", "minor", ""))
+  harness.stdio.log(typed_next("1.2.4-rc.2", "patch", ""))
+  harness.stdio.log(typed_next("1.2.4-rc.2", "minor", ""))
+  harness.stdio.log(version_from_release_branch("release/v1.2.3-rc.1"))
+  harness.stdio.log(version_from_release_branch("release/v1.2.3+build.1") == "")
+}

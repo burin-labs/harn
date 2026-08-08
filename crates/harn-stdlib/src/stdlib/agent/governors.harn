@@ -1,0 +1,897 @@
+import { agent_preset } from "std/agent/presets"
+import { detector_spec_to_stall, unified_detectors_post_turn } from "std/agent/stall"
+import { agent_session_totals } from "std/agent/state"
+
+// std/agent/governors.harn
+//
+// Pace / budget GOVERNORS for `agent_loop`, generalized from burin-code's
+// hand-rolled `lib/runtime/pace-governor.harn`. A governor is a VALUE you
+// compose into the EXISTING `post_turn_callback` seam — it is NEVER a new hook
+// on `agent_loop`. (Institutional constraint, harness-techniques-ledger:2633:
+// do not reintroduce `context_callback` / `on_tool_call` / `on_tool_result`
+// hook surfaces; steering rides the typed post-turn verdict + reminder path.)
+//
+// ONE governance vocabulary, shared with the stall/loop detectors in
+// `std/agent/stall`, collapsed onto the three actions the live post-turn seam
+// can actually take:
+//
+//   "proceed" — do nothing (burin `proceed` / `extend`: keep the run going).
+//   "warn"    — inject a wrap-up reminder and continue (burin `pace_check`).
+//   "abort"   — stop the run before overrun (burin `cut`).
+//
+// The verdict this produces is the ordinary `post_turn_callback` rich dict
+// (`{message, stop, stop_reason}`) that `agent_compute_post_turn` already
+// interprets: `message` is injected as feedback, `stop:true` breaks the loop.
+//
+// CAVEAT: `governor_pace_decision` is the ONE exception to this vocabulary — it
+// keeps burin's native wall-clock ACTUATION verbs (proceed/extend/pace_check/cut)
+// because `extend` (re-stamp the wall budget) has no proceed/warn/abort analog. Map
+// it onto the shared vocabulary with `pace_action_of` when you need one switch.
+//
+// GENERALIZATION over burin: burin's pace governor is wall-clock + write
+// progress with injection-count caps (PACE_CHECK_MAX_INJECTIONS=2,
+// PACE_EXTEND_MAX=6). The post-turn seam cannot extend the loop's iteration
+// budget and there is no per-session scratch store in the stdlib, so this is a
+// STATELESS three-fraction generalization: the injection caps become a single
+// `hard` consumption ceiling. It reads a monotone consumption signal
+// (iterations / tokens / cost) against a budget ceiling, and the write-progress
+// veto is preserved verbatim (progress vetoes the soft stop up to `hard`).
+// This is deliberately NOT bit-for-bit parity with burin's stateful
+// per-injection / per-extend counters — it is behavioral parity on the fractions
+// at which the run slows and stops, with the counts collapsed into the
+// thresholds. A host that needs the exact counters keeps them host-side.
+// Burin pace-governor.harn parity constants, exposed for fixtures / callers.
+// (In this stateless generalization they bound the DEFAULT `hard`/`over_estimate`
+// fractions rather than an injection counter.)
+const GOVERNOR_PACE_CHECK_MAX_INJECTIONS = 2
+
+const GOVERNOR_PACE_EXTEND_MAX = 6
+
+// Default consumption fractions (relative to the budget ceiling). `checkpoint`
+// is burin's armed-budget boundary, `over_estimate` its expected-total+checkpoint
+// boundary, `hard` the exhausted-extend cut.
+const GOVERNOR_DEFAULT_CHECKPOINT = 1.0
+
+const GOVERNOR_DEFAULT_OVER_ESTIMATE = 2.0
+
+const GOVERNOR_DEFAULT_HARD = 3.0
+
+/**
+ * governor_pace_check_max_injections / governor_pace_extend_max expose burin's
+ * pace-governor caps as parity accessors (mirroring burin's `pace_extend_max()`
+ * accessor discipline). In this stateless generalization they are advisory — the
+ * caps collapse into the `hard` consumption fraction — but callers building a
+ * burin-faithful policy can reference them instead of hardcoding 2 / 6.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn governor_pace_check_max_injections() -> int {
+  return GOVERNOR_PACE_CHECK_MAX_INJECTIONS
+}
+
+/**
+ * See governor_pace_check_max_injections.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn governor_pace_extend_max() -> int {
+  return GOVERNOR_PACE_EXTEND_MAX
+}
+
+/**
+ * A pace/budget governor policy. Thresholds are DATA rows, not code branches:
+ *   - signal: which monotone consumption to watch — "iterations" (default,
+ *     from the live payload), "tokens" or "cost" (from agent_session_totals).
+ *   - budget: the ceiling in that signal's units (turns / tokens / USD).
+ *   - checkpoint / over_estimate / hard: consumption FRACTIONS of `budget` at
+ *     which the governor starts caring / warns while progressing / hard-stops.
+ *   - progress_tools: optional allowlist of tool names that count as progress.
+ *     When absent, ANY successful tool this turn counts as progress.
+ *   - extend_max / pace_check_max: smart-timeout pace caps used only by
+ *     `governor_pace_decision` (#burin-cutover seam 2) — the silent-extend and
+ *     recalibration-check-in budgets; default to GOVERNOR_PACE_EXTEND_MAX /
+ *     GOVERNOR_PACE_CHECK_MAX_INJECTIONS.
+ */
+pub type GovernorPolicy = {
+  budget?: float,
+  checkpoint?: float,
+  hard?: float,
+  over_estimate?: float,
+  progress_tools?: list<string>,
+  signal?: string,
+  extend_max?: int,
+  pace_check_max?: int,
+}
+
+/**
+ * A convergence guard policy. Hosts provide typed facts; Harn owns the
+ * decision and recovery vocabulary. The guard requires authoritative green
+ * verification, no task diff after green, a small amount of post-green churn,
+ * and at least one proof-only signal before it emits a recovery.
+ */
+pub type ConvergenceGuardPolicy = {
+  enabled?: bool,
+  min_post_green_turns?: int,
+  proof_artifact_writes?: int,
+  marker_commands?: int,
+  policy_denials?: int,
+  verify_only_retries?: int,
+}
+
+/** Host-supplied convergence facts consumed by convergence_guard_decision. */
+pub type ConvergenceFactVector = {
+  output_contract_passed?: bool,
+  post_green_marker_commands?: int,
+  post_green_policy_denials?: int,
+  post_green_proof_artifact_writes?: int,
+  post_green_task_diff_count?: int,
+  post_green_turns?: int,
+  post_green_verify_only_retries?: int,
+  required_verification_green?: bool,
+  stall_no_net_progress?: bool,
+  stall_patterns?: list<string>,
+  stall_warning?: bool,
+  verification_authority?: string,
+}
+
+/** Auditable convergence-guard receipt embedded in each verdict. */
+pub type ConvergenceGuardReceipt = {
+  confidence?: float,
+  evidence?: dict,
+  iteration?: int,
+  kind: string,
+  reason?: string,
+  recovery?: dict,
+  schema: string,
+  session_id?: string,
+  shape: string,
+  status: string,
+}
+
+/** Typed convergence verdict. Recovery verbs are declarative, never prompt text. */
+pub type ConvergenceGuardVerdict = {
+  confidence?: float,
+  evidence?: dict,
+  receipt?: ConvergenceGuardReceipt,
+  recovery?: dict,
+  shape?: string,
+}
+
+const CONVERGENCE_GUARD_SCHEMA = "harn.agent_convergence_guard_receipt.v1"
+
+const CONVERGENCE_GUARD_DEFAULT_THRESHOLD = 1
+
+const CONVERGENCE_GUARD_DEFAULT_MIN_POST_GREEN_TURNS = 2
+
+fn __convergence_guard_threshold(value) -> int {
+  const parsed = to_int(value ?? CONVERGENCE_GUARD_DEFAULT_THRESHOLD)
+    ?? CONVERGENCE_GUARD_DEFAULT_THRESHOLD
+  if parsed <= 0 {
+    return CONVERGENCE_GUARD_DEFAULT_THRESHOLD
+  }
+  return parsed
+}
+
+fn __convergence_guard_min_turns(value) -> int {
+  const parsed = to_int(value ?? CONVERGENCE_GUARD_DEFAULT_MIN_POST_GREEN_TURNS)
+    ?? CONVERGENCE_GUARD_DEFAULT_MIN_POST_GREEN_TURNS
+  if parsed <= 0 {
+    return CONVERGENCE_GUARD_DEFAULT_MIN_POST_GREEN_TURNS
+  }
+  return parsed
+}
+
+fn __convergence_guard_patterns(facts: dict, recent: dict) -> list<string> {
+  if type_of(recent?.stall_patterns) == "list" {
+    return recent.stall_patterns
+  }
+  if type_of(facts?.stall_patterns) == "list" {
+    return facts.stall_patterns
+  }
+  return []
+}
+
+fn __convergence_guard_evidence(policy: ConvergenceGuardPolicy, facts: dict, recent: dict) -> dict {
+  const proof_artifact_writes = to_int(facts?.post_green_proof_artifact_writes ?? 0) ?? 0
+  const marker_commands = to_int(facts?.post_green_marker_commands ?? 0) ?? 0
+  const policy_denials = to_int(facts?.post_green_policy_denials ?? 0) ?? 0
+  const verify_only_retries = to_int(facts?.post_green_verify_only_retries ?? 0) ?? 0
+  const task_diff_count = to_int(facts?.post_green_task_diff_count ?? 0) ?? 0
+  const post_green_turns = to_int(facts?.post_green_turns ?? 0) ?? 0
+  return {
+    marker_commands: marker_commands,
+    marker_command_threshold: __convergence_guard_threshold(policy.marker_commands),
+    min_post_green_turns: __convergence_guard_min_turns(policy.min_post_green_turns),
+    policy_denials: policy_denials,
+    policy_denial_threshold: __convergence_guard_threshold(policy.policy_denials),
+    post_green_turns: post_green_turns,
+    proof_artifact_writes: proof_artifact_writes,
+    proof_artifact_write_threshold: __convergence_guard_threshold(policy.proof_artifact_writes),
+    required_verification_green: facts?.required_verification_green ?? false,
+    stall_no_net_progress: facts?.stall_no_net_progress ?? recent?.stall_no_net_progress ?? false,
+    stall_patterns: __convergence_guard_patterns(facts, recent),
+    stall_warning: facts?.stall_warning ?? recent?.stall_warning ?? false,
+    task_diff_count: task_diff_count,
+    verification_authority: to_string(facts?.verification_authority ?? ""),
+    verify_only_retries: verify_only_retries,
+    verify_only_retry_threshold: __convergence_guard_threshold(policy.verify_only_retries),
+  }
+}
+
+fn __convergence_guard_has_churn(evidence: dict) -> bool {
+  return evidence.post_green_turns >= evidence.min_post_green_turns
+    || (evidence?.stall_warning ?? false)
+    || (evidence?.stall_no_net_progress ?? false)
+    || len(evidence?.stall_patterns ?? []) > 0
+}
+
+fn __convergence_guard_signal(evidence: dict) -> string {
+  if evidence.proof_artifact_writes >= evidence.proof_artifact_write_threshold {
+    return "post_green_proof_artifact_write"
+  }
+  if evidence.marker_commands >= evidence.marker_command_threshold {
+    return "post_green_marker_command"
+  }
+  if evidence.policy_denials >= evidence.policy_denial_threshold {
+    return "post_green_policy_denial"
+  }
+  if evidence.verify_only_retries >= evidence.verify_only_retry_threshold {
+    return "post_green_verify_only_retry"
+  }
+  return ""
+}
+
+fn __convergence_guard_receipt(
+  shape: string,
+  confidence: float,
+  reason: string,
+  evidence: dict,
+  recovery,
+) -> dict {
+  return {
+    confidence: confidence,
+    evidence: evidence,
+    kind: "convergence_guard",
+    reason: reason,
+    recovery: recovery,
+    schema: CONVERGENCE_GUARD_SCHEMA,
+    shape: shape,
+    status: if shape == "none" {
+      "skipped"
+    } else {
+      "fired"
+    },
+  }
+}
+
+fn __convergence_guard_none(reason: string, evidence: dict) -> dict {
+  const receipt = __convergence_guard_receipt("none", 0.0, reason, evidence, nil)
+  return {shape: "none", confidence: 0.0, evidence: evidence, recovery: nil, receipt: receipt}
+}
+
+fn __convergence_guard_recovery() -> dict {
+  return {
+    verb: "stop_on_green",
+    args: {stop_reason: "convergence_guard:finalization_runaway_on_green"},
+  }
+}
+
+fn __convergence_guard_finalization(reason: string, evidence: dict) -> dict {
+  const recovery = __convergence_guard_recovery()
+  const receipt = __convergence_guard_receipt(
+    "finalization_runaway_on_green",
+    0.95,
+    reason,
+    evidence,
+    recovery,
+  )
+  return {
+    shape: "finalization_runaway_on_green",
+    confidence: 0.95,
+    evidence: evidence,
+    recovery: recovery,
+    receipt: receipt,
+  }
+}
+
+/**
+ * convergence_guard_decision is the PURE convergence decision core. It detects
+ * the post-green spiral class where a run has already satisfied authoritative
+ * verification, makes no further task diff, shows post-green churn, and starts
+ * manufacturing verifier artifacts / marker commands / policy-denied proof
+ * attempts instead of finishing. The output is an issue-shaped verdict:
+ * `{shape, confidence, evidence, recovery, receipt}`. A non-match always uses
+ * `shape: "none"` and `recovery: nil`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn convergence_guard_decision(
+  policy: ConvergenceGuardPolicy,
+  facts: ConvergenceFactVector,
+  recent: dict = {},
+) -> dict {
+  const evidence = __convergence_guard_evidence(policy, facts, recent)
+  if !(policy.enabled ?? true) {
+    return __convergence_guard_none("disabled", evidence)
+  }
+  if !(facts.required_verification_green ?? false) {
+    return __convergence_guard_none("verification_not_green", evidence)
+  }
+  if !(facts.output_contract_passed ?? true) {
+    return __convergence_guard_none("output_contract_not_satisfied", evidence)
+  }
+  if evidence.task_diff_count > 0 {
+    return __convergence_guard_none("post_green_task_diff_present", evidence)
+  }
+  if !__convergence_guard_has_churn(evidence) {
+    return __convergence_guard_none("post_green_churn_below_threshold", evidence)
+  }
+  const signal = __convergence_guard_signal(evidence)
+  if signal != "" {
+    return __convergence_guard_finalization(signal, evidence)
+  }
+  return __convergence_guard_none("within_convergence_bounds", evidence)
+}
+
+/**
+ * Build an auditable receipt from a convergence guard decision and run payload.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn convergence_guard_receipt(decision: dict, payload: dict = {}) -> dict {
+  const receipt = decision?.receipt
+    ?? __convergence_guard_receipt(
+    to_string(decision?.shape ?? "none"),
+    to_float(decision?.confidence ?? 0.0),
+    to_string(decision?.reason ?? "external_verdict"),
+    decision?.evidence ?? {},
+    decision?.recovery,
+  )
+  return receipt
+    + {
+    iteration: to_int(payload?.iteration ?? 0) ?? 0,
+    session_id: to_string(payload?.session_id ?? payload?.session?.id ?? ""),
+  }
+}
+
+fn __governor_abort(reason: string, signal: string, fraction: float) -> dict {
+  return {action: "abort", fraction: fraction, reason: reason, signal: signal}
+}
+
+fn __governor_warn(reason: string, signal: string, fraction: float) -> dict {
+  return {action: "warn", fraction: fraction, reason: reason, signal: signal}
+}
+
+fn __governor_proceed(reason: string, signal: string, fraction: float) -> dict {
+  return {action: "proceed", fraction: fraction, reason: reason, signal: signal}
+}
+
+/**
+ * governor_decision is the PURE pace/budget core (no I/O). It mirrors burin's
+ * `pace_decision` structure, generalized over the consumption signal and
+ * collapsed onto proceed/warn/abort:
+ *
+ *   fraction >= hard                      -> abort  "budget_hard_stop"
+ *                                            (burin: extend/check budget exhausted -> cut)
+ *   fraction >= checkpoint && !progress   -> abort  "no_progress_at_checkpoint"
+ *                                            (burin: no progress at checkpoint -> cut)
+ *   fraction >= over_estimate (progress)  -> warn   "over_estimate_while_progressing"
+ *                                            (burin: over estimate while progressing -> pace_check)
+ *   otherwise                             -> proceed
+ *                                            (burin: below checkpoint, or progressing
+ *                                             within estimate -> extend)
+ *
+ * `obs` is `{ceiling, consumed, made_progress, signal}`. Returns
+ * `{action, fraction, reason, signal}`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn governor_decision(policy: GovernorPolicy, obs: dict) -> dict {
+  const signal = to_string(obs?.signal ?? policy.signal ?? "iterations")
+  const ceiling = to_float(obs?.ceiling ?? 0.0)
+  if ceiling <= 0.0 {
+    return __governor_proceed("no_budget", signal, 0.0)
+  }
+  const consumed = to_float(obs?.consumed ?? 0.0)
+  const fraction = consumed / ceiling
+  const checkpoint = to_float(policy.checkpoint ?? GOVERNOR_DEFAULT_CHECKPOINT)
+  const over_estimate = to_float(policy.over_estimate ?? GOVERNOR_DEFAULT_OVER_ESTIMATE)
+  const hard = to_float(policy.hard ?? GOVERNOR_DEFAULT_HARD)
+  const made_progress = obs?.made_progress ?? false
+  if fraction >= hard {
+    return __governor_abort("budget_hard_stop", signal, fraction)
+  }
+  if fraction >= checkpoint && !made_progress {
+    return __governor_abort("no_progress_at_checkpoint", signal, fraction)
+  }
+  if fraction >= over_estimate {
+    return __governor_warn("over_estimate_while_progressing", signal, fraction)
+  }
+  return __governor_proceed("within_budget", signal, fraction)
+}
+
+/** The checkpoint cadence in ms (one budget window). Defaults to the armed budget. */
+fn __governor_pace_checkpoint_ms(obs: dict, armed: int) -> int {
+  const raw = to_int(obs?.checkpoint_ms ?? 0) ?? 0
+  if raw > 0 {
+    return raw
+  }
+  return armed
+}
+
+/** The estimated total wall in ms. Defaults to the armed budget. */
+fn __governor_pace_expected_total_ms(obs: dict, armed: int) -> int {
+  const raw = to_int(obs?.expected_total_ms ?? 0) ?? 0
+  if raw > 0 {
+    return raw
+  }
+  return armed
+}
+
+/**
+ * governor_pace_decision is the SMART-TIMEOUT pace governor (#burin-cutover seam
+ * 2) — a PURE decision core ported verbatim from burin's
+ * `lib/runtime/pace-governor.harn::pace_decision`. It replaces a blind static
+ * wall-clock kill with progress-based *extend-inside-a-time-bound*: given a
+ * snapshot of the run's pace signals it returns ONE of four actions. It does NO
+ * I/O, reads no flags, touches no session store and calls no model — every input
+ * is passed in, so the caller keeps the wiring (flag gate, epoch tracking, budget
+ * arming, feedback injection, loop stop). This is the token-runaway pattern:
+ * decision in harn, thin wall-deadline actuation stays host-side (harn's
+ * agent_loop never owns the host's wall deadline).
+ *
+ * `policy` (a GovernorPolicy) carries only the bounded caps; both default to the
+ * burin parity constants:
+ *   - extend_max      (default GOVERNOR_PACE_EXTEND_MAX = 6): hard cap on silent
+ *     extends so a slowly-progressing run cannot extend forever.
+ *   - pace_check_max  (default GOVERNOR_PACE_CHECK_MAX_INJECTIONS = 2): bounded
+ *     recalibration check-ins before the run is cut (mirrors the completion-gate
+ *     max-vetoes discipline).
+ *
+ * `obs` (host facts — the caller assembles it from the clock + loop info +
+ * session-stored counters):
+ *   - armed_budget_ms   int  — the wall budget currently armed (ms). 0/absent =>
+ *     not armed; the governor always `proceed`s (the OFF / no-budget no-op path).
+ *   - elapsed_ms        int  — wall ms since the run started.
+ *   - checkpoint_ms     int  — checkpoint cadence (one budget window). Defaults
+ *     to armed_budget_ms so the first decision fires at the budget.
+ *   - expected_total_ms int  — estimated total wall; the pace_check branch fires
+ *     when we blow past it by >= 1 checkpoint while progressing. Defaults to
+ *     armed_budget_ms.
+ *   - made_progress     bool — a workspace write succeeded since the last
+ *     harness.runtime.checkpoint(the single progress signal).
+ *   - verifier_signature_unchanged bool — a write landed but the verifier failure
+ *     signature did not improve; a landed write whose verifier signature is
+ *     unchanged is NOT progress (the edit_applied_but_wrong thrash). The stateful
+ *     caller only ever sets it true under its arm, so absent/false is
+ *     byte-identical to a run without the lever.
+ *   - done              bool — the done-judge is satisfied; the governor adds
+ *     zero delta (never extend/pace_check/cut a done run).
+ *   - extends_used      int  — silent extends already granted this run.
+ *   - pace_checks_used  int  — pace_check injections already spent.
+ *   - env_blame_without_infra bool — typed classifier verdict supplied by the
+ *     stateful caller (the pure governor never matches English phrases).
+ *
+ * Returns `{action, ...}`:
+ *   {action: "proceed"}
+ *   {action: "extend", new_budget_ms: int, reason}  (new_budget_ms = elapsed + checkpoint)
+ *   {action: "pace_check", reason}
+ *   {action: "cut", reason}
+ * cut reasons: no_progress_at_checkpoint / no_verifier_progress /
+ * env_blame_without_infra / extend_budget_exhausted / pace_check_budget_exhausted.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn governor_pace_decision(policy: GovernorPolicy, obs: dict) -> dict {
+  const armed = to_int(obs?.armed_budget_ms ?? 0) ?? 0
+  // No budget armed (flag OFF, or a live surface that did not arm one) => the
+  // governor is inert. This is the byte-identical no-op the caller relies on.
+  if armed <= 0 {
+    return {action: "proceed"}
+  }
+  // A satisfied done-judge ends the run on the existing completion path. Zero
+  // delta — never extend, pace_check, or cut a done run.
+  if obs?.done ?? false {
+    return {action: "proceed"}
+  }
+  const elapsed = to_int(obs?.elapsed_ms ?? 0) ?? 0
+  const checkpoint = __governor_pace_checkpoint_ms(obs, armed)
+  // Time-based outer gate: only decide once we have crossed the checkpoint. Below
+  // it the run is inside budget and continues unchanged.
+  if elapsed < checkpoint {
+    return {action: "proceed"}
+  }
+  const made_progress = obs?.made_progress ?? false
+  const env_blame_without_infra = obs?.env_blame_without_infra ?? false
+  // NO PROGRESS, or env-blaming with no real infra marker => CUT.
+  if !made_progress {
+    return {action: "cut", reason: "no_progress_at_checkpoint"}
+  }
+  // A write landed, but the verifier failure signature did NOT improve since the
+  // last checkpoint. Writes are not progress — only a verifier advance is.
+  if obs?.verifier_signature_unchanged ?? false {
+    return {action: "cut", reason: "no_verifier_progress"}
+  }
+  if env_blame_without_infra {
+    return {action: "cut", reason: "env_blame_without_infra"}
+  }
+  // PROGRESS. Decide extend vs pace_check by whether we have blown past the
+  // expected total by at least one checkpoint.
+  const expected_total = __governor_pace_expected_total_ms(obs, armed)
+  const over_estimate = elapsed >= expected_total + checkpoint
+  const extends_used = to_int(obs?.extends_used ?? 0) ?? 0
+  const pace_checks_used = to_int(obs?.pace_checks_used ?? 0) ?? 0
+  const extend_max = to_int(policy.extend_max ?? GOVERNOR_PACE_EXTEND_MAX)
+    ?? GOVERNOR_PACE_EXTEND_MAX
+  const pace_check_max = to_int(policy.pace_check_max ?? GOVERNOR_PACE_CHECK_MAX_INJECTIONS)
+    ?? GOVERNOR_PACE_CHECK_MAX_INJECTIONS
+  if !over_estimate {
+    // Within the estimate and progressing: silently extend the wall to the next
+    // checkpoint, bounded by extend_max. No model interrupt, zero tokens.
+    if extends_used >= extend_max {
+      return {action: "cut", reason: "extend_budget_exhausted"}
+    }
+    return {
+      action: "extend",
+      new_budget_ms: elapsed + checkpoint,
+      reason: "progress_within_estimate",
+    }
+  }
+  // Progressing but past the estimate. Inject a bounded recalibration check-in;
+  // once the pace_check budget is spent, cut.
+  if pace_checks_used >= pace_check_max {
+    return {action: "cut", reason: "pace_check_budget_exhausted"}
+  }
+  return {action: "pace_check", reason: "over_estimate_while_progressing"}
+}
+
+/**
+ * pace_action_of(decision) maps a `governor_pace_decision` verdict onto the shared
+ * proceed/warn/abort governance vocabulary (the same one `detector_action_of` and
+ * `governor_decision` speak), so a host can route pace decisions and detector trips
+ * through ONE switch: `cut` -> "abort", `pace_check` -> "warn", `extend`/`proceed`
+ * -> "proceed".
+ *
+ * NOTE this mapping is intentionally LOSSY. Pace's native vocabulary
+ * (proceed/extend/pace_check/cut) is wall-clock ACTUATION, not steering severity:
+ * `extend` re-stamps the wall budget and has no analog in the coarse
+ * proceed/warn/abort surface, so it folds to "proceed" (it neither injects feedback
+ * nor stops). Use `governor_pace_decision`'s raw `action` (and `new_budget_ms`) when
+ * you need the actuation distinction.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn pace_action_of(decision) -> string {
+  const action = to_string(decision?.action ?? "proceed")
+  if action == "cut" {
+    return "abort"
+  }
+  if action == "pace_check" {
+    return "warn"
+  }
+  return "proceed"
+}
+
+fn __any_in(values: list, allowlist: list) -> bool {
+  for value in values {
+    if contains(allowlist, value) {
+      return true
+    }
+  }
+  return false
+}
+
+// The consumption signals `__governor_observe` knows how to read. An unrecognized
+// `policy.signal` (a typo like "iteration" / "usd") would otherwise fall through to
+// the iterations branch and silently meter the WRONG signal, so it is rejected
+// loudly at observe entry rather than quietly gating on turn count.
+const GOVERNOR_RECOGNIZED_SIGNALS = ["iterations", "tokens", "cost"]
+
+/**
+ * Read the live post-turn payload into a governor observation. For the
+ * "iterations" signal this reads ONLY `payload.iteration` (the live
+ * `agent_compute_post_turn` field), so it is pure. For "tokens"/"cost" it reads
+ * the host-tracked cumulative via `agent_session_totals`.
+ */
+fn __governor_observe(agent: HarnessAgent, policy: GovernorPolicy, payload: dict) -> dict {
+  const signal = to_string(policy.signal ?? "iterations")
+  if !contains(GOVERNOR_RECOGNIZED_SIGNALS, signal) {
+    throw "agent_loop: governor `policy.signal` must be one of "
+      + join(
+      GOVERNOR_RECOGNIZED_SIGNALS,
+      ", ",
+    )
+      + "; got "
+      + json_stringify(signal)
+  }
+  const session_id = to_string(payload?.session_id ?? payload?.session?.id ?? "")
+  const consumed = if signal == "tokens" {
+    to_float(agent_session_totals(agent, session_id)?.tokens_used ?? 0)
+  } else if signal == "cost" {
+    to_float(agent_session_totals(agent, session_id)?.cost_usd ?? 0.0)
+  } else {
+    to_float((to_int(payload?.iteration ?? 0) ?? 0) + 1)
+  }
+  const progress_tools = policy.progress_tools
+  const successful = payload?.successful_tool_names ?? []
+  const made_progress = if progress_tools == nil {
+    len(successful) > 0
+  } else {
+    __any_in(successful, progress_tools)
+  }
+  return {
+    ceiling: to_float(policy.budget ?? 0.0),
+    consumed: consumed,
+    made_progress: made_progress,
+    signal: signal,
+  }
+}
+
+// The payload keys the governor depends on from the live agent_compute_post_turn
+// shape. If any is ever renamed or dropped the governor cannot compute its
+// consumption signal, so it aborts LOUDLY with a distinct reason rather than
+// silently defaulting to 0 and never firing (the dead-since-inception class).
+const GOVERNOR_REQUIRED_PAYLOAD_KEYS = ["iteration", "session_id", "successful_tool_names"]
+
+fn __governor_shape_ok(payload) -> bool {
+  const present = keys(payload)
+  for key in GOVERNOR_REQUIRED_PAYLOAD_KEYS {
+    if !contains(present, key) {
+      return false
+    }
+  }
+  return true
+}
+
+fn __governor_verdict(decision: dict) {
+  const signal = to_string(decision?.signal ?? "budget")
+  const fraction = to_string(decision?.fraction ?? 0.0)
+  if decision.action == "abort" {
+    return {
+      message: "Budget governor: stopping this run (" + to_string(decision?.reason ?? "")
+        + "). The "
+        + signal
+        + " budget is spent ("
+        + fraction
+        + "x). Do not start new work; if a step is unfinished, report it as the blocker.",
+      stop: true,
+      stop_reason: "budget_governor:" + to_string(decision?.reason ?? "budget"),
+    }
+  }
+  if decision.action == "warn" {
+    return {
+      message: "Budget governor: you are past the expected " + signal + " budget (" + fraction
+        + "x) and still working. Prioritize FINISHING now — narrow to the single essential remaining step and wrap up.",
+    }
+  }
+  return nil
+}
+
+/**
+ * governor_post_turn(harness.agent, policy) returns a `post_turn_callback` closure that reads
+ * the live per-turn payload, evaluates the pace/budget policy, and returns a
+ * steering verdict (warn message / stop) through the existing seam.
+ *
+ * Live-shape / registration guard (harness-techniques-ledger #3381): before
+ * evaluating, it asserts the payload carries the keys it depends on
+ * (`GOVERNOR_REQUIRED_PAYLOAD_KEYS`). If `agent_compute_post_turn`'s payload
+ * shape ever drifts (a renamed/dropped `session_id` / `iteration` /
+ * `successful_tool_names`) the governor aborts with the distinct
+ * `payload_shape_drift` stop reason, so the conformance baseline goes red
+ * instead of the governor silently defaulting to 0 and never firing.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn governor_post_turn(agent: HarnessAgent, policy: GovernorPolicy) {
+  return { payload ->
+    if !__governor_shape_ok(payload) {
+      {
+        message: "Budget governor: DISABLED — the live post-turn payload is missing one of "
+          + join(
+          GOVERNOR_REQUIRED_PAYLOAD_KEYS,
+          ", ",
+        )
+          + ". Stopping rather than running an unmetered budget.",
+        stop: true,
+        stop_reason: "budget_governor:payload_shape_drift",
+      }
+    } else {
+      __governor_verdict(governor_decision(policy, __governor_observe(agent, policy, payload)))
+    }
+  }
+}
+
+fn __normalize_verdict(verdict) -> dict {
+  if verdict == nil || verdict == "" {
+    return {message: "", stop: false}
+  }
+  if type_of(verdict) == "bool" {
+    return {message: "", stop: verdict}
+  }
+  if type_of(verdict) == "string" {
+    return {message: verdict, stop: false}
+  }
+  if type_of(verdict) == "dict" {
+    return {
+      llm_options: verdict?.llm_options,
+      message: to_string(verdict?.message ?? ""),
+      next_options: verdict?.next_options,
+      prefill: verdict?.prefill,
+      stop: verdict?.stop ?? false,
+      stop_reason: verdict?.stop_reason,
+    }
+  }
+  return {message: "", stop: false}
+}
+
+/**
+ * compose_post_turn(callbacks) chains several `post_turn_callback` closures into
+ * ONE, so a caller can run their own callback alongside a governor / detector
+ * overlay without a new option. The FIRST callback that requests a stop wins
+ * (its `stop_reason` / `next_options` / `llm_options` are preserved) and any
+ * warn messages accumulated before it are prepended; otherwise all non-empty
+ * warn messages are merged. Returns nil when nothing fired.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn compose_post_turn(callbacks: list) {
+  return { payload ->
+    let messages = []
+    let result = nil
+    for callback in callbacks {
+      if callback == nil {
+        continue
+      }
+      const norm = __normalize_verdict(callback(payload))
+      if norm.stop {
+        const prior = if len(messages) > 0 {
+          join(messages, "\n") + "\n"
+        } else {
+          ""
+        }
+        result = norm + {message: prior + norm.message}
+        break
+      }
+      if to_string(norm?.message ?? "") != "" {
+        messages = messages.appending(norm.message)
+      }
+    }
+    if result != nil {
+      result
+    } else if len(messages) > 0 {
+      {message: join(messages, "\n")}
+    } else {
+      nil
+    }
+  }
+}
+
+/**
+ * with_governance(harness.agent, opts, config) folds a governor and/or a unified detector spec
+ * into an agent_loop options dict through EXISTING seams only:
+ *   - config.governor  (GovernorPolicy) -> composed into `post_turn_callback`.
+ *   - config.detectors (DetectorSpec)   -> lowered onto `stall_diagnostics`
+ *     (native loop/no-progress/stuck detectors) PLUS a token-runaway overlay
+ *     composed into `post_turn_callback`.
+ * Any pre-existing `post_turn_callback` is preserved (run first) and any
+ * pre-existing `stall_diagnostics` keys are kept unless the spec overrides them.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn with_governance(agent: HarnessAgent, opts: dict, config: dict) -> dict {
+  let callbacks = []
+  const existing = opts?.post_turn_callback
+  if existing != nil {
+    callbacks = callbacks.appending(existing)
+  }
+  if config?.governor != nil {
+    callbacks = callbacks.appending(governor_post_turn(agent, config.governor))
+  }
+  let result = opts
+  const detectors = config?.detectors
+  if detectors != nil {
+    const existing_stall = if type_of(opts?.stall_diagnostics) == "dict" {
+      opts.stall_diagnostics
+    } else {
+      {}
+    }
+    result = result + {stall_diagnostics: existing_stall + detector_spec_to_stall(detectors)}
+    const overlay = unified_detectors_post_turn(agent, detectors)
+    if overlay != nil {
+      callbacks = callbacks.appending(overlay)
+    }
+  }
+  if len(callbacks) > 0 {
+    result = result + {post_turn_callback: compose_post_turn(callbacks)}
+  }
+  return result
+}
+
+/**
+ * agent_governed_preset(harness, kind, options, governance) is `agent_preset` with a
+ * governor / detector spec folded in, so a durable persona can carry its pace
+ * governor and detector rows by name. Equivalent to
+ * `with_governance(harness.agent, agent_preset(harness, kind, options), governance)`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_governed_preset(harness: Harness, kind, options = nil, governance = {}) -> dict {
+  return with_governance(harness.agent, agent_preset(harness, kind, options), governance)
+}
+
+/**
+ * governors_selftest is the offline live-shape / registration assertion. It
+ * builds the CANONICAL live `agent_compute_post_turn` payload shape, asserts the
+ * keys the governor depends on are present (throws otherwise), and proves the
+ * governor reads them correctly by driving a firing policy end-to-end.
+ * Complements the conformance test that runs a REAL agent_loop turn: together
+ * they catch the "dead-since-inception converter" class where a callback keys on
+ * fields the live payload never carries.
+ *
+ * @effects: []
+ * @errors: [agent_loop]
+ * @api_stability: experimental
+ */
+pub fn governors_selftest(agent: HarnessAgent) -> dict {
+  const live_payload = {
+    dispatch: {results: []},
+    has_tool_calls: true,
+    iteration: 4,
+    rejected_tool_names: [],
+    session: {id: "governors-selftest"},
+    session_id: "governors-selftest",
+    session_rejected_tools: [],
+    session_successful_tools: ["edit"],
+    successful_tool_names: ["edit"],
+    text: "",
+    tool_count: 0,
+    tool_results: [],
+    visible_text: "",
+  }
+  const required = ["iteration", "session_id", "successful_tool_names"]
+  let missing = []
+  for key in required {
+    if !contains(keys(live_payload), key) {
+      missing = missing.appending(key)
+    }
+  }
+  if len(missing) > 0 {
+    throw "governors_selftest: live post_turn payload is missing required keys: "
+      + join(missing, ", ")
+  }
+  // signal=iterations reads ONLY payload.iteration, so this is pure (no live
+  // session). budget 5 turns, iteration 4 -> 5 turns consumed -> fraction 1.0
+  // at hard=1.0 -> abort. If `iteration` ever drifts, consumed collapses to 1
+  // and `ok` flips false.
+  const policy = {budget: 5.0, checkpoint: 1.0, hard: 1.0, over_estimate: 1.0, signal: "iterations"}
+  const obs = __governor_observe(agent, policy, live_payload)
+  const decision = governor_decision(policy, obs)
+  return {
+    decision: decision,
+    observed_keys: keys(live_payload).sorted(),
+    ok: decision.action == "abort" && obs.consumed == 5.0,
+    required_keys: required,
+  }
+}

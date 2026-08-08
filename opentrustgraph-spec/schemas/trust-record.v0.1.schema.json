@@ -1,0 +1,290 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/opentrustgraph/v0.1/trust-record.schema.json",
+  "title": "OpenTrustGraph TrustRecord v0.1",
+  "description": "One autonomy, approval, or control-plane event in an append-only OpenTrustGraph chain. v0.1 reserves lineage metadata keys (`effects_grant`, `effects_used`, `parent_record_id`, `actor_chain`, `actor_chain_alert`) so chain validators can prove child effect inheritance, actor-chain parentage, and actor-chain policy alerts. v0 records still validate against this schema for one patch release window (see CONFORMANCE.md §5).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "record_id",
+    "agent",
+    "action",
+    "outcome",
+    "trace_id",
+    "autonomy_tier",
+    "timestamp",
+    "chain_index",
+    "previous_hash",
+    "entry_hash",
+    "metadata"
+  ],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "enum": ["opentrustgraph/v0.1", "opentrustgraph/v0"],
+      "description": "Schema discriminator. v0 is accepted for one patch release window after the v0.1 bump."
+    },
+    "record_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Globally unique record id. UUIDv7 is recommended."
+    },
+    "agent": {
+      "type": "string",
+      "minLength": 1
+    },
+    "action": {
+      "type": "string",
+      "minLength": 1
+    },
+    "approver": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "description": "Actor that satisfied the approval gate, or null when no approval gate applied."
+    },
+    "outcome": {
+      "type": "string",
+      "enum": ["success", "failure", "denied", "timeout"]
+    },
+    "trace_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "autonomy_tier": {
+      "type": "string",
+      "enum": ["shadow", "suggest", "act_with_approval", "act_auto"]
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "cost_usd": {
+      "type": ["number", "null"],
+      "minimum": 0
+    },
+    "chain_index": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "previous_hash": {
+      "type": ["string", "null"],
+      "pattern": "^(sha256:[0-9a-f]{64})$"
+    },
+    "entry_hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Runtime-specific detail bag. Consumers must preserve unknown keys. v0.1 reserves the lineage and actor-chain alert keys below; older consumers MAY ignore them.",
+      "properties": {
+        "effects_grant": {
+          "type": "array",
+          "description": "Typed effect set the parent extended to this record. Empty/absent means no grant tracking. Items follow the EffectRecord shape (kind, scope, optional resource).",
+          "items": { "$ref": "#/$defs/effectRecord" }
+        },
+        "effects_used": {
+          "type": "array",
+          "description": "Typed effect set the action actually exercised. Verifiers MUST check `effects_used` is a subset of `effects_grant` from the parent record referenced via `parent_record_id`.",
+          "items": { "$ref": "#/$defs/effectRecord" }
+        },
+        "parent_record_id": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "description": "Pointer at the parent record's `record_id`. null/absent for root records."
+        },
+        "actor_chain": {
+          "$ref": "#/$defs/actorChain",
+          "description": "RFC 8693 actor chain for the principal that caused this record. When `parent_record_id` is present, verifiers MUST check this chain extends the parent's `actor_chain` by exactly one nested `act` hop."
+        },
+        "actor_chain_alert": {
+          "$ref": "#/$defs/scopeAttenuationViolation",
+          "description": "Typed actor-chain policy alert. Harn writes this for scope attenuation violations."
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "outcome": { "const": "success" },
+          "autonomy_tier": { "const": "act_with_approval" },
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "approval": {
+                "type": "object",
+                "properties": { "required": { "const": true } },
+                "required": ["required"]
+              }
+            },
+            "required": ["approval"]
+          }
+        },
+        "required": ["outcome", "autonomy_tier", "metadata"]
+      },
+      "then": {
+        "properties": {
+          "approver": { "type": "string", "minLength": 1 },
+          "metadata": {
+            "type": "object",
+            "properties": { "approval": { "$ref": "#/$defs/approvalReceipt" } },
+            "required": ["approval"]
+          }
+        },
+        "required": ["approver"]
+      }
+    }
+  ],
+  "$defs": {
+    "approvalReceipt": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["required", "quorum", "signatures"],
+      "properties": {
+        "required": { "const": true },
+        "quorum": { "type": "integer", "minimum": 1 },
+        "signatures": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["reviewer", "signed_at", "signature"],
+            "properties": {
+              "reviewer": { "type": "string", "minLength": 1 },
+              "signed_at": { "type": "string", "format": "date-time" },
+              "signature": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "effectRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "scope"],
+      "properties": {
+        "kind": {
+          "description": "Effect kind discriminator. Mirrors `EffectKind` in crates/harn-vm/src/orchestration/policy/effects.rs.",
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["kind"],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": ["stdio", "fs", "net", "spawn"]
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": ["kind"],
+              "properties": {
+                "kind": { "const": "llm" },
+                "provider": { "type": "string", "minLength": 1 },
+                "model": { "type": "string", "minLength": 1 }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": ["kind", "name"],
+              "properties": {
+                "kind": { "type": "string", "enum": ["tool", "hostcall"] },
+                "name": { "type": "string", "minLength": 1 }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": ["kind", "id"],
+              "properties": {
+                "kind": { "const": "persona" },
+                "id": { "type": "string", "minLength": 1 }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["read", "write", "mutate", "observe"]
+        },
+        "resource": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Opaque, statically-known target identifier (path, URL, tool id, persona id)."
+        }
+      }
+    },
+    "actorChain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sub"],
+      "properties": {
+        "sub": { "type": "string", "minLength": 1 },
+        "scopes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "scope": { "type": "string", "minLength": 1 },
+        "act": { "$ref": "#/$defs/actorChain" },
+        "may_act": { "$ref": "#/$defs/actorChainPrincipal" }
+      }
+    },
+    "actorChainPrincipal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sub"],
+      "properties": {
+        "sub": { "type": "string", "minLength": 1 },
+        "scopes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "scope": { "type": "string", "minLength": 1 }
+      }
+    },
+    "scopeAttenuationViolation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "mode",
+        "parent_subject",
+        "child_subject",
+        "parent_scopes",
+        "child_scopes",
+        "extra_scopes"
+      ],
+      "properties": {
+        "kind": { "const": "scope_attenuation_violation" },
+        "mode": {
+          "type": "string",
+          "enum": ["non-increasing", "strict-subset", "off"]
+        },
+        "parent_subject": { "type": "string", "minLength": 1 },
+        "child_subject": { "type": "string", "minLength": 1 },
+        "parent_scopes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "child_scopes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "extra_scopes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

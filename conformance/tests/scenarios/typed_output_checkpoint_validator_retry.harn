@@ -1,0 +1,78 @@
+import { agent_capture_events } from "std/agent/events"
+import { typed_output_checkpoint } from "std/checkpoint"
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline default(harness: Harness) {
+  const schema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["decision", "confidence", "evidence"],
+    properties: {
+      decision: {type: "string", enum: ["merge", "wait"]},
+      confidence: {type: "number"},
+      evidence: {type: "array", items: {type: "string"}},
+    },
+  }
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text(
+        "Here is the JSON:\n```json\n{\"decision\":\"merge\",\"confidence\":0.2,\"evidence\":[]}\n```",
+      ),
+      llm_text("{\"decision\":\"wait\",\"confidence\":0.95,\"evidence\":[\"ci still pending\"]}"),
+    ],
+    { ->
+      const session_id = "typed-checkpoint-session"
+      const captured = agent_capture_events(
+        harness.agent,
+        session_id,
+        fn() { typed_output_checkpoint(
+          harness.agent,
+          harness.llm,
+          "merge_captain.next_action",
+          "Choose the next Merge Captain action.",
+          schema,
+          {
+            provider: "mock",
+            session_id: session_id,
+            validator_retries: 1,
+            repair: {enabled: false},
+          },
+          fn(data) {
+            let errors = []
+            if data.confidence < 0.7 {
+              errors = errors.appending("confidence must be at least 0.7")
+            }
+            if len(data.evidence) == 0 {
+              errors = errors.appending("evidence must cite a deterministic fact")
+            }
+            return {ok: len(errors) == 0, errors: errors}
+          },
+        ) },
+      )
+      const checkpoint = captured.result
+      harness.stdio.println(checkpoint.ok)
+      harness.stdio.println(checkpoint.data.decision)
+      harness.stdio.println(checkpoint.attempts)
+      harness.stdio.println(checkpoint.checkpoint_attempts)
+      harness.stdio.println(checkpoint.extracted_json)
+      harness.stdio.println(len(checkpoint.validator_failures))
+      harness.stdio.println(
+        contains(
+          harness.llm.mock_calls()[1].messages[0].content,
+          "confidence must be at least 0.7",
+        ),
+      )
+      harness.stdio.println(captured.events[0].type)
+      harness.stdio.println(captured.events[0].checkpoint.final_accepted)
+      const trace = harness.obs.agent_trace()
+      let found = false
+      for event in trace {
+        if event.type == "typed_checkpoint" && event.name == "merge_captain.next_action" {
+          found = event.final_accepted
+        }
+      }
+      harness.stdio.println(found)
+    },
+  )
+}

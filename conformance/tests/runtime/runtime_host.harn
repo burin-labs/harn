@@ -1,0 +1,25 @@
+import "std/runtime"
+
+pipeline default(harness: Harness) {
+  harness.testing.respond("runtime", "task", "demo-task")
+  harness.testing.respond("runtime", "pipeline_input", {message: "hello"})
+  harness.testing.respond("runtime", "prompt_content", [{type: "text", text: "hello blocks"}])
+  harness.testing.respond("runtime", "dry_run", true)
+  harness.testing.respond("runtime", "approved_plan", "ship it")
+  harness.stdio.println(runtime_task(harness.runtime))
+  harness.stdio.println(runtime_pipeline_input(harness.runtime)?.message)
+  harness.stdio.println(runtime_prompt_content(harness.runtime)[0]?.text ?? "")
+  harness.stdio.println(runtime_dry_run(harness.runtime))
+  harness.stdio.println(runtime_approved_plan(harness.runtime))
+  const result = process_shell(harness.process, "printf ok")
+  harness.stdio.println(result?.success)
+  harness.stdio.println(result?.combined)
+  const argv = if harness.system.platform().os == "windows" {
+    ["cmd", "/C", "echo|set /p=argv-ok"]
+  } else {
+    ["printf", "argv-ok"]
+  }
+  const argv_result = process_run(harness.process, argv, {timeout_ms: 5000})
+  harness.stdio.println(argv_result?.success)
+  harness.stdio.println(process_result_text(argv_result))
+}

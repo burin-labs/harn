@@ -1,0 +1,4 @@
+generated/*
+live/*
+reasoning-matrix/*
+!README.md

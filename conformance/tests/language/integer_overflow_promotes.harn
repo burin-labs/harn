@@ -1,0 +1,15 @@
+/**
+ * Scalar integer arithmetic that overflows i64 promotes to float instead of
+ * silently wrapping two's-complement. This matches the language's aggregate
+ * policy (`sum`/`abs` already promote on i64 overflow) and avoids returning a
+ * wrong, wrapped magnitude. In-range arithmetic stays int. Operands are `let`
+ * bindings so the runtime arithmetic path is exercised, not just folding.
+ */
+pipeline test(harness: Harness, task) {
+  const big = 9223372036854775807
+  const one = 1
+  harness.stdio.log(type_of(big + one))
+  harness.stdio.log(big + one > 9000000000000000000.0)
+  harness.stdio.log(type_of(2 + 3))
+  harness.stdio.log(2 + 3)
+}

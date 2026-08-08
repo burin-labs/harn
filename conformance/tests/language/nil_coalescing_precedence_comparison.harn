@@ -1,0 +1,8 @@
+pipeline test(harness: Harness, task) {
+  const classified = false
+  const fixture = {expect_missing_dep: nil}
+  harness.stdio.println(classified == (fixture.expect_missing_dep ?? false))
+  harness.stdio.println((classified == fixture.expect_missing_dep) ?? false)
+  const snap = nil
+  harness.stdio.println((snap?.total_iterations ?? 0) < 2)
+}

@@ -1,0 +1,124 @@
+# llama.cpp — Unsloth Dynamic 2.0 GGUF served by llama-server.
+[models."qwen3.6-35b-a3b-ud-q4-k-xl"]
+name = "Qwen3.6 35B (Unsloth Q4_K_XL, llama.cpp)"
+provider = "llamacpp"
+context_window = 262144
+runtime_context_window = 262144
+stream_timeout = 900.0
+capabilities = ["tools", "streaming", "thinking"]
+tier = "mid"
+open_weight = true
+strengths = ["coding"]
+[models."qwen3.6-35b-a3b-ud-q4-k-xl".local_memory]
+measured_resident_gib = 19.5
+measured_context_window = 8192
+measured_cache_type = "q8_0"
+base_resident_gib = 19.0
+kv_cache_gib_per_1k_ctx = 0.0135
+default_cache_type = "q8_0"
+safety_margin_gib = 4.0
+max_recommended_context = 262144
+cache_type_multipliers = { q8_0 = 1.0, f16 = 2.0, q4_0 = 0.5, q4_1 = 0.5, q5_0 = 0.625, q5_1 = 0.625 }
+last_verified = "2026-06-28"
+notes = "Empirical llama.cpp b9821 / CUDA 12.8 / RTX 5090 measurements with q8_0 KV showed SWA-capped KV growth of about 0.87 GiB per 65k tokens and full 262144 ctx fitting with headroom. Treat as a sizing estimate, not an allocator guarantee."
+[models."qwen3.6-35b-a3b-ud-q5-k-xl"]
+name = "Qwen3.6 35B (Unsloth Q5_K_XL, llama.cpp)"
+provider = "llamacpp"
+context_window = 262144
+runtime_context_window = 65536
+stream_timeout = 900.0
+capabilities = ["tools", "streaming", "thinking"]
+tier = "mid"
+open_weight = true
+strengths = ["coding"]
+[models."qwen3.6-35b-a3b"]
+name = "Qwen3.6 35B (llama.cpp)"
+provider = "llamacpp"
+context_window = 262144
+runtime_context_window = 65536
+stream_timeout = 900.0
+capabilities = ["tools", "streaming", "thinking"]
+tier = "mid"
+open_weight = true
+strengths = ["coding"]
+
+# Apple Silicon MLX. Burin #2717 switched the local MLX route from the
+# never-downloaded dense vision model `unsloth/Qwen3.6-27B-UD-MLX-4bit` to the
+# coding-tuned Qwen3.6-35B-A3B MoE served via `mlx_lm.server` (text MoE, no
+# vision). Shares the `qwen3.6-35b-a3b` logical_model / equivalence_group with
+# the llama.cpp GGUF route so eval aggregation treats the two runtimes as the
+# same model and compares them directly. Keep strengths conservative until
+# `mlx_lm.server` has its own tool/agentic probe evidence; equivalence groups
+# use the least-decorated host baseline for escalation decisions.
+[models."unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"]
+name = "Qwen3.6 35B-A3B (MLX 4-bit)"
+provider = "mlx"
+logical_model = "qwen3.6-35b-a3b"
+equivalence_group = "qwen3.6-35b-a3b"
+context_window = 262144
+runtime_context_window = 65536
+stream_timeout = 900.0
+capabilities = ["tools", "streaming", "thinking"]
+tier = "mid"
+open_weight = true
+strengths = ["coding"]
+
+[models."unsloth/Qwen3.6-35B-A3B-UD-MLX-8bit"]
+name = "Qwen3.6 35B-A3B (MLX 8-bit)"
+provider = "mlx"
+logical_model = "qwen3.6-35b-a3b"
+equivalence_group = "qwen3.6-35b-a3b"
+context_window = 262144
+runtime_context_window = 65536
+stream_timeout = 900.0
+capabilities = ["tools", "streaming", "thinking"]
+tier = "mid"
+open_weight = true
+strengths = ["coding"]
+
+# Local OpenAI-compatible servers (vLLM / bring-your-own).
+[models."gemma-4-e2b-it"]
+name = "Gemma 4 E2B (local)"
+provider = "local"
+context_window = 131072
+stream_timeout = 300.0
+capabilities = ["streaming", "tools", "vision", "thinking", "structured_output"]
+tier = "small"
+open_weight = true
+strengths = ["cheap", "speed"]
+[models."gemma-4-e4b-it"]
+name = "Gemma 4 E4B (local)"
+provider = "local"
+context_window = 131072
+stream_timeout = 300.0
+capabilities = ["streaming", "tools", "vision", "thinking", "structured_output"]
+tier = "small"
+open_weight = true
+strengths = ["cheap"]
+[models."gemma-4-26b-a4b-it"]
+name = "Gemma 4 26B MoE (local)"
+provider = "local"
+context_window = 131072
+stream_timeout = 600.0
+capabilities = ["streaming", "tools", "vision", "thinking", "structured_output"]
+tier = "mid"
+open_weight = true
+strengths = ["coding"]
+[models."gemma-4-31b-it"]
+name = "Gemma 4 31B (local)"
+provider = "local"
+context_window = 131072
+stream_timeout = 600.0
+capabilities = ["streaming", "tools", "vision", "thinking", "structured_output"]
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "long_context"]
+[models."gemma-4-12b-it"]
+name = "Gemma 4 12B (local)"
+provider = "local"
+context_window = 131072
+stream_timeout = 300.0
+capabilities = ["streaming", "tools", "vision", "thinking", "structured_output"]
+tier = "mid"
+open_weight = true
+strengths = ["cheap", "speed"]

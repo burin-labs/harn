@@ -1,0 +1,121 @@
+name: Publish VS Code extension
+
+# Packages the `editors/vscode` extension and publishes it to the VS Code
+# Marketplace (via vsce) and Open VSX (via ovsx).
+#
+# ── ACTIVATION (a human must do this once) ────────────────────────────────
+# This workflow is INERT until repo secrets are set. It never fails when a
+# secret is absent — it packages the .vsix and uploads it as a build artifact,
+# then only publishes to a registry whose token exists:
+#
+#   VSCE_PAT  Azure DevOps Personal Access Token for the `burin-labs`
+#             VS Code Marketplace publisher. Create at
+#             https://dev.azure.com → User settings → Personal access
+#             tokens, scoped to Marketplace → Manage. Then:
+#               gh secret set VSCE_PAT
+#
+#   OVSX_PAT  Open VSX access token for the `burin-labs` namespace. Create
+#             at https://open-vsx.org → user settings → Access Tokens, and
+#             claim the namespace (`npx ovsx create-namespace burin-labs`).
+#             Then:
+#               gh secret set OVSX_PAT
+#
+# With neither secret set the release path still produces an installable
+# .vsix artifact on every tag, so nothing here is a hard dependency of a
+# release. Set one or both secrets to light up the corresponding registry.
+#
+# Triggers:
+#   1. push tag vX.Y.Z — publishes the extension version from the tagged tree.
+#   2. workflow_dispatch — manual (re-)package/publish for recovery.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    # The Marketplace accepts only major.minor.patch manifest versions; its
+    # prerelease channel is a separate flag and cannot preserve Harn's full
+    # X.Y.Z-identifiers identity. The CLI prerelease therefore skips this
+    # independently versioned projection instead of publishing the wrong one.
+    # https://code.visualstudio.com/api/working-with-extensions/publishing-extension#pre-release-extensions
+    if: github.ref_type != 'tag' || !contains(github.ref_name, '-')
+    runs-on: ubuntu-latest
+    # Lift the secrets to job-level env so the publish steps can gate on
+    # them: the `secrets` context is not available in a step-level `if:`,
+    # but `env` is, and job-level `env` may read `secrets`.
+    env:
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      OVSX_PAT: ${{ secrets.OVSX_PAT }}
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/node-cache
+        with:
+          node-version: "22"
+          cache-dependency-path: editors/vscode/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compile
+        run: npm run compile
+
+      # `editors/vscode/package.json` carries a placeholder version that no
+      # release step bumps, so packaging it verbatim would publish the same
+      # version on every tag — succeeding once and then failing forever, since
+      # both registries reject a version that already exists. Take the version
+      # from the tag instead. `--no-update-package-json` keeps this out of the
+      # checkout, so the release commit is unaffected.
+      - name: Resolve published version
+        id: version
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(node -p 'require("./package.json").version')"
+            echo "::notice::No tag in context; falling back to the manifest version $version."
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+          echo "Packaging extension version $version"
+
+      - name: Package .vsix
+        run: |
+          npx --no-install @vscode/vsce package "${{ steps.version.outputs.value }}" \
+            --no-git-tag-version --no-update-package-json --out harn-lang.vsix
+
+      # Always keep the packaged extension as a build artifact so a release
+      # is installable via "Install from VSIX" even before the marketplace
+      # secrets are configured.
+      - name: Upload .vsix artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: harn-lang-vsix
+          path: editors/vscode/harn-lang.vsix
+          if-no-files-found: error
+          # The comment above makes this a deliberate human-facing copy (install
+          # from VSIX without marketplace secrets), so it is declared at the
+          # current effective window rather than shortened.
+          retention-days: 30
+
+      # `--skip-duplicate` keeps a re-run (or a manual dispatch after a partial
+      # failure) from erroring on a version that already published.
+      - name: Publish to VS Code Marketplace
+        if: ${{ env.VSCE_PAT != '' }}
+        run: npx --no-install @vscode/vsce publish --packagePath harn-lang.vsix --skip-duplicate
+
+      - name: Publish to Open VSX
+        if: ${{ env.OVSX_PAT != '' }}
+        run: npx --no-install ovsx publish harn-lang.vsix --pat "$OVSX_PAT" --skip-duplicate
+
+      - name: Notice when unpublished
+        if: ${{ env.VSCE_PAT == '' && env.OVSX_PAT == '' }}
+        run: |
+          echo "::notice::Neither VSCE_PAT nor OVSX_PAT is set — packaged the" \
+            ".vsix as a build artifact but skipped marketplace publish." \
+            "Set the secrets (see the header of this workflow) to activate."

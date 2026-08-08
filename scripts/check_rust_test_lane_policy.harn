@@ -1,0 +1,170 @@
+/*
+ * Every CI step that RUNS Rust tests must get the 16 MiB stack that
+ * `scripts/ci/run_rust_test_lane.sh` establishes — the same size the
+ * production CLI uses (`CLI_RUNTIME_STACK_SIZE`).
+ *
+ * Rust's default spawned-thread stack is 2 MiB. Harn compilation and VM
+ * setup recurse deeper than that, so a lane that invokes cargo directly
+ * aborts with SIGABRT ("fatal runtime error: stack overflow") on tests the
+ * canonical `make test` lane passes. That failure is indistinguishable at a
+ * glance from whatever the lane claims to measure: `thread-parity.yml` ran
+ * raw `cargo nextest` and reported a stack-size difference as a thread-count
+ * parity failure for a week.
+ *
+ * A step satisfies the contract two ways, both already in use:
+ *   1. route the command through the lane wrapper, or
+ *   2. set RUST_MIN_STACK on the step, job, or workflow (what the Windows
+ *      lanes do, where per-iteration wrapper output would be noise).
+ *
+ * Build-only invocations (`--no-run`) never execute a test, so they are out
+ * of scope. `make`-driven lanes are out of scope too: the Makefile's
+ * HARN_RUST_TEST_ENV already owns the same contract.
+ */
+import { read_yaml } from "std/fs"
+import { empty_scope_failure } from "./guard_scope.harn"
+
+const WORKFLOW_GLOB = ".github/workflows/*.yml"
+
+const LANE_WRAPPER = "scripts/ci/run_rust_test_lane.sh"
+
+const STACK_ENV = "RUST_MIN_STACK"
+
+const REQUIRED_STACK = "16777216"
+
+pub type LaneViolation = {workflow: string, job: string, command: string, reason: string}
+
+/**
+ * Join backslash-continued lines so a multi-line shell command is judged as
+ * the single command it is. YAML folded scalars (`>-`) already arrive as one
+ * line; literal blocks (`|`) keep their continuations.
+ */
+pub fn logical_commands(run: string) -> list<string> {
+  let commands: list<string> = []
+  let pending = ""
+  for raw in run.split("\n") {
+    const line = trim(raw)
+    if line.ends_with("\\") {
+      pending = trim(pending + " " + trim(line.slice(0, len(line) - 1)))
+    } else {
+      const joined = trim(pending + " " + line)
+      if joined != "" {
+        commands = commands + [joined]
+      }
+      pending = ""
+    }
+  }
+  if pending != "" {
+    commands = commands + [pending]
+  }
+  return commands
+}
+
+/**
+ * True when the command actually executes tests. `cargo test --no-run` only
+ * builds them, and a commented line is prose.
+ */
+pub fn executes_rust_tests(command: string) -> bool {
+  if command.starts_with("#") {
+    return false
+  }
+  if contains(command, "--no-run") {
+    return false
+  }
+  return contains(command, "cargo nextest run") || contains(command, "cargo test")
+}
+
+pub fn routes_through_lane_wrapper(command: string) -> bool {
+  return contains(command, LANE_WRAPPER)
+}
+
+/** A step, job, or workflow `env:` block that pins the required stack. */
+pub fn env_pins_stack(env: dict) -> bool {
+  return trim("${env[STACK_ENV] ?? ""}") == REQUIRED_STACK
+}
+
+pub fn step_violations(
+  workflow: string,
+  job: string,
+  step: dict,
+  job_env: dict,
+  workflow_env: dict,
+) -> list<LaneViolation> {
+  const run = trim(step?.run ?? "")
+  if run == "" {
+    return []
+  }
+  const pinned = env_pins_stack(step?.env ?? {})
+    || env_pins_stack(job_env)
+    || env_pins_stack(workflow_env)
+  let violations: list<LaneViolation> = []
+  for command in logical_commands(run) {
+    if !executes_rust_tests(command) {
+      continue
+    }
+    if routes_through_lane_wrapper(command) || pinned {
+      continue
+    }
+    violations = violations
+      + [
+      {
+        workflow: workflow,
+        job: job,
+        command: command,
+        reason:
+          "runs Rust tests without ${LANE_WRAPPER} and without ${STACK_ENV}=${REQUIRED_STACK}",
+      },
+    ]
+  }
+  return violations
+}
+
+pub fn workflow_violations(workflow: string, document: dict) -> list<LaneViolation> {
+  let violations: list<LaneViolation> = []
+  const workflow_env = document?.env ?? {}
+  const jobs = document?.jobs ?? {}
+  for job in jobs.keys().sorted() {
+    const job_env = jobs[job]?.env ?? {}
+    for step in jobs[job]?.steps ?? [] {
+      violations = violations + step_violations(workflow, job, step, job_env, workflow_env)
+    }
+  }
+  return violations
+}
+
+fn workflow_name(path: string) -> string {
+  const parts = path.split("/")
+  return parts[len(parts) - 1]
+}
+
+pub fn main(harness: Harness) {
+  let violations: list<LaneViolation> = []
+  let scanned = 0
+  for path in harness.fs.glob(WORKFLOW_GLOB).sorted() {
+    const document = read_yaml(harness.fs, path, nil)
+    if document == nil {
+      continue
+    }
+    scanned = scanned + 1
+    violations = violations + workflow_violations(workflow_name(path), document)
+  }
+  const empty = empty_scope_failure("Rust test lane stack contract", scanned, WORKFLOW_GLOB)
+  if empty != "" {
+    harness.stdio.eprintln(empty)
+    harness.runtime.exit(1)
+  }
+  if len(violations) > 0 {
+    harness.stdio.eprintln("Rust test lane stack contract violated:")
+    for violation in violations {
+      harness.stdio.eprintln("  ${violation.workflow}:${violation.job}: ${violation.reason}")
+      harness.stdio.eprintln("    ${violation.command}")
+    }
+    harness.stdio.eprintln("")
+    harness.stdio.eprintln(
+      "Rust's default 2 MiB spawned-thread stack overflows on tests that drive the",
+    )
+    harness.stdio.eprintln("Harn VM. Route the command through ${LANE_WRAPPER}, or set")
+    harness.stdio.eprintln("${STACK_ENV}: \"${REQUIRED_STACK}\" on the step, job, or workflow.")
+    harness.runtime.exit(1)
+  }
+  harness.stdio.println("Rust test lane stack contract: OK (${scanned} workflow(s))")
+}

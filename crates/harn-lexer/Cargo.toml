@@ -1,0 +1,17 @@
+[package]
+name = "harn-lexer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Tokenizer with span tracking for the Harn programming language"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+
+[lints]
+workspace = true

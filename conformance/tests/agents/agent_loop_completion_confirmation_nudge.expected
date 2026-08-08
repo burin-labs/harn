@@ -1,0 +1,12 @@
+recover.status=done
+recover.iterations=3
+recover.successful=["lookup"]
+recover.nudge_on_turn2=true
+confirm.status=done
+confirm.iterations=2
+confirm.text=Confirmed: 42.
+confirm.nudge_on_turn2=true
+skip.status=done
+skip.iterations=2
+skip.rejected_has_failure=true
+skip.nudge_on_turn2=false

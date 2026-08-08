@@ -1,0 +1,13 @@
+/** Test http_mock with multi-* glob patterns */
+pipeline default(harness: Harness, task) {
+  // Setup mock with multi-glob
+  harness.testing.http_mock(
+    "GET",
+    "https://api.example.com/*/items/*",
+    {status: 200, body: "matched"},
+  )
+  const r = harness.net.get("https://api.example.com/users/items/123")
+  harness.stdio.println(r.body)
+  harness.stdio.println(r.status)
+  harness.testing.http_mock_clear()
+}

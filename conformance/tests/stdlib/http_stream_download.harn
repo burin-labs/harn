@@ -1,0 +1,33 @@
+pipeline default(harness: Harness) {
+  harness.testing.http_mock(
+    "GET",
+    "https://api.example.com/stream",
+    {status: 200, body: "stream-body", headers: {"x-test": "yes"}},
+  )
+  const stream = harness.net.stream_open("https://api.example.com/stream")
+  const info = harness.net.stream_info(stream)
+  const first = harness.net.stream_read(stream, 6)
+  const second = harness.net.stream_read(stream, 64)
+  const end = harness.net.stream_read(stream, 64)
+  const text = bytes_to_string(
+    bytes_concat(first ?? bytes_from_string(""), second ?? bytes_from_string("")),
+  )
+  const closed = harness.net.stream_close(stream)
+  const dst = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-http-download-" + harness.random.uuid() + ".txt",
+  )
+  harness.testing.http_mock(
+    "GET",
+    "https://api.example.com/download",
+    {status: 200, body: "downloaded", headers: {etag: "abc"}},
+  )
+  const download = harness.net.download("https://api.example.com/download", dst)
+  harness.stdio.println(info.status)
+  harness.stdio.println(info.headers["x-test"])
+  harness.stdio.println(text)
+  harness.stdio.println(type_of(end))
+  harness.stdio.println(closed)
+  harness.stdio.println(download.bytes_written)
+  harness.stdio.println(harness.fs.read_text(dst))
+}

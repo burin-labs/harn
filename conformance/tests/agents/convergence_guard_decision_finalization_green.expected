@@ -1,0 +1,7 @@
+finalization_runaway_on_green:post_green_proof_artifact_write:stop_on_green
+stop_on_green
+none:post_green_task_diff_present:
+none:verification_not_green:
+none:output_contract_not_satisfied:
+none:post_green_churn_below_threshold:
+finalization_runaway_on_green
