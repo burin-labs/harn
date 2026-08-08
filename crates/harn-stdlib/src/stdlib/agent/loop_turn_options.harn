@@ -5,6 +5,47 @@ import "std/agent/loop_support"
 import "std/agent/loop_tool_calls"
 import { AgentStallState } from "std/agent/stall_types"
 
+pub type AgentLoopCompletedDispatchStall = {state: AgentStallState, no_information_gain: bool}
+
+/**
+ * Fold the two stall signals that become authoritative only after dispatch:
+ * exact observation recurrence and completed read-only actuation.
+ *
+ * @effects: [agent]
+ * @errors: [agent_loop]
+ */
+pub fn __agent_loop_completed_dispatch_stall(args) -> AgentLoopCompletedDispatchStall {
+  const results = __dispatch_results_list(args.dispatch)
+  const completed = agent_stall_observe_completed_dispatch(
+    args.harness.agent,
+    args.session_id,
+    args.tool_calls,
+    args.dispatch,
+    args.iteration,
+    args.stall_config,
+    args.stall_state,
+    args.turn_opts?.tools,
+    args.turn_opts?.policy,
+  )
+  const state = completed.state
+    + {
+    monologue_actuation: agent_monologue_actuation_observe_completed_dispatch(
+      completed.state.monologue_actuation,
+      args.stall_config.monologue_actuation,
+      args.prior_read_streak,
+      len(results) > 0
+        && len(results) == len(args.tool_calls)
+        && results.all({ result -> __tool_result_ok(result) })
+        && agent_tool_calls_are_read_only(
+        args.tool_calls,
+        args.turn_opts?.tools,
+        args.turn_opts?.policy,
+      ),
+    ),
+  }
+  return {state: state, no_information_gain: completed.no_information_gain}
+}
+
 pub fn __sync_tool_search_state(opts, turn_opts) {
   let synced = opts
   if turn_opts?._tool_search_client != nil {

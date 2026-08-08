@@ -56,6 +56,21 @@ fn _state_with_advance(progress_changed, no_net_advance, remaining, vetoed, requ
   }
 }
 
+/**
+ * Like `_state` but carries the completed-dispatch evidence that every
+ * successful read-only observation this turn was already seen byte-for-byte.
+ */
+fn _state_with_information_gain(progress_changed, no_information_gain, remaining) {
+  return {
+    iteration: 10,
+    budget: {remaining: remaining},
+    turn: {tool_call_count: 1},
+    session: {required_tools_satisfied: true},
+    completion: {vetoed: false},
+    progress: {changed: progress_changed, no_information_gain: no_information_gain},
+  }
+}
+
 pipeline test_text_only_progress_extends(harness: Harness, task) {
   // Visible-text progress, ZERO tool calls this turn, at the boundary → extend.
   // This is the bug the rule table fixed.
@@ -117,6 +132,22 @@ pipeline test_real_progress_still_extends_with_advance_field(harness: Harness, t
     BUDGET,
     _state_with_advance(true, false, 0, false, true),
   )
+  assert_eq(cmd.action, "extend")
+  assert_eq(cmd.reason, "recent turn made progress")
+}
+
+pipeline test_repeated_observation_without_information_gain_does_not_extend(
+  harness: Harness,
+  task,
+) {
+  // A successful tool call is activity, but an exact read-only observation
+  // recurrence carries no new information and must not buy more runway.
+  const cmd = agent_loop_control_invoke({}, BUDGET, _state_with_information_gain(true, true, 0))
+  assert_eq(cmd.action, "none")
+}
+
+pipeline test_novel_observation_still_extends(harness: Harness, task) {
+  const cmd = agent_loop_control_invoke({}, BUDGET, _state_with_information_gain(true, false, 0))
   assert_eq(cmd.action, "extend")
   assert_eq(cmd.reason, "recent turn made progress")
 }

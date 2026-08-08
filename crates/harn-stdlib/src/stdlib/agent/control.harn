@@ -94,6 +94,7 @@ fn __agent_loop_state(args) -> AgentLoopState {
       changed: args.progress_changed,
       summary: args.progress_summary,
       no_net_advance: args.progress_no_net_advance ?? false,
+      no_information_gain: args.progress_no_information_gain ?? false,
     },
   }
 }
@@ -111,9 +112,9 @@ fn __agent_loop_state(args) -> AgentLoopState {
  * treated as "no progress"). Degenerate narration that never acts is bounded
  * independently by the iteration max and the stall detector.
  *
- * The ONE principled override is `progress.no_net_advance`: activity-without-
- * advancement is NOT progress. `progress.changed` is an ACTIVITY signal — it
- * fires merely because the model issued tool calls — which makes a thrashing run
+ * Structural outcome evidence can veto activity credit. `progress.changed` is
+ * an ACTIVITY signal — it fires merely because the model issued tool calls —
+ * which makes a thrashing run
  * (lots of edits/verifies, the SAME compile/test failure recurring turn after
  * turn, no error draining toward a green build) read as "progressing" every
  * turn and lets the loop extend its own budget without bound (observed
@@ -124,13 +125,17 @@ fn __agent_loop_state(args) -> AgentLoopState {
  * no-net-progress ripcord. Crucially it is OUTCOME-AWARE, not a second activity
  * notion: a productive edit changes the error signature (streak resets => still
  * progress) or a test passes (failure model clears => still progress), and
- * read-only / explore turns with no failing verification never set it. So this
- * AND only suppresses an extension for a *measured* no-net-advancement thrash;
- * every genuinely-advancing run keeps its budget. Keep this the *only* place
- * that defines "progress" so no other competing notion can be ANDed in.
+ * read-only / explore turns with no failing verification never set it.
+ * `progress.no_information_gain` covers that disjoint path: it is set only
+ * when every completed, explicitly read-only observation in the turn is an
+ * exact `(tool, args, result)` recurrence. A changed or mixed novel result
+ * leaves it false. These typed outcome facts meet here so extension policy has
+ * one definition of progress.
  */
 fn agent_loop_is_progressing(state: AgentLoopState) -> bool {
-  return state.progress.changed && !(state.progress?.no_net_advance ?? false)
+  return state.progress.changed
+    && !(state.progress?.no_net_advance ?? false)
+    && !(state.progress?.no_information_gain ?? false)
 }
 
 /**
@@ -266,6 +271,7 @@ fn __agent_progress_summary_text(
   tool_count: int,
   visible_text: string,
   no_net_advance: bool,
+  no_information_gain: bool,
 ) -> string {
   if completion_vetoed {
     return "completion gate vetoed"
@@ -274,6 +280,9 @@ fn __agent_progress_summary_text(
   // recurring): name the thrash so the recorded loop decision is auditable.
   if no_net_advance {
     return "tool activity without net verification progress"
+  }
+  if no_information_gain {
+    return "repeated read-only observations returned no new information"
   }
   if tool_count > 0 {
     return "executed " + to_string(tool_count) + " tool call(s)"
@@ -315,11 +324,14 @@ pub fn agent_loop_snapshot_state(args) -> AgentLoopState {
   // suppresses the extension when there WAS activity to begin with — a thrash —
   // never when there is genuinely no activity (that case is already "no progress").
   const no_net_advance = progress_changed && (args.progress_no_net_advance ?? false)
+  const no_information_gain = progress_changed
+    && (args.progress_no_information_gain ?? false)
   const progress_summary = __agent_progress_summary_text(
     completion_vetoed,
     tool_count,
     visible_text,
     no_net_advance,
+    no_information_gain,
   )
   return __agent_loop_state(
     {
@@ -347,6 +359,7 @@ pub fn agent_loop_snapshot_state(args) -> AgentLoopState {
       completion_feedback: completion_feedback,
       progress_changed: progress_changed,
       progress_no_net_advance: no_net_advance,
+      progress_no_information_gain: no_information_gain,
       progress_summary: progress_summary,
     },
   )

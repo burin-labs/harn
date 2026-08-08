@@ -114,3 +114,11 @@ pub type AgentStallObservation = {
   config: AgentStallConfig,
   hard_stop: bool,
 }
+
+/** Result of joining one completed tool dispatch to its originating calls. */
+pub type AgentCompletedObservation = {
+  state: AgentStallState,
+  warning: AgentStallWarning?,
+  feedback_deferred: bool,
+  no_information_gain: bool,
+}

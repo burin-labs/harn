@@ -66,6 +66,7 @@ pub import {
   agent_stall_initial_state,
   agent_stall_inject_feedback,
   agent_stall_no_net_progress,
+  agent_stall_observe_completed_dispatch,
   agent_stall_observe_tool_calls,
   agent_stall_repair_config,
   agent_stall_repeated_verified_pass,

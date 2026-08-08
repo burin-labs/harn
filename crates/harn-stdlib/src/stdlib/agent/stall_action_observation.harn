@@ -185,12 +185,49 @@ pub fn __agent_stall_observation_recurrence(
   return {counts: counts + {[key]: count}, count: count}
 }
 
+fn __agent_stall_call_id(call) -> string {
+  return to_string(call?.id ?? call?.tool_call_id ?? call?.call_id ?? "")
+}
+
+fn __agent_stall_dispatch_results(dispatch) -> list {
+  if type_of(dispatch) == "list" {
+    return dispatch
+  }
+  return dispatch?.results ?? []
+}
+
 /**
- * Fold one tool call and its result into adjacent and cumulative detectors.
+ * Join one originating call to its completed result. Stable call ids own the
+ * relation; result order is the compatibility fallback for text-mode calls
+ * whose provider did not supply an id.
  *
- * Cumulative recurrence is keyed by a digest of both the action signature and
- * the normalized result signature. A changing result therefore creates a new
- * counter structurally, while a dead observation survives unrelated calls.
+ * @effects: []
+ * @errors: []
+ */
+pub fn __agent_stall_completed_result(dispatch, call, index: int) -> dict? {
+  const results = __agent_stall_dispatch_results(dispatch)
+  const call_id = __agent_stall_call_id(call)
+  if call_id != "" {
+    for result in results {
+      if to_string(result?.tool_call_id ?? result?.call_id ?? result?.id ?? "") == call_id {
+        return result
+      }
+    }
+    return nil
+  }
+  if index >= 0 && index < len(results) && type_of(results[index]) == "dict" {
+    return results[index]
+  }
+  return nil
+}
+
+/**
+ * Fold one proposed tool call against the prior dispatch for consecutive
+ * action diagnostics.
+ *
+ * Cumulative recurrence is deliberately absent here: a new call cannot be
+ * paired to its own result before dispatch. Completed-dispatch recurrence is
+ * owned by `agent_stall_observe_completed_dispatch`.
  *
  * @effects: []
  * @errors: []
@@ -241,13 +278,6 @@ pub fn __agent_stall_process_call(
   } else {
     next_state.same_observation_streak + 1
   }
-  const recurrence = __agent_stall_observation_recurrence(
-    next_state,
-    signature,
-    obs_signature,
-    outcome != nil,
-    outcome_kind,
-  )
   const new_same_success_streak = if !same_action || outcome_kind != "ok" || turn_made_edit {
     if outcome_kind == "ok" && !turn_made_edit {
       1
@@ -287,7 +317,6 @@ pub fn __agent_stall_process_call(
       ""
     },
     same_observation_streak: new_same_observation_streak,
-    observation_recurrence_counts: recurrence.counts,
     same_success_streak: new_same_success_streak,
     same_error_streak: new_same_error_streak,
     context_window_error_streak: new_context_streak,
@@ -298,7 +327,6 @@ pub fn __agent_stall_process_call(
       context_streak: new_context_streak,
       same_error_streak: new_same_error_streak,
       same_observation_streak: new_same_observation_streak,
-      observation_recurrence_count: recurrence.count,
       same_success_streak: new_same_success_streak,
       outcome_kind: outcome_kind,
       ping_pong_cycles: next_state.ping_pong_alternations / 2,
@@ -338,19 +366,6 @@ pub fn __agent_stall_classify_trip(config: AgentStallConfig, s) -> dict? {
       pattern: "repeated_same_observation",
       count: s.same_observation_streak,
       threshold: config.repeat_same_observation,
-    }
-  }
-  if !repair_owns_repeat
-    && s.outcome_kind == "ok"
-    && s.same_observation_streak < config.repeat_same_observation
-    && s.observation_recurrence_count
-    == config
-    .repeat_same_observation {
-    return {
-      pattern: "repeated_observation_recurrence",
-      count: s.observation_recurrence_count,
-      threshold: config.repeat_same_observation,
-      advisory_only: true,
     }
   }
   if s.outcome_kind == "ok" && s.same_success_streak >= config.repeat_success {
