@@ -9,6 +9,45 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.60
+
+### Added
+
+- Add typed prerelease SemVer parsing and bump computation for release tooling.
+
+### Changed
+
+- Record post-warm merge_group walltime sample after dual-key Linux rust-cache refresh (#5003).
+- Touch the Linux rust-cache warm script so merge_group exercises the full CI path against the resident warm caches (#5003).
+
+### Fixed
+
+- Restore the main-scoped Linux `workspace-tests` rust-cache after exact-SHA
+  merge-group proof reuse, and grant `actions: write` to the CI cache writers so
+  Swatinem saves are no longer silently dropped. Upload the rolling merge-group
+  wall-time report as a CI artifact so p90 regressions stay visible (#5003).
+- Manifest and lifecycle VM hooks can call typed Harness methods (for example
+  `harness.agent.current_id` and `harness.runtime.store_get`) under a tool's
+  effect ceiling again. Trusted-bridge depth now exempts Harness capability
+  checks the same way it already exempted bridged builtins, so PreToolUse
+  handlers that migrated off ambient builtins can deny instead of failing on
+  `state:read`.
+- Capability migration no longer treats a same-file local callable as an ambient
+  builtin when the names collide. A Flow `@invariant` that calls a helper named
+  `scan` (or another retired ambient such as `read_file`) no longer fails closed
+  for `project` / `fs` authority it never uses.
+- Keep the Linux `workspace-tests` Actions cache resident under the 10 GiB
+  repo budget by protecting it (with `package-audit`) during prune and reserving
+  headroom before the post-merge refresh save, so Windows/macOS nightlies can no
+  longer LRU-evict the merge-gate warm graph (#5003).
+- Persist workspace-member artifacts in a new generation of the Linux
+  `workspace-tests` / `package-audit` rust-caches so merge_group no longer
+  rebuilds every `harn-*` crate after an exact Swatinem hit (#5003).
+- Warm and persist both Linux merge-gate rust-caches (`workspace-tests` and
+  `package-audit`) on post-merge refresh with Swatinem env fingerprints that
+  match their consumer lanes (no job-level `CARGO_BUILD_JOBS`), so exact-SHA
+  proof reuse cannot leave merge_group compiling cold (#5003).
+
 ## v0.10.59
 
 ### Breaking

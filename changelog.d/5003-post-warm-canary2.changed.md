@@ -1,1 +1,0 @@
-- Touch the Linux rust-cache warm script so merge_group exercises the full CI path against the resident warm caches (#5003).
