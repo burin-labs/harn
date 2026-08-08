@@ -3,7 +3,7 @@ set -euo pipefail
 
 readonly NEXTEST_VERSION="0.9.132"
 readonly NEUTRAL_FILTER='all()'
-readonly SECURITY_FILTER='(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and (binary(harn_hostlib) or binary(sandbox_npm_offline_install)))'
+readonly SECURITY_FILTER='(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and binary(harn_hostlib))'
 readonly EXPECTED_RUSTFLAGS='-D warnings -Clink-arg=-fuse-ld=mold'
 readonly EXPECTED_DEV_DEBUG='line-tables-only'
 readonly DEFAULT_MAX_BUNDLE_BYTES=9663676416  # 9 GiB: workspace nextest archive is ~8.4 GiB today

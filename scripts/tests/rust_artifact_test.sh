@@ -33,7 +33,7 @@ case "$1" in
     elif [[ "$#" -eq 13 && "$2" == "archive" && "$3" == "--locked" && \
       "$4" == "-p" && "$5" == "harn-vm" && "$6" == "-p" && "$7" == "harn-hostlib" && \
       "$8" == "--profile" && "$9" == "ci" && "${10}" == "-E" && \
-      "${11}" == '(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and (binary(harn_hostlib) or binary(sandbox_npm_offline_install)))' && \
+      "${11}" == '(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and binary(harn_hostlib))' && \
       "${12}" == "--archive-file" && -n "${13}" ]]; then
       printf 'security tests archive\n' > "${13}"
       : > "${CARGO_RECEIPTS:?}/nextest-security"
