@@ -17,6 +17,7 @@
     "dependencies": {},
     "sub_projects": {},
     "repo_map": {},
+    "codebase_fingerprint": {},
     "delta": {
       "type": "object",
       "properties": {
@@ -42,6 +43,7 @@
     "dependencies",
     "sub_projects",
     "repo_map",
+    "codebase_fingerprint",
     "delta"
   ],
   "type": "object"

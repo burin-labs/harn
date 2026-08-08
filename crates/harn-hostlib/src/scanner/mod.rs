@@ -30,6 +30,7 @@ use crate::tools::args::{
 mod commands;
 mod discover;
 mod extensions;
+mod fingerprint;
 mod folders;
 mod git;
 mod imports;
@@ -167,6 +168,8 @@ pub fn scan_project_with_git(
     let repo_map = folders::build_repo_map(&symbols, &files, opts.repo_map_token_budget);
     let mut sub_projects = subproject::detect_subprojects(&canonical, 2);
     attach_manifest_dependencies(&canonical, &mut project, &mut sub_projects);
+    let codebase_fingerprint =
+        fingerprint::build(&canonical, &project, &files, &symbols, &dependencies);
 
     sort_for_output(&mut files, &mut symbols, &mut dependencies);
 
@@ -181,6 +184,7 @@ pub fn scan_project_with_git(
         dependencies,
         sub_projects,
         repo_map,
+        codebase_fingerprint,
     };
     snapshot::save(&canonical, &result);
     result
@@ -324,6 +328,8 @@ pub fn scan_incremental_with_git(
     let repo_map = folders::build_repo_map(&symbols, &files, opts.repo_map_token_budget);
     let mut sub_projects = subproject::detect_subprojects(&canonical, 2);
     attach_manifest_dependencies(&canonical, &mut project, &mut sub_projects);
+    let codebase_fingerprint =
+        fingerprint::build(&canonical, &project, &files, &symbols, &dependencies);
 
     sort_for_output(&mut files, &mut symbols, &mut dependencies);
 
@@ -338,6 +344,7 @@ pub fn scan_incremental_with_git(
         dependencies,
         sub_projects,
         repo_map,
+        codebase_fingerprint,
     };
     snapshot::save(&canonical, &result);
     IncrementalScan { result, delta }
@@ -658,6 +665,10 @@ fn scan_result_to_value(result: &ScanResult, delta: Option<&ScanDelta>) -> VmVal
             list_of(&result.sub_projects, subproject_to_value),
         ),
         ("repo_map", str_value(&result.repo_map)),
+        (
+            "codebase_fingerprint",
+            str_value(&result.codebase_fingerprint),
+        ),
     ];
     if let Some(d) = delta {
         entries.push(("delta", delta_to_value(d)));
