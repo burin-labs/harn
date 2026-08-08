@@ -54,6 +54,7 @@ plan_rows="$("$HARN_BIN" run "$ROOT_DIR/scripts/verify_crate_packages_plan.harn"
 target_dir=""
 publishable_crates=()
 publishable_package_rows=()
+packaged_workspace_rows=()
 
 while IFS=$'\t' read -r row_kind package_name package_version manifest_path crate_dir; do
   case "$row_kind" in
@@ -138,6 +139,38 @@ extract_package() {
   rm -rf "$tmp/$crate-$version"
   tar -xzf "$crate_archive" -C "$tmp"
   inspect_packaged_includes "$tmp/$crate-$version" "$crate"
+  packaged_workspace_rows+=("$crate"$'\t'"$tmp/$crate-$version")
+}
+
+check_packaged_workspace() {
+  local workspace_manifest="$tmp/Cargo.toml"
+  local row crate package_dir package_rel
+
+  # Cargo's normalized package manifests have workspace inheritance and path
+  # dependencies removed. Reassemble those exact registry candidates into one
+  # temporary workspace, then patch their registry dependencies to the other
+  # extracted candidates. One resolver/build graph checks every publishable
+  # archive without recompiling overlapping dependency graphs per root.
+  {
+    printf '[workspace]\nresolver = "2"\nmembers = [\n'
+    for row in "${packaged_workspace_rows[@]}"; do
+      IFS=$'\t' read -r crate package_dir <<<"$row"
+      package_rel="${package_dir#"$tmp"/}"
+      printf '  "%s",\n' "$package_rel"
+    done
+    printf ']\n\n[patch.crates-io]\n'
+    for row in "${packaged_workspace_rows[@]}"; do
+      IFS=$'\t' read -r crate package_dir <<<"$row"
+      package_rel="${package_dir#"$tmp"/}"
+      printf '"%s" = { path = "%s" }\n' "$crate" "$package_rel"
+    done
+  } >"$workspace_manifest"
+
+  echo "=== Check all extracted publishable packages together ==="
+  HARN_REQUIRE_CLI_AOT=1 \
+    CARGO_TARGET_DIR="$package_check_target_dir" \
+    CARGO_BUILD_BUILD_DIR="$package_check_build_dir" \
+    cargo check --workspace --manifest-path "$workspace_manifest"
 }
 
 package_and_inspect_no_verify() {
@@ -171,9 +204,8 @@ if [[ ! -f "$stdlib_crate" ]]; then
   exit 1
 fi
 
-tar -xzf "$stdlib_crate" -C "$tmp"
+extract_package harn-stdlib "$stdlib_version"
 stdlib_pkg="$tmp/harn-stdlib-$stdlib_version"
-inspect_packaged_includes "$stdlib_pkg" "harn-stdlib"
 
 echo "=== Inspect harn-stdlib package contents ==="
 while IFS= read -r source; do
@@ -197,11 +229,6 @@ if grep -RE '\.\./harn-(vm|modules)' "$stdlib_pkg/src" >/dev/null; then
   exit 1
 fi
 
-echo "=== Check extracted harn-stdlib package ==="
-CARGO_TARGET_DIR="$package_check_target_dir" \
-  CARGO_BUILD_BUILD_DIR="$package_check_build_dir" \
-  cargo check --manifest-path "$stdlib_pkg/Cargo.toml"
-
 echo "=== Package harn-modules ==="
 cargo_package -p harn-modules --allow-dirty --no-verify "${local_harn_patches[@]}"
 
@@ -211,9 +238,8 @@ if [[ ! -f "$modules_crate" ]]; then
   exit 1
 fi
 
-tar -xzf "$modules_crate" -C "$tmp"
+extract_package harn-modules "$modules_version"
 modules_pkg="$tmp/harn-modules-$modules_version"
-inspect_packaged_includes "$modules_pkg" "harn-modules"
 
 echo "=== Inspect harn-modules package stdlib use ==="
 if [[ -e "$modules_pkg/src/stdlib" ]]; then
@@ -227,11 +253,6 @@ if grep -RE '\.\./harn-(vm|stdlib)' "$modules_pkg/src" >/dev/null; then
   exit 1
 fi
 
-echo "=== Check extracted harn-modules package ==="
-CARGO_TARGET_DIR="$package_check_target_dir" \
-  CARGO_BUILD_BUILD_DIR="$package_check_build_dir" \
-  cargo check --manifest-path "$modules_pkg/Cargo.toml" "${local_harn_patches[@]}"
-
 # `harn-hostlib` is a workspace path dep of `harn-cli`. Verifying it
 # packages cleanly here (a) catches scaffold issues for the crate on its
 # own and (b) mirrors the per-crate audit pattern used for harn-modules
@@ -240,18 +261,12 @@ CARGO_TARGET_DIR="$package_check_target_dir" \
 # for harn-cli's version requirement on harn-hostlib.
 package_and_inspect_no_verify harn-hostlib
 
-# `harn-vm` embeds runtime fixtures and schemas. Build the packaged crate
-# instead of only creating the tarball so workspace-relative `include_str!`
+# `harn-vm` embeds runtime fixtures and schemas. Its extracted archive joins
+# the exact packaged workspace below so workspace-relative `include_str!`
 # references fail here, before a broken crate reaches crates.io.
 echo "=== Package harn-vm ==="
 cargo_package -p harn-vm --allow-dirty --no-verify "${local_harn_patches[@]}"
 extract_package harn-vm "$vm_version"
-vm_pkg="$tmp/harn-vm-$vm_version"
-
-echo "=== Check extracted harn-vm package ==="
-CARGO_TARGET_DIR="$package_check_target_dir" \
-  CARGO_BUILD_BUILD_DIR="$package_check_build_dir" \
-  cargo check --manifest-path "$vm_pkg/Cargo.toml" "${local_harn_patches[@]}"
 
 echo "=== Package harn-cli ==="
 if [[ "${HARN_BOOTSTRAP_NEW_CRATES:-0}" == "1" ]]; then
@@ -264,17 +279,11 @@ fi
 if [[ "${HARN_BOOTSTRAP_NEW_CRATES:-0}" != "1" ]]; then
   cli_version="$(package_version harn-cli)"
   extract_package harn-cli "$cli_version"
-  cli_pkg="$tmp/harn-cli-$cli_version"
-
-  # harn-cli must package with the target-independent AOT payload, but its
-  # build script cannot rely on sibling workspace sources after extraction.
-  # This is the direct proof: require the payload and compile the tarball from
-  # outside the workspace with the same local dependency patch set.
-  echo "=== Check extracted harn-cli package with required AOT payload ==="
-  HARN_REQUIRE_CLI_AOT=1 \
-    CARGO_TARGET_DIR="$package_check_target_dir" \
-    CARGO_BUILD_BUILD_DIR="$package_check_build_dir" \
-    cargo check --manifest-path "$cli_pkg/Cargo.toml" "${local_harn_patches[@]}"
 fi
+
+# harn-cli must package with the target-independent AOT payload, and every
+# publishable crate must compile from its normalized archive rather than its
+# workspace source manifest. This is the direct combined proof.
+check_packaged_workspace
 
 echo "Package verification complete"

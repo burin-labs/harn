@@ -154,7 +154,7 @@ fn workflow() {
         permissions: {actions: "read", contents: "read"},
         steps: [
           {
-            name: "Wait for immutable Rust artifacts",
+            name: "Wait for shared Harn binary",
             run: "./scripts/ci/wait_for_run_artifacts.sh harn-cli.tar.zst",
           },
         ],
@@ -212,7 +212,7 @@ fn workflow() {
         if: "needs.changes.outputs.rust == 'true' && needs.rust-check-inputs.result == 'success'",
         steps: [
           {
-            name: "Run OS sandbox proofs on GitHub Ubuntu",
+            name: "Run Linux sandbox tests",
             id: "release-audit-rust-security",
             run:
               "scripts/ci/run_rust_test_lane.sh cargo nextest run --profile ci --archive-file harn-security-tests.tar.zst --workspace-remap workspace -E '${host_bound_filter}'",
@@ -223,13 +223,19 @@ fn workflow() {
         "runs-on": "ubuntu-latest",
         needs: artifact_consumer_needs,
         if: artifact_consumer_if,
+        steps: [],
+      },
+      "ci-walltime-report": {
+        "runs-on": "ubuntu-latest",
+        needs: artifact_consumer_needs,
+        if: artifact_consumer_if,
         steps: [
           {
-            name: "Summarize rolling merge-group wall time",
+            name: "Write CI timing report",
             run:
               "./scripts/ci/write_ci_walltime_report.sh \"$RUNNER_TEMP/ci-walltime-report.json\"",
           },
-          {name: "Upload rolling merge-group wall time", with: {"if-no-files-found": "error"}},
+          {name: "Upload CI timing report", with: {"if-no-files-found": "error"}},
         ],
       },
       "audit-scripts": {
@@ -239,7 +245,7 @@ fn workflow() {
         steps: [],
       },
       "ci-status": {
-        needs: ["rust-artifacts-ready"],
+        needs: ["rust-artifacts-ready", "ci-walltime-report"],
         steps: [
           {
             name: "Verify required CI jobs",
@@ -248,7 +254,11 @@ fn workflow() {
               + gha_expression(
               "needs['rust-artifacts-ready'].result",
             )
-              + "\"\nif [ \"$rust_artifacts_ready_result\" != success ]; then echo 'Rust artifact handoff failed or skipped'; fi\nif [ \"$rust_test_result\" = skipped ] && [ \"$COLOCATED_TESTS_DISABLED\" != true ]; then :; fi",
+              + "\"\nci_walltime_report_result=\""
+              + gha_expression(
+              "needs['ci-walltime-report'].result",
+            )
+              + "\"\nif [ \"$rust_artifacts_ready_result\" != success ]; then echo 'Rust artifact handoff failed or skipped'; fi\nif [ \"$ci_walltime_report_result\" != success ]; then echo 'CI timing report failed or skipped'; fi\nif [ \"$rust_test_result\" = skipped ] && [ \"$COLOCATED_TESTS_DISABLED\" != true ]; then :; fi",
           },
         ],
       },
@@ -472,7 +482,7 @@ pipeline test_rejects_co_location_without_fail_closed_fallback(harness: Harness,
 pipeline test_rejects_serialized_live_artifact_handoff(harness: Harness, task) {
   const valid = workflow()
   const producer = valid.jobs["rust-check-inputs"]
-  const harn_audit = valid.jobs["harn-audit"]
+  const walltime_report = valid.jobs["ci-walltime-report"]
   const invalid = {
     ...valid,
     jobs: {
@@ -490,11 +500,11 @@ pipeline test_rejects_serialized_live_artifact_handoff(harness: Harness, task) {
         if:
           "needs.changes.outputs.rust == 'true' && needs.rust-artifacts-ready.result == 'success'",
       },
-      "harn-audit": {
-        ...harn_audit,
-        steps: harn_audit.steps.map(
+      "ci-walltime-report": {
+        ...walltime_report,
+        steps: walltime_report.steps.map(
           { step ->
-            if step.name != "Upload rolling merge-group wall time" {
+            if step.name != "Upload CI timing report" {
               return step
             }
             return {...step, "continue-on-error": true, with: {"if-no-files-found": "warn"}}
@@ -515,7 +525,11 @@ pipeline test_rejects_serialized_live_artifact_handoff(harness: Harness, task) {
       "ci.yml:rust-security must wait for the producer-owned security archive without delaying CLI consumers",
     ),
   )
-  assert(errors.contains("ci.yml:harn-audit must publish a non-empty fail-closed wall-time report"))
+  assert(
+    errors.contains(
+      "ci.yml:ci-walltime-report must publish a non-empty fail-closed timing report off the conformance tail",
+    ),
+  )
 }
 
 @test
