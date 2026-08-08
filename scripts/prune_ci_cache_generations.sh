@@ -40,10 +40,15 @@ prune_to_listed_ceiling() {
     --arg mode_name "$mode_name" \
     --argjson configured_limit_bytes "$(configured_limit_bytes)" \
     '
-      def protected_key:
-        (.key | startswith("v0-rust-release-"))
-        or (.key | startswith("v0-rust-workspace-tests"))
+      def linux_merge_gate_key:
+        (.key | startswith("v0-rust-workspace-tests"))
         or (.key | startswith("v0-rust-package-audit"));
+      def protected_key:
+        linux_merge_gate_key
+        or (
+          $mode_name != "ensure_headroom"
+          and (.key | startswith("v0-rust-release-"))
+        );
       [.[].actions_caches[]
         | select(
             (.id | type) == "number"
@@ -151,6 +156,16 @@ case "$mode" in
       | .id
     '
     ;;
+  --clear-family-prefix)
+    family_prefix="${2:-}"
+    if [[ "$family_prefix" != "v0-rust-workspace-tests-" \
+      && "$family_prefix" != "v0-rust-package-audit-" ]] \
+      || [[ -n "${3:-}" ]]; then
+      echo "usage: $0 --clear-family-prefix v0-rust-{workspace-tests|package-audit}-" >&2
+      exit 64
+    fi
+    selector='[.[].actions_caches[] | select(.key | startswith($family_prefix)) | .id] | .[]'
+    ;;
   --to-budget)
     budget_bytes="${2:-}"
     if [[ ! "$budget_bytes" =~ ^[0-9]+$ ]] || [[ "$budget_bytes" -lt 1073741824 ]] \
@@ -177,7 +192,7 @@ case "$mode" in
     exit 0
     ;;
   *)
-    echo "usage: $0 --family-prefix v0-rust-release-<target>- | --all-release-families | --to-budget <bytes-at-least-1GiB> | --ensure-headroom <positive-bytes>" >&2
+    echo "usage: $0 --family-prefix v0-rust-release-<target>- | --all-release-families | --clear-family-prefix v0-rust-{workspace-tests|package-audit}- | --to-budget <bytes-at-least-1GiB> | --ensure-headroom <positive-bytes>" >&2
     exit 64
     ;;
 esac

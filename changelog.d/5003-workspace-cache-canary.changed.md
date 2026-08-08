@@ -1,1 +1,0 @@
-- Exercise the full merge-queue CI path against the workspace-crate cache generation for hosted wall-time evidence (#5003).

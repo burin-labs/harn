@@ -666,12 +666,14 @@ jobs:
             install_mold: true
             install_nextest: true
             warm_script: ./scripts/ci/warm_rust_cache.sh
+            save_headroom_bytes: 4294967296
           # Match package-audit: workflow RUSTFLAGS only (no mold).
           - cache_key: package-audit
             rustflags: "-D warnings"
             install_mold: false
             install_nextest: false
             warm_script: ./scripts/ci/warm_package_audit_cache.sh
+            save_headroom_bytes: 2147483648
     permissions:
       contents: read
       actions: write
@@ -695,14 +697,8 @@ jobs:
           packages: mold
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
-      # Free ~1.5 GiB under the 10 GiB repo cache ceiling before each save.
-      # Without this, release + Windows/macOS nightlies fill the pool and
-      # GitHub LRU-evicts the just-written Linux merge-gate entry (#5003).
-      - name: Reserve cache headroom for Linux CI
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: ./scripts/prune_ci_cache_generations.sh --ensure-headroom 1610612736
-      - uses: ./.github/actions/rust-cache
+      - id: rust-cache
+        uses: ./.github/actions/rust-cache
         continue-on-error: true
         with:
           shared-key: ${{ matrix.cache_key }}
@@ -710,6 +706,20 @@ jobs:
           cache-bin: false
           cache-workspace-crates: "true"
           save: "true"
+      # A cache miss means the immutable entry for this family is obsolete.
+      # Delete it only after restore (so its contents remain available to the
+      # local warm build), then reserve the measured per-family envelope (4 GiB
+      # workspace-tests, 2 GiB package-audit). Release compile caches yield
+      # here; the other Linux merge-gate family remains protected (#5003).
+      - name: Prepare Linux cache generation save
+        if: steps.rust-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HARN_CACHE_FAMILY_PREFIX: v0-rust-${{ matrix.cache_key }}-
+          HARN_CACHE_SAVE_HEADROOM_BYTES: ${{ matrix.save_headroom_bytes }}
+        run: |
+          ./scripts/prune_ci_cache_generations.sh --clear-family-prefix "$HARN_CACHE_FAMILY_PREFIX"
+          ./scripts/prune_ci_cache_generations.sh --ensure-headroom "$HARN_CACHE_SAVE_HEADROOM_BYTES"
       - name: Install cargo-nextest
         if: matrix.install_nextest
         uses: taiki-e/install-action@065d6a08a14e61e89fb0a4c10eecdbdef39c7d8e # v2.85.4

@@ -99,23 +99,34 @@ fn workflow() {
         strategy: {
           matrix: {
             include: [
-              {cache_key: "workspace-tests", warm_script: "./scripts/ci/warm_rust_cache.sh"},
-              {cache_key: "package-audit", warm_script: "./scripts/ci/warm_package_audit_cache.sh"},
+              {
+                cache_key: "workspace-tests",
+                warm_script: "./scripts/ci/warm_rust_cache.sh",
+                save_headroom_bytes: 4294967296,
+              },
+              {
+                cache_key: "package-audit",
+                warm_script: "./scripts/ci/warm_package_audit_cache.sh",
+                save_headroom_bytes: 2147483648,
+              },
             ],
           },
         },
         steps: [
           {
-            name: "Reserve cache headroom for Linux CI",
-            run: "./scripts/prune_ci_cache_generations.sh --ensure-headroom 1610612736",
-          },
-          {
+            id: "rust-cache",
             uses: "./.github/actions/rust-cache",
             with: {
               "shared-key": gha_expression("matrix.cache_key"),
               "cache-workspace-crates": "true",
               save: "true",
             },
+          },
+          {
+            name: "Prepare Linux cache generation save",
+            if: "steps.rust-cache.outputs.cache-hit != 'true'",
+            run:
+              "./scripts/prune_ci_cache_generations.sh --clear-family-prefix prefix\n./scripts/prune_ci_cache_generations.sh --ensure-headroom bytes",
           },
           {name: "Warm Cargo graph", run: gha_expression("matrix.warm_script")},
         ],
@@ -189,6 +200,48 @@ pipeline test_rejects_cache_writer_without_actions_write(harness: Harness, task)
   const errors = ci_linux_lane_policy_errors(invalid)
   assert(
     errors.contains("ci.yml:rust-cache-refresh must grant actions: write to persist rust-cache"),
+  )
+}
+
+@test
+pipeline test_rejects_unbounded_or_unconditional_cache_generation_save(harness: Harness, task) {
+  const valid = workflow()
+  const refresh = valid.jobs["rust-cache-refresh"]
+  const invalid_steps = refresh.steps.map(
+    fn(step) {
+      if step?.name == "Prepare Linux cache generation save" {
+        return {...step, if: "", run: "echo unbounded"}
+      }
+      return step
+    },
+  )
+  const invalid_matrix = refresh.strategy.matrix.include.map(
+    fn(entry) { return {...entry, save_headroom_bytes: 1610612736} },
+  )
+  const invalid = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "rust-cache-refresh": {
+        ...refresh,
+        strategy: {...refresh.strategy, matrix: {include: invalid_matrix}},
+        steps: invalid_steps,
+      },
+    },
+  }
+  const errors = ci_linux_lane_policy_errors(invalid)
+  assert(
+    errors.contains(
+      "ci.yml:rust-cache-refresh matrix legs must reserve their measured save envelope",
+    ),
+  )
+  assert(
+    errors.contains("ci.yml:rust-cache-refresh must prepare a generation only after a cache miss"),
+  )
+  assert(
+    errors.contains(
+      "ci.yml:rust-cache-refresh must replace stale generations with bounded save headroom",
+    ),
   )
 }
 
