@@ -361,4 +361,28 @@ mod fixture_dispatch_tests {
         assert!(!calls[0].host_operation);
         fixtures.pop_scope().expect("pop fixture scope");
     }
+
+    #[test]
+    fn runtime_only_host_singleton_preserves_legacy_reuse() {
+        let fixtures = CapabilityFixtureState::default();
+        fixtures.push_scope();
+        fixtures.respond(
+            "dashboard",
+            "write_bulletin",
+            Ok(VmValue::String(arcstr::ArcStr::from("pending-review"))),
+            None,
+            None,
+            true,
+        );
+
+        let params = crate::value::DictMap::new();
+        for _ in 0..2 {
+            let value = fixtures
+                .dispatch_host("dashboard", "write_bulletin", &params)
+                .expect("runtime-only host fixture should remain installed")
+                .expect("fixture should succeed");
+            assert_eq!(value.display(), "pending-review");
+        }
+        fixtures.pop_scope().expect("pop fixture scope");
+    }
 }

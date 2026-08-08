@@ -997,7 +997,8 @@ impl crate::vm::Vm {
                     response,
                     when,
                     repeat,
-                    capability_fixture_is_stable_read(capability_name, target_method),
+                    unregistered_ok
+                        || capability_fixture_is_stable_read(capability_name, target_method),
                 );
                 Ok(VmValue::Nil)
             }
@@ -1173,7 +1174,9 @@ fn capability_fixture_is_stable_read(capability: &str, method: &str) -> bool {
     let Some(entry) = crate::stdlib::capability_method_manifest_entry(capability, method) else {
         // Registered legacy host operations predate effect contracts and were
         // reusable under host mocks. Preserve that migration contract for a
-        // singleton; response scripts and explicit repeat still take priority.
+        // singleton; explicitly admitted runtime-only operations are handled
+        // by the caller because they have the same missing-contract shape.
+        // Response scripts and explicit repeat still take priority.
         return crate::stdlib::host::host_operation_is_registered(
             capability.field_name(),
             method,
