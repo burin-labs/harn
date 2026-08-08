@@ -9,6 +9,21 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.61
+
+### Fixed
+
+- Preserve Harn-managed local runtime PID records when process termination fails,
+  so `harn local stop` and sibling eviction can retry rather than losing ownership.
+- Adaptive agent loops no longer grant extra iterations to a read-only turn when
+  every successful observation repeats an exact result already seen in the
+  session. Completed dispatches now own observation recurrence, so interleaved
+  calls are joined to their actual results while changed polling results and
+  mixed novel turns retain progress credit.
+- Keep the hosted Linux merge-gate caches resident by replacing stale immutable
+  generations under measured save headroom instead of failing when release
+  caches fill the shared pool (#5003).
+
 ## v0.10.60
 
 ### Added
