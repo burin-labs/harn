@@ -9,6 +9,14 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.62
+
+### Added
+
+- `scanner.scan_project` and `scanner.scan_incremental` now return a deterministic
+  `codebase_fingerprint` Markdown projection, so every host can consume the same
+  model-oriented project context without rebuilding scanner heuristics.
+
 ## v0.10.61
 
 ### Fixed
