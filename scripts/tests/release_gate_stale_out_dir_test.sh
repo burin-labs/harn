@@ -19,7 +19,7 @@ version = "1.2.3"
 members = []
 EOF
 mkdir -p "$release_root/docs/src" "$release_root/crates/harn-vm" "$release_root/crates/harn-cli" "$release_root/.github"
-mkdir -p "$release_root/scripts"
+mkdir -p "$release_root/scripts/ci"
 touch "$release_root/README.md" "$release_root/CLAUDE.md"
 git -C "$release_root" init -q
 git -C "$release_root" config user.email test@example.com
@@ -194,6 +194,13 @@ exit 0
 SH
 chmod +x "$fake_bin/env"
 
+cat > "$release_root/scripts/ci/run_rust_lint_lane.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'rust-lint-lane-entrypoint\n' >> "$FAKE_MAKE_RECORD"
+SH
+chmod +x "$release_root/scripts/ci/run_rust_lint_lane.sh"
+
 cat > "$release_root/scripts/verify_crate_packages.sh" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -357,6 +364,12 @@ if [[ "$aot_status" -ne 0 ]]; then
 fi
 if [[ "$(grep -c '^gen-cli-aot$' "$aot_state/make-record")" -ne 2 ]]; then
   echo "source-only AOT recovery should generate exactly twice" >&2
+  cat "$aot_state/make-record" >&2
+  exit 1
+fi
+if ! grep -Fxq 'lint-no-rust-prompt-prose' "$aot_state/make-record" \
+  || ! grep -Fxq 'rust-lint-lane-entrypoint' "$aot_state/make-record"; then
+  echo "release Rust audit should keep the prompt policy and Clippy entrypoint as separate proofs" >&2
   cat "$aot_state/make-record" >&2
   exit 1
 fi
