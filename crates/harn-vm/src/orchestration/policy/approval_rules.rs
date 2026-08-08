@@ -1405,10 +1405,10 @@ fn glob_or_contains(pattern: &str, text: &str) -> bool {
     if pattern.contains('*') {
         let mut rest = text;
         for part in pattern.split('*').filter(|part| !part.is_empty()) {
-            let Some(index) = rest.find(part) else {
+            let Some((_, after)) = rest.split_once(part) else {
                 return false;
             };
-            rest = &rest[index + part.len()..];
+            rest = after;
         }
         true
     } else {

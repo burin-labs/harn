@@ -186,7 +186,10 @@ fn line_starts(content: &str) -> Vec<usize> {
         .collect()
 }
 
-#[expect(clippy::string_slice, reason = "line starts and regex match offsets are char boundaries")]
+#[expect(
+    clippy::string_slice,
+    reason = "line starts and regex match offsets are char boundaries"
+)]
 fn offset_to_line_col(content: &str, starts: &[usize], offset: usize) -> (usize, usize) {
     let line_index = starts
         .partition_point(|start| *start <= offset)

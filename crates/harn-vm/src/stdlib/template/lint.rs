@@ -228,6 +228,10 @@ fn scan_directive_filters(src: &str, start: usize, end: usize, filters: &mut Vec
             cursor += 1;
         }
         if cursor > name_start {
+            #[expect(
+                clippy::string_slice,
+                reason = "name bounds sit on ASCII filter-name bytes"
+            )]
             filters.push(LintConstruct::Filter {
                 name: src[name_start..cursor].to_string(),
                 start: name_start,
@@ -378,6 +382,7 @@ mod tests {
             ["uppr", "default"]
         );
         for (name, start, end) in found {
+            #[expect(clippy::string_slice, reason = "test input is ASCII")]
             assert_eq!(&source[start..end], name);
         }
     }

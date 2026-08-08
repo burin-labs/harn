@@ -47,6 +47,10 @@ pub fn truncate_end(text: &str, max_chars: usize) -> String {
 /// fingerprint, a prompt-budget slice — where an ellipsis would corrupt the
 /// value being keyed or measured. Anything a human reads should use
 /// [`truncate_end`] so the shortening stays visible.
+#[expect(
+    clippy::string_slice,
+    reason = "cut comes from char_indices of the same text"
+)]
 pub fn clip_end(text: &str, max_chars: usize) -> String {
     let mut chars = text.char_indices();
     match chars.nth(max_chars) {
@@ -81,6 +85,10 @@ pub fn truncate_start(text: &str, max_chars: usize) -> String {
 /// backs off to the nearest character boundary. When the budget cannot even
 /// hold the marker the result is empty, because emitting the marker would
 /// break the ceiling this function exists to enforce.
+#[expect(
+    clippy::string_slice,
+    reason = "end backs off until is_char_boundary holds"
+)]
 pub fn truncate_end_bytes(text: &str, max_bytes: usize) -> String {
     if text.len() <= max_bytes {
         return text.to_string();

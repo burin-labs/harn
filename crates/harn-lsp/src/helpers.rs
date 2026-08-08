@@ -251,7 +251,10 @@ pub(crate) fn is_member_access(source: &str, word_start: usize) -> bool {
 }
 
 /// Check if cursor is right after a `.` (for method completion).
-#[expect(clippy::string_slice, reason = "SourceText::offset returns char boundaries")]
+#[expect(
+    clippy::string_slice,
+    reason = "SourceText::offset returns char boundaries"
+)]
 pub(crate) fn char_before_position(source: &SourceText, position: Position) -> Option<char> {
     let offset = source.offset(position);
     let (line_start, _) = source.line_range(position.line)?;
@@ -307,7 +310,10 @@ fn dot_receiver_identifier(source: &SourceText, position: Position) -> Option<St
     Some(line[id_start..id_end].to_string())
 }
 
-#[expect(clippy::string_slice, reason = "i is lowered until is_char_boundary holds")]
+#[expect(
+    clippy::string_slice,
+    reason = "i is lowered until is_char_boundary holds"
+)]
 fn previous_char_boundary(text: &str, index: usize) -> usize {
     let mut i = index.min(text.len());
     while i > 0 && !text.is_char_boundary(i) {

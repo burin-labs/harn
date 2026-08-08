@@ -146,10 +146,7 @@ fn split_params(input: &str) -> Vec<String> {
 
 fn unquote_param(value: &str) -> String {
     let trimmed = value.trim();
-    let Some(inner) = trimmed
-        .strip_prefix('"')
-        .and_then(|s| s.strip_suffix('"'))
-    else {
+    let Some(inner) = trimmed.strip_prefix('"').and_then(|s| s.strip_suffix('"')) else {
         return trimmed.to_string();
     };
 

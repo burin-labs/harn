@@ -634,7 +634,10 @@ fn parse_harndoc(lines: &[&str], start: usize) -> (Option<String>, usize) {
     ((!text.is_empty()).then_some(text), index)
 }
 
-#[expect(clippy::string_slice, reason = "bounds come from str::find and char_indices")]
+#[expect(
+    clippy::string_slice,
+    reason = "bounds come from str::find and char_indices"
+)]
 fn parse_public_function_line(line: &str, doc: Option<String>) -> Option<StdlibPublicFunction> {
     let rest = line.strip_prefix("pub fn ")?.trim();
     let name_end = rest.find('(')?;
@@ -697,7 +700,10 @@ fn matching_paren_len(input: &str) -> Option<usize> {
     None
 }
 
-#[expect(clippy::string_slice, reason = "offsets come from char_indices and 1-byte ','")]
+#[expect(
+    clippy::string_slice,
+    reason = "offsets come from char_indices and 1-byte ','"
+)]
 fn split_top_level_params(params: &str) -> Vec<&str> {
     let mut out = Vec::new();
     let mut depth = 0isize;

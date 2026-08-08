@@ -150,6 +150,11 @@ fn extract_status_code(error: &VmError) -> Option<u16> {
     extract_status_from_text(&message)
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "idx comes from find() of ASCII needles on the byte-length-preserving \
+              ASCII-lowercased copy of message, so it is a char boundary in message"
+)]
 fn extract_status_from_text(message: &str) -> Option<u16> {
     let lowered = message.to_ascii_lowercase();
     let needles = ["http ", "status_code: ", "status: ", "status "];

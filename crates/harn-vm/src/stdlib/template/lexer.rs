@@ -1,3 +1,9 @@
+#![expect(
+    clippy::string_slice,
+    reason = "all offsets are find() results or sit adjacent to matched ASCII \
+              marker bytes ('{{', '}}', '-', '#', whitespace) in the template"
+)]
+
 use super::error::TemplateError;
 
 #[derive(Debug, Clone)]
@@ -93,15 +99,16 @@ pub(super) fn tokenize(src: &str) -> Result<Vec<Token>, TemplateError> {
         // Handle `{{ raw }}` specially: capture until `{{ endraw }}` verbatim.
         let body_trim_start = skip_ws(src, body_start);
         let raw_kw_end = body_trim_start + 3;
-        if raw_kw_end <= len && &src[body_trim_start..raw_kw_end.min(len)] == "raw" && {
-            let after = raw_kw_end;
-            after >= len
-                || bytes[after] == b' '
-                || bytes[after] == b'\t'
-                || bytes[after] == b'\n'
-                || bytes[after] == b'\r'
-                || (after + 1 < len && &src[after..after + 2] == "}}")
-                || (after + 2 < len && &src[after..after + 3] == "-}}")
+        if src[body_trim_start..].starts_with("raw") && {
+            // `raw_kw_end` is a char boundary here: "raw" just matched.
+            let after = &src[raw_kw_end..];
+            after.is_empty()
+                || after.starts_with(' ')
+                || after.starts_with('\t')
+                || after.starts_with('\n')
+                || after.starts_with('\r')
+                || after.starts_with("}}")
+                || after.starts_with("-}}")
         } {
             let Some(dir_close) = find_from(src, raw_kw_end, "}}") else {
                 let (line, col) = line_col(src, open);

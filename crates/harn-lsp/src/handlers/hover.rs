@@ -280,7 +280,10 @@ impl HarnLsp {
             None => return Ok(None),
         };
 
-        #[expect(clippy::string_slice, reason = "paren_pos comes from char_indices over prefix")]
+        #[expect(
+            clippy::string_slice,
+            reason = "paren_pos comes from char_indices over prefix"
+        )]
         let before = &prefix[..paren_pos];
         let name: String = before
             .chars()

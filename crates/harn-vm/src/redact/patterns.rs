@@ -272,6 +272,10 @@ pub fn scan_secret_patterns<'a>(input: &'a str, placeholder: &str) -> Cow<'a, st
         // recomputing offsets after each cut.
         let mut buffer = target.to_string();
         for (start, end) in matches.into_iter().rev() {
+            #[expect(
+                clippy::string_slice,
+                reason = "regex match offsets; reverse splices keep earlier offsets intact"
+            )]
             let matched_slice = &buffer[start..end];
             let replacement = if use_named_placeholder {
                 replacement_for(pattern_name, matched_slice)
@@ -331,6 +335,10 @@ fn ceil_char_boundary(s: &str, mut offset: usize) -> usize {
 /// whole in the neighbouring window. Global match ranges are collected in
 /// pattern-priority order (earlier patterns win on overlap, matching the
 /// single-pass path) and spliced once from the end so offsets stay valid.
+#[expect(
+    clippy::string_slice,
+    reason = "ws/we are char-boundary-snapped; gs/ge are window-relative regex offsets"
+)]
 fn scan_secret_patterns_windowed<'a>(
     input: &'a str,
     use_named_placeholder: bool,
@@ -611,6 +619,7 @@ mod tests {
         assert!(input.len() > MAX_SCAN_INPUT_BYTES);
         let out = scan_secret_patterns(&input, crate::redact::REDACTED_PLACEHOLDER);
         assert!(matches!(out, Cow::Owned(_)), "oversized secret must redact");
+        #[expect(clippy::string_slice, reason = "test input is ASCII")]
         assert!(
             !out.contains(AWS_KEY),
             "secret leaked: {}",

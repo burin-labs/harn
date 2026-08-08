@@ -48,7 +48,10 @@ pub fn normalize_diagnostic_path(path: &str) -> String {
     let bytes = posix.as_bytes();
     let mut drive = "";
     let mut rest = posix.as_str();
-    #[expect(clippy::string_slice, reason = "bytes 0 and 1 are ASCII, so 2 is a char boundary")]
+    #[expect(
+        clippy::string_slice,
+        reason = "bytes 0 and 1 are ASCII, so 2 is a char boundary"
+    )]
     if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
         drive = &posix[..2];
         rest = &posix[2..];

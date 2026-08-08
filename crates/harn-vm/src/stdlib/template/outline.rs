@@ -67,6 +67,7 @@ mod tests {
 
     /// Every block as `(kind, the source text it covers)`, so an
     /// expectation reads as the template it describes.
+    #[expect(clippy::string_slice, reason = "test input is ASCII")]
     fn blocks(src: &str) -> Vec<(OutlineBlockKind, &str)> {
         parse(src)
             .expect("template parses")

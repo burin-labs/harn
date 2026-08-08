@@ -45,6 +45,10 @@ fn workflow_options_harn() -> &'static str {
 /// shapes (only depth-1 keys are collected), and intersection prefixes
 /// (`type X = Y & { ... }` — the intersected alias's keys are NOT included;
 /// pass its own name to collect them separately).
+#[expect(
+    clippy::string_slice,
+    reason = "offsets come from find on the same string plus ASCII literal lengths"
+)]
 fn harn_alias_keys(source: &str, name: &str) -> BTreeSet<String> {
     let marker = format!("type {name} =");
     let start = source

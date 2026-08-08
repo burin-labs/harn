@@ -82,6 +82,10 @@ fn is_protocol_tag_position(index: &TextIndex, text: &str, idx: usize) -> bool {
 /// other word it wrote stops reaching the host. That subtraction is the single
 /// largest silent loss in this file, so the caller needs the remainder in hand
 /// to report it (harn#5142).
+#[expect(
+    clippy::string_slice,
+    reason = "last/whole.start()/whole.end() are regex match offsets on text"
+)]
 fn extract_user_response(text: &str) -> Option<(String, String)> {
     let index = TextIndex::build(text);
     let mut sections: Vec<String> = Vec::new();
@@ -111,6 +115,10 @@ fn extract_user_response(text: &str) -> Option<(String, String)> {
     Some((sections.join("\n\n"), remainder))
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "last/block.start()/block.end() are regex match offsets on text"
+)]
 fn unwrap_assistant_prose(text: &str) -> String {
     let index = TextIndex::build(text);
     let mut out = String::with_capacity(text.len());
@@ -264,6 +272,10 @@ fn strip_internal_json_fences(text: &str) -> String {
         .to_string()
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "every open_idx is an rfind offset on text, so a char boundary"
+)]
 fn strip_unclosed_internal_blocks(text: &str) -> String {
     let index = TextIndex::build(text);
     if let Some(open_idx) = text.rfind("<|tool_call|>") {
@@ -483,6 +495,11 @@ fn strip_bare_internal_json(text: &str) -> String {
     text.to_string()
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "leading_ws is a trim_start delta; visible_start is a serde_json byte offset \
+              landing after a complete JSON value"
+)]
 fn strip_leading_done_marker_control(text: &str) -> String {
     let trimmed = text.trim_start();
     let leading_ws = text.len() - trimmed.len();
@@ -496,6 +513,10 @@ fn strip_leading_done_marker_control(text: &str) -> String {
     text.to_string()
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "idx comes from char_indices of trimmed"
+)]
 fn strip_trailing_internal_json(text: &str) -> String {
     let trimmed = text.trim_end();
     for (idx, ch) in trimmed.char_indices().rev() {
@@ -506,6 +527,10 @@ fn strip_trailing_internal_json(text: &str) -> String {
     text.to_string()
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "the markers are ASCII literals, so any prefix length is a char boundary"
+)]
 fn strip_partial_marker_suffix(text: &str) -> String {
     const MARKERS: [&str; 13] = [
         "<|tool_call|>",

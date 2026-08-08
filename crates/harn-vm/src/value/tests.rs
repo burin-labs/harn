@@ -614,6 +614,10 @@ fn char_range_to_byte_range_matches_reference_slicing() {
                     "{text:?} [{start}..{end}] produced non-boundary byte range \
                      [{start_byte}..{end_byte}]"
                 );
+                #[expect(
+                    clippy::string_slice,
+                    reason = "start_byte/end_byte are asserted char boundaries above"
+                )]
                 assert_eq!(
                     &text[start_byte..end_byte],
                     reference_char_slice(text, start, end),

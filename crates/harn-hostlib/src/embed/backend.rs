@@ -179,7 +179,10 @@ fn extract_int(raw: &str, key: &str) -> Option<i64> {
     let end = rest
         .find(|c: char| !c.is_ascii_digit() && c != '-')
         .unwrap_or(rest.len());
-    #[expect(clippy::string_slice, reason = "`end` comes from find on `rest`, a char boundary")]
+    #[expect(
+        clippy::string_slice,
+        reason = "`end` comes from find on `rest`, a char boundary"
+    )]
     let digits = &rest[..end];
     digits.parse::<i64>().ok()
 }

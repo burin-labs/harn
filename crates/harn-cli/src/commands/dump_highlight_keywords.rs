@@ -280,7 +280,10 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::string_slice, reason = "generated keyword vocabulary output is ASCII")]
+    #[expect(
+        clippy::string_slice,
+        reason = "generated keyword vocabulary output is ASCII"
+    )]
     fn literals_are_not_also_keywords() {
         let out = generate_file(&language_vocabulary());
         // Literals must live in the literal field, not bleed into the

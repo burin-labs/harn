@@ -611,6 +611,10 @@ fn date_after(created_at: &str, cutoff: &str) -> Option<bool> {
     Some(parse_date_prefix(created_at)? > parse_date_prefix(cutoff)?)
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "prefix is 10 bytes verified ASCII digits and dashes above"
+)]
 fn parse_date_prefix(value: &str) -> Option<(u32, u32, u32)> {
     let trimmed = value.trim();
     let prefix = trimmed.get(..10)?;

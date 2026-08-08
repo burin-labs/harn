@@ -1186,10 +1186,7 @@ fn url_decode_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Some(Ok(byte)) = val
-                .get(i + 1..i + 3)
-                .map(|hex| u8::from_str_radix(hex, 16))
-            {
+            if let Some(Ok(byte)) = val.get(i + 1..i + 3).map(|hex| u8::from_str_radix(hex, 16)) {
                 result.push(byte);
                 i += 3;
                 continue;
@@ -1755,6 +1752,15 @@ C/edCMRM78P8eQTBCDUTK1ywSYaszvQZvneiW6gNtWEJndSreEcyyUdVvg==\n\
         let mut vm = vm();
         let result = call(&mut vm, "url_decode", vec![s("100%ZZ")]).unwrap();
         assert_eq!(result.display(), "100%ZZ");
+    }
+
+    #[test]
+    fn url_decode_multibyte_after_percent_does_not_panic() {
+        // Regression: the escape decoder sliced a fixed two-byte window after
+        // '%', which panicked mid-character when a multi-byte char followed.
+        let mut vm = vm();
+        let result = call(&mut vm, "url_decode", vec![s("100%€5")]).unwrap();
+        assert_eq!(result.display(), "100%€5");
     }
 
     #[test]

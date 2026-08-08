@@ -426,7 +426,10 @@ fn parse_bool_token(s: &str) -> Option<bool> {
 
 fn strip_surrounding_quotes(s: &str) -> String {
     for quote in ['"', '\''] {
-        if let Some(inner) = s.strip_prefix(quote).and_then(|rest| rest.strip_suffix(quote)) {
+        if let Some(inner) = s
+            .strip_prefix(quote)
+            .and_then(|rest| rest.strip_suffix(quote))
+        {
             return inner.to_string();
         }
     }

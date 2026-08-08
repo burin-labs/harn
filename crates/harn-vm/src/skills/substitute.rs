@@ -40,6 +40,10 @@ pub struct SubstitutionContext {
 ///   Non-Harn placeholders only use `extra_env`; this keeps arbitrary
 ///   process secrets from being exposed by a skill body.
 /// - A literal `$$` escapes to `$`. Everything else is untouched.
+#[expect(
+    clippy::string_slice,
+    reason = "the cursor advances by whole codepoints or ASCII bytes; `}` and digits are ASCII"
+)]
 pub fn substitute_skill_body(body: &str, ctx: &SubstitutionContext) -> String {
     let bytes = body.as_bytes();
     let mut out = String::with_capacity(body.len());

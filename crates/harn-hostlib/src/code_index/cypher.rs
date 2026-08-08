@@ -164,7 +164,7 @@ enum Token {
 
 #[expect(
     clippy::string_slice,
-    reason = "every slice bound points at or directly follows an ASCII byte, so it is a char boundary"
+    reason = "every slice bound is at or right after an ASCII byte, hence a char boundary"
 )]
 fn lex(input: &str) -> Result<Vec<Token>, CypherError> {
     let mut out: Vec<Token> = Vec::new();

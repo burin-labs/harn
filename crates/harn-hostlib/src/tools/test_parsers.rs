@@ -69,7 +69,7 @@ impl TestRecord {
 /// caller falls back to other parsers.
 #[expect(
     clippy::string_slice,
-    reason = "cursor and offsets come from find results plus ASCII literal widths, all char boundaries"
+    reason = "offsets come from find results plus ASCII literal widths, all char boundaries"
 )]
 pub(crate) fn parse_junit_xml(bytes: &[u8]) -> Result<Vec<TestRecord>, ()> {
     let text = std::str::from_utf8(bytes).map_err(|_| ())?;

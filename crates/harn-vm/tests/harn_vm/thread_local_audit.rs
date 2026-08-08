@@ -153,6 +153,10 @@ fn rust_files(root: &Path) -> Vec<PathBuf> {
     files
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "offsets come from find/rfind/char_indices of ASCII delimiters in source"
+)]
 fn thread_local_blocks(source: &str) -> Vec<&str> {
     let mut blocks = Vec::new();
     let mut offset = 0;
@@ -197,6 +201,10 @@ fn static_names(block: &str) -> Vec<String> {
         let Some(static_index) = trimmed.find("static ") else {
             continue;
         };
+        #[expect(
+            clippy::string_slice,
+            reason = "static_index is a find offset plus an ASCII literal length"
+        )]
         let rest = &trimmed[static_index + "static ".len()..];
         if let Some((name, _)) = rest.split_once(':') {
             names.push(name.trim().to_string());

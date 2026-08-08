@@ -437,6 +437,10 @@ fn empty_render(body: &str, envelope: &'static str) -> SectionRender {
     }
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "start and end are char_indices offsets (end includes len_utf8)"
+)]
 fn normalized_body(body: &str) -> (&str, usize, usize) {
     let start = body
         .char_indices()

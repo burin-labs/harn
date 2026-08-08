@@ -440,7 +440,10 @@ fn starts_quoted_phrase(raw_token: &str) -> bool {
     let Some(quote @ ('\'' | '"')) = token.chars().next() else {
         return false;
     };
-    #[expect(clippy::string_slice, reason = "quote is token's first char, so its len is a boundary")]
+    #[expect(
+        clippy::string_slice,
+        reason = "quote is token's first char, so its len is a boundary"
+    )]
     let rest = &token[quote.len_utf8()..];
     !rest.contains(quote)
 }
@@ -752,7 +755,10 @@ pub(super) fn is_drive_root(arg: &str) -> bool {
         return false;
     }
     // After `x:` the remainder must be empty, a bare separator, or a root glob.
-    #[expect(clippy::string_slice, reason = "the first two bytes are verified ASCII above")]
+    #[expect(
+        clippy::string_slice,
+        reason = "the first two bytes are verified ASCII above"
+    )]
     let rest = &arg[2..];
     matches!(rest, "" | "\\" | "/" | "\\*" | "/*" | "\\*.*" | "*.*")
 }

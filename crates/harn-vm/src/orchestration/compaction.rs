@@ -1096,7 +1096,10 @@ fn default_mask_tool_result(role: &str, content: &str) -> String {
     if line_count <= 3 {
         return format!("[{role}] {content}");
     }
-    #[expect(clippy::string_slice, reason = "floor_char_boundary returns a char boundary")]
+    #[expect(
+        clippy::string_slice,
+        reason = "floor_char_boundary returns a char boundary"
+    )]
     let preview = &first_line[..first_line.floor_char_boundary(120)];
     // Preserve failure-signal lines (bounded so a huge log can't defeat the
     // mask). Skip the first line itself — it is already in the preview.
@@ -1176,7 +1179,10 @@ fn collapse_repeats(lines: Vec<String>) -> Vec<String> {
     out
 }
 
-#[expect(clippy::string_slice, reason = "idx is an rfind offset on the same line")]
+#[expect(
+    clippy::string_slice,
+    reason = "idx is an rfind offset on the same line"
+)]
 fn strip_repeat_suffix(line: &str) -> &str {
     line.rfind(" (x")
         .filter(|_| line.ends_with(')'))
