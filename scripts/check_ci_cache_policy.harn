@@ -149,7 +149,7 @@ const EXECUTION_ONLY_TIMEOUT_MINUTES = "35"
 
 const ARTIFACT_READY_JOB = "rust-artifacts-ready"
 
-const LIVE_ARTIFACT_CONSUMERS = ["harn-audit", "audit-scripts"]
+const LIVE_ARTIFACT_CONSUMERS = ["harn-audit", "audit-scripts", "ci-walltime-report"]
 
 const WORKFLOW_GLOB = ".github/workflows/*.yml"
 
@@ -1472,7 +1472,7 @@ fn producer_artifact_order_errors(workflow) -> list<string> {
 fn artifact_ready_barrier_errors(workflow) -> list<string> {
   const ready_job = workflow?.jobs?.[ARTIFACT_READY_JOB]
   const ready_needs = ready_job?.needs ?? []
-  const ready_step = step_by_name(ready_job?.steps ?? [], "Wait for immutable Rust artifacts")
+  const ready_step = step_by_name(ready_job?.steps ?? [], "Wait for shared Harn binary")
   const ready_command = trim(ready_step?.run ?? "")
   if trim(ready_job?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER
     || trim(
@@ -1557,15 +1557,13 @@ fn live_artifact_handoff_errors(workflow) -> list<string> {
 }
 
 fn walltime_report_errors(workflow) -> list<string> {
-  const harn_audit = workflow?.jobs?.["harn-audit"]
-  const report_step = step_by_name(
-    harn_audit?.steps ?? [],
-    "Summarize rolling merge-group wall time",
-  )
-  const upload_report_step = step_by_name(
-    harn_audit?.steps ?? [],
-    "Upload rolling merge-group wall time",
-  )
+  const report_job = workflow?.jobs?.["ci-walltime-report"]
+  const report_step = step_by_name(report_job?.steps ?? [], "Write CI timing report")
+  const upload_report_step = step_by_name(report_job?.steps ?? [], "Upload CI timing report")
+  const status_job = workflow?.jobs?.["ci-status"]
+  const status_needs = status_job?.needs ?? []
+  const status_step = step_by_name(status_job?.steps ?? [], "Verify required CI jobs")
+  const status_command = trim(status_step?.run ?? "")
   if trim(report_step?.run ?? "")
     != "./scripts/ci/write_ci_walltime_report.sh \"$RUNNER_TEMP/ci-walltime-report.json\""
     || report_step?.["continue-on-error"]
@@ -1573,8 +1571,16 @@ fn walltime_report_errors(workflow) -> list<string> {
     || upload_report_step?.["continue-on-error"]
     != nil
     || trim(upload_report_step?.with?.["if-no-files-found"] ?? "")
-    != "error" {
-    return ["ci.yml:harn-audit must publish a non-empty fail-closed wall-time report"]
+    != "error"
+    || !status_needs.contains("ci-walltime-report")
+    || !contains(
+    status_command,
+    "needs['ci-walltime-report'].result",
+  )
+    || !contains(status_command, "CI timing report failed or skipped") {
+    return [
+      "ci.yml:ci-walltime-report must publish a non-empty fail-closed timing report off the conformance tail",
+    ]
   }
   return []
 }
@@ -1615,10 +1621,7 @@ fn colocated_rust_proof_errors(workflow) -> list<string> {
     ]
   }
   const security_job = workflow?.jobs?.["rust-security"]
-  const security_step = step_by_name(
-    security_job?.steps ?? [],
-    "Run OS sandbox proofs on GitHub Ubuntu",
-  )
+  const security_step = step_by_name(security_job?.steps ?? [], "Run Linux sandbox tests")
   const security_command = trim(security_step?.run ?? "")
   if trim(security_job?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER
     || trim(security_step?.id ?? "")

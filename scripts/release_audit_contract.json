@@ -21,7 +21,7 @@
       ]
     },
     {
-      "name": "Package audit",
+      "name": "Verify publishable crates",
       "job_id": "package-audit",
       "matrix_kind": "",
       "proofs": ["package-audit"],
@@ -57,7 +57,7 @@
       ]
     },
     {
-      "name": "Rust security proof",
+      "name": "Run Linux sandbox tests",
       "job_id": "rust-security",
       "matrix_kind": "",
       "proofs": ["rust-audit"],
@@ -70,7 +70,7 @@
       ]
     },
     {
-    "name": "Harn conformance",
+    "name": "Run Harn conformance tests",
     "job_id": "harn-audit",
     "matrix_kind": "conformance",
       "proofs": ["harn-audit"],
@@ -83,7 +83,7 @@
     ]
   },
   {
-    "name": "Harn audit gates",
+    "name": "Check Harn sources and generated files",
     "job_id": "harn-audit",
     "matrix_kind": "audit",
     "proofs": [
