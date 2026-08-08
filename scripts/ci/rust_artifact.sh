@@ -7,7 +7,7 @@ readonly SECURITY_FILTER='(package(harn-vm) and binary(harn_vm)) or (package(har
 readonly EXPECTED_RUSTFLAGS='-D warnings -Clink-arg=-fuse-ld=mold'
 readonly EXPECTED_DEV_DEBUG='line-tables-only'
 readonly DEFAULT_MAX_BUNDLE_BYTES=9663676416  # 9 GiB: workspace nextest archive is ~8.4 GiB today
-readonly DEFAULT_MAX_SECURITY_BUNDLE_BYTES=1073741824  # 1 GiB: filtered harn-vm library archive
+readonly DEFAULT_MAX_SECURITY_BUNDLE_BYTES=1073741824  # 1 GiB: filtered VM + Hostlib sandbox archive
 cleanup_dir=""
 trap '[[ -z "$cleanup_dir" ]] || rm -rf "$cleanup_dir"' EXIT
 
