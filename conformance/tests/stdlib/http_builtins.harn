@@ -1,0 +1,18 @@
+pipeline test(harness: Harness, task) {
+  // Test error handling: connection refused should throw, caught by try/catch
+  try {
+    const _r = harness.net.get("http://127.0.0.1:1", {timeout: 100})
+    harness.stdio.println("unexpected success")
+  } catch (e) {
+    // Should get a connection error
+    harness.stdio.println("caught_error")
+  }
+  // Test http_request exists and validates args
+  try {
+    const _r = harness.net.request("GET", "", {timeout: 100})
+    harness.stdio.println("unexpected success")
+  } catch (e2) {
+    harness.stdio.println("caught_empty_url")
+  }
+  harness.stdio.println("http_builtins_ok")
+}

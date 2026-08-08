@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/session/search_hybrid.request.json",
+  "title": "session.search_hybrid request",
+  "type": "object",
+  "properties": {
+    "root": { "type": "string", "minLength": 1 },
+    "query": { "type": "string", "minLength": 1 },
+    "filter": { "type": "object" },
+    "limit": { "type": ["integer", "null"], "minimum": 1 }
+  },
+  "required": ["root", "query"],
+  "additionalProperties": false
+}

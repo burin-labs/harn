@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/deps_get.response.json",
+  "title": "code_index.deps_get response",
+  "description": "Sorted ascending list of neighbour file ids.",
+  "type": "array",
+  "items": { "type": "integer", "minimum": 1 }
+}

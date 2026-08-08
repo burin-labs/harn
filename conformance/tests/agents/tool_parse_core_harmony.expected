@@ -1,0 +1,81 @@
+# fireworks harmony tool_call to= header
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"pub const ok = true;","path":"src/schema.zig"}
+  prose=""
+  answer=null
+  done=null
+# bare harmony message leak
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"zig test src/schema.zig"}
+  prose=""
+  answer=null
+  done=null
+# canonical blocks around a harmony leak
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"zig test src/schema.zig"}
+  prose="Checking the Zig parser."
+  answer=null
+  done=null
+# harmony tool_call names an unknown tool
+  calls=0 errors=0 violations=0 stray=0
+  prose="<|message|>tool_call to=unknown code<|message|>{\"command\":\"zig test\"}"
+  answer=null
+  done=null
+# harmony frames around a tagged call
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"create","content":"a","path":"a.rs"}
+  prose="I need to inspect the files first."
+  answer=null
+  done=null
+# harmony multicall batch with corrupted closes
+  calls=2 errors=0 violations=0 stray=2
+  call edit {"action":"create","content":"a","path":"a.rs"}
+  call run {"command":"cargo test"}
+  prose="We need to inspect first.\n\nRun the focused verifier."
+  answer=null
+  done=null
+# malformed harmony tool_call open
+  calls=2 errors=0 violations=0 stray=1
+  call run {"command":"cargo test -p core"}
+  call run {"command":"cargo test -p app"}
+  prose=""
+  answer=null
+  done=null
+# malformed harmony assistant header
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"zig test src/root.zig"}
+  prose="We need to inspect the file."
+  answer=null
+  done=null
+# malformed assistant header bounded before the call
+  calls=1 errors=0 violations=0 stray=0
+  call run {"command":"cargo test"}
+  prose="note: emit\n\nonly after the tool finishes"
+  answer=null
+  done=null
+# frame header bounded before the call
+  calls=1 errors=0 violations=0 stray=0
+  call run {"command":"cargo test -p harn-vm"}
+  prose="note: literal\n\nmarker in prose"
+  answer=null
+  done=null
+# harmony-like text inside a heredoc argument
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"create","content":"inline <assistant<|channel|>analysis<|message|>\n<tool_call<|message|>","path":"a.rs"}
+  prose=""
+  answer=null
+  done=null
+# unknown malformed harmony marker stays strict
+  calls=1 errors=0 violations=1 stray=0
+  call run {"command":"cargo test"}
+  vio "Unknown top-level tag \"<assistant<|bogus|>\". Use <tool_call>, <assistant_prose>, <user_response>, or <done> — no other tags are accepted at the top level."
+  prose="analysis"
+  answer=null
+  done=null
+# empty malformed harmony marker stays strict
+  calls=1 errors=0 violations=1 stray=1
+  call run {"command":"cargo test"}
+  vio "Unknown top-level tag \"<tool_call<||>\". Use <tool_call>, <assistant_prose>, <user_response>, or <done> — no other tags are accepted at the top level."
+  prose=""
+  answer=null
+  done=null

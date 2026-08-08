@@ -1,0 +1,78 @@
+import { fair_round_robin, pool_create, pool_wait } from "std/lifecycle/pool"
+import "std/triggers"
+
+/**
+ * Verifies SpawnToPool's `priority_from` and `key_from` extractors (#1889)
+ * read dotted JSON paths from the trigger event before the pool sees it,
+ * and that the named pool then composes correctly with priority + fair
+ * round-robin queue strategies (PL-02).
+ */
+fn factory_for(tag) {
+  return { _event -> return { -> tag } }
+}
+
+pipeline test(harness: Harness, task) {
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(
+    harness.random.range(100000, 999999),
+  )
+  const pool_name = "spawn-to-pool-extractor-demo-" + unique
+  const _ = pool_create(
+    harness.agent,
+    {name: pool_name, max_concurrent: 1, queue: fair_round_robin("key")},
+  )
+  const trigger_id = "trigger-spawn-to-pool-extract-" + unique
+  const handle: TriggerHandle = harness.runtime.trigger_register(
+    {
+      id: trigger_id,
+      kind: "issue.opened",
+      provider: "webhook",
+      handler: SpawnToPool(
+        {
+          pool: pool_name,
+          priority_from: "headers.priority",
+          key_from: "tenant_id",
+          task_factory: factory_for("seed"),
+        },
+      ),
+      when: nil,
+      retry: nil,
+      match: {events: ["issue.opened"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  const fired = harness.runtime.trigger_fire(
+    handle,
+    {
+      provider: "webhook",
+      kind: "issue.opened",
+      tenant_id: "acme",
+      headers: {priority: "7", x_delivery: "evt-" + unique},
+    },
+  )
+  // The dispatcher surfaces the extracted priority + key in the dispatch
+  // result so observers (audit, action graph) can correlate the pool task
+  // back to the originating event without re-parsing the payload.
+  harness.stdio.println(fired.status == "dispatched")
+  harness.stdio.println(fired.result?.pool == pool_name)
+  harness.stdio.println(fired.result?.priority == 7)
+  harness.stdio.println(fired.result?.key == "acme")
+  // Missing paths fall back to defaults (priority 0, no key) rather than
+  // failing the dispatch.
+  const fallback = harness.runtime.trigger_fire(
+    handle,
+    {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-fallback-" + unique}},
+  )
+  harness.stdio.println(fallback.status == "dispatched")
+  harness.stdio.println(fallback.result?.priority == 0)
+  harness.stdio.println(fallback.result?.key == nil)
+  const results = pool_wait(harness.agent, [fired.result, fallback.result])
+  harness.stdio.println(len(results) == 2)
+  harness.stdio.println(results[0].result == "seed")
+  harness.stdio.println(results[1].result == "seed")
+}

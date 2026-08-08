@@ -1,0 +1,68 @@
+import { MediaAssetOptions, media_asset_store_result } from "std/media/asset"
+import {
+  design_document_export_result,
+  design_document_result,
+  design_document_svg_result,
+  design_document_with_exact_text,
+} from "std/media/composition"
+
+pipeline test(harness: Harness, task) {
+  const png = bytes_from_base64(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  )
+  const root = harness.fs.mkdtemp_in_workspace("design-assets-")
+  const options: MediaAssetOptions = {
+    mime_type: "image/png",
+    width: 1,
+    height: 1,
+    root: root,
+    metadata: {kind: "fixture-background"},
+  }
+  const background = unwrap(media_asset_store_result(harness.fs, png, options))
+  const designed = unwrap(
+    design_document_with_exact_text(
+      "logo-1",
+      background,
+      "Cornflower Garden",
+      {width: 640, height: 360, fill: "#4B7BE5", font_size: 42.0},
+    ),
+  )
+  harness.stdio.log(designed.schema)
+  harness.stdio.log(to_string(len(designed.layers)))
+  harness.stdio.log(designed.layers[1].text)
+  const svg = unwrap(design_document_svg_result(harness.fs, designed, [background]))
+  harness.stdio.log(to_string(svg.contains("Cornflower Garden")))
+  harness.stdio.log(to_string(svg.contains("<text")))
+  const stem = path_join(root, "exports", "logo")
+  const exported = unwrap(
+    design_document_export_result(harness.fs, designed, [background], stem, {root: root}),
+  )
+  harness.stdio.log(to_string(harness.fs.exists(exported.document_path)))
+  harness.stdio.log(to_string(harness.fs.exists(exported.svg_path)))
+  harness.stdio.log(to_string(harness.fs.exists(exported.png_path)))
+  harness.stdio.log(exported.svg_asset.mime_type)
+  harness.stdio.log(to_string(exported.png_asset.parents[0] == background.uri))
+  const reopened = unwrap(
+    design_document_result(json_parse(harness.fs.read_text(exported.document_path))),
+  )
+  harness.stdio.log(reopened.layers[1].text)
+  const missing_text = design_document_result(
+    {
+      id: "bad",
+      width: 10,
+      height: 10,
+      layers: [
+        {
+          kind: "image",
+          id: "only-image",
+          asset_uri: background.uri,
+          x: 0.0,
+          y: 0.0,
+          width: 10.0,
+          height: 10.0,
+        },
+      ],
+    },
+  )
+  harness.stdio.log(unwrap_err(missing_text).kind)
+}

@@ -1,0 +1,12 @@
+// std/llm/safe.strip_think_blocks removes inline <think>/<thinking> reasoning
+// blocks from free-text model output.
+import { strip_think_blocks } from "std/llm/safe"
+
+pipeline default(harness: Harness) {
+  harness.stdio.println(strip_think_blocks("<think>secret reasoning</think>The answer is 4"))
+  harness.stdio.println(strip_think_blocks("<thinking>alt tag</thinking>Hello"))
+  harness.stdio.println(strip_think_blocks("<think>a</think>one <think>b</think>two"))
+  harness.stdio.println(strip_think_blocks("<think>line one\nline two</think>Done"))
+  harness.stdio.println(strip_think_blocks("no tags here"))
+  harness.stdio.println("[" + strip_think_blocks(nil) + "]")
+}

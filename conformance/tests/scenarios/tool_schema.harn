@@ -1,0 +1,48 @@
+pipeline default(harness: Harness) {
+  // Create registry with tools
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "search",
+    "Search the web",
+    {
+      handler: { query -> return "results for: " + query },
+      parameters: {query: {type: "string", description: "Search query"}},
+      returns: {type: "object", properties: {results: {type: "array"}}},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "calculate",
+    "Evaluate math",
+    {
+      handler: { _expr -> return "42" },
+      parameters: {
+        expression: {type: "string", description: "Expression to evaluate"},
+        precision: {type: "integer", description: "Optional decimal precision"},
+      },
+      returns: {type: "string"},
+    },
+  )
+  // Test tool_schema generates OpenAPI-like schema
+  const schema = tool_schema(tools)
+  harness.stdio.println(schema.schema_version)
+  harness.stdio.println(schema.tools.count())
+  harness.stdio.println(schema.tools[0].name)
+  harness.stdio.println(schema.tools[0].inputSchema["type"])
+  harness.stdio.println(schema.tools[0].outputSchema.type)
+  // Test tool_parse_call with single tool call (always returns a list)
+  const text =
+    "I'll search for that. <tool_call>{\"name\": \"search\", \"arguments\": {\"query\": \"tokyo\"}}</tool_call>"
+  const calls = tool_parse_call(text)
+  harness.stdio.println(calls.count())
+  harness.stdio.println(calls[0].name)
+  harness.stdio.println(calls[0].arguments.query)
+  // Test tool_parse_call with no tool call
+  const no_calls = tool_parse_call("Just regular text")
+  harness.stdio.println(no_calls.count())
+  // Test tool_format_result
+  const result = tool_format_result("search", "13.96 million people")
+  harness.stdio.println(result)
+  harness.stdio.println("tool_schema_ok")
+}

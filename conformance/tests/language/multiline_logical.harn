@@ -1,0 +1,25 @@
+pipeline default(harness: Harness) {
+  // Multiline || should work
+  const a = true
+  harness.stdio.println(a)
+  // Multiline && should work
+  const b = false
+  harness.stdio.println(b)
+  // Mixed multiline
+  const c = false || (true
+    && true)
+  harness.stdio.println(c)
+  // Multiline + should work
+  const d = "hello"
+    + " "
+    + "world"
+  harness.stdio.println(d)
+  // Multiline method chaining
+  const e = [1, 2, 3, 4, 5].filter({ x -> x > 2 }).map({ x -> x * 10 })
+  harness.stdio.println(e)
+  // Multiline |> pipe
+  const f = "hello world"
+    |> { s -> split(s, " ") }
+    |> { parts -> len(parts) }
+  harness.stdio.println(f)
+}

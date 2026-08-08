@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/manage_packages.response.json",
+  "title": "tools.manage_packages response",
+  "type": "object",
+  "properties": {
+    "operation": { "type": "string" },
+    "ecosystem": { "type": "string" },
+    "exit_code": { "type": "integer" },
+    "stdout": { "type": "string" },
+    "stderr": { "type": "string" },
+    "duration_ms": { "type": "integer", "minimum": 0 },
+    "lockfile_changed": { "type": "boolean" }
+  },
+  "required": ["operation", "ecosystem", "exit_code", "stdout", "stderr", "duration_ms"],
+  "additionalProperties": false
+}

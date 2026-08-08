@@ -1,0 +1,14 @@
+pipeline test(harness: Harness, task) {
+  const name = "world"
+  const single = "\${VAR}"
+  harness.stdio.log("single=${single}")
+  const multi = """
+    shell \${VAR:-default}
+    harn ${name}
+    """
+  harness.stdio.log(multi)
+  const escaped_only = """
+    only \${VAR}
+    """
+  harness.stdio.log(escaped_only)
+}

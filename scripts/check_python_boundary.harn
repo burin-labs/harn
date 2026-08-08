@@ -1,0 +1,380 @@
+import { help_requested, parse, parser } from "std/cli/argparse"
+import { find_files } from "std/fs"
+
+const SKIP_SEGMENTS = [
+  "/.burin/",
+  "/.claude/",
+  "/.git/",
+  "/.harn/",
+  "/.harn-runs/",
+  "/.harn-tmp/",
+  "/.venv/",
+  "/dist/",
+  "/node_modules/",
+  "/target/",
+]
+
+const PYTHON_ALLOWLIST = [
+  {
+    kind: "prefix",
+    pattern: "crates/harn-cli/assets/demo/",
+    category: "fixture",
+    reason: "Demo assets intentionally include foreign-language projects.",
+  },
+  {
+    kind: "prefix",
+    pattern: "crates/harn-hostlib/tests/fixtures/",
+    category: "fixture",
+    reason: "Hostlib AST/parser fixtures intentionally include foreign-language source.",
+  },
+  {
+    kind: "prefix",
+    pattern: "opentrustgraph-spec/examples/python/",
+    category: "external-example",
+    reason: "External spec examples intentionally include Python.",
+  },
+  {
+    kind: "prefix",
+    pattern: "spec/protocol-artifacts/python/",
+    category: "generated-foreign-binding",
+    reason: "Generated Python SDK binding for external consumers.",
+  },
+]
+
+const EMBEDDED_PYTHON_ALLOWLIST = [
+  {
+    path: "scripts/generate_sdk_clients.sh",
+    pattern: r"^\s*python3\s+-m\s+venv(?:\s|$)",
+    category: "foreign-runtime-bootstrap",
+    owner: "Python SDK generator",
+    reason:
+      "Creates the isolated Python environment required to generate and validate the Python SDK artifact.",
+  },
+]
+
+const EMBEDDED_TEXT_SUFFIXES = [".sh", ".mk", ".yml", ".yaml"]
+
+fn repo_root(fs: HarnessFs) -> string {
+  return path_normalize(path_join(fs.source_dir(), ".."))
+}
+
+fn rel_path(path: string, root: string) -> string {
+  const normalized = replace(path_normalize(path), "\\", "/")
+  const normalized_root = replace(path_normalize(root), "\\", "/")
+  const prefix = normalized_root + "/"
+  if normalized == normalized_root {
+    return "."
+  }
+  if normalized.starts_with(prefix) {
+    return normalized[len(prefix):]
+  }
+  return normalized
+}
+
+fn is_skipped(path: string) -> bool {
+  const wrapped = "/" + replace(path, "\\", "/")
+  for segment in SKIP_SEGMENTS {
+    if wrapped.contains(segment) {
+      return true
+    }
+  }
+  return false
+}
+
+pub fn python_boundary_rule_for(path: string) -> dict {
+  const normalized = replace(path_normalize(path), "\\", "/")
+  for rule in PYTHON_ALLOWLIST {
+    const pattern = to_string(rule.pattern)
+    if rule.kind == "exact" && normalized == pattern {
+      return rule + {allowed: true}
+    }
+    if rule.kind == "prefix" && normalized.starts_with(pattern) {
+      return rule + {allowed: true}
+    }
+  }
+  return {
+    allowed: false,
+    category: "forbidden",
+    reason:
+      "Repo orchestration should be Harn unless bootstrap, foreign artifact validation, or a subprocess fixture requires Python.",
+  }
+}
+
+fn git_python_files(fs: HarnessFs, process: HarnessProcess, root: string) -> list<string>? {
+  const top_level = process.run(
+    {program: "git", args: ["-C", root, "rev-parse", "--show-toplevel"]},
+  )
+  if top_level.exit_code != 0
+    || path_normalize(top_level.stdout.trim()) != path_normalize(root) {
+    return nil
+  }
+  const listed = process.run(
+    {
+      program: "git",
+      args: [
+        "-C",
+        root,
+        "ls-files",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "--",
+        ":(glob)**/*.py",
+      ],
+    },
+  )
+  if listed.exit_code != 0 {
+    return nil
+  }
+  return listed.stdout.lines().map({ path -> path.trim() }).filter(
+    { path -> path != "" && fs.exists(path_join(root, path)) },
+  )
+    .to_list()
+    .sort()
+}
+
+pub fn python_files(fs: HarnessFs, process: HarnessProcess, root: string = "") -> list<string> {
+  const resolved_root = if root == "" {
+    repo_root(fs)
+  } else {
+    path_normalize(root)
+  }
+  const tracked = git_python_files(fs, process, resolved_root)
+  if tracked != nil {
+    return tracked
+  }
+  let out: list<string> = []
+  for path in find_files(fs, resolved_root, "**/*.py") {
+    const rel = rel_path(path, resolved_root)
+    if is_skipped(rel) {
+      continue
+    }
+    out = out + [rel]
+  }
+  return out.sort()
+}
+
+pub fn line_invokes_python(line: string) -> bool {
+  return regex_captures(
+    r"(^|[|;&(:])\s*@?(?:(?:if|then|elif|while|until|do|!|env|exec|command|time)\s+)*(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*python(?:3(?:\.\d+)?)?(?:\s|$)",
+    line,
+  ).count
+    > 0
+}
+
+pub fn embedded_python_rule_for(path: string, line: string) -> dict {
+  for rule in EMBEDDED_PYTHON_ALLOWLIST {
+    if path == rule.path && regex_captures(rule.pattern, line).count > 0 {
+      return rule + {allowed: true}
+    }
+  }
+  return {
+    allowed: false,
+    category: "forbidden",
+    owner: "unclassified",
+    reason:
+      "Embedded Python control-plane commands must move to a typed Harn or owning tool boundary.",
+  }
+}
+
+fn is_embedded_text_path(path: string) -> bool {
+  const normalized = replace(path, "\\", "/")
+  if normalized == "Makefile" || normalized.ends_with("/Makefile") {
+    return true
+  }
+  for suffix in EMBEDDED_TEXT_SUFFIXES {
+    if normalized.ends_with(suffix) {
+      return true
+    }
+  }
+  return false
+}
+
+fn git_embedded_text_files(fs: HarnessFs, process: HarnessProcess, root: string) -> list<string>? {
+  const top_level = process.run(
+    {program: "git", args: ["-C", root, "rev-parse", "--show-toplevel"]},
+  )
+  if top_level.exit_code != 0
+    || path_normalize(top_level.stdout.trim()) != path_normalize(root) {
+    return nil
+  }
+  const listed = process.run({program: "git", args: ["-C", root, "ls-files"]})
+  if listed.exit_code != 0 {
+    return nil
+  }
+  return listed.stdout.lines().map({ path -> path.trim() }).filter(
+    { path ->
+      path != ""
+        && is_embedded_text_path(path)
+        && fs.exists(path_join(root, path))
+    },
+  )
+    .to_list()
+    .sort()
+}
+
+pub fn embedded_python_text_files(
+  fs: HarnessFs,
+  process: HarnessProcess,
+  root: string,
+) -> list<string> {
+  const tracked = git_embedded_text_files(fs, process, root)
+  if tracked != nil {
+    return tracked
+  }
+  let files: list<string> = []
+  for pattern in [
+    "**/*.sh",
+    "**/*.mk",
+    "**/*.yml",
+    "**/*.yaml",
+    "**/Makefile",
+    ".github/workflows/*.yml",
+    ".github/workflows/*.yaml",
+  ] {
+    for path in find_files(fs, root, pattern) {
+      const rel = rel_path(path, root)
+      if !is_skipped(rel) {
+        files = files + [rel]
+      }
+    }
+  }
+  const workflow_root = path_join(root, ".github/workflows")
+  if fs.exists(workflow_root) {
+    for name in fs.list_dir(workflow_root) {
+      const path = path_join(workflow_root, name)
+      if fs.exists(path) && (name.ends_with(".yml") || name.ends_with(".yaml")) {
+        files = files + [rel_path(path, root)]
+      }
+    }
+  }
+  const root_makefile = path_join(root, "Makefile")
+  if fs.exists(root_makefile) {
+    files = files + ["Makefile"]
+  }
+  return files.unique().sort()
+}
+
+pub fn embedded_python_findings(fs: HarnessFs, process: HarnessProcess, root: string) -> dict {
+  let allowed = []
+  let violations = []
+  for path in embedded_python_text_files(fs, process, root) {
+    const text = fs.read_text(path_join(root, path))
+    let line_no = 0
+    for line in text.lines() {
+      line_no = line_no + 1
+      if !line_invokes_python(line) {
+        continue
+      }
+      const rule = embedded_python_rule_for(path, line)
+      const row = {
+        path: path,
+        line: line_no,
+        category: rule.category,
+        owner: rule.owner,
+        reason: rule.reason,
+      }
+      if rule.allowed ?? false {
+        allowed = allowed + [row]
+      } else {
+        violations = violations + [row]
+      }
+    }
+  }
+  return {allowed: allowed, violations: violations}
+}
+
+pub fn check_python_boundary(fs: HarnessFs, process: HarnessProcess, root: string = "") -> dict {
+  const resolved_root = if root == "" {
+    repo_root(fs)
+  } else {
+    path_normalize(root)
+  }
+  let allowed = []
+  let violations = []
+  for path in python_files(fs, process, resolved_root) {
+    const rule = python_boundary_rule_for(path)
+    const row = {kind: "python-file", path: path, category: rule.category, reason: rule.reason}
+    if rule.allowed ?? false {
+      allowed = allowed + [row]
+    } else {
+      violations = violations + [row]
+    }
+  }
+  const embedded = embedded_python_findings(fs, process, resolved_root)
+  for row in embedded.allowed {
+    allowed = allowed + [row + {kind: "embedded-command"}]
+  }
+  for row in embedded.violations {
+    violations = violations + [row + {kind: "embedded-command"}]
+  }
+  return {
+    root: resolved_root,
+    allowed: allowed,
+    violations: violations,
+    allowed_count: len(allowed),
+    violation_count: len(violations),
+  }
+}
+
+fn render_report(report: dict) -> string {
+  if report.violation_count == 0 {
+    return "python boundary check passed: "
+      + to_string(report.allowed_count)
+      + " classified Python boundary use(s); no unclassified Python files or embedded control-plane commands remain."
+  }
+  let lines = [
+    "python boundary check failed: " + to_string(report.violation_count)
+      + " unclassified Python boundary use(s)",
+    "",
+    "Port repo orchestration to Harn, delete dead Python, or add a narrow foreign-runtime/bootstrap allowlist entry with an owner and reason.",
+  ]
+  for violation in report.violations {
+    const suffix = violation?.line == nil ? "" : ":" + to_string(violation.line)
+    const location = to_string(violation.path) + suffix
+    lines = lines + ["- " + location + " (" + to_string(violation.reason) + ")"]
+  }
+  return join(lines, "\n")
+}
+
+fn arg_spec() {
+  return parser(
+    {
+      name: "check_python_boundary",
+      args: [
+        {kind: "flag", name: "root", long: "--root", parse: "string", default: ""},
+        {kind: "switch", name: "json", long: "--json", default: false},
+      ],
+    },
+  )
+}
+
+fn main(harness: Harness) {
+  if help_requested(argv) {
+    harness.stdio.println(
+      "usage: harn run scripts/check_python_boundary.harn -- [--json] [--root PATH]",
+    )
+    return nil
+  }
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
+    harness.runtime.exit(2)
+  }
+  const parsed = unwrap(parsed_result).options
+  const report = check_python_boundary(harness.fs, harness.process, to_string(parsed?.root ?? ""))
+  if parsed?.json ?? false {
+    harness.stdio.println(json_stringify_pretty(report))
+  } else {
+    const out = render_report(report)
+    if report.violation_count == 0 {
+      harness.stdio.println(out)
+    } else {
+      harness.stdio.eprintln(out)
+    }
+  }
+  if report.violation_count > 0 {
+    harness.runtime.exit(1)
+  }
+  return nil
+}

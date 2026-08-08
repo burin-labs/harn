@@ -1,0 +1,34 @@
+import { with_llm_script } from "std/testing"
+
+/**
+ * Plain-string ladder sugar: `models: ["model-a", "model-b"]` is shorthand
+ * for `[{model: "model-a"}, {model: "model-b"}]`. The first rung fails with a
+ * retryable transport error and the ladder advances to the second.
+ */
+pipeline test(harness: Harness, task) {
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        // This fixture owns route escalation, not production cooldown timing.
+        error: {
+          category: "overloaded",
+          message: "HTTP 503 overloaded",
+          status: 503,
+          retry_after_ms: 0,
+        },
+        model: "mock-cheap",
+        provider: "mock",
+      },
+      {text: "strong wins", model: "mock-strong", provider: "mock"},
+    ],
+    { ->
+      const result = harness.llm.call("hi", nil, {models: ["mock-cheap", "mock-strong"]})
+      harness.stdio.println(result.text)
+      const attempts = result.routing.attempts
+      harness.stdio.println(len(attempts))
+      harness.stdio.println(attempts[0].status)
+      harness.stdio.println(attempts[1].status)
+    },
+  )
+}

@@ -1,0 +1,14 @@
+pipeline default(harness: Harness) {
+  // Quoted string keys (JSON-style)
+  const d = {name: "Alice", age: 30}
+  harness.stdio.println(d.name)
+  harness.stdio.println(d.age)
+  // Mixed: quoted and unquoted
+  const mixed = {unquoted: 1, quoted: 2}
+  harness.stdio.println(mixed.unquoted)
+  harness.stdio.println(mixed.quoted)
+  // Quoted keys with special characters
+  const special = {"content-type": "json", "x-api-key": "abc"}
+  harness.stdio.println(special["content-type"])
+  harness.stdio.println(special["x-api-key"])
+}

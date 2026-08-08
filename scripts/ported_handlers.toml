@@ -1,0 +1,99 @@
+# LOC ratchet config consumed by scripts/check_ported_handler_loc.harn.
+#
+# Each `[[handler]]` entry caps the maximum line count for a CLI subcommand
+# handler that has been (fully or partially) ported off Rust onto the
+# self-hosted `.harn` cli/* stack. The intent is to catch *new* growth in
+# the legacy Rust path — not to force a cleanup of the existing baseline.
+# Budgets are deliberately set to the current LOC + a small slack (≈5
+# lines) so a no-op refactor doesn't trip the gate but a real regression
+# does.
+#
+# When a port advances and shrinks the Rust handler, drop the budget to
+# the new current+5 in the same PR. When a new handler joins the ratcheted
+# set (a fresh W ticket landing), append a new `[[handler]]` block with
+# its current+5 budget; do not retroactively tighten existing entries.
+#
+# Tracks epic #2293 (subticket #2314 = C1).
+
+[[handler]]
+path = "crates/harn-cli/src/commands/try_cmd.rs"
+max_loc = 112
+
+[[handler]]
+path = "crates/harn-cli/src/commands/trace.rs"
+max_loc = 226
+
+[[handler]]
+path = "crates/harn-cli/src/commands/explain.rs"
+max_loc = 481
+
+[[handler]]
+path = "crates/harn-cli/src/commands/init.rs"
+max_loc = 946
+
+[[handler]]
+path = "crates/harn-cli/src/commands/tool.rs"
+max_loc = 350
+
+[[handler]]
+path = "crates/harn-cli/src/commands/eval_prompt.rs"
+max_loc = 1201
+
+[[handler]]
+path = "crates/harn-cli/src/commands/eval_coding_agent.rs"
+max_loc = 2391
+
+[[handler]]
+path = "crates/harn-cli/src/commands/precompile.rs"
+max_loc = 285
+
+[[handler]]
+path = "crates/harn-cli/src/lib.rs"
+# Bumped from 3162 to 3175 to fit one-time growth from the workspace lint
+# floor commit (clippy::semicolon_if_nothing_returned + reformatted call
+# sites + a single #[allow(clippy::large_stack_frames)] attr on async_main).
+# Re-bumped to 3218: lib.rs reached 3213 on main via #2628 (fast-mode
+# speed/service_tier wiring into the live request path + cost calc) without a
+# matching budget bump, leaving the ratchet stale for every downstream PR.
+# Re-bumped to 3335: lib.rs reached 3330 on main via #2784 without a matching
+# budget bump, leaving the merge queue ratchet stale for downstream PRs.
+# Re-bumped to 3400: lib.rs reached 3395 on main via #3181 (the `harn run
+# --as-job` one-shot worker entrypoint, `run_as_job`) without a matching budget
+# bump, leaving the ratchet stale for every downstream PR.
+max_loc = 3400
+
+[[handler]]
+path = "crates/harn-cli/src/commands/models/list.rs"
+max_loc = 222
+
+[[handler]]
+path = "crates/harn-cli/src/commands/models/recommend.rs"
+max_loc = 500
+
+[[handler]]
+path = "crates/harn-cli/src/commands/models/test.rs"
+max_loc = 150
+
+[[handler]]
+path = "crates/harn-cli/src/commands/routes.rs"
+max_loc = 805
+
+# 690 → 720 (2026-06-10, docstring-lint simplification): the new
+# `derived_example` wire field is extraction-layer plumbing that belongs
+# in Rust (`synthesize_example` call sites + per-arm field init); the
+# render layer stays in stdlib/cli/graph.harn.
+[[handler]]
+path = "crates/harn-cli/src/commands/graph.rs"
+max_loc = 720
+
+[[handler]]
+path = "crates/harn-cli/src/commands/doctor.rs"
+max_loc = 2446
+
+[[handler]]
+path = "crates/harn-cli/src/commands/provider.rs"
+max_loc = 355
+
+[[handler]]
+path = "crates/harn-cli/src/commands/providers.rs"
+max_loc = 381

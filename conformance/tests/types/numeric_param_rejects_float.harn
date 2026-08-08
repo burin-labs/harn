@@ -1,0 +1,10 @@
+fn takes_int(n: int) -> string {
+  return "int param ACCEPTED ${n}"
+}
+
+pipeline test(harness: Harness, task) {
+  // Native parameters and the portable kernel must agree: a float does not
+  // satisfy a declared int (harn#6267). Use a dynamic value so the static
+  // checker cannot fold the call away.
+  harness.stdio.log(takes_int(json_parse("2.5")))
+}

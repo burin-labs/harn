@@ -1,0 +1,54 @@
+// The shape of scripts/generated_artifacts.toml.
+//
+// Five scripts read that registry and none of them validated it, so each
+// carried its own assumption about the shape and a malformed entry surfaced
+// wherever that particular reader happened to dereference it. This module is
+// the one place that says what the file has to look like; readers import it
+// rather than restating it.
+//
+// It describes the fields the readers actually use, with
+// `additional_properties: true` throughout, so adding a field to the registry
+// does not require editing this file — only removing or retyping one does.
+import "std/schema"
+
+/**
+ * How a `check-*` target is dispatched by the drift-preflight aggregators.
+ *
+ * Constrained to the three tiers rather than left a free string: a typo would
+ * otherwise match no tier, silently drop that target out of both aggregators,
+ * and read as "this check has no members".
+ */
+pub fn preflight_tier_schema() {
+  return schema_enum(["source", "binary", "excluded"])
+}
+
+/** One regenerable artifact: how it is generated and what it reads and writes. */
+pub fn generated_artifact_schema() {
+  return schema_object(
+    {
+      id: schema_field(schema_string()),
+      gen: schema_field(schema_string(), false),
+      check: schema_field(schema_string(), false),
+      outputs: schema_field(schema_list(schema_string()), false),
+      sources: schema_field(schema_list(schema_string()), false),
+    },
+    {additional_properties: true},
+  )
+}
+
+/** The whole registry document. */
+pub fn generated_artifacts_schema() {
+  return schema_object(
+    {
+      artifact: schema_field(schema_list(generated_artifact_schema()), false),
+      preflight: schema_field(
+        schema_object(
+          {dispatch: schema_field(schema_dict(preflight_tier_schema()), false)},
+          {additional_properties: true},
+        ),
+        false,
+      ),
+    },
+    {additional_properties: true},
+  )
+}

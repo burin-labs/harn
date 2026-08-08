@@ -1,0 +1,8 @@
+pipeline test(harness: Harness, task) {
+  const add = { x, y = 10 -> x + y }
+  harness.stdio.log(add(5))
+  harness.stdio.log(add(5, 20))
+  const greet = { name, prefix = "Hello" -> "${prefix}, ${name}" }
+  harness.stdio.log(greet("world"))
+  harness.stdio.log(greet("world", "Hi"))
+}

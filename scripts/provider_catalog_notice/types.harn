@@ -1,0 +1,106 @@
+pub type NoticeProvenance = "authenticated" | "verified_link" | "unverified" | "failed"
+
+pub type ProviderNotice = {
+  source_id: string,
+  retrieved_at: string,
+  provider: string,
+  text?: string,
+  source_url?: string,
+  provenance: NoticeProvenance,
+}
+
+pub type PriceField = "input_per_mtok" \
+  | "output_per_mtok" \
+  | "cache_read_per_mtok" \
+  | "cache_write_per_mtok"
+
+pub type EndpointField = "base_url" | "chat_endpoint" | "completion_endpoint"
+
+pub type CapabilityField = "native_tools" \
+  | "vision" \
+  | "prompt_caching" \
+  | "audio_supported" \
+  | "pdf_supported" \
+  | "files_api_supported"
+
+pub type PriceChange = {
+  kind: "price",
+  provider: string,
+  model_id: string,
+  effective_date: string,
+  field: PriceField,
+  old_value?: float,
+  new_value: float,
+  evidence: string,
+}
+
+pub type RetirementChange = {
+  kind: "retirement",
+  provider: string,
+  model_id: string,
+  effective_date: string,
+  old_value: bool,
+  new_value: bool,
+  replacement?: string,
+  evidence: string,
+}
+
+pub type EndpointChange = {
+  kind: "endpoint",
+  provider: string,
+  model_id: string,
+  effective_date: string,
+  field: EndpointField,
+  old_value: string,
+  new_value: string,
+  evidence: string,
+}
+
+pub type CapabilityChange = {
+  kind: "capability",
+  provider: string,
+  model_id: string,
+  effective_date: string,
+  capability: CapabilityField,
+  old_value: bool,
+  new_value: bool,
+  evidence: string,
+}
+
+pub type ProviderCatalogCandidate = PriceChange \
+  | RetirementChange \
+  | EndpointChange \
+  | CapabilityChange
+
+pub type NoticeExtraction = {
+  classification: "candidate" | "irrelevant",
+  candidate?: ProviderCatalogCandidate,
+  reason?: string,
+}
+
+pub type NoticeDisposition = "patch" | "no_op" | "incomplete_add" | "rejected"
+
+pub type NoticeValidationReceipt = {
+  schema_version: "harn.provider_catalog_notice.v1",
+  notice_id: string,
+  source_id: string,
+  retrieved_at: string,
+  provenance: NoticeProvenance,
+  provider: string,
+  model_id?: string,
+  change_kind?: string,
+  effective_date?: string,
+  disposition: NoticeDisposition,
+  reason: string,
+  evidence?: string,
+  source_url?: string,
+  source_path?: string,
+  unresolved_verification: list<string>,
+  checks: list<string>,
+}
+
+pub type NoticePlan = {
+  receipt: NoticeValidationReceipt,
+  candidate?: ProviderCatalogCandidate,
+  patch?: dict,
+}

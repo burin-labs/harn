@@ -1,0 +1,26 @@
+pipeline default(harness: Harness) {
+  // Optional chaining on nil returns nil
+  const x = nil
+  harness.stdio.println(x?.count)
+  harness.stdio.println(x?.name)
+  // Optional chaining on non-nil works normally
+  const d = {name: "Alice", age: 30}
+  harness.stdio.println(d.name)
+  harness.stdio.println(d.age)
+  // Chained optional access
+  const nested = {inner: {value: 42}}
+  harness.stdio.println(nested.inner.value)
+  // Optional on list
+  const items = [1, 2, 3]
+  harness.stdio.println(items.count)
+  harness.stdio.println(items.first)
+  // Nil propagation through chain
+  const empty = nil
+  harness.stdio.println(empty?.inner?.value)
+  // Optional chaining on non-dict types returns nil for unknown props
+  const n = 42
+  harness.stdio.println(n?.foo)
+  const s = "hello"
+  harness.stdio.println(s.count)
+  harness.stdio.println(s?.foo)
+}

@@ -1,0 +1,43 @@
+{
+  "schema_version": "1",
+  "objective": "Add a `request_timeout_ms` config option with tests and docs",
+  "entry": "discover",
+  "nodes": {
+    "discover": {
+      "kind": "read_fact",
+      "purpose": "Inspect existing config schema",
+      "prompt": "Read the canonical config schema and one example of how an integer option is wired through validation and defaults.",
+      "tools": ["read"]
+    },
+    "implement_config": {
+      "kind": "agent_loop",
+      "purpose": "Wire the new option",
+      "prompt": "Add `request_timeout_ms: int` with default 30000 to the config schema and respect it where the request loop times out.",
+      "tools": ["read", "edit"],
+      "effects": ["writes_files"],
+      "agent_loop": {"max_iterations": 8, "done_sentinel": "DONE"}
+    },
+    "implement_tests": {
+      "kind": "sub_agent",
+      "purpose": "Delegate the test draft to a tighter persona",
+      "sub_agent": {
+        "worker_name": "config-test-author",
+        "preset": "writer",
+        "task_label": "draft config tests"
+      }
+    },
+    "join": {"kind": "join", "purpose": "Synchronize impl + tests"},
+    "verify": {
+      "kind": "verify",
+      "verify": {"command": "cargo test -p config", "expect_status": 0}
+    }
+  },
+  "edges": [
+    {"from": "discover", "to": "implement_config"},
+    {"from": "discover", "to": "implement_tests"},
+    {"from": "implement_config", "to": "join"},
+    {"from": "implement_tests", "to": "join"},
+    {"from": "join", "to": "verify"}
+  ],
+  "capabilities": {"tools": ["read", "edit", "run"], "side_effect_level": "writes_files"}
+}

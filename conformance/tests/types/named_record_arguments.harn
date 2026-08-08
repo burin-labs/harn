@@ -1,0 +1,22 @@
+type Repository = {owner: string, repo: string}
+
+type Branch = {branch: string}
+
+type BranchRequest = {owner: string, repo: string, branch: string}
+
+type IntersectedBranchRequest = Repository & Branch
+
+fn direct(request: BranchRequest) -> string {
+  return request.owner + "/" + request.repo + ":" + request.branch
+}
+
+fn intersected(request: IntersectedBranchRequest) -> string {
+  return request.owner + "/" + request.repo + ":" + request.branch
+}
+
+pipeline default(harness: Harness) {
+  harness.stdio.println(direct({owner: "octo", repo: "demo", branch: "main"}))
+  harness.stdio.println(intersected({owner: "octo", repo: "demo", branch: "next"}))
+  const internal = {owner: "octo", repo: "demo", branch: "release", force: true}
+  harness.stdio.println(direct(internal))
+}

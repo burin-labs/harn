@@ -1,0 +1,135 @@
+import {
+  edit_apply_old_new_patch,
+  edit_check_lazy_truncation,
+  edit_explain_whitespace_difference,
+  edit_splice_lines,
+  edit_strip_line_number_prefixes,
+  edit_validate_changed_regions,
+} from "std/edit"
+
+pipeline default(harness: Harness) {
+  const exact = edit_apply_old_new_patch(
+    "alpha\n  color: red;\nomega\n",
+    "color: red;",
+    "color: blue;",
+  )
+  harness.stdio.println(exact.ok)
+  harness.stdio.println(exact.match_kind)
+  harness.stdio.println(exact.start_line)
+  harness.stdio.println(exact.changed_regions[0].start_line)
+  harness.stdio.println(exact.before_sha256.starts_with("sha256:"))
+  const ambiguous = edit_apply_old_new_patch("x\nx\n", "x", "y")
+  harness.stdio.println(ambiguous.ok)
+  harness.stdio.println(ambiguous.error_code)
+  harness.stdio.println(ambiguous.candidate_count)
+  harness.stdio.println(ambiguous.candidate_contexts[0].start_line)
+  harness.stdio.println(ambiguous.candidate_contexts[0].end_line)
+  const whitespace_only = edit_apply_old_new_patch("let x = 1\n", "let x = 1", "let   x = 1")
+  harness.stdio.println(whitespace_only.ok)
+  harness.stdio.println(whitespace_only.error_code)
+  const structural = edit_apply_old_new_patch(
+    "  fn compute_value() {\n    return one\n    return two\n  }\n  call_compute_value()\n",
+    "fn compute_value(){\nreturn one\nreturn two\n}\ncall_compute_value()",
+    "fn compute_value() {\n  return three\n  return four\n}\ncall_compute_value()",
+    {match: "structural"},
+  )
+  harness.stdio.println(structural.ok)
+  harness.stdio.println(structural.match_kind)
+  harness.stdio.println(structural.patched.contains("return three"))
+  harness.stdio.println(structural.whitespace_explanation.contains("indent"))
+  const unsafe_structural = edit_apply_old_new_patch(
+    "function f() {\n  return 1\n}\n",
+    "function f(){\nreturn 1\n}",
+    "function f() {\n  return 2\n}",
+    {match: "structural"},
+  )
+  harness.stdio.println(unsafe_structural.ok)
+  harness.stdio.println(unsafe_structural.error_code)
+  const relaxed_structural = edit_apply_old_new_patch(
+    "function f() {\n  return 1\n}\n",
+    "function f(){\nreturn 1\n}",
+    "function f() {\n  return 2\n}",
+    {match: "structural", structural_require_anchored_lines: "either"},
+  )
+  harness.stdio.println(relaxed_structural.ok)
+  harness.stdio.println(relaxed_structural.match_kind)
+  const lazy_dots = edit_apply_old_new_patch("a\nb\nc", "b", "... unchanged ...")
+  harness.stdio.println(lazy_dots.ok)
+  harness.stdio.println(lazy_dots.error_code)
+  const lazy_comment = edit_apply_old_new_patch(
+    "alpha\nbody\nomega\n",
+    "body",
+    "kept\n// ... rest of implementation",
+  )
+  harness.stdio.println(lazy_comment.ok)
+  harness.stdio.println(lazy_comment.error_code)
+  const lazy_todo = edit_apply_old_new_patch(
+    "alpha\nbody\nomega\n",
+    "body",
+    "kept\n// TODO: implement the rest",
+  )
+  harness.stdio.println(lazy_todo.ok)
+  harness.stdio.println(lazy_todo.error_code)
+  const lazy_pass = edit_apply_old_new_patch(
+    "alpha\nbody\nomega\n",
+    "body",
+    "kept_body\npass # ... rest",
+  )
+  harness.stdio.println(lazy_pass.ok)
+  harness.stdio.println(lazy_pass.error_code)
+  const spliced = edit_splice_lines("a\nb\nc", 1, 2, "B")
+  harness.stdio.println(spliced.ok)
+  harness.stdio.println(spliced.patched)
+  const inserted = edit_splice_lines("a\nc", 1, 1, "b")
+  harness.stdio.println(inserted.ok)
+  harness.stdio.println(inserted.patched)
+  const deleted = edit_splice_lines("a\nb\nc", 1, 2, "")
+  harness.stdio.println(deleted.ok)
+  harness.stdio.println(deleted.patched)
+  const line_delete = edit_apply_old_new_patch("a\n  b\nc", "b", "", {match: "line"})
+  harness.stdio.println(line_delete.ok)
+  harness.stdio.println(line_delete.patched)
+  const stripped = edit_strip_line_number_prefixes("   1 | foo\n   2 | bar\n   3 | baz\n")
+  harness.stdio.println(stripped)
+  const unstripped = edit_strip_line_number_prefixes("foo\nbar\nbaz\n")
+  harness.stdio.println(unstripped)
+  const prefixed_patch = edit_apply_old_new_patch(
+    "foo\nbar\nbaz\n",
+    "   1 | foo\n   2 | bar\n   3 | baz",
+    "FOO\nBAR\nBAZ",
+    {strip_line_numbers: true},
+  )
+  harness.stdio.println(prefixed_patch.ok)
+  harness.stdio.println(prefixed_patch.patched)
+  const tabs_vs_spaces = edit_explain_whitespace_difference("\tfoo\n\tbar", "  foo\n  bar")
+  harness.stdio.println(tabs_vs_spaces)
+  const blank_diff = edit_explain_whitespace_difference("foo\nbar", "foo\n\nbar")
+  harness.stdio.println(blank_diff)
+  const identical = edit_explain_whitespace_difference("foo", "foo")
+  harness.stdio.println(identical == "")
+  const lazy_truncation = edit_check_lazy_truncation(
+    "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\nm\nn\no\np\nq\nr\ns\nt\nu\nv\nw\nx\ny\nz",
+    "a\n// ... rest of file",
+  )
+  harness.stdio.println(lazy_truncation.ok)
+  harness.stdio.println(lazy_truncation.error_code)
+  const small_file = edit_check_lazy_truncation("one\ntwo\nthree", "// ...")
+  harness.stdio.println(small_file.ok)
+  const real_rewrite = edit_check_lazy_truncation(
+    "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\nk\nl\nm\nn\no\np\nq\nr\ns\nt\nu\nv\nw\nx\ny\nz",
+    "alpha\nbeta\ngamma\ndelta",
+  )
+  harness.stdio.println(real_rewrite.ok)
+  const region_report = edit_validate_changed_regions(
+    "a\nb\nc",
+    "a\nB\nc",
+    [{start_line: 1, end_line: 1}],
+  )
+  harness.stdio.println(region_report.ok)
+  const multi_region_report = edit_validate_changed_regions(
+    "a\nb\nc\nd",
+    "A\nb\nC\nd",
+    [{start_line: 0, end_line: 0}, {start_line: 2, end_line: 2}],
+  )
+  harness.stdio.println(multi_region_report.ok)
+}

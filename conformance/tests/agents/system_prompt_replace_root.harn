@@ -1,0 +1,88 @@
+// A replacement system prompt is an exclusive assembly root, not one more
+// contributor. Prove that at the provider boundary so no builder-local test
+// can pass while a later assembly or placement path re-adds context.
+import { agent_loop } from "std/agent/loop"
+import { AgentLoopOptions } from "std/agent/options"
+import { SystemReplacement } from "std/llm/options"
+import { llm_text, with_llm_script } from "std/testing"
+import { ToolRegistry } from "std/tools"
+
+const REPLACEMENT = "Only these exact replacement bytes reach the system channel."
+
+fn replacement_test_tools() -> ToolRegistry {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "noop",
+    "A no-op test tool.",
+    {
+      handler: { _args -> "ok" },
+      parameters: {},
+      returns: {type: "string"},
+      guidance: "TOOL GUIDANCE MUST NOT LEAK",
+    },
+  )
+  return tools
+}
+
+pipeline default(harness: Harness) {
+  // agent_loop normally contributes the positional primary, project/profile
+  // fragments, loop/tool contracts, and per-tool guidance. Replace mode must
+  // suppress all of them while leaving the tool surface itself available.
+  with_llm_script(
+    harness.llm,
+    [llm_text("done ##DONE##")],
+    { ->
+      const replacement: SystemReplacement = {mode: "replace", content: REPLACEMENT}
+      const opts: AgentLoopOptions = {
+        provider: "mock",
+        model: "mock",
+        loop_until_done: true,
+        done_sentinel: "##DONE##",
+        max_iterations: 1,
+        tool_format: "native",
+        system: replacement,
+        context_profile: {
+          prompt_fragments: [
+            {id: "test.profile", source: "test", body: "PROFILE FRAGMENT MUST NOT LEAK"},
+          ],
+        },
+        tools: replacement_test_tools(),
+      }
+      const result = agent_loop(harness, "Do the task.", "POSITIONAL PRIMARY MUST NOT LEAK", opts)
+      const calls = harness.llm.mock_calls()
+      require len(calls) > 0
+      const call = calls[0]
+      harness.stdio.println(result.status == "done")
+      harness.stdio.println(call.system == REPLACEMENT)
+    },
+  )
+  // Provider normalization historically hoists leading system/developer
+  // messages into the top-level prompt on routes without an inline channel.
+  // Replace mode must suppress those contributors as well.
+  with_llm_script(
+    harness.llm,
+    [llm_text("ok")],
+    { ->
+      harness.llm.call(
+        "ignored",
+        "POSITIONAL PRIMARY MUST NOT LEAK",
+        {
+          provider: "mock",
+          model: "mock",
+          system: {mode: "replace", content: REPLACEMENT},
+          messages: [
+            {role: "system", content: "SYSTEM MESSAGE MUST NOT LEAK"},
+            {role: "developer", content: "DEVELOPER MESSAGE MUST NOT LEAK"},
+            {role: "user", content: "hello"},
+          ],
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      require len(calls) > 0
+      const call = calls[0]
+      harness.stdio.println(call.system == REPLACEMENT)
+      harness.stdio.println(!contains(json_stringify(call.messages), "MUST NOT LEAK"))
+    },
+  )
+}

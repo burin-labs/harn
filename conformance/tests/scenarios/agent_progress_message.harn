@@ -1,0 +1,49 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_progress } from "std/agent/progress"
+import { agent_session_finalize, agent_session_init } from "std/agent/state"
+
+fn progress_events(events) {
+  return events.filter({ event -> event.type == "progress_reported" })
+}
+
+pipeline default(harness: Harness) {
+  const session_id = "agent-progress-message-" + harness.random.uuid()
+  const captured = agent_capture_events(
+    harness.agent,
+    session_id,
+    fn() {
+      let session = agent_session_init(
+        harness.agent,
+        "progress message",
+        nil,
+        {session_id: session_id},
+      )
+      agent_progress(harness.agent, {message: "working", metadata: {source: "message-test"}})
+      agent_session_finalize(harness.agent, session.session_id, "done")
+      return nil
+    },
+  )
+  const events = progress_events(captured.events)
+  require len(events) == 1, "message-only progress emits one event"
+  const event = events[0]
+  harness.stdio.println("message=" + event.message)
+  harness.stdio.println("entries=" + to_string(len(event.entries)))
+  harness.stdio.println("replace=" + to_string(event.replace))
+  harness.stdio.println("metadata.source=" + event.metadata.source)
+  const invalid_session = agent_session_init(
+    harness.agent,
+    "invalid progress",
+    nil,
+    {session_id: session_id + "-invalid"},
+  )
+  const invalid = try {
+    agent_progress(harness.agent, {})
+  }
+  agent_session_finalize(harness.agent, invalid_session.session_id, "done")
+  harness.stdio.println(
+    "validation_error="
+      + to_string(
+      contains(to_string(unwrap_err(invalid)), "message or entries is required"),
+    ),
+  )
+}

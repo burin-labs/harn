@@ -1,0 +1,112 @@
+// The strict half of the tagged protocol: what still earns a violation or a
+// truncation error.
+//
+// Most envelope drift is now salvaged, which makes the remaining strictness
+// load-bearing. An unknown top-level tag, an unclosed response tag that is
+// followed by more blocks, and an empty `<done>` are all cases where guessing
+// would either lose the model's real intent or falsely report completion. A
+// `<tool_call>` cut off mid-argument is the sharpest of these: it must surface
+// a TOOL CALL TRUNCATED error naming the tool, because the old behavior — the
+// body falling through to "unknown top-level tag" and becoming stray text —
+// parsed to zero calls and stalled the loop as if the model had only narrated.
+import { probe, sample_registry } from "_tool_parse_probe"
+
+pipeline main(harness: Harness) {
+  // A chat template that strips the leading angle bracket from a response tag
+  // still leaves malformed protocol, not harmless assistant narration.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "corrupted response tag fragment",
+    "_call>_call>",
+    sample_registry(),
+  )
+  // An unrecognized top-level tag is flagged; the known block still executes.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "unknown top level tag",
+    """<notes>my thoughts</notes><tool_call>
+edit({ action: "create", path: "a.rs", content: "x" })
+</tool_call>""",
+    sample_registry(),
+  )
+  // An unclosed `<user_response>` whose remainder still carries another
+  // top-level block keeps the precise close-tag diagnostic — and must not be
+  // misreported as an unknown tag.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "unclosed user_response followed by another block",
+    """<user_response>Visible answer without a close tag.
+<done>##DONE##</done>""",
+    sample_registry(),
+  )
+  // An empty `<done>` is not a completion signal.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "empty done block",
+    """<tool_call>
+edit({ action: "create", path: "a.rs", content: "x" })
+</tool_call>
+<done></done>""",
+    sample_registry(),
+  )
+  // A large `<tool_call>` the model truncated mid-argument at its output token
+  // limit. No call can dispatch — the argument string is unterminated — but the
+  // loop must see a precise truncation error naming `edit`.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "truncated unclosed tool_call",
+    """Now I'll create the error module.
+<tool_call>
+edit({ action: "create", path: "src/error.rs", content: "//! Unified storage error types.\nuse std::io;\npub enum StorageError {\n    IoError(""",
+    sample_registry(),
+  )
+  // A properly closed block is unaffected by the truncation branch.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "closed tool_call is not truncated",
+    """<tool_call>
+edit({ action: "create", path: "a.rs", content: "x" })
+</tool_call>""",
+    sample_registry(),
+  )
+  // An unclosed wrapper around a structurally COMPLETE bare call — the model
+  // omitted the redundant close tag and stopped normally — is recovered, not
+  // discarded with a false truncation.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "unclosed wrapper, complete heredoc call",
+    """<tool_call>
+edit({ "action": "create", "path": "src/main.swift", "content": <<EOF
+import Foundation
+
+struct App {
+    static func main() {
+        print("hello")
+    }
+}
+EOF
+})""",
+    sample_registry(),
+  )
+  // The non-regression: an unclosed wrapper whose heredoc is genuinely cut off
+  // mid-argument is a real truncation. Zero calls, never a half-written file.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "unclosed wrapper, truncated heredoc",
+    """<tool_call>
+edit({ "action": "create", "path": "src/main.swift", "content": <<EOF
+import Foundation
+
+struct App {
+    static func """,
+    sample_registry(),
+  )
+}

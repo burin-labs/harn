@@ -1,0 +1,30 @@
+import "std/hitl"
+
+pipeline test(harness: Harness, task) {
+  harness.testing.clear()
+  harness.testing.respond(
+    "interaction",
+    "approval_response",
+    [
+      {approved: true, reviewer: "alice", reason: "checked"},
+      {approved: true, reviewer: "bob", reason: "approved"},
+    ],
+  )
+  const record: {
+    approved: bool,
+    reviewers: list<string>,
+    approved_at: string,
+    reason: string?,
+    signatures: list<{reviewer: string, signed_at: string, signature: string}>,
+  } = harness.interaction.request_approval(
+    "deploy production",
+    {quorum: 2, reviewers: ["alice", "bob", "carol"]},
+  )
+  harness.stdio.println(record.approved)
+  harness.stdio.println(len(record.reviewers))
+  harness.stdio.println(record.reviewers[0])
+  harness.stdio.println(record.reviewers[1])
+  harness.stdio.println(len(record.signatures))
+  harness.stdio.println(record.signatures[0]?.reviewer)
+  harness.stdio.println(starts_with(record.signatures[0]?.signature, "sha256:"))
+}

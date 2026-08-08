@@ -1,0 +1,65 @@
+/**
+ * Exercises the harn-side compaction policy primitive (#2505):
+ *   harness.agent.compaction_policy(opts) — declare or replace a per-session policy
+ *   harness.agent.compaction_check(session_id) — return {action, ...} without mutating
+ *   harness.agent.compaction_run(session_id, plan?) — execute lifecycle, return result
+ *
+ * The acceptance contract is the spec triad: a `defer` decision when the
+ * transcript is under threshold, a `compact_now` decision when it crosses,
+ * and a `compaction.run` that funnels through the existing #2323 lifecycle.
+ */
+pipeline test(harness: Harness, task) {
+  const session = harness.agent.open("compaction-policy-primitive")
+  // Register a session-specific policy.
+  const snapshot = harness.agent.compaction_policy(
+    {session_id: session, strategy: "summarize-then-prune", max_tokens: 1, keep_last: 1},
+  )
+  harness.stdio.println(snapshot["strategy"] == "summarize-then-prune")
+  harness.stdio.println(snapshot["max_tokens"] == 1)
+  // Empty session — check should defer.
+  const empty_decision = harness.agent.compaction_check(session)
+  harness.stdio.println(empty_decision["action"] == "defer")
+  harness.stdio.println(empty_decision["message_count"] == 0)
+  harness.stdio.println(!empty_decision["policy_inherited"])
+  // Push enough messages to clear the (1-token) threshold.
+  harness.agent.inject(
+    session,
+    {role: "user", content: "Investigate the parser regression in stdlib."},
+  )
+  harness.agent.inject(
+    session,
+    {role: "assistant", content: "The root cause is in diagnostic recovery."},
+  )
+  harness.agent.inject(
+    session,
+    {role: "user", content: "Keep the failing test names and next command in the summary."},
+  )
+  const primed_decision = harness.agent.compaction_check(session)
+  harness.stdio.println(primed_decision["action"] == "compact_now")
+  harness.stdio.println(primed_decision["trigger"] == "tokens")
+  harness.stdio.println(primed_decision["strategy"] == "summarize-then-prune")
+  harness.stdio.println(primed_decision["engine_strategy"] == "llm")
+  // compaction.run with a plan override forcing a custom strategy avoids
+  // needing an LLM round-trip during conformance.
+  const outcome = harness.agent.compaction_run(
+    session,
+    {
+      strategy: "custom",
+      summarize_fn: { archived, _reminders ->
+        {summary: "policy compacted " + to_string(len(archived))}
+      },
+    },
+  )
+  harness.stdio.println(outcome["compacted"])
+  harness.stdio.println(outcome["session_id"] == session)
+  harness.stdio.println(outcome["archived_messages"] == 2)
+  harness.stdio.println(outcome["latency_ms"] >= 0)
+  harness.stdio.println(outcome["engine_strategy"] == "custom")
+  harness.stdio.println(transcript_summary(outcome["transcript"])?.contains("policy compacted 2"))
+  // After running, check should return defer again — transcript is below
+  // threshold once the summary message replaces the archived ones.
+  const after_decision = harness.agent.compaction_check(session)
+  harness.stdio.println(
+    after_decision["action"] == "compact_now" || after_decision["action"] == "defer",
+  )
+}

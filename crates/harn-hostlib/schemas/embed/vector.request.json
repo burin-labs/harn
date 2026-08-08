@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/embed/vector.request.json",
+  "title": "embed.vector request",
+  "description": "Embed one string to its raw f32 vector via the active backend.",
+  "type": "object",
+  "properties": {
+    "text": { "type": "string" }
+  },
+  "required": ["text"],
+  "additionalProperties": false
+}

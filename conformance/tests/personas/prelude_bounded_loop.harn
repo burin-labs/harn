@@ -1,0 +1,37 @@
+import { bounded_loop } from "std/personas/prelude"
+
+pipeline test(harness: Harness, task) {
+  const opts = {
+    persona: "loop_captain",
+    step: "drain_queue",
+    trace_id: "trace-loop",
+    started_at: "2026-05-03T00:00:00Z",
+    completed_at: "2026-05-03T00:00:00Z",
+    max_iterations: 5,
+    progress_required: true,
+  }
+  const completed = bounded_loop(
+    harness.clock,
+    0,
+    fn(state) {
+      let next = state + 1
+      return {state: next, progress: true, done: next >= 3}
+    },
+    opts,
+  )
+  harness.stdio.println(completed.status)
+  harness.stdio.println(completed.state)
+  harness.stdio.println(completed.iterations)
+  harness.stdio.println(completed.stopped_reason)
+  harness.stdio.println(completed.receipt.schema)
+  const stalled = bounded_loop(
+    harness.clock,
+    7,
+    fn(state) { return {state: state, progress: false} },
+    opts,
+  )
+  harness.stdio.println(stalled.status)
+  harness.stdio.println(stalled.state)
+  harness.stdio.println(stalled.iterations)
+  harness.stdio.println(stalled.stopped_reason)
+}

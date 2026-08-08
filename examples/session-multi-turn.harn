@@ -1,0 +1,33 @@
+/**
+ * Session-backed multi-turn conversation
+ *
+ * Demonstrates agent_session_open + repeated agent_loop calls sharing a
+ * single session id. The second call automatically sees the first call's
+ * transcript as a prefix.
+ *
+ * Uses provider: "mock" so the example runs offline. Swap to your real
+ * provider to see a substantive conversation.
+ *
+ * Run with: cargo run --bin harn -- run examples/session-multi-turn.harn
+ */
+pipeline main(harness: Harness, task) {
+  const sid = harness.agent.open()
+  harness.stdio.log("opened session ${sid}")
+  const first = agent_loop(
+    harness,
+    "Remember that my favorite color is teal.",
+    nil,
+    {session_id: sid, provider: "mock", max_iterations: 2},
+  )
+  harness.stdio.println("turn 1 status=${first.status} len=${harness.agent.length(sid)}")
+  const second = agent_loop(
+    harness,
+    "What did I just tell you?",
+    nil,
+    {session_id: sid, provider: "mock", max_iterations: 2},
+  )
+  harness.stdio.println("turn 2 status=${second.status} len=${harness.agent.length(sid)}")
+  const snap = harness.agent.snapshot(sid)
+  harness.stdio.log("final transcript has ${len(snap["messages"])} messages")
+  harness.agent.close(sid)
+}

@@ -1,0 +1,46 @@
+pipeline default(harness: Harness) {
+  const flaky_starts = harness.runtime.atomic(0)
+  const stable_starts = harness.runtime.atomic(0)
+  const sup = harness.runtime.supervisor_start(
+    {
+      name: "fixture",
+      strategy: "one_for_one",
+      children: [
+        {
+          name: "flaky",
+          kind: "generic_task",
+          restart: {mode: "on_failure", max_restarts: 1, window_ms: 1000, backoff_ms: 1},
+          task: { _ctx ->
+            let attempt = harness.runtime.atomic_add(flaky_starts, 1) + 1
+            if attempt == 1 {
+              throw "flaky-boom"
+            }
+            "recovered"
+          },
+        },
+        {
+          name: "stable",
+          kind: "actor_mailbox",
+          restart: "never",
+          task: { _ctx ->
+            harness.runtime.atomic_add(stable_starts, 1)
+            "stable"
+          },
+        },
+      ],
+    },
+  )
+  const state = harness.runtime.supervisor_wait(sup)
+  const events = harness.runtime.supervisor_events(sup)
+  const debug = harness.runtime.context().debug
+  harness.stdio.println(harness.runtime.atomic_get(flaky_starts))
+  harness.stdio.println(harness.runtime.atomic_get(stable_starts))
+  harness.stdio.println(state.status)
+  harness.stdio.println(state.metrics.failed)
+  harness.stdio.println(state.metrics.restarted)
+  harness.stdio.println(state.children[0].status)
+  harness.stdio.println(state.children[0].restart_count)
+  harness.stdio.println(state.children[1].status)
+  harness.stdio.println(events[0].kind)
+  harness.stdio.println(debug.supervisors[0].name)
+}

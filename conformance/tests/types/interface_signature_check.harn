@@ -1,0 +1,18 @@
+pipeline test(harness: Harness, task) {
+  interface Stringable {
+    fn to_str(self) -> string
+  }
+  struct Name {
+    value: string
+  }
+  impl Name {
+    fn to_str(self) -> string {
+      return self.value
+    }
+  }
+  fn show(item: Stringable) -> string {
+    return item.to_str()
+  }
+  const n = Name({value: "hello"})
+  harness.stdio.log(show(n))
+}

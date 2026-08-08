@@ -1,0 +1,16 @@
+pipeline default(harness: Harness) {
+  // Basic pipe placeholder
+  const result = "hello world" |> split(_, " ")
+  harness.stdio.println(result)
+  // Chained with placeholder
+  const n = "hello world"
+    |> split(_, " ")
+    |> len(_)
+  harness.stdio.println(n)
+  // Placeholder in second arg
+  const msg = "world" |> replace("hello _", "_", _)
+  harness.stdio.println(msg)
+  // Placeholder with method call
+  const nums = [3, 1, 2] |> _.sorted()
+  harness.stdio.println(nums)
+}

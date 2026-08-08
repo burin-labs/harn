@@ -1,0 +1,227 @@
+/**
+ * `harn models lora preflight` renderer.
+ *
+ * The dispatch shim reads corpus/config files and computes deterministic
+ * readiness facts. This Harn source owns report presentation and JSON
+ * passthrough.
+ *
+ * Inputs (from the dispatch shim):
+ *   HARN_MODELS_LORA_PREFLIGHT_PAYLOAD_JSON   - compact report JSON.
+ *   HARN_MODELS_LORA_PREFLIGHT_PAYLOAD_PRETTY - pretty report JSON.
+ *   HARN_OUTPUT_JSON                          - "1" for JSON, else human text.
+ */
+import {
+  cli_json_envelope,
+  print_list,
+  safe_bool,
+  safe_dict,
+  safe_int_string,
+  safe_list,
+  safe_string,
+} from "std/cli/render"
+
+fn __percent(value) -> string {
+  const number = (to_float(value) ?? 0.0) * 100.0
+  return to_string(number) + "%"
+}
+
+fn __render_human(stdio: HarnessStdio, report: dict) {
+  const base = safe_dict(report["base"])
+  const request = safe_dict(report["request"])
+  const thresholds = safe_dict(report["thresholds"])
+  const stats = safe_dict(report["stats"])
+  const tool_calls = safe_dict(stats["tool_calls"])
+  const behavior_strata = safe_dict(stats["behavior_strata"])
+  const config = safe_dict(report["config"])
+  const breakdown = safe_dict(report["breakdown"])
+  const longest = safe_list(report["longest"])
+  const problems = safe_list(report["problem_examples"])
+  const skipped = safe_list(report["skipped_records"])
+  const warnings = safe_list(report["warnings"])
+  const errors = safe_list(report["errors"])
+  const base_id = safe_string(base["id"], "")
+  const provider = safe_string(base["provider"], "")
+  stdio.println("LoRA preflight for " + base_id + " via " + provider)
+  stdio.println("  corpus: " + safe_string(request["corpus"], ""))
+  const config_path = safe_string(config["path"], "")
+  if config_path != "" {
+    stdio.println("  config: " + config_path)
+  }
+  stdio.println(
+    "  target tool format: "
+      + safe_string(request["target_tool_format"], "")
+      + " (requested "
+      + safe_string(request["requested_tool_format"], "auto")
+      + ")",
+  )
+  const correction = safe_string(request["tool_format_correction"], "")
+  if correction != "" {
+    stdio.println("  tool format correction: " + correction)
+  }
+  stdio.println(
+    "  expected source tool format: "
+      + safe_string(thresholds["expected_source_tool_format"], ""),
+  )
+  stdio.println(
+    "  export-required source tool format: "
+      + safe_string(
+      thresholds["required_export_source_tool_format"],
+      "",
+    ),
+  )
+  stdio.println("  max_seq_length: " + safe_int_string(thresholds["max_seq_length"], "0"))
+  stdio.println("  required fit ratio: " + __percent(thresholds["min_fit_ratio"]))
+  stdio.println(
+    "  hard token estimate limit: " + safe_int_string(thresholds["hard_token_limit"], "0"),
+  )
+  stdio.println("  minimum records: " + safe_int_string(thresholds["min_records"], "0"))
+  stdio.println("  minimum tool-call share: " + __percent(thresholds["min_tool_call_share"]))
+  const marker = safe_string(thresholds["done_marker"], "")
+  if marker != "" {
+    stdio.println("  required done marker: " + marker)
+  }
+  stdio.println(
+    "  records: raw="
+      + safe_int_string(stats["raw_records"], "0")
+      + " trainable="
+      + safe_int_string(stats["trainable_records"], "0")
+      + " skipped="
+      + to_string(skipped.count),
+  )
+  stdio.println(
+    "  fit: "
+      + safe_int_string(stats["fit_records"], "0")
+      + "/"
+      + safe_int_string(stats["trainable_records"], "0")
+      + " ("
+      + __percent(stats["fit_ratio"])
+      + ")",
+  )
+  stdio.println(
+    "  tool calls: json="
+      + safe_int_string(tool_calls["json_tool_calls"], "0")
+      + " text="
+      + safe_int_string(tool_calls["text_tool_calls"], "0")
+      + " unknown="
+      + safe_int_string(tool_calls["unknown_tool_blocks"], "0")
+      + " malformed_json="
+      + safe_int_string(tool_calls["malformed_json_bodies"], "0"),
+  )
+  stdio.println(
+    "  behavior strata: source="
+      + json_stringify(safe_dict(behavior_strata["source"]))
+      + " emitted="
+      + json_stringify(safe_dict(behavior_strata["emitted"])),
+  )
+  stdio.println(
+    "  behavior strata policy: "
+      + safe_string(behavior_strata["policy"], "strict")
+      + " status="
+      + safe_string(behavior_strata["status"], "incomplete"),
+  )
+  const missing_behavior_classes = safe_list(behavior_strata["missing_required"])
+  if missing_behavior_classes.count > 0 {
+    stdio.println("  missing behavior strata: " + json_stringify(missing_behavior_classes))
+  }
+  const unclassified_record_ids = safe_list(behavior_strata["unclassified_record_ids"])
+  if unclassified_record_ids.count > 0 {
+    print_list(stdio, "unclassified record ids", unclassified_record_ids)
+  }
+  stdio.println(
+    "  declared tool formats: "
+      + json_stringify(safe_dict(breakdown["declared_tool_formats"])),
+  )
+  stdio.println("  languages: " + json_stringify(safe_dict(breakdown["languages"])))
+  stdio.println("  task types: " + json_stringify(safe_dict(breakdown["task_types"])))
+  if longest.count > 0 {
+    stdio.println("  longest examples:")
+    for example in longest {
+      const item = safe_dict(example)
+      stdio.println(
+        "    - "
+          + safe_string(item["id"], "")
+          + " line="
+          + safe_int_string(item["line_number"], "0")
+          + " approx_tokens="
+          + safe_int_string(item["approx_tokens"], "0")
+          + " "
+          + safe_string(item["language"], "")
+          + "/"
+          + safe_string(item["task_type"], ""),
+      )
+    }
+  }
+  if problems.count > 0 {
+    stdio.println("  problem examples:")
+    for problem in problems {
+      const item = safe_dict(problem)
+      stdio.println(
+        "    - "
+          + safe_string(item["id"], "")
+          + " line="
+          + safe_int_string(item["line_number"], "0")
+          + " "
+          + safe_string(item["kind"], "")
+          + ": "
+          + safe_string(item["detail"], ""),
+      )
+    }
+  }
+  print_list(stdio, "warnings", warnings)
+  print_list(stdio, "errors", errors)
+  const result = if safe_string(behavior_strata["status"], "") == "legacy_unclassified" {
+    "MIGRATION REVIEW"
+  } else if safe_bool(report["ok"], false) {
+    "PASS"
+  } else {
+    "FAIL"
+  }
+  stdio.println("  result: " + result)
+}
+
+fn __render_json(report: dict) -> string {
+  const ok = safe_bool(report["ok"], false)
+  const envelope = if ok {
+    cli_json_envelope({schema_version: 1, ok: true, data: report})
+  } else {
+    cli_json_envelope(
+      {
+        schema_version: 1,
+        ok: false,
+        error: {
+          code: "lora_preflight_failed",
+          message: "LoRA corpus preflight failed readiness checks.",
+          details: report,
+        },
+      },
+    )
+  }
+  return json_stringify_pretty(envelope)
+}
+
+fn main(harness: Harness) -> int {
+  const raw = harness.env.get_or("HARN_MODELS_LORA_PREFLIGHT_PAYLOAD_JSON", "")
+  if raw == "" {
+    harness.stdio.eprintln("internal error: HARN_MODELS_LORA_PREFLIGHT_PAYLOAD_JSON not set")
+    return 70
+  }
+  const report = try {
+    json_parse(raw)
+  } catch (e) {
+    harness.stdio.eprintln("internal error: failed to parse LoRA preflight payload: " + e.message)
+    return 70
+  }
+  const ok = safe_bool(report["ok"], false)
+  const request = safe_dict(report["request"])
+  const check = safe_bool(request["check"], false)
+  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  if json_mode {
+    harness.stdio.println(__render_json(report))
+  } else {
+    __render_human(harness.stdio, report)
+  }
+  if ok || !check {
+    return 0
+  }
+  return 1
+}

@@ -1,0 +1,38 @@
+import "std/agent_state"
+
+pipeline default(harness: Harness) {
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-agent-state-two-writer-" + harness.random.uuid(),
+  )
+  const first = agent_state_init(
+    harness.agent,
+    root,
+    {session_id: "conflict-session", writer_id: "stage-a"},
+  )
+  agent_state_write(harness.agent, first, "ledger.md", "from-a")
+  const second = agent_state_resume(
+    harness.agent,
+    root,
+    "conflict-session",
+    {writer_id: "stage-b", conflict_policy: "ignore"},
+  )
+  agent_state_write(harness.agent, second, "ledger.md", "from-b")
+  harness.stdio.println(agent_state_read(harness.agent, second, "ledger.md"))
+  const strict = agent_state_resume(
+    harness.agent,
+    root,
+    "conflict-session",
+    {writer_id: "stage-c", conflict_policy: "error"},
+  )
+  const message = try {
+    agent_state_write(harness.agent, strict, "ledger.md", "from-c")
+    "no error"
+  } catch (e) {
+    to_string(e)
+  }
+  harness.stdio.println(contains(message, "previously written by"))
+  harness.stdio.println(contains(message, "stage-b") && contains(message, "stage-c"))
+  harness.stdio.println(agent_state_read(harness.agent, strict, "ledger.md"))
+  harness.fs.delete(root)
+}

@@ -1,0 +1,50 @@
+import { agent_reminder_providers_fire, agent_session_messages } from "std/agent/state"
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline main(harness: Harness) {
+  harness.agent.clear_reminder_providers()
+  harness.agent.register_reminder_provider(
+    {
+      id: "render_anthropic_ephemeral",
+      subscribes_to: ["session_idle"],
+      evaluate: { _ctx ->
+        return {reminder: {body: "anthropic ephemeral reminder", role_hint: "ephemeral_cache"}}
+      },
+    },
+  )
+  const session = harness.agent.open("reminder-render-anthropic-ephemeral")
+  harness.agent.reset(session)
+  harness.agent.inject(session, {role: "user", content: "hello"})
+  agent_reminder_providers_fire(
+    harness.agent,
+    session,
+    "session_idle",
+    {session: {id: session}},
+    {},
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text("ok")],
+    { ->
+      harness.llm.call(
+        "ignored",
+        nil,
+        {
+          provider: "mock",
+          model: "claude-sonnet-4-7",
+          messages: agent_session_messages(harness.agent, session),
+          session_id: session,
+        },
+      )
+      const call = harness.llm.mock_calls()[0]
+      const last = call.messages[len(call.messages) - 1]
+      harness.stdio.println(last.role)
+      harness.stdio.println(contains(last.content, "<context-directives>"))
+      harness.stdio.println(contains(last.content, "authority=\"contract\""))
+      harness.stdio.println(contains(last.content, "anthropic ephemeral reminder"))
+      harness.stdio.println(!contains(last.content, "<system-reminder>"))
+      harness.agent.clear_reminder_providers()
+    },
+  )
+}
+// Legacy cache hints do not select a second slot; every directive uses the envelope.

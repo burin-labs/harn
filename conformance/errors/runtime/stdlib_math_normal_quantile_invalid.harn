@@ -1,0 +1,5 @@
+import "std/math"
+
+pipeline test(harness: Harness, task) {
+  normal_quantile(1)
+}

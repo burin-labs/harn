@@ -1,0 +1,2 @@
+no_premature_stop_while_shrinking=true
+ran_to_completion_not_budget_cut=true

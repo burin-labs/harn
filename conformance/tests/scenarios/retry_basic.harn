@@ -1,0 +1,20 @@
+pipeline default(harness: Harness) {
+  let attempts = 0
+  retry 3 {
+    attempts = attempts + 1
+    if attempts < 3 {
+      throw "not yet"
+    }
+  }
+  harness.stdio.println(attempts)
+  // retry with all attempts exhausted
+  let failed = false
+  try {
+    retry 2 {
+      throw "always fails"
+    }
+  } catch (e) {
+    failed = true
+  }
+  harness.stdio.println(failed)
+}

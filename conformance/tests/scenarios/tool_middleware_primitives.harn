@@ -1,0 +1,127 @@
+/**
+ * Exercises the std/llm/tool_middleware primitives at the closure level —
+ * default_tool_caller passthrough, compose_tool_callers right-to-left
+ * ordering, and tools_use_middleware schema decoration. No agent_loop
+ * needed; we hand-build envelopes and a synthetic `next`.
+ */
+import {
+  compose_tool_callers,
+  default_tool_caller,
+  tool_inject_param,
+  tools_use_middleware,
+} from "std/llm/tool_middleware"
+
+fn synthetic_next() {
+  return { call ->
+    return {
+      ok: true,
+      status: "ok",
+      tool_name: call.tool_name,
+      tool_call_id: call.call_id,
+      arguments: call.tool_args,
+      result: "ran " + call.tool_name,
+      rendered_result: "ran " + call.tool_name,
+      observation: "[result of " + call.tool_name + "]\n",
+      error: nil,
+      error_category: nil,
+      executor: "harn",
+    }
+  }
+}
+
+fn envelope(name, args) {
+  return {
+    tool_name: name,
+    tool_args: args,
+    call_id: "call-" + name,
+    declared_executor: "harn",
+    schema: nil,
+    description: "",
+    turn: {iteration: 0, session_id: ""},
+  }
+}
+
+pipeline default(harness: Harness) {
+  const next = synthetic_next()
+  // (1) default_tool_caller passes through unchanged.
+  const dc = default_tool_caller()
+  const r1 = dc(envelope("read", {path: "/etc/hosts"}), next)
+  harness.stdio.println(r1.ok)
+  harness.stdio.println(r1.tool_name)
+  harness.stdio.println(r1.arguments.path)
+  // (2) compose ordering: outer wrapper runs first; both args mutations
+  // reach `next`; outer's post-wrap field lands on the result.
+  const outer = { call, inner ->
+    let result = inner(call + {tool_args: call.tool_args + {seen_by: "outer"}})
+    return result + {wrapped_by: "outer"}
+  }
+  const middle = { call, inner ->
+    return inner(call + {tool_args: call.tool_args + {seen_by_middle: "yes"}})
+  }
+  const composed = compose_tool_callers(harness.clock, [outer, middle])
+  const r2 = composed(envelope("write", {path: "/tmp/x"}), next)
+  harness.stdio.println(r2.wrapped_by)
+  harness.stdio.println(r2.arguments.seen_by)
+  harness.stdio.println(r2.arguments.seen_by_middle)
+  // (3) tools_use_middleware applies the schema transform per entry.
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "read",
+    "Read a file",
+    {handler: { _ -> "" }, parameters: {path: {type: "string"}}, returns: {type: "string"}},
+  )
+  const added = tools_use_middleware(
+    tools,
+    { entry -> tool_inject_param(entry, "reason", {type: "string", description: "why"}) },
+  )
+  const read_entry = added.tools[0]
+  harness.stdio.println(contains(read_entry.parameters.keys(), "reason"))
+  harness.stdio.println(contains(read_entry.parameters.keys(), "path"))
+  harness.stdio.println(read_entry.parameters.reason.description)
+  // (4) JSON-schema-shaped parameters keep `required` updated.
+  let tools2 = tool_registry()
+  tools2 = tool_define(
+    tools2,
+    "edit",
+    "Edit a file",
+    {
+      handler: { _ -> "" },
+      parameters: {type: "object", properties: {path: {type: "string"}}, required: ["path"]},
+      returns: {type: "string"},
+    },
+  )
+  const added2 = tools_use_middleware(
+    tools2,
+    { entry -> tool_inject_param(entry, "reason", {type: "string"}, {required: true}) },
+  )
+  const edit_entry = added2.tools[0]
+  harness.stdio.println(contains(edit_entry.parameters.properties.keys(), "reason"))
+  harness.stdio.println(contains(edit_entry.parameters.required, "reason"))
+  // (5) Optional injected params must remain optional in both the full
+  // JSON-schema shape and the bare shorthand shape. Provider-facing schema
+  // projection reads the param fragment's `required` bit, so the injection
+  // helper must reflect opts.required there as well as in object.required.
+  const optional_full = tools_use_middleware(
+    tools2,
+    { entry -> tool_inject_param(entry, "note", {type: "string"}, {required: false}) },
+  )
+  const optional_full_entry = optional_full.tools[0]
+  harness.stdio.println(contains(optional_full_entry.parameters.properties.keys(), "note"))
+  harness.stdio.println(contains(optional_full_entry.parameters.required, "note"))
+  harness.stdio.println(optional_full_entry.parameters.properties.note.required)
+  let tools3 = tool_registry()
+  tools3 = tool_define(
+    tools3,
+    "read",
+    "Read a file",
+    {handler: { _ -> "" }, parameters: {path: {type: "string"}}, returns: {type: "string"}},
+  )
+  const optional_bare = tools_use_middleware(
+    tools3,
+    { entry -> tool_inject_param(entry, "note", {type: "string"}, {required: false}) },
+  )
+  const optional_bare_entry = optional_bare.tools[0]
+  harness.stdio.println(contains(optional_bare_entry.parameters.keys(), "note"))
+  harness.stdio.println(optional_bare_entry.parameters.note.required)
+}

@@ -1,0 +1,33 @@
+/**
+ * IEEE-754 NaN is unordered: every relational operator involving NaN is
+ * false, and NaN is never equal to anything (including another NaN). This
+ * guards the value-level comparison path (`<`, `>`, `<=`, `>=`) which
+ * historically collapsed the unordered case into "equal" and wrongly
+ * returned true for `NaN <= x` / `NaN >= x`.
+ */
+pipeline default(harness: Harness, task) {
+  const nan = sqrt(-1.0)
+  const nan2 = sqrt(-2.0)
+  // Ordered comparisons against a plain float: all false.
+  harness.stdio.println(nan < 5.0)
+  harness.stdio.println(nan > 5.0)
+  harness.stdio.println(nan <= 5.0)
+  harness.stdio.println(nan >= 5.0)
+  harness.stdio.println(5.0 <= nan)
+  harness.stdio.println(5.0 >= nan)
+  // Mixed int/float operand exercises the generic comparison path.
+  harness.stdio.println(nan <= 5)
+  harness.stdio.println(nan >= 5)
+  harness.stdio.println(5 <= nan)
+  // Equality: NaN never equals anything, including another NaN.
+  harness.stdio.println(nan == 5.0)
+  harness.stdio.println(nan != 5.0)
+  harness.stdio.println(nan == nan2)
+  harness.stdio.println(nan != nan2)
+  harness.stdio.println(nan <= nan2)
+  // Sanity: ordinary floats still compare correctly.
+  harness.stdio.println(2.0 <= 5.0)
+  harness.stdio.println(5.0 <= 5.0)
+  harness.stdio.println(5.0 >= 5.0)
+  harness.stdio.println(6.0 < 5.0)
+}

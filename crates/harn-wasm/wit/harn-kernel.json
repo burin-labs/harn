@@ -1,0 +1,560 @@
+{
+  "worlds": [
+    {
+      "name": "portable-kernel",
+      "imports": {},
+      "exports": {
+        "interface-0": {
+          "interface": {
+            "id": 0
+          }
+        }
+      },
+      "package": 0
+    }
+  ],
+  "interfaces": [
+    {
+      "name": "kernel",
+      "types": {
+        "field": 0,
+        "value-node": 4,
+        "value": 6,
+        "diagnostic": 8,
+        "entry-kind": 9,
+        "program": 10,
+        "grant-set": 13,
+        "value-shape": 14,
+        "capability-request": 15,
+        "capability-success": 16,
+        "capability-error": 17,
+        "capability-result": 18,
+        "suspension": 19,
+        "execution-result": 20
+      },
+      "functions": {
+        "compile": {
+          "name": "compile",
+          "kind": "freestanding",
+          "params": [
+            {
+              "name": "source",
+              "type": "string"
+            },
+            {
+              "name": "entry",
+              "type": "string"
+            },
+            {
+              "name": "kind",
+              "type": 9
+            }
+          ],
+          "result": 22
+        },
+        "compile-package": {
+          "name": "compile-package",
+          "kind": "freestanding",
+          "params": [
+            {
+              "name": "manifest-json",
+              "type": "string"
+            },
+            {
+              "name": "entry",
+              "type": "string"
+            },
+            {
+              "name": "kind",
+              "type": 9
+            }
+          ],
+          "result": 22,
+          "docs": {
+            "contents": "Compile a host-linked JSON source package. The manifest contains stable\nmodule IDs, resolved import targets, and public export projections."
+          }
+        },
+        "start": {
+          "name": "start",
+          "kind": "freestanding",
+          "params": [
+            {
+              "name": "program",
+              "type": 10
+            },
+            {
+              "name": "input",
+              "type": 6
+            },
+            {
+              "name": "grants",
+              "type": 13
+            }
+          ],
+          "result": 20
+        },
+        "resume": {
+          "name": "resume",
+          "kind": "freestanding",
+          "params": [
+            {
+              "name": "program",
+              "type": 10
+            },
+            {
+              "name": "snapshot",
+              "type": 1
+            },
+            {
+              "name": "outcome",
+              "type": 18
+            },
+            {
+              "name": "grants",
+              "type": 13
+            }
+          ],
+          "result": 20
+        }
+      },
+      "docs": {
+        "contents": "The portable execution contract shared by browser, native, and future\nComponent Model adapters."
+      },
+      "package": 0
+    }
+  ],
+  "types": [
+    {
+      "name": "field",
+      "kind": {
+        "record": {
+          "fields": [
+            {
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "name": "value",
+              "type": "u32"
+            }
+          ]
+        }
+      },
+      "owner": {
+        "interface": 0
+      }
+    },
+    {
+      "name": null,
+      "kind": {
+        "list": "u8"
+      },
+      "owner": null
+    },
+    {
+      "name": null,
+      "kind": {
+        "list": "u32"
+      },
+      "owner": null
+    },
+    {
+      "name": null,
+      "kind": {
+        "list": 0
+      },
+      "owner": null
+    },
+    {
+      "name": "value-node",
+      "kind": {
+        "variant": {
+          "cases": [
+            {
+              "name": "null",
+              "type": null
+            },
+            {
+              "name": "boolean",
+              "type": "bool"
+            },
+            {
+              "name": "signed",
+              "type": "s64"
+            },
+            {
+              "name": "floating",
+              "type": "f64"
+            },
+            {
+              "name": "text",
+              "type": "string"
+            },
+            {
+              "name": "bytes",
+              "type": 1
+            },
+            {
+              "name": "list",
+              "type": 2
+            },
+            {
+              "name": "record",
+              "type": 3
+            }
+          ]
+        }
+      },
+      "owner": {
+        "interface": 0
+      },
+      "docs": {
+        "contents": "A flat graph keeps recursive JSON-shaped data bounded and ABI-friendly."
+      }
+    },
+    {
+      "name": null,
+      "kind": {
+        "list": 4
+      },
+      "owner": null
+    },
+    {
+      "name": "value",
+      "kind": {
+        "record": {
+          "fields": [
+            {
+              "name": "nodes",
+              "type": 5
+            },
+            {
+              "name": "root",
+              "type": "u32"
+            }
+          ]
+        }
+      },
+      "owner": {
+        "interface": 0
+      }
+    },
+    {
+      "name": null,
+      "kind": {
+        "option": "u32"
+      },
+      "owner": null
+    },
+    {
+      "name": "diagnostic",
+      "kind": {
+        "record": {
+          "fields": [
+            {
+              "name": "code",
+              "type": "string"
+            },
+            {
+              "name": "message",
+              "type": "string"
+            },
+            {
+              "name": "line",
+              "type": 7
+            },
+            {
+              "name": "column",
+              "type": 7
+            }
+          ]
+        }
+      },
+      "owner": {
+        "interface": 0
+      }
+    },
+    {
+      "name": "entry-kind",
+      "kind": {
+        "enum": {
+          "cases": [
+            {
+              "name": "function"
+            },
+            {
+              "name": "pipeline"
+            }
+          ]
+        }
+      },
+      "owner": {
+        "interface": 0
+      }
+    },
+    {
+      "name": "program",
+      "kind": {
+        "record": {
+          "fields": [
+            {
+              "name": "artifact",
+              "type": 1
+            },
+            {
+              "name": "digest",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "owner": {
+        "interface": 0
+      }
+    },
+    {
+      "name": null,
+      "kind": {
+        "list": "string"
+      },
+      "owner": null
+    },
+    {
+      "name": null,
+      "kind": {
+        "option": 1
+      },
+      "owner": null
+    },
+    {
+      "name": "grant-set",
+      "kind": {
+        "record": {
+          "fields": [
+            {
+              "name": "capabilities",
+              "type": 11
+            },
+            {
+              "name": "snapshot-key",
+              "type": 12,
+              "docs": {
+                "contents": "When present, this is exactly 32 bytes. Hosts retain the secret and use\nit to authenticate snapshots returned across untrusted storage."
+              }
+            }
+          ]
+        }
+      },
+      "owner": {
+        "interface": 0
+      }
+    },
+    {
+      "name": "value-shape",
+      "kind": {
+        "enum": {
+          "cases": [
+            {
+              "name": "any"
+            },
+            {
+              "name": "null"
+            },
+            {
+              "name": "boolean"
+            },
+            {
+              "name": "signed"
+            },
+            {
+              "name": "floating"
+            },
+            {
+              "name": "text"
+            },
+            {
+              "name": "bytes"
+            },
+            {
+              "name": "list"
+            },
+            {
+              "name": "record"
+            }
+          ]
+        }
+      },
+      "owner": {
+        "interface": 0
+      }
+    },
+    {
+      "name": "capability-request",
+      "kind": {
+        "record": {
+          "fields": [
+            {
+              "name": "id",
+              "type": "string"
+            },
+            {
+              "name": "capability",
+              "type": "string"
+            },
+            {
+              "name": "operation",
+              "type": "string"
+            },
+            {
+              "name": "arguments",
+              "type": 6
+            },
+            {
+              "name": "expected",
+              "type": 14
+            }
+          ]
+        }
+      },
+      "owner": {
+        "interface": 0
+      }
+    },
+    {
+      "name": "capability-success",
+      "kind": {
+        "record": {
+          "fields": [
+            {
+              "name": "request-id",
+              "type": "string"
+            },
+            {
+              "name": "value",
+              "type": 6
+            }
+          ]
+        }
+      },
+      "owner": {
+        "interface": 0
+      }
+    },
+    {
+      "name": "capability-error",
+      "kind": {
+        "record": {
+          "fields": [
+            {
+              "name": "request-id",
+              "type": "string"
+            },
+            {
+              "name": "code",
+              "type": "string"
+            },
+            {
+              "name": "message",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "owner": {
+        "interface": 0
+      }
+    },
+    {
+      "name": "capability-result",
+      "kind": {
+        "variant": {
+          "cases": [
+            {
+              "name": "ok",
+              "type": 16
+            },
+            {
+              "name": "error",
+              "type": 17
+            }
+          ]
+        }
+      },
+      "owner": {
+        "interface": 0
+      }
+    },
+    {
+      "name": "suspension",
+      "kind": {
+        "record": {
+          "fields": [
+            {
+              "name": "request",
+              "type": 15
+            },
+            {
+              "name": "snapshot",
+              "type": 1
+            }
+          ]
+        }
+      },
+      "owner": {
+        "interface": 0
+      }
+    },
+    {
+      "name": "execution-result",
+      "kind": {
+        "variant": {
+          "cases": [
+            {
+              "name": "completed",
+              "type": 6
+            },
+            {
+              "name": "suspended",
+              "type": 19
+            },
+            {
+              "name": "failed",
+              "type": 8
+            }
+          ]
+        }
+      },
+      "owner": {
+        "interface": 0
+      }
+    },
+    {
+      "name": null,
+      "kind": {
+        "list": 8
+      },
+      "owner": null
+    },
+    {
+      "name": null,
+      "kind": {
+        "result": {
+          "ok": 10,
+          "err": 21
+        }
+      },
+      "owner": null
+    }
+  ],
+  "packages": [
+    {
+      "name": "harn:kernel@1.0.0",
+      "interfaces": {
+        "kernel": 0
+      },
+      "worlds": {
+        "portable-kernel": 0
+      }
+    }
+  ]
+}

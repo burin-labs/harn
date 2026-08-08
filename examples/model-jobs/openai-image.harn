@@ -1,0 +1,56 @@
+import {
+  ModelJobEvent,
+  ModelJobRequest,
+  ModelJobRunOptions,
+  ModelOutputSpec,
+  ModelTask,
+  OpenAiImageBackendOptions,
+  OpenAiImageFormat,
+  OpenAiImageQuality,
+  model_job_run_result,
+  openai_responses_image_backend,
+} from "std/model_job"
+
+fn main(harness: Harness) {
+  const api_key = harness.env.get_or("OPENAI_API_KEY", "")
+  if trim(api_key) == "" {
+    harness.stdio.eprintln("OPENAI_API_KEY is required")
+    return 2
+  }
+  const task: ModelTask = "image.generate"
+  const output: ModelOutputSpec = {mime_type: "image/png", width: 1024, height: 1024}
+  const request: ModelJobRequest = {
+    id: harness.random.uuid_v7(),
+    task: task,
+    prompt: harness.env.get_or(
+      "MODEL_JOB_IMAGE_PROMPT",
+      "A clean cornflower-blue botanical emblem on a warm cream background, no text",
+    ),
+    output: output,
+    model: harness.env.get_or("OPENAI_IMAGE_RESPONSE_MODEL", "gpt-5.6-sol"),
+  }
+  const options: ModelJobRunOptions = {
+    timeout_ms: 600000,
+    on_event: fn(event: ModelJobEvent) {
+      harness.stdio.eprintln(
+        to_string(event.kind) + ": " + to_string(event.state) + " (" + event.job_id + ")",
+      )
+      return nil
+    },
+  }
+  const quality: OpenAiImageQuality = "low"
+  const format: OpenAiImageFormat = "png"
+  const backend_options: OpenAiImageBackendOptions = {
+    api_key: api_key,
+    quality: quality,
+    output_format: format,
+  }
+  const backend = openai_responses_image_backend(backend_options)
+  const result = model_job_run_result(harness, backend, request, options)
+  if !is_ok(result) {
+    harness.stdio.eprintln(json_stringify(unwrap_err(result)))
+    return 1
+  }
+  harness.stdio.println(json_stringify(unwrap(result)))
+  return 0
+}

@@ -1,0 +1,31 @@
+pipeline test(harness: Harness, task) {
+  const schema = {
+    type: "dict",
+    required: ["name", "age"],
+    properties: {
+      name: {type: "string", min_length: 2},
+      age: {type: "int", min: 0},
+      role: {type: "string", enum: ["admin", "user"], default: "user"},
+      tags: {type: "list", min_items: 1, items: {type: "string", pattern: "^[a-z]+$"}},
+    },
+  }
+  const ok = schema_parse({name: "Ada", age: 36, tags: ["core"]}, schema)
+  harness.stdio.println(is_ok(ok))
+  harness.stdio.println(unwrap(ok).role)
+  const bad = schema_check({name: "A", age: -1, tags: ["Core"]}, schema)
+  harness.stdio.println(is_err(bad))
+  harness.stdio.println(len(unwrap_err(bad).errors) >= 2)
+  const union_schema = {union: [{type: "string", min_length: 3}, {type: "int", min: 10}]}
+  harness.stdio.println(is_ok(schema_check(12, union_schema)))
+  harness.stdio.println(is_err(schema_check("hi", union_schema)))
+  const json_schema = schema_to_json_schema(schema)
+  harness.stdio.println(json_schema.type)
+  harness.stdio.println(json_schema.properties.role.default)
+  const picked = schema_pick(schema, ["name", "role"])
+  harness.stdio.println(picked.required[0])
+  harness.stdio.println(len(picked.properties) == 2)
+  const partial = schema_partial(schema)
+  harness.stdio.println(partial.required == nil || len(partial.required) == 0)
+  const extended = schema_extend(schema, {title: "User"})
+  harness.stdio.println(extended.title)
+}

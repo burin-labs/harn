@@ -1,0 +1,17 @@
+pipeline default(harness: Harness) {
+  const repo = "burin-labs/harn"
+  const repo_args = repo ? ["--repo", repo] : []
+  harness.stdio.println(len(repo_args))
+  harness.stdio.println(repo_args[0])
+  harness.stdio.println(repo_args[1])
+  const selected = repo ? ["steel", "thread"][1] : "none"
+  harness.stdio.println(selected)
+  const missing = nil
+  const missing_args = missing ? ["--repo", missing] : []
+  harness.stdio.println(len(missing_args))
+  const nested = true ? [1, true ? [2] : []] : []
+  harness.stdio.println(len(nested))
+  harness.stdio.println(nested[1][0])
+  const xs = [10, 20]
+  harness.stdio.println(xs[0])
+}

@@ -1,0 +1,21 @@
+pipeline default(harness: Harness) {
+  const session = harness.channels.append(
+    "scoped.session",
+    {},
+    {scope: "session", id: "scope-session"},
+  )
+  const prefixed = harness.channels.append("session:scoped.prefixed", {}, {id: "scope-prefix"})
+  harness.stdio.println(session.name_resolved)
+  harness.stdio.println(prefixed.name_resolved)
+  harness.stdio.println(harness.channels.events("scoped.session", {scope: "session"})[0].id)
+  const missing_pipeline = try {
+    harness.channels.append("pipeline:needs.context", {}, {id: "scope-pipeline"})
+  }
+  harness.stdio.println(is_err(missing_pipeline))
+  harness.stdio.println(contains(to_string(unwrap_err(missing_pipeline)), "HARN-CHN-001"))
+  const org_disabled = try {
+    harness.channels.append("org:burin-labs:pr.merged", {}, {id: "scope-org"})
+  }
+  harness.stdio.println(is_err(org_disabled))
+  harness.stdio.println(contains(to_string(unwrap_err(org_disabled)), "HARN-CHN-002"))
+}

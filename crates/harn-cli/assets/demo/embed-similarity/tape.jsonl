@@ -1,0 +1,1 @@
+{"match":"*[embed-similarity-unused]*","consume_match":false,"text":"unused","model":"mock-noop","provider":"mock"}

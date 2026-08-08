@@ -1,0 +1,36 @@
+pipeline main(harness: Harness) {
+  const tools = [
+    {
+      name: "read_file",
+      parameters: {type: "object", required: ["path"]},
+      annotations: {kind: "read", side_effect_level: "read_only"},
+    },
+    {
+      name: "search",
+      parameters: {type: "object", required: ["query"]},
+      annotations: {kind: "search", side_effect_level: "read_only"},
+    },
+  ]
+  const manifest = composition_binding_manifest(tools)
+  const dispatch = { name, input ->
+    return if name == "read_file" {
+      {kind: "text", path: input.path, content: "<" + input.path + ">"}
+    } else if name == "search" {
+      {kind: "matches", query: input.query, count: 2}
+    } else {
+      {error: "unknown binding " + name}
+    }
+  }
+  const report = harness.tools.composition_execute(
+    "let readme = read_file({path: \"README.md\"})\nlet hits = search({query: readme.content})\nreturn {readme_content: readme.content, hits_query: hits.query, hits_count: hits.count}",
+    manifest,
+    {run_id: "conformance-dispatcher", dispatcher: dispatch},
+  )
+  harness.stdio.println(report.ok)
+  harness.stdio.println(report.child_calls.count)
+  harness.stdio.println(report.child_calls[0].tool_name)
+  harness.stdio.println(report.child_calls[1].tool_name)
+  harness.stdio.println(report.run.result.readme_content)
+  harness.stdio.println(report.run.result.hits_query)
+  harness.stdio.println(report.run.result.hits_count)
+}

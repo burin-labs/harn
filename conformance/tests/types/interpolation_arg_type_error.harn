@@ -1,0 +1,7 @@
+fn needs_int(p: int) -> int {
+  return p + 1
+}
+
+pipeline default(harness: Harness) {
+  harness.stdio.println("${needs_int("not an int")}")
+}

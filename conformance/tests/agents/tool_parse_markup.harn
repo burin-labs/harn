@@ -1,0 +1,276 @@
+// Chat-template function markup emitted as plain assistant text.
+//
+// Native-format models fall back to their chat template's XML rendering under
+// long contexts, so a real call arrives as `<function=NAME>` with
+// `<parameter=KEY>` blocks, or the `<invoke name="NAME">` attribute spelling,
+// or the same opener followed by a bare JSON object. Promoting well-formed
+// markup into real calls is what lets the loop's native-fallback contract act
+// on them at all.
+//
+// Two boundaries hold the class together. A parameter whose close tag never
+// arrives is a truncation: dispatching a partial file body corrupts the
+// workspace, so it errors with zero calls. And markup mentioned in prose or
+// shown inside a fence is documentation, not an attempt — firing on either
+// costs the model a turn for something it did on purpose.
+import { corpus_registry, echo_registry, probe, sample_registry } from "_tool_parse_probe"
+
+pipeline main(harness: Harness) {
+  // The live qwen shape: complete `<function=edit>` markup inside a wrapper,
+  // whose string-typed `content` keeps its blank lines verbatim.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "wrapped function markup",
+    """<tool_call>
+<function=edit>
+<parameter=action>
+create
+</parameter>
+<parameter=path>
+internal/handlers/health.go
+</parameter>
+<parameter=content>
+package handlers
+
+// Health returns 200.
+func Health() int { return 200 }
+</parameter>
+</function>
+</tool_call>""",
+    sample_registry(),
+  )
+  // Unwrapped markup recovers with a soft violation steering back to canonical.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "unwrapped function markup",
+    """<function=run>
+<parameter=command>
+go test ./...
+</parameter>
+</function>""",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "invoke attribute markup",
+    """<invoke name="run">
+<parameter name="command">cargo check</parameter>
+</invoke>""",
+    sample_registry(),
+  )
+  // `<parameter name="file" string="true">` — the DSML-influenced attribute
+  // spelling. The old parameter regex required `>` straight after the name, so
+  // this COMPLETE call was misdiagnosed as truncated and the turn died. It was
+  // the single largest full-turn parse-kill class in the mined corpus. `look`
+  // lives in the corpus registry, so that is the one this resolves against.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "invoke markup with a string attribute",
+    """<tool_call>
+<invoke name="look">
+<parameter name="file" string="true">src/root.zig</parameter>
+</invoke>
+</tool_call>""",
+    corpus_registry(),
+  )
+  // Only the outer close arrives; every parameter is closed, so the values are
+  // complete and the call is recoverable.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "missing function close, parameters closed",
+    """<tool_call>
+<function=run>
+<parameter=command>
+ls
+</parameter>
+</tool_call>""",
+    sample_registry(),
+  )
+  // The wrapper never closes but the markup is complete.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "unclosed wrapper, complete markup",
+    """<tool_call>
+<function=run>
+<parameter=command>
+pwd
+</parameter>
+</function>""",
+    sample_registry(),
+  )
+  // A `<parameter=content>` whose close never arrives is a truncation.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "truncated parameter",
+    """<tool_call>
+<function=edit>
+<parameter=action>
+create
+</parameter>
+<parameter=content>
+package handlers
+""",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "unknown tool in markup",
+    """<function=frobnicate>
+<parameter=level>
+9
+</parameter>
+</function>""",
+    sample_registry(),
+  )
+  // Negatives: an inline mention and a fenced example are documentation.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "prose mentioning markup does not fire",
+    "I considered emitting <function=edit> markup but used the native channel.",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "fenced markup example does not fire",
+    """<assistant_prose>
+The legacy markup looks like this:
+</assistant_prose>
+```text
+<function=edit>
+<parameter=action>
+create
+</parameter>
+</function>
+```""",
+    sample_registry(),
+  )
+  // The schema decides how a parameter value is read: a string-typed field
+  // keeps a numeric-looking value verbatim, a list-typed one parses as JSON.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "string-typed parameter keeps a numeric value verbatim",
+    """<tool_call>
+<function=edit>
+<parameter=action>
+create
+</parameter>
+<parameter=path>
+version.txt
+</parameter>
+<parameter=content>
+123
+</parameter>
+</function>
+</tool_call>""",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "list-typed parameter parses as json",
+    """<tool_call>
+<function=edit>
+<parameter=action>
+patch
+</parameter>
+<parameter=path>
+main.go
+</parameter>
+<parameter=ops>
+[{"op": "a"}]
+</parameter>
+</function>
+</tool_call>""",
+    sample_registry(),
+  )
+  // The trailing-JSON dialect: the opener followed by a JSON object and no
+  // `<parameter=...>` blocks at all, with and without a close tag.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "function markup, trailing json object",
+    "<function=echo_marker>{\"value\": \"MK-7Q3Z\"}",
+    echo_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "function markup, enclosed json object",
+    "<function=echo_marker>{\"value\": \"MK-7Q3Z\"}</function>",
+    echo_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "function markup, wrapped trailing json object",
+    "<tool_call><function=echo_marker>{\"value\": \"MK-7Q3Z\"}</function></tool_call>",
+    echo_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "function markup, empty json object",
+    "<function=echo_marker>{}",
+    echo_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "function markup, nested json object",
+    "<function=echo_marker>{\"value\": \"x\", \"meta\": {\"n\": 1}}",
+    echo_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "invoke markup, trailing json object",
+    "<invoke name=\"echo_marker\">{\"value\": \"MK-7Q3Z\"}</invoke>",
+    echo_registry(),
+  )
+  // An opened `{` that never closes must not dispatch empty or partial args.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "function markup, truncated trailing json",
+    "<function=echo_marker>{\"value\": \"MK-7Q3Z\"",
+    echo_registry(),
+  )
+  // A heredoc nested inside `<parameter=content>`: the markup parser keeps the
+  // parameter value verbatim, delimiters and all. Stripping the leaked wrapper
+  // is the dispatch chokepoint's job, not the parser's — pinning that split
+  // here is what stops a port from "helpfully" unwrapping it early.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "heredoc nested inside a markup parameter stays verbatim",
+    """<tool_call>
+<function=edit>
+<parameter=action>
+create
+</parameter>
+<parameter=path>
+src/writer.zig
+</parameter>
+<parameter=content>
+<<EOF
+fn f() void {
+    var x: u32 = 1;
+    x <<= 4;
+}
+EOF
+</parameter>
+</function>
+</tool_call>""",
+    sample_registry(),
+  )
+}

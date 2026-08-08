@@ -1,0 +1,5 @@
+// `try*` outside any function/pipeline/tool body is a compile error:
+// the rethrow has no body to live in.
+const x = try* Err("missing")
+
+const y = x

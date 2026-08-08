@@ -1,0 +1,37 @@
+rewrite
+cargo build --release --target-dir target-shared
+cargo build --release
+cargo build --release --target-dir target-shared
+2
+tool_rewrite
+rust.cargo.target_dir
+cargo build --release
+cargo build --release --target-dir target-shared
+tool_hooks.reminder_injected
+tool_rewritten
+1
+true
+true
+deny
+custom.git_push_force
+true
+1
+tool_denied
+custom.git_push_force
+git push origin main --force
+error
+passthrough
+find . -name foo
+find . -name foo
+1
+tool_rule_warning
+python.find_versus_rg
+info
+true
+rewrite
+cargo test --target-dir target-shared
+cargo test
+true
+2
+tool_rewrite
+tool_hooks.reminder_injected

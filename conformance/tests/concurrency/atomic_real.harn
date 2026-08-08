@@ -1,0 +1,25 @@
+pipeline default(harness: Harness) {
+  // Create a real atomic
+  const counter = harness.runtime.atomic(0)
+  harness.stdio.println(type_of(counter))
+  // Basic get/set
+  harness.stdio.println(harness.runtime.atomic_get(counter))
+  harness.runtime.atomic_set(counter, 10)
+  harness.stdio.println(harness.runtime.atomic_get(counter))
+  // Atomic add
+  harness.runtime.atomic_add(counter, 5)
+  harness.stdio.println(harness.runtime.atomic_get(counter))
+  // Compare and swap
+  const success = harness.runtime.atomic_cas(counter, 15, 20)
+  harness.stdio.println(success)
+  harness.stdio.println(harness.runtime.atomic_get(counter))
+  const fail = harness.runtime.atomic_cas(counter, 15, 30)
+  harness.stdio.println(fail)
+  harness.stdio.println(harness.runtime.atomic_get(counter))
+  // Concurrent atomic increments
+  const a = harness.runtime.atomic(0)
+  parallel 10 { i ->
+    harness.runtime.atomic_add(a, 1)
+  }
+  harness.stdio.println(harness.runtime.atomic_get(a))
+}

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/read_range.request.json",
+  "title": "code_index.read_range request",
+  "description": "Read a 1-based inclusive line range from `path`. Both bounds are optional; missing both reads the whole file.",
+  "type": "object",
+  "properties": {
+    "path": { "type": "string", "minLength": 1 },
+    "start": { "type": "integer", "minimum": 1 },
+    "end": { "type": "integer", "minimum": 1 }
+  },
+  "required": ["path"],
+  "additionalProperties": false
+}

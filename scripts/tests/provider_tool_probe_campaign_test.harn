@@ -1,0 +1,1168 @@
+import { assert_contains, assert_false, assert_true } from "std/testing"
+import "../provider_tool_probe_campaign.harn"
+
+fn verified_runtime() -> ProviderToolProbeRuntimeReceipt {
+  return {
+    schema_version: "harn.provider_tool_probe_runtime.v1",
+    command: ["harn", "version", "--json"],
+    status: "verified",
+    exit_code: 0,
+    version: "0.10.24",
+    source_revision: "0123456789abcdef0123456789abcdef01234567",
+    reason: "target Harn runtime identified",
+  }
+}
+
+fn verified_catalog() -> ProviderToolProbeCatalogReceipt {
+  return {
+    schema_version: "harn.provider_tool_probe_catalog.v1",
+    command: ["harn", "provider", "catalog", "show"],
+    command_env: {},
+    status: "verified",
+    exit_code: 0,
+    providers_config: "",
+    catalog_sha256: "sha256:fixture",
+    provider_count: 1,
+    model_count: 1,
+    route_count: 1,
+    reason: "target Harn provider catalog identified",
+  }
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_selects_explicit_provider_config(
+  harness: Harness,
+  task,
+) {
+  assert_eq(
+    provider_tool_probe_campaign_providers_config(
+      " /explicit/providers.toml ",
+      "/configured",
+      "/inherited",
+    ),
+    "/explicit/providers.toml",
+  )
+  assert_eq(
+    provider_tool_probe_campaign_providers_config("", " /configured/providers.toml ", "/inherited"),
+    "/configured/providers.toml",
+  )
+  assert_eq(
+    provider_tool_probe_campaign_providers_config("", "", " /inherited/providers.toml "),
+    "/inherited/providers.toml",
+  )
+  assert_eq(provider_tool_probe_campaign_command_env(""), {})
+  assert_eq(
+    provider_tool_probe_campaign_command_env(" /catalog/providers.toml "),
+    {HARN_PROVIDERS_CONFIG: "/catalog/providers.toml"},
+  )
+  assert_eq(provider_tool_probe_campaign_providers_config_text_error("[aliases]\n"), nil)
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_normalizes_verified_catalog_snapshot(
+  harness: Harness,
+  task,
+) {
+  const catalog = {
+    providers: [{id: "openrouter"}],
+    models: [{id: "anthropic/claude-sonnet-4.6"}],
+    routing_routes: [{provider: "openrouter", model: "anthropic/claude-sonnet-4.6"}],
+  }
+  const snapshot = provider_tool_probe_campaign_catalog_snapshot(
+    "/opt/harn",
+    "/workspace/providers.toml",
+    {exit_code: 0, stdout: json_stringify(catalog), stderr: ""},
+  )
+  assert_eq(snapshot.catalog, catalog)
+  assert_eq(
+    snapshot.receipt,
+    {
+      schema_version: "harn.provider_tool_probe_catalog.v1",
+      command: ["/opt/harn", "provider", "catalog", "show"],
+      command_env: {HARN_PROVIDERS_CONFIG: "/workspace/providers.toml"},
+      status: "verified",
+      exit_code: 0,
+      providers_config: "/workspace/providers.toml",
+      catalog_sha256: "sha256:" + sha256(json_stringify(catalog)),
+      provider_count: 1,
+      model_count: 1,
+      route_count: 1,
+      reason: "target Harn provider catalog identified",
+    },
+  )
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_rejects_unavailable_and_invalid_catalog_snapshots(
+  harness: Harness,
+  task,
+) {
+  const unavailable = provider_tool_probe_campaign_catalog_snapshot(
+    "missing-harn",
+    "",
+    {exit_code: 127, stdout: "", stderr: "command not found"},
+  )
+  assert_eq(
+    unavailable,
+    {
+      receipt: {
+        schema_version: "harn.provider_tool_probe_catalog.v1",
+        command: ["missing-harn", "provider", "catalog", "show"],
+        command_env: {},
+        status: "unavailable",
+        exit_code: 127,
+        providers_config: "",
+        catalog_sha256: "",
+        provider_count: 0,
+        model_count: 0,
+        route_count: 0,
+        reason: "command not found",
+      },
+      catalog: {},
+    },
+  )
+  const invalid = provider_tool_probe_campaign_catalog_snapshot(
+    "harn",
+    "",
+    {exit_code: 0, stdout: json_stringify({providers: [], models: []}), stderr: ""},
+  )
+  assert_eq(invalid.receipt.status, "invalid")
+  assert_eq(invalid.receipt.reason, "target Harn runtime produced invalid provider catalog JSON")
+  assert_eq(invalid.catalog, {})
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_normalizes_verified_runtime_receipt(
+  harness: Harness,
+  task,
+) {
+  const receipt = provider_tool_probe_campaign_runtime_receipt(
+    "/opt/harn",
+    {
+      exit_code: 0,
+      stdout: json_stringify(
+        {
+          schemaVersion: 1,
+          ok: true,
+          data: {
+            name: "harn-cli",
+            version: "0.10.24",
+            source_revision: "0123456789abcdef0123456789abcdef01234567",
+          },
+        },
+      ),
+      stderr: "",
+    },
+  )
+  assert_eq(
+    receipt,
+    {
+      schema_version: "harn.provider_tool_probe_runtime.v1",
+      command: ["/opt/harn", "version", "--json"],
+      status: "verified",
+      exit_code: 0,
+      version: "0.10.24",
+      source_revision: "0123456789abcdef0123456789abcdef01234567",
+      reason: "target Harn runtime identified",
+    },
+  )
+  assert_eq(provider_tool_probe_campaign_runtime_allows_live(receipt), true)
+  assert_eq(
+    provider_tool_probe_campaign_runtime_revision_requirement_error(
+      receipt,
+      "0123456789abcdef0123456789abcdef01234567",
+    ),
+    nil,
+  )
+  assert_eq(
+    provider_tool_probe_campaign_runtime_revision_requirement_error(
+      receipt,
+      "ffffffffffffffffffffffffffffffffffffffff",
+    ),
+    "target Harn runtime source revision mismatch: expected ffffffffffffffffffffffffffffffffffffffff, got 0123456789abcdef0123456789abcdef01234567",
+  )
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_normalizes_unavailable_runtime_receipt(
+  harness: Harness,
+  task,
+) {
+  const receipt = provider_tool_probe_campaign_runtime_receipt(
+    "missing-harn",
+    {exit_code: 127, stdout: "", stderr: "command not found"},
+  )
+  assert_eq(
+    receipt,
+    {
+      schema_version: "harn.provider_tool_probe_runtime.v1",
+      command: ["missing-harn", "version", "--json"],
+      status: "unavailable",
+      exit_code: 127,
+      version: "",
+      source_revision: nil,
+      reason: "command not found",
+    },
+  )
+  assert_eq(provider_tool_probe_campaign_runtime_allows_live(receipt), false)
+  assert_eq(
+    provider_tool_probe_campaign_runtime_revision_requirement_error(
+      receipt,
+      "0123456789abcdef0123456789abcdef01234567",
+    ),
+    "target Harn runtime did not report a source revision; expected 0123456789abcdef0123456789abcdef01234567",
+  )
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_normalizes_invalid_runtime_receipts(
+  harness: Harness,
+  task,
+) {
+  const malformed = provider_tool_probe_campaign_runtime_receipt(
+    "harn",
+    {exit_code: 0, stdout: "not-json", stderr: ""},
+  )
+  assert_eq(
+    malformed,
+    {
+      schema_version: "harn.provider_tool_probe_runtime.v1",
+      command: ["harn", "version", "--json"],
+      status: "invalid",
+      exit_code: 0,
+      version: "",
+      source_revision: nil,
+      reason: "target Harn runtime produced invalid version JSON",
+    },
+  )
+  const wrong_contract = provider_tool_probe_campaign_runtime_receipt(
+    "harn",
+    {exit_code: 0, stdout: json_stringify({ok: true, data: {name: "harn-cli", version: "1.0.0"}})},
+  )
+  assert_eq(
+    wrong_contract,
+    {
+      schema_version: "harn.provider_tool_probe_runtime.v1",
+      command: ["harn", "version", "--json"],
+      status: "invalid",
+      exit_code: 0,
+      version: "",
+      source_revision: nil,
+      reason: "target Harn runtime version JSON did not match the harn-cli contract",
+    },
+  )
+  assert_eq(provider_tool_probe_campaign_runtime_allows_live(malformed), false)
+  assert_eq(provider_tool_probe_campaign_runtime_allows_live(wrong_contract), false)
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_env_file_is_explicit_and_portable(
+  harness: Harness,
+  task,
+) {
+  assert_eq(
+    provider_tool_probe_campaign_env_file(" /explicit/.env ", "/configured/.env"),
+    "/explicit/.env",
+  )
+  assert_eq(provider_tool_probe_campaign_env_file("", " /configured/.env "), "/configured/.env")
+  assert_eq(provider_tool_probe_campaign_env_file("", ""), "")
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_parses_explicit_routes(harness: Harness, task) {
+  const routes = provider_tool_probe_campaign_routes(
+    ["anthropic:claude-sonnet-5", "fireworks:accounts/fireworks/models/gpt-oss-120b"],
+  )
+  assert_eq(len(routes), 2)
+  const first = routes[0]
+  const second = routes[1]
+  assert_eq(first.provider, "anthropic")
+  assert_eq(first.model, "claude-sonnet-5")
+  assert_eq(first.env_keys, [])
+  assert_eq(second.provider, "fireworks")
+  assert_eq(second.model, "accounts/fireworks/models/gpt-oss-120b")
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_cli_collects_repeated_routes_and_behaviors(
+  harness: Harness,
+  task,
+) {
+  const parsed = unwrap(
+    provider_tool_probe_campaign_parse_args(
+      [
+        "--route",
+        "fireworks:accounts/fireworks/models/gpt-oss-120b",
+        "--route",
+        "groq:openai/gpt-oss-120b",
+        "--behavior",
+        "tool_calling_non_streaming",
+        "--behavior",
+        "tool_calling_streaming",
+      ],
+    ),
+  ).options
+  assert_eq(
+    parsed.route,
+    ["fireworks:accounts/fireworks/models/gpt-oss-120b", "groq:openai/gpt-oss-120b"],
+  )
+  assert_eq(parsed.behavior, ["tool_calling_non_streaming", "tool_calling_streaming"])
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_rejects_malformed_routes(harness: Harness, task) {
+  const routes = provider_tool_probe_campaign_routes(
+    ["missing-separator", "openai:", ":model", "ollama:gemma4:e4b"],
+  )
+  assert_eq(len(routes), 1)
+  const route = routes[0]
+  assert_eq(route.provider, "ollama")
+  assert_eq(route.model, "gemma4:e4b")
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_default_routes_are_cheap_by_default(
+  harness: Harness,
+  task,
+) {
+  const routes = provider_tool_probe_campaign_default_routes(false)
+  const ids = routes.map({ route -> route.id }).to_list()
+  assert_contains(ids, "fireworks-gpt-oss-120b")
+  assert_contains(ids, "cerebras-gpt-oss-120b")
+  assert_contains(ids, "openrouter-gpt-oss-120b")
+  assert_contains(ids, "moonshot-kimi")
+  assert_contains(ids, "local-vllm")
+  assert_contains(ids, "ollama")
+  assert_false(ids.contains("xai-grok"), "xAI is excluded unless expensive defaults are requested")
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_include_expensive_adds_xai(harness: Harness, task) {
+  const routes = provider_tool_probe_campaign_default_routes(true)
+  const ids = routes.map({ route -> route.id }).to_list()
+  assert_contains(ids, "xai-grok")
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_catalog_routes_use_catalog_metadata(
+  harness: Harness,
+  task,
+) {
+  const catalog = {
+    providers: [
+      {
+        id: "anthropic",
+        classification: "hosted",
+        auth: {env: ["ANTHROPIC_API_KEY"], required: true},
+      },
+      {id: "ollama", classification: "local", auth: {env: [], required: false}},
+    ],
+    models: [
+      {
+        provider: "anthropic",
+        id: "claude-sonnet-fixture",
+        strengths: ["coding"],
+        pricing: {input_per_mtok: 3.0, output_per_mtok: 15.0},
+      },
+      {provider: "ollama", id: "local-fixture", strengths: [], pricing: {}},
+    ],
+  }
+  const cheap = provider_tool_probe_campaign_catalog_routes(catalog, false)
+  assert_eq(len(cheap), 1)
+  assert_eq(cheap[0]?.provider, "ollama")
+  assert_eq(cheap[0]?.local, true)
+  assert_eq(cheap[0]?.cheap, true)
+  const all = provider_tool_probe_campaign_catalog_routes(catalog, true)
+  assert_eq(len(all), 2)
+  const anthropic = all.filter({ route -> route.provider == "anthropic" }).to_list()[0]
+  assert_eq(anthropic.env_keys, ["ANTHROPIC_API_KEY"])
+  assert_eq(anthropic.local, false)
+  assert_eq(anthropic.cheap, false)
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_catalog_routes_keep_cheap_hosted_models(
+  harness: Harness,
+  task,
+) {
+  const catalog = {
+    providers: [{id: "fireworks", classification: "hosted", auth: {env: ["FIREWORKS_API_KEY"]}}],
+    models: [
+      {
+        provider: "fireworks",
+        id: "cheap-fixture",
+        strengths: ["speed"],
+        pricing: {input_per_mtok: 0.5, output_per_mtok: 2.0},
+      },
+      {
+        provider: "fireworks",
+        id: "expensive-fixture",
+        strengths: ["frontier"],
+        pricing: {input_per_mtok: 20.0, output_per_mtok: 60.0},
+      },
+    ],
+  }
+  const routes = provider_tool_probe_campaign_catalog_routes(catalog, false)
+  assert_eq(len(routes), 1)
+  assert_eq(routes[0]?.model, "cheap-fixture")
+  assert_eq(routes[0]?.env_keys, ["FIREWORKS_API_KEY"])
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_catalog_routes_accept_runtime_catalog_shape(
+  harness: Harness,
+  task,
+) {
+  const catalog = {
+    providers: [{name: "anthropic", classification: "hosted", auth_envs: ["ANTHROPIC_API_KEY"]}],
+    models: [
+      {
+        provider: "anthropic",
+        id: "claude-haiku-fixture",
+        strengths: ["cheap"],
+        pricing: {input_per_mtok: 0.8, output_per_mtok: 4.0},
+      },
+    ],
+  }
+  const routes = provider_tool_probe_campaign_catalog_routes(catalog, false)
+  assert_eq(len(routes), 1)
+  assert_eq(routes[0]?.provider, "anthropic")
+  assert_eq(routes[0]?.env_keys, ["ANTHROPIC_API_KEY"])
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_catalog_routes_prefer_routing_routes(
+  harness: Harness,
+  task,
+) {
+  const catalog = {
+    providers: [
+      {id: "baseten", classification: "hosted", auth: {env: ["BASETEN_API_KEY"]}},
+      {id: "fireworks", classification: "hosted", auth: {env: ["FIREWORKS_API_KEY"]}},
+    ],
+    models: [
+      {
+        provider: "baseten",
+        id: "baseten/moonshotai/Kimi-K2.5",
+        wire_model: "moonshotai/Kimi-K2.5",
+        strengths: ["coding"],
+        pricing: {input_per_mtok: 0.6, output_per_mtok: 3.0},
+      },
+      {
+        provider: "fireworks",
+        id: "accounts/fireworks/models/gpt-oss-120b",
+        strengths: ["speed"],
+        pricing: {input_per_mtok: 0.3, output_per_mtok: 0.6},
+      },
+    ],
+    routing_routes: [
+      {
+        provider: "baseten",
+        model: "moonshotai/Kimi-K2.5",
+        secret_env: "BASETEN_ROUTE_KEY",
+        capabilities: ["tools"],
+      },
+    ],
+  }
+  const routes = provider_tool_probe_campaign_catalog_routes(catalog, false)
+  assert_eq(len(routes), 1)
+  assert_eq(routes[0]?.provider, "baseten")
+  assert_eq(routes[0]?.model, "moonshotai/Kimi-K2.5")
+  assert_eq(routes[0]?.env_keys, ["BASETEN_ROUTE_KEY", "BASETEN_API_KEY"])
+  assert_eq(routes[0]?.cheap, true)
+  assert_eq(routes[0]?.metadata.source, "routing_route")
+  assert_eq(routes[0]?.metadata.catalog_model_id, "baseten/moonshotai/Kimi-K2.5")
+  assert_eq(routes[0]?.metadata.catalog_wire_model, "moonshotai/Kimi-K2.5")
+  assert_eq(routes[0]?.metadata.route_capabilities, ["tools"])
+  assert_eq(routes[0]?.metadata.route_secret_env, "BASETEN_ROUTE_KEY")
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_env_aliases_are_alternatives(harness: Harness, task) {
+  const route: ProviderToolProbeRoute = {
+    id: "moonshot-fixture",
+    provider: "moonshot",
+    model: "kimi-k2.6",
+    env_keys: ["MOONSHOT_API_KEY", "MOONSHOT_AI_API_KEY", "KIMI_API_KEY"],
+    local: false,
+    cheap: true,
+    metadata: {source: "fixture"},
+  }
+  assert_eq(provider_tool_probe_campaign_missing_env_keys(route, {}), route.env_keys)
+  assert_eq(
+    provider_tool_probe_campaign_missing_env_keys(route, {MOONSHOT_AI_API_KEY: "present"}),
+    [],
+  )
+  assert_eq(provider_tool_probe_campaign_missing_env_keys(route, {KIMI_API_KEY: "present"}), [])
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_modes_expand_both(harness: Harness, task) {
+  assert_eq(provider_tool_probe_campaign_modes("both"), ["non-streaming", "streaming"])
+  assert_eq(provider_tool_probe_campaign_modes("streaming"), ["streaming"])
+  assert_eq(provider_tool_probe_campaign_modes("non-streaming"), ["non-streaming"])
+  assert_eq(provider_tool_probe_campaign_modes("nonsense"), [])
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_behavior_filter_matches_category_and_runner(
+  harness: Harness,
+  task,
+) {
+  const tool_calls = provider_tool_probe_campaign_select_behaviors(["tool_calls"])
+  const executable = provider_tool_probe_campaign_select_behaviors(["provider_tool_probe"])
+  const parser = provider_tool_probe_campaign_select_behaviors(["parser"])
+  assert_eq(len(tool_calls), 2)
+  assert_eq(len(executable), 8)
+  assert_true(len(parser) >= 2, "parser behaviors are selected by category")
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_mode_filter_keeps_matching_behaviors(
+  harness: Harness,
+  task,
+) {
+  const behaviors = provider_tool_probe_campaign_select_behaviors(["tool_calls"])
+  const streaming = provider_tool_probe_campaign_filter_behavior_modes(behaviors, "streaming")
+  const non_streaming = provider_tool_probe_campaign_filter_behavior_modes(
+    behaviors,
+    "non-streaming",
+  )
+  assert_eq(len(streaming), 1)
+  assert_eq(streaming[0]?.id, "tool_calling_streaming")
+  assert_eq(streaming[0]?.modes, ["streaming"])
+  assert_eq(len(non_streaming), 1)
+  assert_eq(non_streaming[0]?.id, "tool_calling_non_streaming")
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_planned_cells_cover_route_behavior_formats(
+  harness: Harness,
+  task,
+) {
+  const routes = provider_tool_probe_campaign_routes(["ollama:gemma4:e4b"])
+  const behaviors = provider_tool_probe_campaign_select_behaviors(["tool_calling_non_streaming"])
+  const cells = provider_tool_probe_campaign_planned_cells(harness.llm, routes, behaviors)
+  assert_eq(len(cells), 3)
+  assert_eq(cells[0]?.status, "planned")
+  assert_eq(
+    cells[0]?.catalog?.tools,
+    harness.llm.provider_capabilities("ollama", "gemma4:e4b")?.tools,
+  )
+  assert_eq(cells[0]?.catalog?.route_metadata?.source, "explicit")
+  assert_eq(
+    cells[0]?.command,
+    [
+      "harn",
+      "provider",
+      "tool-probe",
+      "ollama",
+      "--model",
+      "gemma4:e4b",
+      "--mode",
+      "non-streaming",
+      "--case",
+      "single_tool_call",
+      "--tool-format",
+      "native",
+      "--repeat",
+      "1",
+      "--timeout-secs",
+      "60",
+      "--json",
+    ],
+  )
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_planned_cells_include_custom_command_recipe(
+  harness: Harness,
+  task,
+) {
+  const routes = provider_tool_probe_campaign_routes(
+    ["fireworks:accounts/fireworks/models/gpt-oss-120b"],
+  )
+  const behaviors = provider_tool_probe_campaign_select_behaviors(["tool_calling_streaming"])
+  const cells = provider_tool_probe_campaign_planned_cells_with_options(
+    harness.llm,
+    routes,
+    behaviors,
+    "./harn",
+    5,
+    12,
+  )
+  assert_eq(len(cells), 3)
+  assert_eq(
+    cells[0]?.command,
+    [
+      "./harn",
+      "provider",
+      "tool-probe",
+      "fireworks",
+      "--model",
+      "accounts/fireworks/models/gpt-oss-120b",
+      "--mode",
+      "streaming",
+      "--case",
+      "single_tool_call",
+      "--tool-format",
+      "native",
+      "--repeat",
+      "5",
+      "--timeout-secs",
+      "12",
+      "--json",
+    ],
+  )
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_report_summarizes_cells(harness: Harness, task) {
+  const routes = provider_tool_probe_campaign_routes(["ollama:gemma4:e4b"])
+  const behaviors = provider_tool_probe_campaign_select_behaviors(["tool_calling_non_streaming"])
+  const cells = provider_tool_probe_campaign_planned_cells(harness.llm, routes, behaviors)
+  const report = provider_tool_probe_campaign_report(
+    routes,
+    behaviors,
+    cells,
+    false,
+    false,
+    ".out",
+    1,
+    {},
+    {checked: false},
+    verified_runtime(),
+    verified_catalog(),
+  )
+  assert_eq(report.schema_version, "harn.provider_tool_probe_campaign.v9")
+  assert_eq(report.runtime, verified_runtime())
+  assert_eq(report.catalog, verified_catalog())
+  assert_eq(report.summary.planned, 3)
+  assert_eq(report.summary.pass, 0)
+  assert_eq(report.cell_count, 3)
+  assert_eq(report.spend.executable_probe_count, 3)
+  assert_eq(report.spend.actual_usd_known, true)
+  assert_eq(report.spend.actual_usd, 0.0)
+  assert_eq(report.runner_summary.provider_tool_probe.total, 3)
+  assert_eq(report.executable_gap.executable_cells, 3)
+  assert_eq(report.executable_gap.executable_commands, 3)
+  assert_eq(report.executable_gap.missing_runner, 0)
+  assert_eq(report.auth_readiness.env_checked, false)
+  assert_eq(report.auth_readiness.ready_routes, 1)
+  assert_eq(report.auth_readiness.missing_auth_routes, 0)
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_shard_slices_probe_units(harness: Harness, task) {
+  const routes = provider_tool_probe_campaign_routes(["ollama:gemma4:e4b"])
+  const behaviors = provider_tool_probe_campaign_select_behaviors(
+    ["tool_calling_non_streaming", "tool_calling_streaming"],
+  )
+  const request: ProviderToolProbePlanRequest = {
+    llm: harness.llm,
+    routes: routes,
+    behaviors: behaviors,
+    harn_bin: "harn",
+    repeat: 1,
+    timeout_secs: 60,
+    shard_count: 2,
+    shard_index: 1,
+    max_probes: 0,
+  }
+  const plan = provider_tool_probe_campaign_planned_cells_sliced_with_options(request)
+  const cells = plan.cells ?? []
+  assert_eq(len(cells), 3)
+  assert_eq(cells[0]?.behavior, "tool_calling_streaming")
+  assert_eq(cells[0]?.mode, "streaming")
+  assert_eq(plan.slice.probe_units_total, 2)
+  assert_eq(plan.slice.probe_units_selected, 1)
+  assert_eq(plan.slice.executable_units_selected, 1)
+  assert_eq(plan.slice.probe_units_excluded_by_shard, 1)
+  assert_eq(plan.slice.probe_units_excluded_by_cap, 0)
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_max_probes_caps_executable_units(
+  harness: Harness,
+  task,
+) {
+  const routes = provider_tool_probe_campaign_routes(["ollama:gemma4:e4b"])
+  const behaviors = provider_tool_probe_campaign_select_behaviors(["provider_tool_probe"])
+  const request: ProviderToolProbePlanRequest = {
+    llm: harness.llm,
+    routes: routes,
+    behaviors: behaviors,
+    harn_bin: "harn",
+    repeat: 3,
+    timeout_secs: 60,
+    shard_count: 1,
+    shard_index: 0,
+    max_probes: 2,
+  }
+  const plan = provider_tool_probe_campaign_planned_cells_sliced_with_options(request)
+  const cells = plan.cells ?? []
+  assert_eq(len(cells), 6)
+  assert_eq(plan.slice.probe_units_total, 8)
+  assert_eq(plan.slice.probe_units_selected, 2)
+  assert_eq(plan.slice.executable_units_selected, 2)
+  assert_eq(plan.slice.probe_units_excluded_by_cap, 6)
+  const report = provider_tool_probe_campaign_report(
+    routes,
+    behaviors,
+    cells,
+    false,
+    false,
+    ".out",
+    3,
+    {},
+    {checked: true},
+    verified_runtime(),
+    verified_catalog(),
+    plan.slice,
+  )
+  assert_eq(report.campaign_slice.max_probes, 2)
+  assert_eq(report.spend.executable_probe_count, 18)
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_live_spend_fails_closed_without_case_receipts(
+  harness: Harness,
+  task,
+) {
+  const routes = provider_tool_probe_campaign_routes(["ollama:gemma4:e4b"])
+  const behaviors = provider_tool_probe_campaign_select_behaviors(["provider_tool_probe"])
+  const planned = provider_tool_probe_campaign_planned_cells(harness.llm, routes, behaviors)
+  const cells = [
+    unwrap(planned[0]) + {status: "pass"},
+    unwrap(planned[1]) + {status: "skip"},
+    unwrap(planned[2]) + {status: "planned"},
+  ]
+  const report = provider_tool_probe_campaign_report(
+    routes,
+    behaviors,
+    cells,
+    true,
+    false,
+    ".out",
+    2,
+    {},
+    {checked: true},
+    verified_runtime(),
+    verified_catalog(),
+  )
+  assert_eq(report.spend.actual_usd_known, false)
+  assert_eq(report.spend.estimated_usd_known, false)
+  assert_eq(report.spend.actual_usd, 0.0)
+  assert_eq(report.spend.unaccounted_probe_count, 1)
+  assert_eq(report.spend.budget_status, "stopped_unpriced")
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_aggregates_priced_probe_telemetry(
+  harness: Harness,
+  task,
+) {
+  const telemetry = provider_tool_probe_campaign_probe_telemetry(
+    {
+      cases: [
+        {
+          ok: true,
+          classification: "structured_native_tool_call",
+          http_status: 200,
+          elapsed_ms: 40,
+          usage: {input_tokens: 10, output_tokens: 4, cost_usd: 0.002},
+        },
+        {
+          ok: false,
+          classification: "empty_silent",
+          http_status: 429,
+          elapsed_ms: 60,
+          usage: {input_tokens: 2, output_tokens: 0, cost_usd: 0.001},
+        },
+      ],
+    },
+  )
+  assert_eq(telemetry.case_count, 2)
+  assert_eq(telemetry.successful_case_count, 1)
+  assert_eq(telemetry.empty_completion_count, 1)
+  assert_eq(telemetry.request_attempt_count, 2)
+  assert_eq(telemetry.retry_count, 0)
+  assert_eq(telemetry.rate_limited_count, 1)
+  assert_eq(telemetry.observed_latency_count, 2)
+  assert_eq(telemetry.latency_ms_total, 100)
+  assert_eq(telemetry.input_tokens, 12)
+  assert_eq(telemetry.output_tokens, 4)
+  assert_eq(telemetry.actual_usd, 0.003)
+  assert_eq(telemetry.unpriced_case_count, 0)
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_stops_after_unreceipted_child_attempt(
+  harness: Harness,
+  task,
+) {
+  const route = unwrap(provider_tool_probe_campaign_routes(["ollama:gemma4:e4b"])[0])
+  const behavior = unwrap(
+    provider_tool_probe_campaign_select_behaviors(["tool_calling_non_streaming"])[0],
+  )
+  const cell = unwrap(
+    provider_tool_probe_campaign_planned_cells(harness.llm, [route], [behavior])[0],
+  )
+  const spend = provider_tool_probe_campaign_observed_spend(
+    [
+      cell
+        + {
+        observed: {
+          telemetry: {
+            actual_usd: 0.0,
+            observed_cost_count: 0,
+            unpriced_case_count: 1,
+            request_attempt_count: 1,
+            retry_count: 0,
+          },
+        },
+      },
+    ],
+  )
+  assert_eq(spend.actual_usd, 0.0)
+  assert_eq(spend.unpriced_case_count, 1)
+  assert_eq(spend.request_attempt_count, 1)
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_uses_case_verdict_for_no_tool_fixtures(
+  harness: Harness,
+  task,
+) {
+  const report = {
+    cases: [{ok: true, classification: "direct_answer_no_tool", fallback_mode: "disabled"}],
+    tool_calling: {
+      native: "fail",
+      text: "fail",
+      streaming_native: "unknown",
+      fallback_mode: "disabled",
+    },
+  }
+  assert_eq(provider_tool_probe_campaign_case_status(report), "pass")
+  assert_eq(
+    provider_tool_probe_campaign_case_status(
+      report + {cases: [{ok: false, failure_reason: "spurious tool call"}]},
+    ),
+    "fail",
+  )
+  assert_eq(provider_tool_probe_campaign_case_status({cases: []}), "skip")
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_live_spend_uses_runtime_pricing(harness: Harness, task) {
+  const routes = provider_tool_probe_campaign_routes(["ollama:gemma4:e4b"])
+  const behaviors = provider_tool_probe_campaign_select_behaviors(["tool_calling_non_streaming"])
+  const planned = provider_tool_probe_campaign_planned_cells(harness.llm, routes, behaviors)
+  const cells = [
+    unwrap(planned[0])
+      + {
+      status: "pass",
+      observed: {
+        telemetry: {
+          actual_usd: 0.003,
+          observed_cost_count: 2,
+          unpriced_case_count: 0,
+          request_attempt_count: 2,
+          retry_count: 0,
+        },
+      },
+    },
+  ]
+  const report = provider_tool_probe_campaign_report(
+    routes,
+    behaviors,
+    cells,
+    true,
+    false,
+    ".out",
+    1,
+    {},
+    {checked: true},
+    verified_runtime(),
+    verified_catalog(),
+    {},
+    0.01,
+  )
+  assert_eq(report.spend.actual_usd_known, true)
+  assert_eq(report.spend.actual_usd, 0.003)
+  assert_eq(report.spend.cap_usd, 0.01)
+  assert_eq(report.spend.budget_status, "within_cap")
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_report_counts_missing_runners(harness: Harness, task) {
+  const routes = provider_tool_probe_campaign_routes(["ollama:gemma4:e4b"])
+  const behaviors = provider_tool_probe_campaign_select_behaviors(["stop_sequences"])
+  const cells = provider_tool_probe_campaign_planned_cells(harness.llm, routes, behaviors)
+  const report = provider_tool_probe_campaign_report(
+    routes,
+    behaviors,
+    cells,
+    false,
+    false,
+    ".out",
+    1,
+    {},
+    {checked: false},
+    verified_runtime(),
+    verified_catalog(),
+  )
+  assert_eq(report.runner_summary.planned_llm_call.total, 1)
+  assert_eq(report.executable_gap.executable_cells, 0)
+  assert_eq(report.executable_gap.executable_commands, 0)
+  assert_eq(report.executable_gap.missing_runner, 1)
+  assert_eq(report.executable_gap.missing_runner_by_behavior.stop_sequences, 1)
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_parallel_case_is_executable(harness: Harness, task) {
+  const routes = provider_tool_probe_campaign_routes(["ollama:gemma4:e4b"])
+  const behaviors = provider_tool_probe_campaign_select_behaviors(["parallel_tool_calls"])
+  const cells = provider_tool_probe_campaign_planned_cells(harness.llm, routes, behaviors)
+  const report = provider_tool_probe_campaign_report(
+    routes,
+    behaviors,
+    cells,
+    false,
+    false,
+    ".out",
+    1,
+    {},
+    {checked: false},
+    verified_runtime(),
+    verified_catalog(),
+  )
+  assert_eq(report.runner_summary.provider_tool_probe.total, 3)
+  assert_eq(report.executable_gap.executable_cells, 3)
+  assert_eq(report.executable_gap.executable_commands, 3)
+  assert_eq(report.executable_gap.missing_runner, 0)
+  assert_eq(
+    cells[0]?.command,
+    [
+      "harn",
+      "provider",
+      "tool-probe",
+      "ollama",
+      "--model",
+      "gemma4:e4b",
+      "--mode",
+      "non-streaming",
+      "--case",
+      "parallel_tool_calls",
+      "--tool-format",
+      "native",
+      "--repeat",
+      "1",
+      "--timeout-secs",
+      "60",
+      "--json",
+    ],
+  )
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_auth_readiness_summarizes_env_without_live_calls(
+  harness: Harness,
+  task,
+) {
+  const routes: list<ProviderToolProbeRoute> = [
+    {
+      id: "fireworks-fixture",
+      provider: "fireworks",
+      model: "accounts/fireworks/models/gpt-oss-120b",
+      env_keys: ["FIREWORKS_API_KEY"],
+      local: false,
+      cheap: true,
+      metadata: {source: "fixture"},
+    },
+    {
+      id: "moonshot-fixture",
+      provider: "moonshot",
+      model: "kimi-k2.6",
+      env_keys: ["MOONSHOT_API_KEY", "MOONSHOT_AI_API_KEY", "KIMI_API_KEY"],
+      local: false,
+      cheap: true,
+      metadata: {source: "fixture"},
+    },
+    {
+      id: "ollama-fixture",
+      provider: "ollama",
+      model: "gemma4:e4b",
+      env_keys: [],
+      local: true,
+      cheap: true,
+      metadata: {source: "fixture"},
+    },
+  ]
+  const behaviors = provider_tool_probe_campaign_select_behaviors(["tool_calling_non_streaming"])
+  const cells = provider_tool_probe_campaign_planned_cells(harness.llm, routes, behaviors)
+  const report = provider_tool_probe_campaign_report(
+    routes,
+    behaviors,
+    cells,
+    false,
+    false,
+    ".out",
+    1,
+    {KIMI_API_KEY: "present"},
+    {checked: true, loaded: true, parsed_key_count: 1, reason: "loaded"},
+    verified_runtime(),
+    verified_catalog(),
+  )
+  assert_eq(report.auth_readiness.env_checked, true)
+  assert_eq(report.auth_readiness.env_source.loaded, true)
+  assert_eq(report.auth_readiness.env_source.parsed_key_count, 1)
+  assert_eq(report.auth_readiness.route_count, 3)
+  assert_eq(report.auth_readiness.ready_routes, 2)
+  assert_eq(report.auth_readiness.missing_auth_routes, 1)
+  assert_eq(report.auth_readiness.local_routes, 1)
+  assert_eq(report.auth_readiness.hosted_routes, 2)
+  assert_eq(report.auth_readiness.ready_by_provider.moonshot, 1)
+  assert_eq(report.auth_readiness.ready_by_provider.ollama, 1)
+  assert_eq(report.auth_readiness.missing_by_provider.fireworks, 1)
+  assert_eq(
+    report.auth_readiness.missing_env_candidates_by_provider.fireworks,
+    ["FIREWORKS_API_KEY"],
+  )
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_artifact_paths_are_unique_per_behavior_case(
+  harness: Harness,
+  task,
+) {
+  const route: ProviderToolProbeRoute = {
+    id: "ollama-gemma4-e4b",
+    provider: "ollama",
+    model: "gemma4:e4b",
+    env_keys: [],
+    local: true,
+    cheap: true,
+    metadata: {source: "fixture"},
+  }
+  const behaviors = provider_tool_probe_campaign_filter_behavior_modes(
+    provider_tool_probe_campaign_select_behaviors(["provider_tool_probe"]),
+    "non-streaming",
+  )
+  let paths: list<string> = []
+  for behavior in behaviors {
+    const path = provider_tool_probe_campaign_artifact_path(
+      route,
+      behavior,
+      "non-streaming",
+      "native",
+      ".out",
+    )
+    assert_false(paths.contains(path), "artifact path must be unique: " + path)
+    paths = paths + [path]
+  }
+  assert_eq(len(paths), 7)
+  assert_contains(paths[0] ?? "", "tool-calling-non-streaming")
+  assert_contains(paths[0] ?? "", "single-tool-call")
+  assert_contains(paths[1] ?? "", "parallel-tool-calls")
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_dotenv_parser_does_not_require_shell(
+  harness: Harness,
+  task,
+) {
+  const env = provider_tool_probe_campaign_env_from_dotenv_text(
+    "# ignored\nexport FIREWORKS_API_KEY=\"secret=value\"\nEMPTY=\nBAD LINE\nMOONSHOT_API_KEY='moon'\n",
+  )
+  assert_eq(env.FIREWORKS_API_KEY, "secret=value")
+  assert_eq(env.MOONSHOT_API_KEY, "moon")
+  assert_eq(env.EMPTY, "")
+  assert_eq(env.BAD, nil)
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_cli_parses_catalog_routes(harness: Harness, task) {
+  const parsed = unwrap(
+    provider_tool_probe_campaign_parse_args(
+      [
+        "--catalog-routes",
+        "--include-expensive",
+        "--shard-count",
+        "4",
+        "--shard-index",
+        "2",
+        "--max-probes",
+        "10",
+        "--max-cost-usd",
+        "12.5",
+        "--require-runtime-revision",
+        "0123456789abcdef0123456789abcdef01234567",
+        "--providers-config",
+        "/workspace/providers.toml",
+      ],
+    ),
+  ).options
+  assert_eq(parsed.catalog_routes, true)
+  assert_eq(parsed.include_expensive, true)
+  assert_eq(parsed.shard_count, 4)
+  assert_eq(parsed.shard_index, 2)
+  assert_eq(parsed.max_probes, 10)
+  assert_eq(parsed.max_cost_usd, 12.5)
+  assert_eq(parsed.require_runtime_revision, "0123456789abcdef0123456789abcdef01234567")
+  assert_eq(parsed.providers_config, "/workspace/providers.toml")
+}
+
+@test
+pipeline test_provider_tool_probe_campaign_markdown_escapes_reasons(harness: Harness, task) {
+  const route: ProviderToolProbeRoute = {
+    id: "fixture-route",
+    provider: "mock",
+    model: "mock",
+    env_keys: [],
+    local: true,
+    cheap: true,
+    metadata: {source: "fixture"},
+  }
+  const behavior: ProviderToolProbeBehavior = {
+    id: "fixture-behavior",
+    category: "tool_calls",
+    description: "fixture",
+    runner: "provider_tool_probe",
+    modes: ["non-streaming"],
+    tool_formats: ["native"],
+    cheap: true,
+  }
+  const cell = {
+    id: "cell",
+    provider: route.provider,
+    model: route.model,
+    route_id: route.id,
+    behavior: behavior.id,
+    category: behavior.category,
+    mode: "non-streaming",
+    tool_format: "native",
+    runner: behavior.runner,
+    status: "planned",
+    reason: "left | right",
+    observed: {},
+    catalog: {},
+  }
+  const report = provider_tool_probe_campaign_report(
+    [route],
+    [behavior],
+    [cell],
+    false,
+    false,
+    ".out",
+    1,
+    {},
+    {checked: false},
+    verified_runtime(),
+    verified_catalog(),
+  )
+  const markdown = provider_tool_probe_campaign_markdown(report)
+  assert_contains(markdown, "- Target runtime: `" + json_stringify(verified_runtime()) + "`")
+  assert_contains(markdown, "- Target catalog: `" + json_stringify(verified_catalog()) + "`")
+  assert_contains(markdown, "left \\| right")
+}

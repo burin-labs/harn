@@ -1,0 +1,177 @@
+{
+  "name": "acp.session_update.harn_extensions",
+  "protocol": "acp",
+  "schema": "schemas/acp-session-update.schema.json",
+  "expect": "valid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "session-1",
+        "update": {
+          "sessionUpdate": "artifact",
+          "_meta": {
+            "harn": {
+              "artifactId": "artifact-chart-1",
+              "kind": "vega-lite",
+              "title": "Build throughput",
+              "mimeType": "application/vnd.vegalite.v5+json",
+              "spec": {
+                "mark": "bar",
+                "data": {
+                  "values": [
+                    {
+                      "name": "a",
+                      "count": 2
+                    }
+                  ]
+                },
+                "encoding": {
+                  "x": {
+                    "field": "name"
+                  },
+                  "y": {
+                    "field": "count"
+                  }
+                }
+              },
+              "fallback": "Build throughput (bar chart)",
+              "sizeBytes": 153,
+              "provenance": {
+                "source": "agent"
+              },
+              "metadata": {
+                "unit": "builds"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "session-1",
+        "update": {
+          "sessionUpdate": "skill_activated",
+          "skillName": "rust-review",
+          "iteration": 1,
+          "reason": "matched"
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "session-1",
+        "update": {
+          "sessionUpdate": "reminder_emitted",
+          "_meta": {
+            "harn": {
+              "reminder": {
+                "reminderId": "reminder-1",
+                "tags": ["token_pressure"],
+                "body": "Refresh the compacted context before answering.",
+                "roleHint": "developer",
+                "renderedRole": "developer",
+                "source": "stdlib_provider",
+                "ttlTurns": 2
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "session-1",
+        "update": {
+          "sessionUpdate": "session_truncated",
+          "keptTurnCount": 1,
+          "removedTurnCount": 2,
+          "newTipTurnId": "turn-1",
+          "reason": "user_edit"
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "session-1",
+        "update": {
+          "sessionUpdate": "tool_search_query",
+          "toolUseId": "search-1",
+          "name": "tool_search",
+          "query": {
+            "q": "filesystem read"
+          },
+          "strategy": "bm25",
+          "mode": "client"
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "session-1",
+        "update": {
+          "sessionUpdate": "progress",
+          "_meta": {
+            "harn": {
+              "phase": "fs_staging",
+              "message": "staged writes pending",
+              "progress": 1,
+              "kind": "staged_writes_pending",
+              "pendingCount": 1,
+              "totalBytes": 7,
+              "pendingWrites": [
+                {
+                  "path": "/tmp/project/src/lib.rs",
+                  "kind": "modify",
+                  "byteDelta": 3,
+                  "snapshotId": "tool-42"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "session-1",
+        "update": {
+          "sessionUpdate": "worker_update",
+          "workerId": "worker-1",
+          "workerName": "reviewer",
+          "workerTask": "review patch",
+          "workerMode": "delegated_stage",
+          "event": "worker_waiting_for_input",
+          "status": "awaiting_input",
+          "terminal": false,
+          "metadata": {
+            "child_run_id": "run_1"
+          }
+        }
+      }
+    }
+  ],
+  "matrix": {
+    "version": "v0.12.2",
+    "family": "session_update",
+    "case": "success",
+    "source": {
+      "kind": "hand_authored",
+      "description": "Protocol matrix fixture maintained from the pinned Harn adapter profile and upstream protocol semantics."
+    }
+  }
+}

@@ -1,0 +1,38 @@
+import { agent_loop } from "std/agent/loop"
+
+pipeline test(harness: Harness, task) {
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(
+    harness.random.range(100000, 999999),
+  )
+  const dir = path_join(harness.fs.workspace_temp_dir(), "harn-agent-daemon-" + unique)
+  harness.fs.mkdir(dir)
+  const snapshot = path_join(dir, "daemon.json")
+  const result = agent_loop(
+    harness,
+    "Poll for background work",
+    "You are helpful",
+    {
+      provider: "mock",
+      daemon: true,
+      max_iterations: 2,
+      wake_interval_ms: 1,
+      persist_path: snapshot,
+      consolidate_on_idle: true,
+      auto_compact: true,
+      compact_threshold: 1,
+      compact_keep_last: 1,
+      compact_strategy: "custom",
+      compact_callback: { archived -> {summary: "daemon compact " + to_string(len(archived))} },
+    },
+  )
+  const saved = json_parse(harness.fs.read_text(snapshot))
+  harness.stdio.println(result.status)
+  harness.stdio.println(result.daemon_state)
+  harness.stdio.println(result.daemon_snapshot_path == snapshot)
+  harness.stdio.println(result.llm.iterations)
+  harness.stdio.println(saved.daemon_state)
+  harness.stdio.println(saved.total_iterations)
+  harness.stdio.println(saved.transcript_summary.contains("daemon compact"))
+  harness.fs.delete(dir)
+}

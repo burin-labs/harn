@@ -1,0 +1,14 @@
+pipeline main(harness: Harness) {
+  const injected = harness.agent.transcript_inject_reminder(
+    transcript(),
+    {body: "ttl reminder", ttl_turns: 5, preserve_on_compact: true, propagate: "none"},
+  )
+  const events = transcript_events_by_kind(injected.transcript, "system_reminder")
+  harness.stdio.println(len(events))
+  harness.stdio.println(events[0].reminder.body)
+  harness.stdio.println(events[0].reminder.ttl_turns)
+  harness.stdio.println(events[0].reminder.preserve_on_compact)
+  harness.stdio.println(events[0].reminder.propagate)
+  harness.stdio.println(events[0].reminder.source)
+  harness.stdio.println(injected.deduped_count)
+}

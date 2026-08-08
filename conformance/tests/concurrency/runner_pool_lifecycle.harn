@@ -1,0 +1,38 @@
+import { runner_pool_scale, runner_pool_start, runner_pool_state } from "std/runner_pool"
+
+pipeline default(harness: Harness) {
+  const starts = harness.runtime.atomic(0)
+  const pool = runner_pool_start(
+    harness.random,
+    harness.runtime,
+    {
+      name: "fixture-runners",
+      min_size: 1,
+      max_size: 2,
+      initial_size: 1,
+      restart: "never",
+      run: { ctx ->
+        ctx.mark_busy(true)
+        harness.runtime.atomic_add(starts, 1)
+        ctx.mark_busy(false)
+        {status: "single-use-complete"}
+      },
+    },
+  )
+  harness.runtime.supervisor_wait(pool.supervisor)
+  const first = runner_pool_state(harness.runtime, pool)
+  const scaled = runner_pool_scale(harness.runtime, pool, 2)
+  harness.runtime.supervisor_wait(scaled.supervisor)
+  const second = runner_pool_state(harness.runtime, scaled)
+  harness.stdio.println(first.generation)
+  harness.stdio.println(first.desired_size)
+  harness.stdio.println(first.online)
+  harness.stdio.println(first.busy)
+  harness.stdio.println(second.generation)
+  harness.stdio.println(second.desired_size)
+  harness.stdio.println(second.online)
+  harness.stdio.println(second.busy)
+  harness.stdio.println(unwrap(second.slots[0]).lifecycle)
+  harness.stdio.println(unwrap(second.slots[1]).lifecycle)
+  harness.stdio.println(harness.runtime.atomic_get(starts))
+}

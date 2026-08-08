@@ -1,0 +1,49 @@
+/**
+ * Latency-floor smoke test for the Cerebras provider.
+ *
+ * Issues `iterations` single-tool-call binder-style llm_call invocations
+ * against `cerebras/gpt-oss-120b`, then reports p50, p99, and mean
+ * wall-clock round-trip in milliseconds. Keep the output tiny so the
+ * result reflects the provider + network floor before a binder prompt
+ * adds work.
+ *
+ * Run with `CEREBRAS_API_KEY` exported (e.g. via burin-code/.env):
+ *
+ *   set -a && source ~/projects/burin-code/.env && set +a
+ *   cargo run --quiet --bin harn -- run scripts/smoke_cerebras.harn
+ */
+pipeline default(harness: Harness, args) {
+  const model = "cerebras/gpt-oss-120b"
+  const iterations = 20
+  // First call eats DNS/TLS/connection setup; drop it from the
+  // percentile so reported numbers reflect steady-state.
+  const warmup = 1
+  const prompt = "Reply with only the word ok."
+  let samples = []
+  for i in range(iterations) {
+    const start = harness.clock.monotonic_ms()
+    const r = harness.llm.call(
+      prompt,
+      nil,
+      {provider: "cerebras", model: model, max_tokens: 8, temperature: 0.0, stream: false},
+    )
+    const elapsed = harness.clock.monotonic_ms() - start
+    samples = samples + [elapsed]
+    harness.stdio.log("[${i + 1}/${iterations}] ${elapsed}ms — ${r.text}")
+  }
+  const measured = samples[warmup:iterations]
+  const measured_count = iterations - warmup
+  const sorted = measured.sorted_by({ ms -> ms })
+  const p50_index = measured_count / 2
+  const p99_index = measured_count - 1
+  const p50 = sorted[p50_index]
+  const p99 = sorted[p99_index]
+  const mean = sorted.sum() / measured_count
+  harness.stdio.log("")
+  harness.stdio.log(
+    "Cerebras latency baseline — model=${model} iterations=${iterations} warmup=${warmup}",
+  )
+  harness.stdio.log("  p50  : ${p50}ms")
+  harness.stdio.log("  p99  : ${p99}ms")
+  harness.stdio.log("  mean : ${mean}ms")
+}

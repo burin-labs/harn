@@ -1,0 +1,488 @@
+/**
+ * @harn-entrypoint-category workflow.stdlib
+ *
+ * std/workflow/patterns — small, deterministic workflow recipes. These are
+ * builders and control-flow helpers, not another workflow runtime and not a
+ * provider client.
+ */
+fn __patterns_dict(value) {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+fn __patterns_list(value) {
+  if type_of(value) == "list" {
+    return value
+  }
+  return []
+}
+
+fn __patterns_is_callable(value) -> bool {
+  const kind = type_of(value)
+  return kind == "function" || kind == "closure" || kind == "fn"
+}
+
+fn __patterns_non_empty_string(value) {
+  if type_of(value) != "string" {
+    return nil
+  }
+  const trimmed = trim(value)
+  if trimmed == "" {
+    return nil
+  }
+  return trimmed
+}
+
+fn __patterns_model_policy(config, key) {
+  const cfg = __patterns_dict(config)
+  const specific = __patterns_dict(cfg?.[key])
+  const shared = __patterns_dict(cfg?.model_policy)
+  return shared + specific
+}
+
+fn __patterns_context_policy(config, key) {
+  const cfg = __patterns_dict(config)
+  const specific = __patterns_dict(cfg?.[key])
+  const shared = __patterns_dict(cfg?.context_policy)
+  return shared + specific
+}
+
+fn __patterns_output_contract(default_kind, override_cfg) {
+  const cfg = __patterns_dict(override_cfg)
+  if cfg?.output_contract != nil {
+    return cfg.output_contract
+  }
+  return {output_kinds: [default_kind]}
+}
+
+fn __patterns_stage_node(config, key, defaults) {
+  const cfg = __patterns_dict(config)
+  const explicit_node = cfg?.[key + "_node"]
+  const override_cfg = if explicit_node != nil {
+    __patterns_dict(explicit_node)
+  } else if key == "verify" {
+    {}
+  } else {
+    __patterns_dict(cfg?.[key])
+  }
+  let node = defaults + override_cfg
+  if node?.model_policy == nil {
+    node = node + {model_policy: __patterns_model_policy(cfg, key + "_model_policy")}
+  }
+  if node?.context_policy == nil {
+    node = node + {context_policy: __patterns_context_policy(cfg, key + "_context_policy")}
+  }
+  return node
+}
+
+/**
+ * Build the standard `verify` stage node shared by every verify-bearing
+ * pattern graph (self-verifying, command-verify, verification-only). Keeps the
+ * `kind`/`mode`/`verify`/`output_contract` defaults in one place.
+ */
+fn __patterns_verify_node(cfg) {
+  return __patterns_stage_node(
+    cfg,
+    "verify",
+    {
+      kind: "verify",
+      mode: cfg?.verify_mode ?? "command",
+      verify: cfg?.verify ?? {},
+      output_contract: __patterns_output_contract(
+        cfg?.verify_output_kind ?? "verification_result",
+        cfg?.verify_node,
+      ),
+    },
+  )
+}
+
+/**
+ * Build a one-stage graph that runs an acting stage and then a verify stage.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn workflow_self_verifying_graph(config = nil) {
+  const cfg = __patterns_dict(config)
+  const act_id = __patterns_non_empty_string(cfg?.act_id) ?? "act"
+  const verify_id = __patterns_non_empty_string(cfg?.verify_id) ?? "verify"
+  const act = __patterns_stage_node(
+    cfg,
+    "act",
+    {
+      kind: "stage",
+      mode: cfg?.mode ?? "agent",
+      model_policy: cfg?.model_policy ?? {},
+      output_contract: __patterns_output_contract(cfg?.act_output_kind ?? "draft", cfg?.act),
+    },
+  )
+  const verify = __patterns_verify_node(cfg)
+  return workflow_graph(
+    {
+      name: cfg?.name ?? "self_verifying",
+      entry: act_id,
+      nodes: {[act_id]: act, [verify_id]: verify},
+      edges: [{from: act_id, to: verify_id}],
+    },
+  )
+}
+
+/**
+ * Build the common implement -> verify -> repair -> verify loop.
+ *
+ * The graph is explicit: verification failure follows branch `"failed"` into
+ * the repair stage, then repair returns to verify. Callers bound total work
+ * with workflow_execute(harness, {max_steps}) and per-agent `iteration_budget`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn workflow_command_verify_graph(config = nil) {
+  const cfg = __patterns_dict(config)
+  const implement_id = __patterns_non_empty_string(cfg?.implement_id) ?? "implement"
+  const verify_id = __patterns_non_empty_string(cfg?.verify_id) ?? "verify"
+  const repair_id = __patterns_non_empty_string(cfg?.repair_id) ?? "repair"
+  const implement = __patterns_stage_node(
+    cfg,
+    "implement",
+    {
+      kind: "stage",
+      mode: cfg?.mode ?? "agent",
+      model_policy: cfg?.model_policy ?? {},
+      output_contract: __patterns_output_contract(
+        cfg?.implement_output_kind ?? "draft",
+        cfg?.implement,
+      ),
+    },
+  )
+  const verify = __patterns_verify_node(cfg)
+  const repair_policy = __patterns_dict(cfg?.repair_model_policy)
+  const repair = __patterns_stage_node(
+    cfg,
+    "repair",
+    {
+      kind: "stage",
+      mode: cfg?.repair_mode ?? "agent",
+      model_policy: __patterns_dict(cfg?.model_policy) + repair_policy,
+      metadata: {repair: true, verifies: verify_id, repairs: implement_id},
+      output_contract: __patterns_output_contract(cfg?.repair_output_kind ?? "patch", cfg?.repair),
+    },
+  )
+  return workflow_graph(
+    {
+      name: cfg?.name ?? "command_verify",
+      entry: implement_id,
+      nodes: {[implement_id]: implement, [verify_id]: verify, [repair_id]: repair},
+      edges: [
+        {from: implement_id, to: verify_id},
+        {from: verify_id, to: repair_id, branch: "failed"},
+        {from: repair_id, to: verify_id},
+      ],
+    },
+  )
+}
+
+/**
+ * Build a single-stage validate→repair graph — sugar over the per-stage retry
+ * policy (`std/workflow/stage.harn`). One delegated goal stage retries with
+ * feedback until it settles: on a failed attempt the retry policy threads the
+ * prior attempt's findings into the next attempt's task (via `feedback: true`
+ * / `{max_chars}` or a `repair_prompt_builder` closure). This is the shape a
+ * hand-rolled "do the work → check → repair with feedback" loop collapses
+ * into.
+ *
+ * Config: `{task?, prompt?, retry_policy, id?, name?, model_policy?, tools?,
+ * verify?, output_kind?}`. The goal runs as a `subagent` stage — the one kind
+ * that both consumes the (feedback-threaded) task and retries through the
+ * inverted attempt loop — so `retry_policy.max_attempts` bounds the repair
+ * budget (defaulted to 2 so repair actually engages). `retry_policy` accepts
+ * the full retry-with-feedback surface (`WorkflowRetryPolicy` in
+ * std/workflow/options).
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn workflow_repair_stage_graph(config = nil) {
+  const cfg = __patterns_dict(config)
+  const stage_id = __patterns_non_empty_string(cfg?.id) ?? "repair"
+  const retry_policy = __patterns_dict(cfg?.retry_policy)
+  const policy = if retry_policy?.max_attempts == nil {
+    retry_policy + {max_attempts: 2}
+  } else {
+    retry_policy
+  }
+  const goal = __patterns_stage_node(
+    cfg,
+    "goal",
+    {
+      kind: "subagent",
+      mode: cfg?.mode ?? "agent",
+      prompt: cfg?.prompt,
+      tools: cfg?.tools,
+      retry_policy: policy,
+      verify: cfg?.verify ?? {},
+      // Inline executor leaf: when supplied, the goal stage runs this closure
+      // in-process instead of spawning a delegated worker. The retry/verify/
+      // feedback machinery is identical either way.
+      executor: cfg?.executor,
+      output_contract: __patterns_output_contract(cfg?.output_kind ?? "result", cfg?.goal),
+    },
+  )
+  return workflow_graph(
+    {name: cfg?.name ?? "repair_stage", entry: stage_id, nodes: {[stage_id]: goal}, edges: []},
+  )
+}
+
+/**
+ * Build a graph with only a verification stage. Useful for replaying a
+ * deterministic verifier against supplied artifacts.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn workflow_verification_only_graph(config = nil) {
+  const cfg = __patterns_dict(config)
+  const verify_id = __patterns_non_empty_string(cfg?.verify_id) ?? "verify"
+  const verify = __patterns_verify_node(cfg)
+  return workflow_graph(
+    {
+      name: cfg?.name ?? "verification_only",
+      entry: verify_id,
+      nodes: {[verify_id]: verify},
+      edges: [],
+    },
+  )
+}
+
+/**
+ * Copy `dict_value` without `drop_key` — used to lift a stage's `id` out of
+ * the node body (the id becomes the nodes-map key, matching hand-authored
+ * graphs).
+ */
+fn __patterns_without_key(dict_value, drop_key) {
+  const source = __patterns_dict(dict_value)
+  let out = {}
+  for key in source.keys() {
+    if key != drop_key {
+      out = out + {[key]: source[key]}
+    }
+  }
+  return out
+}
+
+/**
+ * workflow_stages — ergonomic builder that expands a concise, linear list of
+ * stage specs into the `{entry, nodes, edges}` graph `workflow_execute`
+ * consumes.
+ *
+ * `spec` is either a bare `list<StageSpec>` or a `WorkflowStagesSpec`
+ * (`{stages, name?, entry?, edges?}`). Each stage keeps its authored body
+ * verbatim; its `id` (defaulting to `stage_<n>`) becomes the nodes-map key.
+ * Stages are wired head-to-tail unless explicit `edges` are supplied, and
+ * `entry` defaults to the first stage's id. This is pure sugar over
+ * `workflow_graph`: the returned graph is byte-identical to the equivalent
+ * hand-authored `workflow_graph({entry, nodes, edges})` — no new runtime
+ * concept, no new node shape.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn workflow_stages(spec = nil) {
+  const stages = if type_of(spec) == "list" {
+    spec
+  } else {
+    __patterns_list(__patterns_dict(spec)?.stages)
+  }
+  const cfg = if type_of(spec) == "dict" {
+    spec
+  } else {
+    {}
+  }
+  let nodes = {}
+  let order = []
+  for raw in stages {
+    const stage = __patterns_dict(raw)
+    const id = __patterns_non_empty_string(stage?.id) ?? ("stage_" + to_string(len(order) + 1))
+    nodes = nodes + {[id]: __patterns_without_key(stage, "id")}
+    order = order + [id]
+  }
+  const edges = if cfg?.edges != nil {
+    cfg.edges
+  } else {
+    let linear = []
+    let index = 0
+    while index < len(order) - 1 {
+      linear = linear + [{from: order[index], to: order[index + 1]}]
+      index = index + 1
+    }
+    linear
+  }
+  const entry = __patterns_non_empty_string(cfg?.entry)
+    ?? if len(order) > 0 {
+    order[0]
+  } else {
+    nil
+  }
+  return workflow_graph({name: cfg?.name ?? "stages", entry: entry, nodes: nodes, edges: edges})
+}
+
+fn __failover_disposition(value, fallback_action) {
+  if value == nil {
+    return {action: fallback_action}
+  }
+  if type_of(value) == "string" {
+    return {action: value}
+  }
+  if type_of(value) == "dict" {
+    return value + {action: value?.action ?? value?.decision ?? value?.status ?? fallback_action}
+  }
+  return {action: fallback_action, raw: value}
+}
+
+fn __failover_route_id(route, index) -> string {
+  const explicit = __patterns_non_empty_string(
+    route?.id ?? route?.name ?? route?.model ?? route?.provider,
+  )
+  if explicit != nil {
+    return explicit
+  }
+  return "route-" + to_string(index)
+}
+
+fn __failover_evaluate(config, route, ctx) {
+  const evaluator = config?.evaluate
+  if __patterns_is_callable(evaluator) {
+    return __failover_disposition(evaluator(route, ctx), "call")
+  }
+  return {action: "call"}
+}
+
+fn __failover_classify(config, route, result, ctx) {
+  const classifier = config?.classify
+  if __patterns_is_callable(classifier) {
+    return __failover_disposition(classifier(route, result, ctx), "continue")
+  }
+  if result?.ok ?? false {
+    return {action: "success"}
+  }
+  return {action: "continue"}
+}
+
+fn __failover_terminal_status(decision) -> string {
+  const action = to_string(decision?.action ?? "")
+  if action == "success" {
+    return "success"
+  }
+  if action == "break" || action == "terminal" {
+    return to_string(decision?.status ?? decision?.reason ?? "terminal")
+  }
+  return action
+}
+
+/**
+ * Run a deterministic failover loop over opaque route handles.
+ *
+ * Required config: `{routes, call}`. Optional callbacks:
+ *   - `evaluate(route, ctx) -> {action: "call"|"skip", reason?}`
+ *   - `classify(route, result, ctx) -> {action: "success"|"continue"|"break"|"terminal", reason?}`
+ *
+ * Harn owns attempt ordering and receipts. The caller owns provider HTTP,
+ * credentials, endpoint policy, billing, and any route-handle semantics.
+ *
+ * @effects: []
+ * @errors: ["workflow_failover: call must be callable"]
+ * @api_stability: experimental
+ */
+pub fn workflow_failover(config = nil) {
+  const cfg = __patterns_dict(config)
+  const routes = __patterns_list(cfg?.routes)
+  const caller = cfg?.call
+  if !__patterns_is_callable(caller) {
+    throw "workflow_failover: call must be callable"
+  }
+  const max_attempts = to_int(cfg?.max_attempts ?? len(routes))
+  const base_ctx = __patterns_dict(cfg?.context)
+  let ctx = base_ctx + {attempts: []}
+  let attempts = []
+  let call_attempts = 0
+  let index = 0
+  for route in routes {
+    const route_id = __failover_route_id(route, index)
+    const evaluated = __failover_evaluate(cfg, route, ctx)
+    if evaluated.action == "skip" {
+      const attempt = {
+        index: index,
+        route_id: route_id,
+        route: route,
+        status: "skipped",
+        decision: "skip",
+        reason: evaluated?.reason,
+      }
+      attempts = attempts + [attempt]
+      ctx = ctx + {attempts: attempts, last_attempt: attempt}
+      index = index + 1
+      continue
+    }
+    if call_attempts >= max_attempts {
+      break
+    }
+    call_attempts = call_attempts + 1
+    const result = caller(route, ctx)
+    const decision = __failover_classify(cfg, route, result, ctx + {result: result})
+    const action = to_string(decision?.action ?? "continue")
+    const attempt = {
+      index: index,
+      route_id: route_id,
+      route: route,
+      status: if action == "success" {
+        "succeeded"
+      } else {
+        "failed"
+      },
+      decision: action,
+      reason: decision?.reason,
+      result: result,
+    }
+    attempts = attempts + [attempt]
+    ctx = ctx + {attempts: attempts, last_attempt: attempt}
+    if action == "success" {
+      return {
+        ok: true,
+        status: "success",
+        selected: route,
+        selected_route_id: route_id,
+        value: result,
+        attempts: attempts,
+        call_attempts: call_attempts,
+      }
+    }
+    if action == "break" || action == "terminal" {
+      return {
+        ok: false,
+        status: __failover_terminal_status(decision),
+        selected: route,
+        selected_route_id: route_id,
+        value: result,
+        attempts: attempts,
+        call_attempts: call_attempts,
+      }
+    }
+    index = index + 1
+  }
+  return {
+    ok: false,
+    status: "exhausted",
+    selected: nil,
+    selected_route_id: nil,
+    value: nil,
+    attempts: attempts,
+    call_attempts: call_attempts,
+  }
+}

@@ -1,0 +1,26 @@
+import {
+  MediaAssetOptions,
+  ModelJobState,
+  media_asset_store_result,
+  model_job_state_result,
+  model_job_transition_result,
+} from "std/model_job"
+
+pipeline test(harness: Harness, task) {
+  const unknown = model_job_state_result("teleporting", "fixture", "job-1")
+  harness.stdio.log(unwrap_err(unknown).kind)
+  const canceled: ModelJobState = "canceled"
+  const succeeded: ModelJobState = "succeeded"
+  const after_cancel = model_job_transition_result(canceled, succeeded, "fixture", "job-1")
+  harness.stdio.log(unwrap_err(after_cancel).kind)
+  const media_options: MediaAssetOptions = {
+    mime_type: "image/png",
+    root: harness.fs.mkdtemp_in_workspace("bad-media-"),
+  }
+  const wrong_mime = media_asset_store_result(
+    harness.fs,
+    bytes_from_string("this is not a png"),
+    media_options,
+  )
+  harness.stdio.log(unwrap_err(wrong_mime).kind)
+}

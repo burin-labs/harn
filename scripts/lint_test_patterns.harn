@@ -1,0 +1,1094 @@
+// Lint script that fails if forbidden patterns appear in test files outside an
+// explicit per-pattern allowlist or count baseline.
+//
+// The wall-clock patterns cause flaky tests because they race against scheduler
+// behavior and system load. Their approved replacements use injected time
+// (tokio::time::pause/advance), event subscriptions, or deterministic
+// harnesses. Direct shell spawns also drop platform-independent coverage on
+// Windows, so new process probes use the Cargo-built cross-platform helper.
+//
+// Ported from scripts/lint_test_patterns.sh — same file selection, same
+// per-pattern allowlists, same `  <line>:<content>` + hint output, same
+// FAIL/OK summary and exit codes.
+//
+// Usage: harn run scripts/lint_test_patterns.harn
+//   Exits 0 if no violations found, 1 otherwise.
+//
+// To suppress a false-positive, add the file to the appropriate per-pattern
+// allowlist below with a brief comment explaining why. All suppressions are
+// pre-existing technical debt tracked under the deflake epic; new entries
+// require explicit reviewer justification.
+
+// -------------------------------------------------------------------------------------------------
+
+// Per-pattern allowlists — pre-existing violations from before the deflake
+// epic. Remove entries as each tier of #1057 completes.
+
+// -------------------------------------------------------------------------------------------------
+
+// std::thread::sleep in test files
+// Legitimate uses: waiting on real subprocess I/O that cannot be time-paused.
+const THREAD_SLEEP_ALLOWLIST: list<string> = [
+  "crates/harn-hostlib/tests/harn_hostlib/process_tools.rs",
+  // Real subprocess lifecycle e2e: probes OS process-group death and
+  // `background: true` survival, so the waits observe host process state.
+  "crates/harn-hostlib/tests/harn_hostlib/process_tools_e2e.rs",
+  // Physical lease-ownership e2e: waits for an orphaned Cargo PID to become
+  // observable/dead across exact SIGKILL boundaries.
+  "crates/harn-cli/tests/harn_cli_e2e/host_lease_crash_cli.rs",
+  // Pre-existing interrupt-preemption test for a real subprocess: a spawned
+  // thread sleeps briefly to stage a delayed cancel-token flip (the shape a
+  // scope cancellation / deadline expiry takes mid-wait), proving the wait
+  // loop terminates the child and its grandchild. Extracted from process.rs's
+  // inline test mod, which was previously below this lint's file filter.
+  "crates/harn-vm/src/stdlib/process_tests.rs",
+]
+
+// tokio::time::sleep in test files (outside start_paused = true tests).
+// Legitimate uses:
+//   - `orchestrator_http/support.rs`: `wait_for_path` polls a real
+//     filesystem marker written by handler-side code where no
+//     event signal is available; bounded with `tokio::time::timeout`.
+//   - `agent_sessions_tests.rs`: pre-existing real-time delivery test
+//     for the event-log sink (extracted from agent_sessions.rs's inline
+//     test mod, which was previously below this lint's file filter).
+//   - `executor_tests.rs`: pre-existing budget, fairness, and finish-order
+//     tests extracted from executor.rs's inline test module.
+const TOKIO_SLEEP_ALLOWLIST: list<string> = [
+  "crates/harn-vm/src/agent_sessions_tests.rs",
+  "crates/harn-vm/src/flow/predicates/executor_tests.rs",
+  "crates/harn-cli/tests/harn_cli_fast/orchestrator_http/support.rs",
+]
+
+// Wall-clock `Instant::now() < deadline` comparisons inside any loop or
+// guard.
+const INSTANT_NOW_DEADLINE_ALLOWLIST: list<string> = [
+  // Real subprocess lifecycle e2e: bounded probes wait on OS process-group
+  // disappearance after SIGTERM/SIGKILL and cannot run on a virtual clock.
+  "crates/harn-hostlib/tests/harn_hostlib/process_tools_e2e.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/host_lease_crash_cli.rs",
+]
+
+// SystemTime::now() in test files — use injected clock / MockClock instead.
+// Remaining entries: legitimate fixture-setup uses against real OS time
+// (httpdate Retry-After parsing, real-mtime touch fixtures).
+const SYSTEM_TIME_ALLOWLIST: list<string> = [
+  "crates/harn-vm/src/http/tests.rs",
+  "crates/harn-hostlib/tests/harn_hostlib/scanner_e2e.rs",
+]
+
+// recv_timeout with an explicit sub-second Duration literal.
+// Named-constant variants are not caught here because the constant value
+// cannot be resolved by a static text search.
+const RECV_TIMEOUT_MILLIS_ALLOWLIST: list<string> = []
+
+// Conformance tests that exercise real subprocesses should share the bounded
+// polling helpers from `conformance/tests/_common.harn` instead of copying
+// ad hoc loops into each fixture.
+const CONFORMANCE_HELPER_ALLOWLIST: list<string> = ["conformance/tests/_common.harn"]
+
+// Conformance fixtures that are allowed to call `sleep(<literal>)` /
+// `time.sleep(<literal>)` because they exercise real subprocess I/O,
+// real socket-bound servers, or genuine wall-clock-driven scheduler
+// behavior that cannot be expressed under `harness.testing.clock_set(...)`. New
+// fixtures should drive timing through `harness.testing.clock_set(...)` /
+// `harness.testing.clock_advance(...)` and `harness.runtime.yield_now()` from the unified test clock
+// (see docs/src/dev/testing.md). Add an entry here only when there is
+// no deterministic alternative — and prefer shrinking this list over
+// growing it.
+const CONFORMANCE_REAL_TIME_ALLOWLIST: list<string> = [
+  "conformance/tests/_common.harn",
+  "conformance/tests/agents/daemon_stdlib_wrappers.harn",
+  "conformance/tests/agents/worker_retriggerable.harn",
+  "conformance/tests/agents/workflow_messages.harn",
+  "conformance/tests/concurrency/deadline_catch.harn",
+  "conformance/tests/concurrency/parallel_each_as_stream.harn",
+  "conformance/tests/concurrency/parallel_max_concurrent.harn",
+  "conformance/tests/concurrency/parallel_race.harn",
+  "conformance/tests/concurrency/rwlock_channel_select.harn",
+  "conformance/tests/concurrency/select_basic.harn",
+  "conformance/tests/concurrency/supervisor_circuit_open.harn",
+  "conformance/tests/concurrency/supervisor_one_for_one.harn",
+  "conformance/tests/concurrency/supervisor_restart_cap.harn",
+  "conformance/tests/concurrency/supervisor_restart_window.harn",
+  "conformance/tests/scenarios/agent_loop_mcp_servers.harn",
+  "conformance/tests/scenarios/orchestrator_hot_reload_add.harn",
+  "conformance/tests/scenarios/orchestrator_hot_reload_modify_inflight.harn",
+  "conformance/tests/scenarios/orchestrator_hot_reload_remove.harn",
+  "conformance/tests/scenarios/orchestrator_pump_drain_lifecycle.harn",
+  "conformance/tests/scenarios/orchestrator_recover_stranded_envelopes.harn",
+  "conformance/tests/scenarios/orchestrator_worker_claim_expiry_requeue.harn",
+  "conformance/tests/runtime/http_proxy_passthrough.harn",
+  "conformance/tests/stdlib/hitl/hitl_pending.harn",
+  "conformance/tests/stdlib/waitpoint_fan_out.harn",
+  "conformance/tests/stdlib/waitpoints_fan_out.harn",
+]
+
+// E2E subprocess test files where `harn_e2e_command` / `spawn_orchestrator`
+// are the intended surface. Mirrors the bash `is_e2e_subprocess_path` case
+// arms; `crates/harn-cli/tests/harn_cli_fast/orchestrator_http/` is a prefix match.
+const E2E_SUBPROCESS_PATHS: list<string> = [
+  "crates/harn-cli/tests/harn_cli_e2e/attributed_decl_cli.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/acp_server_cli.rs",
+  "crates/harn-cli/tests/harn_cli_fast/burin_mini_playground.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/check_result_cache.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/conformance_process_lifetime_e2e.rs",
+  // Strictness is an exit-status contract whose text and JSON renderings must
+  // stay identical to advisory checks; only the real CLI process proves all three.
+  "crates/harn-cli/tests/harn_cli_e2e/check_strict_cli.rs",
+  // Trusted host authority is a CLI/config boundary. Exercise two clean CLI
+  // processes so ordinary and explicitly trusted checks cannot share state.
+  "crates/harn-cli/tests/harn_cli_e2e/trusted_host_dispatch_cli.rs",
+  // Changed-line linting needs a real Git repository and CLI process to prove
+  // revision selection, filtering, output, and exit-status behavior together.
+  "crates/harn-cli/tests/harn_cli_e2e/lint_changed_cli.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/demo_cli_e2e.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/doctor_dispatch.rs",
+  // Startup environment validation must run before clap or sidecar dispatch;
+  // only the real multi-call process exercises that boundary.
+  "crates/harn-cli/tests/harn_cli_e2e/environment_registry_cli.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/models_dispatch.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/providers_dispatch.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/routes_graph_dispatch.rs",
+  // The projector must be proven against a run the real agent loop produced,
+  // so the fixture run and the export both go through the actual CLI.
+  "crates/harn-cli/tests/harn_cli_e2e/runs_export_training_cli.rs",
+  "crates/harn-cli/tests/harn_cli_fast/flow_ship_cli.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/host_lease_cli.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/host_lease_crash_cli.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/harn_serve_mcp_cli.rs",
+  "crates/harn-cli/tests/harn_cli_fast/llm_mock_cli.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/mcp_server_cli.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/orchestrator_cli.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/orchestrator_cli_e2e.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/orchestrator_cli_e2e/support.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/persona_activation_cli_e2e.rs",
+  // Cross-process package lease coverage must exercise two real commands
+  // against the same installed generation.
+  "crates/harn-cli/tests/harn_cli_e2e/package_generation_concurrency_cli_e2e.rs",
+  "crates/harn-cli/tests/harn_cli_fast/persona_cli.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/test_worker_cli_e2e.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/run_eval_cleanup_e2e.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/run_eval_imports.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/run_exit_codes.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/skills_cli.rs",
+  "crates/harn-cli/tests/harn_cli_fast/trigger_replay_cli.rs",
+  "crates/harn-cli/tests/harn_cli_e2e/user_test_reports_cli.rs",
+  "crates/harn-cli/tests/harn_cli_fast/orchestrator_http.rs",
+  "crates/harn-cli/tests/test_util/process.rs",
+]
+
+// File-level ratchet for legacy direct access to Cargo's `harn` binary path.
+// Delete a row when its test migrates to `test_util::process`; any increase,
+// including inside an existing file, fails the lint.
+const DIRECT_HARN_BINARY_BASELINE = [
+  {path: "crates/harn-cli/tests/harn_cli_e2e/agent_run_command_argv_coercion.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/canon_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/check_fmt_json_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/codemod_dispatch.rs", count: 3},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/conformance_json_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/coverage_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/dev_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/dispatch_snapshot.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/doctor_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/eval_cluster_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/eval_coding_agent_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/eval_prompt_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/explain_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/graph_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/harn_script_lint_rules_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/json_schemas_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/lint_fix_exit_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/lint_replay_version_upgrade_json_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/lint_strict_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/native_rule_libraries.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/parse_tokens_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/pg_codegen_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/precompile_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/replay_session_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/routes_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/rule_discovery_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/rule_pack_install_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/rule_test_dispatch.rs", count: 4},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/run_json_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/runs_view_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/scaffold_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/scan_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/sidecar_version_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/supervisor_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/time_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/trace_import_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/try_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/usage_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/user_test_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/version_dispatch.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/workflow_authoring_eval.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/workflow_cli.rs", count: 1},
+  {path: "crates/harn-cli/tests/harn_cli_e2e/workflow_patch_cli.rs", count: 1},
+]
+
+// File-level ratchet for direct shell process spawns in Rust tests. These two
+// platform-specific tests predate the gate; delete each row when its shell
+// dependency is removed. New process probes should use harn-test-echo-env.
+const SHELL_SPAWN_LITERAL_BASELINE = [
+  {path: "crates/harn-hostlib/tests/harn_hostlib/process_artifact_retention.rs", count: 1},
+  {path: "crates/harn-vm/src/stdlib/sandbox/tests.rs", count: 1},
+]
+
+// Runtime files allowed to read host time directly (#1439). Each entry is a
+// runtime site where the host wall clock is the *source of truth* —
+// observability timestamps, OAuth/JWT claim issuance, retry-after parsing,
+// real-time logging, etc. — or where Clock injection is tracked as gradual
+// cleanup under the testbench epic (#1438). Drop entries as call sites
+// migrate to `Arc<dyn Clock>`.
+const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
+  "crates/harn-cli/src/commands/agents_conformance.rs",
+  "crates/harn-cli/src/commands/agents_conformance/wire.rs",
+  "crates/harn-cli/src/commands/bench.rs",
+  // Portable-kernel receipts report sub-millisecond compile, decode, and
+  // dispatch latency. The host monotonic clock is the measured subject here,
+  // not runtime scheduling policy; the command's deterministic semantics are
+  // tested separately from these observations.
+  "crates/harn-cli/src/commands/bench/portable.rs",
+  "crates/harn-cli/src/commands/connect.rs",
+  // `harn connect` waits for real browser OAuth callbacks and stamps
+  // persisted connector credential metadata with host Unix time; those
+  // values are user-facing wall-clock state, not VM-scheduled time.
+  "crates/harn-cli/src/commands/connect/callback.rs",
+  "crates/harn-cli/src/commands/connect/store.rs",
+  // Package verification receipts measure subprocess and in-process gate
+  // elapsed time for CI observability; they do not drive scheduling.
+  "crates/harn-cli/src/commands/package_verify.rs",
+  // `harn demo` measures and renders wall-clock elapsed time in the
+  // terminal output ("--- demo complete in 180 ms ---") and stamps the
+  // demo's run record with the actual host wall-clock instant so users
+  // can correlate the run against their own activity. Same shape as the
+  // existing allowlisted `run.rs` entry.
+  "crates/harn-cli/src/commands/demo.rs",
+  // `harn doctor --check-providers` reports observed HTTP latency per
+  // provider — host wall clock is the source of truth, same shape as
+  // the allowlisted `run.rs` / `bench.rs` / `time.rs` entries.
+  "crates/harn-cli/src/commands/doctor.rs",
+  "crates/harn-cli/src/commands/explain.rs",
+  "crates/harn-cli/src/commands/flow.rs",
+  // `harn local switch` stamps the selection record with the actual host
+  // wall clock so `harn local status` can show "selection age" to users
+  // debugging a long-running session.
+  // `harn local launch` stamps process metadata and log filenames with the
+  // actual host wall clock so users can correlate local model lifecycle events
+  // against their terminal, OS process table, and provider logs.
+  "crates/harn-cli/src/commands/local/launch.rs",
+  "crates/harn-cli/src/commands/local/state.rs",
+  "crates/harn-cli/src/commands/mcp/mod.rs",
+  "crates/harn-cli/src/commands/mcp/oauth_resource.rs",
+  "crates/harn-cli/src/commands/mcp/serve/util.rs",
+  "crates/harn-cli/src/commands/orchestrator/common.rs",
+  "crates/harn-cli/src/commands/orchestrator/harness/audit.rs",
+  "crates/harn-cli/src/commands/orchestrator/harness/pumps.rs",
+  "crates/harn-cli/src/commands/orchestrator/harness/shutdown.rs",
+  "crates/harn-cli/src/commands/orchestrator/inspect_data.rs",
+  "crates/harn-cli/src/commands/orchestrator/listener/acp_hub.rs",
+  "crates/harn-cli/src/commands/orchestrator/listener/routes.rs",
+  "crates/harn-cli/src/commands/orchestrator/listener/routes/ingest.rs",
+  "crates/harn-cli/src/commands/orchestrator/queue.rs",
+  "crates/harn-cli/src/commands/orchestrator/reload.rs",
+  "crates/harn-cli/src/commands/orchestrator/stats.rs",
+  "crates/harn-cli/src/commands/orchestrator/supervisor_state.rs",
+  "crates/harn-cli/src/commands/portal/dlq.rs",
+  "crates/harn-cli/src/commands/portal/run_analysis.rs",
+  "crates/harn-cli/src/commands/portal/util.rs",
+  // `harn time run` reports each compile phase's wall-clock duration, so the
+  // host clock is what these reads are measuring rather than a substitute for
+  // injected time. Same justification as `run/mod.rs`, which owned this code
+  // before the chunk-loading phases moved to their own module.
+  "crates/harn-cli/src/commands/run/chunk_loading.rs",
+  // The pack run receipt reports how long decoding the linked-program artifact
+  // took. The host monotonic clock is the measured subject, not a scheduling
+  // input; same shape as the allowlisted `bench/portable.rs` entry.
+  "crates/harn-cli/src/commands/run/harnpack.rs",
+  "crates/harn-cli/src/commands/run/mod.rs",
+  // The script MCP HTTP server bounds how long a queued server-to-client
+  // request may wait for a real network client to open its event stream
+  // (`SESSION_STREAM_GRACE`); the external client's arrival time is host
+  // wall-clock state, same shape as the allowlisted `connect/callback.rs`
+  // browser-callback wait.
+  "crates/harn-cli/src/commands/serve.rs",
+  "crates/harn-cli/src/commands/supervisor.rs",
+  "crates/harn-cli/src/commands/test/mod.rs",
+  "crates/harn-cli/src/commands/test/conformance.rs",
+  // The conformance coordinator reports the observed full-suite duration.
+  // This is output data from the host monotonic clock, not test scheduling.
+  "crates/harn-cli/src/commands/test/conformance/parallel.rs",
+  // `harn time run` measures real wall-clock + per-phase elapsed time
+  // for cost/perf debugging — host time is the source of truth, same
+  // shape as the allowlisted `run.rs`, `demo.rs`, and `bench.rs`
+  // entries. Wall/CPU readings are reported in the structured envelope.
+  "crates/harn-cli/src/commands/time.rs",
+  "crates/harn-cli/src/commands/trigger/ops.rs",
+  "crates/harn-cli/src/commands/trigger/replay.rs",
+  "crates/harn-cli/src/package/registry/cache_layout.rs",
+  "crates/harn-cli/src/skill_provenance.rs",
+  // User-test phase timings report real host wall time; the extracted execution
+  // module preserves the existing `test_runner.rs` observability contract.
+  "crates/harn-cli/src/test_runner/execution.rs",
+  "crates/harn-cli/src/test_runner.rs",
+  "crates/harn-vm/src/a2a/mod.rs",
+  "crates/harn-vm/src/agent_events/sinks.rs",
+  "crates/harn-vm/src/agent_sessions.rs",
+  // Per-builtin profiling reports how long a builtin really took; elapsed host
+  // time IS the observation, and an injected clock would report logical time
+  // instead of the ten seconds the operator is trying to find. Same shape as
+  // the `module_phase_timing.rs` entry below.
+  "crates/harn-vm/src/builtin_profile.rs",
+  // Module phase attribution measures real compile/load work for CLI timing
+  // reports; host monotonic time is the observation being recorded.
+  "crates/harn-vm/src/vm/module_phase_timing.rs",
+  // Durable rate limiting retries real SQLite writer-lock contention and bounds
+  // wall-clock backoff with host monotonic time; VM clock injection would not
+  // model the blocking rusqlite calls it is defending.
+  "crates/harn-vm/src/durable_rate_limit.rs",
+  "crates/harn-vm/src/connectors/a2a_push/mod.rs",
+  "crates/harn-vm/src/connectors/harn_module.rs",
+  "crates/harn-vm/src/connectors/shared.rs",
+  "crates/harn-vm/src/corrections/mod.rs",
+  "crates/harn-vm/src/event_log/mod.rs",
+  "crates/harn-vm/src/event_log/util.rs",
+  "crates/harn-vm/src/flow/atom.rs",
+  "crates/harn-vm/src/flow/fixer.rs",
+  "crates/harn-vm/src/flow/predicates/executor.rs",
+  "crates/harn-vm/src/http/client.rs",
+  "crates/harn-vm/src/http/streaming/websocket.rs",
+  "crates/harn-vm/src/llm/agent_observe.rs",
+  // Split children preserve the parent observability contracts: transcript
+  // timestamps and streamed tool-call coalescing use host time as the source
+  // of truth, rather than VM-scheduled time.
+  "crates/harn-vm/src/llm/agent_observe/transcript_observability.rs",
+  "crates/harn-vm/src/llm/api/transport/sse.rs",
+  // Agent host primitive tool dispatch records actual host monotonic
+  // elapsed time for transcript / portal execution telemetry.
+  "crates/harn-vm/src/llm/agent_host_primitives.rs",
+  // MCP OAuth stamps and compares token expiry against the host wall clock:
+  // the authorization server's `expires_in` is real-world time, so a
+  // VM-scheduled clock cannot decide when a stored token must be refreshed.
+  "crates/harn-vm/src/mcp_oauth.rs",
+  "crates/harn-vm/src/llm/agent_runtime.rs",
+  // `agent_inbox::wait_sync` is a sync blocking primitive for sync
+  // builtins that already block the runtime thread (e.g.
+  // `run_command`'s wait-briefly-for-initial-output helper). The
+  // paired `agent_inbox::wait_async` is the clock-aware variant used
+  // by everything else.
+  "crates/harn-vm/src/orchestration/agent_inbox.rs",
+  // `op_interrupt` is the sync-builtin interrupt bridge: it observes host
+  // cancellation/deadline while a real child process blocks the VM thread.
+  // Virtual time cannot decide whether an OS subprocess has exited or whether
+  // SIGTERM grace has elapsed.
+  "crates/harn-vm/src/op_interrupt.rs",
+  "crates/harn-vm/src/llm/api/partial_tool_args.rs",
+  "crates/harn-vm/src/llm/api/transport.rs",
+  "crates/harn-vm/src/llm/autonomy_budget.rs",
+  "crates/harn-vm/src/llm/cache.rs",
+  // `first_token.rs` records host-observed elapsed time from LLM dispatch
+  // to the first streamed delta as RunProfile telemetry; real provider
+  // latency is the source of truth.
+  "crates/harn-vm/src/llm/first_token.rs",
+  "crates/harn-vm/src/llm/mod.rs",
+  "crates/harn-vm/src/llm/model_test.rs",
+  // Ollama raw `/api/generate` bypasses the shared transport wrapper, so it
+  // records actual host monotonic elapsed time for provider telemetry.
+  "crates/harn-vm/src/llm/providers/ollama.rs",
+  "crates/harn-vm/src/llm/providers/vertex.rs",
+  "crates/harn-vm/src/llm/rate_limit.rs",
+  // `routing_policy` records actual per-link wall-clock elapsed so the
+  // routing trace + `<dispatch>.attempt` tape events accurately
+  // attribute provider latency.
+  "crates/harn-vm/src/llm/routing/execution/mod.rs",
+  "crates/harn-vm/src/llm/routing/execution/race.rs",
+  "crates/harn-vm/src/llm/stream.rs",
+  "crates/harn-vm/src/mcp_card.rs",
+  // mcp_host.rs supervises external MCP servers: cache TTLs and
+  // circuit-breaker reset windows are inherently wall-clock concerns
+  // (the cache hint is server-issued in real time, the breaker decay is
+  // a real-world cool-off period). Mirrors the sibling mcp_registry.rs
+  // exemption and the broader supervision pattern in personas/.
+  "crates/harn-vm/src/mcp_host.rs",
+  "crates/harn-vm/src/mcp_registry.rs",
+  "crates/harn-vm/src/metadata.rs",
+  // The context manifest's capture time is compared against filesystem mtimes
+  // to decide which entries are racily clean (#5582). Only the host wall clock
+  // stamps those mtimes, so an injected clock would make the two sides
+  // incomparable and the staleness rule unsound.
+  "crates/harn-vm/src/module_source.rs",
+  "crates/harn-vm/src/orchestration/command_policy.rs",
+  "crates/harn-vm/src/orchestration/merge_captain_iteration.rs",
+  "crates/harn-vm/src/orchestration/mod.rs",
+  "crates/harn-vm/src/orchestration/playground/fake_server.rs",
+  "crates/harn-vm/src/orchestration/playground/step.rs",
+  "crates/harn-vm/src/personas/mod.rs",
+  "crates/harn-vm/src/provenance/mod.rs",
+  "crates/harn-vm/src/sessions/mod.rs",
+  "crates/harn-vm/src/stdlib/agent_state.rs",
+  // stdlib/clock.rs is itself the canonical wall-clock reader for Harn
+  // scripts; the SystemTime::now reads are the fallback when no mock is
+  // active. Routing through Clock would create a cycle.
+  "crates/harn-vm/src/stdlib/clock.rs",
+  // `compaction.run` records actual host monotonic elapsed time in the
+  // `latency_ms` field of the result dict — the #2505 spec lists
+  // compaction latency as required telemetry, so the host wall clock is
+  // the source of truth (same shape as the allowlisted routing.rs).
+  "crates/harn-vm/src/stdlib/compaction.rs",
+  // testbench/wasi_process.rs's #[cfg(test)] module compares real wall
+  // time vs virtual time to prove that WASM-side `poll_oneoff` sleeps
+  // don't actually block the host thread — the wall-clock read is the
+  // signal under test, not a flake source.
+  "crates/harn-vm/src/testbench/wasi_process.rs",
+  "crates/harn-vm/src/stdlib/agent_state/backend.rs",
+  "crates/harn-vm/src/stdlib/agents_daemon.rs",
+  "crates/harn-vm/src/stdlib/agents_workers/execution.rs",
+  "crates/harn-vm/src/stdlib/concurrency.rs",
+  "crates/harn-vm/src/stdlib/cookies.rs",
+  "crates/harn-vm/src/stdlib/fs.rs",
+  "crates/harn-vm/src/stdlib/hitl.rs",
+  "crates/harn-vm/src/stdlib/host.rs",
+  // stdlib/host/process_exec.rs enforces the `process.exec` timeout against a
+  // real child process, which runs on host time regardless of VM virtual time.
+  // Split verbatim out of the allowlisted stdlib/host.rs; no new time reads.
+  "crates/harn-vm/src/stdlib/host/process_exec.rs",
+  // stdlib/io.rs uses host monotonic time to enforce real terminal input
+  // deadlines; VM virtual time cannot decide whether stdin became readable.
+  "crates/harn-vm/src/stdlib/io.rs",
+  "crates/harn-vm/src/stdlib/logging.rs",
+  "crates/harn-vm/src/stdlib/long_running.rs",
+  "crates/harn-vm/src/stdlib/memory.rs",
+  "crates/harn-vm/src/stdlib/monitors.rs",
+  // `pg_partition_retain` / `pg_partition_create_for_window` (#2580) read the
+  // host wall clock to anchor a retention cutoff ("now − keep_days") and the
+  // default maintenance window start. Real current time IS the source of
+  // truth here — the same shape as the `date_now` builtin. The cutoff/window
+  // math lives in pure helpers that take an injected `now` and are unit-tested
+  // deterministically; only the thin builtin boundary reads the real clock.
+  "crates/harn-vm/src/stdlib/postgres/introspect.rs",
+  // `pg_execute` and `pg_migrate` time the host wall-clock duration of the
+  // Postgres round-trip and surface it as `duration_ms` in the result dict
+  // (issue #2500). The measurement IS the observability source of truth
+  // — same shape as the existing `process.rs` allowlist entry.
+  "crates/harn-vm/src/stdlib/postgres/migrate.rs",
+  "crates/harn-vm/src/stdlib/postgres/mod.rs",
+  // `pg_pool`'s circuit breaker (#2512) stamps the open-at instant + tests
+  // cooldown elapsed against the host wall clock. The "is the cooldown
+  // over yet" decision IS the observability source of truth — same shape
+  // as supervisor/triggers entries above.
+  "crates/harn-vm/src/stdlib/postgres/circuit.rs",
+  "crates/harn-vm/src/stdlib/process.rs",
+  "crates/harn-vm/src/stdlib/supervisor.rs",
+  "crates/harn-vm/src/stdlib/tracing.rs",
+  "crates/harn-vm/src/stdlib/triggers_stdlib.rs",
+  "crates/harn-vm/src/stdlib/waitpoint.rs",
+  "crates/harn-vm/src/stdlib/waitpoints.rs",
+  "crates/harn-vm/src/stdlib/workflow_messages.rs",
+  "crates/harn-vm/src/synchronization.rs",
+  "crates/harn-vm/src/tenant.rs",
+  "crates/harn-vm/src/tracing.rs",
+  // Inherited from the pre-split `triggers/dispatcher/mod.rs` entry: these
+  // three files carry the dispatcher's attempt-runtime, drain-deadline, and
+  // dispatch-span duration measurements, which are host-observability reads.
+  "crates/harn-vm/src/triggers/dispatcher/attempt_loop.rs",
+  "crates/harn-vm/src/triggers/dispatcher/circuits.rs",
+  "crates/harn-vm/src/triggers/dispatcher/lifecycle.rs",
+  "crates/harn-vm/src/triggers/dispatcher/predicate_eval.rs",
+  "crates/harn-vm/src/triggers/dispatcher/routing.rs",
+  "crates/harn-vm/src/triggers/event.rs",
+  "crates/harn-vm/src/triggers/inbox.rs",
+  "crates/harn-vm/src/triggers/registry.rs",
+  "crates/harn-vm/src/triggers/scheduler.rs",
+  "crates/harn-vm/src/triggers/test_util/clock.rs",
+  // leak_audit IS the runtime audit shim — it intentionally reads the
+  // host wall/monotonic clock and records the call when a mock is
+  // installed. Routing through Clock would defeat the audit's purpose.
+  "crates/harn-vm/src/triggers/test_util/clock_leak.rs",
+  "crates/harn-vm/src/triggers/test_util/mod.rs",
+  "crates/harn-vm/src/triggers/webhook_intake.rs",
+  "crates/harn-vm/src/triggers/worker_queue.rs",
+  "crates/harn-vm/src/trust_graph.rs",
+  "crates/harn-vm/src/vm/execution.rs",
+  // std/signal interrupt handler deadlines share the VM's existing monotonic
+  // deadline mechanism until the broader Clock-injection cleanup reaches vm/.
+  "crates/harn-vm/src/vm/interrupts.rs",
+  "crates/harn-vm/src/vm/iter.rs",
+  "crates/harn-vm/src/vm/ops/parallel.rs",
+  "crates/harn-vm/src/waitpoints.rs",
+]
+
+// -------------------------------------------------------------------------------------------------
+
+// Pure helpers (pub so scripts/tests/lint_test_patterns_test.harn can drive
+// them without touching the filesystem).
+
+// -------------------------------------------------------------------------------------------------
+
+/** Repo-relative form of a glob result (strip the `/./` search-root marker). */
+pub fn rel_path(path: string) -> string {
+  const idx = path.index_of("/./")
+  if idx >= 0 {
+    return path.substring(idx + 3, path.len())
+  }
+  return path
+}
+
+/** The trailing path component of `p` (after the last `/`). */
+pub fn base_name(p: string) -> string {
+  let found = -1
+  let i = 0
+  const n = p.len()
+  while i < n {
+    if p.char_at(i) == "/" {
+      found = i
+    }
+    i = i + 1
+  }
+  return p.substring(found + 1, n)
+}
+
+/**
+ * True when a single path segment names a test module by convention:
+ * `tests`, `tests_*`, or `*_tests`, with or without the `.rs` extension.
+ *
+ * A test module may be a file (`tests_runtime.rs`) or a directory holding
+ * the same module split across several files (`tests_runtime/language.rs`),
+ * so this is checked per segment rather than against the base name alone.
+ * Matching only the base name silently reclassified every file of a split
+ * test module as runtime source.
+ */
+pub fn is_test_module_segment(seg: string) -> bool {
+  const stem = seg.ends_with(".rs") ? seg.substring(0, seg.len() - 3) : seg
+  return stem == "tests" || stem.starts_with("tests_") || stem.ends_with("_tests")
+}
+
+/** True when any segment of `rel` names a test module. */
+pub fn has_test_module_segment(rel: string) -> bool {
+  for seg in rel.split("/") {
+    if is_test_module_segment(seg) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * True when a repo-relative `.rs` path under the crates tree counts as a
+ * test file:
+ * any `.rs` under a `tests/` directory, or an inline/sibling test module
+ * (`tests.rs`, `tests_*.rs`, `*_tests.rs`, or a directory of either shape)
+ * under a `src/` directory.
+ * Mirrors the bash `find` pair feeding TEST_FILES_TMP.
+ */
+pub fn is_test_rs_path(rel: string) -> bool {
+  if !rel.ends_with(".rs") {
+    return false
+  }
+  if rel.contains("/tests/") {
+    return true
+  }
+  if !rel.contains("/src/") {
+    return false
+  }
+  return has_test_module_segment(rel)
+}
+
+/**
+ * True when a repo-relative path is a non-test runtime `.rs` file under
+ * `crates/harn-vm/src/` or `crates/harn-cli/src/` — the scan set for the
+ * #1439 non-test wall-clock check.
+ */
+pub fn is_runtime_rs_path(rel: string) -> bool {
+  if !rel.ends_with(".rs") {
+    return false
+  }
+  if !rel.starts_with("crates/harn-vm/src/") && !rel.starts_with("crates/harn-cli/src/") {
+    return false
+  }
+  return !has_test_module_segment(rel)
+}
+
+/** True when `rel` is one of the sanctioned E2E subprocess test files. */
+pub fn is_e2e_subprocess_path(rel: string) -> bool {
+  if rel.starts_with("crates/harn-cli/tests/harn_cli_fast/orchestrator_http/") {
+    return true
+  }
+  return E2E_SUBPROCESS_PATHS.contains(rel)
+}
+
+/**
+ * All `{line_no, text}` hits for `pattern` over a whole file `text` —
+ * the port of `grep -n <pattern> <file>` inside the check loops. Each
+ * matching line is reported once (grep prints a line once no matter how
+ * many matches it holds). Uses one Rust-side `regex_captures` scan per
+ * file so multi-hundred-kLOC corpora stay fast; per-line VM loops were
+ * ~50x slower.
+ */
+pub fn find_hits(text: string, pattern: string) -> list {
+  const ms = regex_captures(pattern, text, "m")
+  if ms.count == 0 {
+    return []
+  }
+  const lines = text.lines()
+  let hits: list = []
+  let last_line = -1
+  for m in ms {
+    if m.line == last_line {
+      continue
+    }
+    last_line = m.line
+    hits = hits + [{line_no: m.line, text: lines[m.line - 1]}]
+  }
+  return hits
+}
+
+/** grep pattern: `std::thread::sleep` variants in test files. */
+pub fn thread_sleep_pattern() -> string {
+  return r"std::thread::sleep|thread::sleep\(Duration|thread::sleep\(std::time"
+}
+
+pub fn tokio_sleep_pattern() -> string {
+  return r"tokio::time::sleep\("
+}
+
+/** `Instant::now()` followed by optional spaces and `<` or `>`. */
+pub fn instant_deadline_pattern() -> string {
+  return r"Instant::now\(\) *[<>]"
+}
+
+pub fn system_time_pattern() -> string {
+  return r"SystemTime::now\(\)"
+}
+
+pub fn recv_timeout_pattern() -> string {
+  return r"recv_timeout\(Duration::from_(millis|nanos|micros)"
+}
+
+/**
+ * A measured duration compared against a millisecond-scale budget, such as
+ * `elapsed < Duration::from_millis(500)`.
+ *
+ * Matches the bare binding as well as the direct call, because the usual shape
+ * binds `let elapsed = started.elapsed()` on an earlier line. Second-scale
+ * comparisons are deliberately not matched: those are liveness guards ("did not
+ * hang"), which tolerate a loaded machine. A sub-second budget is a performance
+ * claim, and `make test` shares hosts with release audit lanes.
+ */
+pub fn elapsed_millis_budget_pattern() -> string {
+  return r"elapsed(\(\))? *[<>]=? *[A-Za-z_:]*Duration::from_millis"
+}
+
+pub fn harn_command_pattern() -> string {
+  return r"harn_command\("
+}
+
+pub fn harn_e2e_command_pattern() -> string {
+  return r"(harn_e2e_command|run_harn_e2e)\("
+}
+
+pub fn direct_harn_binary_pattern() -> string {
+  return "CARGO_BIN_EXE_harn"
+}
+
+pub fn direct_harn_binary_baseline(rel: string) -> int {
+  for item in DIRECT_HARN_BINARY_BASELINE {
+    if item.path == rel {
+      return item.count
+    }
+  }
+  return 0
+}
+
+/** Return duplicate path keys from a file/count baseline. */
+pub fn duplicate_baseline_paths(items: list) -> list<string> {
+  let seen = {}
+  let duplicates = []
+  for item in items {
+    if seen[item.path] ?? false {
+      if !duplicates.contains(item.path) {
+        duplicates = duplicates + [item.path]
+      }
+    } else {
+      seen[item.path] = true
+    }
+  }
+  return duplicates
+}
+
+pub fn direct_harn_binary_baseline_duplicates() -> list<string> {
+  return duplicate_baseline_paths(DIRECT_HARN_BINARY_BASELINE)
+}
+
+/** Direct Rust process spawns whose executable is sh, /bin/sh, or cmd. */
+pub fn shell_spawn_literal_pattern() -> string {
+  return "([A-Za-z_][A-Za-z0-9_]*::)*[A-Za-z_]*Command::new[ \\t\\r\\n]*\\([ \\t\\r\\n]*\"(sh|/bin/sh|cmd)\""
+}
+
+pub fn shell_spawn_literal_baseline(rel: string) -> int {
+  for item in SHELL_SPAWN_LITERAL_BASELINE {
+    if item.path == rel {
+      return item.count
+    }
+  }
+  return 0
+}
+
+pub fn shell_spawn_literal_baseline_duplicates() -> list<string> {
+  return duplicate_baseline_paths(SHELL_SPAWN_LITERAL_BASELINE)
+}
+
+pub fn spawn_orchestrator_pattern() -> string {
+  return r"spawn_orchestrator\("
+}
+
+pub fn ignore_attr_pattern() -> string {
+  return r"#\[ignore"
+}
+
+/** Copied conformance wait helper definitions (line-anchored). */
+pub fn wait_helper_pattern() -> string {
+  return r"^fn (wait_for_listener_url|wait_for_a2a_server_url|wait_for_log_line|wait_for_exit)"
+}
+
+pub fn random_fixed_port_pattern() -> string {
+  return r"random_int\(20000, 45000\)"
+}
+
+/**
+ * `sleep(<digit>` / `time.sleep(<digit>` at the start of a line or after
+ * a non-identifier character — the ERE
+ * `(^|[^_a-zA-Z])(sleep|time\.sleep)\([0-9]` from the bash lint.
+ */
+pub fn literal_sleep_pattern() -> string {
+  // `\n` excluded from the negated class: the whole-file scan would
+  // otherwise anchor a match on the previous line's trailing newline and
+  // misattribute the line number (grep tests each line standalone).
+  return r"(^|[^_a-zA-Z\n])(sleep|time\.sleep)\([0-9]"
+}
+
+/** Direct host wall-clock reads forbidden in runtime code (#1439). */
+pub fn wall_clock_pattern() -> string {
+  return r"SystemTime::now\(\)|chrono::Utc::now\(\)|chrono::Local::now\(\)|Instant::now\(\)|OffsetDateTime::now_utc\(\)"
+}
+
+/**
+ * True when a fixture installs a clock mock: some line's leading
+ * whitespace is followed by `harness.testing.clock_set(` (grep `^[[:space:]]*harness.testing.clock_set(`).
+ */
+pub fn has_mock_time(text: string) -> bool {
+  return regex_match(r"^[ \t\r]*(mock_time|harness\.testing\.clock_set)\(", text, "m") != nil
+}
+
+// -------------------------------------------------------------------------------------------------
+// Reporting driver
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Run one pattern check over `files` ({rel, text} records), skipping any
+ * file for which `skip(rel)` is true. Prints each hit as `  <n>:<line>`
+ * followed by the pre-formatted `hint_lines`; returns the violation count.
+ */
+fn report_pattern(
+  stdio: HarnessStdio,
+  files: list,
+  skip: fn(string) -> bool,
+  pattern: string,
+  hint_lines: list<string>,
+) -> int {
+  let count = 0
+  for f in files {
+    if skip(f.rel) {
+      continue
+    }
+    for hit in find_hits(f.text, pattern) {
+      stdio.println("  ${hit.line_no}:${hit.text}")
+      for h in hint_lines {
+        stdio.println(h)
+      }
+      count = count + 1
+    }
+  }
+  return count
+}
+
+/** Load `{rel, text}` records for each repo-relative path, sorted. */
+fn load_files(fs: HarnessFs, rels: list<string>) -> list {
+  let out: list = []
+  for rel in rels.sorted() {
+    out = out + [{rel: rel, text: fs.read_text(rel)}]
+  }
+  return out
+}
+
+pipeline main(harness: Harness, task) {
+  let test_rels: list<string> = []
+  let runtime_rels: list<string> = []
+  for g in harness.fs.glob("crates/**/*.rs") {
+    const rel = rel_path(g)
+    if !harness.fs.stat(rel).is_file {
+      // Mirror `find -type f`: a directory can match the glob (e.g. a
+      // state dir literally named `.harn` matching `*.harn`).
+      continue
+    }
+    if is_test_rs_path(rel) {
+      test_rels = test_rels + [rel]
+    }
+    if is_runtime_rs_path(rel) {
+      runtime_rels = runtime_rels + [rel]
+    }
+  }
+  let harn_rels: list<string> = []
+  for g in harness.fs.glob("conformance/tests/**/*.harn") {
+    const rel = rel_path(g)
+    if harness.fs.stat(rel).is_file {
+      harn_rels = harn_rels + [rel]
+    }
+  }
+  const test_files = load_files(harness.fs, test_rels)
+  const harn_files = load_files(harness.fs, harn_rels)
+  const runtime_files = load_files(harness.fs, runtime_rels)
+  let violations = 0
+  harness.stdio.println("=== Checking test files for forbidden patterns ===")
+  harness.stdio.println("--- std::thread::sleep ---")
+  violations = violations
+    + report_pattern(
+    harness.stdio,
+    test_files,
+    { rel -> THREAD_SLEEP_ALLOWLIST.contains(rel) },
+    thread_sleep_pattern(),
+    ["    hint: Use tokio::time::pause() + advance(), or wait on an event/channel instead."],
+  )
+  harness.stdio.println("--- tokio::time::sleep ---")
+  violations = violations
+    + report_pattern(
+    harness.stdio,
+    test_files,
+    { rel -> TOKIO_SLEEP_ALLOWLIST.contains(rel) },
+    tokio_sleep_pattern(),
+    [
+      "    hint: Use tokio::time::pause() + advance() in a #[tokio::test(start_paused = true)] context.",
+    ],
+  )
+  harness.stdio.println("--- Instant::now() deadline comparison (wall-clock poll) ---")
+  // Catches `Instant::now() < deadline`, `>= deadline`, etc. — the smell is
+  // the comparison itself, regardless of whether it sits inside a `while`,
+  // a `loop`, or an `assert!` macro inside a loop body.
+  violations = violations
+    + report_pattern(
+    harness.stdio,
+    test_files,
+    { rel -> INSTANT_NOW_DEADLINE_ALLOWLIST.contains(rel) },
+    instant_deadline_pattern(),
+    [
+      "    hint: Subscribe to an EventLog channel, use OrchestratorHarness, or wrap a poll in tokio::time::timeout instead.",
+    ],
+  )
+  harness.stdio.println("--- SystemTime::now() in tests ---")
+  violations = violations
+    + report_pattern(
+    harness.stdio,
+    test_files,
+    { rel -> SYSTEM_TIME_ALLOWLIST.contains(rel) },
+    system_time_pattern(),
+    ["    hint: Inject a MockClock or use the stdlib clock() builtin via a test harness."],
+  )
+  harness.stdio.println("--- recv_timeout with explicit sub-second Duration ---")
+  violations = violations
+    + report_pattern(
+    harness.stdio,
+    test_files,
+    { rel -> RECV_TIMEOUT_MILLIS_ALLOWLIST.contains(rel) },
+    recv_timeout_pattern(),
+    [
+      "    hint: Use an event-driven wait (channel recv with tokio::time::timeout) instead of busy-polling.",
+    ],
+  )
+  harness.stdio.println("--- wall-clock millisecond budget asserted in a test ---")
+  violations = violations
+    + report_pattern(
+    harness.stdio,
+    test_files,
+    { rel -> false },
+    elapsed_millis_budget_pattern(),
+    [
+      "    hint: Assert the correctness contract here and move the latency budget to the benchmark gate; `make test` shares hosts with release audit lanes, so a sub-second budget measures contention.",
+    ],
+  )
+  harness.stdio.println("--- obsolete harn_command helper ---")
+  violations = violations
+    + report_pattern(
+    harness.stdio,
+    test_files,
+    { rel -> false },
+    harn_command_pattern(),
+    [
+      "    hint: harn_command was retired; use in-process APIs in fast tests or harn_e2e_command in the E2E suite.",
+    ],
+  )
+  harness.stdio.println("--- direct Cargo harn binary access (file-level ratchet) ---")
+  for path in direct_harn_binary_baseline_duplicates() {
+    harness.stdio.println("  duplicate baseline path: " + path)
+    harness.stdio.println("    hint: keep exactly one canonical expected-count row per file")
+    violations = violations + 1
+  }
+  for f in test_files {
+    if !f.rel.starts_with("crates/harn-cli/tests/")
+      || f.rel
+      == "crates/harn-cli/tests/test_util/process.rs" {
+      continue
+    }
+    const actual = find_hits(f.text, direct_harn_binary_pattern()).count
+    const expected = direct_harn_binary_baseline(f.rel)
+    if actual != expected {
+      harness.stdio.println(
+        "  " + f.rel + ": expected " + to_string(expected) + ", found " + to_string(actual),
+      )
+      harness.stdio.println(
+        "    hint: route real CLI subprocesses through crates/harn-cli/tests/test_util/process.rs",
+      )
+      violations = violations + 1
+    }
+  }
+  harness.stdio.println("--- direct shell process spawns (file-level ratchet) ---")
+  for path in shell_spawn_literal_baseline_duplicates() {
+    harness.stdio.println("  duplicate baseline path: " + path)
+    harness.stdio.println("    hint: keep exactly one canonical expected-count row per file")
+    violations = violations + 1
+  }
+  for f in test_files {
+    const hits = find_hits(f.text, shell_spawn_literal_pattern())
+    const actual = hits.count
+    const expected = shell_spawn_literal_baseline(f.rel)
+    if actual != expected {
+      harness.stdio.println(
+        "  " + f.rel + ": expected " + to_string(expected) + ", found " + to_string(actual),
+      )
+      if actual > expected {
+        for hit in hits {
+          harness.stdio.println("    ${hit.line_no}:${hit.text}")
+        }
+      }
+      harness.stdio.println(
+        "    hint: use the hermetic harn-test-echo-env helper instead of spawning sh, /bin/sh, or cmd",
+      )
+      harness.stdio.println(
+        "          or lower SHELL_SPAWN_LITERAL_BASELINE after removing a grandfathered spawn",
+      )
+      violations = violations + 1
+    }
+  }
+  harness.stdio.println("--- Harn E2E subprocess helper outside E2E tests ---")
+  violations = violations
+    + report_pattern(
+    harness.stdio,
+    test_files,
+    is_e2e_subprocess_path,
+    harn_e2e_command_pattern(),
+    ["    hint: Harn E2E helpers are E2E-only; use in-process command/library APIs in fast tests."],
+  )
+  harness.stdio.println("--- spawn_orchestrator outside E2E subprocess tests ---")
+  violations = violations
+    + report_pattern(
+    harness.stdio,
+    test_files,
+    is_e2e_subprocess_path,
+    spawn_orchestrator_pattern(),
+    ["    hint: spawn_orchestrator is E2E-only; use OrchestratorHarness in fast tests."],
+  )
+  harness.stdio.println("--- #[ignore] outside slow harn-cli integration tests ---")
+  violations = violations
+    + report_pattern(
+    harness.stdio,
+    test_files,
+    { rel -> rel.starts_with("crates/harn-cli/tests/") },
+    ignore_attr_pattern(),
+    [
+      "    hint: Default-suite Rust tests must run by default. Move slow subprocess coverage to the harn-cli E2E profile instead of using #[ignore].",
+    ],
+  )
+  harness.stdio.println("--- copied conformance subprocess wait helpers ---")
+  violations = violations
+    + report_pattern(
+    harness.stdio,
+    harn_files,
+    { rel -> CONFORMANCE_HELPER_ALLOWLIST.contains(rel) },
+    wait_helper_pattern(),
+    [
+      "    hint: Import the shared helper from conformance/tests/_common.harn so retry ceilings stay consistent.",
+    ],
+  )
+  harness.stdio.println("--- random fixed-port conformance server allocation ---")
+  violations = violations
+    + report_pattern(
+    harness.stdio,
+    harn_files,
+    { rel -> false },
+    random_fixed_port_pattern(),
+    ["    hint: Bind test servers to port 0 and read the selected port from the readiness log."],
+  )
+  harness.stdio.println("--- conformance sleep with fixed literal duration ---")
+  // Fixtures that drive timing via `harness.testing.clock_set(...)` / `harness.testing.clock_advance(...)`
+  // auto-deflake their `sleep(...)` calls (the unified test clock advances
+  // instantly). Anything else relies on wall-clock and should either move
+  // to that pattern or be added to CONFORMANCE_REAL_TIME_ALLOWLIST with
+  // justification.
+  for f in harn_files {
+    if CONFORMANCE_REAL_TIME_ALLOWLIST.contains(f.rel) {
+      continue
+    }
+    // Files that install a clock mock are exempt because `sleep(...)` and
+    // `harness.clock.sleep_ms(...)` advance the mock instead of suspending the runtime.
+    if has_mock_time(f.text) {
+      continue
+    }
+    for hit in find_hits(f.text, literal_sleep_pattern()) {
+      harness.stdio.println("  ${hit.line_no}:${hit.text}")
+      harness.stdio.println(
+        "    hint: Wrap timing-sensitive logic in harness.testing.clock_set(...)/harness.testing.clock_reset(),",
+      )
+      harness.stdio.println("          or add the fixture to CONFORMANCE_REAL_TIME_ALLOWLIST in")
+      harness.stdio.println(
+        "          scripts/lint_test_patterns.harn with reviewer justification.",
+      )
+      violations = violations + 1
+    }
+  }
+  // -------------------------------------------------------------------------
+  // Non-test wall-clock reads (#1439)
+  //
+  // Runtime code that reads `SystemTime::now()`, `OffsetDateTime::now_utc()`,
+  // `Instant::now()`, or `chrono::Utc::now()` directly cannot be virtualised
+  // by the testbench `Clock` substrate (`harn_clock::Clock`). New runtime code
+  // should accept an `Arc<dyn Clock>` and read time through it, leaving the
+  // direct host-clock APIs to `RealClock` impls and known-good logging /
+  // observability sites.
+  //
+  // NON_TEST_WALL_CLOCK_ALLOWLIST (above) freezes the file inventory as of
+  // #1439. Existing files may keep their direct reads (tracked as gradual
+  // cleanup), but adding new files with direct reads requires either (a)
+  // routing time through a `Clock` or (b) appending the file to the allowlist
+  // with a one-line justification.
+  // -------------------------------------------------------------------------
+  harness.stdio.println("--- Non-test wall-clock reads (harn-vm/harn-cli runtime) ---")
+  violations = violations
+    + report_pattern(
+    harness.stdio,
+    runtime_files,
+    { rel -> NON_TEST_WALL_CLOCK_ALLOWLIST.contains(rel) },
+    wall_clock_pattern(),
+    [
+      "    hint: route time reads through an injected harn_clock::Clock; if the host wall clock is the source of truth (observability, JWT claim, retry-after, etc.), append this file to NON_TEST_WALL_CLOCK_ALLOWLIST in scripts/lint_test_patterns.harn with a one-line justification.",
+    ],
+  )
+  harness.stdio.println("")
+  if violations > 0 {
+    harness.stdio.println("FAIL: ${violations} forbidden test pattern violation(s) found.")
+    harness.stdio.println("")
+    harness.stdio.println("Forbidden patterns cause flaky tests. See docs/src/dev/testing.md for")
+    harness.stdio.println("approved alternatives and how to opt out with reviewer justification.")
+    return 1
+  }
+  harness.stdio.println("OK: no forbidden test pattern violations found.")
+  return 0
+}

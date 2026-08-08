@@ -1,0 +1,14 @@
+pipeline default(harness: Harness, task) {
+  const input = range(0, 1000).to_list()
+  let iteration = 0
+  let total = 0
+  while iteration < 200 {
+    const evens = input.filter({ value -> value % 2 == 0 })
+    const doubled = evens.map({ value -> value * 2 })
+    total = total + len(doubled)
+    iteration = iteration + 1
+  }
+  if total < 0 {
+    harness.stdio.log("unreachable")
+  }
+}

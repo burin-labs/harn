@@ -1,0 +1,23 @@
+<task>
+{{ task }}
+</task>
+
+<behavior>
+{{ behavior }}
+</behavior>
+
+<question>
+{{ question }}
+</question>
+
+<context>
+{{ context }}
+</context>
+
+<recent_transcript>
+{{ transcript }}
+</recent_transcript>
+
+Reply count: {{ reply_count }} / {{ max_replies }}
+
+Decide the next simulated-user action.

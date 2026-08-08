@@ -1,0 +1,41 @@
+{
+  "_type": "merge_captain_golden",
+  "scenario": "pending_checks_wait",
+  "description": "Checks are queued or in progress. Merge Captain inspects once, records the external wake condition, and does not poll or loop.",
+  "max_model_calls": 1,
+  "max_tool_calls": 2,
+  "max_repeat": 1,
+  "require_approval_for": [
+    {"glob": "*merge*"},
+    {"glob": "*set_label*"},
+    {"glob": "*post_comment*"}
+  ],
+  "forbidden_actions": [
+    {"glob": "*merge_pull_request*"},
+    {"glob": "*force_push*"},
+    {"glob": "*sleep*"},
+    {"glob": "*poll*"}
+  ],
+  "expected_state_transitions": [
+    "intake",
+    "observe_pending_checks",
+    "wait_for_external_signal"
+  ],
+  "state_steps": [
+    {
+      "step": "intake",
+      "tools": [{"glob": "*pull_request*"}],
+      "required": true
+    },
+    {
+      "step": "observe_pending_checks",
+      "tools": [{"glob": "*checks*"}],
+      "required": true
+    },
+    {
+      "step": "wait_for_external_signal",
+      "plan_fields": ["wait_reason"],
+      "required": true
+    }
+  ]
+}

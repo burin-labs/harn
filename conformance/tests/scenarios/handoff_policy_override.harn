@@ -1,0 +1,133 @@
+import { agent_dispatch_tool_call } from "std/agent/primitives"
+/**
+ * Handoff policy overrides are carried on the typed envelope, surfaced in
+ * tool-middleware audit records, and adopted as a replacement execution policy
+ * for the target dispatcher invocation.
+ */
+import "std/agents"
+import "std/handoffs"
+import { with_handoff_artifact } from "std/llm/tool_middleware"
+
+fn note_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "read_note",
+    "Read a note",
+    {
+      handler: { args -> "read " + args.path },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "write_note",
+    "Write a note",
+    {
+      handler: { args -> "wrote " + args.path },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+    },
+  )
+  return tools
+}
+
+fn handoff_tool_call() {
+  return {
+    tool_name: "handoff_tool",
+    tool_args: {},
+    call_id: "handoff-call",
+    declared_executor: "harn",
+    schema: nil,
+    description: "",
+    turn: {iteration: 0, session_id: "handoff-policy-test"},
+  }
+}
+
+fn successful_handoff_result(payload) {
+  return { call ->
+    return {
+      ok: true,
+      status: "ok",
+      tool_name: call.tool_name,
+      tool_call_id: call.call_id,
+      arguments: call.tool_args,
+      result: {__handoff: payload},
+      rendered_result: "handoff",
+      observation: "",
+      error: nil,
+      error_category: nil,
+      executor: "harn",
+    }
+  }
+}
+
+fn review_captain_mock(harness: Harness, envelope) {
+  const policy = harness.runtime.current_policy()
+  const tools = note_tools()
+  const read_result = agent_dispatch_tool_call(
+    harness.tools,
+    {name: "read_note", id: "read-1", arguments: {path: "notes.txt"}},
+    tools,
+  )
+  const denied = agent_dispatch_tool_call(
+    harness.tools,
+    {name: "write_note", id: "write-1", arguments: {path: "notes.txt"}},
+    tools,
+  )
+  return {
+    source_handoff: envelope?.audit?.scope?.source_handoff,
+    handoff_policy_tool: envelope?.handoff?.policy_override?.tools[0],
+    active_policy_tool: policy?.tools[0],
+    read_ok: read_result?.ok,
+    denied_ok: denied?.ok,
+    denied_category: denied?.error_category,
+  }
+}
+
+pipeline main(harness: Harness) {
+  const routes = [
+    {
+      id: "handoff-policy-review",
+      kind: "merge_receipt",
+      from: "merge_captain",
+      route: [{target: "review_captain", when: "always"}],
+    },
+  ]
+  const payload = {
+    kind: "merge_receipt",
+    source_persona: "merge_captain",
+    target_persona_or_human: {kind: "persona", id: "review_captain", label: "review_captain"},
+    task: "Review policy-scoped handoff",
+    reason: "The receiving persona should run under the handoff override",
+    requested_capabilities: ["review"],
+    policy_override: {tools: ["read_note"], side_effect_level: "read_only"},
+  }
+  // What matters is that the handoff override does not outlive the dispatch,
+  // which is restoration rather than absence. Comparing against the policy in
+  // force beforehand says that directly, and holds whether or not the runner
+  // has installed a policy of its own.
+  const policy_before = harness.runtime.current_policy()
+  const record = handoff(payload)
+  const mw = with_handoff_artifact()
+  const audited = mw(handoff_tool_call(), successful_handoff_result(payload))
+  const routed = handoff_routed(harness.clock, payload, routes, {})
+  const dispatch = handoff_dispatch(
+    harness,
+    routed,
+    nil,
+    {dispatchers: {review_captain: review_captain_mock}},
+  )
+  const invocation = dispatch?.dispatch_receipt?.invocation_result
+  harness.stdio.println(record?.policy_override?.tools[0] == "read_note")
+  harness.stdio.println(audited?.audit?.handoff?.policy_override?.tools[0] == "read_note")
+  harness.stdio.println(dispatch?.audit?.scope?.source_handoff == routed?.id)
+  harness.stdio.println(invocation?.source_handoff == routed?.id)
+  harness.stdio.println(invocation?.handoff_policy_tool == "read_note")
+  harness.stdio.println(invocation?.active_policy_tool == "read_note")
+  harness.stdio.println(invocation?.read_ok)
+  harness.stdio.println(!invocation?.denied_ok)
+  harness.stdio.println(invocation?.denied_category == "permission_denied")
+  harness.stdio.println(harness.runtime.current_policy() == policy_before)
+}

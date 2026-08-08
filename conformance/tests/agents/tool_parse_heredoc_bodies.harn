@@ -1,0 +1,420 @@
+// Heredoc argument values: `key: <<TAG` ... `TAG`.
+//
+// The heredoc is how a model delivers a file body without escaping it, so the
+// body must reach the tool byte-for-byte. That makes the close rule the whole
+// contract: the tag terminates only on a word boundary at the start of a line
+// (so `EOFunction` and `EOFX` are content), leading indentation is allowed,
+// anything after the tag on the close line is handed back to the outer parser
+// (`EOF } ] })`), and nothing inside the body — backticks, quotes, backslashes,
+// another `<<INNER` opener, a `<<`/`>>` shift operator, a literal `</tool_call>`
+// — may be read as structure.
+import { probe, sample_registry } from "_tool_parse_probe"
+
+pipeline main(harness: Harness) {
+  probe(
+    harness.agent,
+    harness.stdio,
+    "simple heredoc body",
+    """edit({
+    action: "create",
+    path: "main.go",
+    content: <<EOF
+package main
+
+import "fmt"
+
+func main() {
+    fmt.Println("hello")
+}
+EOF
+})""",
+    sample_registry(),
+  )
+  // Go raw-string backticks and a YAML document inside the body.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "heredoc body with backticks",
+    """edit({
+    action: "create",
+    path: "parser_test.go",
+    content: <<CONTENT
+package manifest
+
+import "testing"
+
+func TestYAML(t *testing.T) {
+    yaml := `
+version: "1.0"
+services:
+  web:
+    image: nginx
+`
+    if yaml == "" {
+        t.Fatal("empty")
+    }
+}
+CONTENT
+})""",
+    sample_registry(),
+  )
+  // Escaped quotes and Windows backslashes stay raw.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "heredoc body with quotes and backslashes",
+    """edit({
+    action: "create",
+    path: "test.py",
+    content: <<END
+def test_escaping():
+    s = "hello \"world\""
+    path = "C:\\Users\\test"
+    raw = r"no\escaping\here"
+    assert len(s) > 0
+END
+})""",
+    sample_registry(),
+  )
+  // Two heredoc values in one call, separated by a comma after the close tag.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "two heredocs mixed with regular args",
+    """edit({
+    action: "patch",
+    path: "main.go",
+    old_string: <<OLD
+func broken() {
+    return nil
+}
+OLD,
+    new_string: <<NEW
+func fixed() {
+    return &Result{}
+}
+NEW
+})""",
+    sample_registry(),
+  )
+  // Cheap models collapse the closing dict/array tail onto the close line.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "close line carrying brace and comma",
+    """edit({ path: "internal/manifest/parser_extra_test.go", ops: [
+  { op: "replace_body", function_name: "TestInvalidYaml", new_body: <<EOF
+func TestInvalidYaml(t *testing.T) {
+	assertParseError(t, "invalid yaml")
+}
+EOF },
+  { op: "replace_body", function_name: "TestMissingRequiredFields", new_body: <<EOF
+func TestMissingRequiredFields(t *testing.T) {
+	assertParseError(t, "version: 1")
+}
+EOF }
+] })""",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "close line carrying every remaining closer",
+    """edit({ path: "a.go", ops: [ { op: "replace_body", function_name: "F", new_body: <<EOF
+body
+EOF } ] })""",
+    sample_registry(),
+  )
+  // Word boundary: an identifier that merely BEGINS with the tag is content.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "tag prefix of an identifier does not close",
+    """edit({
+    action: "create",
+    path: "a.rs",
+    content: <<EOF
+let EOFunction = 1;
+let x = 2;
+EOF
+})""",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "near collision tag line does not close",
+    """edit({ action: "create", path: "a.zig", content: <<EOF
+line one
+EOFX is not the tag
+line three
+EOF })""",
+    sample_registry(),
+  )
+  // An indented close tag still terminates.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "indented close tag terminates",
+    """edit({
+    action: "create",
+    path: "a.go",
+    content: <<EOF
+package main
+    EOF
+})""",
+    sample_registry(),
+  )
+  // Zig shift operators are not heredoc openers, mid-line or line-leading.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "shift operators in the body",
+    """edit({
+    action: "create",
+    path: "src/writer.zig",
+    content: <<EOF
+const std = @import("std");
+pub fn pack(a: u32, b: u32) u32 {
+    return (a << 2) | (b >> 1);
+}
+test "shift" {
+    var x: u32 = 1;
+    x <<= 4;
+    try std.testing.expect(x == 16);
+}
+EOF
+})""",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "body line starting with double angle",
+    """edit({ action: "create", path: "src/writer.zig", content: <<EOF
+pub fn f(x: u32) u32 {
+    return x
+        << 2;
+}
+EOF })""",
+    sample_registry(),
+  )
+  // A body that documents the tool format itself, containing another opener.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "body containing another heredoc opener",
+    """edit({ action: "create", path: "doc.md", content: <<EOF
+Example tool call:
+content: <<INNER
+some inner text
+INNER
+end of example
+EOF })""",
+    sample_registry(),
+  )
+  // The top-level chunker must step over the body too, not just the value
+  // parser: the same shift body inside a `<tool_call>` block.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "top level chunker steps over a shift body",
+    """<tool_call>
+edit({ action: "create", path: "src/writer.zig", content: <<EOF
+pub fn f(a: u32) u32 {
+    return a << 3;
+}
+EOF })
+</tool_call>""",
+    sample_registry(),
+  )
+  // A heredoc-bodied call with NO wrapper: the stray chunker used to scan to
+  // the next `<`, truncating the call at its own heredoc opener.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "bare heredoc call with no wrapper",
+    """edit({ action: "replace_range", path: "tests/test.py", range_start: 1, range_end: 4, content: <<EOF
+import pytest
+
+def test_one():
+    assert 1 == 1
+EOF
+})""",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "heredoc inside a tool_call wrapper",
+    """<tool_call>
+edit({ action: "create", path: "a.py", content: <<EOF
+def foo():
+    return 1
+EOF
+})
+</tool_call>""",
+    sample_registry(),
+  )
+  // The protocol tells models to write raw content, so a body may legitimately
+  // contain the literal close tag. The close scan must step over the body.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "literal close tag inside the heredoc body",
+    """<tool_call>edit({
+    action: "create",
+    path: "doc.md",
+    content: <<EOF
+Wrap each call like </tool_call> here.
+More body lines.
+EOF
+})</tool_call>""",
+    sample_registry(),
+  )
+  // A bash heredoc inside a quoted STRING argument is string content, not a
+  // Harn heredoc; treating it as one dropped the call as truncated.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "bash heredoc inside a string argument",
+    """<tool_call>run({ command: "cat <<EOF
+some heredoc body
+EOF" })</tool_call>""",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "literal close tag inside a string argument",
+    "<tool_call>run({ command: \"echo </tool_call> done\" })</tool_call>",
+    sample_registry(),
+  )
+  // Several calls, each with its own heredoc.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "multiple calls with heredocs",
+    """I'll create the file and then run the tests.
+
+edit({
+    action: "create",
+    path: "test.go",
+    content: <<EOF
+package main
+EOF
+})
+
+run({ command: "go test ./..." })""",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "three edits then a run",
+    """I'll create all three files.
+
+edit({
+    action: "create",
+    path: "a.go",
+    content: <<EOF
+package a
+EOF
+})
+
+edit({
+    action: "create",
+    path: "b.go",
+    content: <<EOF
+package b
+EOF
+})
+
+edit({
+    action: "create",
+    path: "c.go",
+    content: <<EOF
+package c
+EOF
+})
+
+run({ command: "go build ./..." })""",
+    sample_registry(),
+  )
+  // Prose before, between, and after calls is extracted; the call text is not.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "prose extraction around heredoc calls",
+    """Here's my plan.
+
+edit({
+    action: "create",
+    path: "main.go",
+    content: <<EOF
+package main
+EOF
+})
+
+That should compile. Let me verify.
+
+run({ command: "go build" })""",
+    sample_registry(),
+  )
+  // A Go test body full of backtick raw strings, then a second call.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "go table test body with backticks then run",
+    """I'll create the test file with table-driven tests.
+
+edit({
+    action: "create",
+    path: "internal/manifest/parser_test.go",
+    content: <<GOFILE
+package manifest
+
+import (
+	"testing"
+)
+
+func TestParseManifest(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{
+			name:  "basic",
+			input: `{"name": "test"}`,
+			want:  "test",
+		},
+		{
+			name:    "empty",
+			input:   ``,
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Parse(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Parse() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("Parse() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+GOFILE
+})
+
+Now let me run the tests.
+
+run({ command: "go test ./internal/manifest/ -v" })""",
+    sample_registry(),
+  )
+}

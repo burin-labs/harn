@@ -1,0 +1,6 @@
+audit_count=3
+kind_order=composed_log_step,pipeline_finalized,composed_after_drain
+log_value=42
+drain_reason=no_unsettled
+audit_value=42
+result=42

@@ -1,0 +1,47 @@
+import { command_run } from "std/command"
+import "../_common"
+
+/**
+ * A nested static Harn CLI command must not initialize Tokio's Unix
+ * signal/process driver before dispatch. Linux worktree sandboxes at the
+ * process_exec ceiling deny `socket` (the Tokio signal/process driver opens
+ * one), so enabling that driver would panic before `harn check` can inspect
+ * the target file. (`socketpair` is allowed — it is anonymous local IPC, not
+ * an egress channel — so this guard rides on `socket`, not `socketpair`.)
+ */
+pipeline default(harness: Harness) {
+  const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const harn_bin = harness.env.get_or(
+    "HARN_CONFORMANCE_HARN_BIN",
+    resolve_harn_bin(harness, repo_root),
+  )
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "nested-harn-check-" + harness.random.uuid_v7(),
+  )
+  harness.fs.mkdir(root)
+  const script = path_join(root, "child.harn")
+  harness.fs.write_text(
+    script,
+    "pipeline main(harness: Harness) {\n  harness.stdio.println(\"child ok\")\n}\n",
+  )
+  const harn_bin_dir = dirname(harn_bin)
+  const result = harness.runtime.with_execution_policy(
+    {
+      sandbox_profile: "worktree",
+      workspace_roots: [repo_root, root],
+      side_effect_level: "process_exec",
+      process_sandbox: {read_roots: [harn_bin_dir, root], write_roots: [root]},
+    },
+    { ->
+      return command_run(
+        harness.tools,
+        [harn_bin, "check", script],
+        {cwd: root, capture: {max_inline_bytes: 200000}},
+      )
+    },
+  )
+  harness.stdio.println(result.success)
+  harness.stdio.println(!contains(result.stderr, "failed to create UnixStream"))
+  harness.stdio.println(!contains(result.stderr, "panicked at"))
+}

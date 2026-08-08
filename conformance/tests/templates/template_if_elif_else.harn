@@ -1,0 +1,6 @@
+pipeline default(harness: Harness) {
+  harness.stdio.println(harness.fs.render_prompt("fixtures/template/if_elif_else.prompt", {n: 1}))
+  harness.stdio.println(harness.fs.render_prompt("fixtures/template/if_elif_else.prompt", {n: 2}))
+  harness.stdio.println(harness.fs.render_prompt("fixtures/template/if_elif_else.prompt", {n: 3}))
+  harness.stdio.println(harness.fs.render_prompt("fixtures/template/if_elif_else.prompt", {n: 99}))
+}

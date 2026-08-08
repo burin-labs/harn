@@ -1,0 +1,48 @@
+/**
+ * R-01: `system_reminder` events expose the full lifecycle envelope
+ * (id/tags/dedupe_key/ttl_turns/preserve_on_compact/propagate/role_hint
+ * /authority/source/body/fired_at_turn) on a normalized transcript event.
+ */
+pipeline main(harness: Harness) {
+  const evt = transcript_reminder_event(
+    {
+      body: "Approaching context window cap.",
+      tags: ["token_pressure", "memory"],
+      dedupe_key: "token_pressure",
+      ttl_turns: 3,
+      preserve_on_compact: true,
+      propagate: "session",
+      role_hint: "developer",
+      authority: "corrective",
+      source: "stdlib_provider",
+      fired_at_turn: 4,
+    },
+  )
+  // Canonical envelope mirrors every other transcript event so existing
+  // consumers keep working without learning a new shape.
+  harness.stdio.println(evt?.kind == "system_reminder")
+  harness.stdio.println(evt?.role == "developer")
+  harness.stdio.println(evt?.visibility == "public")
+  harness.stdio.println(evt?.text == "Approaching context window cap.")
+  harness.stdio.println(len(evt?.blocks) == 1)
+  harness.stdio.println(evt?.blocks[0]?.type == "text")
+  harness.stdio.println(evt?.blocks[0]?.text == "Approaching context window cap.")
+  // Typed `reminder` lifecycle slot carries the full envelope.
+  harness.stdio.println(evt?.reminder?.body == "Approaching context window cap.")
+  harness.stdio.println(evt?.reminder?.tags[0] == "token_pressure")
+  harness.stdio.println(evt?.reminder?.tags[1] == "memory")
+  harness.stdio.println(evt?.reminder?.dedupe_key == "token_pressure")
+  harness.stdio.println(evt?.reminder?.ttl_turns == 3)
+  harness.stdio.println(evt?.reminder?.preserve_on_compact)
+  harness.stdio.println(evt?.reminder?.propagate == "session")
+  harness.stdio.println(evt?.reminder?.role_hint == "developer")
+  harness.stdio.println(evt?.reminder?.authority == "corrective")
+  harness.stdio.println(evt?.reminder?.source == "stdlib_provider")
+  harness.stdio.println(evt?.reminder?.fired_at_turn == 4)
+  harness.stdio.println(len(evt?.reminder?.id) > 0)
+  // Metadata mirrors the reminder envelope so hosts that already key
+  // off `event.metadata` see reminder context without learning a
+  // second field.
+  harness.stdio.println(evt?.metadata?.body == "Approaching context window cap.")
+  harness.stdio.println(evt?.metadata?.source == "stdlib_provider")
+}

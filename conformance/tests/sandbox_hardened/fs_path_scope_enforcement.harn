@@ -1,0 +1,59 @@
+/**
+ * Workspace-root path-scope enforcement for the hostlib `tools` and `fs`
+ * filesystem builtins (issue #2600, follow-up to the coarse
+ * `tools:deterministic` gate from #2548).
+ *
+ * Under a restricted `worktree` sandbox profile scoped to a single
+ * workspace root, a path that resolves outside that root must be refused
+ * — for writes and reads alike — with a `tool_rejected` violation that
+ * names the offending path. In-root paths still succeed. This mirrors what
+ * the VM-native `harness.fs.*` surface enforces, so both filesystem
+ * surfaces reject the same out-of-root path identically.
+ */
+pipeline default(harness: Harness) {
+  const base = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn_fs_path_scope_" + to_string(harness.random.range(100000, 999999)),
+  )
+  const root = path_join(base, "workspace")
+  harness.fs.mkdir(root)
+  const in_path = path_join(root, "in.txt")
+  const out_path = path_join(base, "outside.txt")
+  // `read_only_roots` is declared, not left empty: `intersect` treats an
+  // empty list as "defer to the caller", so a case that omits it inherits
+  // whatever read scope happens to be ambient and its read-rejection
+  // assertion quietly stops testing anything. Naming the root pins the read
+  // scope to the same directory as the write scope.
+  harness.runtime.with_execution_policy(
+    {sandbox_profile: "worktree", workspace_roots: [root], read_only_roots: [root]},
+    { ->
+      const ok = harness.tools.write_file({path: in_path, content: "ok\n"})
+      harness.stdio.println(ok.bytes_written)
+      const write_err = try {
+        harness.tools.write_file({path: out_path, content: "nope\n"})
+        nil
+      } catch (e) {
+        e
+      }
+      harness.stdio.println(write_err.kind)
+      harness.stdio.println(write_err.builtin)
+      harness.stdio.println(contains(write_err.message, "outside workspace_roots"))
+      harness.stdio.println(contains(write_err.path, "outside.txt"))
+      const read_err = try {
+        harness.fs.staged_read_text({path: out_path})
+        nil
+      } catch (e) {
+        e
+      }
+      harness.stdio.println(read_err.kind)
+      harness.stdio.println(read_err.builtin)
+    },
+  )
+  // The in-root write landed; the rejected out-of-root write never did.
+  harness.stdio.println(harness.fs.read_text(in_path) == "ok\n")
+  harness.stdio.println(harness.fs.exists(out_path))
+}
+// In-root write is allowed.
+// Out-of-root write is refused with the typed violation, before any
+// bytes reach disk.
+// Reads obey the same scope.

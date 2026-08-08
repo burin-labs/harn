@@ -1,0 +1,38 @@
+/**
+ * `T?` is sugar for `T | nil`. Equivalence at parse, narrow, and
+ * runtime levels: a function written with `T?` accepts the same
+ * values as one written with `T | nil`, and pre-existing nil-narrowing
+ * rules apply unchanged.
+ */
+fn first_word(text: string?) -> string? {
+  if text == nil {
+    return nil
+  }
+  return text
+}
+
+fn unwrap_int(value: int?) -> int {
+  if value != nil {
+    return value
+  }
+  return 0
+}
+
+pipeline test(harness: Harness, task) {
+  // Plain optional values.
+  const a: int? = nil
+  const b: int? = 7
+  harness.stdio.log(a)
+  harness.stdio.log(b)
+  // Optional generic and dict types format/parse round-trip.
+  const words: list<int>? = [1, 2, 3]
+  const lookup: dict<string, int>? = nil
+  harness.stdio.log(words)
+  harness.stdio.log(lookup)
+  // Sugar interoperates with `T | nil` callers.
+  const mixed: string? = first_word("hello")
+  harness.stdio.log(mixed)
+  harness.stdio.log(first_word(nil))
+  harness.stdio.log(unwrap_int(nil))
+  harness.stdio.log(unwrap_int(42))
+}

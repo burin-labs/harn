@@ -1,0 +1,18 @@
+pipeline test(harness: Harness, task) {
+  const ch1 = harness.runtime.channel("ch1")
+  const ch2 = harness.runtime.channel("ch2")
+  // Send to ch2 first
+  spawn {
+    harness.runtime.send(ch2, "from ch2")
+  }
+  // Small delay to ensure send completes
+  harness.clock.sleep_ms(50ms)
+  select {
+    msg from ch1 {
+      harness.stdio.log("ch1: ${msg}")
+    }
+    msg from ch2 {
+      harness.stdio.log("ch2: ${msg}")
+    }
+  }
+}

@@ -1,0 +1,718 @@
+import { PortableProgram } from "std/portable"
+import { UiAppOptions } from "std/ui/contracts"
+import {
+  UiMcpResourceOptions,
+  UiMcpResourceRegistration,
+  UiMcpToolMetadata,
+  UiResource,
+  UiResourceOptions,
+  UiToolMetaOptions,
+  ui_resource,
+  ui_resource_to_mcp,
+  ui_tool_meta,
+  ui_tool_meta_to_mcp,
+} from "std/ui_resource"
+
+const UI_RENDERER_HTML = """
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root {
+  color-scheme: light dark;
+  font: 14px Inter, ui-sans-serif, system-ui, sans-serif;
+  --bg: #f4f1e9;
+  --paper: #fffdf7;
+  --ink: #20251f;
+  --muted: #62665e;
+  --line: #c8c3b7;
+  --accent: #385943;
+}
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 680px; min-height: 480px; background: var(--bg); color: var(--ink); }
+#app { height: 100vh; display: flex; flex-direction: column; }
+.column { display: flex; flex-direction: column; gap: 12px; }
+.row { display: flex; align-items: center; gap: 8px; }
+.workspace { height: 100%; display: grid; grid-template-columns: minmax(440px, 1fr) 320px; gap: 0; }
+.work { padding: 24px; min-width: 0; }
+.panel { padding: 24px 20px; border-left: 1px solid var(--line); background: var(--paper); overflow: auto; }
+.toolbar { min-height: 38px; }
+.toolbar h1 { margin-right: auto; }
+.canvas-area { flex: 1; min-height: 360px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 12px; background: #ded9cb; overflow: hidden; }
+h1, h2, h3, h4, h5, h6 { margin: 0; font-family: Georgia, serif; font-weight: 500; }
+h1 { font-size: 20px; }
+h2 { font-size: 16px; }
+p { margin: 0; line-height: 1.45; }
+label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+button, select, textarea, input { font: inherit; border: 1px solid #b9b5a9; border-radius: 7px; background: #fff; color: #20251f; padding: 8px 10px; }
+button { cursor: pointer; }
+button:disabled { opacity: .5; cursor: default; }
+button.primary { border: 0; color: #fff; background: var(--accent); font-weight: 650; padding: 11px 14px; }
+.annotation { padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; font-size: 13px; }
+.status { min-height: 32px; color: var(--muted); font-size: 12px; line-height: 1.4; }
+textarea { width: 100%; resize: vertical; line-height: 1.45; }
+canvas { width: 100%; aspect-ratio: 16 / 9; background: #fffef9; box-shadow: 0 8px 35px #56513e30; touch-action: none; cursor: crosshair; }
+img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; }
+hr { width: 100%; border: 0; border-top: 1px solid var(--line); }
+.grow { flex: 1; }
+.hidden { display: none !important; }
+@media (max-width: 760px) {
+  body { min-width: 0; }
+  .workspace { grid-template-columns: 1fr; }
+  .panel { border-left: 0; border-top: 1px solid var(--line); }
+  .work { min-height: 520px; }
+}
+</style>
+</head>
+<body>
+<main id="app" aria-live="polite"></main>
+<script>
+(() => {
+  'use strict';
+
+  const TOOL = __HARN_UI_TOOL__;
+  const PORTABLE = __HARN_UI_PORTABLE__;
+  const PORTABLE_SCHEMA = 'harn.portable_worker.v1';
+  const PORTABLE_METHOD = 'ui/notifications/harn-portable-worker';
+  const MAX_STROKE_POINTS = 4096;
+  const root = document.getElementById('app');
+  const pending = new Map();
+  let nextRequestId = 1;
+  let currentDocument = null;
+  /** spec.id -> {node, tag} kept from the previous render so nodes survive it. */
+  let rendered = new Map();
+  let eventChain = Promise.resolve();
+  let portableState = PORTABLE?.state ?? null;
+  let portableReady = null;
+  let portableReadyResolve = null;
+  let portableReadyReject = null;
+  let portableEvent = null;
+
+  function request(method, params) {
+    const id = nextRequestId++;
+    parent.postMessage({ jsonrpc: '2.0', id, method, params }, '*');
+    return new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
+  }
+
+  addEventListener('message', messageEvent => {
+    if (messageEvent.source !== parent) return;
+    const message = messageEvent.data;
+    if (!message || message.jsonrpc !== '2.0') return;
+    if (message.method === PORTABLE_METHOD) {
+      receivePortable(message.params);
+      return;
+    }
+    if (message.method === 'ui/resource-teardown') {
+      if (message.id !== undefined) {
+        parent.postMessage({ jsonrpc: '2.0', id: message.id, result: {} }, '*');
+      }
+      return;
+    }
+    if (message.id === undefined) return;
+    const call = pending.get(message.id);
+    if (!call) return;
+    pending.delete(message.id);
+    if (message.error) call.reject(new Error(message.error.message));
+    else call.resolve(message.result);
+  });
+
+  function uiEvent(kind, target, extra = {}) {
+    return { schema: 'harn.ui_event.v1', kind, target, ...extra };
+  }
+
+  function readUpdate(result) {
+    const value = result?.structuredContent;
+    if (value?.schema === 'harn.ui_update.v1') return value;
+    const text = result?.content?.find(item => item.type === 'text')?.text;
+    if (text) {
+      try {
+        const parsed = JSON.parse(text);
+        if (parsed?.schema === 'harn.ui_update.v1') return parsed;
+      } catch {}
+    }
+    throw new Error('Harn UI tool returned no harn.ui_update.v1 result');
+  }
+
+  function showError(error) {
+    let node = document.getElementById('harn-ui-error');
+    if (!node) {
+      node = create('p', 'status');
+      node.id = 'harn-ui-error';
+      root.prepend(node);
+    }
+    node.textContent = 'Could not update app: ' + String(error.message || error);
+  }
+
+  function clearError() {
+    document.getElementById('harn-ui-error')?.remove();
+  }
+
+  function toolValue(result) {
+    if (result?.structuredContent !== undefined) return result.structuredContent;
+    const text = result?.content?.find(item => item.type === 'text')?.text;
+    if (text) {
+      try { return JSON.parse(text); } catch {}
+    }
+    return result;
+  }
+
+  function readPortableFallback(result) {
+    const value = toolValue(result);
+    if (value?.update?.schema === 'harn.ui_update.v1' && 'state' in value) {
+      portableState = structuredClone(value.state);
+      return value.update;
+    }
+    throw new Error('portable fallback tool must return {state, update}');
+  }
+
+  function sendPortable(message) {
+    parent.postMessage({jsonrpc: '2.0', method: PORTABLE_METHOD, params: message}, '*');
+  }
+
+  async function serviceCapability(spec) {
+    const args = spec?.arguments;
+    if (spec?.capability !== 'tools' || spec?.operation !== 'invoke'
+      || !Array.isArray(args) || typeof args[0] !== 'string') {
+      sendPortable({
+        schema: PORTABLE_SCHEMA,
+        kind: 'result',
+        result: {
+          status: 'err',
+          request_id: spec?.id || '',
+          code: 'unsupported_browser_capability',
+          message: 'the Harn app renderer supports tools.invoke capability requests',
+        },
+      });
+      return;
+    }
+    try {
+      const result = await request('tools/call', {name: args[0], arguments: args[1] || {}});
+      sendPortable({
+        schema: PORTABLE_SCHEMA,
+        kind: 'result',
+        result: {status: 'ok', request_id: spec.id, value: toolValue(result)},
+      });
+    } catch (error) {
+      sendPortable({
+        schema: PORTABLE_SCHEMA,
+        kind: 'result',
+        result: {
+          status: 'err',
+          request_id: spec.id,
+          code: 'tool_call',
+          message: String(error?.message || error),
+        },
+      });
+    }
+  }
+
+  function receivePortable(data) {
+    if (data?.schema !== PORTABLE_SCHEMA) return;
+    if (data.kind === 'ready') {
+      portableState = structuredClone(data.state);
+      root.dataset.runtime = 'portable';
+      portableReadyResolve?.();
+      portableReadyResolve = null;
+      portableReadyReject = null;
+    } else if (data.kind === 'restored') {
+      portableState = structuredClone(data.state);
+    } else if (data.kind === 'request') {
+      serviceCapability(data.request);
+    } else if (data.kind === 'update') {
+      portableState = structuredClone(data.state);
+      applyUpdate(data.update);
+      portableEvent?.resolve();
+      portableEvent = null;
+    } else if (data.kind === 'failed') {
+      const code = data.diagnostic?.code || 'portable_reducer';
+      const error = new Error(code + ': ' + (data.diagnostic?.message || 'portable reducer failed'));
+      error.code = code;
+      portableReadyReject?.(error);
+      portableReadyResolve = null;
+      portableReadyReject = null;
+      portableEvent?.reject(error);
+      portableEvent = null;
+    }
+  }
+
+  function portableConnection() {
+    if (portableReady) return portableReady;
+    if (!document.querySelector('meta[name="harn-portable-worker"]')) {
+      const error = new Error('this host does not provide portable browser execution');
+      error.code = 'portable_worker_unavailable';
+      throw error;
+    }
+    portableReady = new Promise((resolve, reject) => {
+      portableReadyResolve = resolve;
+      portableReadyReject = reject;
+      const artifact = Uint8Array.from(atob(PORTABLE.artifact), value => value.charCodeAt(0));
+      sendPortable({
+        schema: PORTABLE_SCHEMA,
+        kind: 'load',
+        artifact,
+        state: PORTABLE.state,
+        grants: {capabilities: PORTABLE.capabilities},
+      });
+    });
+    return portableReady;
+  }
+
+  function sendEvent(event) {
+    eventChain = eventChain.then(async () => {
+      root.dataset.busy = 'true';
+      try {
+        if (PORTABLE) {
+          try {
+            await portableConnection();
+            await new Promise((resolve, reject) => {
+              portableEvent = {resolve, reject};
+              sendPortable({schema: PORTABLE_SCHEMA, kind: 'event', event});
+            });
+          } catch (error) {
+            if (!TOOL || !String(error?.code || '').startsWith('portable_worker_')) {
+              throw error;
+            }
+            portableReady = null;
+            portableReadyResolve = null;
+            portableReadyReject = null;
+            root.dataset.runtime = 'native';
+            console.warn('[harn portable] using the native tool fallback:', error);
+            const result = await request('tools/call', {
+              name: TOOL,
+              arguments: {event, state: portableState},
+            });
+            applyUpdate(readPortableFallback(result));
+          }
+        } else {
+          root.dataset.runtime = 'native';
+          const result = await request('tools/call', {name: TOOL, arguments: {event}});
+          applyUpdate(readUpdate(result));
+        }
+        clearError();
+      } catch (error) {
+        showError(error);
+      } finally {
+        delete root.dataset.busy;
+      }
+    });
+    return eventChain;
+  }
+
+  function create(tag, className) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    return node;
+  }
+
+  function elementTag(spec) {
+    if (spec.kind === 'column' || spec.kind === 'row') return 'section';
+    if (spec.kind === 'heading') {
+      const level = Number.isInteger(spec.level) && spec.level >= 1 && spec.level <= 6
+        ? spec.level : 2;
+      return 'h' + level;
+    }
+    if (spec.kind === 'text' || spec.kind === 'status') return 'p';
+    if (spec.kind === 'button') return 'button';
+    if (spec.kind === 'field' || spec.kind === 'text_area' || spec.kind === 'select') return 'label';
+    if (spec.kind === 'canvas') return 'canvas';
+    if (spec.kind === 'image') return 'img';
+    if (spec.kind === 'divider') return 'hr';
+    return null;
+  }
+
+  function elementClassName(spec) {
+    if (spec.kind === 'column' || spec.kind === 'row') return spec.kind + ' ' + (spec.variant || '');
+    if (spec.kind === 'status') return 'status ' + (spec.variant || '');
+    if (spec.kind === 'divider') return '';
+    return spec.variant || '';
+  }
+
+  function assign(node, property, value) {
+    if (node[property] !== value) node[property] = value;
+  }
+
+  /** Build the empty shell for one element. Content is applied by `update`. */
+  function build(spec, tag) {
+    const node = create(tag);
+    if (spec.kind === 'button') {
+      node.type = 'button';
+    } else if (spec.kind === 'field' || spec.kind === 'text_area' || spec.kind === 'select') {
+      node.append(create('span'));
+      const control = spec.kind === 'text_area' ? create('textarea')
+        : spec.kind === 'select' ? create('select')
+        : create('input');
+      if (spec.kind === 'field') control.type = 'text';
+      node.append(control);
+    } else if (spec.kind === 'canvas') {
+      connectCanvas(node);
+    }
+    // A field's caption and control belong to the element itself, not to the
+    // document tree. Recording them keeps child reconciliation from treating
+    // them as stale spec children and deleting them.
+    node.harnIntrinsic = [...node.childNodes];
+    return node;
+  }
+
+  /** Apply one spec to a node of the matching kind, touching only what differs. */
+  function update(node, spec) {
+    assign(node, 'className', elementClassName(spec));
+    node.dataset.uiId = spec.id;
+    node.classList.toggle('hidden', Boolean(spec.hidden));
+    if (spec.kind === 'heading') {
+      assign(node, 'textContent', spec.text || spec.label || '');
+    } else if (spec.kind === 'text' || spec.kind === 'status') {
+      assign(node, 'textContent', spec.text || '');
+    } else if (spec.kind === 'button') {
+      assign(node, 'textContent', spec.label || spec.text || spec.id);
+      assign(node, 'disabled', Boolean(spec.disabled));
+      node.onclick = () => sendEvent(uiEvent('click', spec.id));
+    } else if (spec.kind === 'field' || spec.kind === 'text_area' || spec.kind === 'select') {
+      const [caption, control] = node.children;
+      assign(caption, 'textContent', spec.label || spec.id);
+      if (spec.kind === 'text_area') assign(control, 'rows', spec.rows || 4);
+      if (spec.kind === 'select') syncOptions(control, spec.options || []);
+      assign(control, 'id', spec.id);
+      // Assigning an unchanged value would still move the caret to the end of
+      // the text, so an edit round-tripping through Harn would jump the cursor
+      // on every keystroke that reaches the reducer.
+      assign(control, 'value', spec.value || '');
+      assign(control, 'placeholder', spec.placeholder || '');
+      assign(control, 'disabled', Boolean(spec.disabled));
+      control.onchange = () => sendEvent(uiEvent('input', spec.id, { value: control.value }));
+    } else if (spec.kind === 'canvas') {
+      assign(node, 'width', spec.width);
+      assign(node, 'height', spec.height);
+      node.setAttribute('aria-label', spec.label || 'Drawing canvas');
+      // The stroke handlers read this rather than closing over one render's
+      // spec, so a redraw never has to rebind them mid-stroke.
+      node.harnSpec = spec;
+      paint(node, spec.strokes || []);
+    } else if (spec.kind === 'image') {
+      assign(node, 'src', spec.image_src || '');
+      assign(node, 'alt', spec.image_alt || spec.label || '');
+    }
+  }
+
+  function syncOptions(control, options) {
+    const matches = control.children.length === options.length
+      && options.every((option, index) => control.children[index].value === option.value
+        && control.children[index].textContent === option.label);
+    if (matches) return;
+    const selected = control.value;
+    control.replaceChildren(...options.map(option => {
+      const item = create('option');
+      item.value = option.value;
+      item.textContent = option.label;
+      return item;
+    }));
+    control.value = selected;
+  }
+
+  /**
+   * Move `desired` into `parent` in order, leaving every node that is already
+   * in place untouched.
+   *
+   * This is the load-bearing half of the redraw. `replaceChildren()` detached
+   * every node on every update, so an update landing between `mousedown` and
+   * `mouseup` — which is exactly when a field's `change` event fires, because
+   * pressing a button blurs the field — destroyed the button and the browser
+   * never synthesized the `click` (#6011).
+   */
+  function syncChildren(parent, desired) {
+    let cursor = parent.firstChild;
+    for (const node of desired) {
+      if (cursor === node) {
+        cursor = cursor.nextSibling;
+        continue;
+      }
+      parent.insertBefore(node, cursor);
+    }
+    while (cursor) {
+      const next = cursor.nextSibling;
+      parent.removeChild(cursor);
+      cursor = next;
+    }
+  }
+
+  function render(nextDocument) {
+    currentDocument = nextDocument;
+    document.title = currentDocument.title + ' — Harn App';
+    const nodes = new Map([['', root]]);
+    const children = new Map([[root, []]]);
+    const retained = new Map();
+
+    for (const spec of currentDocument.elements) {
+      const tag = elementTag(spec);
+      if (!tag) continue;
+      const previous = rendered.get(spec.id);
+      // A node is reusable only when it is still the same element. A spec that
+      // changes kind changes tag, and reusing across that would keep stale
+      // children and handlers.
+      const node = previous && previous.tag === tag ? previous.node : build(spec, tag);
+      update(node, spec);
+      retained.set(spec.id, { node, tag });
+      nodes.set(spec.id, node);
+      children.set(node, [...(node.harnIntrinsic || [])]);
+      const parentNode = nodes.get(spec.parent || '') || root;
+      (children.get(parentNode) || children.get(root)).push(node);
+    }
+
+    for (const [parent, desired] of children) syncChildren(parent, desired);
+    rendered = retained;
+  }
+
+  function paint(canvas, strokes) {
+    const context = canvas.getContext('2d');
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.lineCap = 'round';
+    context.lineJoin = 'round';
+    for (const stroke of strokes) {
+      if (!stroke.points?.length) continue;
+      context.beginPath();
+      context.strokeStyle = stroke.color || '#486449';
+      context.lineWidth = stroke.width || 7;
+      stroke.points.forEach((point, index) => {
+        const x = point.x * canvas.width;
+        const y = point.y * canvas.height;
+        if (index) context.lineTo(x, y);
+        else context.moveTo(x, y);
+      });
+      context.stroke();
+    }
+  }
+
+  /**
+   * Bind the stroke handlers once, for the life of the canvas node.
+   *
+   * The current spec is read from `canvas.harnSpec` on each event rather than
+   * captured here, so a redraw during a stroke cannot rebind these handlers and
+   * drop the in-progress `points`.
+   */
+  function connectCanvas(canvas) {
+    let points = null;
+    const pointFrom = pointerEvent => {
+      const bounds = canvas.getBoundingClientRect();
+      return {
+        x: Math.max(0, Math.min(1, (pointerEvent.clientX - bounds.left) / bounds.width)),
+        y: Math.max(0, Math.min(1, (pointerEvent.clientY - bounds.top) / bounds.height)),
+      };
+    };
+    canvas.onpointerdown = pointerEvent => {
+      points = [pointFrom(pointerEvent)];
+      canvas.setPointerCapture(pointerEvent.pointerId);
+    };
+    canvas.onpointermove = pointerEvent => {
+      if (!points) return;
+      if (points.length < MAX_STROKE_POINTS) points.push(pointFrom(pointerEvent));
+      paint(canvas, [...(canvas.harnSpec?.strokes || []), { points, color: '#486449', width: 7 }]);
+    };
+    canvas.onpointerup = () => {
+      const finished = points;
+      points = null;
+      if (!finished?.length) return;
+      if (finished.length === 1) finished.push(finished[0]);
+      sendEvent(uiEvent('canvas.stroke', canvas.harnSpec.id, { points: finished }));
+    };
+    canvas.onpointercancel = () => {
+      points = null;
+      paint(canvas, canvas.harnSpec?.strokes || []);
+    };
+  }
+
+  function applyUpdate(update) {
+    if (update?.schema !== 'harn.ui_update.v1') {
+      throw new Error('unsupported Harn UI update');
+    }
+    render(update.document);
+    for (const effect of update.effects || []) {
+      const delay = Math.max(0, effect.after_ms || 0);
+      if (effect.kind === 'send_event') {
+        setTimeout(() => sendEvent(effect.event), delay);
+      } else if (effect.kind === 'capture_canvas') {
+        const canvas = [...root.querySelectorAll('canvas')]
+          .find(item => item.dataset.uiId === effect.target);
+        if (!canvas) throw new Error('canvas not found: ' + effect.target);
+        setTimeout(() => {
+          try {
+            sendEvent(uiEvent('canvas.snapshot', effect.event_target || effect.target, {
+              value: canvas.toDataURL('image/png'),
+            }));
+          } catch (error) {
+            showError(error);
+          }
+        }, delay);
+      } else if (effect.kind === 'download') {
+        const link = create('a');
+        link.href = 'data:' + (effect.mime_type || 'application/octet-stream')
+          + ';base64,' + effect.data_base64;
+        link.download = effect.name || 'download';
+        link.click();
+      }
+    }
+  }
+
+  async function start() {
+    const initialized = await request('ui/initialize', {
+      protocolVersion: '2026-01-26',
+      appCapabilities: { availableDisplayModes: ['fullscreen'] },
+      appInfo: { name: 'harn-ui-renderer', version: '1' },
+    });
+    if (initialized?.protocolVersion !== '2026-01-26') {
+      throw new Error('Harn UI host selected an unsupported protocol version');
+    }
+    parent.postMessage({ jsonrpc: '2.0', method: 'ui/notifications/initialized', params: {} }, '*');
+    await sendEvent(uiEvent('ready', 'app'));
+  }
+
+  start().catch(showError);
+})();
+</script>
+</body>
+</html>
+"""
+
+/**
+ * Return the shared renderer HTML configured for one Harn event tool.
+ *
+ * @effects: []
+ * @errors: [invalid_argument]
+ */
+pub fn renderer_html(tool_name: string) -> string {
+  const name = trim(tool_name)
+  if name == "" {
+    throw "std/ui: event tool name is required"
+  }
+  return __ui_renderer_html(name, nil)
+}
+
+fn __ui_script_json(value) -> string {
+  let encoded = json_stringify(value)
+  encoded = replace(encoded, "<", "\\u003c")
+  encoded = replace(encoded, ">", "\\u003e")
+  return replace(encoded, "&", "\\u0026")
+}
+
+fn __ui_renderer_html(tool_name: string, portable) -> string {
+  const html = replace(UI_RENDERER_HTML, "__HARN_UI_TOOL__", __ui_script_json(tool_name))
+  const portable_json = portable == nil ? "null" : __ui_script_json(portable)
+  return replace(html, "__HARN_UI_PORTABLE__", portable_json)
+}
+
+/**
+ * Return the shared renderer configured for one Portable Harn reducer.
+ *
+ * The reducer receives `{state, event}` and returns `{state, update}`. The
+ * browser runs it in a worker when the host ships the Portable Kernel runtime;
+ * other MCP Apps hosts call `fallback_tool` through the standard tool route.
+ *
+ * @effects: []
+ * @errors: [invalid_argument]
+ */
+pub fn portable_renderer_html(
+  fallback_tool: string,
+  program: PortableProgram,
+  state: unknown,
+  capabilities: list<string> = [],
+) -> string {
+  const name = trim(fallback_tool)
+  if name == "" {
+    throw "std/ui: fallback event tool name is required"
+  }
+  for capability in capabilities {
+    if capability != "tools.invoke" {
+      throw "std/ui: browser reducers currently support only the tools.invoke capability"
+    }
+  }
+  const config = {
+    artifact: bytes_to_base64(program.artifact),
+    state: state,
+    capabilities: capabilities,
+  }
+  return __ui_renderer_html(name, config)
+}
+
+fn __ui_resource_options(options: UiAppOptions, capabilities: list<string>) -> UiResourceOptions {
+  const base = {
+    version: options?.version ?? "1",
+    capabilities: capabilities,
+    validation: {allow_network: false}.merging(options?.validation ?? {}),
+  }
+  const description = options?.description
+  if description != nil {
+    return {
+      description: description,
+      version: base.version,
+      capabilities: base.capabilities,
+      validation: base.validation,
+    }
+  }
+  return base
+}
+
+/**
+ * Build an MCP Apps resource backed by the shared Harn view.
+ *
+ * @effects: []
+ * @errors: [invalid_argument]
+ */
+pub fn app_resource(
+  uri: string,
+  name: string,
+  tool_name: string,
+  options: UiAppOptions = nil,
+) -> UiResource {
+  return ui_resource(
+    uri,
+    name,
+    renderer_html(tool_name),
+    __ui_resource_options(options, ["tools/call"]),
+  )
+}
+
+/**
+ * Build an MCP Apps resource whose state reducer runs in the browser worker.
+ *
+ * @effects: []
+ * @errors: [invalid_argument]
+ */
+pub fn portable_app_resource(
+  uri: string,
+  name: string,
+  fallback_tool: string,
+  program: PortableProgram,
+  state: unknown,
+  capabilities: list<string> = [],
+  options: UiAppOptions = nil,
+) -> UiResource {
+  return ui_resource(
+    uri,
+    name,
+    portable_renderer_html(fallback_tool, program, state, capabilities),
+    __ui_resource_options(options, ["tools/call", "harn.portable.v1"]),
+  )
+}
+
+/**
+ * Return the MCP tool metadata that opens an app resource.
+ *
+ * @effects: []
+ * @errors: [invalid_argument]
+ */
+pub fn tool_metadata(resource: UiResource, options: UiToolMetaOptions = nil) -> UiMcpToolMetadata {
+  return ui_tool_meta_to_mcp(ui_tool_meta(resource, options))
+}
+
+/**
+ * Return the config accepted by `harness.tools.mcp_resource`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn mcp_resource(
+  resource: UiResource,
+  options: UiMcpResourceOptions = nil,
+) -> UiMcpResourceRegistration {
+  return ui_resource_to_mcp(resource, options)
+}

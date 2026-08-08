@@ -1,0 +1,7 @@
+{
+  "mode": "mock",
+  "env": {
+    "HOME": "/home/alice"
+  },
+  "expect_stdio": "true\ntrue\ntrue\ntrue\ntrue\ntrue\n"
+}

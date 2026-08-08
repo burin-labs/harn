@@ -1,0 +1,2287 @@
+//! Auto-compaction — transcript size management strategies.
+
+use crate::llm::{vm_call_llm_full, vm_value_to_json};
+use crate::value::{VmDictExt, VmError, VmValue};
+use serde::{Deserialize, Serialize};
+
+mod tool_output;
+use crate::vm::AsyncBuiltinCtx;
+pub use tool_output::{
+    microcompact_tool_output, microcompact_tool_output_result, MicrocompactedToolOutput,
+};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CompactStrategy {
+    Llm,
+    Truncate,
+    Custom,
+    ObservationMask,
+}
+
+pub fn parse_compact_strategy(value: &str) -> Result<CompactStrategy, VmError> {
+    match value {
+        "llm" => Ok(CompactStrategy::Llm),
+        "truncate" => Ok(CompactStrategy::Truncate),
+        "custom" => Ok(CompactStrategy::Custom),
+        "observation_mask" => Ok(CompactStrategy::ObservationMask),
+        other => Err(VmError::Runtime(format!(
+            "unknown compact_strategy '{other}' (expected 'llm', 'truncate', 'custom', or 'observation_mask')"
+        ))),
+    }
+}
+
+pub fn compact_strategy_name(strategy: &CompactStrategy) -> &'static str {
+    match strategy {
+        CompactStrategy::Llm => "llm",
+        CompactStrategy::Truncate => "truncate",
+        CompactStrategy::Custom => "custom",
+        CompactStrategy::ObservationMask => "observation_mask",
+    }
+}
+
+const COMPACTION_POLICY_KEYS: &[&str] = &[
+    "instructions",
+    "mode",
+    "scope",
+    "preserve",
+    "drop",
+    "extend_default_instructions",
+    "author",
+];
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CompactionPolicy {
+    pub instructions: Option<String>,
+    pub mode: Option<String>,
+    pub scope: Option<String>,
+    pub preserve: Vec<String>,
+    #[serde(rename = "drop")]
+    pub drop_items: Vec<String>,
+    pub extend_default_instructions: Option<bool>,
+    pub author: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CompactionRequest {
+    pub mode: Option<String>,
+    pub policy: CompactionPolicy,
+}
+
+impl CompactionPolicy {
+    pub fn has_metadata(&self) -> bool {
+        self.instructions.is_some()
+            || self.mode.is_some()
+            || self.scope.is_some()
+            || !self.preserve.is_empty()
+            || !self.drop_items.is_empty()
+            || self.extend_default_instructions.is_some()
+            || self.author.is_some()
+    }
+
+    fn has_prompt_directives(&self) -> bool {
+        self.instructions
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+            || !self.preserve.is_empty()
+            || !self.drop_items.is_empty()
+    }
+
+    pub fn instruction_mode(&self) -> &'static str {
+        if !self.has_prompt_directives() {
+            "default"
+        } else if self.extend_default_instructions == Some(false) {
+            "replace"
+        } else {
+            "extend"
+        }
+    }
+
+    pub fn instruction_source(&self) -> Option<&str> {
+        self.author
+            .as_deref()
+            .filter(|author| !author.trim().is_empty())
+    }
+
+    pub fn metadata_json(&self) -> Option<serde_json::Value> {
+        if !self.has_metadata() {
+            return None;
+        }
+        let mut map = serde_json::Map::new();
+        if let Some(instructions) = self.instructions.as_ref() {
+            map.insert(
+                "instructions".to_string(),
+                serde_json::Value::String(instructions.clone()),
+            );
+        }
+        if let Some(mode) = self.mode.as_ref() {
+            map.insert("mode".to_string(), serde_json::Value::String(mode.clone()));
+        }
+        if let Some(scope) = self.scope.as_ref() {
+            map.insert(
+                "scope".to_string(),
+                serde_json::Value::String(scope.clone()),
+            );
+        }
+        if !self.preserve.is_empty() {
+            map.insert(
+                "preserve".to_string(),
+                serde_json::to_value(&self.preserve).unwrap_or_default(),
+            );
+        }
+        if !self.drop_items.is_empty() {
+            map.insert(
+                "drop".to_string(),
+                serde_json::to_value(&self.drop_items).unwrap_or_default(),
+            );
+        }
+        if let Some(extend_default_instructions) = self.extend_default_instructions {
+            map.insert(
+                "extend_default_instructions".to_string(),
+                serde_json::Value::Bool(extend_default_instructions),
+            );
+        }
+        if let Some(author) = self.author.as_ref() {
+            map.insert(
+                "author".to_string(),
+                serde_json::Value::String(author.clone()),
+            );
+        }
+        map.insert(
+            "instruction_mode".to_string(),
+            serde_json::Value::String(self.instruction_mode().to_string()),
+        );
+        if let Some(source) = self.instruction_source() {
+            map.insert(
+                "instruction_source".to_string(),
+                serde_json::Value::String(source.to_string()),
+            );
+        }
+        Some(serde_json::Value::Object(map))
+    }
+
+    fn prompt_directives(&self) -> Option<String> {
+        if !self.has_prompt_directives() {
+            return None;
+        }
+        let mut parts = Vec::new();
+        if let Some(instructions) = self
+            .instructions
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            parts.push(instructions.to_string());
+        }
+        if !self.preserve.is_empty() {
+            parts.push(format!("Preserve: {}.", self.preserve.join("; ")));
+        }
+        if !self.drop_items.is_empty() {
+            parts.push(format!("Drop: {}.", self.drop_items.join("; ")));
+        }
+        Some(parts.join("\n"))
+    }
+
+    fn is_model_visible_scope(&self) -> bool {
+        matches!(
+            self.scope.as_deref(),
+            Some("model_visible" | "summary" | "transcript")
+        )
+    }
+}
+
+pub fn compaction_policy_option_keys() -> &'static [&'static str] {
+    COMPACTION_POLICY_KEYS
+}
+
+pub fn compaction_policy_to_vm_value(policy: &CompactionPolicy) -> VmValue {
+    let mut map = crate::value::DictMap::new();
+    if let Some(instructions) = policy.instructions.as_ref() {
+        map.put_str("instructions", instructions.clone());
+    }
+    if let Some(mode) = policy.mode.as_ref() {
+        map.put_str("mode", mode.clone());
+    }
+    if let Some(scope) = policy.scope.as_ref() {
+        map.put_str("scope", scope.clone());
+    }
+    map.insert(
+        crate::value::intern_key("preserve"),
+        VmValue::List(std::sync::Arc::new(
+            policy
+                .preserve
+                .iter()
+                .map(|item| VmValue::String(arcstr::ArcStr::from(item.clone())))
+                .collect(),
+        )),
+    );
+    map.insert(
+        crate::value::intern_key("drop"),
+        VmValue::List(std::sync::Arc::new(
+            policy
+                .drop_items
+                .iter()
+                .map(|item| VmValue::String(arcstr::ArcStr::from(item.clone())))
+                .collect(),
+        )),
+    );
+    if let Some(extend_default_instructions) = policy.extend_default_instructions {
+        map.insert(
+            crate::value::intern_key("extend_default_instructions"),
+            VmValue::Bool(extend_default_instructions),
+        );
+    }
+    if let Some(author) = policy.author.as_ref() {
+        map.put_str("author", author.clone());
+    }
+    VmValue::dict(map)
+}
+
+pub fn parse_compaction_policy_options(
+    options: Option<&crate::value::DictMap>,
+    builtin: &str,
+) -> Result<CompactionPolicy, VmError> {
+    let mut policy = options
+        .and_then(|map| {
+            map.get("policy")
+                .or_else(|| map.get("compaction_policy"))
+                .or_else(|| map.get("compaction_request"))
+        })
+        .map(|value| parse_compaction_policy_value(value, builtin))
+        .transpose()?
+        .unwrap_or_default();
+    if let Some(options) = options {
+        apply_compaction_policy_fields(&mut policy, options, builtin)?;
+    }
+    Ok(policy)
+}
+
+fn parse_compaction_policy_value(
+    value: &VmValue,
+    builtin: &str,
+) -> Result<CompactionPolicy, VmError> {
+    match value {
+        VmValue::Nil => Ok(CompactionPolicy::default()),
+        VmValue::Dict(map) => {
+            if let Some(nested) = map
+                .get("policy")
+                .or_else(|| map.get("compaction_policy"))
+                .or_else(|| map.get("compaction_request"))
+            {
+                let mut policy = parse_compaction_policy_value(nested, builtin)?;
+                apply_compaction_policy_fields(&mut policy, map, builtin)?;
+                Ok(policy)
+            } else {
+                let mut policy = CompactionPolicy::default();
+                apply_compaction_policy_fields(&mut policy, map, builtin)?;
+                Ok(policy)
+            }
+        }
+        other => Err(VmError::Runtime(format!(
+            "{builtin}: compaction policy must be a dict or nil, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+fn apply_compaction_policy_fields(
+    policy: &mut CompactionPolicy,
+    map: &crate::value::DictMap,
+    builtin: &str,
+) -> Result<(), VmError> {
+    if let Some(value) = optional_policy_string(map, "instructions", builtin)? {
+        policy.instructions = Some(value);
+    }
+    if let Some(value) = optional_policy_string(map, "mode", builtin)? {
+        policy.mode = Some(value);
+    }
+    if let Some(value) = optional_policy_string(map, "scope", builtin)? {
+        policy.scope = Some(value);
+    }
+    if map.contains_key("preserve") {
+        policy.preserve = policy_string_list(map.get("preserve"), builtin, "preserve")?;
+    }
+    if map.contains_key("drop") {
+        policy.drop_items = policy_string_list(map.get("drop"), builtin, "drop")?;
+    }
+    if let Some(value) = optional_policy_bool(map, "extend_default_instructions", builtin)? {
+        policy.extend_default_instructions = Some(value);
+    }
+    if let Some(value) = optional_policy_string(map, "author", builtin)? {
+        policy.author = Some(value);
+    }
+    Ok(())
+}
+
+fn optional_policy_string(
+    map: &crate::value::DictMap,
+    key: &str,
+    builtin: &str,
+) -> Result<Option<String>, VmError> {
+    match map.get(key) {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::String(text)) => {
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(trimmed.to_string()))
+            }
+        }
+        Some(other) => Err(VmError::Runtime(format!(
+            "{builtin}: compaction policy `{key}` must be a string, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+fn optional_policy_bool(
+    map: &crate::value::DictMap,
+    key: &str,
+    builtin: &str,
+) -> Result<Option<bool>, VmError> {
+    match map.get(key) {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::Bool(value)) => Ok(Some(*value)),
+        Some(other) => Err(VmError::Runtime(format!(
+            "{builtin}: compaction policy `{key}` must be a bool, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+fn policy_string_list(
+    value: Option<&VmValue>,
+    builtin: &str,
+    key: &str,
+) -> Result<Vec<String>, VmError> {
+    match value {
+        None | Some(VmValue::Nil) => Ok(Vec::new()),
+        Some(VmValue::String(text)) => {
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                Ok(Vec::new())
+            } else {
+                Ok(vec![trimmed.to_string()])
+            }
+        }
+        Some(VmValue::List(items)) => items
+            .iter()
+            .map(|item| match item {
+                VmValue::String(text) => Ok(text.trim().to_string()),
+                other => Err(VmError::Runtime(format!(
+                    "{builtin}: compaction policy `{key}` entries must be strings, got {}",
+                    other.type_name()
+                ))),
+            })
+            .filter_map(|result| match result {
+                Ok(value) if value.is_empty() => None,
+                other => Some(other),
+            })
+            .collect(),
+        Some(other) => Err(VmError::Runtime(format!(
+            "{builtin}: compaction policy `{key}` must be a string or list, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+pub fn compaction_policy_metadata_fields(
+    policy: &CompactionPolicy,
+) -> Vec<(&'static str, serde_json::Value)> {
+    let mut fields = vec![(
+        "instruction_mode",
+        serde_json::Value::String(policy.instruction_mode().to_string()),
+    )];
+    if let Some(source) = policy.instruction_source() {
+        fields.push((
+            "instruction_source",
+            serde_json::Value::String(source.to_string()),
+        ));
+    }
+    if let Some(policy_json) = policy.metadata_json() {
+        fields.push(("compaction_policy", policy_json));
+    }
+    fields
+}
+
+/// Configuration for automatic transcript compaction in agent loops.
+///
+/// Two-tier compaction:
+///   Tier 1 (`token_threshold` / `compact_strategy`): lightweight, deterministic
+///     observation masking that fires early. Masks verbose tool results while
+///     preserving assistant prose and error output.
+///   Tier 2 (`hard_limit_tokens` / `hard_limit_strategy`): aggressive LLM-powered
+///     summarization that fires when tier-1 alone isn't enough, typically as the
+///     transcript approaches the model's actual context window.
+#[derive(Clone, Debug)]
+pub struct AutoCompactConfig {
+    /// Number of earliest messages to keep verbatim before the compacted
+    /// summary. The system prompt is not part of this list and is always
+    /// preserved separately by the caller.
+    pub keep_first: usize,
+    /// Tier-1 threshold: estimated tokens before lightweight compaction.
+    pub token_threshold: usize,
+    /// Maximum character length for a single tool result before microcompaction.
+    pub tool_output_max_chars: usize,
+    /// Number of recent messages to keep during compaction.
+    pub keep_last: usize,
+    /// Tier-1 strategy (default: ObservationMask).
+    pub compact_strategy: CompactStrategy,
+    /// Tier-2 threshold: fires when tier-1 result still exceeds this.
+    /// Typically set to ~75% of the model's actual context window.
+    /// When `None`, tier-2 is disabled.
+    pub hard_limit_tokens: Option<usize>,
+    /// Tier-2 strategy (default: Llm).
+    pub hard_limit_strategy: CompactStrategy,
+    /// Optional Harn callback used when a strategy is `custom`.
+    pub custom_compactor: Option<VmValue>,
+    /// Pending reminders supplied to `custom_compactor` as a second
+    /// argument. Built-in compaction strategies decide reminder retention
+    /// before rebuilding the transcript, so they do not consume this list.
+    pub custom_compactor_reminders: Vec<VmValue>,
+    /// Optional callback for domain-specific per-message masking during
+    /// observation mask compaction. Called with a list of archived messages,
+    /// returns a list of `Option<String>` — `Some(masked)` to override the
+    /// default mask for that message, `None` to use the default.
+    /// This lets the host (e.g. an IDE or cloud runner) inject AST outlines,
+    /// file summaries, etc. without putting language-specific logic in Harn.
+    pub mask_callback: Option<VmValue>,
+    /// Optional callback for per-tool-result compression. Called with
+    /// `{tool_name, output, max_chars}` and returns compressed output string.
+    /// When set, used INSTEAD of the built-in `microcompact_tool_output`.
+    /// This allows the pipeline to use LLM-based compression rather than
+    /// keyword heuristics.
+    pub compress_callback: Option<VmValue>,
+    /// Optional prompt-template asset path used when LLM compaction is
+    /// selected. The rendered template becomes the user message sent to
+    /// the summarizer.
+    pub summarize_prompt: Option<String>,
+    /// User-facing policy label for replay and observability. This can be
+    /// broader than the engine strategy, e.g. `hybrid` lowers to LLM
+    /// summarization plus truncate fallback.
+    pub policy_strategy: String,
+    /// Strategy to try when the primary strategy fails. Budget-pressure
+    /// compaction uses this to keep the session within its hard cap even when
+    /// an LLM summarizer is unavailable.
+    pub fallback_strategy: Option<CompactStrategy>,
+    /// Host/user-supplied instructions that guide compaction without
+    /// becoming part of the compacted transcript unless `scope` explicitly
+    /// asks for model-visible policy text.
+    pub policy: CompactionPolicy,
+    /// Upper bound (bytes) on the observation-mask recap body, excluding the
+    /// bounded pinned snapshots and the single carried-forward prior recap.
+    /// The budget is spent newest-first on load-bearing observations (verify /
+    /// test / build results and the errors that preceded edits) rather than on
+    /// verbatim assistant call replay, so a long session cannot inject an
+    /// unbounded (and compounding) recap at the exact moment context pressure
+    /// forced compaction.
+    pub recap_budget_bytes: usize,
+}
+
+impl Default for AutoCompactConfig {
+    fn default() -> Self {
+        Self {
+            keep_first: 0,
+            token_threshold: 48_000,
+            tool_output_max_chars: 16_000,
+            keep_last: 12,
+            compact_strategy: CompactStrategy::ObservationMask,
+            hard_limit_tokens: None,
+            hard_limit_strategy: CompactStrategy::Llm,
+            custom_compactor: None,
+            custom_compactor_reminders: Vec::new(),
+            mask_callback: None,
+            compress_callback: None,
+            summarize_prompt: None,
+            policy_strategy: compact_strategy_name(&CompactStrategy::ObservationMask).to_string(),
+            fallback_strategy: None,
+            policy: CompactionPolicy::default(),
+            recap_budget_bytes: DEFAULT_RECAP_BUDGET_BYTES,
+        }
+    }
+}
+
+/// Default byte budget for an observation-mask recap body (~4k tokens). Chosen
+/// well below the multi-tens-of-KB recaps that motivated the bound: large
+/// enough to carry the load-bearing observations across a compaction, small
+/// enough that re-injecting it never re-creates the pressure that forced the
+/// compaction.
+pub const DEFAULT_RECAP_BUDGET_BYTES: usize = 16_000;
+
+/// Observation-mask recap metrics, carried verbatim (typed) inside
+/// [`super::CompactionReceipt`] so recap behavior survives every projection.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct RecapMetrics {
+    pub recap_bytes: usize,
+    pub budget_bytes: usize,
+    pub kept_results_count: usize,
+    pub dropped_count: usize,
+    pub carried_prior_recap: bool,
+}
+
+impl RecapMetrics {
+    pub fn to_json(self) -> serde_json::Value {
+        serde_json::json!({
+            "recap_bytes": self.recap_bytes,
+            "budget_bytes": self.budget_bytes,
+            "kept_results_count": self.kept_results_count,
+            "dropped_count": self.dropped_count,
+            "carried_prior_recap": self.carried_prior_recap,
+        })
+    }
+}
+
+/// Estimate token count from a list of JSON messages (chars / 4 heuristic).
+pub fn estimate_message_tokens(messages: &[serde_json::Value]) -> usize {
+    messages.iter().map(estimate_message_chars).sum::<usize>() / 4
+}
+
+fn estimate_message_chars(message: &serde_json::Value) -> usize {
+    let mut total = message
+        .get("content")
+        .map(estimate_content_chars)
+        .unwrap_or_default();
+    if let Some(reasoning) = message.get("reasoning") {
+        total += estimate_content_chars(reasoning);
+    }
+    if let Some(tool_calls) = message.get("tool_calls") {
+        total += estimate_content_chars(tool_calls);
+    }
+    total
+}
+
+fn estimate_content_chars(value: &serde_json::Value) -> usize {
+    match value {
+        serde_json::Value::String(text) => text.len(),
+        serde_json::Value::Array(items) => items.iter().map(estimate_content_chars).sum(),
+        serde_json::Value::Object(map) => map.values().map(estimate_content_chars).sum(),
+        serde_json::Value::Null => 0,
+        other => other.to_string().len(),
+    }
+}
+
+fn is_reasoning_or_tool_turn_message(message: &serde_json::Value) -> bool {
+    let role = message
+        .get("role")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+    role == "tool"
+        || message.get("tool_calls").is_some()
+        || message
+            .get("reasoning")
+            .map(|value| !value.is_null())
+            .unwrap_or(false)
+}
+
+fn find_prev_user_boundary(messages: &[serde_json::Value], start: usize) -> Option<usize> {
+    (0..=start)
+        .rev()
+        .find(|idx| messages[*idx].get("role").and_then(|value| value.as_str()) == Some("user"))
+}
+
+/// True when the message carries a tool result: the OpenAI durable shape
+/// (`role: "tool"`), the Anthropic durable shape (`role: "tool_result"`), or
+/// a user message whose content blocks include a `tool_result`. Text-channel
+/// results are ordinary user strings and intentionally don't match — they
+/// have no provider-level pairing to protect.
+fn is_tool_result_message(message: &serde_json::Value) -> bool {
+    match message.get("role").and_then(|role| role.as_str()) {
+        Some("tool") | Some("tool_result") => true,
+        Some("user") => message
+            .get("content")
+            .and_then(|content| content.as_array())
+            .is_some_and(|blocks| {
+                blocks.iter().any(|block| {
+                    block.get("type").and_then(|value| value.as_str()) == Some("tool_result")
+                })
+            }),
+        _ => false,
+    }
+}
+
+/// A compaction split must never land between an assistant tool-use message
+/// and its tool_result message(s): a kept window that begins with a
+/// tool_result whose request was drained is rejected by providers as an
+/// orphaned result. Results always immediately follow their request, so a
+/// split index is unsafe exactly when it points AT a tool-result message.
+/// Walk backward to the message that initiated the result run (keeping the
+/// request together with its results); when that would consume the whole
+/// compactable window, walk forward past the run instead so compaction still
+/// makes progress.
+fn snap_split_off_tool_results(
+    messages: &[serde_json::Value],
+    split_at: usize,
+    compact_start: usize,
+) -> usize {
+    if split_at >= messages.len() || !is_tool_result_message(&messages[split_at]) {
+        return split_at;
+    }
+    let mut backward = split_at;
+    while backward > compact_start && is_tool_result_message(&messages[backward]) {
+        backward -= 1;
+    }
+    if backward > compact_start {
+        return backward;
+    }
+    let mut forward = split_at;
+    while forward < messages.len() && is_tool_result_message(&messages[forward]) {
+        forward += 1;
+    }
+    forward
+}
+
+/// True when `trimmed` (an already-trimmed line) begins with `file:line` —
+/// a colon immediately followed by a digit, with no whitespace before the
+/// colon. Used as a strong signal that a line carries a located diagnostic.
+fn line_has_file_line_prefix(trimmed: &str) -> bool {
+    let bytes = trimmed.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() && bytes[i] != b':' {
+        i += 1;
+    }
+    i < bytes.len() && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit()
+}
+
+/// True when a single line carries failure signal worth preserving verbatim
+/// when we shrink a large tool output. This is the ONE filter shared by both
+/// the microcompact path (`microcompact_tool_output`) and the observation-mask
+/// path (`default_mask_tool_result`). Keep these paths on one filter so
+/// assertion values, rustc continuation lines, and structured failing-line
+/// markers survive in the detail the model re-reads to fix the bug.
+///
+///   - assertion value lines with no `file:line` (`left:`, `right:`,
+///     `expected:`, `actual:`, `got`, `want`) — the values the model needs to
+///     see the actual-vs-expected mismatch.
+///   - rustc continuation lines (`-->` location pointers, `= help:`/`= note:`,
+///     numbered source rows like `12 |`, and `^^^` carets).
+///   - `Lnnn:` failing-line structure some test harnesses emit.
+pub(super) fn is_failure_signal_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let lower = trimmed.to_lowercase();
+
+    let has_file_line = line_has_file_line_prefix(trimmed);
+    let has_strong_keyword =
+        trimmed.contains("FAIL") || trimmed.contains("panic") || trimmed.contains("Panic");
+    let has_weak_keyword = trimmed.contains("error")
+        || trimmed.contains("undefined")
+        || trimmed.contains("expected")
+        || trimmed.contains("got")
+        || lower.contains("cannot find")
+        || lower.contains("not found")
+        || lower.contains("no such")
+        || lower.contains("unresolved")
+        || lower.contains("missing")
+        || lower.contains("declared but not used")
+        || lower.contains("unused")
+        || lower.contains("mismatch");
+    let positional = lower.contains(" error ")
+        || lower.starts_with("error:")
+        || lower.starts_with("warning:")
+        || lower.starts_with("note:")
+        || lower.contains("panic:");
+
+    let assertion_value = lower.starts_with("left:")
+        || lower.starts_with("right:")
+        || lower.starts_with("expected:")
+        || lower.starts_with("actual:")
+        || lower.starts_with("got:")
+        || lower.starts_with("want:")
+        || lower.starts_with("got ")
+        || lower.starts_with("want ")
+        || lower.starts_with("assertion")
+        || lower.contains("assertionerror");
+
+    // rustc continuation lines: location pointer, help/note, numbered source
+    // rows (`12 | ...`), and caret underlines (`^^^`).
+    let rustc_continuation = trimmed.starts_with("-->")
+        || trimmed.starts_with("= help:")
+        || trimmed.starts_with("= note:")
+        || trimmed.contains('^')
+        || {
+            // `<digits> |` numbered source row from rustc's snippet rendering.
+            let mut chars = trimmed.chars();
+            let mut saw_digit = false;
+            let mut rest = trimmed;
+            while let Some(c) = chars.clone().next() {
+                if c.is_ascii_digit() {
+                    saw_digit = true;
+                    chars.next();
+                    rest = chars.as_str();
+                } else {
+                    break;
+                }
+            }
+            saw_digit && rest.trim_start().starts_with('|')
+        };
+
+    let failing_line_marker = {
+        if let Some(rest) = trimmed.strip_prefix('L') {
+            let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+            !digits.is_empty() && rest[digits.len()..].starts_with(':')
+        } else {
+            false
+        }
+    };
+
+    has_strong_keyword
+        || (has_file_line && has_weak_keyword)
+        || positional
+        || assertion_value
+        || rustc_continuation
+        || failing_line_marker
+}
+
+/// Snap a byte offset to the nearest preceding line boundary (end of a complete line).
+/// Returns the substring from the start up to and including the last complete line
+/// that fits within `max_bytes`. Never cuts mid-line.
+fn snap_to_line_end(s: &str, max_bytes: usize) -> &str {
+    if max_bytes >= s.len() {
+        return s;
+    }
+    let search_end = s.floor_char_boundary(max_bytes);
+    match s[..search_end].rfind('\n') {
+        Some(pos) => &s[..pos + 1],
+        None => &s[..search_end], // single long line — fall back to char boundary
+    }
+}
+
+/// Snap a byte offset to the nearest following line boundary (start of a complete line).
+/// Returns the substring from the first complete line at or after `start_byte`.
+/// Never cuts mid-line.
+fn snap_to_line_start(s: &str, start_byte: usize) -> &str {
+    if start_byte == 0 {
+        return s;
+    }
+    let search_start = s.ceil_char_boundary(start_byte);
+    if search_start >= s.len() {
+        return "";
+    }
+    match s[search_start..].find('\n') {
+        Some(pos) => {
+            let line_start = search_start + pos + 1;
+            if line_start < s.len() {
+                &s[line_start..]
+            } else {
+                &s[search_start..]
+            }
+        }
+        None => &s[search_start..], // already at start of last line
+    }
+}
+
+fn format_compaction_messages(messages: &[serde_json::Value]) -> String {
+    messages
+        .iter()
+        .map(|msg| {
+            let role = msg
+                .get("role")
+                .and_then(|v| v.as_str())
+                .unwrap_or("user")
+                .to_uppercase();
+            let content = msg
+                .get("content")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            format!("{role}: {content}")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn truncate_compaction_summary(
+    old_messages: &[serde_json::Value],
+    archived_count: usize,
+) -> String {
+    truncate_compaction_summary_with_context(old_messages, archived_count, false)
+}
+
+fn truncate_compaction_summary_with_context(
+    old_messages: &[serde_json::Value],
+    archived_count: usize,
+    is_llm_fallback: bool,
+) -> String {
+    let per_msg_limit = 500_usize;
+    let summary_parts: Vec<String> = old_messages
+        .iter()
+        .filter_map(|m| {
+            let role = m.get("role")?.as_str()?;
+            let content = m.get("content")?.as_str()?;
+            if content.is_empty() {
+                return None;
+            }
+            let truncated = if content.len() > per_msg_limit {
+                format!(
+                    "{}... [truncated from {} chars]",
+                    &content[..content.floor_char_boundary(per_msg_limit)],
+                    content.len()
+                )
+            } else {
+                content.to_string()
+            };
+            Some(format!("[{role}] {truncated}"))
+        })
+        .take(15)
+        .collect();
+    let header = if is_llm_fallback {
+        format!(
+            "[auto-compact fallback: LLM summarizer returned empty; {archived_count} older messages abbreviated to ~{per_msg_limit} chars each]"
+        )
+    } else {
+        format!("[auto-compacted {archived_count} older messages via truncate strategy]")
+    };
+    format!(
+        "{header}\n{}{}",
+        summary_parts.join("\n"),
+        if archived_count > 15 {
+            format!("\n... and {} more", archived_count - 15)
+        } else {
+            String::new()
+        }
+    )
+}
+
+fn compact_summary_text_from_value(value: &VmValue) -> Result<String, VmError> {
+    if let Some(map) = value.as_dict() {
+        if let Some(summary) = map.get("summary").or_else(|| map.get("text")) {
+            return Ok(summary.display());
+        }
+    }
+    match value {
+        VmValue::String(text) => Ok(text.to_string()),
+        VmValue::Nil => Ok(String::new()),
+        _ => serde_json::to_string_pretty(&vm_value_to_json(value))
+            .map_err(|e| VmError::Runtime(format!("custom compactor encode error: {e}"))),
+    }
+}
+
+async fn llm_compaction_summary(
+    old_messages: &[serde_json::Value],
+    archived_count: usize,
+    llm_opts: &crate::llm::api::LlmCallOptions,
+    summarize_prompt: Option<&str>,
+    policy: &CompactionPolicy,
+) -> Result<String, VmError> {
+    let mut compact_opts = llm_opts.clone();
+    let formatted = format_compaction_messages(old_messages);
+    compact_opts.system = None;
+    compact_opts.transcript_summary = None;
+    compact_opts.native_tools = None;
+    compact_opts.tool_choice = None;
+    compact_opts.output_format = crate::llm::api::OutputFormat::Text;
+    compact_opts.response_format = None;
+    compact_opts.json_schema = None;
+    compact_opts.output_schema = None;
+    let prompt =
+        render_llm_compaction_prompt(summarize_prompt, &formatted, archived_count, policy)?;
+    compact_opts.messages = vec![serde_json::json!({
+        "role": "user",
+        "content": prompt,
+    })];
+    let manifest = &mut compact_opts.context_manifest;
+    manifest.record_system_transform("compaction", "stdlib:compaction", "removed system", None);
+    compact_opts.set_call_role("compaction");
+    let result = vm_call_llm_full(&compact_opts).await?;
+    let summary = result.text.trim();
+    if summary.is_empty() {
+        Ok(truncate_compaction_summary_with_context(
+            old_messages,
+            archived_count,
+            true,
+        ))
+    } else {
+        Ok(format!(
+            "[auto-compacted {archived_count} older messages]\n{summary}"
+        ))
+    }
+}
+
+fn render_llm_compaction_prompt(
+    summarize_prompt: Option<&str>,
+    formatted: &str,
+    archived_count: usize,
+    policy: &CompactionPolicy,
+) -> Result<String, VmError> {
+    if policy.has_prompt_directives() && policy.extend_default_instructions == Some(false) {
+        return render_replacement_compaction_prompt(policy, formatted, archived_count);
+    }
+    let mut bindings = crate::value::DictMap::new();
+    bindings.put_str("formatted_messages", formatted);
+    bindings.insert(
+        crate::value::intern_key("archived_count"),
+        VmValue::Int(archived_count as i64),
+    );
+    let Some(path) = summarize_prompt.filter(|path| !path.trim().is_empty()) else {
+        let prompt = crate::stdlib::template::render_stdlib_prompt_asset(
+            "orchestration/prompts/compaction_summary.harn.prompt",
+            Some(&bindings),
+        )?;
+        return Ok(extend_compaction_prompt(prompt, policy));
+    };
+
+    let asset = crate::stdlib::template::TemplateAsset::render_target(path)
+        .map_err(|error| VmError::Runtime(format!("compaction summarize_prompt: {error}")))?;
+    let prompt = crate::stdlib::template::render_asset_result(&asset, Some(&bindings))
+        .map_err(VmError::from)?;
+    Ok(extend_compaction_prompt(prompt, policy))
+}
+
+fn render_replacement_compaction_prompt(
+    policy: &CompactionPolicy,
+    formatted: &str,
+    archived_count: usize,
+) -> Result<String, VmError> {
+    let directives = policy.prompt_directives().unwrap_or_default();
+    let mut bindings = crate::value::DictMap::new();
+    bindings.put_str("directives", directives);
+    bindings.put_str("formatted_messages", formatted);
+    bindings.insert(
+        crate::value::intern_key("archived_count"),
+        VmValue::Int(archived_count as i64),
+    );
+    crate::stdlib::template::render_stdlib_prompt_asset(
+        "orchestration/prompts/compaction_policy_replacement.harn.prompt",
+        Some(&bindings),
+    )
+}
+
+fn extend_compaction_prompt(mut prompt: String, policy: &CompactionPolicy) -> String {
+    let Some(directives) = policy.prompt_directives() else {
+        return prompt;
+    };
+    prompt.push_str(
+        "\n\nAdditional compaction instructions: use these directives to shape the summary, but do not quote this section unless it explicitly requests a model-visible note.\n",
+    );
+    prompt.push_str(&directives);
+    prompt
+}
+
+async fn custom_compaction_summary(
+    ctx: Option<&AsyncBuiltinCtx>,
+    old_messages: &[serde_json::Value],
+    archived_count: usize,
+    callback: &VmValue,
+    reminders: &[VmValue],
+    policy: &CompactionPolicy,
+) -> Result<String, VmError> {
+    let Some(VmValue::Closure(closure)) = Some(callback.clone()) else {
+        return Err(VmError::Runtime(
+            "compact_callback must be a closure when compact_strategy is 'custom'".to_string(),
+        ));
+    };
+    let Some(ctx) = ctx else {
+        return Err(VmError::Runtime(
+            "custom transcript compaction requires an async builtin VM context".to_string(),
+        ));
+    };
+    let mut vm = ctx.child_vm();
+    let messages_vm = VmValue::List(std::sync::Arc::new(
+        old_messages
+            .iter()
+            .map(crate::stdlib::json_to_vm_value)
+            .collect(),
+    ));
+    let result = if policy.has_metadata()
+        && (closure.func.params.len() >= 3 || closure.func.has_rest_param)
+    {
+        let reminders_vm = VmValue::List(std::sync::Arc::new(reminders.to_vec()));
+        let policy_vm = compaction_policy_to_vm_value(policy);
+        vm.call_closure_pub(&closure, &[messages_vm, reminders_vm, policy_vm])
+            .await
+    } else if closure.func.params.len() >= 2 || closure.func.has_rest_param {
+        let reminders_vm = VmValue::List(std::sync::Arc::new(reminders.to_vec()));
+        vm.call_closure_pub(&closure, &[messages_vm, reminders_vm])
+            .await
+    } else {
+        vm.call_closure_pub(&closure, &[messages_vm]).await
+    };
+    let summary = compact_summary_text_from_value(&result?)?;
+    ctx.forward_output(&vm.take_output());
+    if summary.trim().is_empty() {
+        Ok(truncate_compaction_summary(old_messages, archived_count))
+    } else {
+        Ok(format!(
+            "[auto-compacted {archived_count} older messages]\n{summary}"
+        ))
+    }
+}
+
+/// Marker the host emits inside a tool-output (or message) body to pin its
+/// live grounding — the current file view and just-edited window — so it
+/// survives a compaction pass. The host renders this literal substring inside
+/// markdown headings (e.g. `## Exact current file text [no-compact]`,
+/// `## Edited region now reads (...) [no-compact]`) in
+/// `lib/tools/result-format.harn`. Compaction matches the substring; it does
+/// not invent a new vocabulary.
+pub(crate) const NO_COMPACT_MARKER: &str = "[no-compact]";
+
+/// Upper bound on how many of the most-recent pinned segments survive a
+/// compaction pass verbatim. A pin that could never be evicted would let a
+/// long session accumulate unbounded pinned snapshots (e.g. one edited-window
+/// per edit) and eventually overflow the context window — defeating the
+/// purpose of compaction. Keeping only the latest few preserves the agent's
+/// *current* grounding (the file it is editing now, emitted as the exact-text
+/// block plus the numbered-lines block in one or two adjacent outputs) while
+/// letting stale duplicates from earlier in the session compact normally.
+pub(crate) const MAX_PINNED_SEGMENTS: usize = 3;
+
+/// Whether a content body carries the host's `[no-compact]` pin marker.
+fn is_pinned_content(content: &str) -> bool {
+    content.contains(NO_COMPACT_MARKER)
+}
+
+/// Compute the set of message indices into `messages` that are pinned AND fall
+/// within the most-recent [`MAX_PINNED_SEGMENTS`] pinned bodies. Older pinned
+/// bodies are intentionally excluded so they compact normally (the bound).
+/// `content_of` extracts the body text to inspect for each message.
+fn latest_pinned_indices<'a, F>(
+    messages: impl Iterator<Item = &'a serde_json::Value>,
+    content_of: F,
+) -> std::collections::HashSet<usize>
+where
+    F: Fn(&serde_json::Value) -> Option<&str>,
+{
+    // Walk newest-first, collecting up to MAX_PINNED_SEGMENTS pinned indices.
+    let pinned: Vec<usize> = messages
+        .enumerate()
+        .filter(|(_, msg)| content_of(msg).is_some_and(is_pinned_content))
+        .map(|(idx, _)| idx)
+        .collect();
+    pinned.into_iter().rev().take(MAX_PINNED_SEGMENTS).collect()
+}
+
+/// Check whether a tool-result string should be preserved verbatim during
+/// observation masking. Uses content length as the primary heuristic:
+/// short results (< 500 chars) are kept since they're typically error messages,
+/// status lines, or concise answers that are cheap to retain and risky to mask.
+/// Long results are masked to save context budget.
+fn content_should_preserve(content: &str) -> bool {
+    content.len() < 500
+}
+
+/// Default per-message masking for tool results.
+///
+/// Beyond the first-line preview, this KEEPS any failure-signal lines
+/// (assertion values, located diagnostics, rustc help/caret/source rows,
+/// `Lnnn:` markers) via the shared [`is_failure_signal_line`] filter, so the
+/// model re-reads the actual-vs-expected detail it needs to fix the bug. The
+/// previous mask dropped everything but the first line, silently shredding the
+/// structured failure that the strong microcompact filter preserves at the
+/// emission side.
+fn default_mask_tool_result(role: &str, content: &str) -> String {
+    let first_line = content.lines().next().unwrap_or(content);
+    let line_count = content.lines().count();
+    let char_count = content.len();
+    if line_count <= 3 {
+        return format!("[{role}] {content}");
+    }
+    let preview = &first_line[..first_line.len().min(120)];
+    // Preserve failure-signal lines (bounded so a huge log can't defeat the
+    // mask). Skip the first line itself — it is already in the preview.
+    let kept: Vec<&str> = content
+        .lines()
+        .skip(1)
+        .filter(|line| is_failure_signal_line(line))
+        .take(32)
+        .collect();
+    if kept.is_empty() {
+        format!("[{role}] {preview}... [{line_count} lines, {char_count} chars masked]")
+    } else {
+        format!(
+            "[{role}] {preview}... [{line_count} lines, {char_count} chars masked; \
+             failure lines preserved]\n{}",
+            kept.join("\n")
+        )
+    }
+}
+
+/// Stable marker on the first line of every observation-mask recap. A prior
+/// recap re-enters the archive window on a later compaction as an ordinary
+/// `{role: "user"}` message; matching this sentinel lets the next compaction
+/// carry it forward once (bounded) instead of re-expanding and re-masking it —
+/// the "recap of a recap = the same recap, updated" contract that stops recaps
+/// from compounding across compactions.
+pub(crate) const RECAP_HEADER_SENTINEL: &str = "via observation masking]";
+
+/// Byte cap on a single carried-forward prior recap. Bounds the compound-growth
+/// term independently of the per-message budget so a chain of compactions
+/// converges instead of accreting.
+const PRIOR_RECAP_CARRY_CAP: usize = 6_000;
+
+/// Byte cap on the preview kept for an archived assistant turn. Assistant turns
+/// carry the *calls* the model issued, not what it *learned*; keeping only a
+/// short preview spends the recap budget on tool results (the observations)
+/// rather than replaying verbatim call syntax.
+const ASSISTANT_PREVIEW_CHARS: usize = 240;
+
+/// Whether a message body is a previous observation-mask recap.
+fn is_prior_recap(content: &str) -> bool {
+    content.contains(RECAP_HEADER_SENTINEL)
+}
+
+/// Render one archived assistant turn as a bounded preview. Short turns pass
+/// through; long turns keep a head slice plus a masked-marker tail so the drop
+/// is visible in the same vocabulary as [`default_mask_tool_result`].
+fn assistant_preview(content: &str) -> String {
+    if content.len() <= ASSISTANT_PREVIEW_CHARS {
+        return format!("[assistant] {content}");
+    }
+    let head = snap_to_line_end(content, ASSISTANT_PREVIEW_CHARS);
+    let dropped = content.len().saturating_sub(head.len());
+    format!("[assistant] {head}... [assistant turn truncated, {dropped} chars masked]")
+}
+
+/// Collapse runs of byte-identical consecutive lines into a single line with an
+/// `(xN)` suffix. Turns repetitive call/read sequences ("looked at X 4 times")
+/// into a count instead of N verbatim copies.
+fn collapse_repeats(lines: Vec<String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(lines.len());
+    let mut run = 0usize;
+    for line in lines {
+        if out
+            .last()
+            .is_some_and(|prev| strip_repeat_suffix(prev) == line)
+        {
+            run += 1;
+            let base =
+                strip_repeat_suffix(out.last().expect("run implies a last line")).to_string();
+            *out.last_mut().expect("run implies a last line") = format!("{base} (x{})", run + 1);
+        } else {
+            run = 0;
+            out.push(line);
+        }
+    }
+    out
+}
+
+fn strip_repeat_suffix(line: &str) -> &str {
+    line.rfind(" (x")
+        .filter(|_| line.ends_with(')'))
+        .map(|idx| &line[..idx])
+        .unwrap_or(line)
+}
+
+/// Deterministic observation-mask compaction.
+#[cfg(test)]
+pub(crate) fn observation_mask_compaction(
+    old_messages: &[serde_json::Value],
+    archived_count: usize,
+) -> String {
+    observation_mask_compaction_with_callback(
+        old_messages,
+        archived_count,
+        None,
+        DEFAULT_RECAP_BUDGET_BYTES,
+    )
+    .0
+}
+
+/// Test-only accessor exposing the recap body together with its
+/// [`RecapMetrics`] and taking an explicit byte budget.
+#[cfg(test)]
+pub(crate) fn observation_mask_compaction_for_test(
+    old_messages: &[serde_json::Value],
+    archived_count: usize,
+    budget_bytes: usize,
+) -> (String, RecapMetrics) {
+    observation_mask_compaction_with_callback(old_messages, archived_count, None, budget_bytes)
+}
+
+/// Build the observation-mask recap body under `budget_bytes`.
+///
+/// Contract (harn#4731):
+///   - A single header line names how many messages were archived.
+///   - The most-recent *prior* recap in the archive window is carried forward
+///     once, bounded to [`PRIOR_RECAP_CARRY_CAP`], and never re-expanded, so
+///     recaps do not compound across successive compactions.
+///   - The remaining budget is spent NEWEST-first on load-bearing observations
+///     (tool results — verify/test/build outcomes and the errors that preceded
+///     edits, preserved by [`default_mask_tool_result`]) rather than on verbatim
+///     assistant call replay, which is reduced to a short preview.
+///   - Pinned `[no-compact]` grounding is always kept (already bounded to
+///     [`MAX_PINNED_SEGMENTS`]).
+///   - Overflow past the budget is dropped and summarized in one trailing
+///     masked-marker line; repetitive identical lines collapse to `(xN)`.
+fn observation_mask_compaction_with_callback(
+    old_messages: &[serde_json::Value],
+    archived_count: usize,
+    mask_results: Option<&[Option<String>]>,
+    budget_bytes: usize,
+) -> (String, RecapMetrics) {
+    let header =
+        format!("[auto-compacted {archived_count} older messages via observation masking]");
+    let pinned = latest_pinned_indices(old_messages.iter(), |msg| {
+        msg.get("content").and_then(|v| v.as_str())
+    });
+    // Carry forward only the single most-recent prior recap; older recaps in the
+    // window are already folded into it and compact as ordinary text.
+    let prior_recap_idx = old_messages
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, msg)| {
+            msg.get("content")
+                .and_then(|v| v.as_str())
+                .is_some_and(is_prior_recap)
+        })
+        .map(|(idx, _)| idx);
+
+    let mut metrics = RecapMetrics {
+        budget_bytes,
+        ..RecapMetrics::default()
+    };
+    // Render newest-first so the budget lands on the most decision-relevant tail;
+    // reverse to chronological order for output.
+    let mut rendered_rev: Vec<String> = Vec::new();
+    let mut used = header.len();
+
+    for (idx, msg) in old_messages.iter().enumerate().rev() {
+        let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("user");
+        let content = msg
+            .get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        if content.is_empty() {
+            continue;
+        }
+
+        if Some(idx) == prior_recap_idx {
+            let carried = snap_to_line_end(content, PRIOR_RECAP_CARRY_CAP);
+            rendered_rev.push(format!("[prior recap] {carried}"));
+            metrics.carried_prior_recap = true;
+            continue;
+        }
+
+        // Pinned grounding is unconditional (and already bounded).
+        if pinned.contains(&idx) {
+            rendered_rev.push(format!("[{role}] {content}"));
+            continue;
+        }
+
+        let (line, is_result) = if role == "assistant" {
+            (assistant_preview(content), false)
+        } else if content_should_preserve(content) {
+            (format!("[{role}] {content}"), true)
+        } else if let Some(Some(custom)) = mask_results.and_then(|r| r.get(idx)) {
+            (custom.clone(), true)
+        } else {
+            (default_mask_tool_result(role, content), true)
+        };
+
+        if used + line.len() + 1 > budget_bytes {
+            metrics.dropped_count += 1;
+            continue;
+        }
+        used += line.len() + 1;
+        if is_result {
+            metrics.kept_results_count += 1;
+        }
+        rendered_rev.push(line);
+    }
+
+    let mut body: Vec<String> = rendered_rev.into_iter().rev().collect();
+    body = collapse_repeats(body);
+    let mut parts = vec![header];
+    parts.append(&mut body);
+    if metrics.dropped_count > 0 {
+        parts.push(format!(
+            "[{} older message(s) dropped to fit recap budget]",
+            metrics.dropped_count
+        ));
+    }
+    let summary = parts.join("\n");
+    metrics.recap_bytes = summary.len();
+    (summary, metrics)
+}
+
+/// Invoke the mask_callback to get per-message custom masks.
+async fn invoke_mask_callback(
+    ctx: Option<&AsyncBuiltinCtx>,
+    callback: &VmValue,
+    old_messages: &[serde_json::Value],
+) -> Result<Vec<Option<String>>, VmError> {
+    let VmValue::Closure(closure) = callback.clone() else {
+        return Err(VmError::Runtime(
+            "mask_callback must be a closure".to_string(),
+        ));
+    };
+    let Some(ctx) = ctx else {
+        return Err(VmError::Runtime(
+            "mask_callback requires an async builtin VM context".to_string(),
+        ));
+    };
+    let mut vm = ctx.child_vm();
+    let messages_vm = VmValue::List(std::sync::Arc::new(
+        old_messages
+            .iter()
+            .map(crate::stdlib::json_to_vm_value)
+            .collect(),
+    ));
+    let result = vm.call_closure_pub(&closure, &[messages_vm]).await?;
+    ctx.forward_output(&vm.take_output());
+    let list = match result {
+        VmValue::List(items) => items,
+        _ => return Ok(vec![None; old_messages.len()]),
+    };
+    Ok(list
+        .iter()
+        .map(|v| match v {
+            VmValue::String(s) => Some(s.to_string()),
+            VmValue::Nil => None,
+            _ => None,
+        })
+        .collect())
+}
+
+/// Rewrite each tool-result message in `messages` whose content exceeds
+/// `config.tool_output_max_chars`, using `config.compress_callback` when set
+/// (and a VM context is available) else the deterministic
+/// [`microcompact_tool_output`]. Only the `content` text is replaced; the
+/// message's `role`/`tool_call_id` are left untouched so tool-call pairing is
+/// preserved. A `tool_output_max_chars` of 0 disables the pass.
+async fn clamp_tool_outputs(
+    ctx: Option<&AsyncBuiltinCtx>,
+    messages: &mut [serde_json::Value],
+    config: &AutoCompactConfig,
+) -> Result<(), VmError> {
+    if config.tool_output_max_chars == 0 {
+        return Ok(());
+    }
+    // Exempt the most-recent pinned tool-outputs (those carrying the host's
+    // `[no-compact]` marker) from length-clamping so the agent's live file view
+    // stays intact. Bounded to the latest MAX_PINNED_SEGMENTS so older pinned
+    // snapshots in the kept window still clamp and can't blow the budget.
+    let pinned = latest_pinned_indices(messages.iter(), |msg| {
+        if msg.get("role").and_then(|role| role.as_str()) == Some("tool") {
+            msg.get("content").and_then(|content| content.as_str())
+        } else {
+            None
+        }
+    });
+    for (idx, message) in messages.iter_mut().enumerate() {
+        if message.get("role").and_then(|role| role.as_str()) != Some("tool") {
+            continue;
+        }
+        let Some(content) = message.get("content").and_then(|content| content.as_str()) else {
+            continue;
+        };
+        if content.len() <= config.tool_output_max_chars {
+            continue;
+        }
+        if pinned.contains(&idx) {
+            continue;
+        }
+        let content = content.to_string();
+        let replacement = match (config.compress_callback.as_ref(), ctx) {
+            (Some(callback), Some(ctx)) => {
+                invoke_compress_callback(ctx, callback, &content, config.tool_output_max_chars)
+                    .await?
+            }
+            _ => microcompact_tool_output(&content, config.tool_output_max_chars),
+        };
+        message["content"] = serde_json::Value::String(replacement);
+    }
+    Ok(())
+}
+
+/// Invoke `compress_callback(content, max_chars)` to replace one oversized
+/// tool-output body, mirroring [`invoke_mask_callback`]'s child-VM closure
+/// invocation. A non-string return falls back to the deterministic primitive.
+async fn invoke_compress_callback(
+    ctx: &AsyncBuiltinCtx,
+    callback: &VmValue,
+    content: &str,
+    max_chars: usize,
+) -> Result<String, VmError> {
+    let VmValue::Closure(closure) = callback.clone() else {
+        return Err(VmError::Runtime(
+            "compress_callback must be a closure".to_string(),
+        ));
+    };
+    let mut vm = ctx.child_vm();
+    let args = [
+        VmValue::String(arcstr::ArcStr::from(content)),
+        VmValue::Int(max_chars as i64),
+    ];
+    let result = vm.call_closure_pub(&closure, &args).await?;
+    ctx.forward_output(&vm.take_output());
+    match result {
+        VmValue::String(text) => Ok(text.to_string()),
+        _ => Ok(microcompact_tool_output(content, max_chars)),
+    }
+}
+
+#[derive(Clone, Copy)]
+struct CompactionStrategyInputs<'a> {
+    ctx: Option<&'a AsyncBuiltinCtx>,
+    strategy: &'a CompactStrategy,
+    old_messages: &'a [serde_json::Value],
+    archived_count: usize,
+    llm_opts: Option<&'a crate::llm::api::LlmCallOptions>,
+    custom_compactor: Option<&'a VmValue>,
+    custom_compactor_reminders: &'a [VmValue],
+    mask_callback: Option<&'a VmValue>,
+    summarize_prompt: Option<&'a str>,
+    policy: &'a CompactionPolicy,
+    recap_budget_bytes: usize,
+}
+
+/// Apply a single compaction strategy to a list of archived messages. Returns
+/// the summary text plus [`RecapMetrics`] for the observation-mask strategy
+/// (the only strategy that spends a recap budget); other strategies return
+/// `None`.
+async fn apply_compaction_strategy(
+    input: CompactionStrategyInputs<'_>,
+) -> Result<(String, Option<RecapMetrics>), VmError> {
+    let CompactionStrategyInputs {
+        strategy,
+        old_messages,
+        archived_count,
+        llm_opts,
+        custom_compactor,
+        custom_compactor_reminders,
+        mask_callback,
+        summarize_prompt,
+        policy,
+        recap_budget_bytes,
+        ctx,
+    } = input;
+    match strategy {
+        CompactStrategy::Truncate => Ok((
+            truncate_compaction_summary(old_messages, archived_count),
+            None,
+        )),
+        CompactStrategy::Llm => llm_compaction_summary(
+            old_messages,
+            archived_count,
+            llm_opts.ok_or_else(|| {
+                VmError::Runtime(
+                    "LLM transcript compaction requires active LLM call options".to_string(),
+                )
+            })?,
+            summarize_prompt,
+            policy,
+        )
+        .await
+        .map(|summary| (summary, None)),
+        CompactStrategy::Custom => custom_compaction_summary(
+            ctx,
+            old_messages,
+            archived_count,
+            custom_compactor.ok_or_else(|| {
+                VmError::Runtime(
+                    "compact_callback is required when compact_strategy is 'custom'".to_string(),
+                )
+            })?,
+            custom_compactor_reminders,
+            policy,
+        )
+        .await
+        .map(|summary| (summary, None)),
+        CompactStrategy::ObservationMask => {
+            let mask_results = if let Some(cb) = mask_callback {
+                Some(invoke_mask_callback(ctx, cb, old_messages).await?)
+            } else {
+                None
+            };
+            let (summary, metrics) = observation_mask_compaction_with_callback(
+                old_messages,
+                archived_count,
+                mask_results.as_deref(),
+                recap_budget_bytes,
+            );
+            Ok((summary, Some(metrics)))
+        }
+    }
+}
+
+async fn apply_compaction_strategy_with_fallback(
+    input: CompactionStrategyInputs<'_>,
+    fallback_strategy: Option<&CompactStrategy>,
+) -> Result<(String, CompactStrategy, Option<RecapMetrics>), VmError> {
+    match apply_compaction_strategy(input).await {
+        Ok((summary, metrics)) => Ok((summary, input.strategy.clone(), metrics)),
+        Err(primary_error) => {
+            let Some(fallback) = fallback_strategy.filter(|fallback| *fallback != input.strategy)
+            else {
+                return Err(primary_error);
+            };
+            let fallback_input = CompactionStrategyInputs {
+                strategy: fallback,
+                ..input
+            };
+            apply_compaction_strategy(fallback_input)
+                .await
+                .map(|(summary, metrics)| (summary, fallback.clone(), metrics))
+        }
+    }
+}
+
+pub(crate) struct AutoCompactResult {
+    pub summary: String,
+    pub strategy: CompactStrategy,
+    pub recap_metrics: Option<RecapMetrics>,
+}
+
+/// Auto-compact a message list in place using two-tier compaction.
+#[cfg(test)]
+pub(crate) async fn auto_compact_messages_with_result(
+    messages: &mut Vec<serde_json::Value>,
+    config: &AutoCompactConfig,
+    llm_opts: Option<&crate::llm::api::LlmCallOptions>,
+) -> Result<Option<AutoCompactResult>, VmError> {
+    auto_compact_messages_with_result_with_ctx(None, messages, config, llm_opts).await
+}
+
+pub(crate) async fn auto_compact_messages_with_result_with_ctx(
+    ctx: Option<&AsyncBuiltinCtx>,
+    messages: &mut Vec<serde_json::Value>,
+    config: &AutoCompactConfig,
+    llm_opts: Option<&crate::llm::api::LlmCallOptions>,
+) -> Result<Option<AutoCompactResult>, VmError> {
+    if config.token_threshold > 0 && estimate_message_tokens(messages) <= config.token_threshold {
+        return Ok(None);
+    }
+    if messages.len() <= config.keep_first.saturating_add(config.keep_last) {
+        return Ok(None);
+    }
+    let compact_start = config.keep_first.min(messages.len());
+    let original_split = messages.len().saturating_sub(config.keep_last);
+    let mut split_at = original_split;
+    // Snap back to a user-role boundary so the kept suffix begins at a clean
+    // turn. OpenAI-compatible APIs reject tool results orphaned from their
+    // assistant request, so splitting mid-turn corrupts the transcript.
+    while split_at > compact_start
+        && split_at < messages.len()
+        && messages[split_at]
+            .get("role")
+            .and_then(|r| r.as_str())
+            .is_none_or(|r| r != "user")
+    {
+        split_at -= 1;
+    }
+    // Fall back to the naive split (e.g. tool-heavy transcripts with the sole
+    // user message at index 0) rather than skipping compaction entirely.
+    if split_at == compact_start {
+        split_at = original_split;
+    }
+    if let Some(volatile_start) = messages[split_at..]
+        .iter()
+        .position(is_reasoning_or_tool_turn_message)
+        .map(|offset| split_at + offset)
+    {
+        if let Some(boundary) = volatile_start
+            .checked_sub(1)
+            .and_then(|idx| find_prev_user_boundary(messages, idx))
+            .filter(|boundary| *boundary > compact_start)
+        {
+            split_at = boundary;
+        }
+    }
+    // The naive fallback (and, in tool-heavy transcripts with no interior
+    // user boundary, the volatile-start correction too) can still leave the
+    // split pointing at a tool_result whose tool_use request would be
+    // drained. Final pass: snap off any request/result pair.
+    split_at = snap_split_off_tool_results(messages, split_at, compact_start);
+    if split_at <= compact_start {
+        return Ok(None);
+    }
+    let old_messages: Vec<_> = messages.drain(compact_start..split_at).collect();
+    let archived_count = old_messages.len();
+
+    // Clamp oversized tool-result bodies in the *kept* window so the live
+    // context honors the policy's `tool_output_max_chars` (and the
+    // `compress_callback` override), not just the archived/summarized window.
+    // Runs before the hard-limit estimate so tier-2 escalation
+    // keys off the post-clamp size. Only the text body is rewritten; `role`
+    // and `tool_call_id` are preserved so tool_call/tool_result pairing stays
+    // intact.
+    clamp_tool_outputs(ctx, messages, config).await?;
+
+    let (mut summary, mut strategy, mut recap_metrics) = apply_compaction_strategy_with_fallback(
+        CompactionStrategyInputs {
+            ctx,
+            strategy: &config.compact_strategy,
+            old_messages: &old_messages,
+            archived_count,
+            llm_opts,
+            custom_compactor: config.custom_compactor.as_ref(),
+            custom_compactor_reminders: &config.custom_compactor_reminders,
+            mask_callback: config.mask_callback.as_ref(),
+            summarize_prompt: config.summarize_prompt.as_deref(),
+            policy: &config.policy,
+            recap_budget_bytes: config.recap_budget_bytes,
+        },
+        config.fallback_strategy.as_ref(),
+    )
+    .await?;
+
+    if let Some(hard_limit) = config.hard_limit_tokens {
+        let summary_msg = serde_json::json!({"role": "user", "content": &summary});
+        let mut estimate_msgs = vec![summary_msg];
+        estimate_msgs.extend_from_slice(messages.as_slice());
+        let estimated = estimate_message_tokens(&estimate_msgs);
+        if estimated > hard_limit {
+            let tier1_as_messages = vec![serde_json::json!({
+                "role": "user",
+                "content": summary,
+            })];
+            let (hard_limit_summary, hard_limit_strategy, hard_limit_metrics) =
+                apply_compaction_strategy_with_fallback(
+                    CompactionStrategyInputs {
+                        ctx,
+                        strategy: &config.hard_limit_strategy,
+                        old_messages: &tier1_as_messages,
+                        archived_count,
+                        llm_opts,
+                        custom_compactor: config.custom_compactor.as_ref(),
+                        custom_compactor_reminders: &config.custom_compactor_reminders,
+                        mask_callback: None,
+                        summarize_prompt: config.summarize_prompt.as_deref(),
+                        policy: &config.policy,
+                        recap_budget_bytes: config.recap_budget_bytes,
+                    },
+                    config.fallback_strategy.as_ref(),
+                )
+                .await?;
+            summary = hard_limit_summary;
+            strategy = hard_limit_strategy;
+            // Tier-2 re-summarized the tier-1 recap; its metrics (if any)
+            // describe the delivered body, so they supersede tier-1's.
+            recap_metrics = hard_limit_metrics.or(recap_metrics);
+        }
+    }
+
+    summary = super::repair_ledger::append_repair_ledger_to_summary(
+        apply_model_visible_policy(summary, &config.policy),
+        &old_messages,
+    );
+
+    messages.insert(
+        compact_start,
+        serde_json::json!({
+            "role": "user",
+            "content": summary,
+        }),
+    );
+    Ok(Some(AutoCompactResult {
+        summary,
+        strategy,
+        recap_metrics,
+    }))
+}
+
+/// Auto-compact a message list in place using two-tier compaction.
+#[cfg(test)]
+pub(crate) async fn auto_compact_messages(
+    messages: &mut Vec<serde_json::Value>,
+    config: &AutoCompactConfig,
+    llm_opts: Option<&crate::llm::api::LlmCallOptions>,
+) -> Result<Option<String>, VmError> {
+    Ok(
+        auto_compact_messages_with_result(messages, config, llm_opts)
+            .await?
+            .map(|result| result.summary),
+    )
+}
+
+fn apply_model_visible_policy(mut summary: String, policy: &CompactionPolicy) -> String {
+    if !policy.is_model_visible_scope() {
+        return summary;
+    }
+    let Some(directives) = policy.prompt_directives() else {
+        return summary;
+    };
+    summary.push_str("\n\n[compaction instructions]\n");
+    summary.push_str(&directives);
+    summary
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn microcompact_short_output_unchanged() {
+        let output = "line1\nline2\nline3\n";
+        assert_eq!(microcompact_tool_output(output, 1000), output);
+    }
+
+    #[test]
+    fn microcompact_snaps_to_line_boundaries() {
+        let lines: Vec<String> = (0..20)
+            .map(|i| format!("line {i:02} content here"))
+            .collect();
+        let output = lines.join("\n");
+        let result = microcompact_tool_output(&output, 200);
+        assert!(result.contains("[... "), "should have snip marker");
+        let parts: Vec<&str> = result.split("\n\n[... ").collect();
+        assert!(parts.len() >= 2, "should split at marker");
+        let head = parts[0];
+        for line in head.lines() {
+            assert!(
+                line.starts_with("line "),
+                "head line should be complete: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn microcompact_preserves_diagnostic_lines_with_line_boundaries() {
+        let mut lines = Vec::new();
+        for i in 0..50 {
+            lines.push(format!("verbose output line {i}"));
+        }
+        lines.push("src/main.rs:42: error: cannot find value".to_string());
+        for i in 50..100 {
+            lines.push(format!("verbose output line {i}"));
+        }
+        let output = lines.join("\n");
+        let result = microcompact_tool_output(&output, 600);
+        assert!(result.contains("cannot find value"), "diagnostic preserved");
+        assert!(
+            result.contains("[diagnostic lines preserved]"),
+            "has diagnostic marker"
+        );
+    }
+
+    // D1-durable: the shared failure-signal filter must keep the structured
+    // failure kinds the old mask path dropped — assertion values, rustc
+    // help/caret/source rows, and `Lnnn:` markers — not just keyword lines.
+    #[test]
+    fn failure_signal_filter_keeps_structured_failure_lines() {
+        for keep in [
+            "left: 3",
+            "right: 4",
+            "expected: foo",
+            "actual: bar",
+            "  --> src/main.rs:4:9",
+            "= help: add `use std::fmt;`",
+            "12 | let x = bad();",
+            "   | ^^^^^^^ not found",
+            "L42: assertion failed",
+            "src/main.rs:42: error: cannot find value",
+            "FAIL: TestThing",
+            "panic: index out of range",
+        ] {
+            assert!(
+                is_failure_signal_line(keep),
+                "should keep failure-signal line: {keep:?}"
+            );
+        }
+        for drop in [
+            "verbose output line 7",
+            "compiling crate foo",
+            "    let y = ok();",
+            "",
+        ] {
+            assert!(
+                !is_failure_signal_line(drop),
+                "should drop ordinary line: {drop:?}"
+            );
+        }
+    }
+
+    // D1-durable: masking a large tool output must preserve the assertion
+    // values and rustc detail (not just the first line) so the model can fix
+    // the bug instead of re-reading a shredded summary.
+    #[test]
+    fn default_mask_preserves_failure_detail() {
+        let mut lines = vec!["running 1 test".to_string()];
+        for i in 0..40 {
+            lines.push(format!("noise line {i}"));
+        }
+        lines.push("assertion `left == right` failed".to_string());
+        lines.push("  left: 3".to_string());
+        lines.push(" right: 4".to_string());
+        lines.push("  --> src/lib.rs:10:5".to_string());
+        for i in 40..80 {
+            lines.push(format!("more noise {i}"));
+        }
+        let content = lines.join("\n");
+        let masked = default_mask_tool_result("tool", &content);
+        assert!(
+            masked.contains("masked"),
+            "still reports it masked: {masked}"
+        );
+        assert!(
+            masked.contains("failure lines preserved"),
+            "should flag preserved lines: {masked}"
+        );
+        assert!(masked.contains("left: 3"), "keeps left value: {masked}");
+        assert!(masked.contains("right: 4"), "keeps right value: {masked}");
+        assert!(
+            masked.contains("--> src/lib.rs:10:5"),
+            "keeps rustc location: {masked}"
+        );
+        assert!(
+            !masked.contains("noise line 7"),
+            "drops ordinary noise: {masked}"
+        );
+    }
+
+    // Verbose output with NO failure signal still masks down to the preview.
+    #[test]
+    fn default_mask_without_failure_lines_stays_terse() {
+        let lines: Vec<String> = (0..40).map(|i| format!("plain line {i}")).collect();
+        let content = lines.join("\n");
+        let masked = default_mask_tool_result("tool", &content);
+        assert!(masked.contains("masked]"), "should mask: {masked}");
+        assert!(
+            !masked.contains("failure lines preserved"),
+            "no failure lines to preserve: {masked}"
+        );
+    }
+
+    #[test]
+    fn token_estimate_counts_structured_message_content() {
+        let text = "x".repeat(400);
+        let messages = vec![serde_json::json!({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": text},
+                {"type": "input_text", "text": "tail"},
+            ],
+            "reasoning": {"text": "scratch"},
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "read", "arguments": "{\"path\":\"src/main.rs\"}"}
+            }],
+        })];
+
+        assert!(
+            estimate_message_tokens(&messages) >= 100,
+            "structured content must not count as zero"
+        );
+    }
+
+    #[test]
+    fn compaction_policy_instructions_extend_by_default() {
+        let policy = CompactionPolicy {
+            instructions: Some("Keep the failing test names.".to_string()),
+            ..Default::default()
+        };
+        let prompt = render_llm_compaction_prompt(None, "[user] old context", 1, &policy)
+            .expect("prompt renders");
+
+        assert_eq!(policy.instruction_mode(), "extend");
+        assert!(prompt.contains("Preserve goals, constraints"));
+        assert!(prompt.contains("Additional compaction instructions"));
+        assert!(prompt.contains("Keep the failing test names."));
+    }
+
+    #[test]
+    fn compaction_policy_can_replace_default_instructions() {
+        let policy = CompactionPolicy {
+            instructions: Some("Only keep repro steps.".to_string()),
+            extend_default_instructions: Some(false),
+            ..Default::default()
+        };
+        let prompt = render_llm_compaction_prompt(None, "[user] old context", 1, &policy)
+            .expect("prompt renders");
+
+        assert_eq!(policy.instruction_mode(), "replace");
+        assert!(prompt.contains("according to these instructions"));
+        assert!(prompt.contains("Only keep repro steps."));
+        assert!(!prompt.contains("Preserve goals, constraints"));
+    }
+
+    #[test]
+    fn snap_to_line_end_finds_newline() {
+        let s = "line1\nline2\nline3\nline4\n";
+        let head = snap_to_line_end(s, 12);
+        assert!(head.ends_with('\n'), "should end at newline");
+        assert!(head.contains("line1"));
+    }
+
+    #[test]
+    fn snap_to_line_start_finds_newline() {
+        let s = "line1\nline2\nline3\nline4\n";
+        let tail = snap_to_line_start(s, 12);
+        assert!(
+            tail.starts_with("line"),
+            "should start at line boundary: {tail}"
+        );
+    }
+
+    #[test]
+    fn auto_compact_preserves_reasoning_tool_suffix() {
+        let mut messages = vec![
+            serde_json::json!({"role": "user", "content": "old task"}),
+            serde_json::json!({"role": "assistant", "content": "old reply"}),
+            serde_json::json!({"role": "user", "content": "new task"}),
+            serde_json::json!({
+                "role": "assistant",
+                "content": "",
+                "reasoning": "think first",
+                "tool_calls": [{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "read", "arguments": "{\"path\":\"foo.rs\"}"}
+                }],
+            }),
+            serde_json::json!({"role": "tool", "tool_call_id": "call_1", "content": "file"}),
+        ];
+        let config = AutoCompactConfig {
+            token_threshold: 1,
+            keep_last: 2,
+            ..Default::default()
+        };
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let summary = runtime
+            .block_on(auto_compact_messages(&mut messages, &config, None))
+            .expect("compaction succeeds");
+
+        assert!(summary.is_some());
+        assert_eq!(messages[1]["role"], "user");
+        assert_eq!(messages[2]["role"], "assistant");
+        assert_eq!(messages[2]["tool_calls"][0]["id"], "call_1");
+        assert_eq!(messages[3]["role"], "tool");
+        assert_eq!(messages[3]["tool_call_id"], "call_1");
+    }
+
+    /// Regression (transcript integrity): a tool-heavy transcript whose only
+    /// user message is the pinned head has no interior user boundary, so the
+    /// split falls back to the naive `len - keep_last` index — which can land
+    /// BETWEEN an assistant tool_use message and its tool_result, orphaning
+    /// the result at the kept-window head. The split must snap to the start
+    /// of the request/result pair instead.
+    #[test]
+    fn auto_compact_never_splits_assistant_tool_use_from_its_result() {
+        let tool_call = |id: &str| {
+            serde_json::json!({
+                "id": id,
+                "type": "function",
+                "function": {"name": "run", "arguments": "{}"}
+            })
+        };
+        let mut messages = vec![
+            serde_json::json!({"role": "user", "content": "task"}),
+            serde_json::json!({"role": "assistant", "content": "", "tool_calls": [tool_call("c0")]}),
+            serde_json::json!({"role": "tool", "tool_call_id": "c0", "content": "r0"}),
+            serde_json::json!({"role": "assistant", "content": "", "tool_calls": [tool_call("c1")]}),
+            serde_json::json!({"role": "tool", "tool_call_id": "c1", "content": "r1"}),
+            serde_json::json!({"role": "assistant", "content": "", "tool_calls": [tool_call("c2")]}),
+            serde_json::json!({"role": "tool", "tool_call_id": "c2", "content": "r2"}),
+        ];
+        // keep_last: 3 puts the naive split at index 4 — the tool_result for
+        // c1 — exactly mid-pair.
+        let config = AutoCompactConfig {
+            token_threshold: 1,
+            keep_first: 0,
+            keep_last: 3,
+            ..Default::default()
+        };
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let summary = runtime
+            .block_on(auto_compact_messages(&mut messages, &config, None))
+            .expect("compaction succeeds");
+        assert!(summary.is_some(), "compaction should trigger");
+
+        // Kept window: summary, then the INTACT c1 pair, then the c2 pair.
+        assert_eq!(messages[0]["role"], "user", "summary head");
+        assert_eq!(messages[1]["role"], "assistant");
+        assert_eq!(messages[1]["tool_calls"][0]["id"], "c1");
+        assert_eq!(messages[2]["role"], "tool");
+        assert_eq!(messages[2]["tool_call_id"], "c1");
+        assert_eq!(messages[3]["tool_calls"][0]["id"], "c2");
+        assert_eq!(messages[4]["tool_call_id"], "c2");
+        // No kept tool_result may reference a drained (missing) request.
+        for (idx, message) in messages.iter().enumerate() {
+            if message["role"] == "tool" {
+                let id = message["tool_call_id"].as_str().expect("tool_call_id");
+                let paired = messages[..idx].iter().any(|prev| {
+                    prev["tool_calls"]
+                        .as_array()
+                        .is_some_and(|calls| calls.iter().any(|call| call["id"] == id))
+                });
+                assert!(paired, "tool_result {id} orphaned in kept window");
+            }
+        }
+    }
+
+    #[test]
+    fn snap_split_off_tool_results_handles_all_result_shapes() {
+        // A split pointing at any tool-result shape walks back to the
+        // request that initiated the run. OpenAI durable shape
+        // (`role: "tool"`):
+        let openai = vec![
+            serde_json::json!({"role": "user", "content": "task"}),
+            serde_json::json!({"role": "assistant", "content": "", "tool_calls": []}),
+            serde_json::json!({"role": "tool", "tool_call_id": "c0", "content": "r0"}),
+        ];
+        assert_eq!(snap_split_off_tool_results(&openai, 2, 0), 1);
+        // Anthropic durable shape (`role: "tool_result"`).
+        let anthropic = vec![
+            serde_json::json!({"role": "user", "content": "task"}),
+            serde_json::json!({"role": "assistant", "content": ""}),
+            serde_json::json!({"role": "tool_result", "tool_use_id": "c0", "content": "r0"}),
+        ];
+        assert_eq!(snap_split_off_tool_results(&anthropic, 2, 0), 1);
+        // User message carrying tool_result blocks.
+        let user_blocks = vec![
+            serde_json::json!({"role": "user", "content": "task"}),
+            serde_json::json!({"role": "assistant", "content": ""}),
+            serde_json::json!({
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": "c0", "content": "r0"}],
+            }),
+        ];
+        assert_eq!(snap_split_off_tool_results(&user_blocks, 2, 0), 1);
+        // Plain user text is a safe boundary — untouched.
+        let text = vec![
+            serde_json::json!({"role": "assistant", "content": ""}),
+            serde_json::json!({"role": "user", "content": "plain"}),
+        ];
+        assert_eq!(snap_split_off_tool_results(&text, 1, 0), 1);
+        // Backward walk pinned at compact_start: fall forward past the run
+        // so compaction still makes progress (the whole pair is drained
+        // together rather than split).
+        let pinned = vec![
+            serde_json::json!({"role": "tool", "tool_call_id": "c0", "content": "r0"}),
+            serde_json::json!({"role": "tool", "tool_call_id": "c1", "content": "r1"}),
+            serde_json::json!({"role": "assistant", "content": "done"}),
+        ];
+        assert_eq!(snap_split_off_tool_results(&pinned, 1, 0), 2);
+    }
+
+    #[test]
+    fn auto_compact_clamps_oversized_tool_output_to_max_chars() {
+        // A large tool result in the *kept* window must be clamped to honor
+        // `tool_output_max_chars`.
+        let big = "x".repeat(4000);
+        let big_len = big.len();
+        let mut messages = vec![
+            serde_json::json!({"role": "user", "content": "old task"}),
+            serde_json::json!({"role": "assistant", "content": "old reply"}),
+            serde_json::json!({"role": "user", "content": "new task"}),
+            serde_json::json!({"role": "assistant", "content": "calling tool"}),
+            serde_json::json!({"role": "tool", "tool_call_id": "call_1", "content": big}),
+        ];
+        let config = AutoCompactConfig {
+            token_threshold: 1,
+            keep_last: 2,
+            tool_output_max_chars: 500,
+            ..Default::default()
+        };
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let result = runtime
+            .block_on(auto_compact_messages(&mut messages, &config, None))
+            .expect("compaction succeeds");
+        assert!(result.is_some(), "compaction should trigger");
+
+        let tool_msg = messages
+            .iter()
+            .find(|message| message["role"] == "tool")
+            .expect("tool message kept in window");
+        // Pairing preserved...
+        assert_eq!(tool_msg["tool_call_id"], "call_1");
+        // ...and the oversized body was clamped well below its original size.
+        let content = tool_msg["content"].as_str().expect("string content");
+        assert!(
+            content.len() < big_len,
+            "tool output should be clamped: {} vs {}",
+            content.len(),
+            big_len
+        );
+        assert!(content.len() < 2000, "clamped near tool_output_max_chars");
+    }
+
+    /// (1) A pinned tool-output survives an observation-mask pass that evicts
+    /// (masks) the unpinned verbose outputs around it.
+    #[test]
+    fn observation_mask_preserves_pinned_live_file_view() {
+        let pinned_body = format!(
+            "## Edited region now reads (line 42, ±6 context) {}\n```\n{}\n```",
+            NO_COMPACT_MARKER,
+            (0..40)
+                .map(|i| format!("   {i}  let x = compute({i});"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        let verbose_unpinned = (0..60)
+            .map(|i| format!("verbose scan output line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        // These are the ARCHIVED messages handed to the mask pass.
+        let archived = vec![
+            serde_json::json!({"role": "user", "content": verbose_unpinned}),
+            serde_json::json!({"role": "user", "content": pinned_body}),
+        ];
+        let summary = observation_mask_compaction(&archived, archived.len());
+        // Pinned live file view survives verbatim.
+        assert!(
+            summary.contains("Edited region now reads"),
+            "pinned heading survived: {summary}"
+        );
+        assert!(
+            summary.contains("let x = compute(39);"),
+            "pinned body survived verbatim"
+        );
+        // The unpinned verbose neighbor was masked.
+        assert!(summary.contains("masked]"), "unpinned output was masked");
+        assert!(!summary.contains("verbose scan output line 30"));
+    }
+
+    /// (2) A pinned large tool-output is NOT clamped, while an unpinned one of
+    /// the same size IS.
+    #[test]
+    fn clamp_exempts_pinned_tool_output() {
+        let pinned_big = format!(
+            "## Exact current file text {}\n{}",
+            NO_COMPACT_MARKER,
+            "x".repeat(4000)
+        );
+        let pinned_len = pinned_big.len();
+        let unpinned_big = "y".repeat(4000);
+        let unpinned_len = unpinned_big.len();
+        let mut messages = vec![
+            serde_json::json!({"role": "user", "content": "old task"}),
+            serde_json::json!({"role": "assistant", "content": "reply"}),
+            serde_json::json!({"role": "user", "content": "new task"}),
+            serde_json::json!({"role": "assistant", "content": "calling tools"}),
+            serde_json::json!({"role": "tool", "tool_call_id": "c0", "content": unpinned_big}),
+            serde_json::json!({"role": "tool", "tool_call_id": "c1", "content": pinned_big}),
+            serde_json::json!({"role": "user", "content": "continue"}),
+        ];
+        let config = AutoCompactConfig {
+            token_threshold: 1,
+            keep_last: 4,
+            tool_output_max_chars: 500,
+            ..Default::default()
+        };
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime
+            .block_on(auto_compact_messages(&mut messages, &config, None))
+            .expect("compaction succeeds");
+
+        let pinned_msg = messages
+            .iter()
+            .find(|m| m["tool_call_id"] == "c1")
+            .expect("pinned tool message kept");
+        assert_eq!(
+            pinned_msg["content"].as_str().map(str::len),
+            Some(pinned_len),
+            "pinned output must be intact (unclamped)"
+        );
+        let unpinned_msg = messages
+            .iter()
+            .find(|m| m["tool_call_id"] == "c0")
+            .expect("unpinned tool message kept");
+        assert!(
+            unpinned_msg["content"].as_str().map(str::len).unwrap() < unpinned_len,
+            "unpinned output of the same size must be clamped"
+        );
+    }
+
+    /// (3) Bounded policy: with MANY pinned outputs, only the latest
+    /// MAX_PINNED_SEGMENTS survive verbatim; older pinned duplicates compact —
+    /// so the pin can't prevent all compaction (and can't overflow the window
+    /// on a very long session).
+    #[test]
+    fn pin_bound_keeps_only_latest_segments() {
+        // Build 6 distinct pinned, oversized edited-window snapshots
+        // (gen 0 = oldest .. gen 5 = newest), each tagged with the marker and
+        // long enough that masking would otherwise truncate it.
+        let make = |gen: usize| {
+            let body = (0..40)
+                .map(|i| format!("marker-gen-{gen} body line {i}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            serde_json::json!({
+                "role": "user",
+                "content": format!(
+                    "## Edited region now reads (gen {gen}) {}\n{}",
+                    NO_COMPACT_MARKER, body
+                ),
+            })
+        };
+        let archived: Vec<_> = (0..6).map(make).collect();
+
+        // Unit-level: the index selection keeps exactly the latest N.
+        let pinned = latest_pinned_indices(archived.iter(), |m| {
+            m.get("content").and_then(|c| c.as_str())
+        });
+        assert_eq!(
+            pinned.len(),
+            MAX_PINNED_SEGMENTS,
+            "only the latest MAX_PINNED_SEGMENTS are pinned"
+        );
+        assert!(pinned.contains(&5) && pinned.contains(&4) && pinned.contains(&3));
+        assert!(!pinned.contains(&0) && !pinned.contains(&1) && !pinned.contains(&2));
+
+        // End-to-end through the mask pass: the 3 newest snapshots survive
+        // verbatim; the 3 oldest are masked, proving the pin cannot defeat all
+        // compaction.
+        let summary = observation_mask_compaction(&archived, archived.len());
+        assert!(
+            summary.contains("marker-gen-5")
+                && summary.contains("marker-gen-4")
+                && summary.contains("marker-gen-3"),
+            "latest {MAX_PINNED_SEGMENTS} pinned snapshots survive verbatim: {summary}"
+        );
+        assert!(
+            !summary.contains("marker-gen-0")
+                && !summary.contains("marker-gen-1")
+                && !summary.contains("marker-gen-2"),
+            "older pinned snapshots are masked (bound enforced)"
+        );
+        assert!(summary.contains("masked]"), "older snapshots were masked");
+    }
+
+    /// (4) Regression: with NO pins, compaction behaves exactly as before.
+    #[test]
+    fn no_pins_preserves_prior_clamp_behavior() {
+        let big = "x".repeat(4000);
+        let big_len = big.len();
+        let mut messages = vec![
+            serde_json::json!({"role": "user", "content": "old task"}),
+            serde_json::json!({"role": "assistant", "content": "old reply"}),
+            serde_json::json!({"role": "user", "content": "new task"}),
+            serde_json::json!({"role": "assistant", "content": "calling tool"}),
+            serde_json::json!({"role": "tool", "tool_call_id": "call_1", "content": big}),
+        ];
+        let config = AutoCompactConfig {
+            token_threshold: 1,
+            keep_last: 2,
+            tool_output_max_chars: 500,
+            ..Default::default()
+        };
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let result = runtime
+            .block_on(auto_compact_messages(&mut messages, &config, None))
+            .expect("compaction succeeds");
+        assert!(result.is_some());
+        let tool_msg = messages
+            .iter()
+            .find(|m| m["role"] == "tool")
+            .expect("tool kept");
+        let content = tool_msg["content"].as_str().expect("string content");
+        assert!(content.len() < big_len, "unpinned output clamped as before");
+        assert!(content.len() < 2000, "clamped near tool_output_max_chars");
+    }
+}

@@ -1,0 +1,13 @@
+[harn] caught: x
+[harn] catch_finally_count: 1
+[harn] outer-caught: y
+[harn] finally_only_count: 1
+[harn] outer-rethrown: rethrown
+[harn] catch_rethrow_count: 1
+[harn] body-ok
+[harn] finally_success_count: 1
+[harn] inner-caught
+[harn] nested_bare_catch_count: 1
+[harn] inner-finally
+[harn] outer-finally
+[harn] resolved: resolved

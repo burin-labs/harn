@@ -1,0 +1,6 @@
+suspended_status=suspended
+pause_again_status=suspended
+resume_status=running
+final_status=completed
+has_transcript=true
+continuity_left=0

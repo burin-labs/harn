@@ -1,0 +1,85 @@
+import {
+  context_maintenance_dedupe_key,
+  context_maintenance_queue_receipt,
+  context_maintenance_receipt,
+  context_maintenance_replay_decision,
+  context_maintenance_transition,
+} from "std/context/maintenance"
+
+pipeline default(harness: Harness) {
+  const event = {event: "FileEdited", session: {id: "session-1"}, path: "src/lib.rs"}
+  const queued = context_maintenance_queue_receipt(
+    "context.refresh",
+    event,
+    {
+      queued_at: "2026-05-16T18:00:00Z",
+      retry_hint: {retryable: true, after_ms: 1000},
+      replay: {mode: "include"},
+    },
+  )
+  harness.stdio.println(queued.schema)
+  harness.stdio.println(queued.status)
+  harness.stdio.println(queued.lifecycle_event)
+  harness.stdio.println(queued.affected_paths[0])
+  harness.stdio.println(queued.retry_hint.retryable)
+  const running = context_maintenance_transition(
+    queued,
+    "running",
+    {started_at: "2026-05-16T18:00:01Z", duration_ms: 1},
+  )
+  harness.stdio.println(running.status)
+  harness.stdio.println(running.run_id == queued.run_id)
+  const succeeded = context_maintenance_transition(
+    running,
+    "succeeded",
+    {
+      completed_at: "2026-05-16T18:00:03Z",
+      duration_ms: 3000,
+      artifact_ids: ["scan-result", "scan-result"],
+    },
+  )
+  harness.stdio.println(succeeded.status)
+  harness.stdio.println(succeeded.duration_ms)
+  harness.stdio.println(len(succeeded.artifact_ids))
+  const failed = context_maintenance_transition(
+    running,
+    "failed",
+    {
+      duration_ms: 2000,
+      error: "transient index failure",
+      retry_hint: {retryable: true, reason: "transient"},
+    },
+  )
+  harness.stdio.println(failed.status)
+  harness.stdio.println(failed.retry_hint.reason)
+  const skipped = context_maintenance_replay_decision(
+    succeeded,
+    {mode: "skip", reason: "fixture covers it"},
+  )
+  harness.stdio.println(skipped.should_run)
+  harness.stdio.println(skipped.receipt.status)
+  harness.stdio.println(skipped.receipt.error)
+  const included = context_maintenance_replay_decision(succeeded, {mode: "include"})
+  harness.stdio.println(included.should_run)
+  // `status` is validated at runtime. A statically-known-invalid literal is
+  // now a check-time error (the literal-union arg check), so exercise the
+  // runtime guard with a `string`-typed value the checker treats as dynamic.
+  const bad_status: string = "paused"
+  const invalid = try {
+    context_maintenance_receipt("context.refresh", bad_status, {})
+  }
+  harness.stdio.println(is_err(invalid))
+  const key_a = context_maintenance_dedupe_key(
+    "context.refresh",
+    "FileEdited",
+    ["b", "a", "a"],
+    "session-1",
+  )
+  const key_b = context_maintenance_dedupe_key(
+    "context.refresh",
+    "FileEdited",
+    ["a", "b"],
+    "session-1",
+  )
+  harness.stdio.println(key_a == key_b)
+}

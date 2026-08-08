@@ -1,0 +1,45 @@
+import "std/triggers"
+
+/**
+ * CH-04 (#1875): `expire_action: "discard"` drops the buffer when the
+ * window elapses without reaching `count`. The handler is not invoked
+ * and the buffered events are not preserved.
+ */
+fn handle_batch(harness: Harness, event) {
+  harness.channels.append("batch.discard.fired", {})
+}
+
+pipeline test(harness: Harness, task) {
+  harness.testing.clock_set(2000000)
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(
+    harness.random.range(100000, 999999),
+  )
+  const _ = harness.runtime.trigger_register(
+    {
+      id: "batch-discard-" + unique,
+      kind: "channel.emit",
+      provider: "channel",
+      autonomy_tier: "act_auto",
+      handler: handle_batch,
+      when: nil,
+      retry: nil,
+      match: {events: ["channel:batch.discard.input"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      batch: {count: 5, window: "30s", expire_action: "discard"},
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  const _ = harness.channels.append("batch.discard.input", {seq: 1})
+  const _ = harness.channels.append("batch.discard.input", {seq: 2})
+  const _ = harness.channels.append("batch.discard.input", {seq: 3})
+  const _ = harness.testing.clock_advance(60000)
+  harness.channels.flush_aggregations()
+  const fired = harness.channels.events("batch.discard.fired")
+  harness.stdio.println("after-window:" + to_string(len(fired)))
+  harness.testing.clock_reset()
+}

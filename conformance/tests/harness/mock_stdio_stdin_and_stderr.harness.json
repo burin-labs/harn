@@ -1,0 +1,14 @@
+{
+  "mode": "mock",
+  "stdin_lines": ["alpha", "beta"],
+  "expect_stdio": "alpha\nanswer: beta\n",
+  "expect_stderr": "warm-up\ntrail ",
+  "expect_calls": [
+    {"sub_handle": "stdio", "method": "eprintln", "args": ["warm-up"]},
+    {"sub_handle": "stdio", "method": "read_line", "args": []},
+    {"sub_handle": "stdio", "method": "println", "args": ["alpha"]},
+    {"sub_handle": "stdio", "method": "eprint", "args": ["trail "]},
+    {"sub_handle": "stdio", "method": "prompt", "args": ["answer: "]},
+    {"sub_handle": "stdio", "method": "println", "args": ["beta"]}
+  ]
+}

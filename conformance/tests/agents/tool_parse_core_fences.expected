@@ -1,0 +1,73 @@
+# fenced and bare call both dispatch
+  calls=2 errors=0 violations=0 stray=2
+  call edit {"action":"create","path":"fenced.go"}
+  call edit {"action":"create","path":"bare.go"}
+  prose="Here's how to use it:\n\nAnd another:"
+  answer=null
+  done=null
+# inline code span mention is not a call
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","path":"real.go"}
+  prose="I considered `edit({...})` but chose a different approach."
+  answer=null
+  done=null
+# unbalanced backtick does not suppress a later call
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","path":"real.go"}
+  prose="The file is `src/main.rs (note path)."
+  answer=null
+  done=null
+# inline wrapped call as the entire response
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","path":"wrapped.go"}
+  prose=""
+  answer=null
+  done=null
+# fenced call as the entire response
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","path":"wrapped.go"}
+  prose=""
+  answer=null
+  done=null
+# gemma tool_code fence
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"ls"}
+  prose=""
+  answer=null
+  done=null
+# fenced edit batch ops with nested heredoc
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"ops":[{"function_name":"test_handle","new_body":"value = 1\nassert value == 1","op":"replace_body"},{"import_statement":"from app.types import RequestContext","op":"add_import"}],"path":"tests/test_service.py"}
+  prose=""
+  answer=null
+  done=null
+# non-tool calls in a code example stay prose
+  calls=0 errors=0 violations=0 stray=0
+  prose="Here is the target test body:\n\n    assert divide(10, 2) == 5.0\n    multiply(2, 3)"
+  answer=null
+  done=null
+# multiple calls in one response
+  calls=2 errors=0 violations=0 stray=2
+  call edit {"action":"create","content":"a","path":"a.go"}
+  call edit {"action":"patch","path":"b.go"}
+  prose="Then we will:"
+  answer=null
+  done=null
+# tool call after an unbalanced fence
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"create","content":"x","path":"a.rs"}
+  prose="Here is the rough shape:\n```\nfn sketch() {}"
+  answer=null
+  done=null
+# user_response inside a markdown fence is an example
+  calls=0 errors=0 violations=1 stray=0
+  vio "Stray text outside response tags: \"<user_response>example only</user_response>\". Wrap all prose in <assistant_prose>...</assistant_prose> or <user_response>...</user_response>, and every tool call in <tool_call>...</tool_call>."
+  prose="Visible answer."
+  answer="Visible answer."
+  done=null
+# inline user_response placeholder is stray prose
+  calls=0 errors=0 violations=1 stray=0
+  vio "Stray text outside response tags: \"<user_response>...</user_response>` as the wrapper.\". Wrap all prose in <assistant_prose>...</assistant_prose> or <user_response>...</user_response>, and every tool call in <tool_call>...</tool_call>."
+  prose=""
+  answer=null
+  done=null

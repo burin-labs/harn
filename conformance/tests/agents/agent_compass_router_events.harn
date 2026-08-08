@@ -1,0 +1,57 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_dispatch_tool_call } from "std/agent/primitives"
+
+fn compass_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "str_replace",
+    "Raw text replace",
+    {
+      parameters: {path: {type: "string"}, old_text: {type: "string"}, new_text: {type: "string"}},
+      returns: {type: "string"},
+      handler: { args -> "raw:" + args.path },
+    },
+  )
+  tools = tool_define(
+    tools,
+    "edit_safe_text_patch",
+    "Hash-guarded text patch",
+    {
+      parameters: {path: {type: "string"}, hunks: {type: "array"}},
+      returns: {type: "string"},
+      handler: { args -> "safe:" + args.path + ":" + to_string(len(args.hunks)) },
+    },
+  )
+  return tools
+}
+
+pipeline default(harness: Harness) {
+  const session = "compass-router-" + harness.random.uuid()
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    fn() { return agent_dispatch_tool_call(
+      harness.tools,
+      {
+        id: "edit-1",
+        name: "str_replace",
+        arguments: {path: "src/lib.rs", old_text: "let a = 1;", new_text: "let a = 2;"},
+      },
+      compass_tools(),
+      {session_id: session, persona: "fixer", compass: {mode: "rewrite"}},
+    ) },
+  )
+  const events = captured.events.filter({ event -> event.type == "compass_routing_decision" })
+  const event = events[0]
+  harness.stdio.println(captured.result.tool_name)
+  harness.stdio.println(captured.result.ok)
+  harness.stdio.println(len(events))
+  harness.stdio.println(event.action)
+  harness.stdio.println(event.mode)
+  harness.stdio.println(event.persona)
+  harness.stdio.println(event.original_tool)
+  harness.stdio.println(event.routed_tool)
+  harness.stdio.println(event.target_tool)
+  harness.stdio.println(event.path)
+}

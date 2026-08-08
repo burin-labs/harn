@@ -1,0 +1,24 @@
+pipeline main(harness: Harness) {
+  const topic = "transcript.reminder.lifecycle"
+  const cursor = harness.obs.event_log_latest(topic)
+  const first = harness.agent.transcript_inject_reminder(
+    transcript(),
+    {body: "old reminder", dedupe_key: "context-slot", ttl_turns: 2},
+  )
+  const second = harness.agent.transcript_inject_reminder(
+    first.transcript,
+    {body: "new reminder", dedupe_key: "context-slot", ttl_turns: 3},
+  )
+  const stream = harness.obs.event_log_subscribe({topic: topic, from_cursor: cursor})
+  const injected = stream.next().value
+  const logged = stream.next().value
+  harness.stdio.println(second.deduped_count)
+  harness.stdio.println(injected.kind)
+  harness.stdio.println(logged.kind)
+  harness.stdio.println(logged.payload.dedupe_key)
+  harness.stdio.println(logged.payload.reminder_id == second.reminder_id)
+  harness.stdio.println(logged.payload.replacing_id == second.reminder_id)
+  harness.stdio.println(logged.payload.replaced_id == first.reminder_id)
+  harness.stdio.println(logged.payload.dropped_count)
+  harness.stdio.println(len(logged.payload.dropped_reminder_ids))
+}

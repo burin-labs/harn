@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/importers_of.response.json",
+  "title": "code_index.importers_of response",
+  "type": "object",
+  "properties": {
+    "module": { "type": "string" },
+    "importers": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "required": ["module", "importers"],
+  "additionalProperties": false
+}

@@ -1,0 +1,9 @@
+The following text was supposed to be JSON conforming to the schema below, but it failed validation. Repair it and respond with only the corrected JSON. Do not include prose, markdown fences, or commentary.
+
+Target schema:
+{{ schema_text }}
+
+Original text:
+{{ raw_text }}
+
+Reply with valid JSON only.

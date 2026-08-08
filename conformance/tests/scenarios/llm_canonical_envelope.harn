@@ -1,0 +1,33 @@
+// The canonical llm_call envelope: one spelling per field, `usage` as the
+// single owner of accounting, and a typed `outcome`. Guards the alias class
+// (prose / private_reasoning / parsed_done_marker / top-level usage
+// duplicates / usage.cache_creation_input_tokens) against regrowing.
+// Rust twin: `envelope_top_level_keys_are_canonical` in
+// crates/harn-vm/src/llm/api/result.rs; types in std/llm/envelope.
+import { llm_response_is_billed_empty, llm_response_is_empty } from "std/llm/envelope"
+
+pipeline default(harness: Harness) {
+  const r = harness.llm.call("Hello world", nil, {provider: "mock"})
+  // Canonical channels present.
+  harness.stdio.println(r.text != "")
+  harness.stdio.println(r.raw_text != "")
+  harness.stdio.println(type_of(r.usage) == "dict")
+  harness.stdio.println(type_of(r.tool_calls) == "list")
+  harness.stdio.println(type_of(r.native_tool_calls) == "list")
+  // Typed outcome.
+  harness.stdio.println(r.outcome.kind)
+  harness.stdio.println(r.outcome.billed)
+  harness.stdio.println(llm_response_is_empty(r))
+  harness.stdio.println(llm_response_is_billed_empty(r))
+  // usage owns accounting; no top-level duplicates, no aliases.
+  harness.stdio.println(r.usage.input_tokens > 0)
+  harness.stdio.println(r.usage.output_tokens > 0)
+  harness.stdio.println(r.input_tokens == nil)
+  harness.stdio.println(r.output_tokens == nil)
+  harness.stdio.println(r.served_fast == nil)
+  harness.stdio.println(r.cache_hit_ratio == nil)
+  harness.stdio.println(r.prose == nil)
+  harness.stdio.println(r.private_reasoning == nil)
+  harness.stdio.println(r.parsed_done_marker == nil)
+  harness.stdio.println(r.usage.cache_creation_input_tokens == nil)
+}

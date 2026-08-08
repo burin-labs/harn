@@ -1,0 +1,9 @@
+result_kind=thinking_tokens
+result_consumed=9000
+result_custom_observed=true
+audit_count=3
+audit_0=budget_warn_and_continue
+audit_0_strategy=warn_and_continue
+audit_1=tool_hooks.reminder_injected
+audit_2=custom_after_warn
+audit_2_kind_observed=thinking_tokens

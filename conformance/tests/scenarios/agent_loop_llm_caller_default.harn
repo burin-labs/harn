@@ -1,0 +1,19 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * agent_loop with no llm_caller routes through __default_invoke_llm and
+ * preserves existing behavior — golden parity test.
+ */
+pipeline default(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [llm_text("all done")],
+    { ->
+      const result = agent_loop(harness, "hi", nil, {provider: "mock"})
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.visible_text)
+      harness.stdio.println(len(harness.llm.mock_calls()))
+    },
+  )
+}

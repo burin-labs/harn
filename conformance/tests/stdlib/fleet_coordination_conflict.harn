@@ -1,0 +1,89 @@
+import { coord_post, coord_read } from "std/coordination"
+import { fleet_claim, fleet_done, fleet_project } from "std/fleet/coordination"
+
+pipeline default(harness: Harness) {
+  harness.testing.clock_set(2000)
+  const room = {session_id: "fleet-conflict"}
+  const first = fleet_claim(
+    harness,
+    "session",
+    "ops",
+    "repo#7",
+    room + {id: "claim-a", from: {agent: "lane-a"}},
+  )
+  const _ = fleet_claim(
+    harness,
+    "session",
+    "ops",
+    "repo#7",
+    room + {id: "claim-b", from: {agent: "lane-b"}},
+  )
+  const _ = coord_post(
+    harness.runtime,
+    harness.channels,
+    harness.random,
+    "session",
+    "ops",
+    {
+      kind: "heartbeat",
+      subject: "future heartbeat",
+      from: {agent: "future-lane"},
+      data: {schema: "harn.fleet.heartbeat.v2", state: "busy"},
+    },
+    room + {id: "future-heartbeat"},
+  )
+  const _ = coord_post(
+    harness.runtime,
+    harness.channels,
+    harness.random,
+    "session",
+    "ops",
+    {
+      kind: "heartbeat",
+      subject: "malformed heartbeat",
+      from: {agent: "malformed-lane"},
+      data: {schema: "harn.fleet.heartbeat.v1", state: "busy"},
+    },
+    room + {id: "malformed-heartbeat"},
+  )
+  const conflicted = fleet_project(
+    coord_read(harness.runtime, harness.channels, "session", "ops", room + {include_events: true}),
+    {now_ms: 2000},
+  )
+  harness.stdio.println(len(conflicted.conflicts))
+  harness.stdio.println(conflicted.claims[0]?.state)
+  harness.stdio.println(conflicted.claims[1]?.state)
+  harness.stdio.println(conflicted.unknown_messages[0]?.id)
+  harness.stdio.println(len(conflicted.unknown_messages))
+  const _ = fleet_done(
+    harness,
+    "session",
+    "ops",
+    first.id,
+    "different-work",
+    "completed",
+    room + {id: "done-wrong-key", from: {agent: "lane-a"}},
+  )
+  const wrong_key = fleet_project(
+    coord_read(harness.runtime, harness.channels, "session", "ops", room + {include_events: true}),
+    {now_ms: 2000},
+  )
+  harness.stdio.println(wrong_key.claims[0]?.state)
+  const _ = fleet_done(
+    harness,
+    "session",
+    "ops",
+    first.id,
+    "repo#7",
+    "completed",
+    room + {id: "done-a", from: {agent: "lane-a"}},
+  )
+  const resolved = fleet_project(
+    coord_read(harness.runtime, harness.channels, "session", "ops", room + {include_events: true}),
+    {now_ms: 2000},
+  )
+  harness.stdio.println(len(resolved.conflicts))
+  harness.stdio.println(resolved.claims[0]?.state)
+  harness.stdio.println(resolved.claims[1]?.state)
+  harness.testing.clock_reset()
+}

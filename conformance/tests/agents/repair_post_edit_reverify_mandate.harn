@@ -1,0 +1,185 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Current-failure loop: the post-edit re-verify mandate. A turn that makes a
+ * successful corrective edit on top of a LIVE failure must force a verification
+ * before the loop continues — a successful edit is not proof the failure is
+ * resolved. The verify routes through the EXISTING `verify_completion`
+ * entrypoint.
+ *
+ * Positive: repair_aware true OR false => after the fail->edit sequence the
+ * mandate fires `verify_completion` with stop_reason "post_edit_reverify"
+ * (observed via the veto feedback injected into the next LLM turn).
+ * Negative control: post_edit_reverify:false => no forced verify, the marker
+ * feedback never appears.
+ */
+fn repair_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "run_test",
+    "Run the test suite",
+    {
+      handler: { _args ->
+        throw "test failed: assertion X"
+      },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "apply_fix",
+    "Apply a corrective edit",
+    {
+      handler: { _args -> "edit applied" },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+    },
+  )
+  return tools
+}
+
+const REVERIFY_MARKER = "REVERIFY_MANDATE_FIRED"
+
+/**
+ * Confirms on every stop EXCEPT the post-edit re-verify, which it vetoes with a
+ * recognizable marker so the test can observe that the mandate fired.
+ */
+fn reverify_probe(info) {
+  if info.stop_reason == "post_edit_reverify" {
+    return REVERIFY_MARKER
+  }
+  nil
+}
+
+fn run_scenario(harness: Harness, repair_aware, post_edit_reverify) {
+  return with_llm_script(
+    harness.llm,
+    [
+      // Turn 1: run the tests -> fail.
+      {text: "", tool_calls: [{id: "t1", name: "run_test", arguments: {}}]},
+      // Turn 2: apply a corrective edit (no completion proposed -> continue).
+      {text: "", tool_calls: [{id: "e1", name: "apply_fix", arguments: {}}]},
+      // Turn 3+: finish.
+      llm_text("All set. ##DONE##"),
+      llm_text("All set. ##DONE##"),
+    ],
+    { ->
+      const session = "repair-reverify-" + harness.random.uuid()
+      const _result = agent_loop(
+        harness,
+        "Make the tests pass.",
+        nil,
+        {
+          provider: "mock",
+          tools: repair_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          max_iterations: 6,
+          session_id: session,
+          done_sentinel: "##DONE##",
+          verify_completion: reverify_probe,
+          stall_diagnostics: {
+            enabled: true,
+            repair_aware: repair_aware,
+            post_edit_reverify: post_edit_reverify,
+            stuck_same_diagnostic_after: 3,
+          },
+        },
+      )
+      const all_messages = json_stringify(harness.llm.mock_calls())
+      return contains(all_messages, REVERIFY_MARKER)
+    },
+  )
+}
+
+fn first_event(events, event_type) {
+  for event in events {
+    if event.type == event_type {
+      return event
+    }
+  }
+  return nil
+}
+
+fn confirm_post_edit_reverify(info) {
+  if info.stop_reason == "post_edit_reverify" {
+    return nil
+  }
+  return "unexpected verification reason: " + to_string(info.stop_reason)
+}
+
+fn veto_post_edit_reverify(info) {
+  if info.stop_reason == "post_edit_reverify" {
+    return "still red after the edit"
+  }
+  return nil
+}
+
+fn run_cap_scenario(harness: Harness, verify_completion) {
+  return with_llm_script(
+    harness.llm,
+    [
+      // Turn 1: run the tests -> fail.
+      {text: "", tool_calls: [{id: "t1", name: "run_test", arguments: {}}]},
+      // Turn 2: apply a fix at the iteration cap. The loop must verify this
+      // edit before deciding whether it can finish.
+      {text: "", tool_calls: [{id: "e1", name: "apply_fix", arguments: {}}]},
+    ],
+    { ->
+      const session = "repair-reverify-cap-" + harness.random.uuid()
+      return agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Make the tests pass.",
+          nil,
+          {
+            provider: "mock",
+            tools: repair_tools(),
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 2,
+            final_wrapup: false,
+            session_id: session,
+            done_sentinel: "##DONE##",
+            verify_completion: verify_completion,
+            stall_diagnostics: {
+              enabled: true,
+              repair_aware: false,
+              post_edit_reverify: true,
+              stuck_same_diagnostic_after: 3,
+            },
+          },
+        ) },
+      )
+    },
+  )
+}
+
+pipeline default(harness: Harness) {
+  // Positive: the mandate fires after fail->edit with repair nudges enabled.
+  harness.stdio.println(run_scenario(harness, true, true))
+  // Positive: the same mandate fires with repair nudges disabled.
+  harness.stdio.println(run_scenario(harness, false, true))
+  // Negative control: callers may explicitly disable post-edit reverify.
+  harness.stdio.println(run_scenario(harness, false, false))
+  // Green post-edit verification can close a last-iteration edit without
+  // requiring one more model turn just to say "done".
+  const cap_confirmed = run_cap_scenario(harness, confirm_post_edit_reverify)
+  harness.stdio.println(cap_confirmed.result.status)
+  harness.stdio.println(cap_confirmed.result.stop_reason)
+  // Red post-edit verification at the cap stays exhausted and carries the
+  // current failure instead of silently completing.
+  const cap_vetoed = run_cap_scenario(harness, veto_post_edit_reverify)
+  const budget_event = first_event(cap_vetoed.events, "budget_exhausted")
+  harness.stdio.println(cap_vetoed.result.status)
+  harness.stdio.println(budget_event.kind)
+  harness.stdio.println(cap_vetoed.result?.current_failure != nil)
+}

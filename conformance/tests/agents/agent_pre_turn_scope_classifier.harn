@@ -1,0 +1,189 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { agent_loop_options } from "std/agent/options"
+import { pre_turn_scope_classifier } from "std/llm/scope_classifier"
+
+fn scope_events(events) {
+  return events.filter({ event -> event.type == "scope_classifier_verdict" })
+}
+
+fn scope_reminders(result) {
+  return transcript_events_by_kind(result?.transcript, "system_reminder").filter(
+    { event ->
+      event?.reminder?.tags != nil && event.reminder.tags.any({ tag -> tag == "scope_alert" })
+    },
+  )
+}
+
+fn heavy_caller(text) {
+  return { call ->
+    return {
+      ok: true,
+      value: {
+        text: text,
+        provider: call?.opts?.provider ?? "mock",
+        model: call?.opts?.model ?? "mock",
+        input_tokens: 10,
+        output_tokens: 2,
+      },
+    }
+  }
+}
+
+fn anchor_opts() {
+  return {
+    workspace_anchor: {
+      primary: "/workspace/harn",
+      additional_roots: [
+        {path: "/workspace/shared", mount_mode: "read_only", mounted_at: "2026-05-25T00:00:00Z"},
+      ],
+      anchored_at: "2026-05-25T00:00:00Z",
+    },
+  }
+}
+
+fn anchored_session(random: HarnessRandom, prefix) {
+  return prefix + "-" + random.uuid()
+}
+
+fn open_anchored_session(agent: HarnessAgent, session) {
+  agent.open(session, anchor_opts())
+}
+
+pipeline default(harness: Harness) {
+  const out_session = anchored_session(harness.random, "scope-out")
+  const out_classifier = pre_turn_scope_classifier(
+    harness.agent,
+    harness.llm,
+    {
+      enabled: true,
+      confidence_threshold: 0.8,
+      classifier: { payload ->
+        return {
+          label: "out_of_scope",
+          confidence: 0.95,
+          evidence: payload.workspace_anchor.primary
+            + " recent_context="
+            + to_string(len(payload.recent_context) > 0),
+        }
+      },
+    },
+  )
+  const out = agent_capture_events(
+    harness.agent,
+    out_session,
+    fn() {
+      open_anchored_session(harness.agent, out_session)
+      return agent_loop(
+        harness,
+        "Change the CSS in /workspace/other.",
+        nil,
+        {
+          provider: "mock",
+          session_id: out_session,
+          max_iterations: 1,
+          done_judge: false,
+          pre_turn_scope_classifier: out_classifier,
+          llm_caller: { _call ->
+            throw "main llm should have been skipped"
+          },
+        },
+      )
+    },
+  )
+  const out_events = scope_events(out.events)
+  const out_reminders = scope_reminders(out.result)
+  harness.stdio.println(out.result.status)
+  harness.stdio.println(out.result.stop_reason)
+  harness.stdio.println(out.result.llm.iterations)
+  harness.stdio.println(len(out_events))
+  harness.stdio.println(out_events[0].label)
+  harness.stdio.println(out_events[0].confidence >= 0.9)
+  harness.stdio.println(len(out_reminders))
+  harness.stdio.println(contains(out.result.text, "Add Root"))
+  harness.stdio.println(contains(out_events[0].evidence, "/workspace/harn"))
+  harness.stdio.println(contains(out_events[0].evidence, "recent_context=true"))
+  const in_session = anchored_session(harness.random, "scope-in")
+  const in_classifier = pre_turn_scope_classifier(
+    harness.agent,
+    harness.llm,
+    {
+      enabled: true,
+      confidence_threshold: 0.8,
+      classifier: { _payload -> {label: "in_scope", confidence: 0.91, evidence: "current repo"} },
+    },
+  )
+  const in_scope = agent_capture_events(
+    harness.agent,
+    in_session,
+    fn() {
+      open_anchored_session(harness.agent, in_session)
+      return agent_loop(
+        harness,
+        "Add a parser conformance test in this repo.",
+        nil,
+        {
+          provider: "mock",
+          session_id: in_session,
+          max_iterations: 1,
+          done_judge: false,
+          pre_turn_scope_classifier: in_classifier,
+          llm_caller: heavy_caller("heavy model reached"),
+        },
+      )
+    },
+  )
+  const in_events = scope_events(in_scope.events)
+  harness.stdio.println(in_scope.result.status)
+  harness.stdio.println(in_scope.result.text)
+  harness.stdio.println(in_events[0].label)
+  harness.stdio.println(len(scope_reminders(in_scope.result)))
+  const low_session = anchored_session(harness.random, "scope-low")
+  const low_classifier = pre_turn_scope_classifier(
+    harness.agent,
+    harness.llm,
+    {
+      enabled: true,
+      confidence_threshold: 0.8,
+      classifier: { _payload -> {label: "in_scope", confidence: 0.2, evidence: "weak signal"} },
+    },
+  )
+  const low = agent_capture_events(
+    harness.agent,
+    low_session,
+    fn() {
+      open_anchored_session(harness.agent, low_session)
+      return agent_loop(
+        harness,
+        "Maybe compare this repository to a sibling repo.",
+        nil,
+        {
+          provider: "mock",
+          session_id: low_session,
+          max_iterations: 1,
+          done_judge: false,
+          pre_turn_scope_classifier: low_classifier,
+          llm_caller: heavy_caller("escalated to heavy model"),
+        },
+      )
+    },
+  )
+  const low_events = scope_events(low.events)
+  harness.stdio.println(low.result.text)
+  harness.stdio.println(low_events[0].label)
+  harness.stdio.println(low_events[0].original_label)
+  const invalid = try {
+    agent_loop_options(harness, {pre_turn_scope_classifier: "yes"})
+  }
+  harness.stdio.println(is_err(invalid))
+  harness.stdio.println(contains(to_string(unwrap_err(invalid)), "pre_turn_scope_classifier"))
+  const invalid_threshold = try {
+    pre_turn_scope_classifier(
+      harness.agent,
+      harness.llm,
+      {enabled: true, confidence_threshold: -0.1},
+    )
+  }
+  harness.stdio.println(is_err(invalid_threshold))
+  harness.stdio.println(contains(to_string(unwrap_err(invalid_threshold)), "confidence_threshold"))
+}

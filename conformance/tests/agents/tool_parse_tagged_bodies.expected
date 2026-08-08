@@ -1,0 +1,70 @@
+# json object body
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"create","content":"fn a() {}","path":"a.rs"}
+  prose=""
+  answer=null
+  done=null
+# single element json array body
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"create","content":"fn a() {}","path":"a.rs"}
+  prose=""
+  answer=null
+  done=null
+# multi element json array body
+  calls=0 errors=1 violations=0 stray=0
+  err "<tool_call> JSON array contained 2 calls; emit one call per <tool_call> block."
+  prose=""
+  answer=null
+  done=null
+# nested xml wrapper naming a registered tool
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"create","content":"fn a() {}","path":"a.rs"}
+  prose=""
+  answer=null
+  done=null
+# nested xml wrapper naming an unknown tool
+  calls=0 errors=1 violations=0 stray=0
+  err "Unknown tool 'deploy' in nested XML tool-call body. Available tools: [edit, ledger, load_skill, run]"
+  prose=""
+  answer=null
+  done=null
+# nested xml, mismatched inner close, no outer close
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"create","content":"fn a() {}","path":"a.rs"}
+  prose=""
+  answer=null
+  done=null
+# nested xml, missing inner close, duplicate outer close
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"create","path":"a.rs"}
+  prose=""
+  answer=null
+  done=null
+# nested xml, unknown tool, sloppy close
+  calls=0 errors=1 violations=0 stray=0
+  err "Unknown tool 'frobnicate' in nested XML tool-call body. Available tools: [edit, ledger, load_skill, run]"
+  prose=""
+  answer=null
+  done=null
+# wrapped assistant_prose is narration
+  calls=0 errors=0 violations=0 stray=0
+  prose="Reading parser.go to understand ParseManifest."
+  answer=null
+  done=null
+# bare prose body is narration
+  calls=0 errors=0 violations=0 stray=0
+  prose="Reading the file to understand the layout."
+  answer=null
+  done=null
+# narration alongside a real call
+  calls=1 errors=0 violations=0 stray=0
+  call run {"command":"cat parser.go"}
+  prose="Reading parser.go first."
+  answer=null
+  done=null
+# unknown wrapped tag is not narration
+  calls=0 errors=1 violations=0 stray=0
+  err "Unknown tool 'frobnicate' in nested XML tool-call body. Available tools: [edit, ledger, load_skill, run]"
+  prose=""
+  answer=null
+  done=null

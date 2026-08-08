@@ -1,0 +1,92 @@
+// std/agent_state — durable session-scoped state helpers.
+//
+// Import: import "std/agent_state"
+/**
+ * agent_state_init.
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn agent_state_init(agent: HarnessAgent, root: string, options: dict? = nil) -> resource {
+  return agent.state_init(root, options)
+}
+
+/**
+ * agent_state_resume.
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn agent_state_resume(
+  agent: HarnessAgent,
+  root: string,
+  session_id: string,
+  options: dict? = nil,
+) -> resource {
+  return agent.state_resume(root, session_id, options)
+}
+
+/**
+ * agent_state_write.
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn agent_state_write(
+  agent: HarnessAgent,
+  handle: resource,
+  key: string,
+  content: string,
+) -> nil {
+  return agent.state_write(handle, key, content)
+}
+
+/**
+ * agent_state_read.
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn agent_state_read(agent: HarnessAgent, handle: resource, key: string) -> string? {
+  return agent.state_read(handle, key)
+}
+
+/**
+ * agent_state_list.
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn agent_state_list(agent: HarnessAgent, handle: resource) -> list<string> {
+  return agent.state_list(handle)
+}
+
+/**
+ * agent_state_delete.
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn agent_state_delete(agent: HarnessAgent, handle: resource, key: string) -> nil {
+  return agent.state_delete(handle, key)
+}
+
+/**
+ * agent_state_handoff.
+ *
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn agent_state_handoff(agent: HarnessAgent, handle: resource, summary: dict) -> nil {
+  return agent.state_handoff(handle, summary)
+}
+
+/**
+ * agent_state_handoff_key.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn agent_state_handoff_key() {
+  return "__handoff.json"
+}

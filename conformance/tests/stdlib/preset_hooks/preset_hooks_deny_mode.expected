@@ -1,0 +1,11 @@
+deny
+rust.cargo.target_dir_conflict
+harn-canon/rust
+warning
+true
+true
+1
+tool_denied
+rust.cargo.target_dir_conflict
+cargo test
+warning

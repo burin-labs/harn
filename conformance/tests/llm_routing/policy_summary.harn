@@ -1,0 +1,32 @@
+/**
+ * Returns a tagged dict with the canonicalized config so scripts can
+ * reflect on the policy they built before piping it through llm_call.
+ */
+pipeline test(harness: Harness, task) {
+  const policy = harness.llm.routing_policy(
+    {
+      chain: [
+        {provider: "anthropic", model: "claude-opus-4-20250514"},
+        {provider: "openai", model: "gpt-4o-mini"},
+        "ollama:llama4:70b",
+      ],
+      failover: {on_status: [429, 500, 503], on_timeout_ms: 30000, max_attempts: 3},
+      latency: {race_after_ms: 5000, target_p95_ms: 8000},
+      budget: {per_call_usd: 0.5, session_usd: 5.0, on_exceed: "abort"},
+      observe: {emit_event: "billing.routing_decision"},
+      label: "frontier-cascade",
+    },
+  )
+  harness.stdio.println(policy.__routing_policy__)
+  harness.stdio.println(policy.label)
+  harness.stdio.println(len(policy.chain))
+  harness.stdio.println(policy.chain[0].provider)
+  harness.stdio.println(policy.chain[2].provider)
+  harness.stdio.println(policy.chain[2].model)
+  harness.stdio.println(policy.failover.max_attempts)
+  harness.stdio.println(len(policy.failover.on_status))
+  harness.stdio.println(policy.latency.race_after_ms)
+  harness.stdio.println(policy.budget.per_call_usd)
+  harness.stdio.println(policy.budget.on_exceed)
+  harness.stdio.println(policy.observe.emit_event)
+}

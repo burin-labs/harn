@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/reindex_file.request.json",
+  "title": "code_index.reindex_file request",
+  "description": "Re-parse and re-index a single file. Removes the existing entry if the file no longer exists or fails the indexability filter.",
+  "type": "object",
+  "properties": {
+    "path": { "type": "string", "minLength": 1 }
+  },
+  "required": ["path"],
+  "additionalProperties": false
+}

@@ -1,0 +1,174 @@
+// Tests for scripts/check_protocol_symbol_removals.harn — exercise the pure
+// helpers on synthetic inputs (no filesystem / git dependency).
+//
+// The regression these pin: #6072 removed four published MCP version constants
+// from the generated bindings. The removal was intended and had a `breaking`
+// changelog entry, but nothing named the symbols, so the first report of it was
+// a Swift compile error in a downstream repin two days later.
+import "../check_protocol_symbol_removals.harn"
+import { git_show_at, has_trailer, resolve_commit, trailer_values } from "../git_base.harn"
+
+const TS_SAMPLE = """
+export const MCP_PROTOCOL_VERSION = "2026-07-28"
+export const MCP_DRAFT_PROTOCOL_VERSION = "DRAFT-2026-v1"
+export type MCPProtocolVersion = string
+export interface MCPInitializeRequest {
+  method: string
+}
+// export const NOT_EXPORTED_BECAUSE_COMMENTED = 1
+const INTERNAL = 2
+"""
+
+const SWIFT_SAMPLE = """
+public enum HarnProtocolConstants {
+    public static let mcpProtocolVersion = "2026-07-28"
+    public static let mcpDraftProtocolVersion = "DRAFT-2026-v1"
+}
+public struct HarnMCPInitializeRequest: Codable {
+    let method: String
+}
+internal struct NotPublished {}
+"""
+
+@test
+pipeline test_ts_exports_are_collected(harness: Harness, task) {
+  const symbols = exported_symbols(TS_SAMPLE, "ts")
+  assert_eq(symbols.contains("MCP_PROTOCOL_VERSION"), true)
+  assert_eq(symbols.contains("MCP_DRAFT_PROTOCOL_VERSION"), true)
+  assert_eq(symbols.contains("MCPProtocolVersion"), true)
+  assert_eq(symbols.contains("MCPInitializeRequest"), true)
+}
+
+@test
+pipeline test_ts_non_exports_are_ignored(harness: Harness, task) {
+  const symbols = exported_symbols(TS_SAMPLE, "ts")
+  // A commented-out export is not a contract, and neither is a module-local
+  // const; treating either as published would make the guard fire on edits
+  // that changed nothing a downstream consumer can see.
+  assert_eq(symbols.contains("NOT_EXPORTED_BECAUSE_COMMENTED"), false)
+  assert_eq(symbols.contains("INTERNAL"), false)
+}
+
+@test
+pipeline test_swift_public_members_are_collected(harness: Harness, task) {
+  const symbols = exported_symbols(SWIFT_SAMPLE, "swift")
+  assert_eq(symbols.contains("mcpProtocolVersion"), true)
+  assert_eq(symbols.contains("mcpDraftProtocolVersion"), true)
+  assert_eq(symbols.contains("HarnProtocolConstants"), true)
+  assert_eq(symbols.contains("HarnMCPInitializeRequest"), true)
+  assert_eq(symbols.contains("NotPublished"), false)
+}
+
+@test
+pipeline test_symbols_are_sorted_and_deduplicated(harness: Harness, task) {
+  const symbols = exported_symbols(
+    "export const B = 1\nexport const A = 2\nexport const A = 3\n",
+    "ts",
+  )
+  assert_eq(symbols, ["A", "B"])
+}
+
+@test
+pipeline test_removed_symbols_are_the_ones_that_disappeared(harness: Harness, task) {
+  const gone = removed_symbols(["A", "B", "C"], ["A", "C", "D"])
+  assert_eq(gone, ["B"])
+}
+
+@test
+pipeline test_adding_a_symbol_is_never_a_removal(harness: Harness, task) {
+  assert_eq(removed_symbols(["A"], ["A", "B", "C"]), [])
+}
+
+@test
+pipeline test_undeclared_removals_exclude_declared_names(harness: Harness, task) {
+  const missing = undeclared_removals(
+    ["MCP_DRAFT_PROTOCOL_VERSION", "MCP_STABLE_PROTOCOL_VERSION"],
+    ["MCP_DRAFT_PROTOCOL_VERSION"],
+  )
+  assert_eq(missing, ["MCP_STABLE_PROTOCOL_VERSION"])
+}
+
+@test
+pipeline test_a_fully_declared_removal_leaves_nothing(harness: Harness, task) {
+  assert_eq(undeclared_removals(["A", "B"], ["B", "A"]), [])
+}
+
+@test
+pipeline test_trailer_values_split_on_whitespace(harness: Harness, task) {
+  const messages = "subject\n\nAllow-Protocol-Removal: A B\nAllow-Protocol-Removal: C\n"
+  assert_eq(trailer_values(messages, "Allow-Protocol-Removal:"), ["A", "B", "C"])
+}
+
+@test
+pipeline test_trailer_must_start_the_line(harness: Harness, task) {
+  // Prose that merely mentions the trailer is not a declaration.
+  const messages = "see Allow-Protocol-Removal: A\n  Allow-Protocol-Removal: B\n"
+  assert_eq(trailer_values(messages, "Allow-Protocol-Removal:"), [])
+  assert_eq(has_trailer(messages, "Allow-Protocol-Removal:"), false)
+}
+
+@test
+pipeline test_empty_trailer_declares_nothing(harness: Harness, task) {
+  assert_eq(trailer_values("Allow-Protocol-Removal:   \n", "Allow-Protocol-Removal:"), [])
+}
+
+@test
+pipeline test_failure_report_names_symbols_and_the_escape_hatch(harness: Harness, task) {
+  const report = failure_report(
+    "abc123",
+    [
+      {
+        path: "spec/protocol-artifacts/harn-protocol.ts",
+        undeclared: ["MCP_DRAFT_PROTOCOL_VERSION"],
+      },
+    ],
+  )
+  assert_eq(report.contains("MCP_DRAFT_PROTOCOL_VERSION"), true)
+  assert_eq(report.contains("Allow-Protocol-Removal:"), true)
+  // The report has to say why this matters here rather than downstream, or the
+  // next reader treats a published-contract break as a lint to silence.
+  assert_eq(report.contains("downstream contract"), true)
+  assert_eq(report.contains("abc123"), true)
+}
+
+@test
+pipeline test_probe_failure_report_names_the_path_and_the_remedy(harness: Harness, task) {
+  const report = probe_failure_report(
+    "HEAD^1",
+    [{path: "(base ref)", error: "not a commit in this clone"}],
+  )
+  assert_eq(report.contains("HEAD^1"), true)
+  assert_eq(report.contains("not a commit in this clone"), true)
+  // An operator reading this in a CI log needs the remedy, not just the symptom.
+  assert_eq(report.contains("fetch-depth: 0"), true)
+  assert_eq(report.contains("PROTOCOL_SYMBOL_GUARD_BASE"), true)
+  // And it must not read as a clean comparison.
+  assert_eq(report.contains("did not make"), true)
+}
+
+@test
+pipeline test_unreachable_base_fails_instead_of_reporting_clean(harness: Harness, task) {
+  // The regression that motivated this: `git show <unfetched-sha>:<path>` says
+  // the path "exists on disk, but not in <sha>" — the same wording it uses for
+  // a path that genuinely was not in the tree. Read as absence, an unfetched
+  // base makes the guard exit 0 having compared nothing.
+  const missing = resolve_commit(harness.process, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+  assert_eq(missing.sha, "")
+  assert_eq(missing.error != "", true)
+  const present = resolve_commit(harness.process, "HEAD")
+  assert_eq(present.error, "")
+  assert_eq(present.sha.len() >= 7, true)
+}
+
+@test
+pipeline test_git_show_at_separates_absence_from_failure(harness: Harness, task) {
+  const head = resolve_commit(harness.process, "HEAD").sha
+  const found = git_show_at(harness.process, head, "scripts/git_base.harn")
+  assert_eq(found.found, true)
+  assert_eq(found.error, "")
+  assert_eq(found.text.contains("pub fn git_run"), true)
+  const absent = git_show_at(harness.process, head, "scripts/no_such_file_here.harn")
+  assert_eq(absent.found, false)
+  // Absence at a resolved commit is an answer, not a failure.
+  assert_eq(absent.error, "")
+}

@@ -1,0 +1,17 @@
+[package]
+name = "harn-flock"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Advisory file locks with deadlines for the Harn programming language"
+
+[dependencies]
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true
