@@ -84,7 +84,14 @@ jobs:
         with:
           fetch-depth: 0
           path: package
+          # workflow_dispatch may run the caller from a maintenance or feature
+          # ref. The declared PR base, not the caller ref, owns bump ancestry.
+          ref: ${{ inputs.base }}
           token: ${{ steps.app-token.outputs.token }}
+          # The Harn driver owns signed publication through HARN_BUMP_TOKEN.
+          # Persisted checkout credentials leave a runner-temporary includeIf
+          # in .git/config that caller-owned git probes cannot safely traverse.
+          persist-credentials: false
 
       - name: Install caller Node.js toolchain
         if: inputs.node-version != ''
