@@ -191,6 +191,7 @@ fn setup_harn_action() {
 fn action() {
   return {
     inputs: {
+      "cache-workspace-crates": {default: "false"},
       "prune-superseded-release-generations": {default: "false"},
       "target-dir": {default: ""},
     },
@@ -227,8 +228,9 @@ fn action() {
           "continue-on-error": true,
           with: {
             "shared-key": gha_expression(
-              "inputs.source-key != '' && format('{0}-{1}', inputs.shared-key, inputs.source-key) || inputs.shared-key",
+              "format('{0}{1}', inputs.source-key != '' && format('{0}-{1}', inputs.shared-key, inputs.source-key) || inputs.shared-key, inputs.cache-workspace-crates == 'true' && '-workspace-crates-v1' || '')",
             ),
+            "cache-workspace-crates": gha_expression("inputs.cache-workspace-crates"),
             "cache-targets": gha_expression("inputs.target-dir == ''"),
             "cache-directories": gha_expression("inputs.target-dir"),
             "save-if": gha_expression("inputs.save == 'true' && github.ref == 'refs/heads/main'"),
@@ -814,7 +816,42 @@ pipeline test_ci_cache_policy_rejects_ignored_rust_cache_source_fingerprint(
   }
   assert(
     ci_cache_policy_errors(policy(), invalid_action, node_action(), workflows()).contains(
-      ".github/actions/rust-cache/action.yml must compose source-key into the effective upstream shared-key",
+      ".github/actions/rust-cache/action.yml must compose source-key and workspace retention into the effective upstream shared-key",
+    ),
+  )
+}
+
+pipeline test_ci_cache_policy_rejects_uncoupled_workspace_retention(harness: Harness, task) {
+  const valid_action = action()
+  const cache = valid_action.runs.steps[2]
+  const invalid_action = {
+    ...valid_action,
+    runs: {
+      ...valid_action.runs,
+      steps: valid_action.runs.steps.slice(0, 2)
+        + [
+        {
+          ...cache,
+          with: {
+            ...cache?.with ?? {},
+            "shared-key": gha_expression(
+              "inputs.source-key != '' && format('{0}-{1}', inputs.shared-key, inputs.source-key) || inputs.shared-key",
+            ),
+            "cache-workspace-crates": nil,
+          },
+        },
+      ],
+    },
+  }
+  const errors = ci_cache_policy_errors(policy(), invalid_action, node_action(), workflows())
+  assert(
+    errors.contains(
+      ".github/actions/rust-cache/action.yml must compose source-key and workspace retention into the effective upstream shared-key",
+    ),
+  )
+  assert(
+    errors.contains(
+      ".github/actions/rust-cache/action.yml must pass an opt-in workspace-crate retention input to Swatinem",
     ),
   )
 }

@@ -174,6 +174,15 @@ const CACHE_PRUNE_SCRIPT =
 
 const CACHE_PRUNE_INPUT = "prune-superseded-release-generations"
 
+// Swatinem removes workspace-member artifacts before save unless this input is
+// true. Because Actions cache entries are immutable and the upstream action
+// does not include the input in its own key, the wrapper must couple retention
+// to a generation suffix. Otherwise enabling retention restores the old exact
+// deps-only entry and save.ts exits without replacing it (#5003).
+const WORKSPACE_CACHE_INPUT = "cache-workspace-crates"
+
+const WORKSPACE_CACHE_GENERATION = "workspace-crates-v1"
+
 const RELEASE_CACHE_WORKFLOW = "build-release-binaries.yml"
 
 const RELEASE_CACHE_JOB = "build"
@@ -607,12 +616,24 @@ fn cache_action_errors(policy: CiCachePolicy, action) -> list<string> {
   }
   const step = upstream[0]
   const expected_shared_key = "$"
-    + "{{ inputs.source-key != '' && format('{0}-{1}', inputs.shared-key, inputs.source-key) || inputs.shared-key }}"
+    + "{{ format('{0}{1}', inputs.source-key != '' && format('{0}-{1}', inputs.shared-key, inputs.source-key) || inputs.shared-key, inputs.cache-workspace-crates == 'true' && '-${WORKSPACE_CACHE_GENERATION}' || '') }}"
   if trim(step?.with?.["shared-key"] ?? "") != expected_shared_key
     || trim(step?.with?.key ?? "")
     != "" {
     errors = errors
-      + ["${ACTION_PATH} must compose source-key into the effective upstream shared-key"]
+      + [
+      "${ACTION_PATH} must compose source-key and workspace retention into the effective upstream shared-key",
+    ]
+  }
+  if trim(to_string(action?.inputs?.[WORKSPACE_CACHE_INPUT]?.default ?? "")) != "false"
+    || trim(
+    step?.with?.[WORKSPACE_CACHE_INPUT] ?? "",
+  )
+    != "$" + "{{ inputs.${WORKSPACE_CACHE_INPUT} }}" {
+    errors = errors
+      + [
+      "${ACTION_PATH} must pass an opt-in workspace-crate retention input to Swatinem",
+    ]
   }
   errors = errors + cache_target_input_errors(action, step)
   const save_if = trim(step?.with?.["save-if"] ?? "")
@@ -1139,6 +1160,11 @@ fn hosted_compile_lane_errors(workflow, job_name: string) -> list<string> {
     errors = errors
       + [
       "ci.yml:${job_name} must restore rust-cache unconditionally, not behind a runner tier",
+    ]
+  } else if trim(to_string(caches[0]?.with?.[WORKSPACE_CACHE_INPUT] ?? "")) != "true" {
+    errors = errors
+      + [
+      "ci.yml:${job_name} must use the workspace-crate cache generation for complete Rust restores",
     ]
   }
   if CI_CACHE_WRITE_JOBS.contains(job_name)

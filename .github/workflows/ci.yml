@@ -376,6 +376,10 @@ jobs:
           shared-key: package-audit
           cache-on-failure: true
           cache-bin: false
+          # Keep workspace artifacts: Swatinem's default strips them on save and
+          # leaves merge_group recompiling every harn-* crate after an exact hit
+          # (#5003).
+          cache-workspace-crates: "true"
           # Authorize this lane as the package-audit main-branch cache writer.
           # Package-relevant merges are exactly the pushes where this lane runs,
           # so the saved key tracks every lockfile/manifest change. Before this,
@@ -489,6 +493,9 @@ jobs:
           shared-key: workspace-tests
           cache-on-failure: true
           cache-bin: false
+          # Keep workspace artifacts so merge_group does not rebuild every
+          # harn-* crate after an exact rust-cache hit (#5003).
+          cache-workspace-crates: "true"
           save: ${{ matrix.kind == 'workspace-tests' }}
       - name: Install cargo-nextest
         if: matrix.kind == 'workspace-tests'
@@ -606,6 +613,7 @@ jobs:
           shared-key: workspace-tests
           cache-on-failure: true
           cache-bin: false
+          cache-workspace-crates: "true"
       - name: Install cargo-nextest
         uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
         with:
@@ -700,6 +708,7 @@ jobs:
           shared-key: ${{ matrix.cache_key }}
           cache-on-failure: true
           cache-bin: false
+          cache-workspace-crates: "true"
           save: "true"
       - name: Install cargo-nextest
         if: matrix.install_nextest
