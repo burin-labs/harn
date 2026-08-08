@@ -184,6 +184,37 @@ fn test_sequential_primitives() {
   require is_err(impossible_savings), "savings reject a schedule that omits registered arms"
 }
 
+fn test_endpoint_streams_keep_accumulated_evidence() {
+  const zero_short = range(0, 1000).map({ _ -> 0.0 }).to_list()
+  const zero_long = range(0, 10000).map({ _ -> 0.0 }).to_list()
+  const one_short = range(0, 1000).map({ _ -> 1.0 }).to_list()
+  const one_long = range(0, 10000).map({ _ -> 1.0 }).to_list()
+  const zero_short_cs = bounded_cs(zero_short, 0.99, 0.0, 1.0)
+  const zero_long_cs = bounded_cs(zero_long, 0.99, 0.0, 1.0)
+  const one_short_cs = bounded_cs(one_short, 0.99, 0.0, 1.0)
+  const one_long_cs = bounded_cs(one_long, 0.99, 0.0, 1.0)
+  const rescaled_short = range(0, 1000).map({ _ -> -2.0 }).to_list()
+  const rescaled_long = range(0, 1400).map({ _ -> -2.0 }).to_list()
+  const rescaled_mirror = range(0, 1400).map({ _ -> 3.0 }).to_list()
+  const lower_rescaled_short_cs = bounded_cs(rescaled_short, 0.999999999, -2.0, 3.0)
+  const lower_rescaled_long_cs = bounded_cs(rescaled_long, 0.999999999, -2.0, 3.0)
+  const upper_rescaled_long_cs = bounded_cs(rescaled_mirror, 0.999999999, -2.0, 3.0)
+  require zero_long_cs.lo == 0.0, "an all-zero stream retains the exact lower endpoint"
+  require one_long_cs.hi == 1.0, "an all-one stream retains the exact upper endpoint"
+  require zero_long_cs.hi <= zero_short_cs.hi,
+    "more all-zero evidence cannot reset a narrowed interval to the full support"
+  require one_long_cs.lo >= one_short_cs.lo,
+    "more all-one evidence cannot reset a narrowed interval to the full support"
+  require zero_long_cs.hi < 1.0 && one_long_cs.lo > 0.0,
+    "constant endpoint evidence remains informative"
+  require lower_rescaled_long_cs.lo == -2.0 && lower_rescaled_long_cs.hi < 3.0,
+    "exact lower-endpoint behavior survives affine rescaling"
+  require lower_rescaled_long_cs.hi <= lower_rescaled_short_cs.hi,
+    "affine rescaling cannot restore the full-support reset"
+  require upper_rescaled_long_cs.hi == 3.0 && upper_rescaled_long_cs.lo > -2.0,
+    "exact upper-endpoint behavior survives affine rescaling"
+}
+
 fn test_sequential_decision_contract() {
   const zero_band = try {
     arm_decision([{id: "arm", deltas: [0.0], complexity: 0}], 1, 0.05, 0.0, 3, true)
@@ -292,6 +323,7 @@ fn test_anytime_valid_null_and_broken_control(stdio: HarnessStdio) {
 
 pipeline test(harness: Harness, _task) {
   test_sequential_primitives()
+  test_endpoint_streams_keep_accumulated_evidence()
   test_sequential_decision_contract()
   test_anytime_valid_null_and_broken_control(harness.stdio)
   harness.stdio.println("[harn] stdlib eval sequential ok")
