@@ -1,9 +1,9 @@
 use super::ndjson::consume_ollama_ndjson_lines;
 use super::sse::reqwest_send_error;
 use super::{
-    append_ollama_tool_calls, non_stream_send_error, parse_ollama_tool_arguments,
-    should_request_stream_usage, telemetry_source,
+    append_ollama_tool_calls, non_stream_send_error, should_request_stream_usage, telemetry_source,
 };
+use crate::llm::api::response::parse_tool_arguments;
 use crate::value::{error_to_category, ErrorCategory, VmError};
 use std::time::Duration;
 
@@ -92,13 +92,24 @@ fn stream_usage_requested_for_openai_compatible_endpoints() {
 #[test]
 fn ollama_tool_arguments_accept_object_shape() {
     let arguments = serde_json::json!({"path": "README.md"});
-    assert_eq!(parse_ollama_tool_arguments(&arguments), arguments);
+    assert_eq!(parse_tool_arguments(Some(&arguments)), arguments);
 }
 
 #[test]
 fn ollama_tool_arguments_parse_json_strings() {
-    let parsed = parse_ollama_tool_arguments(&serde_json::json!("{\"path\":\"README.md\"}"));
+    let parsed = parse_tool_arguments(Some(&serde_json::json!("{\"path\":\"README.md\"}")));
     assert_eq!(parsed["path"], "README.md");
+}
+
+// The ollama path shares the response-parser helper, so a malformed
+// tool-argument string with multibyte characters past the preview budget
+// reports a parse error instead of panicking (the deleted local copy sliced
+// the string at a fixed byte offset).
+#[test]
+fn ollama_tool_arguments_preview_does_not_panic_mid_utf8() {
+    let malformed = format!("{{\"path\": {}", "日本語テキスト".repeat(40));
+    let parsed = parse_tool_arguments(Some(&serde_json::Value::String(malformed)));
+    assert!(parsed["__parse_error"].is_string());
 }
 
 #[test]
