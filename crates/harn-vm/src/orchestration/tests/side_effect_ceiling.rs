@@ -197,6 +197,41 @@ fn call_configuration_and_runtime_context_keep_their_audit_effects() {
 }
 
 #[test]
+fn explicit_llm_catalog_grant_still_admits_configuration_reads() {
+    // The llm.call → llm.catalog subsumption must stay one-directional: a
+    // policy that grants only the catalog read keeps working without any
+    // call authority.
+    push_execution_policy(CapabilityPolicy {
+        side_effect_level: Some("read_only".to_string()),
+        capabilities: BTreeMap::from([("llm".to_string(), vec!["catalog".to_string()])]),
+        ..Default::default()
+    });
+    let catalog_read = enforce_current_policy_for_capability(
+        harn_builtin_meta::CapabilityId::Llm,
+        "known_models",
+        &[],
+    );
+    let call = enforce_current_policy_for_capability(
+        harn_builtin_meta::CapabilityId::Llm,
+        "call",
+        &[
+            crate::value::VmValue::String("prompt".into()),
+            crate::value::VmValue::Nil,
+            crate::value::VmValue::Nil,
+        ],
+    );
+    pop_execution_policy();
+    assert!(
+        catalog_read.is_ok(),
+        "an explicit llm.catalog grant keeps working without llm.call: {catalog_read:?}"
+    );
+    assert!(
+        call.is_err(),
+        "llm.catalog must not imply model-call authority"
+    );
+}
+
+#[test]
 fn side_effect_ceiling_grant_is_exact_to_the_denied_tool_and_effect() {
     let mut tool_annotations = BTreeMap::new();
     tool_annotations.insert(
