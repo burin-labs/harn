@@ -721,13 +721,33 @@ fn child_nodes(node: &SNode) -> Vec<&SNode> {
 }
 
 pub(crate) fn effect_allowed_by_ceiling(effect: &EffectRecord, ceiling: &CapabilityPolicy) -> bool {
+    effect_allowed_by_ceiling_with_authorization(effect, ceiling, false)
+}
+
+pub(crate) fn contract_effect_allowed_by_ceiling(
+    effect: &EffectRecord,
+    contract: harn_builtin_meta::BuiltinContract,
+    ceiling: &CapabilityPolicy,
+) -> bool {
+    let explicitly_authorized = contract.effects_authorized_by.is_some_and(|authority| {
+        super::policy_allows_capability(
+            ceiling,
+            authority.capability.field_name(),
+            authority.operation,
+        )
+    });
+    effect_allowed_by_ceiling_with_authorization(effect, ceiling, explicitly_authorized)
+}
+
+fn effect_allowed_by_ceiling_with_authorization(
+    effect: &EffectRecord,
+    ceiling: &CapabilityPolicy,
+    explicitly_authorized: bool,
+) -> bool {
     if ceiling.capabilities_are_restricted() {
         let (capability, op) = effect_capability_op(effect);
-        let allowed = ceiling
-            .capabilities
-            .get(capability)
-            .is_some_and(|ops| ops.is_empty() || ops.iter().any(|allowed| allowed == op));
-        if !allowed {
+        let allowed = super::policy_allows_capability(ceiling, capability, op);
+        if !allowed && !explicitly_authorized {
             return false;
         }
     }

@@ -21,8 +21,8 @@ pub mod shapes;
 pub mod signatures;
 
 pub use contracts::{
-    wire_identifier_key, BuiltinContract, BuiltinExposure, CapabilityId, EffectAccess, EffectKind,
-    EffectSpec, ResourceSelector,
+    wire_identifier_key, BuiltinContract, BuiltinExposure, CapabilityId, EffectAccess,
+    EffectAuthorization, EffectKind, EffectSpec, ResourceSelector,
 };
 
 /// A complete, static description of one builtin: identifier, arity range,

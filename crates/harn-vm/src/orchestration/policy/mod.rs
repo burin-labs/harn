@@ -32,7 +32,7 @@ pub use effects::{
     compute_handoff_effects, effect_kind_label, effect_record_summary, effect_subset_violations,
     effects_from_metadata, EffectKind, EffectRecord, EffectScope,
 };
-pub(crate) use effects::{effect_allowed_by_ceiling, runtime_effects_from_contract};
+pub(crate) use effects::{contract_effect_allowed_by_ceiling, runtime_effects_from_contract};
 pub use nested_budget::{
     annotate_nested_execution_options, enter_nested_execution_policy, NestedExecutionGuard,
     NestedExecutionKind, NESTED_KIND_OPTION_KEY, NESTED_LABEL_OPTION_KEY,
@@ -209,6 +209,10 @@ fn policy_allows_capability(policy: &CapabilityPolicy, capability: &str, op: &st
     if capability == "workspace" && op == "exists" {
         return policy_grants_capability(policy, "workspace", "read_text")
             || policy_grants_capability(policy, "workspace", "list");
+    }
+    // LLM calls resolve the catalog; keep the read visible without a second grant.
+    if capability == "llm" && op == "catalog" {
+        return policy_grants_capability(policy, "llm", "call");
     }
     false
 }
@@ -644,7 +648,7 @@ pub fn enforce_current_policy_for_capability(
     };
     let denied = effects::runtime_effects_from_contract(entry.contract.effects, args)
         .into_iter()
-        .find(|effect| !effects::effect_allowed_by_ceiling(effect, &policy));
+        .find(|effect| !contract_effect_allowed_by_ceiling(effect, entry.contract, &policy));
     if let Some(effect) = denied {
         return reject_policy(format!(
             "harness.{}.{method} exceeds the active effect ceiling: {}",

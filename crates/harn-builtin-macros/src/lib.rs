@@ -39,6 +39,8 @@ mod sig_parser;
 /// - `effects = ["fs.read@arg0", "fs.write@arg0+arg1", ...]` — typed effect
 ///   rows. Selectors are `argN`, `argN.field.path`, `eachN`, `const=VALUE`,
 ///   or `dynamic`. `effects = []` is an explicit purity declaration.
+/// - `effects_authorized_by = "llm.call"` — an explicit capability grant that
+///   may authorize this builtin's read-only declared effects.
 /// - `category = "collections"` — observability label (optional).
 /// - `kind = "sync" | "async"` — defaults to `sync`. `async` wraps the user
 ///   fn into `Pin<Box<dyn Future<...>>>`.
@@ -83,6 +85,7 @@ struct CapabilityMethodInput {
     effects: Vec<LitStr>,
     signature: Expr,
     doc: LitStr,
+    effects_authorized_by: Option<LitStr>,
 }
 
 impl Parse for CapabilityMethodInput {
@@ -97,6 +100,12 @@ impl Parse for CapabilityMethodInput {
         let signature = input.parse()?;
         input.parse::<Token![,]>()?;
         let doc = input.parse()?;
+        let effects_authorized_by = if input.is_empty() {
+            None
+        } else {
+            input.parse::<Token![,]>()?;
+            Some(input.parse()?)
+        };
         if !input.is_empty() {
             return Err(input.error("unexpected capability method tokens"));
         }
@@ -106,6 +115,7 @@ impl Parse for CapabilityMethodInput {
             effects,
             signature,
             doc,
+            effects_authorized_by,
         })
     }
 }
@@ -128,6 +138,7 @@ fn expand_capability_method(input: CapabilityMethodInput) -> syn::Result<TokenSt
         exposure: Some(input.exposure),
         effects: input.effects,
         effects_declared: true,
+        effects_authorized_by: input.effects_authorized_by,
         parser_only: true,
         ..BuiltinAttrs::default()
     };
@@ -180,6 +191,7 @@ fn expand_leaf_capability_contract(input: CapabilityMethodInput) -> syn::Result<
         exposure: Some(input.exposure),
         effects: input.effects,
         effects_declared: true,
+        effects_authorized_by: input.effects_authorized_by,
         parser_only: true,
         ..BuiltinAttrs::default()
     };
@@ -211,6 +223,7 @@ struct BuiltinAttrs {
     exposure: Option<LitStr>,
     effects: Vec<LitStr>,
     effects_declared: bool,
+    effects_authorized_by: Option<LitStr>,
     category: Option<LitStr>,
     kind: BuiltinKind,
     parser_only: bool,
@@ -264,6 +277,9 @@ impl Parse for BuiltinAttrs {
                         "effects" => {
                             out.effects = parse_str_array(&nv.value)?;
                             out.effects_declared = true;
+                        }
+                        "effects_authorized_by" => {
+                            out.effects_authorized_by = Some(parse_lit_str(&nv.value)?);
                         }
                         other => {
                             return Err(syn::Error::new(
@@ -496,7 +512,35 @@ fn contract_expr(attrs: &BuiltinAttrs, support: &TokenStream2) -> syn::Result<To
         .map(|effect| parse_effect_spec(&effect.value(), effect.span(), support))
         .collect::<syn::Result<Vec<_>>>()?;
     let effects = quote!(&[#(#effects),*]);
+    if let Some(authority) = attrs.effects_authorized_by.as_ref() {
+        if attrs.effects.is_empty() {
+            return Err(syn::Error::new(
+                authority.span(),
+                "`effects_authorized_by` requires at least one declared effect",
+            ));
+        }
+        if let Some(effect) = attrs.effects.iter().find(|effect| {
+            let head = effect.value();
+            let access = head
+                .split_once('@')
+                .map_or(head.as_str(), |(head, _)| head)
+                .split_once('.')
+                .map(|(_, access)| access);
+            !matches!(access, Some("read" | "observe"))
+        }) {
+            return Err(syn::Error::new(
+                effect.span(),
+                "`effects_authorized_by` may only delegate read or observe effects",
+            ));
+        }
+    }
     let raw = exposure.value();
+    if attrs.effects_authorized_by.is_some() && !raw.starts_with("harness.") {
+        return Err(syn::Error::new(
+            exposure.span(),
+            "`effects_authorized_by` is only valid for Harness methods",
+        ));
+    }
     match raw.as_str() {
         "pure" => {
             if !attrs.effects.is_empty() {
@@ -559,11 +603,42 @@ fn contract_expr(attrs: &BuiltinAttrs, support: &TokenStream2) -> syn::Result<To
                 ));
             }
             let capability = capability_expr(capability, exposure.span(), support)?;
-            Ok(quote!(#support::BuiltinContract::harness(
-                #capability,
-                #method,
-                #effects,
-            )))
+            if let Some(authority) = attrs.effects_authorized_by.as_ref() {
+                let raw_authority = authority.value();
+                let Some((authority_capability, authority_operation)) =
+                    raw_authority.split_once('.')
+                else {
+                    return Err(syn::Error::new(
+                        authority.span(),
+                        "effect authority must be `<capability>.<operation>`",
+                    ));
+                };
+                if authority_operation.is_empty() || authority_operation.contains('.') {
+                    return Err(syn::Error::new(
+                        authority.span(),
+                        "effect authority operation must be one non-empty identifier",
+                    ));
+                }
+                let authority_capability =
+                    capability_expr(authority_capability, authority.span(), support)?;
+                Ok(
+                    quote!(#support::BuiltinContract::harness_with_effect_authorization(
+                        #capability,
+                        #method,
+                        #effects,
+                        #support::EffectAuthorization::new(
+                            #authority_capability,
+                            #authority_operation,
+                        ),
+                    )),
+                )
+            } else {
+                Ok(quote!(#support::BuiltinContract::harness(
+                    #capability,
+                    #method,
+                    #effects,
+                )))
+            }
         }
     }
 }

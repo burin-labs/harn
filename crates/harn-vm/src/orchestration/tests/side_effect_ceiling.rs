@@ -8,7 +8,8 @@ use super::super::{
     allow_trusted_bridge_calls, enforce_current_policy_for_builtin,
     enforce_current_policy_for_capability, enforce_current_policy_for_tool,
     enforce_current_policy_for_tool_with_annotations_and_side_effect_grant, pop_execution_policy,
-    push_execution_policy, CapabilityPolicy,
+    push_execution_policy, runtime_effects_from_contract, CapabilityPolicy, EffectKind,
+    EffectScope,
 };
 
 #[test]
@@ -68,6 +69,131 @@ fn execution_policy_rejects_llm_call_without_llm_capability() {
     let result = enforce_current_policy_for_builtin("llm_call", &[]);
     pop_execution_policy();
     assert!(result.is_err());
+}
+
+#[test]
+fn llm_call_grant_covers_read_only_call_configuration_but_not_generic_state() {
+    push_execution_policy(CapabilityPolicy {
+        side_effect_level: Some("read_only".to_string()),
+        capabilities: BTreeMap::from([("llm".to_string(), vec!["call".to_string()])]),
+        ..Default::default()
+    });
+
+    let empty_options =
+        crate::value::VmValue::dict(BTreeMap::<String, crate::value::VmValue>::new());
+    let reasoning = enforce_current_policy_for_capability(
+        harn_builtin_meta::CapabilityId::Llm,
+        "apply_reasoning_policy",
+        &[empty_options],
+    );
+    assert!(
+        reasoning.is_ok(),
+        "an authorized model call must be able to resolve its Harn-owned reasoning policy: {reasoning:?}"
+    );
+
+    let runtime_context = enforce_current_policy_for_capability(
+        harn_builtin_meta::CapabilityId::Runtime,
+        "context",
+        &[],
+    );
+    assert!(
+        runtime_context.is_ok(),
+        "agent-loop infrastructure must be able to read its execution-local context: {runtime_context:?}"
+    );
+
+    let current_agent = enforce_current_policy_for_capability(
+        harn_builtin_meta::CapabilityId::Agent,
+        "current_id",
+        &[],
+    );
+    assert!(
+        current_agent.is_ok(),
+        "agent-loop infrastructure must be able to read its current session id: {current_agent:?}"
+    );
+
+    let unrelated_state = enforce_current_policy_for_capability(
+        harn_builtin_meta::CapabilityId::Runtime,
+        "store_get",
+        &[crate::value::VmValue::String(
+            "unrelated.product.state".into(),
+        )],
+    );
+    pop_execution_policy();
+    assert!(
+        unrelated_state.is_err(),
+        "llm.call must not become a generic state.read grant"
+    );
+}
+
+#[test]
+fn call_configuration_requires_llm_call_authority() {
+    push_execution_policy(CapabilityPolicy {
+        side_effect_level: Some("read_only".to_string()),
+        capabilities: BTreeMap::from([("workspace".to_string(), vec!["read_text".to_string()])]),
+        ..Default::default()
+    });
+
+    let empty_options =
+        crate::value::VmValue::dict(BTreeMap::<String, crate::value::VmValue>::new());
+    let reasoning = enforce_current_policy_for_capability(
+        harn_builtin_meta::CapabilityId::Llm,
+        "apply_reasoning_policy",
+        &[empty_options],
+    );
+    let runtime_context = enforce_current_policy_for_capability(
+        harn_builtin_meta::CapabilityId::Runtime,
+        "context",
+        &[],
+    );
+    let current_agent = enforce_current_policy_for_capability(
+        harn_builtin_meta::CapabilityId::Agent,
+        "current_id",
+        &[],
+    );
+    pop_execution_policy();
+
+    assert!(
+        reasoning.is_err(),
+        "reasoning-policy resolution must not work without llm.call"
+    );
+    assert!(
+        runtime_context.is_err(),
+        "the infrastructure context exception must not exist without llm.call"
+    );
+    assert!(
+        current_agent.is_err(),
+        "the infrastructure session exception must not exist without llm.call"
+    );
+}
+
+#[test]
+fn call_configuration_and_runtime_context_keep_their_audit_effects() {
+    let reasoning = crate::stdlib::capability_method_manifest_entry(
+        harn_builtin_meta::CapabilityId::Llm,
+        "apply_reasoning_policy",
+    )
+    .expect("reasoning-policy contract");
+    let reasoning_effects = runtime_effects_from_contract(reasoning.contract.effects, &[]);
+    assert!(reasoning_effects.iter().any(|effect| {
+        matches!(effect.kind, EffectKind::Llm { .. }) && effect.scope == EffectScope::Read
+    }));
+
+    let context = crate::stdlib::capability_method_manifest_entry(
+        harn_builtin_meta::CapabilityId::Runtime,
+        "context",
+    )
+    .expect("runtime-context contract");
+    let context_effects = runtime_effects_from_contract(context.contract.effects, &[]);
+    assert!(context_effects.iter().any(|effect| {
+        matches!(effect.kind, EffectKind::State) && effect.scope == EffectScope::Read
+    }));
+    assert_eq!(
+        context.contract.effects_authorized_by,
+        Some(harn_builtin_meta::EffectAuthorization::new(
+            harn_builtin_meta::CapabilityId::Llm,
+            "call",
+        ))
+    );
 }
 
 #[test]

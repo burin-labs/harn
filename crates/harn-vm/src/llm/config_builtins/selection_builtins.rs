@@ -15,7 +15,7 @@ use super::model_projection::{
 /// Infer the configured provider name for a model identifier.
 #[harn_builtin(
     exposure = "harness.llm.infer_provider",
-    effects = ["state.read@arg0"],
+    effects = ["llm.read@arg0"],
     sig = "llm_infer_provider(model_id: string) -> string",
     category = "llm.config"
 )]
@@ -29,7 +29,7 @@ fn llm_infer_provider_builtin(args: &[VmValue], _out: &mut String) -> Result<VmV
 /// Return the configured capability tier for a model identifier.
 #[harn_builtin(
     exposure = "harness.llm.model_tier",
-    effects = ["state.read@arg0"],
+    effects = ["llm.read@arg0"],
     sig = "llm_model_tier(model_id: string) -> string",
     category = "llm.config"
 )]
@@ -43,7 +43,7 @@ fn llm_model_tier_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
 /// Resolve a model alias or selector to full model metadata.
 #[harn_builtin(
     exposure = "harness.llm.resolve_model",
-    effects = ["state.read@arg0"],
+    effects = ["llm.read@arg0"],
     sig = "llm_resolve_model(alias: string) -> dict",
     category = "llm.config"
 )]
@@ -57,7 +57,7 @@ fn llm_resolve_model_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVa
 /// Return catalog metadata for a resolved model selector.
 #[harn_builtin(
     exposure = "harness.llm.model_info",
-    effects = ["state.read@arg0"],
+    effects = ["llm.read@arg0"],
     sig = "llm_model_info(selector: string) -> dict",
     category = "llm.config"
 )]
@@ -70,7 +70,7 @@ fn llm_model_info_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
 /// List configured model alias names.
 #[harn_builtin(
     exposure = "harness.llm.known_models",
-    effects = ["state.read@const=model-catalog"],
+    effects = ["llm.read@const=model-catalog"],
     sig = "llm_known_models() -> list", category = "llm.config"
 )]
 fn llm_known_models_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -80,7 +80,7 @@ fn llm_known_models_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmVa
 /// Return the configured cheap QC/repair model for a provider.
 #[harn_builtin(
     exposure = "harness.llm.qc_default_model",
-    effects = ["state.read@arg0"],
+    effects = ["llm.read@arg0"],
     sig = "llm_qc_default_model(provider: string) -> string|nil",
     category = "llm.config"
 )]
@@ -99,7 +99,7 @@ fn llm_qc_default_model_builtin(args: &[VmValue], _out: &mut String) -> Result<V
 /// Return logical- and route-merged model defaults for `model_id`.
 #[harn_builtin(
     exposure = "harness.llm.model_defaults",
-    effects = ["state.read@arg0"],
+    effects = ["llm.read@arg0"],
     sig = "llm_model_defaults(model_id: string) -> dict",
     category = "llm.config"
 )]
@@ -125,7 +125,7 @@ pub(super) fn llm_model_defaults_builtin(
 /// Return the fully-merged llm_call options for `opts`. Requires opts.model.
 #[harn_builtin(
     exposure = "harness.llm.resolved_options",
-    effects = ["state.read@dynamic"],
+    effects = ["llm.read@dynamic"],
     sig = "llm_resolved_options(opts: dict) -> dict",
     category = "llm.config"
 )]
@@ -167,7 +167,7 @@ pub(super) fn llm_resolved_options_builtin(
 /// Apply Harn's provider-aware reasoning-policy and effort defaults to an `llm_call` option dict.
 #[harn_builtin(
     exposure = "harness.llm.apply_reasoning_policy",
-    effects = ["state.read@dynamic"],
+    effects = ["llm.read@dynamic"],
     sig = "llm_apply_reasoning_policy(opts: dict) -> dict",
     category = "llm.config"
 )]
@@ -189,7 +189,7 @@ fn llm_apply_reasoning_policy_builtin(
 /// An unknown/empty level resolves to the medium default.
 #[harn_builtin(
     exposure = "harness.llm.reasoning_effort_budget",
-    effects = ["state.read@arg0"],
+    effects = ["llm.read@arg0"],
     sig = "llm_reasoning_effort_budget(level: string) -> int",
     category = "llm.config"
 )]
@@ -205,7 +205,7 @@ pub(super) fn llm_reasoning_effort_budget_builtin(
 /// Resolve a model alias or tier to an `{id, provider, tier}` dict.
 #[harn_builtin(
     exposure = "harness.llm.pick_model",
-    effects = ["state.read@dynamic"],
+    effects = ["llm.read@dynamic"],
     sig = "llm_pick_model(target: string, options?: dict|nil) -> dict",
     category = "llm.config"
 )]
@@ -236,7 +236,7 @@ fn llm_pick_model_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
 /// Pick a different-family reviewer model for review, critique, or plan review.
 #[harn_builtin(
     exposure = "harness.llm.complementary_reviewer",
-    effects = ["state.read@dynamic"],
+    effects = ["llm.read@dynamic"],
     sig = "llm_complementary_reviewer(options: dict) -> dict",
     category = "llm.config"
 )]
@@ -322,7 +322,7 @@ fn vm_value_as_f64(value: &VmValue) -> Result<f64, VmError> {
 /// with compatible context/tool/structured-output capabilities.
 #[harn_builtin(
     exposure = "harness.llm.equivalent_models",
-    effects = ["state.read@arg0"],
+    effects = ["llm.read@arg0"],
     sig = "llm_equivalent_models(selector: string) -> list",
     category = "llm.config"
 )]

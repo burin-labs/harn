@@ -31,10 +31,10 @@ pub mod support {
     pub use crate::{CapabilityMethodDef, ALL_CAPABILITY_METHOD_DEFS};
     pub use harn_builtin_meta::{
         shapes, BuiltinContract, BuiltinExposure, BuiltinSignature, CapabilityId, EffectAccess,
-        EffectKind, EffectSpec, Param, ResourceSelector, ShapeFieldDescriptor, Ty, TY_ANY, TY_BOOL,
-        TY_BYTES, TY_BYTES_OR_NIL, TY_CLOSURE, TY_DICT, TY_DICT_OR_NIL, TY_DURATION, TY_FLOAT,
-        TY_INT, TY_INT_OR_NIL, TY_LIST, TY_NEVER, TY_NIL, TY_NUMBER, TY_RESOURCE, TY_STRING,
-        TY_STRING_OR_NIL,
+        EffectAuthorization, EffectKind, EffectSpec, Param, ResourceSelector, ShapeFieldDescriptor,
+        Ty, TY_ANY, TY_BOOL, TY_BYTES, TY_BYTES_OR_NIL, TY_CLOSURE, TY_DICT, TY_DICT_OR_NIL,
+        TY_DURATION, TY_FLOAT, TY_INT, TY_INT_OR_NIL, TY_LIST, TY_NEVER, TY_NIL, TY_NUMBER,
+        TY_RESOURCE, TY_STRING, TY_STRING_OR_NIL,
     };
 }
 
