@@ -11,3 +11,5 @@ set -euo pipefail
 cargo build --locked --bin harn
 cargo nextest run --locked --workspace --profile ci --no-run \
   -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'
+
+# Post-warm canary touch for #5003 walltime sampling.
