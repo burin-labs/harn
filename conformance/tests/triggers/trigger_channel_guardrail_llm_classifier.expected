@@ -1,0 +1,9 @@
+llm_risk_classifier:haiku
+true
+true
+false
+true
+false
+2
+channel_guardrail_blocked
+channel_guardrail_warning

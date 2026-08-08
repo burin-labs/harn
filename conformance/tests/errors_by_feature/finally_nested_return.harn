@@ -1,0 +1,25 @@
+pipeline test(harness: Harness, task) {
+  // Test that finally runs even with return in nested try
+  fn outer() {
+    try {
+      try {
+        return "early"
+      } finally {
+        harness.stdio.log("inner finally")
+      }
+    } finally {
+      harness.stdio.log("outer finally")
+    }
+    harness.stdio.log("unreachable")
+  }
+  const r = outer()
+  harness.stdio.log("result: ${r}")
+  // Finally with empty body should not crash
+  fn with_empty_finally() {
+    try {
+      return 42
+    } finally {
+    }
+  }
+  harness.stdio.log(with_empty_finally())
+}

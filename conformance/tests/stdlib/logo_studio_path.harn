@@ -1,0 +1,206 @@
+/**
+ * Canonical logo-studio path without a browser or GPU.
+ *
+ * Proves draw → annotate → generate (replay/fake) → progress → candidate →
+ * exact-text composition → SVG+PNG export on the same contracts the app uses.
+ */
+import { MediaAssetOptions, media_asset_store_result } from "std/media/asset"
+import {
+  design_document_export_result,
+  design_document_with_exact_text,
+} from "std/media/composition"
+import {
+  ModelJobObservation,
+  ModelJobOutput,
+  ModelJobRequest,
+  ModelJobRunOptions,
+  ModelJobState,
+  ModelOutputSpec,
+  ModelTask,
+  model_job_fake_backend,
+  model_job_run_result,
+} from "std/model_job"
+import * as ui from "std/ui"
+import { UiEvent } from "std/ui/contracts"
+import { UiTestOptions } from "std/ui/testing"
+
+type StudioState = {
+  revision: int,
+  strokes: int,
+  notes: list<string>,
+  logo_text: string,
+  status: string,
+  progress?: float,
+  preview?: string,
+  exported?: string,
+}
+
+pipeline test(harness: Harness, task) {
+  const png = bytes_from_base64(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  )
+  const root = harness.fs.mkdtemp_in_workspace("logo-path-")
+  const sketch_options: MediaAssetOptions = {
+    mime_type: "image/png",
+    width: 1200,
+    height: 675,
+    root: root,
+    metadata: {kind: "logo-sketch"},
+  }
+  const sketch = unwrap(media_asset_store_result(harness.fs, png, sketch_options))
+  let state: StudioState = {
+    revision: 0,
+    strokes: 0,
+    notes: [],
+    logo_text: "Cornflower Garden",
+    status: "ready",
+  }
+  const session = harness.agent.open("logo-studio-path")
+  harness.agent.reset(session)
+  fn document() {
+    return ui.document(
+      "Logo path",
+      state.revision,
+      [
+        {id: "root", kind: "column"},
+        {id: "sketch", kind: "canvas", parent: "root", width: 800, height: 450, strokes: []},
+        {id: "status", kind: "status", parent: "root", text: state.status},
+        {id: "preview", kind: "status", parent: "root", text: state.preview ?? "none"},
+        {id: "export", kind: "status", parent: "root", text: state.exported ?? "none"},
+      ],
+    )
+  }
+  fn respond(effects = []) {
+    state.revision = state.revision + 1
+    return ui.update(document(), effects)
+  }
+  fn generate() {
+    const task_kind: ModelTask = "image.edit"
+    const output_spec: ModelOutputSpec = {mime_type: "image/png", width: 1, height: 1}
+    const request: ModelJobRequest = {
+      id: "logo-path-1",
+      task: task_kind,
+      prompt: "Polish sketch; leave lettering to deterministic layers.",
+      output: output_spec,
+      model: "fixture",
+      inputs: [sketch],
+      seed: 42,
+    }
+    const queued: ModelJobState = "queued"
+    const running: ModelJobState = "running"
+    const succeeded: ModelJobState = "succeeded"
+    const output: ModelJobOutput = {
+      name: "candidate.png",
+      mime_type: "image/png",
+      bytes: png,
+      width: 1,
+      height: 1,
+    }
+    const observations: list<ModelJobObservation> = [
+      {job_id: "job-path", state: queued, backend_state: "pending"},
+      {job_id: "job-path", state: running, progress: 0.4, backend_state: "executing"},
+      {
+        job_id: "job-path",
+        state: succeeded,
+        progress: 1.0,
+        backend_state: "complete",
+        outputs: [output],
+      },
+    ]
+    const run_options: ModelJobRunOptions = {interval_ms: 0, asset_root: root, session_id: session}
+    const receipt = unwrap(
+      model_job_run_result(
+        harness,
+        model_job_fake_backend("logo-path-fake", observations),
+        request,
+        run_options,
+      ),
+    )
+    state.progress = 1.0
+    state.preview = receipt.assets[0].uri
+    state.status = "candidate"
+    const design = unwrap(
+      design_document_with_exact_text(
+        "logo-path",
+        receipt.assets[0],
+        state.logo_text,
+        {width: 640, height: 360, metadata: {sketch: sketch.uri, job: receipt.job.id}},
+      ),
+    )
+    const exported = unwrap(
+      design_document_export_result(
+        harness.fs,
+        design,
+        [receipt.assets[0]],
+        path_join(root, "out", "logo"),
+        {root: root},
+      ),
+    )
+    state.exported = exported.svg_path + "|" + exported.png_path
+    state.status = "exported"
+    return respond()
+  }
+  fn handle_event(raw) {
+    const event: UiEvent = ui.event(raw.event)
+    if event.kind == "canvas.stroke" {
+      state.strokes = state.strokes + 1
+      state.status = "sketched"
+      return respond()
+    }
+    if event.kind == "input" && event.target == "note" {
+      state.notes = state.notes + [event.value ?? ""]
+      state.status = "annotated"
+      return respond()
+    }
+    if event.kind == "click" && event.target == "generate" {
+      state.status = "generating"
+      return respond(
+        [
+          {
+            kind: "send_event",
+            after_ms: 0,
+            event: {schema: "harn.ui_event.v1", kind: "click", target: "run"},
+          },
+        ],
+      )
+    }
+    if event.kind == "click" && event.target == "run" {
+      return generate()
+    }
+    return respond()
+  }
+  const events: list<UiEvent> = [
+    ui.event(
+      {
+        schema: "harn.ui_event.v1",
+        kind: "canvas.stroke",
+        target: "sketch",
+        points: [{x: 0.1, y: 0.2}, {x: 0.4, y: 0.5}],
+      },
+    ),
+    ui.event(
+      {
+        schema: "harn.ui_event.v1",
+        kind: "input",
+        target: "note",
+        value: "Keep the mark calm and botanical.",
+      },
+    ),
+    ui.event({schema: "harn.ui_event.v1", kind: "click", target: "generate"}),
+  ]
+  const test_options: UiTestOptions = {follow_scheduled: true, max_steps: 8}
+  const trace = ui.test.run(handle_event, events, test_options)
+  harness.stdio.log(trace.schema)
+  harness.stdio.log(to_string(state.strokes))
+  harness.stdio.log(state.notes[0])
+  harness.stdio.log(state.status)
+  harness.stdio.log(
+    to_string(state.preview != nil && starts_with(state.preview, "asset://sha256/")),
+  )
+  harness.stdio.log(to_string(state.exported != nil && state.exported.contains(".svg")))
+  harness.stdio.log(to_string(state.exported != nil && state.exported.contains(".png")))
+  const svg = harness.fs.read_text(path_join(root, "out", "logo.svg"))
+  harness.stdio.log(to_string(svg.contains("Cornflower Garden")))
+  const transcript = transcript_events_by_kind(harness.agent.snapshot(session), "model_job")
+  harness.stdio.log(to_string(len(transcript) > 0))
+}

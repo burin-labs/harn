@@ -1,0 +1,80 @@
+/**
+ * http-transport demo: exercise the A.12 transport-completeness
+ * builtins (#2515) — content negotiation, ETag derivation, conditional
+ * 304 envelopes, the WS-upgrade envelope shape, and the HTTP/2-style
+ * push-hint builder.
+ *
+ * Scope (offline):
+ *   - Pick a content type from a simulated `Accept` header.
+ *   - Derive a strong ETag for a JSON payload.
+ *   - Build a `http_not_modified` envelope that mirrors what a `.harn`
+ *     handler returns when `If-None-Match` matches.
+ *   - Build a `http_upgrade_ws` envelope with subprotocol negotiation.
+ *   - Wrap an `http_ok` envelope with `http_push_hints` so the codec
+ *     emits one `Link: <...>; rel=preload; as=...` header per asset.
+ *   - Emit a receipt that captures every output so the tape stays
+ *     deterministic and the demo runs without a live HTTP server.
+ *
+ * Why a demo for this primitive: each of `http_etag`, `http_choose`,
+ * `http_not_modified`, `http_upgrade_ws`, and `http_push_hints` is a
+ * public builtin the demo gate watches. The scenario keeps the
+ * offline smoke path covered without spinning up a real axum
+ * listener — the transport-layer behaviour itself is covered by the
+ * conformance suite in
+ * `crates/harn-serve/tests/transport_conformance.rs`.
+ */
+fn payload() {
+  return {resource: {id: "r1", value: "ETag-stable across runs."}}
+}
+
+fn fake_request() {
+  return {
+    method: "GET",
+    path: "/v1/resource",
+    headers: {
+      "Sec-WebSocket-Protocol": "v0.harn, v1.harn",
+      Accept: "application/xml;q=0.5, application/json;q=0.9",
+    },
+  }
+}
+
+fn main(harness: Harness) {
+  const req = fake_request()
+  // 1. Content negotiation against a simulated `Accept` header.
+  const chosen = http_choose(
+    req.headers.Accept,
+    ["application/xml", "application/json", "text/plain"],
+  )
+  harness.stdio.println("chose: ${chosen}")
+  // 2. Compute a strong ETag from the serialized payload. The codec's
+  //    router-side ETag middleware mirrors this for the auto path;
+  //    handlers can also drive the value themselves (e.g. from a row
+  //    mtime).
+  const etag = http_etag(json_stringify(payload()))
+  harness.stdio.println("etag: ${etag}")
+  // 3. Build the conditional-GET reply for the matching case.
+  const not_modified = http_not_modified(etag, {"Cache-Control": "max-age=60"})
+  // 4. Construct the WS-upgrade envelope. With both client + server
+  //    offering `v1.harn`, that's the negotiated subprotocol.
+  const upgrade = http_upgrade_ws(req, {subprotocols: ["v1.harn", "v2.harn"], idle_ping_ms: 30000})
+  // 5. Wrap an http_ok envelope with preload hints. The codec turns
+  //    each entry into a separate `Link: <path>; rel=preload; as=...`
+  //    header so HTTP/2-enabled clients can prefetch the asset.
+  const page = http_push_hints(http_ok({title: "home"}), ["/main.css", "/app.js", "/hero.webp"])
+  const receipt = {
+    receipt_kind: "http_transport_receipt",
+    chose_content_type: chosen,
+    etag: etag,
+    not_modified_status: not_modified.status,
+    not_modified_etag: not_modified.headers.ETag,
+    upgrade_status: upgrade.status,
+    upgrade_subprotocol: upgrade.ws_upgrade.subprotocol,
+    upgrade_offered_count: len(upgrade.ws_upgrade.offered),
+    page_status: page.status,
+    page_link_count: len(page.headers.Link),
+    page_first_link: page.headers.Link[0],
+  }
+  harness.stdio.println("=== http-transport receipt ===")
+  harness.stdio.println(json_stringify(receipt))
+  return receipt
+}

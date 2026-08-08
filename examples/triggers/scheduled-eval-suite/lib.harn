@@ -1,0 +1,3 @@
+fn main(harness: Harness) {
+  harness.stdio.log("scheduled eval suite uses eval_pack://scheduled-regression")
+}

@@ -1,0 +1,65 @@
+{
+  "schema_version": "harn.orchestration.replay_trace.v1",
+  "name": "simple_trigger_local_handler",
+  "description": "Trigger dispatch to an in-process Harn handler with a deterministic local receipt.",
+  "expect": "match",
+  "allowlist": [
+    {"path": "/run_id", "reason": "run ids are allocated per execution"},
+    {"path": "/event_log_entries/*/event_id", "reason": "EventLog offsets are backend-local"},
+    {"path": "/event_log_entries/*/occurred_at_ms", "reason": "append timestamps are wall-clock observations"},
+    {"path": "/event_log_entries/*/payload/event_id", "reason": "TriggerEvent ids are generated per intake"},
+    {"path": "/trigger_firings/*/event_id", "reason": "TriggerEvent ids are generated per intake"},
+    {"path": "/trigger_firings/*/trace_id", "reason": "trace ids are generated per execution"},
+    {"path": "/effect_receipts/*/receipt_id", "reason": "receipt ids are generated per side-effect record"}
+  ],
+  "first_run": {
+    "run_id": "run_live_simple_01",
+    "event_log_entries": [
+      {
+        "event_id": 11,
+        "topic": "orchestrator.triggers.pending",
+        "kind": "event_ingested",
+        "occurred_at_ms": 1770000000100,
+        "payload": {"event_id": "trigger_evt_live_simple", "binding_id": "simple-local", "provider": "github", "kind": "issues.opened"}
+      },
+      {
+        "event_id": 12,
+        "topic": "trigger.outbox",
+        "kind": "dispatch_succeeded",
+        "occurred_at_ms": 1770000000200,
+        "payload": {"event_id": "trigger_evt_live_simple", "binding_id": "simple-local", "handler": "handlers::on_issue", "result": {"status": "triaged", "labels": ["needs-owner"]}}
+      }
+    ],
+    "trigger_firings": [
+      {"binding_id": "simple-local", "event_id": "trigger_evt_live_simple", "trace_id": "trace_live_simple", "handler_kind": "harn", "decision": "dispatched"}
+    ],
+    "effect_receipts": [
+      {"receipt_id": "receipt_live_simple", "kind": "file_substitute", "path": "artifacts/simple-local.json", "sha256": "0f44d61f92bb64e4c8e48f4a2d876e79380f5c1e49a68d116a6f3ec8fbf6bd2e", "mode": "deterministic_substitute"}
+    ]
+  },
+  "second_run": {
+    "run_id": "run_replay_simple_01",
+    "event_log_entries": [
+      {
+        "event_id": 21,
+        "topic": "orchestrator.triggers.pending",
+        "kind": "event_ingested",
+        "occurred_at_ms": 1770001000100,
+        "payload": {"event_id": "trigger_evt_replay_simple", "binding_id": "simple-local", "provider": "github", "kind": "issues.opened"}
+      },
+      {
+        "event_id": 22,
+        "topic": "trigger.outbox",
+        "kind": "dispatch_succeeded",
+        "occurred_at_ms": 1770001000200,
+        "payload": {"event_id": "trigger_evt_replay_simple", "binding_id": "simple-local", "handler": "handlers::on_issue", "result": {"status": "triaged", "labels": ["needs-owner"]}}
+      }
+    ],
+    "trigger_firings": [
+      {"binding_id": "simple-local", "event_id": "trigger_evt_replay_simple", "trace_id": "trace_replay_simple", "handler_kind": "harn", "decision": "dispatched"}
+    ],
+    "effect_receipts": [
+      {"receipt_id": "receipt_replay_simple", "kind": "file_substitute", "path": "artifacts/simple-local.json", "sha256": "0f44d61f92bb64e4c8e48f4a2d876e79380f5c1e49a68d116a6f3ec8fbf6bd2e", "mode": "deterministic_substitute"}
+    ]
+  }
+}

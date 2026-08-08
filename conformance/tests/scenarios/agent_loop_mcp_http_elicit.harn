@@ -1,0 +1,75 @@
+import { agent_loop } from "std/agent/loop"
+import { AgentLoopOptions } from "std/agent/options"
+import { process_shell } from "std/runtime"
+import { llm_text, with_llm_script } from "std/testing"
+import { resolve_harn_bin, wait_for_log_match } from "../_common.harn"
+
+pipeline default(harness: Harness) {
+  const root = harness.fs.workspace_root()
+  const helper = path_join(root, "conformance/helpers/mcp_http_elicit_server.harn")
+  const harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, root))
+  const state_dir = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-mcp-http-elicit-" + harness.random.uuid(),
+  )
+  const pid_path = path_join(state_dir, "server.pid")
+  const log_path = path_join(state_dir, "server.log")
+  harness.fs.mkdir(state_dir)
+  const start = process_shell(
+    harness.process,
+    "\"" + harn_bin + "\" serve mcp --transport http --bind 127.0.0.1:0 \""
+      + helper
+      + "\" >\""
+      + log_path
+      + "\" 2>&1 & echo $! > \""
+      + pid_path
+      + "\"",
+  )
+  require start?.success, "MCP elicitation mock server started"
+  const url = wait_for_log_match(harness, log_path, "MCP workflow server ready on (http://[^\\s]+)")
+  require url != nil, "timed out waiting for MCP server readiness"
+  harness.testing.clear()
+  harness.testing.respond(
+    "mcp",
+    "elicit",
+    {action: "accept", content: {env: "staging", confirm: true}},
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        text: "Calling MCP elicitation tool.",
+        tool_calls: [
+          {id: "mcp-elicit", name: "remote__ask", arguments: {prompt: "Choose deploy target"}},
+        ],
+      },
+      llm_text("<done>##DONE##</done>"),
+    ],
+    { ->
+      const opts: AgentLoopOptions = {
+        provider: "mock",
+        tool_format: "native",
+        max_iterations: 3,
+        mcp_servers: [{name: "remote", transport: "http", url: url}],
+      }
+      const result = agent_loop(harness, "Use the remote ask tool", nil, opts)
+      const calls = harness.testing.calls()
+      const successful = result?.tools.successful[0]
+      const tool_name_parts = split(successful, "__")
+      const response = regex_captures(
+        "(accept):(staging):(true)",
+        json_stringify(harness.llm.mock_calls()[1].messages),
+      )
+      require len(response) == 1, "completed MCP tool result carries the elicitation response"
+      process_shell(harness.process, "kill $(cat \"" + pid_path + "\") >/dev/null 2>&1 || true")
+      harness.stdio.println(successful)
+      harness.stdio.println(tool_name_parts[len(tool_name_parts) - 1])
+      harness.stdio.println(response[0].groups[0])
+      harness.stdio.println(response[0].groups[1])
+      harness.stdio.println(response[0].groups[2])
+      harness.stdio.println(calls[0].capability)
+      harness.stdio.println(calls[0].operation)
+      harness.stdio.println(calls[0].params.server)
+    },
+  )
+}

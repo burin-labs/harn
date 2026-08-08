@@ -1,0 +1,68 @@
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Native OpenAI Responses mode is an explicit llm_call option. The
+ * deterministic mock records the normalized request so provider-sensitive
+ * scripts can assert that structured output, hosted tools, remote MCP, and
+ * conversation controls survive option extraction without live credentials.
+ */
+pipeline test(harness: Harness, task) {
+  with_llm_script(
+    harness.llm,
+    [llm_text("{\"ok\":true}")],
+    { ->
+      const result = harness.llm.call(
+        "return a structured answer",
+        nil,
+        {
+          provider: "mock",
+          model: "gpt-5.4-preview",
+          api_mode: "responses",
+          output: {
+            schema: {type: "object", properties: {ok: {type: "boolean"}}, required: ["ok"]},
+            strict: true,
+          },
+          provider_tools: [
+            {type: "web_search"},
+            {
+              type: "mcp",
+              server_label: "docs",
+              server_url: "https://mcp.example.test",
+              require_approval: "always",
+            },
+          ],
+          previous_response_id: "resp_prev",
+          store: false,
+          background: true,
+          truncation: "auto",
+          compact: true,
+          include: ["web_search_call.action"],
+          max_tool_calls: 2,
+        },
+      )
+      assert(result.text == "{\"ok\":true}", "mock response returned")
+      const calls = harness.llm.mock_calls()
+      assert(len(calls) == 1, "one LLM call recorded")
+      const call = calls[0]
+      assert(call.api_mode == "responses", "Responses mode recorded")
+      assert(call.output_format.kind == "json_schema", "structured output kind recorded")
+      assert(call.output_format.schema.properties.ok.type == "boolean", "schema recorded")
+      assert(len(call.provider_tools) == 2, "provider tools recorded")
+      assert(call.provider_tools[0].type == "web_search", "hosted tool recorded")
+      assert(call.provider_tools[1].type == "mcp", "remote MCP tool recorded")
+      assert(call.provider_tools[1].server_label == "docs", "remote MCP metadata recorded")
+      assert(
+        call.provider_tools[1].require_approval == "always",
+        "provider approval policy recorded",
+      )
+      assert(call.previous_response_id == "resp_prev", "previous response id recorded")
+      assert(!call.store, "store flag recorded")
+      assert(call.background, "background flag recorded")
+      assert(call.truncation == "auto", "truncation policy recorded")
+      assert(call.compact, "standalone compaction flag recorded")
+      assert(call.include[0] == "web_search_call.action", "include list recorded")
+      assert(call.max_tool_calls == 2, "tool-call limit recorded")
+      harness.stdio.log("openai_responses_mode_mock tests passed")
+    },
+  )
+}

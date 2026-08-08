@@ -1,0 +1,13 @@
+[harn] Result.Ok(42)
+[harn] Result.Err(something failed)
+[harn] true
+[harn] false
+[harn] false
+[harn] true
+[harn] 42
+[harn] default
+[harn] something failed
+[harn] Result.Ok(hello)
+[harn] Result.Err(oops)
+[harn] ok: hello
+[harn] err: oops

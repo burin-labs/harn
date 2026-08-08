@@ -1,0 +1,86 @@
+pipeline default(harness: Harness) {
+  const server = harness.net.server({max_body_bytes: 16, retain_raw_body: true})
+  harness.net.server_before(server, { req -> req + {order: "before-a"} })
+  harness.net.server_before(server, { req -> req + {order: req.order + ",before-b"} })
+  harness.net.server_after(
+    server,
+    { response, _req ->
+      const prior = response.headers["x-order"] ?? ""
+      response + {headers: response.headers + {"x-order": prior + ",after-a"}}
+    },
+  )
+  harness.net.server_after(
+    server,
+    { response, _req ->
+      const prior = response.headers["x-order"] ?? ""
+      response
+        + {headers: response.headers + {"x-order": prior + ",after-b", "x-after": "after-b"}}
+    },
+  )
+  harness.net.server_route(
+    server,
+    "POST",
+    "/hooks/{tenant}/{trigger}",
+    { req ->
+      assert(req.path_params.tenant == "acme", "tenant path param")
+      assert(req.path_params.trigger == "push", "trigger path param")
+      assert(req.query.mode == "fast", "query param")
+      assert(http_header(req, "X-Signature") == "sig", "case-insensitive header")
+      assert(bytes_to_string(req.raw_body) == "{\"ok\":true}", "raw body is retained")
+      assert(req.client_ip == "203.0.113.7", "client IP metadata")
+      http_response_json(
+        {accepted: req.path_params.trigger, tenant: req.path_params.tenant},
+        {status: 202, headers: {"x-handler": "ok", "x-order": req.order + ",handler"}},
+      )
+    },
+    {max_body_bytes: 64},
+  )
+  const response = harness.net.server_test(
+    server,
+    {
+      method: "post",
+      path: "/hooks/acme/push?mode=fast",
+      headers: {"X-Signature": "sig"},
+      body: "{\"ok\":true}",
+      client_ip: "203.0.113.7",
+    },
+  )
+  harness.stdio.println(response.status)
+  harness.stdio.println(http_header(response, "X-After"))
+  harness.stdio.println(json_parse(response.body).accepted)
+  harness.stdio.println(http_header(response, "x-order"))
+  harness.net.server_route(
+    server,
+    "POST",
+    "/limited",
+    { _req -> http_response_text("unreachable") },
+    {max_body_bytes: 4},
+  )
+  const rejected = harness.net.server_request(
+    server,
+    {method: "POST", path: "/limited", body: "12345"},
+  )
+  harness.stdio.println(rejected.status)
+  harness.stdio.println(http_header(rejected, "x-harn-body-limit"))
+  harness.net.server_route(
+    server,
+    "POST",
+    "/discard",
+    { req -> http_response_text(to_string(req.raw_body == nil) + ":" + req.body) },
+    {retain_raw_body: false},
+  )
+  const discarded = harness.net.server_test(
+    server,
+    {method: "POST", path: "/discard", body: "kept-text"},
+  )
+  harness.stdio.println(discarded.body)
+  harness.net.server_set_ready(server, false)
+  harness.stdio.println(harness.net.server_test(server, {method: "POST", path: "/discard"}).status)
+  harness.net.server_set_ready(server, true)
+  harness.net.server_readiness(server, { _server -> false })
+  harness.stdio.println(harness.net.server_ready(server))
+  harness.stdio.println(harness.net.server_test(server, {method: "POST", path: "/discard"}).status)
+  harness.net.server_on_shutdown(server, { _server -> nil })
+  harness.stdio.println(harness.net.server_shutdown(server))
+  harness.stdio.println(harness.net.server_test(server, {method: "POST", path: "/discard"}).status)
+}

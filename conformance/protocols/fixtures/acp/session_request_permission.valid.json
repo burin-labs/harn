@@ -1,0 +1,71 @@
+{
+  "name": "acp.session_request_permission.round_trip",
+  "protocol": "acp",
+  "schema": "schemas/acp-session-update.schema.json",
+  "expect": "valid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "id": 77,
+      "method": "session/request_permission",
+      "params": {
+        "sessionId": "session-1",
+        "toolCall": {
+          "sessionUpdate": "tool_call_update",
+          "toolCallId": "tool-1",
+          "title": "edit",
+          "kind": "edit",
+          "content": [
+            {
+              "type": "diff",
+              "path": "/workspace/src/lib.rs",
+              "oldText": "old\n",
+              "newText": "new\n",
+              "_meta": {
+                "harn": {
+                  "permission_preview": {
+                    "source": "pre_approval",
+                    "preimageSha256": "abc123",
+                    "byteCount": 4
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "options": [
+          {
+            "optionId": "allow",
+            "name": "Allow",
+            "kind": "allow_once"
+          },
+          {
+            "optionId": "reject",
+            "name": "Reject",
+            "kind": "reject_once"
+          }
+        ]
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 77,
+      "result": {
+        "outcome": {
+          "outcome": "selected",
+          "optionId": "allow"
+        }
+      }
+    }
+  ],
+  "matrix": {
+    "version": "v0.12.2",
+    "family": "session_request_permission",
+    "case": "success",
+    "source": {
+      "kind": "adapter_generated",
+      "generator": "cargo test -p harn-serve adapters::acp::tests::acp_bridge_routes_session_request_permission_response",
+      "description": "Canonical ACP v0.12.2 permission request/response shape from AcpBridge::call_client."
+    }
+  }
+}

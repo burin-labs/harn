@@ -1,0 +1,242 @@
+# ---------- OpenRouter slugs for the new families -----------------------------
+# OpenRouter is OpenAI-compatible at the wire level, so model-specific
+# overrides only need to set `native_tools` + `preferred_tool_format`.
+# The audit test trips on missing entries because provider_family
+# inheritance does not cover specific OR slugs by itself.
+
+[[provider.openrouter]]
+model_match = "minimax/minimax-m3*"
+native_tools = true
+preferred_tool_format = "native"
+text_tool_wire_format_supported = true
+structured_output = "delimited"
+thinking_modes = ["adaptive"]
+vision = true
+vision_supported = true
+video_supported = true
+prompt_caching = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
+model_match = "minimax/minimax-m2.7*"
+native_tools = true
+preferred_tool_format = "native"
+text_tool_wire_format_supported = true
+structured_output = "delimited"
+
+[[provider.openrouter]]
+model_match = "minimax/minimax-m2*"
+native_tools = true
+preferred_tool_format = "native"
+text_tool_wire_format_supported = true
+structured_output = "delimited"
+
+[[provider.openrouter]]
+model_match = "z-ai/glm-5*"
+native_tools = true
+preferred_tool_format = "text"
+tool_mode_parity = "native_unreliable"
+tool_mode_parity_notes = "2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and hallucinated a result token; heredoc text tools completed the loop. OpenRouter reasoning-on text tools emitted malformed tool markup, so auto reasoning is off for agent/code/verify tasks."
+text_tool_wire_format_supported = true
+structured_output = "native"
+thinking_modes = ["enabled"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["high", "xhigh", "max"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
+prompt_caching = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
+model_match = "kwaipilot/kat-coder-pro-v2"
+native_tools = true
+preferred_tool_format = "native"
+tool_mode_parity = "interchangeable"
+tool_mode_parity_notes = "Live OpenRouter probe on 2026-06-12 returned a valid provider-native tool call for KAT-Coder-Pro V2."
+prompt_caching = true
+text_tool_wire_format_supported = true
+structured_output = "native"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
+# OpenAI gpt-oss (Harmony) served via OpenRouter. Without an explicit row this
+# slug falls through provider_family openrouter -> openai, matches no `gpt-*`
+# rule (the `openai/` prefix and the unparseable `oss` "version" both fail the
+# match), and lands on a capability-less catch-all that declares NO reasoning
+# support — so the policy resolver cannot even materialize reasoning.
+#
+# `reasoning_required_for_tools = true`: gpt-oss performs tool calls INSIDE the
+# Harmony chain-of-thought channel, so disabling reasoning breaks tool calling.
+# Live OpenRouter probe (openai/gpt-oss-120b, 2026-06-13, identical tool
+# request): reasoning {enabled:false} -> 0 tool_calls + null completion_tokens
+# (the billed-noncommittal failure); reasoning {effort:low} -> 1 clean native
+# tool call; no reasoning field (provider default) -> 1 clean native tool call.
+# `reasoning_disable_supported = false` keeps Harn from ever emitting the
+# `reasoning:{enabled:false}` disable directive on the wire, and the
+# required-for-tools flag keeps the auto policy from flooring tool tasks to off.
+# Must NOT carry a Qwen-style `auto_reasoning_overrides = "off"`.
+#
+# OpenRouter's provider-native tool surface is not stable enough to expose as
+# the default abstraction for this aggregate route: forced native finishes
+# billed-noncommittal (0 dispatchable tool_calls). Between the two TEXT-channel
+# grammars, an empirical A/B (2026-06-21, real OpenRouter calls, task = author a
+# Zig file heavy in `\\` multiline-string literals) showed `text`/heredoc beats
+# `json` on BOTH axes: dispatch 3/3 vs 2/3, and byte-fidelity 3/3 clean vs 0/3
+# clean. The `json` arm corrupted source bodies the same way every GPT-OSS
+# serving stack does — a JSON string arg forces the model to escape the
+# backslashes the Zig source already needs, and gpt-oss double-escapes them
+# (`\\` -> `\\\\` prefixes, escaped quotes, and a run that collapsed into invalid
+# Zig) — while the escape-free heredoc body carried the source verbatim. Pin to
+# `text`. (Same class as the Fireworks GPT-OSS json->text flip; direct
+# Cerebras/Groq/DeepInfra GPT-OSS rows keep `native`, whose provider-native
+# channel does dispatch cleanly on those stacks.)
+#
+# The OpenRouter sub-provider lottery still matters. `openai/gpt-oss-120b` fans
+# out across many upstreams; even with reasoning ON, some mis-serialize Harmony
+# turns and finish billed-noncommittal. Keep the known-clean upstream allowlist:
+# `openrouter_provider_order = ["Cerebras", "Groq"]` materializes to
+# `provider: { order: ["Cerebras","Groq"], allow_fallbacks: false }`.
+[[provider.openrouter]]
+model_match = "openai/gpt-oss-*"
+native_tools = false
+preferred_tool_format = "text"
+structured_output = "native"
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "medium", "high"]
+reasoning_disable_supported = false
+reasoning_required_for_tools = true
+openrouter_provider_order = ["Cerebras", "Groq"]
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+# Full-precision route: the Cerebras/Groq upstream allowlist above only ever
+# lands on full-precision upstreams, so OpenRouter openai/gpt-oss-120b is the
+# trusted-precision REFERENCE the meter precision canary pairs candidates
+# against. Verified clean across the 2026-06-13 live probes documented above.
+serving_precision = "trusted"
+
+[[provider.openrouter]]
+model_match = "stepfun/step-3.7-flash"
+native_tools = true
+preferred_tool_format = "native"
+tool_mode_parity = "interchangeable"
+tool_mode_parity_notes = "Live OpenRouter probe on 2026-06-12 returned a valid provider-native tool call for Step 3.7 Flash with reasoning enabled."
+prompt_caching = true
+structured_output = "native"
+thinking_modes = ["enabled"]
+reasoning_disable_supported = false
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+# July 2026 OpenRouter catalog deltas whose slugs do not inherit useful
+# family-specific capability rows through the OpenAI-compatible transport
+# fallback. Keep them explicit so the catalog audit can catch future rows that
+# need a real tool contract decision.
+[[provider.openrouter]]
+model_match = "x-ai/grok-*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["adaptive"]
+prompt_caching = true
+vision_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
+
+[[provider.openrouter]]
+model_match = "bytedance-seed/*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+prompt_caching = true
+vision_supported = true
+video_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
+model_match = "cohere/north-mini-code:free"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
+model_match = "nvidia/nemotron-3*"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
+
+[[provider.openrouter]]
+model_match = "openrouter/free"
+native_tools = true
+preferred_tool_format = "native"
+structured_output = "native"
+thinking_modes = ["enabled"]
+vision_supported = true
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"

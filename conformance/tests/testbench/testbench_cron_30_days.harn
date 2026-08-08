@@ -1,0 +1,13 @@
+/**
+ * Cron trigger fires daily for 30 simulated days under a paused clock.
+ * Validates that the testbench clock drives the cron connector
+ * deterministically and that all 30 ticks are ordered correctly.
+ */
+pipeline test(harness: Harness, task) {
+  const result = harness.runtime.trigger_test_harness("cron_30_days")
+  harness.stdio.println(result.ok)
+  harness.stdio.println(len(result.emitted) == 30)
+  harness.stdio.println(result.emitted[0].occurred_at == "2026-01-02T00:00:00Z")
+  harness.stdio.println(result.emitted[29].occurred_at == "2026-01-31T00:00:00Z")
+  harness.stdio.println(result.emitted.every({ e -> e.provider == "cron" && e.kind == "tick" }))
+}

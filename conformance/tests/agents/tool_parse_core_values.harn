@@ -1,0 +1,209 @@
+// Object-literal argument values in the bare `name({ ... })` grammar.
+//
+// The value parser is the layer every dialect eventually funnels into: whatever
+// framing a provider wraps around a call, the arguments are read by this
+// grammar. These cases pin what a value may be — quoted and single-quoted
+// strings, backtick template literals (including multi-line bodies and escaped
+// backticks), `+`-folded string fragments, nested objects and arrays, trailing
+// commas, comments — and the two shapes it deliberately refuses.
+import { probe, sample_registry } from "_tool_parse_probe"
+
+pipeline main(harness: Harness) {
+  // Non-ASCII scalars must round-trip through every string channel. The scanner
+  // advances one byte at a time, so a multi-byte scalar pushed per byte used to
+  // land as one Latin-1 char per byte — mojibake in quoted and template values
+  // while heredocs and `\u{...}` escapes decoded correctly.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "nonascii quoted value",
+    "run({ command: \"café ☕ 日本\" })",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "nonascii template value",
+    "run({ command: `café ☕ 日本` })",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "nonascii tagged value",
+    """<tool_call>
+run({ command: "café ☕ 日本" })
+</tool_call>""",
+    sample_registry(),
+  )
+  // A plain object literal surrounded by prose.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "object literal between prose lines",
+    """I'll write the scaffold now.
+edit({ action: "create", path: "a.go", content: "package a\n" })
+That should work.""",
+    sample_registry(),
+  )
+  // A backtick template literal carrying a multi-line body.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "multiline template literal body",
+    """edit({
+  action: "replace_body",
+  path: "a.go",
+  new_body: `
+func Foo() {
+    return 1
+}
+`
+})""",
+    sample_registry(),
+  )
+  // Inside a template literal, `\`` is a literal backtick and `\\` a backslash.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "escaped backtick inside template literal",
+    "edit({ action: \"create\", path: \"a.md\", content: `line with a \\` backtick` })",
+    sample_registry(),
+  )
+  // A single-line template literal in a fully multi-line call.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "single line template literal",
+    """edit({
+    action: "create",
+    path: "simple.txt",
+    content: `hello world`
+})""",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "multiline template literal as whole value",
+    """edit({ action: "create", path: "a.go", content: `package main
+
+func main() {}
+` })""",
+    sample_registry(),
+  )
+  // `+` between two quoted strings folds to one value.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "folds string concatenation",
+    "edit({ action: \"create\", path: \"a.txt\", content: \"hello \" + \"world\" })",
+    sample_registry(),
+  )
+  // The dominant corpus shape: a Go body whose backtick struct tag forces the
+  // model into template + quoted + template concatenation. The fragments must
+  // collapse into one string with the literal backtick tag preserved.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "folds go backtick struct tag concatenation",
+    """edit({ action: "create", path: "status.go", content: `package main
+
+type S struct {
+	Services []ServiceStatus ` + "`json:\"services\"`" + ` // tail
+}
+` })""",
+    sample_registry(),
+  )
+  // A `+` whose right operand is not a string is malformed concatenation. The
+  // parser must reject loudly rather than guess at the intended value.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "rejects non-string concatenation operand",
+    "edit({ action: \"create\", path: \"a.txt\", content: \"x\" + 1 })",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "nested object and array literals",
+    """edit({
+    action: "create",
+    path: "a.go",
+    content: "x",
+    new_body: { "nested": [1, 2, "three"], "flag": true }
+})""",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "trailing commas",
+    """edit({
+    action: "create",
+    path: "a.go",
+    content: "x",
+})""",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "line and block comments",
+    """edit({
+    // Create a new file
+    action: "create", /* must be a valid action */
+    path: "a.go",
+    content: "package a"
+})""",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "single quoted string literals",
+    "edit({ action: 'create', path: 'a.go' })",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "double quoted string value",
+    "run({ command: \"go test ./internal/manifest/\" })",
+    sample_registry(),
+  )
+  // `=` is accepted as a synonym for `:` as the key/value separator, before a
+  // scalar, before a template body, and before a heredoc opener.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "equals as key value separator",
+    "edit({ action= \"create\", path: \"a.go\", content= `x` })",
+    sample_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "equals before heredoc value",
+    """edit({
+    action: "create",
+    path: "a.go",
+    content= <<EOF
+package main
+EOF
+})""",
+    sample_registry(),
+  )
+  // Shape 3 from the DeepSeek forensics: a leading-dot float. Recovering
+  // `.100` to `0.100` keeps the whole call rather than dropping it over a char.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "leading dot floats",
+    """<tool_call>
+run({ command: "x", limit: .100, weight: -.5 })
+</tool_call>""",
+    sample_registry(),
+  )
+}

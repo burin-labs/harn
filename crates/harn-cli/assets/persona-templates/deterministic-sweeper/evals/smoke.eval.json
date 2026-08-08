@@ -1,0 +1,9 @@
+{
+  "_type": "eval_pack_manifest",
+  "id": "template-persona-smoke",
+  "persona": "template_persona",
+  "fixtures": ["fixtures/happy_path.json"],
+  "metrics": [
+    {"name": "smoke_passed", "kind": "boolean"}
+  ]
+}

@@ -1,0 +1,30 @@
+pipeline test(harness: Harness, task) {
+  // Test llm_cost builtin with known model pricing. `llm_cost` returns an
+  // exact `decimal` (money), so it is compared against decimal literals —
+  // decimals form a clean island and never compare equal/ordered against
+  // binary floats.
+  const cost = llm_cost("gpt-4o-mini", 1000, 500)
+  // gpt-4o-mini: $0.15/M input, $0.60/M output
+  // 1000 * 0.15 / 1000000 = 0.00015
+  // 500 * 0.60 / 1000000 = 0.0003
+  // total = 0.00045 — exact, no float drift
+  assert_eq(cost, decimal("0.00045"))
+  assert(cost > decimal("0.0004"), "cost should be > 0.0004")
+  assert(cost < decimal("0.0005"), "cost should be < 0.0005")
+  // Formatting accepts the decimal amount directly.
+  assert_eq(llm_format_usd(cost), "$0.000450")
+  harness.stdio.log("cost ok")
+  // Unknown model returns an exact zero decimal
+  const unknown_cost = llm_cost("unknown-model", 1000, 500)
+  assert_eq(unknown_cost, decimal("0"))
+  harness.stdio.log("unknown ok")
+  // Budget builtins
+  harness.llm.budget(10.0)
+  const remaining = harness.llm.budget_remaining()
+  assert_eq(remaining, 10.0)
+  harness.stdio.log("budget ok")
+  // Session cost starts at 0
+  const session = harness.llm.session_cost()
+  assert_eq(session.total_cost, 0.0)
+  harness.stdio.log("session ok")
+}

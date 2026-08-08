@@ -1,0 +1,37 @@
+pipeline test(harness: Harness, task) {
+  fn count_up(start, end) {
+    let i = start
+    while i < end {
+      yield i
+      i = i + 1
+    }
+  }
+  // Test .next() method
+  const gen = count_up(1, 4)
+  const r1 = gen.next()
+  harness.stdio.println(r1.value)
+  harness.stdio.println(r1.done)
+  const r2 = gen.next()
+  harness.stdio.println(r2.value)
+  harness.stdio.println(r2.done)
+  const r3 = gen.next()
+  harness.stdio.println(r3.value)
+  harness.stdio.println(r3.done)
+  // After exhaustion
+  const r4 = gen.next()
+  harness.stdio.println(r4.value)
+  harness.stdio.println(r4.done)
+  // Test for-in with generator
+  for n in count_up(10, 13) {
+    harness.stdio.println(n)
+  }
+  // Test yield with no value
+  fn empty_yields() {
+    yield
+    yield
+  }
+  const g2 = empty_yields()
+  const e1 = g2.next()
+  harness.stdio.println(e1.value)
+  harness.stdio.println(e1.done)
+}

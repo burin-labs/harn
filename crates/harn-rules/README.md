@@ -1,0 +1,239 @@
+# harn-rules
+
+The declarative structural rule engine for Harn — the Rust core behind
+`harn rules` / lint / codemod surfaces. Part of the
+[Rule Engine program](https://github.com/burin-labs/harn/issues/2826)
+(Epic A, [harn#2827](https://github.com/burin-labs/harn/issues/2827)).
+
+A **rule** says *what to match* and optionally *how to rewrite* it. The
+engine compiles the rule against the tree-sitter machinery in `harn-hostlib`
+and produces matches with metavariable bindings — the structural complement
+to regex/glob search.
+
+This crate ships the **atomic matching tier**
+([harn#2832](https://github.com/burin-labs/harn/issues/2832)), the
+**relational + composite algebra**
+([harn#2833](https://github.com/burin-labs/harn/issues/2833)), the
+**predicate + rewrite layer**
+([harn#2834](https://github.com/burin-labs/harn/issues/2834)), the
+**safety + idempotency gate**
+([harn#2835](https://github.com/burin-labs/harn/issues/2835)), and the
+**whole-project scan lifecycle**
+([harn#2836](https://github.com/burin-labs/harn/issues/2836)), with
+Harn-only semantic capture metadata for resolved bindings and simple static
+types ([harn#2882](https://github.com/burin-labs/harn/issues/2882)).
+
+## Rule shape (TOML)
+
+```toml
+id = "destructure-with-defaults"
+language = "typescript"
+severity = "warning"                 # info | warning (default) | error
+message = "Collapse `?.x ?? default`"
+fix = "{ $KEY: $SRC }"               # presence makes the rule a codemod
+
+[rule]                               # the matcher block — keep it LAST
+pattern = "$SRC?.$KEY ?? $DEFAULT"   # one of: pattern | kind | regex
+```
+
+> **Key ordering:** because `[rule]` opens a TOML table, every scalar field
+> (`id`, `language`, `severity`, `message`, `fix`) must appear **before** it.
+
+A rule's kind is derived from its shape: a `fix` makes it a **codemod**; a
+`message` with no `fix` makes it a **lint**; a bare matcher is a **search**.
+
+### Atomic matcher forms
+
+- `pattern` — a code snippet in the target grammar with `$VAR` metavariable
+  holes. Compiled to a tree-sitter query: each `$VAR` becomes a capture, the
+  snippet's operators/keywords are matched literally (so `??` ≠ `||`), and a
+  repeated `$VAR` unifies (must bind identical text). Variadic `$$$` holes
+  land with the relational tier (#2833).
+- `kind` — a bare tree-sitter node kind (e.g. `"call_expression"`).
+- `regex` — a regular expression over the source text.
+- `query` — a **raw tree-sitter query** (S-expression), used verbatim — the
+  escape hatch for structural selections a `pattern` snippet cannot express,
+  such as capturing an anonymous keyword token. It must bind the matched node
+  to `@__match` (the node re-rooted during matching, and the default replaced
+  span); every other named capture becomes a metavar binding, usable in `fix`
+  and selectable via [`fixTarget`](#surgical-rewrites-with-fixtarget).
+
+A metavar-free `pattern` is a **literal** pattern: `foo()` matches calls to
+`foo` specifically (every non-metavar identifier/literal is constrained to
+its exact text).
+
+A metavar can carry a **typed `$VAR:kind` constraint** (#2839) so it binds
+only to nodes of a syntactic class: `log($ARG:identifier)` matches `log(x)`
+but not `log(f())`. `:kind` is a semantic alias (`expr`/`expression`,
+`stmt`/`statement`, `ty`/`type`, `ident`/`identifier`, resolved to the
+grammar's supertype) or an exact tree-sitter kind. A constraint that names no
+kind in the target grammar is a compile error — the supertype aliases exist in
+some grammars (`expression` in TypeScript/JS/Python) but not others
+(Rust/Go), where an exact kind is used instead.
+
+### Relational + composite algebra
+
+Beyond the atomic leaf, a rule node can add relational and composite keys —
+all ANDed. A node matches iff its atomic part matches *and* every other key
+holds:
+
+```toml
+[rule]
+pattern = "let $NAME = $SRC?.$KEY ?? $DEF"
+[rule.inside]                  # ancestor must match this sub-rule
+kind = "statement_block"
+stopBy = "end"                 # neighbor (default) | end | <rule>
+[rule.not.inside]              # composite `not` of a relational `inside`
+kind = "try_statement"
+stopBy = "end"
+```
+
+- **Relational**: `inside` (ancestor), `has` (descendant), `follows` /
+  `precedes` (siblings), each a sub-rule tuned by `stopBy` and `field`
+  (restrict to a tree-sitter field).
+- **Composite**: `all` / `any` (lists of sub-rules), `not` (a sub-rule),
+  and `matches` (reference a `[utils.NAME]` utility rule by id).
+
+### `where` constraints, `transform`, and `fix`
+
+A rule can narrow matches with `where` predicates, synthesize new metavars
+with `transform`, and rewrite with `fix`:
+
+```toml
+id = "snakeify-getters"
+language = "typescript"
+fix = "$SNAKE()"                     # interpolates $VAR / ${VAR} (and $$ -> $)
+
+[rule]
+pattern = "$FN()"
+
+[[where]]                            # keep only matches that pass every predicate
+metavar = "FN"
+regex = "^get[A-Z]"                  # or: comparison = { op = ">", value = 100 }
+                                     # or: pattern = "..."  (recursive sub-pattern)
+
+[transform.SNAKE]                    # derive a new metavar before fixing
+source = "FN"
+convert = "snake"                    # or: replace = { regex, by } / substring = { start, end }
+```
+
+### Surgical rewrites with `fixTarget`
+
+By default a `fix` replaces the **whole matched node**, so anything the matcher
+does not capture is lost — rewriting `let x: Int = 1` with a `pattern`/`fix`
+that omits the type annotation silently drops `: Int`. `fixTarget` fixes this
+by splicing the `fix` over **only a named capture's span**, leaving the rest of
+the node byte-for-byte intact. Pair it with a raw `query` that captures the
+sub-node you want to change:
+
+```toml
+id = "let-to-const"
+language = "harn"
+fix = "const"                        # scalar fields stay before [rule]
+fixTarget = "kw"                     # replace only the @kw capture's span
+
+[rule]
+query = '(let_binding "let" @kw) @__match'
+```
+
+This rewrites `let x: Int = 1` → `const x: Int = 1`, touching only the keyword.
+`fixTarget` names any capture the matcher always binds (a raw-`query` capture or
+a `$VAR` metavar); an unbound name is an apply-time error. It composes with
+`where` / `transform` unchanged — only the replaced span moves.
+
+For Harn rules, captures are also enriched with semantic metadata when the
+engine can resolve the node to a local declaration/binding or infer a simple
+type from an annotation/literal. The string captures stay in `captures`; the
+metadata is exposed separately as `capture_metadata`.
+
+```toml
+id = "global-target-call"
+language = "harn"
+
+[rule]
+pattern = "$FN($ARG)"
+
+[[where]]
+metavar = "FN"
+resolvesTo = { name = "target", kind = "fn", line = 1 } # 1-based line
+
+[[where]]
+metavar = "ARG"
+type = "int"
+```
+
+`resolvesTo` accepts any subset of `id`, `name`, `kind`, `line`, and `column`;
+`id` is `<kind>:<name>@<line>:<column>` using 1-based line/column. This is a
+Harn-only first cut: cross-language name/type resolvers are intentionally not
+invented here.
+
+`CompiledRule::apply(source)` runs the rule, drops matches that fail any
+constraint, interpolates each match's `fix` (from its captured + transformed
+metavars), and splices the replacements in — format-preserving, the same
+byte-splice guarantee as `ast.batch_apply`. It returns the rewritten source
+plus the per-match edits; the caller decides whether to write.
+
+### Safety, applicability, and idempotency
+
+A rule declares a `safety` tier — `format-only` → `behavior-preserving` →
+`scope-local` (default) → `surface-changing` → `capability-changing` →
+`needs-human`. The two safest map to **machine-applicable**; the rest are
+**suggestions** (opt-in). The gate:
+
+- `apply` always computes the preview (and reports `safety`,
+  `applicability`, and whether the fix is `idempotent`).
+- `auto_apply` refuses anything above `behavior-preserving` — so the runner
+  never silently applies a risky fix.
+- `apply_checked` additionally fails if the fix is **not idempotent** (re-
+  running it produces further changes — it never reaches a fixed point).
+- `diagnostics(source)` emits one diagnostic per match (message, severity,
+  span, applicability, interpolated fix) — the mapping surface the linter
+  and LSP convert into `LintDiagnostic` / `FixEdit`.
+
+## Usage
+
+```rust
+use harn_rules::{Rule, CompiledRule};
+
+let rule = Rule::from_toml_str(/* … */)?;
+let compiled = CompiledRule::compile(&rule)?;
+for m in compiled.run(source)? {
+    println!("{} at {:?}: {}", m.rule_id, m.span, m.text);
+    for (name, binding) in &m.bindings {
+        println!("  ${name} = {}", binding.text);
+    }
+}
+```
+
+Load from disk with `load_rule_file(path)` or `load_rule_dir(dir)`.
+
+### Whole-project lifecycle
+
+For rules that must see the whole repo before editing — or that create /
+delete files (import insertion, codegen, dead-code removal) — implement a
+`ScanningRecipe` (OpenRewrite-style): a deterministic, path-sorted `scan`
+pass folds every file into a typed accumulator, then a `generate` pass turns
+that state into a set of `FileChange`s (`Edit` / `Create` / `Delete`).
+
+```rust
+use harn_rules::{run_recipe, RuleRecipe};
+
+// Run a declarative codemod across a project (per-file, no scan state):
+let run = run_recipe(&RuleRecipe { rule: &compiled }, source_files)?;
+for change in &run.changes { /* the caller writes / formats them */ }
+```
+
+`run_recipe` returns the changes; the caller (a CLI, the staged filesystem)
+decides whether to write and `harn fmt` them.
+
+### Data tables (report-only)
+
+`data_table(rule, files)` runs a rule across a project **without editing** and
+returns a columnar `DataTable` — one row per match (path, position, text,
+metavar bindings) plus a metrics summary (total findings, files, per-file
+counts). It serializes to JSON for inventory / impact analysis / audit:
+
+```rust
+let table = harn_rules::data_table(&compiled, &source_files)?;
+println!("{}", table.to_json());   // { rule_id, columns, rows, summary }
+```

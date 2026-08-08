@@ -1,0 +1,4 @@
+pipeline default(harness: Harness) {
+  const u = {name: "Alice", email: "a@example.com", tags: ["admin", "dev", "ops"]}
+  harness.stdio.println(harness.fs.render_prompt("fixtures/template/nested.prompt", {user: u}))
+}

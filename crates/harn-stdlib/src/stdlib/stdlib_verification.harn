@@ -1,0 +1,133 @@
+pub import {
+  verification_file_hash_snapshot,
+  verification_snapshot_staleness,
+  verification_warm_state_facts,
+} from "std/verification_core"
+pub import {
+  verification_affected_targets,
+  verification_diagnostic_delta,
+  verification_finish_check,
+  verification_gate_input,
+  verification_hud_model,
+  verification_hud_text,
+  verification_ladder_plan,
+  verification_observation_from_command_result,
+  verification_record_check_result,
+  verification_run_check,
+  verification_start_check,
+  verification_start_warm_state,
+  verification_teardown_warm_state,
+  verification_toolchain_facts,
+} from "std/verification_public"
+
+pub type VerificationFileHashSnapshotEntry = {
+  path: string,
+  known: bool,
+  readable: bool,
+  hash: string?,
+  hash_source: "indexed" | "disk" | "missing",
+  size: int?,
+  mtime_ms: int?,
+  indexed_hash: string?,
+  indexed_mtime_ms: int?,
+  last_edit_seq: int,
+}
+
+pub type VerificationFileHashSnapshot = {
+  seq: int,
+  captured_at_ms: int,
+  algorithm: string,
+  snapshot: dict,
+  missing: list<string>,
+  files: list<VerificationFileHashSnapshotEntry>,
+}
+
+pub type VerificationCheckObservation = {
+  durationMs?: int,
+  warm: bool,
+  at?: string,
+  exit?: int,
+  failureSignature?: string,
+  snapshot?: dict,
+}
+
+pub type VerificationRecordedCheck = {
+  result: dict,
+  observation: VerificationCheckObservation,
+  row: dict?,
+  snapshot: VerificationFileHashSnapshot?,
+}
+
+pub type VerificationStartedCheck = {
+  row_id: string,
+  started: dict,
+  observation_options: dict,
+  snapshot: VerificationFileHashSnapshot?,
+}
+
+pub type VerificationToolchainFact = {
+  id: string,
+  name: string,
+  available: bool,
+  version?: string,
+  raw_version: string,
+  cache_identity: dict,
+  probe: dict,
+}
+
+pub type VerificationWarmStateFact = {
+  id: string,
+  name: string,
+  configured: bool,
+  available: bool,
+  ready: bool,
+  warm: bool,
+  timing_kind: string,
+  mode: string,
+  expected_warm_delta_ms?: int,
+  warm_ms?: int,
+  cold_ms?: int,
+  cache_identity: dict,
+  probe: dict,
+}
+
+pub type VerificationWarmStateLifecycleReceipt = dict
+
+pub type VerificationAffectedTarget = dict
+
+pub type VerificationAffectedAdapterFact = {
+  id: string,
+  parser_id: string,
+  status: string,
+  ok: bool,
+  target_count: int,
+  exit?: int,
+  error?: string,
+}
+
+pub type VerificationAffectedTargetsFact = {
+  changed_paths: list<string>,
+  targets: list<VerificationAffectedTarget>,
+  adapters: list<VerificationAffectedAdapterFact>,
+  fallback: dict,
+}
+
+pub type VerificationProfileMatch = {row: dict, specificity: int, index: int}
+
+pub type VerificationLadderPlanEntry = dict
+
+pub type VerificationLadderPlan = {
+  schema: string,
+  query: dict,
+  matches: list<VerificationProfileMatch>,
+  selected: list<VerificationLadderPlanEntry>,
+  skipped: list<dict>,
+  fallback: bool,
+  reason: string,
+}
+
+pub type VerificationDiagnosticDelta = dict
+
+pub type VerificationGateInput = dict
+// Keep public verification aliases on this facade for the same type-checker
+// compatibility boundary as the agent option and stall facades.

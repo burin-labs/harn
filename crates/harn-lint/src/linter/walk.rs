@@ -1,0 +1,1489 @@
+//! The main AST dispatch, isolated so `lint_node` does not dominate the
+//! surrounding state-tracking plumbing.
+
+mod casts;
+
+use harn_lexer::{FixEdit, Span, StringSegment};
+use harn_parser::{BindingPattern, DiagnosticCode as Code, Node, SNode};
+
+use self::casts::unnecessary_cast_target;
+use super::Linter;
+use crate::decls::{FnDeclaration, ImportInfo, TypeDeclaration};
+use crate::diagnostic::{LintDiagnostic, LintSeverity};
+use crate::fixes::{
+    contains_optional_chaining, empty_statement_removal_fix, is_nan_free, is_pure_expression,
+    nil_fallback_ternary_parts, unnecessary_cast_fix,
+};
+use crate::harndoc::extract_harndoc;
+use crate::naming::simplify_bool_comparison;
+
+impl<'a> Linter<'a> {
+    pub(super) fn lint_node(&mut self, snode: &SNode) {
+        if self.rules_visit_nodes {
+            self.run_node_rules(snode);
+        }
+        match &snode.node {
+            Node::Pipeline {
+                params,
+                return_type,
+                body,
+                name,
+                is_pub,
+                ..
+            } => {
+                self.known_functions.insert(name.clone());
+                self.record_callable_signature_type_references(params, return_type);
+                if *is_pub {
+                    self.check_public_api_types(
+                        "pipeline",
+                        name,
+                        params,
+                        return_type,
+                        snode.span,
+                        false,
+                    );
+                }
+                if return_type.is_none()
+                    && *is_pub
+                    && !self.require_public_api_types
+                    && !Self::is_entry_pipeline_name(name)
+                    && !Self::is_test_pipeline_name(name)
+                {
+                    self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintPipelineReturnType,
+                        rule: "pipeline-return-type".into(),
+                        message: format!(
+                            "public pipeline `{name}` has no declared return type; \
+                             explicit return types will be required in a future release"
+                        ),
+                        span: snode.span,
+                        severity: LintSeverity::Warning,
+                        suggestion: Some(format!(
+                            "declare a return type: `pub pipeline {name}(...) -> TypeExpr {{ ... }}`"
+                        )),
+                        fix: None,
+                    });
+                }
+                self.push_scope();
+                for p in params {
+                    if let Some(scope) = self.scopes.last_mut() {
+                        scope.insert(p.name.clone());
+                    }
+                    self.references.insert(p.name.clone());
+                }
+                self.references.insert(name.clone());
+                if Self::is_test_pipeline_name(name) {
+                    self.test_pipeline_depth += 1;
+                }
+                let _ = self.analyze_secret_scan_block(body, false);
+                self.enter_long_running_body(body);
+                self.lint_block(body);
+                self.exit_long_running_body();
+                if Self::is_test_pipeline_name(name) {
+                    self.test_pipeline_depth -= 1;
+                }
+                self.pop_scope();
+            }
+
+            Node::FnDecl {
+                name,
+                params,
+                return_type,
+                where_clauses,
+                body,
+                is_pub,
+                ..
+            } => {
+                self.lint_function_name(name, snode.span);
+                self.known_functions.insert(name.clone());
+                self.fn_declarations.push(FnDeclaration {
+                    name: name.clone(),
+                    span: snode.span,
+                    is_pub: *is_pub,
+                    is_method: self.in_impl_block,
+                });
+                if *is_pub {
+                    self.check_public_api_types(
+                        "fn",
+                        name,
+                        params,
+                        return_type,
+                        snode.span,
+                        self.require_stdlib_metadata,
+                    );
+                }
+                // Opt-in: `require_docstrings` via config, implied for
+                // stdlib sources (HARN-STD-101 defers to this rule when no
+                // doc block exists at all, so the stdlib gate must keep it
+                // armed or undocumented stdlib fns would escape both lints).
+                if *is_pub
+                    && (self.require_docstrings || self.require_stdlib_metadata)
+                    && self
+                        .source
+                        .and_then(|source| extract_harndoc(source, &snode.span))
+                        .is_none()
+                    && !self.has_adjacent_migratable_comment(snode.span.line)
+                {
+                    self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintMissingHarndoc,
+                        rule: "missing-harndoc".into(),
+                        message: format!(
+                            "public function `{name}` is missing a `/** */` doc comment"
+                        ),
+                        span: snode.span,
+                        severity: LintSeverity::Warning,
+                        suggestion: Some(format!(
+                            "add a `/** ... */` HarnDoc block directly above `pub fn {name}`"
+                        )),
+                        fix: None,
+                    });
+                }
+                if *is_pub && self.require_stdlib_metadata {
+                    self.check_stdlib_metadata(name, snode.span);
+                }
+                if *is_pub && self.require_stdlib_metadata && return_type.is_none() {
+                    self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintMissingStdlibReturnType,
+                        rule: "missing-stdlib-return-type".into(),
+                        message: format!(
+                            "public stdlib function `{name}` is missing an explicit return type"
+                        ),
+                        span: self.name_anchored_span(name, snode.span),
+                        severity: LintSeverity::Warning,
+                        suggestion: Some(format!(
+                            "declare a return type: `pub fn {name}(...) -> Type {{ ... }}`"
+                        )),
+                        fix: None,
+                    });
+                }
+                self.record_callable_signature_type_references(params, return_type);
+                for clause in where_clauses {
+                    self.record_type_expr_references(&clause.bound);
+                }
+                self.check_cyclomatic_complexity(name, body, snode.span);
+                self.push_scope();
+                let saved_loop_depth = self.loop_depth;
+                self.loop_depth = 0;
+                for p in params {
+                    self.declare_parameter(&p.name, snode.span);
+                }
+                self.return_type_stack.push(return_type.clone());
+                self.harness_param_stack
+                    .push(Self::callable_harness_param(params));
+                if harn_vm::connector_export_effect_class(name).is_some() {
+                    self.connector_effect_export_stack.push(name.clone());
+                }
+                self.lint_param_default_values(params);
+                let _ = self.analyze_secret_scan_block(body, false);
+                self.enter_long_running_body(body);
+                self.lint_block(body);
+                self.exit_long_running_body();
+                if harn_vm::connector_export_effect_class(name).is_some() {
+                    self.connector_effect_export_stack.pop();
+                }
+                self.harness_param_stack.pop();
+                self.return_type_stack.pop();
+                self.loop_depth = saved_loop_depth;
+                self.pop_scope();
+            }
+
+            Node::ToolDecl {
+                name,
+                params,
+                return_type,
+                body,
+                is_pub,
+                ..
+            } => {
+                self.lint_function_name(name, snode.span);
+                self.known_functions.insert(name.clone());
+                self.fn_declarations.push(FnDeclaration {
+                    name: name.clone(),
+                    span: snode.span,
+                    is_pub: *is_pub,
+                    is_method: false,
+                });
+                self.record_callable_signature_type_references(params, return_type);
+                self.check_cyclomatic_complexity(name, body, snode.span);
+                self.push_scope();
+                let saved_loop_depth = self.loop_depth;
+                self.loop_depth = 0;
+                for p in params {
+                    self.declare_parameter(&p.name, snode.span);
+                }
+                self.return_type_stack.push(return_type.clone());
+                self.harness_param_stack
+                    .push(Self::callable_harness_param(params));
+                self.lint_param_default_values(params);
+                let _ = self.analyze_secret_scan_block(body, false);
+                self.enter_long_running_body(body);
+                self.lint_block(body);
+                self.exit_long_running_body();
+                self.harness_param_stack.pop();
+                self.return_type_stack.pop();
+                self.loop_depth = saved_loop_depth;
+                self.pop_scope();
+            }
+
+            Node::SkillDecl {
+                name,
+                fields,
+                is_pub,
+            } => {
+                self.known_functions.insert(name.clone());
+                self.fn_declarations.push(FnDeclaration {
+                    name: name.clone(),
+                    span: snode.span,
+                    is_pub: *is_pub,
+                    is_method: false,
+                });
+                for (_k, value) in fields {
+                    self.lint_node(value);
+                }
+            }
+
+            Node::EvalPackDecl {
+                binding_name,
+                fields,
+                body,
+                summarize,
+                is_pub,
+                ..
+            } => {
+                self.known_functions.insert(binding_name.clone());
+                self.fn_declarations.push(FnDeclaration {
+                    name: binding_name.clone(),
+                    span: snode.span,
+                    is_pub: *is_pub,
+                    is_method: false,
+                });
+                for (_k, value) in fields {
+                    self.lint_node(value);
+                }
+                self.push_scope();
+                if let Some(scope) = self.scopes.last_mut() {
+                    scope.insert("id".to_string());
+                    scope.insert("version".to_string());
+                    for (field_name, _) in fields {
+                        scope.insert(field_name.clone());
+                    }
+                }
+                self.lint_block(body);
+                if let Some(summary_body) = summarize {
+                    self.lint_block(summary_body);
+                }
+                self.pop_scope();
+            }
+
+            Node::ImplBlock { type_name, methods } => {
+                self.type_references.insert(type_name.clone());
+                let saved = self.in_impl_block;
+                self.in_impl_block = true;
+                for method in methods {
+                    self.lint_node(method);
+                }
+                self.in_impl_block = saved;
+            }
+
+            Node::LetBinding {
+                pattern,
+                type_ann,
+                value,
+                is_pub,
+            } => {
+                if let Some(name) = Self::simple_binding_name(pattern) {
+                    self.record_mcp_registry_binding(name, value);
+                }
+                self.lint_node(value);
+                if let Some(ann) = type_ann {
+                    self.record_type_expr_references(ann);
+                    self.check_eager_collection_conversion(ann, value);
+                }
+                self.declare_pattern_variables(pattern, snode.span, true, *is_pub);
+                self.lint_binding_pattern_defaults(pattern);
+            }
+
+            Node::ConstBinding {
+                pattern,
+                type_ann,
+                value,
+                is_pub,
+            } => {
+                if let Some(name) = Self::simple_binding_name(pattern) {
+                    self.record_mcp_registry_binding(name, value);
+                }
+                self.lint_node(value);
+                if let Some(ann) = type_ann {
+                    self.record_type_expr_references(ann);
+                    self.check_eager_collection_conversion(ann, value);
+                }
+                self.declare_pattern_variables(pattern, snode.span, false, *is_pub);
+                self.lint_binding_pattern_defaults(pattern);
+            }
+
+            Node::Assignment { target, value, .. } => {
+                if let Some(name) = Self::root_var_name(target) {
+                    self.record_mcp_registry_binding(&name, value);
+                    self.assignments.insert(name);
+                }
+                self.lint_node(target);
+                self.lint_node(value);
+            }
+
+            Node::Identifier(name) => {
+                self.check_renamed_stdlib_symbol(name, snode.span);
+                self.references.insert(name.clone());
+                self.function_references.insert(name.clone());
+            }
+
+            Node::FunctionCall {
+                name,
+                type_args,
+                args,
+            } => {
+                self.check_renamed_stdlib_symbol(name, snode.span);
+                self.check_ambient_clock_builtin(name, snode.span);
+                self.check_ambient_stdio_builtin(name, snode.span);
+                self.check_ambient_fs_builtin(name, snode.span);
+                self.check_ambient_env_builtin(name, snode.span);
+                self.check_ambient_random_builtin(name, args.len(), snode.span);
+                self.check_ambient_net_builtin(name, snode.span);
+                self.check_ambient_harness_method(name, args, snode.span);
+                self.references.insert(name.clone());
+                self.function_references.insert(name.clone());
+                self.function_calls.push((name.clone(), snode.span));
+                if name == "mcp_tools" {
+                    if let Some(registry) = args.first() {
+                        self.warn_mcp_tools_missing_annotations(registry);
+                    }
+                }
+                if name == "register_step_hook" {
+                    self.validate_step_hook_target(args, snode.span);
+                }
+                if Self::is_assert_builtin(name) && !self.in_test_pipeline() {
+                    self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintAssertOutsideTest,
+                        rule: "assert-outside-test".into(),
+                        message: format!(
+                            "`{name}` is intended for test pipelines, not production control flow"
+                        ),
+                        span: snode.span,
+                        severity: LintSeverity::Warning,
+                        suggestion: Some(
+                            "use `require` for invariants in non-test code".to_string(),
+                        ),
+                        fix: None,
+                    });
+                }
+                if name == "llm_call" && args.get(1).is_some_and(Self::has_interpolation) {
+                    self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintPromptInjectionRisk,
+                        rule: "prompt-injection-risk".into(),
+                        message:
+                            "interpolated data in the `llm_call` system prompt can smuggle untrusted instructions"
+                                .to_string(),
+                        span: snode.span,
+                        severity: LintSeverity::Warning,
+                        suggestion: Some(
+                            "keep the system prompt static and pass dynamic data in the user prompt or options"
+                                .to_string(),
+                        ),
+                        fix: None,
+                    });
+                }
+                if let Some(export) = self.connector_effect_export_stack.last() {
+                    if let Some(reason) =
+                        harn_vm::connector_export_denied_builtin_reason(export, name)
+                    {
+                        self.diagnostics.push(LintDiagnostic {
+                            code: Code::LintConnectorEffectPolicy,
+                            rule: "connector-effect-policy".into(),
+                            message: format!(
+                                "connector export `{export}` calls disallowed builtin `{name}`: {reason}"
+                            ),
+                            span: snode.span,
+                            severity: LintSeverity::Warning,
+                            suggestion: Some(format!(
+                                "move `{name}` out of `{export}` or configure a trusted connector effect-policy override"
+                            )),
+                            fix: None,
+                        });
+                    }
+                }
+                self.check_redundant_clone_args(name, args);
+                if let Some(target) = unnecessary_cast_target(name, args) {
+                    let inner = &args[0];
+                    let fix = unnecessary_cast_fix(self.source, snode.span, inner.span);
+                    let article = if matches!(target, "int") { "an" } else { "a" };
+                    self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintUnnecessaryCast,
+                        rule: "unnecessary-cast".into(),
+                        message: format!(
+                            "`{name}` is a no-op here — its argument is already {article} {target}"
+                        ),
+                        span: snode.span,
+                        severity: LintSeverity::Warning,
+                        suggestion: Some(format!("remove the redundant `{name}(...)` wrapper")),
+                        fix,
+                    });
+                }
+                if Self::call_uses_background_flag(name, args) {
+                    self.warn_unmanaged_long_running_call(name, snode.span);
+                }
+                for type_arg in type_args {
+                    self.record_type_expr_references(type_arg);
+                }
+                if name == "schema_of" && args.len() == 1 {
+                    if let Node::Identifier(type_name) = &args[0].node {
+                        self.type_references.insert(type_name.clone());
+                    }
+                }
+                for arg in args {
+                    self.lint_node(arg);
+                }
+            }
+
+            Node::ValueCall { callee, args } => {
+                self.lint_node(callee);
+                for arg in args {
+                    self.lint_node(arg);
+                }
+            }
+            Node::MethodCall {
+                object,
+                method,
+                args,
+            }
+            | Node::OptionalMethodCall {
+                object,
+                method,
+                args,
+            } => {
+                self.check_harness_method_effect_policy(object, method, args, snode.span);
+                self.lint_node(object);
+                for arg in args {
+                    self.lint_node(arg);
+                }
+            }
+
+            Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
+                if let Node::FunctionCall { name, .. } = &object.node {
+                    if Self::is_boundary_api(name) {
+                        self.diagnostics.push(LintDiagnostic {
+                            code: Code::LintUntypedDictAccess,
+                            rule: "untyped-dict-access".into(),
+                            message: format!(
+                                "property access on raw `{name}()` result without schema validation"
+                            ),
+                            span: snode.span,
+                            severity: LintSeverity::Warning,
+                            suggestion: Some(
+                                "assign to a variable and validate with schema_expect() or schema_check() first"
+                                    .to_string(),
+                            ),
+                            fix: None,
+                        });
+                    }
+                }
+                self.lint_node(object);
+            }
+
+            Node::SubscriptAccess { object, index }
+            | Node::OptionalSubscriptAccess { object, index } => {
+                if let Node::FunctionCall { name, .. } = &object.node {
+                    if Self::is_boundary_api(name) {
+                        self.diagnostics.push(LintDiagnostic {
+                            code: Code::LintUntypedDictAccess,
+                            rule: "untyped-dict-access".into(),
+                            message: format!(
+                                "subscript access on raw `{name}()` result without schema validation"
+                            ),
+                            span: snode.span,
+                            severity: LintSeverity::Warning,
+                            suggestion: Some(
+                                "assign to a variable and validate with schema_expect() or schema_check() first"
+                                    .to_string(),
+                            ),
+                            fix: None,
+                        });
+                    }
+                }
+                self.lint_node(object);
+                self.lint_node(index);
+            }
+
+            Node::SliceAccess { object, start, end } => {
+                self.lint_node(object);
+                if let Some(s) = start {
+                    self.lint_node(s);
+                }
+                if let Some(e) = end {
+                    self.lint_node(e);
+                }
+            }
+
+            Node::BinaryOp { op, left, right } => {
+                if let Some((message, replacement)) =
+                    Self::constant_logical_reduction(op, left, right)
+                {
+                    self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintConstantLogicalOperand,
+                        rule: "constant-logical-operand".into(),
+                        message,
+                        span: snode.span,
+                        severity: LintSeverity::Warning,
+                        suggestion: Some(format!("replace this expression with `{replacement}`")),
+                        fix: Some(vec![FixEdit {
+                            span: snode.span,
+                            replacement: replacement.to_string(),
+                        }]),
+                    });
+                }
+                let is_self_comparison = (op == "==" || op == "!=")
+                    && left.node == right.node
+                    && is_pure_expression(&left.node);
+                if is_self_comparison {
+                    let replacement = if op == "==" { "true" } else { "false" };
+                    // A float operand may be NaN, for which `x == x` is `false`
+                    // and `x != x` is `true` (the idiomatic NaN test). Folding
+                    // the comparison to a constant is only sound when the
+                    // operand provably cannot be a NaN float, so gate both the
+                    // autofix and the "replace with <const>" suggestion on
+                    // `is_nan_free`. Otherwise still flag the smell, but leave
+                    // the code untouched and point at `is_nan(...)`.
+                    let (suggestion, fix) = if is_nan_free(&left.node) {
+                        (
+                            format!("replace this comparison with `{replacement}`"),
+                            Some(vec![FixEdit {
+                                span: snode.span,
+                                replacement: replacement.to_string(),
+                            }]),
+                        )
+                    } else {
+                        (
+                            format!(
+                                "use `is_nan(...)` to test for NaN; this is otherwise \
+                                 always `{replacement}` for non-NaN values"
+                            ),
+                            None,
+                        )
+                    };
+                    self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintPointlessComparison,
+                        rule: "pointless-comparison".into(),
+                        message: format!("expression is compared to itself with `{op}`"),
+                        span: snode.span,
+                        severity: LintSeverity::Warning,
+                        suggestion: Some(suggestion),
+                        fix,
+                    });
+                }
+                if (op == "==" || op == "!=") && !is_self_comparison {
+                    let is_bool_left = matches!(left.node, Node::BoolLiteral(_));
+                    let is_bool_right = matches!(right.node, Node::BoolLiteral(_));
+                    // `x?.y == false` is a presence test, not redundancy:
+                    // a nil receiver makes the comparison `false` while the
+                    // "simplified" `!x?.y` would be `true`. Skip the lint
+                    // (and its behavior-changing autofix) for operands that
+                    // can be nil via optional chaining.
+                    let other_can_be_nil = if is_bool_left {
+                        contains_optional_chaining(&right.node)
+                    } else {
+                        contains_optional_chaining(&left.node)
+                    };
+                    if (is_bool_left || is_bool_right) && !other_can_be_nil {
+                        let (suggestion, msg) = if op == "==" {
+                            if matches!(right.node, Node::BoolLiteral(true))
+                                || matches!(left.node, Node::BoolLiteral(true))
+                            {
+                                (
+                                    "remove the comparison, use the expression directly",
+                                    "comparison to `true` is redundant",
+                                )
+                            } else {
+                                ("use `!expr` instead", "comparison to `false` is redundant")
+                            }
+                        } else if matches!(right.node, Node::BoolLiteral(true))
+                            || matches!(left.node, Node::BoolLiteral(true))
+                        {
+                            ("use `!expr` instead", "`!= true` is redundant")
+                        } else {
+                            (
+                                "remove the comparison, use the expression directly",
+                                "`!= false` is redundant",
+                            )
+                        };
+                        let fix = self.source.and_then(|src| {
+                            let expr_text = src.get(snode.span.start..snode.span.end)?;
+                            let replacement = simplify_bool_comparison(expr_text)?;
+                            Some(vec![FixEdit {
+                                span: snode.span,
+                                replacement,
+                            }])
+                        });
+                        self.diagnostics.push(LintDiagnostic {
+                            code: Code::LintComparisonToBool,
+                            rule: "comparison-to-bool".into(),
+                            message: msg.to_string(),
+                            span: snode.span,
+                            severity: LintSeverity::Warning,
+                            suggestion: Some(suggestion.to_string()),
+                            fix,
+                        });
+                    }
+                }
+                if matches!(op.as_str(), "+" | "-" | "*" | "/" | "%") {
+                    let has_bad_literal =
+                        matches!(left.node, Node::BoolLiteral(_) | Node::NilLiteral)
+                            || matches!(right.node, Node::BoolLiteral(_) | Node::NilLiteral);
+                    if has_bad_literal {
+                        let fix = if op == "+" {
+                            self.source.and_then(|src| {
+                                let is_left_str = matches!(&left.node, Node::StringLiteral(_));
+                                let is_right_str = matches!(&right.node, Node::StringLiteral(_));
+                                if !is_left_str && !is_right_str {
+                                    return None;
+                                }
+                                let (str_node, other_node) = if is_left_str {
+                                    (&**left, &**right)
+                                } else {
+                                    (&**right, &**left)
+                                };
+                                let str_text = src.get(str_node.span.start..str_node.span.end)?;
+                                let other_text =
+                                    src.get(other_node.span.start..other_node.span.end)?;
+                                let inner = str_text.strip_prefix('"')?.strip_suffix('"')?;
+                                let replacement = if is_left_str {
+                                    format!("\"{inner}${{{other_text}}}\"")
+                                } else {
+                                    format!("\"${{{other_text}}}{inner}\"")
+                                };
+                                Some(vec![FixEdit {
+                                    span: snode.span,
+                                    replacement,
+                                }])
+                            })
+                        } else {
+                            None
+                        };
+                        self.diagnostics.push(LintDiagnostic {
+                            code: Code::LintInvalidBinaryOpLiteral,
+                            rule: "invalid-binary-op-literal".into(),
+                            message: format!(
+                                "operator '{op}' used with boolean or nil literal — this will cause a runtime error"
+                            ),
+                            span: snode.span,
+                            severity: LintSeverity::Warning,
+                            suggestion: Some(
+                                "use to_string() or string interpolation to convert values explicitly".to_string(),
+                            ),
+                            fix,
+                        });
+                    }
+                }
+                self.lint_node(left);
+                self.lint_node(right);
+            }
+
+            Node::UnaryOp { operand, .. } => {
+                self.lint_node(operand);
+            }
+
+            Node::Ternary {
+                condition,
+                true_expr,
+                false_expr,
+            } => {
+                self.lint_node(condition);
+                self.lint_node(true_expr);
+                self.lint_node(false_expr);
+
+                // Detect ternary fallbacks over a nil check where the non-nil
+                // branch is identical to the checked variable:
+                //   x == nil ? fallback : x   →   x ?? fallback
+                //   x != nil ? x : fallback   →   x ?? fallback
+                // Only fires when the checked variable is a bare identifier so
+                // it is evaluated exactly once in both forms.
+                if let Some((ident, fallback)) =
+                    nil_fallback_ternary_parts(condition, true_expr, false_expr)
+                {
+                    let fix = self.source.and_then(|src| {
+                        let fallback_text = src.get(fallback.span.start..fallback.span.end)?;
+                        let replacement = format!("{ident} ?? {fallback_text}");
+                        Some(vec![FixEdit {
+                            span: snode.span,
+                            replacement,
+                        }])
+                    });
+                    self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintRedundantNilTernary,
+                        rule: "redundant-nil-ternary".into(),
+                        message: format!(
+                            "ternary nil check over `{ident}` can be replaced with `{ident} ?? <fallback>`"
+                        ),
+                        span: snode.span,
+                        severity: LintSeverity::Warning,
+                        suggestion: Some(format!("use `{ident} ?? <fallback>` instead")),
+                        fix,
+                    });
+                }
+            }
+
+            Node::IfElse {
+                condition,
+                then_body,
+                else_body,
+                ..
+            } => {
+                self.lint_node(condition);
+                if let Node::BoolLiteral(value) = &condition.node {
+                    self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintPointlessComparison,
+                        rule: "pointless-comparison".into(),
+                        message: format!("if condition is always `{value}`"),
+                        span: condition.span,
+                        severity: LintSeverity::Warning,
+                        suggestion: Some(
+                            "remove the constant condition or replace it with real branching"
+                                .to_string(),
+                        ),
+                        fix: None,
+                    });
+                }
+                if then_body.is_empty() {
+                    // Skip autofix when an `else` branch exists (dropping the
+                    // whole if-else would silently drop the else body) or when
+                    // the condition has observable side effects.
+                    let fix = if else_body.is_none() && is_pure_expression(&condition.node) {
+                        empty_statement_removal_fix(self.source, snode.span)
+                    } else {
+                        None
+                    };
+                    self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintEmptyBlock,
+                        rule: "empty-block".into(),
+                        message: "if block has an empty body".to_string(),
+                        span: snode.span,
+                        severity: LintSeverity::Warning,
+                        suggestion: Some("remove the empty if or add a body".to_string()),
+                        fix,
+                    });
+                }
+                if let Some(else_b) = else_body {
+                    let then_returns = then_body
+                        .last()
+                        .is_some_and(|s| matches!(s.node, Node::ReturnStmt { .. }));
+                    let else_returns = else_b
+                        .last()
+                        .is_some_and(|s| matches!(s.node, Node::ReturnStmt { .. }));
+                    if then_returns && else_returns {
+                        // Rewrite `} else { <body> }` as `}\n<indent><body>`.
+                        let fix = self.source.and_then(|src| {
+                            let then_last = then_body.last()?;
+                            let else_first = else_b.first()?;
+                            let else_last = else_b.last()?;
+                            let search_start = then_last.span.end;
+                            let body_text = src.get(else_first.span.start..else_last.span.end)?;
+                            let else_block_end = snode.span.end;
+                            let between = src.get(search_start..else_first.span.start)?;
+                            let else_kw_off = between.find("else")?;
+                            let else_start = search_start + else_kw_off;
+                            let line_start =
+                                src[..snode.span.start].rfind('\n').map_or(0, |p| p + 1);
+                            let indent = &src[line_start..snode.span.start];
+                            let close_brace = src.get(search_start..else_start)?.rfind('}')?;
+                            let replace_start = search_start + close_brace + 1;
+                            Some(vec![FixEdit {
+                                span: Span::with_offsets(
+                                    replace_start,
+                                    else_block_end,
+                                    then_last.span.end_line,
+                                    1,
+                                ),
+                                replacement: format!("\n{indent}{body_text}"),
+                            }])
+                        });
+                        self.diagnostics.push(LintDiagnostic {
+                            code: Code::LintUnnecessaryElseReturn,
+                            rule: "unnecessary-else-return".into(),
+                            message: "both if and else branches return — else is unnecessary"
+                                .to_string(),
+                            span: snode.span,
+                            severity: LintSeverity::Warning,
+                            suggestion: Some(
+                                "remove the else and place its body after the if".to_string(),
+                            ),
+                            fix,
+                        });
+                    }
+                }
+                self.push_scope();
+                self.lint_value_block(then_body);
+                self.pop_scope();
+                if let Some(else_b) = else_body {
+                    self.push_scope();
+                    self.lint_value_block(else_b);
+                    self.pop_scope();
+                }
+            }
+
+            Node::ForIn {
+                pattern,
+                iterable,
+                body,
+            } => {
+                self.lint_node(iterable);
+                if body.is_empty() {
+                    // A pure iterable makes the whole loop a removable no-op.
+                    let fix = if is_pure_expression(&iterable.node) {
+                        empty_statement_removal_fix(self.source, snode.span)
+                    } else {
+                        None
+                    };
+                    self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintEmptyBlock,
+                        rule: "empty-block".into(),
+                        message: "for loop has an empty body".to_string(),
+                        span: snode.span,
+                        severity: LintSeverity::Warning,
+                        suggestion: Some("remove the empty for loop or add a body".to_string()),
+                        fix,
+                    });
+                }
+                self.push_scope();
+                match pattern {
+                    BindingPattern::Identifier(name) => {
+                        if let Some(scope) = self.scopes.last_mut() {
+                            scope.insert(name.clone());
+                        }
+                        self.references.insert(name.clone());
+                        // Track the iteration binding so the
+                        // undefined-function lint treats it as a
+                        // potentially-callable local (e.g. when the
+                        // loop iterates over closures and invokes
+                        // them in the body).
+                        self.declare_parameter(name, snode.span);
+                    }
+                    _ => self.declare_pattern_variables(pattern, snode.span, false, false),
+                }
+                self.loop_depth += 1;
+                self.lint_block(body);
+                self.loop_depth -= 1;
+                self.pop_scope();
+            }
+
+            Node::WhileLoop { condition, body } => {
+                self.lint_node(condition);
+                if body.is_empty() {
+                    self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintEmptyBlock,
+                        rule: "empty-block".into(),
+                        message: "while loop has an empty body".to_string(),
+                        span: snode.span,
+                        severity: LintSeverity::Warning,
+                        suggestion: Some("remove the empty while loop or add a body".to_string()),
+                        fix: None,
+                    });
+                }
+                self.push_scope();
+                self.loop_depth += 1;
+                self.lint_block(body);
+                self.loop_depth -= 1;
+                self.pop_scope();
+            }
+
+            Node::TryCatch {
+                has_catch: _,
+                body,
+                error_var,
+                error_type,
+                catch_body,
+                finally_body,
+                ..
+            } => {
+                if let Some(error_type) = error_type {
+                    self.record_type_expr_references(error_type);
+                }
+                if body.is_empty() {
+                    self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintEmptyBlock,
+                        rule: "empty-block".into(),
+                        message: "try block has an empty body".to_string(),
+                        span: snode.span,
+                        severity: LintSeverity::Warning,
+                        suggestion: Some("remove the empty try/catch or add a body".to_string()),
+                        fix: None,
+                    });
+                }
+                self.push_scope();
+                self.lint_value_block(body);
+                self.pop_scope();
+                self.push_scope();
+                if let Some(ev) = error_var {
+                    if let Some(scope) = self.scopes.last_mut() {
+                        scope.insert(ev.clone());
+                    }
+                    self.references.insert(ev.clone());
+                }
+                self.lint_value_block(catch_body);
+                self.pop_scope();
+                if let Some(fb) = finally_body {
+                    self.push_scope();
+                    self.lint_block(fb);
+                    self.pop_scope();
+                }
+            }
+
+            Node::TryExpr { body } => {
+                self.push_scope();
+                self.lint_value_block(body);
+                self.pop_scope();
+            }
+
+            Node::MatchExpr { value, arms } => {
+                self.lint_node(value);
+                for (i, arm) in arms.iter().enumerate() {
+                    for earlier in &arms[..i] {
+                        if arm.pattern.node == earlier.pattern.node && arm.guard == earlier.guard {
+                            self.diagnostics.push(LintDiagnostic {
+                                code: Code::LintDuplicateMatchArm,
+                                rule: "duplicate-match-arm".into(),
+                                message: "duplicate match arm pattern".to_string(),
+                                span: arm.pattern.span,
+                                severity: LintSeverity::Warning,
+                                suggestion: Some("remove the duplicate arm".to_string()),
+                                fix: None,
+                            });
+                            break;
+                        }
+                    }
+                    self.lint_match_pattern(&arm.pattern);
+                    if let Some(ref guard) = arm.guard {
+                        self.lint_node(guard);
+                    }
+                    self.push_scope();
+                    self.lint_value_block(&arm.body);
+                    self.pop_scope();
+                }
+            }
+
+            Node::Retry { count, body } => {
+                self.lint_node(count);
+                self.push_scope();
+                self.lint_block(body);
+                self.pop_scope();
+            }
+
+            Node::CostRoute { options, body } => {
+                for (_, value) in options {
+                    self.lint_node(value);
+                }
+                self.push_scope();
+                self.lint_block(body);
+                self.pop_scope();
+            }
+
+            Node::ReturnStmt { value } => {
+                if let Some(v) = value {
+                    self.lint_node(v);
+                    if let Some(Some(ret_ty)) = self.return_type_stack.last().cloned() {
+                        self.check_eager_collection_conversion(&ret_ty, v);
+                    }
+                }
+            }
+
+            Node::ThrowStmt { value } => {
+                self.lint_node(value);
+            }
+
+            Node::Block(nodes) => {
+                self.push_scope();
+                self.lint_value_block(nodes);
+                self.pop_scope();
+            }
+
+            Node::Closure { params, body, .. } => {
+                self.record_param_type_references(params);
+                self.push_scope();
+                let saved_loop_depth = self.loop_depth;
+                self.loop_depth = 0;
+                for p in params {
+                    self.declare_parameter(&p.name, snode.span);
+                }
+                self.lint_param_default_values(params);
+                self.enter_long_running_body(body);
+                self.lint_value_block(body);
+                self.exit_long_running_body();
+                self.loop_depth = saved_loop_depth;
+                self.pop_scope();
+            }
+
+            Node::SpawnExpr { body } | Node::ScopeBlock { body } => {
+                self.push_scope();
+                self.lint_block(body);
+                self.pop_scope();
+            }
+
+            Node::HitlExpr { args, .. } => {
+                for arg in args {
+                    self.lint_node(&arg.value);
+                }
+            }
+
+            Node::GuardStmt {
+                condition,
+                else_body,
+            } => {
+                self.lint_node(condition);
+                self.push_scope();
+                self.lint_block(else_body);
+                self.pop_scope();
+            }
+
+            Node::RequireStmt { condition, message } => {
+                if self.in_test_pipeline() {
+                    self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintRequireInTest,
+                        rule: "require-in-test".into(),
+                        message: "`require` in a test pipeline should usually be an assertion"
+                            .to_string(),
+                        span: snode.span,
+                        severity: LintSeverity::Warning,
+                        suggestion: Some(
+                            "prefer `assert(...)` or `assert_eq(...)` in test pipelines"
+                                .to_string(),
+                        ),
+                        fix: None,
+                    });
+                }
+                self.lint_node(condition);
+                if let Some(message) = message {
+                    self.lint_node(message);
+                }
+            }
+
+            Node::DeadlineBlock { duration, body } => {
+                self.lint_node(duration);
+                self.push_scope();
+                self.lint_block(body);
+                self.pop_scope();
+            }
+
+            Node::MutexBlock { key, body } => {
+                if let Some(key) = key {
+                    self.lint_node(key);
+                }
+                self.push_scope();
+                self.lint_block(body);
+                self.pop_scope();
+            }
+
+            Node::Parallel {
+                expr,
+                body,
+                variable,
+                options,
+                ..
+            } => {
+                self.lint_node(expr);
+                for (_, value) in options {
+                    self.lint_node(value);
+                }
+                self.push_scope();
+                if let Some(v) = variable {
+                    if let Some(scope) = self.scopes.last_mut() {
+                        scope.insert(v.clone());
+                    }
+                    self.references.insert(v.clone());
+                }
+                self.lint_block(body);
+                self.pop_scope();
+            }
+
+            Node::ListLiteral(items) => {
+                for item in items {
+                    self.lint_node(item);
+                }
+            }
+
+            Node::DictLiteral(entries) => {
+                for entry in entries {
+                    self.lint_node(&entry.key);
+                    self.lint_node(&entry.value);
+                }
+            }
+            Node::InterpolatedString(segments) => {
+                self.check_interpolated_ambient_calls(segments);
+                for seg in segments {
+                    if let StringSegment::Expression(expr, _, _) = seg {
+                        // Record any identifier tokens inside `${...}` as
+                        // references so lints like `unused-variable` see them.
+                        for token in expr.split(|c: char| !c.is_alphanumeric() && c != '_') {
+                            if !token.is_empty()
+                                && token
+                                    .chars()
+                                    .next()
+                                    .is_some_and(|c| c.is_alphabetic() || c == '_')
+                            {
+                                self.references.insert(token.to_string());
+                                self.function_references.insert(token.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+
+            Node::RangeExpr { start, end, .. } => {
+                self.lint_node(start);
+                self.lint_node(end);
+            }
+
+            Node::DeferStmt { body } => {
+                self.lint_block(body);
+            }
+
+            Node::YieldExpr { value } => {
+                if let Some(v) = value {
+                    self.lint_node(v);
+                }
+            }
+
+            Node::EmitExpr { value } => {
+                self.lint_node(value);
+            }
+
+            Node::EnumConstruct {
+                enum_name, args, ..
+            } => {
+                self.type_references.insert(enum_name.clone());
+                for arg in args {
+                    self.lint_node(arg);
+                }
+            }
+
+            Node::StructConstruct {
+                struct_name,
+                fields,
+            } => {
+                self.type_references.insert(struct_name.clone());
+                for entry in fields {
+                    self.lint_node(&entry.key);
+                    self.lint_node(&entry.value);
+                }
+            }
+
+            Node::SelectExpr {
+                cases,
+                timeout,
+                default_body,
+            } => {
+                for case in cases {
+                    self.lint_node(&case.channel);
+                    self.push_scope();
+                    if let Some(scope) = self.scopes.last_mut() {
+                        scope.insert(case.variable.clone());
+                    }
+                    self.lint_block(&case.body);
+                    self.pop_scope();
+                }
+                if let Some((dur, body)) = timeout {
+                    self.lint_node(dur);
+                    self.push_scope();
+                    self.lint_block(body);
+                    self.pop_scope();
+                }
+                if let Some(body) = default_body {
+                    self.push_scope();
+                    self.lint_block(body);
+                    self.pop_scope();
+                }
+            }
+
+            Node::Spread(inner) => {
+                self.lint_node(inner);
+            }
+
+            Node::TryOperator { operand }
+            | Node::NonNullAssert { operand }
+            | Node::TryStar { operand } => {
+                self.lint_node(operand);
+            }
+
+            Node::StructDecl {
+                name,
+                fields,
+                is_pub,
+                ..
+            } => {
+                self.lint_type_name("struct", name, snode.span);
+                self.known_functions.insert(name.clone());
+                self.type_declarations.push(TypeDeclaration {
+                    name: name.clone(),
+                    span: snode.span,
+                    kind: "struct",
+                    is_pub: *is_pub,
+                });
+                for field in fields {
+                    if let Some(type_expr) = &field.type_expr {
+                        self.record_type_expr_references(type_expr);
+                    }
+                }
+            }
+            Node::EnumDecl {
+                name,
+                variants,
+                is_pub,
+                ..
+            } => {
+                self.lint_type_name("enum", name, snode.span);
+                self.known_functions.insert(name.clone());
+                self.type_declarations.push(TypeDeclaration {
+                    name: name.clone(),
+                    span: snode.span,
+                    kind: "enum",
+                    is_pub: *is_pub,
+                });
+                for variant in variants {
+                    self.record_param_type_references(&variant.fields);
+                }
+            }
+            Node::SelectiveImport { names, is_pub, .. } => {
+                for name in names {
+                    self.check_renamed_stdlib_symbol(name, snode.span);
+                    self.known_functions.insert(name.clone());
+                }
+                self.imports.push(ImportInfo {
+                    names: names.clone(),
+                    invalid_names: Default::default(),
+                    span: snode.span,
+                    is_pub: *is_pub,
+                });
+            }
+
+            Node::NamespaceImport { alias, is_pub, .. } => {
+                self.known_functions.insert(alias.clone());
+                self.imports.push(ImportInfo {
+                    names: vec![alias.clone()],
+                    invalid_names: Default::default(),
+                    span: snode.span,
+                    is_pub: *is_pub,
+                });
+            }
+            Node::ImportDecl { .. } => {
+                if !self.use_module_graph_for_wildcards {
+                    self.has_wildcard_import = true;
+                }
+            }
+
+            Node::InterfaceDecl {
+                name,
+                associated_types,
+                methods,
+                ..
+            } => {
+                self.lint_type_name("interface", name, snode.span);
+                self.type_declarations.push(TypeDeclaration {
+                    name: name.clone(),
+                    span: snode.span,
+                    kind: "interface",
+                    is_pub: false,
+                });
+                for assoc in associated_types {
+                    if let Some(type_expr) = &assoc.default {
+                        self.record_type_expr_references(type_expr);
+                    }
+                }
+                for method in methods {
+                    self.record_param_type_references(&method.params);
+                    if let Some(type_expr) = &method.return_type {
+                        self.record_type_expr_references(type_expr);
+                    }
+                }
+            }
+
+            Node::TypeDecl {
+                name,
+                type_params: _,
+                type_expr,
+                is_pub,
+            } => {
+                self.lint_type_name("type", name, snode.span);
+                self.type_declarations.push(TypeDeclaration {
+                    name: name.clone(),
+                    span: snode.span,
+                    kind: "type",
+                    is_pub: *is_pub,
+                });
+                self.record_type_expr_references(type_expr);
+            }
+
+            Node::StringLiteral(_)
+            | Node::RawStringLiteral(_)
+            | Node::IntLiteral(_)
+            | Node::FloatLiteral(_)
+            | Node::BoolLiteral(_)
+            | Node::NilLiteral
+            | Node::DurationLiteral(_)
+            | Node::OverrideDecl { .. }
+            | Node::BreakStmt
+            | Node::ContinueStmt => {
+                if matches!(snode.node, Node::BreakStmt | Node::ContinueStmt)
+                    && self.loop_depth == 0
+                {
+                    let keyword = if matches!(snode.node, Node::BreakStmt) {
+                        "break"
+                    } else {
+                        "continue"
+                    };
+                    self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintBreakOutsideLoop,
+                        rule: "break-outside-loop".into(),
+                        message: format!("`{keyword}` used outside of a loop"),
+                        span: snode.span,
+                        severity: LintSeverity::Error,
+                        suggestion: Some(format!(
+                            "`{keyword}` can only be used inside for or while loops"
+                        )),
+                        fix: None,
+                    });
+                }
+            }
+
+            Node::AttributedDecl { attributes, inner } => {
+                let suppresses_complexity = attributes.iter().any(|a| {
+                    a.name == "complexity"
+                        && a.args.iter().any(|arg| {
+                            arg.name.is_none()
+                                && matches!(&arg.value.node, Node::Identifier(s) if s == "allow")
+                        })
+                });
+                for attribute in attributes {
+                    for argument in &attribute.args {
+                        self.record_attribute_argument_references(&argument.value);
+                    }
+                }
+                if suppresses_complexity {
+                    self.complexity_suppression_depth += 1;
+                }
+                self.lint_node(inner);
+                if suppresses_complexity {
+                    self.complexity_suppression_depth -= 1;
+                }
+            }
+
+            Node::OrPattern(alternatives) => {
+                for alt in alternatives {
+                    self.lint_node(alt);
+                }
+            }
+        }
+    }
+
+    /// Attribute values are compile-time metadata, not runtime expressions.
+    /// Bare identifiers can name source bindings (for example, an evidence
+    /// constant) or schema-owned symbolic values. Without an attribute schema
+    /// those cases are intentionally indistinguishable, so record every bare
+    /// identifier for unused-declaration analysis while keeping runtime lints
+    /// off this surface.
+    fn record_attribute_argument_references(&mut self, value: &SNode) {
+        match &value.node {
+            Node::Identifier(name) => {
+                self.references.insert(name.clone());
+                self.function_references.insert(name.clone());
+            }
+            // Call heads are schema-owned sentinels such as `schedule`, not
+            // runtime bindings. Their arguments may still contain bindings.
+            Node::FunctionCall { args, .. } => {
+                for argument in args {
+                    self.record_attribute_argument_references(argument);
+                }
+            }
+            Node::ListLiteral(items) => {
+                for item in items {
+                    self.record_attribute_argument_references(item);
+                }
+            }
+            Node::DictLiteral(entries) => {
+                for entry in entries {
+                    // Dict keys name metadata fields; only values can refer
+                    // to source bindings.
+                    self.record_attribute_argument_references(&entry.value);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Lint a match-arm pattern.
+    ///
+    /// Patterns are parsed as ordinary expressions, so a call-shaped pattern
+    /// such as `Circle(radius)` arrives as a `FunctionCall`. It is not a call:
+    /// the head names an enum variant and the arguments bind payloads. Walking
+    /// it as an expression would record a call site and report the variant as
+    /// an undefined function.
+    ///
+    /// Deciding whether a call-shaped head is a variant needs the enum catalog
+    /// plus the imported-enum surface, which only the typechecker has. It
+    /// already makes that call in `check_match_pattern`, reporting an
+    /// unresolvable head as `HARN-NAM-002` and a mis-scoped variant as
+    /// `HARN-MAT-003` — both hard errors. So the lint declines to guess here
+    /// rather than keeping a second, weaker copy of that judgement.
+    ///
+    /// Sub-patterns are still walked so name references stay recorded and the
+    /// unused-binding and unused-import rules keep working.
+    fn lint_match_pattern(&mut self, pattern: &SNode) {
+        match &pattern.node {
+            Node::FunctionCall { name, args, .. } => {
+                // The head is still a *reference*: when the pattern turns out
+                // to be an expression-equality pattern it names a real
+                // function, and the unused-function and unused-import rules
+                // must keep seeing it. Only the call-site record — the input
+                // to the undefined-function rule — is withheld.
+                self.references.insert(name.clone());
+                self.function_references.insert(name.clone());
+                for arg in args {
+                    self.lint_match_pattern(arg);
+                }
+            }
+            Node::OrPattern(alternatives) => {
+                for alternative in alternatives {
+                    self.lint_match_pattern(alternative);
+                }
+            }
+            Node::ListLiteral(elements) => {
+                for element in elements {
+                    self.lint_match_pattern(element);
+                }
+            }
+            Node::DictLiteral(entries) => {
+                for entry in entries {
+                    // Keys stay ordinary expressions; only values hold
+                    // sub-patterns.
+                    self.lint_node(&entry.key);
+                    self.lint_match_pattern(&entry.value);
+                }
+            }
+            _ => self.lint_node(pattern),
+        }
+    }
+
+    fn lint_binding_pattern_defaults(&mut self, pattern: &BindingPattern) {
+        match pattern {
+            BindingPattern::Dict(fields) => {
+                for field in fields {
+                    if let Some(default_value) = field.default_value.as_deref() {
+                        self.lint_node(default_value);
+                    }
+                }
+            }
+            BindingPattern::List(elements) => {
+                for element in elements {
+                    if let Some(default_value) = element.default_value.as_deref() {
+                        self.lint_node(default_value);
+                    }
+                }
+            }
+            BindingPattern::Identifier(_) | BindingPattern::Pair(_, _) => {}
+        }
+    }
+}

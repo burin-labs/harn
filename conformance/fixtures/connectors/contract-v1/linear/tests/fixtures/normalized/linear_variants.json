@@ -1,0 +1,11 @@
+{
+  "variants": [
+    {"fixture": "issue_update", "kind": "linear.issue.update", "data_id": "ISS-1"},
+    {"fixture": "comment_create", "kind": "linear.comment.create", "data_id": "COM-1"},
+    {"fixture": "issue_label_update", "kind": "linear.issue_label.update", "data_id": "LBL-1"},
+    {"fixture": "project_update", "kind": "linear.project.update", "data_id": "PRJ-1"},
+    {"fixture": "cycle_update", "kind": "linear.cycle.update", "data_id": "CYC-1"},
+    {"fixture": "customer_update", "kind": "linear.customer.update", "data_id": "CUS-1"},
+    {"fixture": "customer_request_create", "kind": "linear.customer_request.create", "data_id": "REQ-1"}
+  ]
+}

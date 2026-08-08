@@ -1,0 +1,11 @@
+// `.map` transforms the element type via the closure's return type: `ys` is
+// list<string> here, so binding an element to `int` is a static error. Before
+// combinator element typing this collapsed to an untyped list and slipped by.
+pipeline default(harness: Harness) {
+  const xs = [1, 2, 3]
+  const ys = xs.map({ n -> "v" })
+  for s in ys {
+    const bad: int = s
+    harness.stdio.println(s)
+  }
+}

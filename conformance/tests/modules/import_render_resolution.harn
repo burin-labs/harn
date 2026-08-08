@@ -1,0 +1,6 @@
+import "lib/render_helper.harn"
+
+pipeline test(harness: Harness, task) {
+  const text = load_greeting(harness.fs)
+  harness.stdio.log(text)
+}

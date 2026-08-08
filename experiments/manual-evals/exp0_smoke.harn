@@ -1,0 +1,26 @@
+/** Smoke test: minimal agent_loop call against local llama.cpp. */
+pipeline main(harness: Harness, task) {
+  let registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "calc",
+    "Evaluate a math expression",
+    {parameters: {expr: {type: "string"}}, handler: { _args -> "396" }},
+  )
+  harness.stdio.log("Smoke test: calling agent_loop against llamacpp provider")
+  const result = agent_loop(
+    harness,
+    "What is 17 * 23 + 5? Use the calc tool.",
+    "/no_think You are a math assistant. Always use the calc tool for arithmetic.",
+    {
+      provider: "llamacpp",
+      model: "qwen3.6",
+      tool_format: "native",
+      done_sentinel: "",
+      persistent: false,
+      max_iterations: 5,
+      tools: registry,
+    },
+  )
+  harness.stdio.log("status=${result.status} iters=${result.llm.iterations} text=${result.text}")
+}

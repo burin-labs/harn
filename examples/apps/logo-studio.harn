@@ -1,0 +1,713 @@
+import { MediaAsset, media_asset_store_result, media_asset_verify_result } from "std/media/asset"
+import {
+  DesignDocument,
+  DesignExport,
+  design_document_export_result,
+  design_document_result,
+  design_document_with_exact_text,
+} from "std/media/composition"
+import {
+  ComfyWorkflowBuilder,
+  ModelBackend,
+  ModelJobError,
+  ModelJobErrorKind,
+  ModelJobReceipt,
+  ModelJobRequest,
+  ModelJobRun,
+  ModelJobRunOptions,
+  ModelOutputSpec,
+  ModelTask,
+  OpenAiImageBackendOptions,
+  OpenAiImageFormat,
+  OpenAiImageQuality,
+  comfyui_backend,
+  comfyui_flux2_klein_edit_workflow,
+  model_job_cancel_run_result,
+  model_job_error,
+  model_job_finish_result,
+  model_job_run_result,
+  model_job_step_result,
+  model_job_submit_result,
+  openai_responses_image_backend,
+} from "std/model_job"
+/**
+ * Burin Logo Studio — a complete interactive app written in Harn.
+ *
+ * Run with: harn app run examples/apps/logo-studio.harn
+ *
+ * Exact logo lettering is a deterministic text layer. The image model polishes
+ * the sketch; export writes a reopenable design document, editable SVG, and PNG.
+ */
+import * as ui from "std/ui"
+import { UiDocument, UiEvent, UiStroke } from "std/ui/contracts"
+
+type LogoModel = "replay" | "local" | "openai"
+
+type LogoState = {
+  revision: int,
+  strokes: list<UiStroke>,
+  annotations: list<string>,
+  annotation_draft: string,
+  logo_text: string,
+  model: LogoModel,
+  output_path: string,
+  status: string,
+  running?: ModelJobRun,
+  hosted_sketch?: MediaAsset,
+  asset?: MediaAsset,
+  design?: DesignDocument,
+  export?: DesignExport,
+  preview?: string,
+}
+
+type LogoIo = {env: HarnessEnv, fs: HarnessFs}
+
+const DEFAULT_NOTE =
+  "Use a calm green for grass behind the mark, with soft botanical detail and a dark outline only where contrast helps."
+
+const DEFAULT_LOGO_TEXT = "Cornflower Garden"
+
+fn default_state() -> LogoState {
+  return {
+    revision: 0,
+    strokes: [],
+    annotations: [DEFAULT_NOTE],
+    annotation_draft: "",
+    logo_text: DEFAULT_LOGO_TEXT,
+    model: "replay",
+    output_path: "logo",
+    status: "Ready — sketch loosely, set exact logo text, then describe the finish.",
+  }
+}
+
+fn work_path(io: LogoIo) -> string {
+  return io.env.get_or(
+    "BURIN_LOGO_STUDIO_STATE",
+    path_join(io.fs.source_dir(), ".harn", "logo-studio-state.json"),
+  )
+}
+
+fn reopen_work(io: LogoIo) -> LogoState {
+  const path = work_path(io)
+  if !io.fs.exists(path) {
+    return default_state()
+  }
+  const decoded = try {
+    json_parse(io.fs.read_text(path))
+  }
+  if !is_ok(decoded) || unwrap(decoded)?.revision == nil {
+    return default_state()
+  }
+  const checked = try {
+    const reopened: LogoState = unwrap(decoded)
+    reopened
+  }
+  if !is_ok(checked) {
+    return default_state()
+  }
+  let state = unwrap(checked)
+  if state.hosted_sketch != nil {
+    state.hosted_sketch = nil
+    state.status = "Hosted generation was interrupted. Polish the drawing to retry."
+  }
+  if state.logo_text == nil || trim(state.logo_text) == "" {
+    state.logo_text = DEFAULT_LOGO_TEXT
+  }
+  if state.design != nil {
+    const design_checked = design_document_result(state.design)
+    if !is_ok(design_checked) {
+      state.design = nil
+      state.export = nil
+    } else {
+      state.design = unwrap(design_checked)
+    }
+  }
+  if state.asset != nil {
+    if is_ok(media_asset_verify_result(io.fs, state.asset)) {
+      state.preview = "data:" + state.asset.mime_type + ";base64,"
+        + bytes_to_base64(
+        io.fs.read_bytes(state.asset.path),
+      )
+    } else {
+      state.asset = nil
+      state.design = nil
+      state.export = nil
+      state.status = "Reopened the drawing and directions, but the previous result was unavailable."
+    }
+  }
+  return state
+}
+
+fn remember_work(io: LogoIo, state: LogoState) {
+  const path = work_path(io)
+  io.fs.mkdir(dirname(path), true)
+  let remembered = state
+  remembered.preview = nil
+  remembered.export = nil
+  io.fs.write_text(path, json_stringify_pretty(remembered) + "\n")
+}
+
+fn prompt(state: LogoState) -> string {
+  return "Polish this loose hand-drawn logo sketch into a clean rectangular mark. "
+    + "Do not render lettering; exact text is composed as a separate deterministic layer. "
+    + join(
+    state.annotations,
+    " ",
+  )
+}
+
+fn busy(state: LogoState) -> bool {
+  return state.running != nil || state.hosted_sketch != nil
+}
+
+fn document(state: LogoState) -> UiDocument {
+  let elements = [
+    {id: "studio", kind: "row", variant: "workspace"},
+    {id: "work", kind: "column", parent: "studio", variant: "work"},
+    {id: "toolbar", kind: "row", parent: "work", variant: "toolbar"},
+    {id: "title", kind: "heading", parent: "toolbar", text: "Burin Logo Studio", level: 1},
+    {
+      id: "undo",
+      kind: "button",
+      parent: "toolbar",
+      label: "Undo",
+      disabled: len(state.strokes) == 0,
+    },
+    {
+      id: "clear",
+      kind: "button",
+      parent: "toolbar",
+      label: "Clear",
+      disabled: len(state.strokes) == 0,
+    },
+    {id: "canvas_area", kind: "column", parent: "work", variant: "canvas-area"},
+    {
+      id: "sketch",
+      kind: "canvas",
+      parent: "canvas_area",
+      label: "Logo sketch canvas",
+      width: 1200,
+      height: 675,
+      strokes: state.strokes,
+    },
+    {id: "panel", kind: "column", parent: "studio", variant: "panel"},
+    {id: "notes_title", kind: "heading", parent: "panel", text: "Directions", level: 2},
+  ]
+  let index = 0
+  for note in state.annotations {
+    const row_id = "note_" + to_string(index)
+    elements = elements
+      + [
+      {id: row_id, kind: "row", parent: "panel"},
+      {id: row_id + "_text", kind: "text", parent: row_id, text: note, variant: "annotation grow"},
+      {id: "remove_note_" + to_string(index), kind: "button", parent: row_id, label: "Remove"},
+    ]
+    index = index + 1
+  }
+  elements = elements
+    + [
+    {
+      id: "annotation_draft",
+      kind: "text_area",
+      parent: "panel",
+      label: "Add a direction",
+      value: state.annotation_draft,
+      rows: 4,
+      placeholder: "Describe color, lettering, layout, mood, or constraints…",
+    },
+    {id: "add_note", kind: "button", parent: "panel", label: "Add direction"},
+    {
+      id: "logo_text",
+      kind: "field",
+      parent: "panel",
+      label: "Exact logo text",
+      value: state.logo_text,
+      placeholder: "Lettering preserved outside the image model",
+    },
+    {
+      id: "model",
+      kind: "select",
+      parent: "panel",
+      label: "Image model",
+      value: state.model,
+      disabled: busy(state),
+      options: [
+        {value: "replay", label: "Replay — included proof"},
+        {value: "local", label: "Local — ComfyUI / FLUX.2"},
+        {value: "openai", label: "Hosted — OpenAI image edit"},
+      ],
+    },
+    {
+      id: "polish",
+      kind: "button",
+      parent: "panel",
+      label: busy(state) ? "Working…" : "Polish drawing",
+      variant: "primary",
+      disabled: busy(state)
+        || len(state.strokes) == 0
+        || len(state.annotations) == 0
+        || trim(state.logo_text) == "",
+    },
+    {
+      id: "cancel",
+      kind: "button",
+      parent: "panel",
+      label: "Cancel job",
+      hidden: state.running == nil,
+    },
+    {
+      id: "output_path",
+      kind: "field",
+      parent: "panel",
+      label: "Output stem",
+      value: state.output_path,
+    },
+    {
+      id: "write_file",
+      kind: "button",
+      parent: "panel",
+      label: "Export SVG + PNG",
+      disabled: state.asset == nil || trim(state.output_path) == "" || trim(state.logo_text) == "",
+    },
+    {id: "status", kind: "status", parent: "panel", text: state.status},
+  ]
+  if state.preview != nil {
+    elements = elements
+      + [
+      {
+        id: "result",
+        kind: "image",
+        parent: "panel",
+        image_src: state.preview,
+        image_alt: "Polished logo result",
+      },
+    ]
+  }
+  return ui.document("Burin Logo Studio", state.revision, elements)
+}
+
+fn bump(state: LogoState) -> LogoState {
+  let next = state
+  next.revision = next.revision + 1
+  return next
+}
+
+fn replay_backend(fs: HarnessFs) -> ModelBackend {
+  const proof = path_join(
+    fs.source_dir(),
+    "..",
+    "..",
+    "docs",
+    "src",
+    "cookbooks",
+    "assets",
+    "model-job-openai-proof.png",
+  )
+  const invalid_state: ModelJobErrorKind = "invalid_state"
+  const invalid_transition: ModelJobErrorKind = "invalid_transition"
+  return {
+    id: "logo-proof-replay",
+    submit: fn(_harness, request) { return Ok(
+      {
+        job_id: "logo-proof-" + request.id,
+        state: "succeeded",
+        progress: 1.0,
+        outputs: [{name: "logo-proof.png", mime_type: "image/png", path: proof}],
+      },
+    ) },
+    inspect: fn(_harness, job) { return Err(
+      model_job_error(invalid_state, "completed replay job cannot be inspected", {job_id: job.id}),
+    ) },
+    cancel: fn(_harness, job) { return Err(
+      model_job_error(
+        invalid_transition,
+        "completed replay job cannot be canceled",
+        {job_id: job.id},
+      ),
+    ) },
+  }
+}
+
+fn backend(io: LogoIo, model: LogoModel) -> ModelBackend {
+  if model == "replay" {
+    return replay_backend(io.fs)
+  }
+  if model == "local" {
+    const build: ComfyWorkflowBuilder =
+      fn(request: ModelJobRequest) { return comfyui_flux2_klein_edit_workflow(
+      request,
+    ) }
+    return comfyui_backend(io.env.get_or("COMFYUI_URL", "http://127.0.0.1:8188"), build)
+  }
+  const quality: OpenAiImageQuality = "low"
+  const format: OpenAiImageFormat = "png"
+  const options: OpenAiImageBackendOptions = {
+    api_key: io.env.get_or("OPENAI_API_KEY", ""),
+    quality: quality,
+    output_format: format,
+    size: "1536x1024",
+  }
+  return openai_responses_image_backend(options)
+}
+
+fn request(random: HarnessRandom, state: LogoState, sketch: MediaAsset) -> ModelJobRequest {
+  const output: ModelOutputSpec = {mime_type: "image/png", width: 1536, height: 1024}
+  const task: ModelTask = state.model == "replay" ? "image.generate" : "image.edit"
+  return {
+    id: random.uuid_v7(),
+    task: task,
+    prompt: prompt(state),
+    output: output,
+    model: state.model == "openai" ? "gpt-5.6-sol" : "black-forest-labs/FLUX.2-klein-4B",
+    inputs: state.model == "replay" ? [] : [sketch],
+    seed: 42,
+  }
+}
+
+fn run_options(fs: HarnessFs) -> ModelJobRunOptions {
+  return {
+    interval_ms: 0,
+    timeout_ms: 600000,
+    asset_root: path_join(fs.source_dir(), ".harn", "logo-assets"),
+  }
+}
+
+fn compose_design(state: LogoState, asset: MediaAsset) -> Result<DesignDocument, string> {
+  const designed = design_document_with_exact_text(
+    "logo-" + asset.sha256,
+    asset,
+    trim(state.logo_text),
+    {
+      width: asset.width ?? 1536,
+      height: asset.height ?? 1024,
+      fill: "#4B7BE5",
+      metadata: {
+        backend_model: state.model,
+        annotations: state.annotations,
+        parents: asset.parents ?? [],
+        producing_job: asset.producing_job,
+      },
+    },
+  )
+  if !is_ok(designed) {
+    return Err(unwrap_err(designed).message)
+  }
+  return Ok(unwrap(designed))
+}
+
+fn accept_receipt(fs: HarnessFs, state: LogoState, receipt: ModelJobReceipt) -> LogoState {
+  const first = receipt.assets[0]
+  if first == nil {
+    let empty = state
+    empty.running = nil
+    empty.status = "Finished with " + receipt.backend + ", but no media asset was returned."
+    return bump(empty)
+  }
+  const asset: MediaAsset = first
+  let next = state
+  next.running = nil
+  next.asset = asset
+  next.export = nil
+  next.preview = "data:" + asset.mime_type + ";base64,"
+    + bytes_to_base64(fs.read_bytes(asset.path))
+  const designed = compose_design(next, asset)
+  if is_ok(designed) {
+    next.design = unwrap(designed)
+    next.status = "Finished with " + receipt.backend
+      + ". Exact text is a separate layer — export SVG + PNG when ready."
+  } else {
+    next.design = nil
+    next.status = "Finished with " + receipt.backend
+      + ", but composition failed: "
+      + unwrap_err(designed)
+  }
+  return bump(next)
+}
+
+fn finish_run(
+  harness: Harness,
+  state: LogoState,
+  run: ModelJobRun,
+) -> Result<LogoState, ModelJobError> {
+  const finished = model_job_finish_result(harness, run, run_options(harness.fs))
+  if !is_ok(finished) {
+    return Err(unwrap_err(finished))
+  }
+  return Ok(accept_receipt(harness.fs, state, unwrap(finished)))
+}
+
+fn capture_effect() {
+  return {kind: "capture_canvas", target: "sketch", event_target: "capture"}
+}
+
+fn poll_effect() {
+  return {
+    kind: "send_event",
+    after_ms: 500,
+    event: {schema: "harn.ui_event.v1", kind: "click", target: "poll"},
+  }
+}
+
+fn run_hosted_effect() {
+  return {
+    kind: "send_event",
+    after_ms: 0,
+    event: {schema: "harn.ui_event.v1", kind: "click", target: "run_hosted"},
+  }
+}
+
+pipeline main(harness: Harness, task) {
+  const resource = ui.app_resource(
+    "ui://burin-labs/logo-studio",
+    "Burin Logo Studio",
+    "logo.handle_event",
+    {
+      description: "Sketch, annotate, generate, replay, and export exact-text SVG plus PNG",
+      version: "3",
+    },
+  )
+  const tool_meta = ui.tool_metadata(resource, {visibility: ["model", "app"]})
+  const io: LogoIo = {env: harness.env, fs: harness.fs}
+  let state = reopen_work(io)
+  fn respond(effects = []) {
+    state = bump(state)
+    remember_work(io, state)
+    return ui.update(document(state), effects)
+  }
+  fn start_generation(event: UiEvent) {
+    const prefix = "data:image/png;base64,"
+    const snapshot = event.value ?? ""
+    if !starts_with(snapshot, prefix) {
+      state.status = "The browser returned an invalid canvas snapshot."
+      return respond()
+    }
+    if state.model == "openai" && trim(harness.env.get_or("OPENAI_API_KEY", "")) == "" {
+      state.status = "OPENAI_API_KEY is required for the hosted model."
+      return respond()
+    }
+    const stored = media_asset_store_result(
+      harness.fs,
+      bytes_from_base64(substring(snapshot, len(prefix), len(snapshot))),
+      {
+        mime_type: "image/png",
+        width: 1200,
+        height: 675,
+        root: path_join(harness.fs.source_dir(), ".harn", "logo-assets"),
+        metadata: {kind: "logo-sketch"},
+      },
+    )
+    if !is_ok(stored) {
+      state.status = "Could not store the sketch: " + unwrap_err(stored).message
+      return respond()
+    }
+    const selected_backend = backend(io, state.model)
+    const model_request = request(harness.random, state, unwrap(stored))
+    if state.model == "local" {
+      const submitted = model_job_submit_result(
+        harness,
+        selected_backend,
+        model_request,
+        run_options(harness.fs),
+      )
+      if !is_ok(submitted) {
+        state.status = "Generation failed: " + unwrap_err(submitted).message
+      } else {
+        state.running = unwrap(submitted)
+        state.status = "Queued on local ComfyUI."
+        return respond([poll_effect()])
+      }
+    } else if state.model == "openai" {
+      state.hosted_sketch = unwrap(stored)
+      state.status = "Generating with hosted OpenAI…"
+      return respond([run_hosted_effect()])
+    } else {
+      const completed = model_job_run_result(
+        harness,
+        selected_backend,
+        model_request,
+        run_options(harness.fs),
+      )
+      if is_ok(completed) {
+        state = accept_receipt(harness.fs, state, unwrap(completed))
+      } else {
+        state.status = "Generation failed: " + unwrap_err(completed).message
+      }
+    }
+    return respond()
+  }
+  fn run_hosted(sketch: MediaAsset) {
+    state.hosted_sketch = nil
+    const completed = model_job_run_result(
+      harness,
+      backend(io, state.model),
+      request(harness.random, state, sketch),
+      run_options(harness.fs),
+    )
+    if is_ok(completed) {
+      state = accept_receipt(harness.fs, state, unwrap(completed))
+    } else {
+      state.status = "Generation failed: " + unwrap_err(completed).message
+    }
+    return respond()
+  }
+  fn poll_generation(run: ModelJobRun) {
+    const stepped = model_job_step_result(
+      harness,
+      backend(io, state.model),
+      run,
+      run_options(harness.fs),
+    )
+    if !is_ok(stepped) {
+      state.running = nil
+      state.status = "Generation failed: " + unwrap_err(stepped).message
+      return respond()
+    }
+    const next_run = unwrap(stepped)
+    state.running = next_run
+    if ["succeeded", "failed", "canceled"].contains(next_run.job.state) {
+      const finished = finish_run(harness, state, next_run)
+      if is_ok(finished) {
+        state = unwrap(finished)
+      } else {
+        state.running = nil
+        state.status = "Generation failed: " + unwrap_err(finished).message
+      }
+      return respond()
+    }
+    state.status = next_run.job.progress == nil ? "Generating on local ComfyUI…" : "Generating — "
+      + to_string(
+      to_int(next_run.job.progress * 100.0) ?? 0,
+    )
+      + "%"
+    return respond([poll_effect()])
+  }
+  fn cancel_generation(run: ModelJobRun) {
+    const canceled = model_job_cancel_run_result(
+      harness,
+      backend(io, state.model),
+      run,
+      run_options(harness.fs),
+    )
+    if is_ok(canceled) {
+      state.running = nil
+      state.status = "Generation canceled."
+      return respond()
+    }
+    state.status = "Could not cancel generation: " + unwrap_err(canceled).message
+    return respond([poll_effect()])
+  }
+  fn handle_action(event: UiEvent) {
+    if event.target == "undo" && len(state.strokes) > 0 {
+      state.strokes = state.strokes.slice(0, len(state.strokes) - 1)
+    } else if event.target == "clear" {
+      state.strokes = []
+    } else if event.target == "add_note" && trim(state.annotation_draft) != "" {
+      state.annotations = state.annotations + [trim(state.annotation_draft)]
+      state.annotation_draft = ""
+    } else if starts_with(event.target, "remove_note_") {
+      const index = to_int(substring(event.target, len("remove_note_"), len(event.target)))
+      if index != nil && index >= 0 && index < len(state.annotations) {
+        state.annotations = state.annotations.slice(0, index)
+          + state.annotations.slice(
+          index + 1,
+          len(state.annotations),
+        )
+      }
+    } else if event.target == "polish" {
+      state.status = "Preparing the sketch for " + state.model + "…"
+      return respond([capture_effect()])
+    } else if event.kind == "canvas.snapshot" && event.target == "capture" {
+      return start_generation(event)
+    } else if event.target == "poll" && state.running != nil {
+      return poll_generation(state.running)
+    } else if event.target == "run_hosted" && state.hosted_sketch != nil {
+      return run_hosted(state.hosted_sketch)
+    } else if event.target == "cancel" && state.running != nil {
+      return cancel_generation(state.running)
+    } else if event.target == "write_file" && state.asset != nil {
+      const asset: MediaAsset = state.asset
+      const existing = state.design
+      const designed = existing != nil ? Ok(existing) : compose_design(state, asset)
+      if !is_ok(designed) {
+        state.status = "Could not compose exact text: " + unwrap_err(designed)
+        return respond()
+      }
+      const exported = design_document_export_result(
+        harness.fs,
+        unwrap(designed),
+        [asset],
+        trim(state.output_path),
+        {root: path_join(harness.fs.source_dir(), ".harn", "logo-assets")},
+      )
+      if is_ok(exported) {
+        state.design = unwrap(exported).document
+        state.export = unwrap(exported)
+        state.status = "Wrote "
+          + unwrap(exported).document_path
+          + ", "
+          + unwrap(exported).svg_path
+          + ", and "
+          + unwrap(exported).png_path
+      } else {
+        state.status = "Could not export the design: " + unwrap_err(exported).message
+      }
+    }
+    return respond()
+  }
+  fn handle_event(raw) {
+    const event: UiEvent = ui.event(raw.event)
+    if event.kind == "ready" {
+      return state.running == nil ? respond() : respond([poll_effect()])
+    }
+    if event.kind == "input" {
+      if event.target == "annotation_draft" {
+        state.annotation_draft = event.value ?? ""
+      } else if event.target == "logo_text" {
+        state.logo_text = event.value ?? ""
+        if state.asset != nil {
+          const asset: MediaAsset = state.asset
+          const designed = compose_design(state, asset)
+          state.design = is_ok(designed) ? unwrap(designed) : nil
+        }
+      } else if event.target == "model" && !busy(state) {
+        const selected = event.value ?? "replay"
+        state.model = ["replay", "local", "openai"].contains(selected) ? selected : "replay"
+      } else if event.target == "output_path" {
+        state.output_path = event.value ?? ""
+      }
+      return respond()
+    }
+    if event.kind == "canvas.stroke" {
+      state.strokes = state.strokes
+        + [
+        {id: harness.random.uuid_v7(), points: event.points ?? [], color: "#486449", width: 7.0},
+      ]
+      return respond()
+    }
+    return handle_action(event)
+  }
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "logo.handle_event",
+    "Apply one typed UI event to the logo studio",
+    {
+      parameters: {event: {type: "object", required: true}},
+      returns: {type: "object"},
+      handler: handle_event,
+      meta: tool_meta,
+      annotations: {
+        title: "Update logo studio",
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+    },
+  )
+  harness.tools.mcp_server_metadata(
+    {name: "burin-logo-studio", instructions: "Use logo.handle_event for the interactive studio."},
+  )
+  harness.tools.mcp_tools(tools)
+  harness.tools.mcp_resource(ui.mcp_resource(resource, {prefers_border: false}))
+}

@@ -1,0 +1,168 @@
+import {
+  workflow_classify_stage_outcome,
+  workflow_evaluate_condition,
+  workflow_evaluate_verification,
+  workflow_prepare_static_stage,
+} from "std/workflow/stage"
+
+pipeline default(harness: Harness) {
+  const verification = workflow_evaluate_verification(
+    {
+      verify: {assert_text: "ok", expect_status: 0},
+      result: {visible_text: "all ok", exit_status: 0},
+    },
+  )
+  harness.stdio.println(verification.kind)
+  harness.stdio.println(verification.ok)
+  harness.stdio.println(len(verification.checks))
+  const failed_verification = workflow_evaluate_verification(
+    {verify: {assert_text: "missing", expect_status: 1}, result: {text: "present", exit_status: 0}},
+  )
+  harness.stdio.println(failed_verification.ok)
+  harness.stdio.println(failed_verification.checks[1].actual)
+  const condition = workflow_evaluate_condition(
+    {
+      metadata: {contains_text: "needle"},
+      artifacts: [
+        {id: "a", kind: "summary", text: "hay"},
+        {id: "b", kind: "summary", text: "needle here"},
+      ],
+    },
+  )
+  harness.stdio.println(condition.matched)
+  harness.stdio.println(json_stringify(condition.consumed_artifact_ids))
+  const kind_condition = workflow_evaluate_condition(
+    {metadata: {artifact_kind: "diff"}, artifacts: [{id: "d", kind: "diff"}]},
+  )
+  harness.stdio.println(kind_condition.matched)
+  const verify_outcome = workflow_classify_stage_outcome(
+    {node_kind: "verify", result: {status: "completed"}, verification: {ok: false}},
+  )
+  harness.stdio.println(verify_outcome.outcome)
+  harness.stdio.println(verify_outcome.branch)
+  const stuck_outcome = workflow_classify_stage_outcome(
+    {node_kind: "stage", result: {status: "stuck"}, verification: {ok: true}},
+  )
+  harness.stdio.println(stuck_outcome.outcome)
+  harness.stdio.println(stuck_outcome.branch)
+  const done_outcome = workflow_classify_stage_outcome(
+    {node_kind: "stage", result: {status: "done"}, verification: {ok: true}},
+  )
+  harness.stdio.println(done_outcome.outcome)
+  harness.stdio.println(done_outcome.branch)
+  const subagent_outcome = workflow_classify_stage_outcome(
+    {node_kind: "subagent", result: {status: "completed"}, verification: {ok: true}},
+  )
+  harness.stdio.println(subagent_outcome.outcome)
+  harness.stdio.println(subagent_outcome.branch)
+  const static_condition = workflow_prepare_static_stage(
+    harness.agent,
+    harness.interaction,
+    harness.tools,
+    {
+      node_id: "gate",
+      node: {kind: "condition", metadata: {artifact_kind: "summary"}},
+      artifacts: [{id: "s", kind: "summary", text: "ok"}],
+    },
+  )
+  harness.stdio.println(static_condition.result.text)
+  harness.stdio.println(static_condition.outcome)
+  const static_reduce = workflow_prepare_static_stage(
+    harness.agent,
+    harness.interaction,
+    harness.tools,
+    {
+      node_id: "reduce",
+      node: {
+        kind: "reduce",
+        reduce_policy: {separator: " / "},
+        output_contract: {output_kinds: ["plan"]},
+      },
+      artifacts: [{id: "a", kind: "summary", text: "one"}, {id: "b", kind: "summary", text: "two"}],
+    },
+  )
+  harness.stdio.println(static_reduce.result.text)
+  harness.stdio.println(static_reduce.artifacts[0].kind)
+  harness.stdio.println(json_stringify(static_reduce.artifacts[0].lineage))
+  const static_escalation = workflow_prepare_static_stage(
+    harness.agent,
+    harness.interaction,
+    harness.tools,
+    {
+      node_id: "escalate",
+      node: {
+        kind: "escalation",
+        escalation_policy: {queue: "review", level: "high", reason: "needs owner"},
+      },
+      artifacts: [{id: "input", kind: "plan", text: "blocked"}],
+    },
+  )
+  harness.stdio.println(static_escalation.result.text)
+  harness.stdio.println(static_escalation.artifacts[0].data.queue)
+  harness.stdio.println(static_escalation.branch)
+  harness.testing.clear()
+  harness.testing.respond(
+    "interaction",
+    "approval_response",
+    {approved: true, reviewer: "lead", reason: "ready"},
+  )
+  const static_gate = workflow_prepare_static_stage(
+    harness.agent,
+    harness.interaction,
+    harness.tools,
+    {
+      node_id: "gate",
+      node: {
+        kind: "stage",
+        mode: "manual",
+        metadata: {human_gate: true, approval_id: "ship", approval_prompt: "Approve ship"},
+      },
+      artifacts: [{id: "input", kind: "plan", text: "ship plan"}],
+    },
+  )
+  harness.stdio.println(static_gate.branch)
+  harness.stdio.println(static_gate.artifacts[0].data.approval_id)
+  harness.stdio.println(static_gate.artifacts[0].data.approved)
+  const argv = if harness.system.platform().os == "windows" {
+    ["cmd", "/C", "echo|set /p=command-ok"]
+  } else {
+    ["printf", "command-ok"]
+  }
+  const static_command = workflow_prepare_static_stage(
+    harness.agent,
+    harness.interaction,
+    harness.tools,
+    {
+      node_id: "cmd",
+      node: {kind: "stage", mode: "command", metadata: {command_tool: "run", command_args: argv}},
+      artifacts: [{id: "input", kind: "plan", text: "ship plan"}],
+    },
+  )
+  harness.stdio.println(static_command.branch)
+  harness.stdio.println(static_command.result.ok)
+  harness.stdio.println(contains(static_command.result.text, "command-ok"))
+  harness.stdio.println(static_command.artifacts[0].kind)
+  const static_compact = workflow_prepare_static_stage(
+    harness.agent,
+    harness.interaction,
+    harness.tools,
+    {
+      node_id: "compact",
+      node: {
+        kind: "stage",
+        mode: "compact",
+        metadata: {compact_preserve_recent: 1},
+        auto_compact: {token_threshold: 1},
+        output_contract: {output_kinds: ["context_summary"]},
+      },
+      artifacts: [
+        {id: "a", kind: "summary", text: "first"},
+        {id: "b", kind: "summary", text: "second"},
+      ],
+    },
+  )
+  harness.stdio.println(static_compact.branch)
+  harness.stdio.println(static_compact.artifacts[0].kind)
+  harness.stdio.println(contains(static_compact.artifacts[0].text, "auto-compacted"))
+  harness.stdio.println(static_compact.artifacts[0].data.compact_options.keep_last)
+}

@@ -1,0 +1,126 @@
+/**
+ * merge-captain demo: a merge_captain persona triages three mocked PRs
+ * (trivial green, risky needs review, buggy fail), asks an LLM for a
+ * merge recommendation per PR, and emits a structured receipt with a
+ * final supervision summary.
+ *
+ * Designed to run fully offline against the bundled `tape.jsonl`
+ * fixture under `assets/demo/merge-captain/`. The same script also
+ * runs against a real provider when invoked via `harn demo
+ * merge-captain --live`.
+ */
+fn pull_requests() {
+  return [
+    {
+      repo: "burin-labs/widgets",
+      number: 421,
+      title: "fix: typo in README",
+      diff_lines: 1,
+      failing_checks: [],
+      stale_threads: [],
+      tag: "trivial",
+    },
+    {
+      repo: "burin-labs/widgets",
+      number: 422,
+      title: "feat: add experimental retry middleware",
+      diff_lines: 312,
+      failing_checks: [],
+      stale_threads: ["concurrency safety"],
+      tag: "risky",
+    },
+    {
+      repo: "burin-labs/widgets",
+      number: 423,
+      title: "chore: bump unrelated transitive dep",
+      diff_lines: 9,
+      failing_checks: ["ci / integration"],
+      stale_threads: [],
+      tag: "buggy",
+    },
+  ]
+}
+
+fn classify(pr) {
+  if len(pr.failing_checks) > 0 {
+    return "block"
+  }
+  if len(pr.stale_threads) > 0 || pr.diff_lines > 200 {
+    return "handoff"
+  }
+  return "merge"
+}
+
+const PR_PROMPT = """
+[merge_captain][pr={{ number }}][tag={{ tag }}]
+
+Decide: should PR #{{ number }} ({{ title }}) merge, hand off to
+review_captain, or block?
+
+  - Failing checks: {{ failing_checks }}
+  - Stale threads: {{ stale_threads }}
+  - Diff size: {{ diff_lines }} lines
+"""
+
+fn render_pr_prompt(fs: HarnessFs, pr) {
+  return fs.render_template(
+    PR_PROMPT,
+    {
+      number: pr.number,
+      tag: pr.tag,
+      title: pr.title,
+      failing_checks: len(pr.failing_checks),
+      stale_threads: len(pr.stale_threads),
+      diff_lines: pr.diff_lines,
+    },
+  )
+}
+
+pipeline default(harness: Harness, _task) {
+  const prs = pull_requests()
+  let decisions = []
+  let merged = 0
+  let handed_off = 0
+  let blocked = 0
+  for pr in prs {
+    const prompt = render_pr_prompt(harness.fs, pr)
+    const llm_envelope = harness.llm.call(
+      prompt,
+      "You are merge_captain, a senior release engineer.",
+    )
+    const llm_response = llm_envelope.text
+    const decision = classify(pr)
+    if decision == "merge" {
+      merged = merged + 1
+    }
+    if decision == "handoff" {
+      handed_off = handed_off + 1
+    }
+    if decision == "block" {
+      blocked = blocked + 1
+    }
+    const row = {
+      repo: pr.repo,
+      pr: pr.number,
+      title: pr.title,
+      decision: decision,
+      reasoning: llm_response,
+    }
+    decisions = decisions + [row]
+    harness.stdio.println("[#${pr.number}] ${pr.title}")
+    harness.stdio.println("    decision: ${decision}")
+    harness.stdio.println("    reasoning: ${llm_response}")
+    harness.stdio.println("")
+  }
+  const receipt = {
+    persona: "merge_captain",
+    execution_mode: "dry_run",
+    approval_required: blocked > 0 || handed_off > 0,
+    summary: "Triaged ${len(prs)} PRs: ${merged} merge, ${handed_off} handoff, ${blocked} block.",
+    decisions: decisions,
+    receipt_kind: "merge_supervision_receipt",
+  }
+  harness.stdio.println("=== merge_captain receipt ===")
+  harness.stdio.println(json_stringify(receipt))
+  return receipt
+}

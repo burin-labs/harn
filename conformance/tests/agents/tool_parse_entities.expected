@@ -1,0 +1,54 @@
+# encoded operator in json content
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"create","content":"xs.map(x => x)","path":"a.ts"}
+  prose=""
+  answer=null
+  done=null
+# all operator classes decode
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"create","content":"if (a <= b && b >= 0) {}","path":"a.ts"}
+  prose=""
+  answer=null
+  done=null
+# double escaped reference stays literal
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"create","content":"<p>a &lt; b &amp; c</p>","path":"page.html"}
+  prose=""
+  answer=null
+  done=null
+# bare ampersands untouched
+  calls=1 errors=0 violations=0 stray=0
+  call run {"command":"echo R&D && sleep 1 & wait; printf '&amp'"}
+  prose=""
+  answer=null
+  done=null
+# quote references decode
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"create","content":"print(\"a\", 'b', 'c')","path":"a.py"}
+  prose=""
+  answer=null
+  done=null
+# nested arguments decode recursively
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"patch","ops":[{"content":"x => x"},{"content":"a < b"}],"path":"a.ts"}
+  prose=""
+  answer=null
+  done=null
+# nested xml wrapper content decodes
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"create","content":"x => x","path":"a.ts"}
+  prose=""
+  answer=null
+  done=null
+# heredoc raw body is not decoded
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"<p>a &lt; b</p>","path":"page.html"}
+  prose=""
+  answer=null
+  done=null
+# operator corruption class is repaired
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"replace_body","new_body":"const f = (xs) => xs.filter(x => x > 0)","path":"a.ts"}
+  prose=""
+  answer=null
+  done=null

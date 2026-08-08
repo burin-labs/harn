@@ -1,0 +1,20 @@
+pipeline default(harness: Harness) {
+  fn count_down(n, acc) {
+    if n <= 0 {
+      return acc
+    }
+    return count_down(n - 1, acc + 1)
+  }
+  fn sum_tail(n, acc) {
+    if n <= 0 {
+      return acc
+    }
+    return sum_tail(n - 1, acc + n)
+  }
+  // This would overflow the 512-frame stack without TCO
+  const result = count_down(10000, 0)
+  harness.stdio.println(result)
+  // Tail-recursive sum
+  const total = sum_tail(100, 0)
+  harness.stdio.println(total)
+}

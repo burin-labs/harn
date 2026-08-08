@@ -1,0 +1,7 @@
+fn main(harness: Harness) {
+  harness.stdio.println(harness.clock.now_ms())
+  harness.clock.sleep_ms(250)
+  harness.stdio.println(harness.clock.now_ms())
+  harness.stdio.println(harness.clock.monotonic_ms())
+  harness.stdio.println(harness.clock.elapsed())
+}

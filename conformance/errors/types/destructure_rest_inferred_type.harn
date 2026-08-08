@@ -1,0 +1,11 @@
+// Rest patterns preserve the source element type: `rest` here is `list<int>`,
+// so iterating it yields `int` and binding an element to `string` is an error.
+// Before this, the rest binding was the opaque `list` type and slipped through.
+pipeline default(harness: Harness) {
+  const [first, ...rest] = [1, 2, 3]
+  harness.stdio.println(first)
+  for r in rest {
+    const bad: string = r
+    harness.stdio.println(bad)
+  }
+}

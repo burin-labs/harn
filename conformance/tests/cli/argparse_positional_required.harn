@@ -1,0 +1,20 @@
+import { parse, parser } from "std/cli/argparse"
+import { assert_eq } from "std/testing"
+
+pipeline test(harness: Harness, task) {
+  const spec = parser(
+    {
+      name: "demo",
+      args: [
+        {name: "input", kind: "positional", required: true},
+        {name: "output", kind: "positional", required: false},
+      ],
+    },
+  )
+  const result = parse(spec, ["foo.txt", "bar.txt"])
+  assert_eq(result, Ok({options: {input: "foo.txt", output: "bar.txt"}, rest: []}))
+  const invocation = unwrap(result)
+  harness.stdio.println(invocation.options.input)
+  harness.stdio.println(invocation.options.output)
+  harness.stdio.println(len(invocation.rest))
+}

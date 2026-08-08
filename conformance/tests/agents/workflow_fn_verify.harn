@@ -1,0 +1,128 @@
+import { workflow_execute } from "std/workflow/execute"
+import { workflow_evaluate_verification } from "std/workflow/stage"
+
+/**
+ * fn-verify mode (design D5): a stage's `verify` may be a FUNCTION that
+ * receives the attempt result and returns a verdict `{ok, findings?}`. This
+ * composes verification with arbitrary Harn logic and — crucially — a failing
+ * fn-verify threads its findings into the NEXT attempt's repair prompt (the
+ * blind-repair regression the plan warns against would fail the live-shape
+ * assertion at the bottom).
+ */
+pipeline default(harness: Harness) {
+  // --- Unit: verdict normalization in workflow_evaluate_verification. ---
+  // 1. Dict verdict with an explicit findings list.
+  const v1 = workflow_evaluate_verification(
+    {
+      verify: { r -> return {ok: false, findings: ["needs a summary section"]} },
+      result: {visible_text: "draft"},
+    },
+  )
+  harness.stdio.println(v1.kind)
+  harness.stdio.println(v1.ok)
+  harness.stdio.println(join(v1.findings, "|"))
+  // 2. Bare bool verdict.
+  const v2 = workflow_evaluate_verification({verify: { r -> return true }, result: {}})
+  harness.stdio.println(v2.ok)
+  harness.stdio.println(len(v2.findings))
+  // 3. Findings as a single string are normalized to a one-element list.
+  const v3 = workflow_evaluate_verification(
+    {verify: { r -> return {ok: false, findings: "one problem"} }, result: {}},
+  )
+  harness.stdio.println(join(v3.findings, "|"))
+  // 4. The verifier actually inspects the attempt result.
+  const inspector = { r ->
+    return {ok: contains(to_string(r?.visible_text), "GOOD"), findings: ["missing GOOD marker"]}
+  }
+  harness.stdio.println(
+    workflow_evaluate_verification({verify: inspector, result: {visible_text: "all GOOD"}}).ok,
+  )
+  harness.stdio.println(
+    workflow_evaluate_verification({verify: inspector, result: {visible_text: "bad"}}).ok,
+  )
+  // --- Live-shape: fn-verify FIRES end-to-end through workflow_execute and its
+  //     findings reach attempt 2's repair prompt. The mock provider echoes the
+  //     (feedback-threaded) prompt back as its output, and the verifier passes
+  //     only when that echo contains the token that IS the finding — so a pass
+  //     on attempt 2 PROVES the finding was threaded into attempt 2's prompt. A
+  //     findings-less (blind) repair would loop to exhaustion and fail here. ---
+  const token = "GOTOKEN"
+  const verifier = { r ->
+    return {ok: contains(to_string(r?.artifacts[0]?.text), token), findings: [token]}
+  }
+  const flow = workflow_graph(
+    {
+      name: "fn-verify-live",
+      entry: "goal",
+      nodes: {
+        goal: {
+          kind: "subagent",
+          mode: "llm",
+          model_policy: {provider: "mock"},
+          retry_policy: {max_attempts: 2, feedback: true},
+          verify: verifier,
+          output_contract: {output_kinds: ["result"]},
+        },
+      },
+      edges: [],
+    },
+  )
+  const run = workflow_execute(harness, "Z", flow, [], {max_steps: 2})
+  const stage = run?.run?.stages[0]
+  const attempts = stage?.attempts
+  harness.stdio.println(run.status)
+  // Exactly two attempts: fn-verify failed attempt 1, passed attempt 2.
+  harness.stdio.println(len(attempts))
+  harness.stdio.println(attempts[0].status)
+  harness.stdio.println(attempts[1].status)
+  // Attempt 1's recorded verification is the fn verdict carrying the finding.
+  harness.stdio.println(attempts[0].verification.kind)
+  harness.stdio.println(attempts[0].verification.ok)
+  harness.stdio.println(contains(json_stringify(attempts[0].verification.findings), token))
+  // The stage settles successfully on attempt 2 (terminates on success).
+  harness.stdio.println(stage.status)
+  // Finding-threading proof: attempt 2's echoed output carries BOTH the
+  // threaded token and the "Previous attempt 1 failed:" feedback preamble —
+  // they could only reach the mock via attempt 2's repair prompt.
+  harness.stdio.println(contains(json_stringify(stage.artifacts), token))
+  harness.stdio.println(contains(json_stringify(stage.artifacts), "Previous attempt 1 failed"))
+  // --- Robustness: a THROWING verifier is contained as a failed verification
+  //     (with the throw message in findings), NOT an aborted run. A user
+  //     verifier doing `r.output` on a nil field must not nuke the workflow —
+  //     the attempt loop stays intact and records every attempt. ---
+  const throwing_verifier = { r ->
+    throw "verifier boom: " + to_string(r?.nonexistent?.field)
+  }
+  const throw_flow = workflow_graph(
+    {
+      name: "fn-verify-throw",
+      entry: "goal",
+      nodes: {
+        goal: {
+          kind: "subagent",
+          mode: "llm",
+          model_policy: {provider: "mock"},
+          retry_policy: {max_attempts: 2, feedback: true},
+          verify: throwing_verifier,
+          output_contract: {output_kinds: ["result"]},
+        },
+      },
+      edges: [],
+    },
+  )
+  const throw_run = workflow_execute(harness, "go", throw_flow, [], {max_steps: 2})
+  const throw_stage = throw_run?.run?.stages[0]
+  const throw_attempts = throw_stage?.attempts
+  // The run did NOT abort — both attempts were still recorded and settled.
+  harness.stdio.println(len(throw_attempts))
+  harness.stdio.println(throw_attempts[0].status)
+  harness.stdio.println(throw_attempts[1].status)
+  // The throw is captured as a failed verification carrying its message.
+  harness.stdio.println(throw_attempts[0].verification.ok)
+  harness.stdio.println(
+    contains(json_stringify(throw_attempts[0].verification.findings), "verifier threw"),
+  )
+  harness.stdio.println(
+    contains(json_stringify(throw_attempts[0].verification.findings), "verifier boom"),
+  )
+}

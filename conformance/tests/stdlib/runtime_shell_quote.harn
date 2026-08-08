@@ -1,0 +1,12 @@
+import { process_result_success, shell_quote } from "std/runtime"
+
+pipeline default(harness: Harness) {
+  harness.stdio.println(shell_quote("simple"))
+  harness.stdio.println(shell_quote("two words"))
+  harness.stdio.println(shell_quote("can't"))
+  harness.stdio.println(shell_quote(""))
+  harness.stdio.println(shell_quote(nil))
+  harness.stdio.println(process_result_success({status: "completed", exit_code: 0}))
+  harness.stdio.println(process_result_success({status: "failed", exit_code: 0}))
+  harness.stdio.println(process_result_success({success: false, status: "completed", exit_code: 0}))
+}

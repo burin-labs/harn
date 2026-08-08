@@ -1,0 +1,2602 @@
+//! Named agent worker pools.
+//!
+//! Provides a VM-scoped registry of named pools that bound the number of
+//! concurrent Harn closure executions and queue excess submissions. Queue
+//! strategies, bounded backpressure, and pipeline-scope durability all flow
+//! through the single submit path so trigger, agent, and direct-submit callers
+//! observe the same scheduling rules.
+//!
+//! Scope conventions follow the channel scope contract (CH-01 / CH-03):
+//!
+//! * `scope: "session"` (default) — in-memory only, lost on session close.
+//! * `scope: "pipeline"` — file-backed JSONL store under `.harn/pools/`,
+//!   keyed by pipeline id + pool name so reload across process restart
+//!   reuses the same persistent state.
+//! * `scope: "tenant"` / `scope: "org"` — host-managed scopes. Accepted at
+//!   the API level so user code is portable; today they fail with a clear
+//!   diagnostic until an embedding host wires a tenant/org pool backend.
+
+use crate::value::VmDictExt;
+use std::any::Any;
+use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::future::Future;
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use crate::event_log::{
+    active_event_log, install_memory_for_current_thread, EventLog, LogEvent, Topic,
+};
+use crate::runtime_limits::RuntimeLimits;
+use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
+use crate::value::{VmClosure, VmError, VmValue};
+use crate::vm::{AsyncBuiltinCtx, Vm};
+use futures::FutureExt;
+use harn_parser::diagnostic_codes::Code;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+
+mod storage;
+use storage::{PersistedPoolMeta, PersistedPoolState, PersistedTask, PoolDurableStore, PoolRecord};
+
+/// Default `max_concurrent` when a pool is created without one.
+const DEFAULT_MAX_CONCURRENT: usize = 1;
+
+/// Type tag stamped on every pool handle and task handle returned to Harn
+/// code. `wait_agent` matches on `POOL_TASK_TYPE` to route pool task
+/// handles to `__pool_wait` (see `agent/workers.harn`).
+const POOL_TYPE: &str = "pool";
+const POOL_TASK_TYPE: &str = "pool_task";
+const POOL_AUDIT_TOPIC: &str = "lifecycle.pool.audit";
+const POOL_EVENT_LOG_QUEUE_DEPTH: usize = RuntimeLimits::DEFAULT.default_event_log_queue_depth;
+
+/// On-disk root for pipeline-scope pool state. Mirrors the channel scope
+/// convention (`.harn/...`) so durable artifacts stay co-located with the
+/// pipeline's other state.
+const PIPELINE_POOLS_ROOT: &str = ".harn/pools";
+
+/// Default stale-in-flight threshold. A task whose heartbeat is older than
+/// this on reload is classified as failed. Configurable via `opts.stale_after_ms`.
+const DEFAULT_STALE_AFTER_MS: i64 = 30_000;
+
+#[derive(Clone)]
+struct PendingTask {
+    task_id: String,
+    closure: Arc<VmClosure>,
+    state: Arc<parking_lot::Mutex<TaskState>>,
+    priority: i64,
+    key: Option<String>,
+    /// Tiebreaker so FIFO order is preserved among equal priorities.
+    seq: u64,
+    /// Execution context captured at submit time. Pool tasks are dispatched
+    /// later from slot-free callbacks, so the runner context must travel with
+    /// the task instead of being rediscovered from ambient state.
+    context: Option<AsyncBuiltinCtx>,
+}
+
+struct TaskState {
+    id: String,
+    pool_id: String,
+    pool_name: String,
+    key: Option<String>,
+    priority: i64,
+    status: TaskStatus,
+    submitted_at: String,
+    started_at: Option<String>,
+    finished_at: Option<String>,
+    result: Option<VmValue>,
+    error: Option<String>,
+    rejection_reason: Option<String>,
+    rejection_policy: Option<String>,
+    /// Caller-supplied dedupe key. When set, two submissions with the
+    /// same `idempotency_key` resolve to the same task (the second call
+    /// returns the existing handle / terminal snapshot instead of being
+    /// re-enqueued). Persisted to the durable store so resubmission after
+    /// a process restart short-circuits to the previously recorded
+    /// outcome.
+    idempotency_key: Option<String>,
+    /// Wall-clock ms of the latest progress signal (submit, dispatch,
+    /// terminal transition). Drives stale-in-flight detection on
+    /// pipeline-scope pool reload: any task whose `heartbeat_at_ms` is
+    /// older than `stale_after_ms` at load time is classified as failed.
+    heartbeat_at_ms: i64,
+    /// Wall-clock ms snapshot taken at submission, used to compute
+    /// `queued_for_ms` on the `PoolDequeueReceipt` when the task is
+    /// finally plucked from the queue (PL-06).
+    submitted_at_ms: i64,
+    /// Live span link to the `PoolSubmit` span. Populated when tracing is
+    /// enabled at submit time so the deferred `PoolDequeue` span can link
+    /// back across the async boundary (PL-06 / `set_span_link` from
+    /// harn#1858).
+    submit_span_link: Option<crate::tracing::SpanLink>,
+    /// Caller identifier captured at submit time (`workflow_id`,
+    /// `agent_session_id`, or `worker_id` when set; otherwise "user").
+    /// Stamped on the `PoolSubmitReceipt`.
+    submitted_by: String,
+    /// Senders wake every `pool_wait` future the moment the task reaches
+    /// a terminal state. The Sender side is dropped to fire the signal.
+    waiters: Vec<tokio::sync::oneshot::Sender<()>>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TaskStatus {
+    Queued,
+    Running,
+    Completed,
+    Failed,
+    Rejected,
+}
+
+impl TaskStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            TaskStatus::Queued => "queued",
+            TaskStatus::Running => "running",
+            TaskStatus::Completed => "completed",
+            TaskStatus::Failed => "failed",
+            TaskStatus::Rejected => "rejected",
+        }
+    }
+
+    fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Rejected
+        )
+    }
+}
+
+struct PoolEntry {
+    id: String,
+    name: String,
+    max_concurrent: usize,
+    created_at: String,
+    submit_counter: u64,
+    queue: VecDeque<PendingTask>,
+    queue_strategy: QueueStrategy,
+    backpressure: BackpressureStrategy,
+    round_robin_after: Option<String>,
+    active: HashMap<String, Arc<parking_lot::Mutex<TaskState>>>,
+    /// Tasks popped from `queue` by a dispatcher but not yet inserted into
+    /// `active`. The pop (in `dispatch_ready`) and the insert (in `spawn_task`)
+    /// happen under separate lock holds, so without counting these reservations
+    /// two concurrent dispatchers — e.g. a `submit` racing a `finalize_task` —
+    /// could both admit into the same free slot and momentarily run more than
+    /// `max_concurrent` tasks. The admission check counts `active + reserved`.
+    reserved_slots: usize,
+    tasks: BTreeMap<String, Arc<parking_lot::Mutex<TaskState>>>,
+    space_waiters: Vec<tokio::sync::oneshot::Sender<()>>,
+    /// Optional per-create user-supplied config (queue strategy, priority
+    /// fn, backpressure). Queue strategy is evaluated by this module;
+    /// later pool tickets wire the other config knobs.
+    config: crate::value::DictMap,
+    /// Durability scope. `Session` is in-memory only.
+    /// `Pipeline` writes a JSONL append-log under `.harn/pools/` so the
+    /// pool's pending queue + in-flight task metadata survives process
+    /// restart. `Tenant` / `Org` are reserved for host-managed runtimes and
+    /// today fail with a clear diagnostic.
+    scope: PoolScope,
+    /// Scope identifier (e.g. pipeline run id). Empty for session-scoped
+    /// pools because `Session` is registry-local.
+    scope_id: String,
+    /// Idempotency-key → existing task id. Populated when a submission
+    /// carries `idempotency_key`, and used to short-circuit duplicate
+    /// submissions to the same `task_handle_value`.
+    idempotency_index: HashMap<String, String>,
+    /// Stale-in-flight threshold (ms). Used by the file-backed reload
+    /// path to decide which `Running` tasks must be re-enqueued.
+    stale_after_ms: i64,
+    /// Optional durable store the pool serializes state mutations into.
+    /// `None` for session-scoped pools.
+    store: Option<Arc<parking_lot::Mutex<PoolDurableStore>>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum QueueStrategy {
+    Fifo,
+    Priority,
+    Lifo,
+    FairRoundRobin { key_field: String },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum BackpressureStrategy {
+    Unbounded,
+    Queue {
+        max_depth: usize,
+        on_full: QueueOnFullPolicy,
+    },
+    FailFast,
+    RingBuffer {
+        capacity: usize,
+    },
+}
+
+impl BackpressureStrategy {
+    fn name(&self) -> &'static str {
+        match self {
+            BackpressureStrategy::Unbounded => "unbounded",
+            BackpressureStrategy::Queue { .. } => "queue",
+            BackpressureStrategy::FailFast => "fail_fast",
+            BackpressureStrategy::RingBuffer { .. } => "ring_buffer",
+        }
+    }
+
+    fn max_depth(&self) -> Option<usize> {
+        match self {
+            BackpressureStrategy::Queue { max_depth, .. } => Some(*max_depth),
+            BackpressureStrategy::RingBuffer { capacity } => Some(*capacity),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum QueueOnFullPolicy {
+    BlockSubmitter,
+    DropOldest,
+    DropNewest,
+    FailSubmitter,
+}
+
+impl QueueOnFullPolicy {
+    fn as_str(self) -> &'static str {
+        match self {
+            QueueOnFullPolicy::BlockSubmitter => "block_submitter",
+            QueueOnFullPolicy::DropOldest => "drop_oldest",
+            QueueOnFullPolicy::DropNewest => "drop_newest",
+            QueueOnFullPolicy::FailSubmitter => "fail_submitter",
+        }
+    }
+}
+
+/// Durability scope for a registered pool. Follows the channel scope
+/// contract (CH-01 / CH-03 in `channels.rs`) so user code stays portable
+/// across primitives.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum PoolScope {
+    /// In-memory; lost on session close. Default when `scope` is omitted.
+    Session,
+    /// File-backed JSONL store under `.harn/pools/`. Pending queue +
+    /// in-flight task metadata survive process restart.
+    Pipeline,
+    /// Reserved for host-managed runtimes until the host capability lands.
+    Tenant,
+    /// Reserved for host-managed runtimes until the host capability lands.
+    Org,
+}
+
+impl PoolScope {
+    fn parse(value: &str) -> Result<Self, VmError> {
+        match value.trim() {
+            "" | "session" => Ok(Self::Session),
+            "pipeline" => Ok(Self::Pipeline),
+            "tenant" => Ok(Self::Tenant),
+            "org" => Ok(Self::Org),
+            other => Err(VmError::Runtime(format!(
+                "pool_create: unknown scope '{other}' (expected one of session/pipeline/tenant/org)"
+            ))),
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Session => "session",
+            Self::Pipeline => "pipeline",
+            Self::Tenant => "tenant",
+            Self::Org => "org",
+        }
+    }
+
+    /// True for scopes that require a host-managed backing service. At the
+    /// language level we still accept the keyword so user code stays
+    /// portable across runtimes, but the in-process pool registry must not
+    /// invent tenant/org persistence semantics on its own.
+    fn is_host_routed(self) -> bool {
+        matches!(self, Self::Tenant | Self::Org)
+    }
+}
+
+#[derive(Clone)]
+struct PoolDropAudit {
+    pool_id: String,
+    pool_name: String,
+    task_id: String,
+    replacement_task_id: Option<String>,
+    reason: String,
+    policy: String,
+    queue_depth: usize,
+    max_depth: Option<usize>,
+    occurred_at: String,
+}
+
+/// `PoolSubmitReceipt` (PL-06 / #1891). One per accepted submission.
+/// Pairs 1:1 with a `PoolSubmit` span on the audit timeline.
+#[derive(Clone)]
+struct PoolSubmitReceipt {
+    pool_id: String,
+    pool_name: String,
+    task_id: String,
+    submitted_at: String,
+    priority: i64,
+    key: Option<String>,
+    idempotency_key: Option<String>,
+    submitted_by: String,
+}
+
+/// `PoolDequeueReceipt` (PL-06 / #1891). One per task plucked out of the
+/// queue by the dispatcher. Pairs 1:1 with a `PoolDequeue` span that
+/// links back to the originating `PoolSubmit` span.
+#[derive(Clone)]
+struct PoolDequeueReceipt {
+    pool_id: String,
+    pool_name: String,
+    task_id: String,
+    dequeued_at: String,
+    queued_for_ms: i64,
+    /// Sequential slot index inside `pool.active` at the moment of
+    /// dispatch. Useful when correlating dequeue receipts with
+    /// `max_concurrent` capacity exhaustion.
+    slot_index: usize,
+}
+
+/// RAII guard around a pool tracing span. Mirrors the
+/// `LifecycleSpanGuard` pattern used by P-05 (#1858): we open both a
+/// thread-local Harn span (for `trace_spans()` introspection) and an
+/// OTel `tracing::Span` (for the exporter), wire OTel span links via
+/// `crate::observability::otel::set_span_link`, and close them both on
+/// `end()` / `Drop`. Disabled-tracing path is a no-op because
+/// `crate::tracing::span_start_*` returns id 0 and short-circuits.
+struct PoolSpanGuard {
+    span_id: u64,
+    otel_span: tracing::Span,
+}
+
+impl PoolSpanGuard {
+    fn start(
+        kind: crate::tracing::SpanKind,
+        name: String,
+        links: Vec<crate::tracing::SpanLink>,
+    ) -> Self {
+        Self::start_with_parenting(kind, name, links, true)
+    }
+
+    fn start_detached(
+        kind: crate::tracing::SpanKind,
+        name: String,
+        links: Vec<crate::tracing::SpanLink>,
+    ) -> Self {
+        Self::start_with_parenting(kind, name, links, false)
+    }
+
+    fn start_with_parenting(
+        kind: crate::tracing::SpanKind,
+        name: String,
+        links: Vec<crate::tracing::SpanLink>,
+        inherit_parent: bool,
+    ) -> Self {
+        let span_id = if inherit_parent {
+            crate::tracing::span_start_with_links(kind, name.clone(), links.clone())
+        } else {
+            crate::tracing::span_start_detached_with_links(kind, name.clone(), links.clone())
+        };
+        let otel_span = tracing::info_span!(
+            target: "harn.vm.pool",
+            "harn.pool",
+            harn.kind = kind.as_str(),
+            harn.name = %name,
+        );
+        for link in links {
+            let trace_id = crate::TraceId(link.trace_id);
+            let mut attributes: std::collections::HashMap<String, String> =
+                link.attributes.into_iter().collect();
+            attributes
+                .entry("harn.link.kind".to_string())
+                .or_insert_with(|| "pool_submit".to_string());
+            let _ = crate::observability::otel::set_span_link(
+                &otel_span,
+                &trace_id,
+                &link.span_id,
+                Some(attributes),
+            );
+        }
+        Self { span_id, otel_span }
+    }
+
+    fn link(&self) -> Option<crate::tracing::SpanLink> {
+        crate::observability::otel::current_span_context_hex(&self.otel_span)
+            .map(|(trace_id, span_id)| crate::tracing::SpanLink::new(trace_id, span_id))
+            .or_else(|| crate::tracing::span_link(self.span_id))
+    }
+
+    fn set_metadata(&self, key: &str, value: serde_json::Value) {
+        crate::tracing::span_set_metadata(self.span_id, key, value);
+    }
+
+    fn end(&mut self) {
+        if self.span_id != 0 {
+            crate::tracing::span_end(self.span_id);
+            self.span_id = 0;
+        }
+    }
+}
+
+impl Drop for PoolSpanGuard {
+    fn drop(&mut self) {
+        self.end();
+    }
+}
+
+impl QueueStrategy {
+    fn name(&self) -> &'static str {
+        match self {
+            QueueStrategy::Fifo => "fifo",
+            QueueStrategy::Priority => "priority",
+            QueueStrategy::Lifo => "lifo",
+            QueueStrategy::FairRoundRobin { .. } => "fair_round_robin",
+        }
+    }
+
+    fn key_field(&self) -> Option<&str> {
+        match self {
+            QueueStrategy::FairRoundRobin { key_field } => Some(key_field.as_str()),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct PoolRegistry {
+    inner: parking_lot::Mutex<PoolRegistryState>,
+}
+
+#[derive(Default)]
+struct PoolRegistryState {
+    pools: HashMap<String, Arc<parking_lot::Mutex<PoolEntry>>>,
+    /// Name → pool_id lookup so `pool_get("...")` and `pool_create({name: ...})`
+    /// duplicate detection stay O(1).
+    names: HashMap<String, String>,
+}
+
+impl PoolRegistryState {
+    fn clear(&mut self) {
+        self.pools.clear();
+        self.names.clear();
+    }
+}
+
+tokio::task_local! {
+    static ACTIVE_POOL_REGISTRY: Arc<PoolRegistry>;
+}
+
+static FALLBACK_POOL_REGISTRY: std::sync::OnceLock<Arc<PoolRegistry>> = std::sync::OnceLock::new();
+
+pub(crate) fn new_pool_registry() -> Arc<PoolRegistry> {
+    Arc::new(PoolRegistry::default())
+}
+
+pub(crate) async fn with_pool_registry_scope<F>(registry: Arc<PoolRegistry>, future: F) -> F::Output
+where
+    F: Future,
+{
+    ACTIVE_POOL_REGISTRY.scope(registry, future).await
+}
+
+fn fallback_pool_registry() -> Arc<PoolRegistry> {
+    FALLBACK_POOL_REGISTRY
+        .get_or_init(|| Arc::new(PoolRegistry::default()))
+        .clone()
+}
+
+fn current_pool_registry() -> Arc<PoolRegistry> {
+    ACTIVE_POOL_REGISTRY
+        .try_with(Arc::clone)
+        .unwrap_or_else(|_| fallback_pool_registry())
+}
+
+fn pool_registry_for_ctx(ctx: Option<&AsyncBuiltinCtx>) -> Arc<PoolRegistry> {
+    ctx.map(AsyncBuiltinCtx::pool_registry)
+        .unwrap_or_else(current_pool_registry)
+}
+
+fn next_pool_id() -> String {
+    format!("pool_{}", uuid::Uuid::now_v7())
+}
+
+/// Deterministic pool id for pipeline-scope pools. Same `(scope_id,
+/// name)` always maps to the same id so reloads after restart bind to
+/// the existing JSONL file. The hash never includes raw user input on
+/// the filesystem path (see [`pipeline_pool_file_path`]).
+fn deterministic_pool_id(scope: PoolScope, scope_id: &str, name: &str) -> String {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(scope.as_str().as_bytes());
+    hasher.update(b"\x00");
+    hasher.update(scope_id.as_bytes());
+    hasher.update(b"\x00");
+    hasher.update(name.as_bytes());
+    let digest = hasher.finalize().to_hex();
+    // Take the first 32 hex chars — enough collision resistance for the
+    // single-pipeline scope while keeping ids ergonomic in logs.
+    format!("pool_{}_{}", scope.as_str(), &digest.as_str()[..32])
+}
+
+fn next_task_id(pool: &PoolEntry) -> String {
+    format!("{}_task_{}", pool.id, uuid::Uuid::now_v7())
+}
+
+fn lookup_pool(pool_id: &str) -> Result<Arc<parking_lot::Mutex<PoolEntry>>, VmError> {
+    lookup_pool_in_registry(&current_pool_registry(), pool_id)
+}
+
+fn lookup_pool_in_registry(
+    registry: &Arc<PoolRegistry>,
+    pool_id: &str,
+) -> Result<Arc<parking_lot::Mutex<PoolEntry>>, VmError> {
+    registry
+        .inner
+        .lock()
+        .pools
+        .get(pool_id)
+        .cloned()
+        .ok_or_else(|| VmError::Runtime(format!("pool not found: {pool_id}")))
+}
+
+fn lookup_pool_by_name_or_id_in_registry(
+    registry: &Arc<PoolRegistry>,
+    name_or_id: &str,
+) -> Option<Arc<parking_lot::Mutex<PoolEntry>>> {
+    let registry_ref = registry.inner.lock();
+    if let Some(id) = registry_ref.names.get(name_or_id) {
+        registry_ref.pools.get(id).cloned()
+    } else {
+        registry_ref.pools.get(name_or_id).cloned()
+    }
+}
+
+fn pool_id_from_value(value: &VmValue, builtin: &str) -> Result<String, VmError> {
+    match value {
+        VmValue::String(text) => Ok(text.to_string()),
+        VmValue::Dict(map) => map
+            .get("id")
+            .map(|value| value.display())
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| VmError::Runtime(format!("{builtin}: pool handle missing id"))),
+        _ => Err(VmError::Runtime(format!(
+            "{builtin}: expected pool handle or pool id"
+        ))),
+    }
+}
+
+fn task_handle_from_value(value: &VmValue, builtin: &str) -> Result<(String, String), VmError> {
+    let map = value.as_dict().ok_or_else(|| {
+        VmError::Runtime(format!(
+            "{builtin}: expected pool task handle (got {})",
+            value.type_name()
+        ))
+    })?;
+    let pool_id = map
+        .get("pool_id")
+        .map(|v| v.display())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| VmError::Runtime(format!("{builtin}: task handle missing pool_id")))?;
+    let task_id = map
+        .get("id")
+        .map(|v| v.display())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| VmError::Runtime(format!("{builtin}: task handle missing id")))?;
+    Ok((pool_id, task_id))
+}
+
+fn parse_options(value: Option<&VmValue>, builtin: &str) -> Result<crate::value::DictMap, VmError> {
+    match value {
+        None | Some(VmValue::Nil) => Ok(crate::value::DictMap::new()),
+        Some(VmValue::Dict(map)) => Ok((**map).clone()),
+        Some(other) => Err(VmError::Runtime(format!(
+            "{builtin}: options must be a dict (got {})",
+            other.type_name()
+        ))),
+    }
+}
+
+fn parse_max_concurrent(opts: &crate::value::DictMap) -> Result<usize, VmError> {
+    match opts.get("max_concurrent") {
+        None | Some(VmValue::Nil) => Ok(DEFAULT_MAX_CONCURRENT),
+        Some(VmValue::Int(n)) => {
+            if *n < 1 {
+                return Err(VmError::Runtime(
+                    "pool_create: max_concurrent must be >= 1".to_string(),
+                ));
+            }
+            Ok(*n as usize)
+        }
+        Some(other) => Err(VmError::Runtime(format!(
+            "pool_create: max_concurrent must be an int (got {})",
+            other.type_name()
+        ))),
+    }
+}
+
+fn parse_name(opts: &crate::value::DictMap) -> Option<String> {
+    opts.get("name").and_then(|value| match value {
+        VmValue::String(text) if !text.trim().is_empty() => Some(text.to_string()),
+        _ => None,
+    })
+}
+
+fn parse_scope(opts: &crate::value::DictMap) -> Result<PoolScope, VmError> {
+    match opts.get("scope") {
+        None | Some(VmValue::Nil) => Ok(PoolScope::Session),
+        Some(VmValue::String(text)) => PoolScope::parse(text),
+        Some(other) => Err(VmError::Runtime(format!(
+            "pool_create: scope must be a string (got {})",
+            other.type_name()
+        ))),
+    }
+}
+
+fn parse_scope_id_override(opts: &crate::value::DictMap) -> Option<String> {
+    for key in ["scope_id", "pipeline_id", "run_id"] {
+        if let Some(VmValue::String(text)) = opts.get(key) {
+            if !text.trim().is_empty() {
+                return Some(text.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn parse_stale_after_ms(opts: &crate::value::DictMap) -> Result<i64, VmError> {
+    match opts.get("stale_after_ms") {
+        None | Some(VmValue::Nil) => Ok(DEFAULT_STALE_AFTER_MS),
+        Some(VmValue::Int(n)) if *n >= 0 => Ok(*n),
+        Some(VmValue::Duration(n)) if *n >= 0 => Ok(*n),
+        Some(other) => Err(VmError::Runtime(format!(
+            "pool_create: stale_after_ms must be a non-negative int or duration (got {})",
+            other.type_name()
+        ))),
+    }
+}
+
+fn parse_idempotency_key(opts: &crate::value::DictMap) -> Result<Option<String>, VmError> {
+    match opts.get("idempotency_key").or_else(|| opts.get("id")) {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::String(text)) if !text.trim().is_empty() => Ok(Some(text.to_string())),
+        Some(VmValue::String(_)) => Err(VmError::Runtime(
+            "pool.submit: idempotency_key cannot be empty".to_string(),
+        )),
+        Some(other) => Err(VmError::Runtime(format!(
+            "pool.submit: idempotency_key must be a string (got {})",
+            other.type_name()
+        ))),
+    }
+}
+
+/// Resolve the pipeline id for a pipeline-scope pool. Tries explicit
+/// option overrides first, then falls back to the active runtime
+/// context (workflow_id / run_id). Returns a friendly error matching the
+/// channel scope contract when no pipeline id is in scope.
+fn resolve_pipeline_scope_id(
+    ctx: Option<&AsyncBuiltinCtx>,
+    opts: &crate::value::DictMap,
+) -> Result<String, VmError> {
+    if let Some(explicit) = parse_scope_id_override(opts) {
+        return Ok(explicit);
+    }
+    if let Some(vm) = ctx.map(AsyncBuiltinCtx::child_vm) {
+        if let VmValue::Dict(values) = crate::runtime_context::runtime_context_value(&vm) {
+            for key in ["workflow_id", "run_id"] {
+                if let Some(VmValue::String(text)) = values.get(key) {
+                    if !text.is_empty() {
+                        return Ok(text.to_string());
+                    }
+                }
+            }
+        }
+    }
+    Err(VmError::Runtime(
+        "pool_create: pipeline-scope pool requires a pipeline_id (or active workflow/run \
+         context); pass options.pipeline_id explicitly when creating from outside a pipeline"
+            .to_string(),
+    ))
+}
+
+fn parse_priority(opts: &crate::value::DictMap) -> Result<i64, VmError> {
+    match opts.get("priority") {
+        None | Some(VmValue::Nil) => Ok(0),
+        Some(VmValue::Int(n)) => Ok(*n),
+        Some(other) => Err(VmError::Runtime(format!(
+            "pool.submit: priority must be an int (got {})",
+            other.type_name()
+        ))),
+    }
+}
+
+fn parse_key(opts: &crate::value::DictMap) -> Result<Option<String>, VmError> {
+    match opts.get("key") {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::String(text)) => Ok(Some(text.to_string())),
+        Some(other) => Err(VmError::Runtime(format!(
+            "pool.submit: key must be a string (got {})",
+            other.type_name()
+        ))),
+    }
+}
+
+fn parse_submit_key(
+    opts: &crate::value::DictMap,
+    queue_strategy: &QueueStrategy,
+) -> Result<Option<String>, VmError> {
+    if let Some(field) = queue_strategy.key_field() {
+        match opts.get(field) {
+            Some(VmValue::String(text)) => return Ok(Some(text.to_string())),
+            Some(VmValue::Nil) | None => {}
+            Some(other) => {
+                return Err(VmError::Runtime(format!(
+                    "pool.submit: {field} must be a string (got {})",
+                    other.type_name()
+                )));
+            }
+        }
+    }
+    parse_key(opts)
+}
+
+fn parse_queue_strategy(opts: &crate::value::DictMap) -> Result<QueueStrategy, VmError> {
+    let Some(value) = opts.get("queue") else {
+        return Ok(QueueStrategy::Priority);
+    };
+    match value {
+        VmValue::Nil => Ok(QueueStrategy::Priority),
+        VmValue::String(text) => parse_queue_strategy_name(text),
+        VmValue::Dict(map) => {
+            let kind = map
+                .get("kind")
+                .or_else(|| map.get("strategy"))
+                .map(VmValue::display)
+                .filter(|name| !name.is_empty())
+                .ok_or_else(|| {
+                    VmError::Runtime("pool_create: queue strategy missing kind".to_string())
+                })?;
+            match kind.as_str() {
+                "fair_round_robin" => {
+                    let key_field = map
+                        .get("key")
+                        .or_else(|| map.get("key_field"))
+                        .map(VmValue::display)
+                        .filter(|name| !name.is_empty())
+                        .unwrap_or_else(|| "key".to_string());
+                    Ok(QueueStrategy::FairRoundRobin { key_field })
+                }
+                _ => parse_queue_strategy_name(&kind),
+            }
+        }
+        other => Err(VmError::Runtime(format!(
+            "pool_create: queue must be a strategy dict or string (got {})",
+            other.type_name()
+        ))),
+    }
+}
+
+fn parse_queue_strategy_name(name: &str) -> Result<QueueStrategy, VmError> {
+    match name {
+        "fifo" => Ok(QueueStrategy::Fifo),
+        "priority" => Ok(QueueStrategy::Priority),
+        "lifo" => Ok(QueueStrategy::Lifo),
+        "fair_round_robin" => Ok(QueueStrategy::FairRoundRobin {
+            key_field: "key".to_string(),
+        }),
+        other => Err(VmError::Runtime(format!(
+            "pool_create: unknown queue strategy '{other}'"
+        ))),
+    }
+}
+
+fn parse_backpressure(opts: &crate::value::DictMap) -> Result<BackpressureStrategy, VmError> {
+    let Some(value) = opts.get("backpressure") else {
+        return Ok(BackpressureStrategy::Unbounded);
+    };
+    match value {
+        VmValue::Nil => Ok(BackpressureStrategy::Unbounded),
+        VmValue::String(text) => parse_backpressure_name(text),
+        VmValue::Dict(map) => {
+            let kind = map
+                .get("kind")
+                .or_else(|| map.get("strategy"))
+                .map(VmValue::display)
+                .filter(|name| !name.is_empty())
+                .ok_or_else(|| {
+                    VmError::Runtime("pool_create: backpressure missing kind".to_string())
+                })?;
+            match kind.as_str() {
+                "queue" => {
+                    let max_depth = parse_positive_usize(
+                        map.get("max_depth").or_else(|| map.get("capacity")),
+                        "pool_create: backpressure.max_depth",
+                    )?;
+                    let on_full = parse_on_full_policy(map.get("on_full"))?;
+                    Ok(BackpressureStrategy::Queue { max_depth, on_full })
+                }
+                "ring_buffer" => {
+                    let capacity = parse_positive_usize(
+                        map.get("capacity").or_else(|| map.get("max_depth")),
+                        "pool_create: backpressure.capacity",
+                    )?;
+                    Ok(BackpressureStrategy::RingBuffer { capacity })
+                }
+                _ => parse_backpressure_name(&kind),
+            }
+        }
+        other => Err(VmError::Runtime(format!(
+            "pool_create: backpressure must be a policy dict or string (got {})",
+            other.type_name()
+        ))),
+    }
+}
+
+fn parse_backpressure_name(name: &str) -> Result<BackpressureStrategy, VmError> {
+    match name {
+        "unbounded" => Ok(BackpressureStrategy::Unbounded),
+        "fail_fast" => Ok(BackpressureStrategy::FailFast),
+        other => Err(VmError::Runtime(format!(
+            "pool_create: unknown backpressure policy '{other}'"
+        ))),
+    }
+}
+
+fn parse_positive_usize(value: Option<&VmValue>, name: &str) -> Result<usize, VmError> {
+    match value {
+        Some(VmValue::Int(n)) if *n >= 1 => Ok(*n as usize),
+        Some(VmValue::Int(_)) => Err(VmError::Runtime(format!("{name} must be >= 1"))),
+        Some(other) => Err(VmError::Runtime(format!(
+            "{name} must be an int (got {})",
+            other.type_name()
+        ))),
+        None => Err(VmError::Runtime(format!("{name} is required"))),
+    }
+}
+
+fn parse_on_full_policy(value: Option<&VmValue>) -> Result<QueueOnFullPolicy, VmError> {
+    match value {
+        None | Some(VmValue::Nil) => Ok(QueueOnFullPolicy::BlockSubmitter),
+        Some(VmValue::String(text)) => match text.as_ref() {
+            "block_submitter" => Ok(QueueOnFullPolicy::BlockSubmitter),
+            "drop_oldest" => Ok(QueueOnFullPolicy::DropOldest),
+            "drop_newest" => Ok(QueueOnFullPolicy::DropNewest),
+            "fail_submitter" => Ok(QueueOnFullPolicy::FailSubmitter),
+            other => Err(VmError::Runtime(format!(
+                "pool_create: unknown backpressure on_full policy '{other}'"
+            ))),
+        },
+        Some(other) => Err(VmError::Runtime(format!(
+            "pool_create: backpressure.on_full must be a string (got {})",
+            other.type_name()
+        ))),
+    }
+}
+
+/// Public surface: snapshot dict mirroring the structure returned by
+/// `pool.snapshot()`. Pulled into its own helper so `__pool_create`,
+/// `__pool_snapshot`, `__pool_list`, and `__pool_get` stay byte-for-byte
+/// consistent.
+fn pool_snapshot_value(pool: &PoolEntry) -> VmValue {
+    let mut tasks: Vec<VmValue> = pool
+        .tasks
+        .values()
+        .map(|task| task_snapshot_value(&task.lock()))
+        .collect();
+    tasks.sort_by_key(task_sort_key);
+    let queued: i64 = pool.queue.len() as i64;
+    let active: i64 = pool.active.len() as i64;
+    let mut completed: i64 = 0;
+    let mut failed: i64 = 0;
+    let mut rejected: i64 = 0;
+    for task in pool.tasks.values() {
+        match task.lock().status {
+            TaskStatus::Completed => completed += 1,
+            TaskStatus::Failed => failed += 1,
+            TaskStatus::Rejected => rejected += 1,
+            _ => {}
+        }
+    }
+    let mut snapshot = crate::value::DictMap::new();
+    snapshot.put_str("_type", POOL_TYPE);
+    snapshot.put_str("id", pool.id.as_str());
+    snapshot.put_str("name", pool.name.as_str());
+    snapshot.insert(
+        crate::value::intern_key("max_concurrent"),
+        VmValue::Int(pool.max_concurrent as i64),
+    );
+    snapshot.put_str("created_at", pool.created_at.as_str());
+    snapshot.insert(crate::value::intern_key("active"), VmValue::Int(active));
+    snapshot.insert(crate::value::intern_key("queued"), VmValue::Int(queued));
+    snapshot.insert(
+        crate::value::intern_key("completed"),
+        VmValue::Int(completed),
+    );
+    snapshot.insert(crate::value::intern_key("failed"), VmValue::Int(failed));
+    snapshot.insert(crate::value::intern_key("rejected"), VmValue::Int(rejected));
+    snapshot.insert(
+        crate::value::intern_key("total"),
+        VmValue::Int(pool.tasks.len() as i64),
+    );
+    snapshot.put_str("queue_strategy", pool.queue_strategy.name());
+    snapshot.insert(
+        crate::value::intern_key("backpressure"),
+        backpressure_snapshot_value(&pool.backpressure),
+    );
+    snapshot.insert(
+        crate::value::intern_key("blocked_submitters"),
+        VmValue::Int(pool.space_waiters.len() as i64),
+    );
+    snapshot.insert(
+        crate::value::intern_key("tasks"),
+        VmValue::List(std::sync::Arc::new(tasks)),
+    );
+    snapshot.put_str("scope", pool.scope.as_str());
+    if !pool.scope_id.is_empty() {
+        snapshot.put_str("scope_id", pool.scope_id.as_str());
+    }
+    snapshot.insert(
+        crate::value::intern_key("durable"),
+        VmValue::Bool(pool.store.is_some()),
+    );
+    snapshot.insert(
+        crate::value::intern_key("stale_after_ms"),
+        VmValue::Int(pool.stale_after_ms),
+    );
+    if !pool.config.is_empty() {
+        snapshot.insert(
+            crate::value::intern_key("config"),
+            VmValue::dict(pool.config.clone()),
+        );
+    }
+    VmValue::dict(snapshot)
+}
+
+fn backpressure_snapshot_value(backpressure: &BackpressureStrategy) -> VmValue {
+    let mut value = crate::value::DictMap::new();
+    value.put_str("_type", "backpressure");
+    value.put_str("kind", backpressure.name());
+    if let Some(max_depth) = backpressure.max_depth() {
+        value.insert(
+            crate::value::intern_key("max_depth"),
+            VmValue::Int(max_depth as i64),
+        );
+    }
+    if let BackpressureStrategy::Queue { on_full, .. } = backpressure {
+        value.put_str("on_full", on_full.as_str());
+    }
+    VmValue::dict(value)
+}
+
+fn task_sort_key(task: &VmValue) -> String {
+    match task {
+        VmValue::Dict(map) => map
+            .get("submitted_at")
+            .map(|value| value.display())
+            .unwrap_or_default(),
+        _ => String::new(),
+    }
+}
+
+fn task_snapshot_value(task: &TaskState) -> VmValue {
+    let mut entry = crate::value::DictMap::new();
+    entry.put_str("_type", POOL_TASK_TYPE);
+    entry.put_str("id", task.id.as_str());
+    entry.put_str("pool_id", task.pool_id.as_str());
+    entry.put_str("pool", task.pool_name.as_str());
+    entry.put_str("status", task.status.as_str());
+    entry.insert(
+        crate::value::intern_key("priority"),
+        VmValue::Int(task.priority),
+    );
+    entry.put_str("submitted_at", task.submitted_at.as_str());
+    entry.put_opt_str("key", task.key.as_deref());
+    entry.put_opt_str("started_at", task.started_at.as_deref());
+    entry.put_opt_str("finished_at", task.finished_at.as_deref());
+    if let Some(result) = &task.result {
+        entry.insert(crate::value::intern_key("result"), result.clone());
+    }
+    entry.put_opt_str("error", task.error.as_deref());
+    entry.put_opt_str("rejection_reason", task.rejection_reason.as_deref());
+    entry.put_opt_str("rejection_policy", task.rejection_policy.as_deref());
+    VmValue::dict(entry)
+}
+
+fn task_handle_value(task: &TaskState) -> VmValue {
+    let mut handle = crate::value::DictMap::new();
+    handle.put_str("_type", POOL_TASK_TYPE);
+    handle.put_str("id", task.id.as_str());
+    handle.put_str("pool_id", task.pool_id.as_str());
+    handle.put_str("pool", task.pool_name.as_str());
+    handle.put_str("submitted_at", task.submitted_at.as_str());
+    handle.put_str("status", task.status.as_str());
+    handle.put_opt_str("key", task.key.as_deref());
+    handle.put_opt_str("error", task.error.as_deref());
+    handle.put_opt_str("rejection_reason", task.rejection_reason.as_deref());
+    handle.put_opt_str("rejection_policy", task.rejection_policy.as_deref());
+    VmValue::dict(handle)
+}
+
+fn ordered_pool_config(opts: &crate::value::DictMap) -> crate::value::DictMap {
+    let mut config = crate::value::DictMap::new();
+    for key in ["queue", "backpressure", "priority"] {
+        if let Some(value) = opts.get(key) {
+            config.insert(crate::value::intern_key(key), value.clone());
+        }
+    }
+    config
+}
+
+/// Create a named agent pool and register it in the local pool registry.
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "__pool_create(options?: dict|nil) -> dict",
+    kind = "async",
+    category = "pool",
+    runtime_only = true
+)]
+async fn pool_create_sync(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let opts = parse_options(args.first(), "pool_create")?;
+    let name = parse_name(&opts).unwrap_or_else(|| format!("pool_{}", uuid::Uuid::now_v7()));
+    let registry = ctx.pool_registry();
+    {
+        let registry_ref = registry.inner.lock();
+        if let Some(existing) = registry_ref.names.get(&name) {
+            return Err(VmError::Runtime(format!(
+                "pool_create: pool '{name}' already exists (id={existing}); use pool_get to reuse"
+            )));
+        }
+    }
+    let max_concurrent = parse_max_concurrent(&opts)?;
+    let queue_strategy = parse_queue_strategy(&opts)?;
+    let backpressure = parse_backpressure(&opts)?;
+    let scope = parse_scope(&opts)?;
+    let stale_after_ms = parse_stale_after_ms(&opts)?;
+
+    if scope.is_host_routed() {
+        return Err(VmError::Runtime(format!(
+            "pool_create: scope '{}' is host-managed and is not wired in the \
+             in-process runtime. Use scope: \"session\" or scope: \"pipeline\", \
+             or provide a host runtime that implements tenant/org pool routing",
+            scope.as_str()
+        )));
+    }
+
+    let (id, scope_id, store, persisted) = match scope {
+        PoolScope::Session => (next_pool_id(), String::new(), None, None),
+        PoolScope::Pipeline => {
+            let pipeline_id = resolve_pipeline_scope_id(Some(&ctx), &opts)?;
+            let id = deterministic_pool_id(scope, &pipeline_id, &name);
+            let dir_override = parse_durable_dir(&opts)?;
+            let path = pipeline_pool_file_path(dir_override.as_deref(), &pipeline_id, &name);
+            let store = PoolDurableStore::new(path);
+            let persisted = store.load()?;
+            (
+                id,
+                pipeline_id,
+                Some(Arc::new(parking_lot::Mutex::new(store))),
+                persisted,
+            )
+        }
+        PoolScope::Tenant | PoolScope::Org => unreachable!("host-managed scope returned above"),
+    };
+
+    // Compute the live submit counter from any persisted state so newly
+    // submitted tasks always observe a strictly-increasing seq across
+    // restarts.
+    let submit_counter = persisted
+        .as_ref()
+        .map(|state| state.meta.submit_counter)
+        .unwrap_or(0);
+
+    let entry = Arc::new(parking_lot::Mutex::new(PoolEntry {
+        id: id.clone(),
+        name: name.clone(),
+        max_concurrent,
+        created_at: uuid::Uuid::now_v7().to_string(),
+        submit_counter,
+        queue: VecDeque::new(),
+        queue_strategy,
+        backpressure,
+        round_robin_after: None,
+        active: HashMap::new(),
+        reserved_slots: 0,
+        tasks: std::collections::BTreeMap::new(),
+        space_waiters: Vec::new(),
+        config: ordered_pool_config(&opts),
+        scope,
+        scope_id,
+        idempotency_index: HashMap::new(),
+        stale_after_ms,
+        store: store.clone(),
+    }));
+
+    // Hydrate persisted tasks BEFORE registering, so any reader that
+    // races a `pool_get` on the same registry sees a populated pool.
+    if let (Some(persisted), Some(store_ref)) = (persisted, store.clone()) {
+        rehydrate_persisted_state(&entry, &store_ref, persisted, stale_after_ms)?;
+    } else if let Some(store_ref) = store {
+        // Fresh pipeline-scope pool: stamp the header so reloads find a
+        // well-formed log even if no tasks have been submitted yet.
+        let meta = persisted_meta_from_entry(&entry.lock());
+        store_ref.lock().compact(&meta, &[])?;
+    }
+
+    {
+        let mut registry_ref = registry.inner.lock();
+        if let Some(existing) = registry_ref.names.get(&name) {
+            return Err(VmError::Runtime(format!(
+                "pool_create: pool '{name}' already exists (id={existing}); use pool_get to reuse"
+            )));
+        }
+        registry_ref.pools.insert(id.clone(), entry.clone());
+        registry_ref.names.insert(name, id);
+    }
+    let snapshot = pool_snapshot_value(&entry.lock());
+    Ok(snapshot)
+}
+
+fn pipeline_pool_file_path(dir_override: Option<&str>, pipeline_id: &str, name: &str) -> PathBuf {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(pipeline_id.as_bytes());
+    hasher.update(b"\x00");
+    hasher.update(name.as_bytes());
+    let digest = hasher.finalize().to_hex();
+    let safe_pipeline = crate::event_log::sanitize_topic_component(pipeline_id);
+    let safe_name = crate::event_log::sanitize_topic_component(name);
+    let root = match dir_override {
+        Some(path) => PathBuf::from(path),
+        None => PathBuf::from(PIPELINE_POOLS_ROOT),
+    };
+    root.join(format!(
+        "{safe_pipeline}__{safe_name}__{}.jsonl",
+        &digest.as_str()[..16]
+    ))
+}
+
+fn parse_durable_dir(opts: &crate::value::DictMap) -> Result<Option<String>, VmError> {
+    match opts.get("dir") {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::String(text)) if !text.trim().is_empty() => Ok(Some(text.to_string())),
+        Some(VmValue::String(_)) => Err(VmError::Runtime(
+            "pool_create: dir cannot be empty".to_string(),
+        )),
+        Some(other) => Err(VmError::Runtime(format!(
+            "pool_create: dir must be a string (got {})",
+            other.type_name()
+        ))),
+    }
+}
+
+/// Look up a pool by name or id; returns nil when missing.
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "__pool_get(name_or_id: string|dict) -> dict|nil",
+    category = "pool",
+    runtime_only = true
+)]
+fn pool_get_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let key = args
+        .first()
+        .map(VmValue::display)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| VmError::Runtime("pool_get: name is required".to_string()))?;
+    let registry = current_pool_registry();
+    let Some(entry) = lookup_pool_by_name_or_id_in_registry(&registry, &key) else {
+        return Ok(VmValue::Nil);
+    };
+    let snapshot = pool_snapshot_value(&entry.lock());
+    Ok(snapshot)
+}
+
+/// List every pool registered in the local pool registry.
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "__pool_list() -> list", category = "pool", runtime_only = true
+)]
+fn pool_list_sync(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let mut entries: Vec<Arc<parking_lot::Mutex<PoolEntry>>> = current_pool_registry()
+        .inner
+        .lock()
+        .pools
+        .values()
+        .cloned()
+        .collect();
+    entries.sort_by_key(|entry| entry.lock().created_at.clone());
+    Ok(VmValue::List(std::sync::Arc::new(
+        entries
+            .iter()
+            .map(|entry| pool_snapshot_value(&entry.lock()))
+            .collect(),
+    )))
+}
+
+/// Return active + queued task count for a pool.
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "__pool_size(pool: string|dict) -> int",
+    category = "pool",
+    runtime_only = true
+)]
+fn pool_size_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let pool_id = pool_id_from_value(
+        args.first()
+            .ok_or_else(|| VmError::Runtime("pool.size: pool handle is required".to_string()))?,
+        "pool.size",
+    )?;
+    let entry = lookup_pool(&pool_id)?;
+    let entry = entry.lock();
+    Ok(VmValue::Int(
+        (entry.active.len() + entry.queue.len()) as i64,
+    ))
+}
+
+/// Test-only entrypoint that drops the in-process pool registry so a
+/// subsequent `pool_create({scope: "pipeline", ...})` reloads its state
+/// from the on-disk JSONL artifact. Conformance fixtures use this to
+/// simulate "kill process → restart" without actually forking a new
+/// process. Returns `nil`.
+/// Drop the in-process pool registry; pipeline-scope pools reload from disk on next pool_create.
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "__pool_simulate_restart() -> nil",
+    category = "pool",
+    runtime_only = true
+)]
+fn pool_reload_sync(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    reset_pool_state();
+    Ok(VmValue::Nil)
+}
+
+/// Return the full pool snapshot for inspection.
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "__pool_snapshot(pool: string|dict) -> dict",
+    category = "pool",
+    runtime_only = true
+)]
+fn pool_snapshot_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let pool_id = pool_id_from_value(
+        args.first().ok_or_else(|| {
+            VmError::Runtime("pool.snapshot: pool handle is required".to_string())
+        })?,
+        "pool.snapshot",
+    )?;
+    let entry = lookup_pool(&pool_id)?;
+    let snapshot = pool_snapshot_value(&entry.lock());
+    Ok(snapshot)
+}
+
+/// Submit a closure to a pool; spawns when a slot is free, otherwise queues.
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "__pool_submit(pool: string|dict, closure: closure, options?: dict|nil) -> dict",
+    kind = "async",
+    category = "pool",
+    runtime_only = true
+)]
+async fn pool_submit_builtin(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let pool_id = pool_id_from_value(
+        args.first()
+            .ok_or_else(|| VmError::Runtime("pool.submit: pool handle is required".to_string()))?,
+        "pool.submit",
+    )?;
+    let closure = match args.get(1) {
+        Some(VmValue::Closure(closure)) => closure.clone(),
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "pool.submit: second argument must be a closure (got {})",
+                other.type_name()
+            )));
+        }
+        None => {
+            return Err(VmError::Runtime(
+                "pool.submit: closure is required".to_string(),
+            ));
+        }
+    };
+    let opts = parse_options(args.get(2), "pool.submit")?;
+    let priority = parse_priority(&opts)?;
+    let idempotency_key = parse_idempotency_key(&opts)?;
+
+    let registry = ctx.pool_registry();
+    let entry = lookup_pool_in_registry(&registry, &pool_id)?;
+    let key = {
+        let pool = entry.lock();
+        parse_submit_key(&opts, &pool.queue_strategy)?
+    };
+
+    let state =
+        submit_to_pool_entry(Some(&ctx), &entry, closure, key, priority, idempotency_key).await?;
+    let handle = task_handle_value(&state.lock());
+    Ok(handle)
+}
+
+/// Resolve a registered pool by name (or id) without producing a snapshot.
+/// Returns `None` when no pool matches. Used by the trigger dispatcher's
+/// SpawnToPool handler (#1889) so it can route inbound events into named
+/// pools without going through the Harn-level builtin surface.
+/// Public submission outcome returned by [`submit_closure_to_named_pool`].
+/// The dispatcher inspects this to distinguish accepted-and-running tasks
+/// from accepted-but-dropped (drop_newest) tasks so it can emit the right
+/// audit and dispatch outcome.
+pub struct PoolSubmitOutcome {
+    /// Stable pool id (e.g. `pool_018f...`). Pair with `task_id` to build a
+    /// `pool_wait` handle on the Harn side.
+    pub pool_id: String,
+    /// Human-friendly pool name (i.e. the registration argument).
+    pub pool_name: String,
+    /// Assigned task id; also stable across the lifetime of the pool.
+    pub task_id: String,
+    /// Status the task is in once `submit_closure_to_named_pool` returns:
+    /// `"queued"`, `"running"`, or `"rejected"` (for the `drop_newest` case
+    /// when the newly-submitted task is the one that gets evicted).
+    pub status: &'static str,
+    /// Set when `status == "rejected"` so the dispatcher can surface the
+    /// pool's policy-driven drop reason in audit + action graph metadata.
+    pub rejection_reason: Option<String>,
+}
+
+/// Submit a closure to a named pool from a non-Harn caller (e.g. the trigger
+/// dispatcher). Honors the pool's queue strategy + backpressure policy in the
+/// same way as `pool.submit` from Harn code. Returns an error when the pool
+/// does not exist or the policy fails the submitter (fail_fast /
+/// fail_submitter); awaits when the policy blocks the submitter.
+pub async fn submit_closure_to_named_pool(
+    ctx: Option<&AsyncBuiltinCtx>,
+    pool_name: &str,
+    closure: Arc<VmClosure>,
+    priority: i64,
+    key: Option<String>,
+) -> Result<PoolSubmitOutcome, VmError> {
+    let registry = pool_registry_for_ctx(ctx);
+    let entry = lookup_pool_by_name_or_id_in_registry(&registry, pool_name).ok_or_else(|| {
+        VmError::Runtime(format!(
+            "pool: pool '{pool_name}' not found; create it with pool_create first"
+        ))
+    })?;
+    // Trigger-dispatcher pool submissions don't carry a caller-supplied
+    // idempotency key today; the dispatcher's own dedupe runs upstream.
+    let state = submit_to_pool_entry(ctx, &entry, closure, key, priority, None).await?;
+    let task = state.lock();
+    Ok(PoolSubmitOutcome {
+        pool_id: task.pool_id.clone(),
+        pool_name: task.pool_name.clone(),
+        task_id: task.id.clone(),
+        status: task.status.as_str(),
+        rejection_reason: task.rejection_reason.clone(),
+    })
+}
+
+/// Shared inner submission loop used by both `pool.submit` (Harn builtin)
+/// and `submit_closure_to_named_pool` (dispatcher). Honors the pool's
+/// backpressure policy: blocks on `BlockSubmitter`, drops oldest/newest in
+/// the corresponding policies, and fails on `FailFast`/`FailSubmitter`.
+async fn submit_to_pool_entry(
+    ctx: Option<&AsyncBuiltinCtx>,
+    entry: &Arc<parking_lot::Mutex<PoolEntry>>,
+    closure: Arc<VmClosure>,
+    key: Option<String>,
+    priority: i64,
+    idempotency_key: Option<String>,
+) -> Result<Arc<parking_lot::Mutex<TaskState>>, VmError> {
+    // Idempotency short-circuit: if the caller previously submitted with
+    // the same key, return the existing task (terminal snapshot or
+    // pending handle). Mirrors the durable channel `id`-based dedupe
+    // contract.
+    if let Some(idem) = idempotency_key.as_ref() {
+        if let Some(existing) = lookup_idempotency_match(entry, idem) {
+            return Ok(existing);
+        }
+    }
+    let submitted_by = current_submitter(ctx);
+    let (pool_id_for_span, pool_name_for_span) = {
+        let pool = entry.lock();
+        (pool.id.clone(), pool.name.clone())
+    };
+    loop {
+        // Open the PoolSubmit span just-in-time for each attempt loop:
+        // a single submitter that is blocked under `block_submitter`
+        // backpressure may try several times before placing the task in
+        // the queue. We span every attempt so the trace records the
+        // submitter's queue-wait dwell explicitly.
+        let mut submit_span = PoolSpanGuard::start(
+            crate::tracing::SpanKind::PoolSubmit,
+            format!("pool.submit {pool_name_for_span}"),
+            Vec::new(),
+        );
+        submit_span.set_metadata("pool", serde_json::json!(pool_name_for_span));
+        submit_span.set_metadata("pool_id", serde_json::json!(pool_id_for_span));
+        submit_span.set_metadata("priority", serde_json::json!(priority));
+        if let Some(key) = &key {
+            submit_span.set_metadata("key", serde_json::json!(key));
+        }
+        if let Some(idem) = &idempotency_key {
+            submit_span.set_metadata("idempotency_key", serde_json::json!(idem));
+        }
+        let submit_link = submit_span.link();
+
+        let attempt = {
+            let mut pool = entry.lock();
+            submit_or_wait(
+                ctx,
+                &mut pool,
+                closure.clone(),
+                key.clone(),
+                priority,
+                idempotency_key.clone(),
+                submit_link.clone(),
+                submitted_by.clone(),
+            )
+        };
+        match attempt {
+            SubmitAttempt::Submitted { task, audits } => {
+                {
+                    let task_ref = task.lock();
+                    submit_span.set_metadata("task_id", serde_json::json!(task_ref.id));
+                    submit_span.set_metadata("status", serde_json::json!(task_ref.status.as_str()));
+                }
+                let receipt = {
+                    let pool_ref = entry.lock();
+                    let task_ref = task.lock();
+                    pool_submit_receipt(&pool_ref, &task_ref)
+                };
+                emit_pool_submit_receipt(receipt).await;
+                for audit in audits {
+                    emit_pool_drop(audit).await;
+                }
+                submit_span.end();
+                dispatch_ready(entry);
+                return Ok(task);
+            }
+            SubmitAttempt::Wait(receiver) => {
+                submit_span.set_metadata("blocked", serde_json::json!(true));
+                submit_span.end();
+                let _ = receiver.await;
+            }
+            SubmitAttempt::Fail(error) => {
+                submit_span.set_metadata("error", serde_json::json!(error.to_string()));
+                submit_span.end();
+                return Err(error);
+            }
+        }
+    }
+}
+
+/// Resolve the best-available identifier for who submitted a task. Mirrors
+/// the runtime-context lookups in `runtime_context_value` so the
+/// `PoolSubmitReceipt.submitted_by` field aligns with the rest of the
+/// observability stack (workflow span, agent session, mutation session,
+/// active worker). Falls back to `"user"` when no better identifier is
+/// in scope (e.g. submission from a CLI smoke test).
+fn current_submitter(ctx: Option<&AsyncBuiltinCtx>) -> String {
+    if let Some(vm) = ctx.map(AsyncBuiltinCtx::child_vm) {
+        if let VmValue::Dict(values) = crate::runtime_context::runtime_context_value(&vm) {
+            for key in [
+                "agent_session_id",
+                "worker_id",
+                "workflow_id",
+                "run_id",
+                "task_id",
+            ] {
+                if let Some(VmValue::String(text)) = values.get(key) {
+                    if !text.is_empty() {
+                        return text.to_string();
+                    }
+                }
+            }
+        }
+    }
+    "user".to_string()
+}
+
+fn lookup_idempotency_match(
+    entry: &Arc<parking_lot::Mutex<PoolEntry>>,
+    idempotency_key: &str,
+) -> Option<Arc<parking_lot::Mutex<TaskState>>> {
+    let pool = entry.lock();
+    let task_id = pool.idempotency_index.get(idempotency_key)?.clone();
+    pool.tasks.get(&task_id).cloned()
+}
+
+enum SubmitAttempt {
+    Submitted {
+        task: Arc<parking_lot::Mutex<TaskState>>,
+        audits: Vec<PoolDropAudit>,
+    },
+    Wait(tokio::sync::oneshot::Receiver<()>),
+    Fail(VmError),
+}
+
+#[allow(clippy::too_many_arguments)]
+fn submit_or_wait(
+    ctx: Option<&AsyncBuiltinCtx>,
+    pool: &mut PoolEntry,
+    closure: Arc<VmClosure>,
+    key: Option<String>,
+    priority: i64,
+    idempotency_key: Option<String>,
+    submit_span_link: Option<crate::tracing::SpanLink>,
+    submitted_by: String,
+) -> SubmitAttempt {
+    if can_accept_now(pool) {
+        let (state, pending) = create_pending_task(
+            ctx,
+            pool,
+            closure,
+            key,
+            priority,
+            idempotency_key,
+            submit_span_link,
+            submitted_by,
+        );
+        enqueue_task(pool, pending);
+        return SubmitAttempt::Submitted {
+            task: state,
+            audits: Vec::new(),
+        };
+    }
+
+    match pool.backpressure.clone() {
+        BackpressureStrategy::Unbounded => {
+            let (state, pending) = create_pending_task(
+                ctx,
+                pool,
+                closure,
+                key,
+                priority,
+                idempotency_key,
+                submit_span_link,
+                submitted_by,
+            );
+            enqueue_task(pool, pending);
+            SubmitAttempt::Submitted {
+                task: state,
+                audits: Vec::new(),
+            }
+        }
+        BackpressureStrategy::Queue {
+            max_depth: _,
+            on_full: QueueOnFullPolicy::BlockSubmitter,
+        } => {
+            let (sender, receiver) = tokio::sync::oneshot::channel();
+            pool.space_waiters.push(sender);
+            SubmitAttempt::Wait(receiver)
+        }
+        BackpressureStrategy::Queue {
+            max_depth,
+            on_full: QueueOnFullPolicy::DropOldest,
+        } => submit_with_oldest_drop(
+            ctx,
+            pool,
+            closure,
+            key,
+            priority,
+            idempotency_key,
+            submit_span_link,
+            submitted_by,
+            "drop_oldest_queue_full",
+            QueueOnFullPolicy::DropOldest.as_str(),
+            Some(max_depth),
+        ),
+        BackpressureStrategy::Queue {
+            max_depth,
+            on_full: QueueOnFullPolicy::DropNewest,
+        } => submit_with_newest_drop(
+            ctx,
+            pool,
+            closure,
+            key,
+            priority,
+            idempotency_key,
+            submit_span_link,
+            submitted_by,
+            "drop_newest_queue_full",
+            QueueOnFullPolicy::DropNewest.as_str(),
+            Some(max_depth),
+        ),
+        BackpressureStrategy::Queue {
+            on_full: QueueOnFullPolicy::FailSubmitter,
+            ..
+        } => SubmitAttempt::Fail(policy_error(
+            Code::PoolBackpressureFull,
+            format!(
+                "pool.submit: pool '{}' queue is full under fail_submitter backpressure",
+                pool.name
+            ),
+        )),
+        BackpressureStrategy::FailFast => SubmitAttempt::Fail(policy_error(
+            Code::PoolFailFastFull,
+            format!(
+                "pool.submit: pool '{}' has no immediate capacity under fail_fast backpressure",
+                pool.name
+            ),
+        )),
+        BackpressureStrategy::RingBuffer { capacity } => submit_with_oldest_drop(
+            ctx,
+            pool,
+            closure,
+            key,
+            priority,
+            idempotency_key,
+            submit_span_link,
+            submitted_by,
+            "ring_buffer_drop_oldest",
+            "ring_buffer",
+            Some(capacity),
+        ),
+    }
+}
+
+fn can_accept_now(pool: &PoolEntry) -> bool {
+    if pool.active.len() < pool.max_concurrent && pool.queue.is_empty() {
+        return true;
+    }
+    match &pool.backpressure {
+        BackpressureStrategy::Unbounded => true,
+        BackpressureStrategy::Queue { max_depth, .. } => pool.queue.len() < *max_depth,
+        BackpressureStrategy::FailFast => false,
+        BackpressureStrategy::RingBuffer { capacity } => pool.queue.len() < *capacity,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn submit_with_oldest_drop(
+    ctx: Option<&AsyncBuiltinCtx>,
+    pool: &mut PoolEntry,
+    closure: Arc<VmClosure>,
+    key: Option<String>,
+    priority: i64,
+    idempotency_key: Option<String>,
+    submit_span_link: Option<crate::tracing::SpanLink>,
+    submitted_by: String,
+    reason: &str,
+    policy: &str,
+    max_depth: Option<usize>,
+) -> SubmitAttempt {
+    let queue_depth = pool.queue.len();
+    let (state, pending) = create_pending_task(
+        ctx,
+        pool,
+        closure,
+        key,
+        priority,
+        idempotency_key,
+        submit_span_link,
+        submitted_by,
+    );
+    let replacement_task_id = state.lock().id.clone();
+    let mut audits = Vec::new();
+    if let Some(dropped) = pool.queue.pop_front() {
+        audits.push(reject_pending_task(
+            pool,
+            dropped,
+            Some(replacement_task_id.as_str()),
+            reason,
+            policy,
+            queue_depth,
+            max_depth,
+        ));
+    }
+    enqueue_task(pool, pending);
+    SubmitAttempt::Submitted {
+        task: state,
+        audits,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn submit_with_newest_drop(
+    ctx: Option<&AsyncBuiltinCtx>,
+    pool: &mut PoolEntry,
+    closure: Arc<VmClosure>,
+    key: Option<String>,
+    priority: i64,
+    idempotency_key: Option<String>,
+    submit_span_link: Option<crate::tracing::SpanLink>,
+    submitted_by: String,
+    reason: &str,
+    policy: &str,
+    max_depth: Option<usize>,
+) -> SubmitAttempt {
+    let queue_depth = pool.queue.len();
+    let (state, _pending) = create_pending_task(
+        ctx,
+        pool,
+        closure,
+        key,
+        priority,
+        idempotency_key,
+        submit_span_link,
+        submitted_by,
+    );
+    let task_id = state.lock().id.clone();
+    let waiters = reject_task_state(&state, reason, policy);
+    wake_task_waiters(waiters);
+    persist_task_if_durable(pool, &state.lock());
+    let audit = pool_drop_audit(pool, &task_id, None, reason, policy, queue_depth, max_depth);
+    SubmitAttempt::Submitted {
+        task: state,
+        audits: vec![audit],
+    }
+}
+
+fn create_pending_task(
+    ctx: Option<&AsyncBuiltinCtx>,
+    pool: &mut PoolEntry,
+    closure: Arc<VmClosure>,
+    key: Option<String>,
+    priority: i64,
+    idempotency_key: Option<String>,
+    submit_span_link: Option<crate::tracing::SpanLink>,
+    submitted_by: String,
+) -> (Arc<parking_lot::Mutex<TaskState>>, PendingTask) {
+    pool.submit_counter += 1;
+    let seq = pool.submit_counter;
+    let task_id = next_task_id(pool);
+    let now_ms = now_ms_for_pool();
+    let state = Arc::new(parking_lot::Mutex::new(TaskState {
+        id: task_id.clone(),
+        pool_id: pool.id.clone(),
+        pool_name: pool.name.clone(),
+        key: key.clone(),
+        priority,
+        status: TaskStatus::Queued,
+        submitted_at: uuid::Uuid::now_v7().to_string(),
+        started_at: None,
+        finished_at: None,
+        result: None,
+        error: None,
+        rejection_reason: None,
+        rejection_policy: None,
+        idempotency_key: idempotency_key.clone(),
+        heartbeat_at_ms: now_ms,
+        submitted_at_ms: now_ms,
+        submit_span_link,
+        submitted_by,
+        waiters: Vec::new(),
+    }));
+    if let Some(idem) = &idempotency_key {
+        pool.idempotency_index.insert(idem.clone(), task_id.clone());
+    }
+    pool.tasks.insert(task_id.clone(), state.clone());
+    persist_task_if_durable(pool, &state.lock());
+    let pending = PendingTask {
+        task_id,
+        closure,
+        state: state.clone(),
+        priority,
+        key,
+        seq,
+        context: ctx.map(AsyncBuiltinCtx::child_ctx),
+    };
+    (state, pending)
+}
+
+/// Return the wall-clock millisecond timestamp used for task heartbeats.
+/// Routes through `clock_mock` so test fixtures can deterministically
+/// drive stale-in-flight detection on reload.
+fn now_ms_for_pool() -> i64 {
+    crate::clock_mock::now_ms()
+}
+
+fn persist_task_if_durable(pool: &PoolEntry, state: &TaskState) {
+    let Some(store) = pool.store.as_ref() else {
+        return;
+    };
+    let record = PoolRecord::Task {
+        task: persisted_task_from_state(state),
+    };
+    if let Err(err) = store.lock().append(&record) {
+        // Best-effort: log + swallow rather than poisoning the submit
+        // path. A genuine fsync failure surfaces on the next compact.
+        let _ = err;
+    }
+}
+
+fn persisted_meta_from_entry(pool: &PoolEntry) -> PersistedPoolMeta {
+    PersistedPoolMeta {
+        id: pool.id.clone(),
+        name: pool.name.clone(),
+        scope: pool.scope.as_str().to_string(),
+        scope_id: pool.scope_id.clone(),
+        max_concurrent: pool.max_concurrent,
+        created_at: pool.created_at.clone(),
+        submit_counter: pool.submit_counter,
+    }
+}
+
+fn persisted_task_from_state(state: &TaskState) -> PersistedTask {
+    PersistedTask {
+        id: state.id.clone(),
+        pool_id: state.pool_id.clone(),
+        pool_name: state.pool_name.clone(),
+        key: state.key.clone(),
+        priority: state.priority,
+        status: state.status.as_str().to_string(),
+        submitted_at: state.submitted_at.clone(),
+        started_at: state.started_at.clone(),
+        finished_at: state.finished_at.clone(),
+        error: state.error.clone(),
+        rejection_reason: state.rejection_reason.clone(),
+        rejection_policy: state.rejection_policy.clone(),
+        idempotency_key: state.idempotency_key.clone(),
+        result_display: state.result.as_ref().map(VmValue::display),
+        heartbeat_at_ms: state.heartbeat_at_ms,
+        seq: 0,
+    }
+}
+
+/// Rehydrate a fresh `PoolEntry` from a durable JSONL log. Terminal
+/// tasks are restored as-is so reads through `pool.snapshot()` / `pool_get`
+/// keep the same history. Tasks that were `Queued` or `Running` at the
+/// last checkpoint become "orphaned" markers: their `status` flips to
+/// `failed` with a stale-restart message, and their `idempotency_key`
+/// (when present) stays available so a fresh submit can re-execute them
+/// without violating idempotency. The pool file is compacted in place
+/// so the next process restart sees a tidy log.
+fn rehydrate_persisted_state(
+    entry: &Arc<parking_lot::Mutex<PoolEntry>>,
+    store: &Arc<parking_lot::Mutex<PoolDurableStore>>,
+    persisted: PersistedPoolState,
+    stale_after_ms: i64,
+) -> Result<(), VmError> {
+    let now = now_ms_for_pool();
+    let mut idempotency_index: HashMap<String, String> = HashMap::new();
+    let mut tasks: BTreeMap<String, Arc<parking_lot::Mutex<TaskState>>> =
+        std::collections::BTreeMap::new();
+    let mut rehydrated_persisted: Vec<PersistedTask> = Vec::new();
+
+    {
+        let mut pool = entry.lock();
+        for (_, task) in persisted.tasks {
+            let live = task_state_from_persisted(&pool, &task, now, stale_after_ms);
+            let (task_id, idem) = {
+                let borrowed = live.lock();
+                rehydrated_persisted.push(persisted_task_from_state(&borrowed));
+                (borrowed.id.clone(), borrowed.idempotency_key.clone())
+            };
+            if let Some(idem) = idem {
+                idempotency_index.insert(idem, task_id.clone());
+            }
+            tasks.insert(task_id, live);
+        }
+        pool.tasks = tasks;
+        pool.idempotency_index = idempotency_index;
+    }
+
+    // Rewrite the file with the compacted snapshot. Atomic so a crash
+    // mid-rewrite leaves the previous log intact.
+    let meta = persisted_meta_from_entry(&entry.lock());
+    store.lock().compact(&meta, &rehydrated_persisted)?;
+    Ok(())
+}
+
+fn task_state_from_persisted(
+    pool: &PoolEntry,
+    persisted: &PersistedTask,
+    now: i64,
+    stale_after_ms: i64,
+) -> Arc<parking_lot::Mutex<TaskState>> {
+    let status = match persisted.status.as_str() {
+        "queued" | "running" => {
+            // Both `queued` and `running` survive a crash as "stale"
+            // when the heartbeat is sufficiently old. They convert to
+            // `Failed` with a stale-restart marker so re-submission by
+            // idempotency_key gets a fresh task and existing handles
+            // observe a terminal state.
+            if now.saturating_sub(persisted.heartbeat_at_ms) >= stale_after_ms {
+                TaskStatus::Failed
+            } else {
+                // Within the freshness window: treat as failed too,
+                // because the process owning the in-flight execution is
+                // gone. The stale_after_ms knob is reserved for callers
+                // that want a deferred sweep — for now we always fail
+                // on reload so the durable store never re-enqueues a
+                // closure we cannot resurrect.
+                TaskStatus::Failed
+            }
+        }
+        "completed" => TaskStatus::Completed,
+        "failed" => TaskStatus::Failed,
+        "rejected" => TaskStatus::Rejected,
+        _ => TaskStatus::Failed,
+    };
+
+    let finished_at = persisted
+        .finished_at
+        .clone()
+        .or_else(|| Some(uuid::Uuid::now_v7().to_string()));
+    let (error, rejection_reason, rejection_policy) = match status {
+        TaskStatus::Failed if persisted.status != "failed" => (
+            Some(format!(
+                "pool: task {} reloaded as stale after process restart",
+                persisted.id
+            )),
+            None,
+            None,
+        ),
+        _ => (
+            persisted.error.clone(),
+            persisted.rejection_reason.clone(),
+            persisted.rejection_policy.clone(),
+        ),
+    };
+    let result = persisted
+        .result_display
+        .as_ref()
+        .map(|text| VmValue::String(arcstr::ArcStr::from(text.as_str())));
+
+    Arc::new(parking_lot::Mutex::new(TaskState {
+        id: persisted.id.clone(),
+        pool_id: pool.id.clone(),
+        pool_name: pool.name.clone(),
+        key: persisted.key.clone(),
+        priority: persisted.priority,
+        status,
+        submitted_at: persisted.submitted_at.clone(),
+        started_at: persisted.started_at.clone(),
+        finished_at,
+        result,
+        error,
+        rejection_reason,
+        rejection_policy,
+        idempotency_key: persisted.idempotency_key.clone(),
+        heartbeat_at_ms: persisted.heartbeat_at_ms,
+        // Rehydrated tasks predate the live VM's tracing context: the
+        // submit span belongs to the prior process. Treat as no span;
+        // the dequeue receipt's `queued_for_ms` is computed from the
+        // persisted heartbeat instead.
+        submitted_at_ms: persisted.heartbeat_at_ms,
+        submit_span_link: None,
+        // No live submitter context after a reload; receipts emitted on
+        // re-execution take the live caller's identity at that point.
+        submitted_by: "reloaded".to_string(),
+        waiters: Vec::new(),
+    }))
+}
+
+fn enqueue_task(pool: &mut PoolEntry, pending: PendingTask) {
+    pool.queue.push_back(pending);
+}
+
+fn dispatch_ready(pool: &Arc<parking_lot::Mutex<PoolEntry>>) {
+    let mut freed_queue_space = false;
+    loop {
+        let next = {
+            let mut pool_ref = pool.lock();
+            // Reserve against tasks already popped by a concurrent dispatcher but
+            // not yet inserted into `active`, so two dispatchers can never admit
+            // into the same free slot (transient over-admission past the cap).
+            if pool_ref.active.len() + pool_ref.reserved_slots >= pool_ref.max_concurrent {
+                break;
+            }
+            let next = pop_next_task(&mut pool_ref);
+            if next.is_some() {
+                pool_ref.reserved_slots += 1;
+                freed_queue_space = true;
+            }
+            next
+        };
+        let Some(pending) = next else { break };
+        spawn_task(pool.clone(), pending);
+    }
+    if freed_queue_space {
+        wake_space_waiters(pool);
+    }
+}
+
+fn reject_pending_task(
+    pool: &PoolEntry,
+    pending: PendingTask,
+    replacement_task_id: Option<&str>,
+    reason: &str,
+    policy: &str,
+    queue_depth: usize,
+    max_depth: Option<usize>,
+) -> PoolDropAudit {
+    let task_id = pending.task_id.clone();
+    let waiters = reject_task_state(&pending.state, reason, policy);
+    wake_task_waiters(waiters);
+    persist_task_if_durable(pool, &pending.state.lock());
+    pool_drop_audit(
+        pool,
+        &task_id,
+        replacement_task_id,
+        reason,
+        policy,
+        queue_depth,
+        max_depth,
+    )
+}
+
+fn reject_task_state(
+    state: &Arc<parking_lot::Mutex<TaskState>>,
+    reason: &str,
+    policy: &str,
+) -> Vec<tokio::sync::oneshot::Sender<()>> {
+    let mut state_ref = state.lock();
+    state_ref.status = TaskStatus::Rejected;
+    state_ref.finished_at = Some(uuid::Uuid::now_v7().to_string());
+    state_ref.heartbeat_at_ms = now_ms_for_pool();
+    state_ref.error = Some(reason.to_string());
+    state_ref.rejection_reason = Some(reason.to_string());
+    state_ref.rejection_policy = Some(policy.to_string());
+    std::mem::take(&mut state_ref.waiters)
+}
+
+fn wake_task_waiters(waiters: Vec<tokio::sync::oneshot::Sender<()>>) {
+    for waiter in waiters {
+        let _ = waiter.send(());
+    }
+}
+
+fn wake_space_waiters(pool: &Arc<parking_lot::Mutex<PoolEntry>>) {
+    let waiters = {
+        let mut pool_ref = pool.lock();
+        std::mem::take(&mut pool_ref.space_waiters)
+    };
+    for waiter in waiters {
+        let _ = waiter.send(());
+    }
+}
+
+fn pool_drop_audit(
+    pool: &PoolEntry,
+    task_id: &str,
+    replacement_task_id: Option<&str>,
+    reason: &str,
+    policy: &str,
+    queue_depth: usize,
+    max_depth: Option<usize>,
+) -> PoolDropAudit {
+    PoolDropAudit {
+        pool_id: pool.id.clone(),
+        pool_name: pool.name.clone(),
+        task_id: task_id.to_string(),
+        replacement_task_id: replacement_task_id.map(str::to_string),
+        reason: reason.to_string(),
+        policy: policy.to_string(),
+        queue_depth,
+        max_depth,
+        occurred_at: uuid::Uuid::now_v7().to_string(),
+    }
+}
+
+async fn emit_pool_drop(audit: PoolDropAudit) {
+    let topic = Topic::new(POOL_AUDIT_TOPIC).expect("static pool audit topic is valid");
+    let mut headers = std::collections::BTreeMap::new();
+    headers.insert("schema".to_string(), "harn.pool_drop.v1".to_string());
+    headers.insert("policy".to_string(), audit.policy.clone());
+    let payload = json!({
+        "pool_id": audit.pool_id,
+        "pool": audit.pool_name,
+        "task_id": audit.task_id,
+        "replacement_task_id": audit.replacement_task_id,
+        "reason": audit.reason,
+        "policy": audit.policy,
+        "queue_depth": audit.queue_depth,
+        "max_depth": audit.max_depth,
+        "occurred_at": audit.occurred_at,
+    });
+    let _ = ensure_pool_event_log()
+        .append(
+            &topic,
+            LogEvent::new("pool_drop", payload).with_headers(headers),
+        )
+        .await;
+}
+
+fn pool_submit_receipt(pool: &PoolEntry, task: &TaskState) -> PoolSubmitReceipt {
+    PoolSubmitReceipt {
+        pool_id: pool.id.clone(),
+        pool_name: pool.name.clone(),
+        task_id: task.id.clone(),
+        submitted_at: task.submitted_at.clone(),
+        priority: task.priority,
+        key: task.key.clone(),
+        idempotency_key: task.idempotency_key.clone(),
+        submitted_by: task.submitted_by.clone(),
+    }
+}
+
+async fn emit_pool_submit_receipt(receipt: PoolSubmitReceipt) {
+    let topic = Topic::new(POOL_AUDIT_TOPIC).expect("static pool audit topic is valid");
+    let mut headers = std::collections::BTreeMap::new();
+    headers.insert("schema".to_string(), "harn.pool_submit.v1".to_string());
+    let payload = json!({
+        "pool_id": receipt.pool_id,
+        "pool": receipt.pool_name,
+        "task_id": receipt.task_id,
+        "submitted_at": receipt.submitted_at,
+        "priority": receipt.priority,
+        "key": receipt.key,
+        "idempotency_key": receipt.idempotency_key,
+        "submitted_by": receipt.submitted_by,
+    });
+    let _ = ensure_pool_event_log()
+        .append(
+            &topic,
+            LogEvent::new("pool_submit", payload).with_headers(headers),
+        )
+        .await;
+}
+
+fn pool_dequeue_receipt(
+    pool: &PoolEntry,
+    task: &TaskState,
+    slot_index: usize,
+) -> PoolDequeueReceipt {
+    let now_ms = now_ms_for_pool();
+    let queued_for_ms = now_ms.saturating_sub(task.submitted_at_ms);
+    PoolDequeueReceipt {
+        pool_id: pool.id.clone(),
+        pool_name: pool.name.clone(),
+        task_id: task.id.clone(),
+        dequeued_at: task
+            .started_at
+            .clone()
+            .unwrap_or_else(|| uuid::Uuid::now_v7().to_string()),
+        queued_for_ms,
+        slot_index,
+    }
+}
+
+async fn emit_pool_dequeue_receipt(
+    event_log: Arc<crate::event_log::AnyEventLog>,
+    receipt: PoolDequeueReceipt,
+) {
+    let topic = Topic::new(POOL_AUDIT_TOPIC).expect("static pool audit topic is valid");
+    let mut headers = std::collections::BTreeMap::new();
+    headers.insert("schema".to_string(), "harn.pool_dequeue.v1".to_string());
+    let payload = json!({
+        "pool_id": receipt.pool_id,
+        "pool": receipt.pool_name,
+        "task_id": receipt.task_id,
+        "dequeued_at": receipt.dequeued_at,
+        "queued_for_ms": receipt.queued_for_ms,
+        "slot_index": receipt.slot_index,
+    });
+    let _ = event_log
+        .append(
+            &topic,
+            LogEvent::new("pool_dequeue", payload).with_headers(headers),
+        )
+        .await;
+}
+
+fn ensure_pool_event_log() -> Arc<crate::event_log::AnyEventLog> {
+    active_event_log()
+        .unwrap_or_else(|| install_memory_for_current_thread(POOL_EVENT_LOG_QUEUE_DEPTH))
+}
+
+fn policy_error(code: Code, message: String) -> VmError {
+    VmError::Runtime(format!("{}: {message}", code.as_str()))
+}
+
+fn pop_next_task(pool: &mut PoolEntry) -> Option<PendingTask> {
+    match &pool.queue_strategy {
+        QueueStrategy::Fifo => pool.queue.pop_front(),
+        QueueStrategy::Lifo => pool.queue.pop_back(),
+        QueueStrategy::Priority => {
+            let index = priority_queue_index(pool.queue.iter().map(|p| (p.priority, p.seq)))?;
+            pool.queue.remove(index)
+        }
+        QueueStrategy::FairRoundRobin { .. } => pop_fair_round_robin(pool),
+    }
+}
+
+fn priority_queue_index<I>(existing: I) -> Option<usize>
+where
+    I: Iterator<Item = (i64, u64)>,
+{
+    existing
+        .enumerate()
+        .max_by(
+            |(_, (left_priority, left_seq)), (_, (right_priority, right_seq))| {
+                left_priority
+                    .cmp(right_priority)
+                    .then_with(|| right_seq.cmp(left_seq))
+            },
+        )
+        .map(|(index, _)| index)
+}
+
+fn pop_fair_round_robin(pool: &mut PoolEntry) -> Option<PendingTask> {
+    if pool.queue.is_empty() {
+        return None;
+    }
+    let mut keys = Vec::<String>::new();
+    for pending in &pool.queue {
+        let key = fair_key(pending);
+        if !keys.contains(&key) {
+            keys.push(key);
+        }
+    }
+    let selected_key = match pool.round_robin_after.as_deref() {
+        Some(after) => keys
+            .iter()
+            .position(|key| key == after)
+            .map(|index| keys[(index + 1) % keys.len()].clone())
+            .unwrap_or_else(|| keys[0].clone()),
+        None => keys[0].clone(),
+    };
+    let index = pool
+        .queue
+        .iter()
+        .position(|pending| fair_key(pending) == selected_key)?;
+    pool.round_robin_after = Some(selected_key);
+    pool.queue.remove(index)
+}
+
+fn fair_key(pending: &PendingTask) -> String {
+    pending.key.clone().unwrap_or_default()
+}
+
+fn spawn_task(pool: Arc<parking_lot::Mutex<PoolEntry>>, pending: PendingTask) {
+    let PendingTask {
+        task_id,
+        closure,
+        state,
+        context,
+        ..
+    } = pending;
+    let task_runtime_id = task_id.clone();
+
+    // PoolDequeue span (PL-06). Opened detached so it stands on its own
+    // in the trace tree — the dispatcher fires it from whatever caller
+    // happens to free a slot (submit, wait, or another task finishing),
+    // and the natural parent of that work is the submitter's pipeline,
+    // not the unrelated current span. Linking back to the submit span
+    // via `set_span_link` is what stitches the trace tree together.
+    let submit_link = state.lock().submit_span_link.clone();
+    let span_links: Vec<crate::tracing::SpanLink> = submit_link
+        .into_iter()
+        .map(|link| {
+            link.with_attributes(std::collections::BTreeMap::from([(
+                "harn.link.kind".to_string(),
+                "pool_submit".to_string(),
+            )]))
+        })
+        .collect();
+    let (pool_id_for_span, pool_name_for_span) = {
+        let pool_ref = pool.lock();
+        (pool_ref.id.clone(), pool_ref.name.clone())
+    };
+    let mut dequeue_span = PoolSpanGuard::start_detached(
+        crate::tracing::SpanKind::PoolDequeue,
+        format!("pool.dequeue {pool_name_for_span}"),
+        span_links,
+    );
+    dequeue_span.set_metadata("pool", serde_json::json!(pool_name_for_span));
+    dequeue_span.set_metadata("pool_id", serde_json::json!(pool_id_for_span));
+    dequeue_span.set_metadata("task_id", serde_json::json!(task_id));
+
+    {
+        let mut state_ref = state.lock();
+        state_ref.status = TaskStatus::Running;
+        state_ref.started_at = Some(uuid::Uuid::now_v7().to_string());
+        state_ref.heartbeat_at_ms = now_ms_for_pool();
+    }
+    let dequeue_receipt = {
+        let mut pool_ref = pool.lock();
+        pool_ref.active.insert(task_id, state.clone());
+        // The reservation `dispatch_ready` made for this task is now realized as
+        // a live `active` entry.
+        pool_ref.reserved_slots = pool_ref.reserved_slots.saturating_sub(1);
+        let slot_index = pool_ref.active.len().saturating_sub(1);
+        let receipt = pool_dequeue_receipt(&pool_ref, &state.lock(), slot_index);
+        persist_task_if_durable(&pool_ref, &state.lock());
+        receipt
+    };
+
+    dequeue_span.set_metadata(
+        "queued_for_ms",
+        serde_json::json!(dequeue_receipt.queued_for_ms),
+    );
+    dequeue_span.set_metadata("slot_index", serde_json::json!(dequeue_receipt.slot_index));
+
+    // Hand the dequeue receipt off to a Tokio task. Capture the active event
+    // log before crossing the work-stealing boundary so audit events stay on
+    // the submitter's log instead of binding to a worker thread default.
+    let event_log = ensure_pool_event_log();
+    tokio::spawn(emit_pool_dequeue_receipt(event_log, dequeue_receipt));
+
+    let Some(ctx) = context else {
+        dequeue_span.end();
+        finalize_task(
+            &pool,
+            &state,
+            Err("pool: no VM execution context".to_string()),
+        );
+        return;
+    };
+
+    // Close the dequeue span before handing off to the spawned future:
+    // the span tracks dispatcher work (slot reservation + child-VM clone),
+    // not the runtime of the user closure itself. The closure executes
+    // under whatever spans it opens for its own work.
+    dequeue_span.end();
+
+    let registry = ctx.pool_registry();
+    let task_group_id = pool_id_for_span;
+    let scheduled_activity = ctx.wait_for_graph().register_task(task_runtime_id.clone());
+    spawn_pool_worker(registry, async move {
+        let _scheduled_activity = scheduled_activity;
+        tokio::task::yield_now().await;
+        let outcome = std::panic::AssertUnwindSafe(async {
+            let mut runner = ctx.child_vm();
+            runner.runtime_context = runner.runtime_context.child_task(
+                task_runtime_id,
+                "pool task",
+                Some(task_group_id),
+            );
+            let outcome = runner
+                .call_closure_args(&closure, crate::vm::CallArgs::Empty)
+                .await
+                .map_err(|error| error.to_string());
+            ctx.forward_output(&runner.take_output());
+            outcome
+        })
+        .catch_unwind()
+        .await
+        .unwrap_or_else(|payload| Err(pool_panic_error(payload)));
+        finalize_task(&pool, &state, outcome);
+    });
+}
+
+fn spawn_pool_worker<F>(registry: Arc<PoolRegistry>, future: F) -> tokio::task::JoinHandle<()>
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    tokio::spawn(with_pool_registry_scope(registry, future))
+}
+
+fn pool_panic_error(payload: Box<dyn Any + Send>) -> String {
+    let message = payload
+        .downcast_ref::<&'static str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("unknown panic payload");
+    format!("pool task panicked: {message}")
+}
+
+fn finalize_task(
+    pool: &Arc<parking_lot::Mutex<PoolEntry>>,
+    state: &Arc<parking_lot::Mutex<TaskState>>,
+    outcome: Result<VmValue, String>,
+) {
+    let waiters: Vec<tokio::sync::oneshot::Sender<()>>;
+    {
+        let mut pool_ref = pool.lock();
+        let mut state_ref = state.lock();
+        state_ref.finished_at = Some(uuid::Uuid::now_v7().to_string());
+        state_ref.heartbeat_at_ms = now_ms_for_pool();
+        match outcome {
+            Ok(value) => {
+                state_ref.status = TaskStatus::Completed;
+                state_ref.result = Some(value);
+            }
+            Err(error) => {
+                state_ref.status = TaskStatus::Failed;
+                state_ref.error = Some(error);
+            }
+        }
+        pool_ref.active.remove(&state_ref.id);
+        persist_task_if_durable(&pool_ref, &state_ref);
+        waiters = std::mem::take(&mut state_ref.waiters);
+    }
+    wake_task_waiters(waiters);
+    dispatch_ready(pool);
+    wake_space_waiters(pool);
+}
+
+/// Block until one or more pool task handles reach a terminal state.
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "__pool_wait(handle_or_handles: string|dict|list) -> dict",
+    kind = "async",
+    category = "pool",
+    runtime_only = true
+)]
+async fn pool_wait_builtin(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let target = args
+        .first()
+        .ok_or_else(|| VmError::Runtime("pool_wait: task handle is required".to_string()))?;
+    let registry = ctx.pool_registry();
+    let waiter = ctx.child_vm();
+    match target {
+        VmValue::List(items) => {
+            let mut results = Vec::with_capacity(items.len());
+            for item in items.iter() {
+                results.push(wait_single_task(&registry, &waiter, item).await?);
+            }
+            Ok(VmValue::List(std::sync::Arc::new(results)))
+        }
+        _ => wait_single_task(&registry, &waiter, target).await,
+    }
+}
+
+async fn wait_single_task(
+    registry: &Arc<PoolRegistry>,
+    waiter: &Vm,
+    value: &VmValue,
+) -> Result<VmValue, VmError> {
+    let (pool_id, task_id) = task_handle_from_value(value, "pool_wait")?;
+    let entry = lookup_pool_in_registry(registry, &pool_id)?;
+    let state = {
+        let pool = entry.lock();
+        pool.tasks
+            .get(&task_id)
+            .cloned()
+            .ok_or_else(|| VmError::Runtime(format!("pool_wait: task not found: {task_id}")))?
+    };
+    let receiver = {
+        let mut state_ref = state.lock();
+        if state_ref.status.is_terminal() {
+            return Ok(task_snapshot_value(&state_ref));
+        }
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        state_ref.waiters.push(tx);
+        rx
+    };
+    let _wait = waiter
+        .wait_for_graph
+        .wait_for_tasks(&waiter.runtime_context.task_id, [task_id])?;
+    // The sender is dropped on completion; both send() and drop wake the
+    // receiver. Either is fine: we only care that the task reached a
+    // terminal state, which `finalize_task` guarantees before signaling.
+    let _ = receiver.await;
+    let snapshot = task_snapshot_value(&state.lock());
+    Ok(snapshot)
+}
+
+pub(crate) const MODULE_BUILTINS: &[&VmBuiltinDef] = &[
+    &POOL_CREATE_SYNC_DEF,
+    &POOL_GET_SYNC_DEF,
+    &POOL_LIST_SYNC_DEF,
+    &POOL_SIZE_SYNC_DEF,
+    &POOL_SNAPSHOT_SYNC_DEF,
+    &POOL_RELOAD_SYNC_DEF,
+    &POOL_SUBMIT_BUILTIN_DEF,
+    &POOL_WAIT_BUILTIN_DEF,
+];
+
+pub(crate) fn register_pool_builtins(vm: &mut Vm) {
+    for def in MODULE_BUILTINS {
+        vm.register_builtin_def(def);
+    }
+}
+
+/// Drop all in-process pool registry state. Called from
+/// `reset_thread_local_state` between top-level VM runs and from
+/// conformance test harness reload sequences so a fresh `pool_create`
+/// starts from a clean registry. The on-disk JSONL artifacts under
+/// `.harn/pools/` are intentionally NOT removed — that is the whole
+/// point of pipeline-scope durability.
+pub fn reset_pool_state() {
+    current_pool_registry().inner.lock().clear();
+}
+
+/// Snapshot every pool task that has not yet reached a terminal state.
+///
+/// Powers the `pool_pending_tasks` bucket on
+/// `UnsettledStateSnapshot` so pipeline `on_finish` callbacks (drain,
+/// abandon, handoff presets) can observe pool work alongside suspended
+/// sub-agents, queued triggers, partial handoffs, and in-flight LLM
+/// calls. Walks the active pool registry once, emitting one
+/// JSON entry per task whose status is `queued` or `running`. Order is
+/// pool-id ascending, then queued tasks in queue order followed by
+/// running tasks in `tasks` btree order, so successive snapshots from
+/// one logical execution are deterministic.
+pub(crate) fn snapshot_pending_tasks() -> Vec<serde_json::Value> {
+    let now_ms = crate::stdlib::clock::now_wall_ms();
+    let mut ordered: Vec<(String, Arc<parking_lot::Mutex<PoolEntry>>)> = current_pool_registry()
+        .inner
+        .lock()
+        .pools
+        .iter()
+        .map(|(pool_id, entry)| (pool_id.clone(), entry.clone()))
+        .collect();
+    ordered.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut out = Vec::new();
+    for (_pool_id, entry) in ordered {
+        let pool = entry.lock();
+        for pending in &pool.queue {
+            let task = pending.state.lock();
+            if task.status.is_terminal() {
+                continue;
+            }
+            out.push(pending_task_snapshot_json(&pool, &task, now_ms));
+        }
+        for state in pool.tasks.values() {
+            let task = state.lock();
+            if task.status != TaskStatus::Running {
+                continue;
+            }
+            out.push(pending_task_snapshot_json(&pool, &task, now_ms));
+        }
+    }
+    out
+}
+
+fn pending_task_snapshot_json(
+    pool: &PoolEntry,
+    task: &TaskState,
+    now_ms: i64,
+) -> serde_json::Value {
+    let queued_at_ms = task.submitted_at_ms;
+    let age_ms = now_ms.saturating_sub(queued_at_ms).max(0);
+    serde_json::json!({
+        "id": task.id.clone(),
+        "task_id": task.id.clone(),
+        "pool_id": pool.id.clone(),
+        "pool_name": pool.name.clone(),
+        "status": task.status.as_str(),
+        "priority": task.priority,
+        "key": task.key.clone(),
+        "idempotency_key": task.idempotency_key.clone(),
+        "submitted_at": task.submitted_at.clone(),
+        "submitted_at_ms": queued_at_ms,
+        "submitted_by": task.submitted_by.clone(),
+        "started_at": task.started_at.clone(),
+        "age_ms": age_ms,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::priority_queue_index;
+
+    /// Simulates priority dispatch over a vector of (priority, seq) tuples
+    /// so the ordering rule can be exercised without standing up a real
+    /// `VmClosure` or `PoolEntry`.
+    fn dispatch_all(items: &[(i64, u64)]) -> Vec<u64> {
+        let mut queue: Vec<(i64, u64)> = items.to_vec();
+        let mut out = Vec::new();
+        while let Some(index) = priority_queue_index(queue.iter().copied()) {
+            let (_, seq) = queue.remove(index);
+            out.push(seq);
+        }
+        out
+    }
+
+    #[test]
+    fn higher_priority_dequeues_first_ties_break_by_seq() {
+        // Submit order: 1@0, 2@5, 3@5, 4@10
+        // Expected dispatch order: 4 (highest), then 2 then 3 (older tie),
+        // then 1 (lowest).
+        assert_eq!(
+            dispatch_all(&[(0, 1), (5, 2), (5, 3), (10, 4)]),
+            vec![4, 2, 3, 1]
+        );
+    }
+
+    #[test]
+    fn equal_priority_is_pure_fifo() {
+        assert_eq!(dispatch_all(&[(0, 1), (0, 2), (0, 3)]), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn empty_priority_queue_has_no_next_task() {
+        assert_eq!(priority_queue_index(std::iter::empty()), None);
+    }
+}

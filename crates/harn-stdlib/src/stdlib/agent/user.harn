@@ -1,0 +1,854 @@
+// @harn-entrypoint-category agent.stdlib
+import { agent_read_tools } from "std/agent/host_tools"
+import { agent_loop } from "std/agent/loop"
+import { render_agent_prompt } from "std/agent/prompts"
+import { agent_emit_event, agent_session_messages } from "std/agent/state"
+import { agent_report_truncation } from "std/agent/truncation"
+import { pick_keys } from "std/collections"
+import { JsonParseFailure } from "std/json"
+
+fn __sim_user_string(value) {
+  if value == nil {
+    return ""
+  }
+  return to_string(value)
+}
+
+fn __sim_user_int(value, fallback) {
+  if type_of(value) == "int" {
+    return value
+  }
+  return fallback
+}
+
+fn __sim_user_bool(value, fallback) {
+  if type_of(value) == "bool" {
+    return value
+  }
+  return fallback
+}
+
+fn __sim_user_truncate(agent: HarnessAgent, text, max_chars) {
+  const value = __sim_user_string(text)
+  if max_chars == nil || max_chars <= 0 || len(value) <= max_chars {
+    return value
+  }
+  const retained_chars = max_chars <= 16 ? max_chars : max_chars - 16
+  const retained = value.substring(0, retained_chars)
+  let _ = agent_report_truncation(
+    agent,
+    value,
+    retained,
+    "simulated user reply exceeded its model-visible budget",
+  )
+  if max_chars <= 16 {
+    return retained
+  }
+  return retained + "\n...[truncated]"
+}
+
+fn __sim_user_reply(message, reason = nil, metadata = nil) {
+  return {
+    action: "reply",
+    message: __sim_user_string(message),
+    reason: reason,
+    metadata: metadata ?? {},
+  }
+}
+
+fn __sim_user_stop(reason = nil, metadata = nil) {
+  return {action: "stop", reason: reason ?? "no_reply_needed", metadata: metadata ?? {}}
+}
+
+fn __sim_user_fail(reason = nil, message = nil, metadata = nil) {
+  return {
+    action: "fail",
+    reason: reason ?? "simulated_user_failed",
+    message: message ?? "",
+    metadata: metadata ?? {},
+  }
+}
+
+fn __sim_user_action(value) {
+  const action = lowercase(trim(__sim_user_string(value)))
+  if action == "" {
+    return "reply"
+  }
+  if contains(["reply", "stop", "fail"], action) {
+    return action
+  }
+  if contains(["done", "complete", "finished", "end"], action) {
+    return "stop"
+  }
+  if contains(["error", "abort"], action) {
+    return "fail"
+  }
+  return "reply"
+}
+
+fn __sim_user_normalize_decision(raw) {
+  if raw == nil {
+    return __sim_user_stop("empty_decision")
+  }
+  if type_of(raw) == "string" {
+    const text = trim(raw)
+    if text == "" {
+      return __sim_user_stop("empty_message")
+    }
+    return __sim_user_reply(text)
+  }
+  if type_of(raw) != "dict" {
+    return __sim_user_reply(__sim_user_string(raw))
+  }
+  const action = __sim_user_action(raw?.action ?? raw?.verdict)
+  if action == "stop" {
+    return __sim_user_stop(raw?.reason ?? raw?.message, raw?.metadata)
+  }
+  if action == "fail" {
+    return __sim_user_fail(raw?.reason, raw?.message, raw?.metadata)
+  }
+  const message = raw?.message ?? raw?.reply ?? raw?.answer ?? raw?.text ?? ""
+  if trim(__sim_user_string(message)) == "" {
+    return __sim_user_stop(raw?.reason ?? "empty_reply", raw?.metadata)
+  }
+  return __sim_user_reply(message, raw?.reason, raw?.metadata)
+}
+
+fn __sim_user_set(runtime: HarnessRuntime, answerer, key, value) {
+  const state = answerer?.state ?? {}
+  const cell = state[key]
+  if type_of(cell) == "atomic" {
+    const stored = if key == "stopped" {
+      value ? 1 : 0
+    } else {
+      value
+    }
+    runtime.atomic_set(cell, stored)
+    return __sim_user_state(runtime, answerer)
+  }
+  return __sim_user_state(runtime, answerer) + {[key]: value}
+}
+
+fn __sim_user_state(runtime: HarnessRuntime, answerer) {
+  const state = answerer?.state ?? {}
+  if type_of(state) != "dict" {
+    return {}
+  }
+  let out = {}
+  for entry in state {
+    const value = if type_of(entry.value) == "atomic" {
+      const stored = runtime.atomic_get(entry.value)
+      if entry.key == "stopped" {
+        stored != 0
+      } else {
+        stored
+      }
+    } else {
+      entry.value
+    }
+    out[entry.key] = value
+  }
+  return out
+}
+
+fn __sim_user_atomic_state(runtime: HarnessRuntime, raw) {
+  const state = raw ?? {}
+  return {
+    index: runtime.atomic(__sim_user_int(state?.index, 0)),
+    replies: runtime.atomic(__sim_user_int(state?.replies, 0)),
+    llm_calls: runtime.atomic(__sim_user_int(state?.llm_calls, 0)),
+    stopped: runtime.atomic(__sim_user_bool(state?.stopped, false) ? 1 : 0),
+  }
+}
+
+fn __sim_user_state_int(runtime: HarnessRuntime, answerer, key, fallback) {
+  return __sim_user_int(__sim_user_state(runtime, answerer)[key], fallback)
+}
+
+fn __sim_user_increment(runtime: HarnessRuntime, answerer, key, amount = 1) {
+  const next = __sim_user_state_int(runtime, answerer, key, 0) + amount
+  __sim_user_set(runtime, answerer, key, next)
+  return next
+}
+
+fn __sim_user_mark_stopped(runtime: HarnessRuntime, answerer) {
+  __sim_user_set(runtime, answerer, "stopped", true)
+}
+
+fn __sim_user_budget_stop(runtime: HarnessRuntime, answerer, reason) {
+  __sim_user_mark_stopped(runtime, answerer)
+  return __sim_user_stop(
+    reason,
+    {
+      replies: __sim_user_state_int(runtime, answerer, "replies", 0),
+      llm_calls: __sim_user_state_int(runtime, answerer, "llm_calls", 0),
+    },
+  )
+}
+
+fn __sim_user_preflight(runtime: HarnessRuntime, answerer) {
+  const state = __sim_user_state(runtime, answerer)
+  if state?.stopped ?? false {
+    if answerer?.max_replies != nil
+      && __sim_user_state_int(runtime, answerer, "replies", 0)
+      >= answerer
+      .max_replies {
+      return __sim_user_stop("max_replies")
+    }
+    if answerer?.max_llm_calls != nil
+      && __sim_user_state_int(runtime, answerer, "llm_calls", 0)
+      >= answerer
+      .max_llm_calls {
+      return __sim_user_stop("max_llm_calls")
+    }
+    return __sim_user_stop("stopped")
+  }
+  const max_replies = answerer?.max_replies
+  if max_replies != nil
+    && __sim_user_state_int(runtime, answerer, "replies", 0)
+    >= max_replies {
+    return __sim_user_budget_stop(runtime, answerer, "max_replies")
+  }
+  const max_llm_calls = answerer?.max_llm_calls
+  if max_llm_calls != nil
+    && __sim_user_state_int(runtime, answerer, "llm_calls", 0)
+    >= max_llm_calls {
+    return __sim_user_budget_stop(runtime, answerer, "max_llm_calls")
+  }
+  return nil
+}
+
+fn __sim_user_record_decision(runtime: HarnessRuntime, answerer, decision) {
+  if decision.action == "reply" {
+    __sim_user_increment(runtime, answerer, "replies")
+  } else {
+    __sim_user_mark_stopped(runtime, answerer)
+  }
+  return decision
+}
+
+fn __sim_user_event_payload(runtime: HarnessRuntime, answerer, payload, decision) {
+  return {
+    id: answerer?.id,
+    kind: answerer?.kind,
+    action: decision.action,
+    reason: decision?.reason,
+    question: __sim_user_extract_question(payload),
+    message_chars: len(decision?.message ?? ""),
+    replies: __sim_user_state_int(runtime, answerer, "replies", 0),
+    llm_calls: __sim_user_state_int(runtime, answerer, "llm_calls", 0),
+  }
+}
+
+fn __sim_user_emit(
+  agent: HarnessAgent,
+  runtime: HarnessRuntime,
+  answerer,
+  event_type,
+  payload,
+  decision,
+) {
+  const session_id = agent.current_id()
+  if session_id == nil {
+    return nil
+  }
+  const audit = __sim_user_event_payload(runtime, answerer, payload, decision)
+    + {
+    event_type: event_type,
+  }
+  const result = try {
+    agent_emit_event(
+      agent,
+      session_id,
+      "tool_call_audit",
+      {
+        tool_call_id: payload?.tool_call_id ?? payload?.call_id ?? "simulated_user",
+        tool_name: payload?.tool_name ?? "ask_user",
+        audit: audit,
+      },
+    )
+  }
+  if is_err(result) {
+    return nil
+  }
+  return unwrap(result)
+}
+
+fn __sim_user_emit_decision(
+  agent: HarnessAgent,
+  runtime: HarnessRuntime,
+  answerer,
+  payload,
+  decision,
+) {
+  if decision.action == "reply" {
+    return __sim_user_emit(agent, runtime, answerer, "simulated_user_reply", payload, decision)
+  }
+  if decision.action == "stop" {
+    return __sim_user_emit(agent, runtime, answerer, "simulated_user_stop", payload, decision)
+  }
+  return __sim_user_emit(agent, runtime, answerer, "simulated_user_failed", payload, decision)
+}
+
+fn __sim_user_extract_question(payload) {
+  if type_of(payload) == "string" {
+    return payload
+  }
+  if type_of(payload) != "dict" {
+    return __sim_user_string(payload)
+  }
+  return payload?.question ?? payload?.prompt ?? payload?.message ?? payload?.text ?? ""
+}
+
+fn __sim_user_payload_context(payload) {
+  if type_of(payload) != "dict" {
+    return ""
+  }
+  return payload?.context ?? payload?.background ?? payload?.visible_text ?? payload?.text ?? ""
+}
+
+fn __sim_user_contains_glob(text, pattern) {
+  const needle = __sim_user_string(pattern)
+  if needle == "" || needle == "*" {
+    return true
+  }
+  if !contains(needle, "*") {
+    return contains(text, needle)
+  }
+  let rest = text
+  let first = true
+  const anchored_start = !needle.starts_with("*")
+  const anchored_end = !needle.ends_with("*")
+  const parts = split(needle, "*")
+  for part in parts {
+    if part == "" {
+      continue
+    }
+    const at = rest.index_of(part)
+    if at < 0 {
+      return false
+    }
+    if first && anchored_start && at != 0 {
+      return false
+    }
+    rest = rest.substring(at + len(part))
+    first = false
+  }
+  if anchored_end && len(parts) > 0 {
+    const last = parts[len(parts) - 1]
+    if last != "" && !text.ends_with(last) {
+      return false
+    }
+  }
+  return true
+}
+
+fn __sim_user_matches(payload, matcher) {
+  if matcher == nil {
+    return true
+  }
+  const text = __sim_user_extract_question(payload) + "\n" + __sim_user_payload_context(payload)
+  if type_of(matcher) == "string" {
+    return __sim_user_contains_glob(text, matcher)
+  }
+  if type_of(matcher) == "list" {
+    for item in matcher {
+      if __sim_user_matches(payload, item) {
+        return true
+      }
+    }
+    return false
+  }
+  if type_of(matcher) == "closure" {
+    return matcher(payload) ? true : false
+  }
+  return false
+}
+
+fn __scripted_entry_decision(entry) {
+  if type_of(entry) == "string" {
+    return __sim_user_reply(entry)
+  }
+  if type_of(entry) != "dict" {
+    return __sim_user_reply(__sim_user_string(entry))
+  }
+  const action = __sim_user_action(entry?.action ?? entry?.verdict)
+  if action == "stop" {
+    return __sim_user_stop(entry?.reason ?? entry?.reply ?? entry?.message, entry?.metadata)
+  }
+  if action == "fail" {
+    return __sim_user_fail(entry?.reason, entry?.message ?? entry?.reply, entry?.metadata)
+  }
+  return __sim_user_reply(
+    entry?.reply ?? entry?.message ?? entry?.answer ?? "",
+    entry?.reason,
+    entry?.metadata,
+  )
+}
+
+fn __scripted_exhausted(answerer) {
+  const on_exhausted = answerer?.on_exhausted ?? "stop"
+  if on_exhausted == "fail" {
+    return __sim_user_fail("script_exhausted")
+  }
+  if on_exhausted == "reply" && answerer?.default_reply != nil {
+    return __sim_user_reply(answerer.default_reply, "default_reply")
+  }
+  return __sim_user_stop("script_exhausted")
+}
+
+fn __scripted_user_respond(agent: HarnessAgent, runtime: HarnessRuntime, answerer, payload = nil) {
+  const preflight = __sim_user_preflight(runtime, answerer)
+  if preflight != nil {
+    __sim_user_emit(agent, runtime, answerer, "simulated_user_budget_exhausted", payload, preflight)
+    return preflight
+  }
+  const script = answerer?.script ?? []
+  let index = __sim_user_state_int(runtime, answerer, "index", 0)
+  while index < len(script) {
+    const entry = script[index]
+    const matcher = if type_of(entry) == "dict" {
+      entry?.match ?? entry?.when
+    } else {
+      nil
+    }
+    const consume = if type_of(entry) == "dict" {
+      entry?.consume ?? true
+    } else {
+      true
+    }
+    if __sim_user_matches(payload, matcher) {
+      if consume {
+        __sim_user_set(runtime, answerer, "index", index + 1)
+      }
+      const decision = __sim_user_record_decision(
+        runtime,
+        answerer,
+        __scripted_entry_decision(entry),
+      )
+      __sim_user_emit_decision(agent, runtime, answerer, payload, decision)
+      return decision
+    }
+    index = index + 1
+  }
+  __sim_user_set(runtime, answerer, "index", index)
+  const exhausted = __sim_user_record_decision(runtime, answerer, __scripted_exhausted(answerer))
+  __sim_user_emit_decision(agent, runtime, answerer, payload, exhausted)
+  return exhausted
+}
+
+fn __sim_user_config(task_or_config, behavior, tools, model, options) {
+  if type_of(task_or_config) == "dict" && behavior == nil && tools == nil && model == nil
+    && options
+    == nil {
+    return task_or_config
+  }
+  const opts = options ?? {}
+  return opts + {task: task_or_config, behavior: behavior, tools: tools, model: model}
+}
+
+fn __sim_user_json_object_text(raw) {
+  const text = trim(__sim_user_string(raw))
+  if text.starts_with("```") {
+    const first_newline = text.index_of("\n")
+    const last_fence = text.last_index_of("```")
+    if first_newline >= 0 && last_fence > first_newline {
+      return trim(text.substring(first_newline + 1, last_fence))
+    }
+  }
+  const start = text.index_of("{")
+  const end = text.last_index_of("}")
+  if start >= 0 && end > start {
+    return text.substring(start, end + 1)
+  }
+  return text
+}
+
+fn __agentic_user_parse(raw) {
+  const parsed: Result<unknown, JsonParseFailure> = try {
+    json_parse(__sim_user_json_object_text(raw))
+  }
+  if is_ok(parsed) {
+    return __sim_user_normalize_decision(unwrap(parsed))
+  }
+  return __sim_user_normalize_decision(raw)
+}
+
+fn __sim_user_session_tail(agent: HarnessAgent, session_id, max_chars) {
+  if session_id == nil || session_id == "" || max_chars == 0 {
+    return ""
+  }
+  const messages = try {
+    agent_session_messages(agent, session_id)
+  }
+  if is_err(messages) {
+    return ""
+  }
+  let out = ""
+  for message in unwrap(messages) {
+    const role = message?.role ?? "message"
+    const content = message?.content ?? message?.text ?? json_stringify(message)
+    out = out + "\n[" + role + "] " + __sim_user_string(content)
+  }
+  return __sim_user_truncate(agent, out, max_chars)
+}
+
+fn __agentic_user_bindings(agent: HarnessAgent, runtime: HarnessRuntime, answerer, payload) {
+  const question = __sim_user_extract_question(payload)
+  const context = __sim_user_payload_context(payload)
+  const transcript = __sim_user_session_tail(
+    agent,
+    payload?.session_id ?? agent.current_id(),
+    answerer?.transcript_max_chars ?? 4000,
+  )
+  return {
+    task: answerer?.task ?? "",
+    behavior: answerer?.behavior ?? "",
+    question: question,
+    context: context,
+    transcript: transcript,
+    reply_count: __sim_user_state_int(runtime, answerer, "replies", 0),
+    max_replies: answerer?.max_replies ?? "",
+  }
+}
+
+fn __agentic_user_prompt(harness: Harness, answerer, payload) {
+  const bindings = __agentic_user_bindings(harness.agent, harness.runtime, answerer, payload)
+  const system = answerer?.system_prompt
+    ?? render_agent_prompt(
+    harness.fs,
+    "agentic_user_system.harn.prompt",
+    bindings,
+  )
+  const prompt = answerer?.prompt
+    ?? render_agent_prompt(
+    harness.fs,
+    "agentic_user_user.harn.prompt",
+    bindings,
+  )
+  return {system: system, prompt: prompt}
+}
+
+fn __agentic_user_base_llm_options(answerer) {
+  const opts = answerer?.llm_options ?? {}
+  return opts + pick_keys(answerer, __agentic_user_llm_option_keys(), {drop_nil: true})
+}
+
+fn __agentic_user_llm_option_keys() {
+  return __llm_call_option_registry().keys
+}
+
+fn __agentic_user_remaining_llm_calls(runtime: HarnessRuntime, answerer) {
+  const max_llm_calls = answerer?.max_llm_calls
+  if max_llm_calls == nil {
+    return answerer?.max_iterations ?? 4
+  }
+  const remaining = max_llm_calls - __sim_user_state_int(runtime, answerer, "llm_calls", 0)
+  return remaining > 0 ? remaining : 0
+}
+
+fn __agentic_user_call_once(llm: HarnessLlm, runtime: HarnessRuntime, answerer, prompts) {
+  const result = llm.call(prompts.prompt, prompts.system, __agentic_user_base_llm_options(answerer))
+  __sim_user_increment(runtime, answerer, "llm_calls")
+  return result.text ?? result?.raw_text ?? json_stringify(result)
+}
+
+fn __agentic_user_call_loop(harness: Harness, answerer, prompts) {
+  const remaining = __agentic_user_remaining_llm_calls(harness.runtime, answerer)
+  const max_iterations = __sim_user_int(answerer?.max_iterations, 4)
+  const iteration_limit = if remaining > 0 && remaining < max_iterations {
+    remaining
+  } else {
+    max_iterations
+  }
+  const opts = __agentic_user_base_llm_options(answerer)
+    + {
+    tools: answerer.tools,
+    tool_format: answerer?.tool_format ?? "native",
+    loop_until_done: true,
+    max_iterations: iteration_limit,
+    max_nudges: answerer?.max_nudges ?? 2,
+    done_judge: answerer?.done_judge ?? false,
+    session_id: answerer?.session_id,
+  }
+  const result = agent_loop(harness, prompts.prompt, prompts.system, opts)
+  __sim_user_increment(harness.runtime, answerer, "llm_calls", result?.llm?.iterations ?? 1)
+  return result?.visible_text ?? result?.text ?? result?.raw_text ?? json_stringify(result)
+}
+
+fn __agentic_user_respond(harness: Harness, answerer, payload = nil) {
+  const preflight = __sim_user_preflight(harness.runtime, answerer)
+  if preflight != nil {
+    __sim_user_emit(
+      harness.agent,
+      harness.runtime,
+      answerer,
+      "simulated_user_budget_exhausted",
+      payload,
+      preflight,
+    )
+    return preflight
+  }
+  const prompts = __agentic_user_prompt(harness, answerer, payload)
+  const call = try {
+    if answerer?.tools != nil {
+      __agentic_user_call_loop(harness, answerer, prompts)
+    } else {
+      __agentic_user_call_once(harness.llm, harness.runtime, answerer, prompts)
+    }
+  }
+  if is_err(call) {
+    const decision = __sim_user_record_decision(
+      harness.runtime,
+      answerer,
+      __sim_user_fail("llm_call_failed", __sim_user_string(unwrap_err(call))),
+    )
+    __sim_user_emit_decision(harness.agent, harness.runtime, answerer, payload, decision)
+    return decision
+  }
+  const decision = __sim_user_record_decision(
+    harness.runtime,
+    answerer,
+    __agentic_user_parse(unwrap(call)),
+  )
+  __sim_user_emit_decision(harness.agent, harness.runtime, answerer, payload, decision)
+  return decision
+}
+
+fn __sim_user_should_answer_post_turn(payload, options) {
+  if payload?.has_tool_calls ?? false {
+    return false
+  }
+  if options?.answer_all_text ?? false {
+    return trim(payload?.text ?? "") != ""
+  }
+  const text = lowercase(payload?.text ?? "")
+  return contains(text, "?")
+    || contains(text, "clarify")
+    || contains(text, "which ")
+    || contains(text, "what ")
+    || contains(text, "should i")
+}
+
+/**
+ * agentic_user returns an answerer that uses an LLM, optionally with read tools,
+ * to simulate the harness user during an eval.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agentic_user(
+  harness: Harness,
+  task_or_config,
+  behavior = nil,
+  tools = nil,
+  model = nil,
+  options = nil,
+) {
+  const config = __sim_user_config(task_or_config, behavior, tools, model, options)
+  const state = __sim_user_atomic_state(harness.runtime, config?.state)
+  let answerer = {
+    kind: "agentic_user",
+    id: config?.id ?? ("agentic-user-" + harness.random.uuid_v7()),
+    task: config?.task ?? "",
+    behavior: config?.behavior ?? "",
+    tools: config?.tools,
+    tool_format: config?.tool_format,
+    llm_options: config?.llm_options ?? {},
+    max_replies: config?.max_replies ?? 5,
+    max_llm_calls: config?.max_llm_calls ?? 8,
+    max_iterations: config?.max_iterations ?? 4,
+    max_nudges: config?.max_nudges ?? 2,
+    done_judge: config?.done_judge ?? false,
+    system_prompt: config?.system_prompt,
+    prompt: config?.prompt,
+    transcript_max_chars: config?.transcript_max_chars ?? 4000,
+    session_id: config?.session_id,
+    state: state,
+  }
+    + pick_keys(config, __agentic_user_llm_option_keys(), {drop_nil: true})
+  answerer["respond"] = { payload -> __agentic_user_respond(harness, answerer, payload) }
+  return answerer
+}
+
+/**
+ * scripted_user returns a deterministic fixture answerer.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn scripted_user(harness: Harness, script, options = nil) {
+  const opts = options ?? {}
+  const state = __sim_user_atomic_state(harness.runtime, opts?.state)
+  let answerer = {
+    kind: "scripted_user",
+    id: opts?.id ?? ("scripted-user-" + harness.random.uuid_v7()),
+    script: script ?? [],
+    default_reply: opts?.default_reply,
+    on_exhausted: opts?.on_exhausted ?? "stop",
+    max_replies: opts?.max_replies ?? 32,
+    state: state,
+  }
+  answerer["respond"] = { payload ->
+    __scripted_user_respond(harness.agent, harness.runtime, answerer, payload)
+  }
+  return answerer
+}
+
+/**
+ * fixture_user is an alias for deterministic eval fixtures.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn fixture_user(harness: Harness, script, options = nil) {
+  return scripted_user(harness, script, options)
+}
+
+/**
+ * simulated_user_respond asks an answerer for its next decision.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn simulated_user_respond(answerer, payload = nil) {
+  if type_of(answerer) == "string" {
+    return __sim_user_reply(answerer)
+  }
+  if type_of(answerer) == "closure" {
+    return __sim_user_normalize_decision(answerer(payload))
+  }
+  if type_of(answerer) != "dict" {
+    throw "simulated_user_respond: answerer must be a dict, closure, or string"
+  }
+  const respond = answerer?.respond
+  if type_of(respond) != "closure" {
+    throw "simulated_user_respond: answerer missing respond closure"
+  }
+  return __sim_user_normalize_decision(respond(payload))
+}
+
+/**
+ * simulated_user_status returns public state for assertions and eval reports.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn simulated_user_status(runtime: HarnessRuntime, answerer) {
+  if type_of(answerer) != "dict" {
+    return {}
+  }
+  return {
+    id: answerer?.id,
+    kind: answerer?.kind,
+    state: __sim_user_state(runtime, answerer),
+    max_replies: answerer?.max_replies,
+    max_llm_calls: answerer?.max_llm_calls,
+  }
+}
+
+/**
+ * user_tools adds an ask_user tool backed by a simulated answerer.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn user_tools(answerer, registry = nil, options = nil) {
+  const opts = options ?? {}
+  const tools = registry ?? tool_registry()
+  const name = opts?.name ?? answerer?.tool_name ?? "ask_user"
+  return tool_define(
+    tools,
+    name,
+    opts?.description
+      ?? "Ask the simulated user a clarification question and receive a plausible reply.",
+    {
+      handler: { args ->
+        const decision = simulated_user_respond(answerer, args)
+        if decision.action == "reply" {
+          return decision.message
+        }
+        if decision.action == "fail" {
+          const reason = decision.reason ?? decision?.message ?? "unknown"
+          throw "simulated user failed: " + reason
+        }
+        return opts?.stop_observation
+          ?? "No further simulated user input is available; continue or finish from existing context."
+      },
+      parameters: {
+        question: {
+          type: "string",
+          description: "The clarification question to ask the simulated user.",
+        },
+        context: {
+          type: "string",
+          required: false,
+          description: "Optional concise context for the question.",
+        },
+        choices: {
+          type: "array",
+          required: false,
+          description: "Optional answer choices, if this is multiple choice.",
+        },
+      },
+      returns: {type: "string"},
+      annotations: {kind: "read", readOnlyHint: true},
+    },
+  )
+}
+
+/**
+ * simulated_user_post_turn replies to plain-text clarification questions.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn simulated_user_post_turn(answerer, options = nil) {
+  const opts = options ?? {}
+  return { payload ->
+    if !__sim_user_should_answer_post_turn(payload, opts) {
+      return nil
+    }
+    const decision = simulated_user_respond(
+      answerer,
+      {
+        question: payload?.text ?? "",
+        context: opts?.context ?? "",
+        session_id: payload?.session_id,
+        source: "post_turn_callback",
+      },
+    )
+    if decision.action == "reply" {
+      const prefix = opts?.prefix_reply ?? ""
+      return prefix + decision.message
+    }
+    if decision.action == "fail" {
+      const reason = decision.reason ?? "unknown"
+      return {stop: true, message: "simulated user failed: " + reason}
+    }
+    return {stop: true}
+  }
+}
+
+/**
+ * simulated_user_read_tools is a named alias for read-only research tools.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn simulated_user_read_tools(
+  fs: HarnessFs,
+  tools: HarnessTools,
+  registry = nil,
+  options = nil,
+) {
+  return agent_read_tools(fs, tools, registry, options)
+}

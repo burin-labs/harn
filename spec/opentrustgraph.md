@@ -1,0 +1,271 @@
+# OpenTrustGraph v0.1
+
+`OpenTrustGraph` is a portable event schema for recording autonomy and approval
+decisions around agent dispatch. Harn emits these records onto `trust_graph`
+plus the per-agent topic `trust_graph.<agent_id>` (`trust.graph` is still read
+for compatibility). Harn also mirrors a compact runtime projection to
+`trust_graph.records` with `actor_id`, `action`, `approver`, `outcome`,
+`evidence_refs`, `trace_id`, `timestamp`, and `autonomy_tier_at_time`. The
+OpenTrustGraph format is designed to be runtime-neutral so other schedulers and
+workflow engines can adopt the same stream shape.
+
+Version markers:
+
+```json
+{"schema":"opentrustgraph/v0.1"}
+```
+
+```json
+{"schema":"opentrustgraph-chain/v0"}
+```
+
+`v0.1` is an additive bump over `v0`. It reserves five lineage and alert keys under
+`TrustRecord.metadata` — `effects_grant`, `effects_used`,
+`parent_record_id`, `actor_chain`, and `actor_chain_alert` — so chain
+validators can prove that a child agent's
+`effects_used ⊆ parent.effects_grant` and that actor-chain parentage follows
+the same lineage. The chain hash inputs are unchanged because metadata was
+already hash-covered. `v0` records still parse for one patch release window per
+[`opentrustgraph-spec/CONFORMANCE.md` §5](../opentrustgraph-spec/CONFORMANCE.md#5-versioning),
+then are dropped. The chain export envelope (`opentrustgraph-chain/v0`)
+is unchanged.
+
+## TrustRecord
+
+Each dispatch or control-plane autonomy change appends one `TrustRecord`.
+
+```json
+{
+  "schema": "opentrustgraph/v0",
+  "record_id": "01966f4c-0f31-7b5d-b44b-f7f8e7e1d384",
+  "agent": "github-triage-bot",
+  "action": "issue.label",
+  "approver": "maintainer-1",
+  "outcome": "success",
+  "trace_id": "trace_01J...",
+  "autonomy_tier": "act_with_approval",
+  "timestamp": "2026-04-19T18:42:11Z",
+  "cost_usd": 0.0124,
+  "chain_index": 7,
+  "previous_hash": "sha256:12b6...",
+  "entry_hash": "sha256:f00d...",
+  "metadata": {
+    "provider": "github",
+    "binding_version": 3
+  }
+}
+```
+
+Fields:
+
+- `schema`: schema/version discriminator. Current value:
+  `opentrustgraph/v0.1`. Older `opentrustgraph/v0` records still validate
+  for one patch release window per
+  [`opentrustgraph-spec/CONFORMANCE.md` §5](../opentrustgraph-spec/CONFORMANCE.md#5-versioning).
+- `record_id`: globally unique record identifier. UUIDv7 is recommended.
+- `agent`: logical agent identifier, handler id, or runtime-owned agent name.
+- `action`: action class being evaluated, such as `issue.label`,
+  `pr.merge`, or `deploy.prod`.
+- `approver`: optional approving actor when an approval gate was satisfied.
+- `outcome`: terminal outcome for the dispatch or control change.
+- `trace_id`: execution trace id tying the record back to the originating run.
+- `autonomy_tier`: autonomy mode in force for this dispatch.
+- `timestamp`: RFC3339 UTC timestamp for the record append time.
+- `cost_usd`: optional marginal cost attributed to the action.
+- `chain_index`: 1-based position in the append-only trust graph chain.
+- `previous_hash`: prior record's `entry_hash`, or `null` for the first record.
+- `entry_hash`: SHA-256 hash over the canonical record with `entry_hash`
+  removed. Harn stores it with the `sha256:` prefix.
+- `metadata`: extensible runtime-specific detail bag. `v0.1` reserves
+  five lineage and alert keys at this layer:
+  - `effects_grant`: typed `EffectRecord` list (`kind`, `scope`, optional
+    `resource`) the parent extended to this record.
+  - `effects_used`: typed `EffectRecord` list the action actually
+    exercised. Verifiers MUST check `effects_used ⊆ effects_grant` (taken
+    from the parent record referenced via `parent_record_id`).
+  - `parent_record_id`: pointer at the parent record's `record_id`
+    (`null`/absent for root records). The release-record flow keeps the
+    separate `parent_trust_record_id` key for the Harn release
+    lineage; `parent_record_id` is the
+    generic spawn-lineage pointer.
+  - `actor_chain`: RFC 8693 `{sub, act}` actor chain for this record.
+    Each entry may carry `scopes` or an OAuth-style `scope` string.
+    When `parent_record_id` is present, verifiers MUST check that dropping
+    the current actor produces the parent chain.
+  - `actor_chain_alert`: typed actor-chain policy alert. Harn writes
+    `kind: "scope_attenuation_violation"` with the violating parent and
+    child subjects plus the parent, child, and extra scope sets.
+
+Outcome enum:
+
+- `success`
+- `failure`
+- `denied`
+- `timeout`
+
+Autonomy tier enum:
+
+- `shadow`
+- `suggest`
+- `act_with_approval`
+- `act_auto`
+
+Approval evidence:
+
+- When `metadata.approval.required` is `true`, `outcome` is `success`, and
+  `autonomy_tier` is `act_with_approval`, the record must include a non-empty
+  `approver`.
+- The same record must include at least one signature receipt in
+  `metadata.approval.signatures`.
+- Signature receipt objects are intentionally extensible. Harn uses
+  `reviewer`, `signed_at`, and `signature` fields today.
+
+## Chain export
+
+A `TrustChainExport` wraps ordered records with metadata for receipts,
+supervision UIs, and third-party verification:
+
+```json
+{
+  "schema": "opentrustgraph-chain/v0",
+  "chain": {
+    "topic": "trust_graph",
+    "total": 2,
+    "root_hash": "sha256:6bb2b155ba07c67443c881f2d9dd954083bb44542df81520db1490fcbfdd5bf9",
+    "verified": true,
+    "generated_at": "2026-04-19T18:45:00Z",
+    "producer": {
+      "name": "harn",
+      "version": "0.8.x"
+    }
+  },
+  "records": []
+}
+```
+
+Fields:
+
+- `schema`: chain-export schema/version discriminator. Current value:
+  `opentrustgraph-chain/v0`.
+- `chain.topic`: canonical event-log topic or exported stream name.
+- `chain.total`: number of records in the ordered export.
+- `chain.root_hash`: final record's `entry_hash`, or `null` for an empty
+  export.
+- `chain.verified`: whether the producer verified record hashes, previous-hash
+  linkage, and required approval evidence before export.
+- `chain.generated_at`: RFC3339 UTC timestamp for the export.
+- `chain.producer`: producer name and version.
+- `records`: ordered `TrustRecord` list.
+
+## JSON schema and protobuf
+
+JSON is canonical. The normative wire-format files live in the public
+artifact directory:
+
+- [`opentrustgraph-spec/schemas/trust-record.v0.1.schema.json`](../opentrustgraph-spec/schemas/trust-record.v0.1.schema.json)
+  — current record schema (`v0.1`). Accepts both `opentrustgraph/v0.1`
+  and `opentrustgraph/v0` discriminators for one patch release window.
+- [`opentrustgraph-spec/schemas/trust-record.v0.schema.json`](../opentrustgraph-spec/schemas/trust-record.v0.schema.json)
+  — previous record schema (`v0`); retained for one patch release
+  window so consumers can validate legacy records.
+- [`opentrustgraph-spec/schemas/trust-chain.v0.schema.json`](../opentrustgraph-spec/schemas/trust-chain.v0.schema.json)
+- [`opentrustgraph-spec/schemas/trust-record.v0.proto`](../opentrustgraph-spec/schemas/trust-record.v0.proto)
+  — Protocol Buffers mirror for runtimes that prefer a binary stream
+  encoding (Kafka, gRPC, Temporal task queues).
+
+Harn tests parse the JSON schema files and all fixtures directly, so the
+spec artifact and runtime hash contract stay in sync.
+
+The conformance contract (RFC 2119 MUST/SHOULD requirements for
+producers, consumers, and verifiers) lives at
+[`opentrustgraph-spec/CONFORMANCE.md`](../opentrustgraph-spec/CONFORMANCE.md).
+A reference verifier in pure Python is provided at
+[`opentrustgraph-spec/examples/python/verify_chain.py`](../opentrustgraph-spec/examples/python/verify_chain.py)
+as a portable, non-Harn implementation of the same hash and linkage
+checks Harn runs internally.
+
+## Producing a chain export
+
+Harn ships `harn trust export`,
+which writes a verified `opentrustgraph-chain/v0` envelope to stdout or
+to a file:
+
+```bash
+harn trust export --output chain.json
+harn trust export | python3 opentrustgraph-spec/examples/python/verify_chain.py
+```
+
+The export uses `verify_trust_chain` internally so `chain.verified` is
+authoritative.
+
+## Sample export
+
+```json
+{
+  "schema": "opentrustgraph-chain/v0",
+  "chain": {
+    "topic": "trust_graph",
+    "total": 2,
+    "root_hash": "sha256:6bb2b155ba07c67443c881f2d9dd954083bb44542df81520db1490fcbfdd5bf9",
+    "verified": true,
+    "generated_at": "2026-04-19T18:45:00Z",
+    "producer": {
+      "name": "harn",
+      "version": "0.8.x"
+    }
+  },
+  "records": [
+    {
+      "schema": "opentrustgraph/v0",
+      "record_id": "01966f4c-0f31-7b5d-b44b-f7f8e7e1d384",
+      "agent": "github-triage-bot",
+      "action": "github.issue.opened",
+      "approver": null,
+      "outcome": "success",
+      "trace_id": "trace_valid_01",
+      "autonomy_tier": "suggest",
+      "timestamp": "2026-04-19T18:42:11Z",
+      "cost_usd": null,
+      "chain_index": 1,
+      "previous_hash": null,
+      "entry_hash": "sha256:84facae7d56fd304e040ea18d80bd019e274ad86ddd5a4d732f3ac3d984c48ec",
+      "metadata": {
+        "provider": "github"
+      }
+    },
+    {
+      "schema": "opentrustgraph/v0",
+      "record_id": "01966f4c-0f32-7d37-b443-d72dd96f0f4f",
+      "agent": "github-triage-bot",
+      "action": "trust.promote",
+      "approver": "maintainer-1",
+      "outcome": "success",
+      "trace_id": "trace_valid_02",
+      "autonomy_tier": "act_auto",
+      "timestamp": "2026-04-19T18:43:02Z",
+      "cost_usd": null,
+      "chain_index": 2,
+      "previous_hash": "sha256:84facae7d56fd304e040ea18d80bd019e274ad86ddd5a4d732f3ac3d984c48ec",
+      "entry_hash": "sha256:6bb2b155ba07c67443c881f2d9dd954083bb44542df81520db1490fcbfdd5bf9",
+      "metadata": {
+        "control": true,
+        "from_tier": "suggest",
+        "to_tier": "act_auto"
+      }
+    }
+  ]
+}
+```
+
+## Portability notes
+
+- The schema is append-only friendly. New consumers should ignore unknown
+  fields inside `metadata`.
+- Chain verification is local and deterministic: recompute each `entry_hash`
+  with `entry_hash` removed and compare `previous_hash` with the prior record.
+- A runtime can project the same record into Kafka, Temporal histories,
+  Inngest events, or an internal append-only audit log without changing the
+  core contract.
+- Promotion and demotion events are ordinary trust records with
+  `action = "trust.promote"` or `action = "trust.demote"`, which keeps control
+  changes inside the same audit substrate as execution records.

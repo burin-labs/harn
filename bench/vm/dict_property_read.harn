@@ -1,0 +1,12 @@
+pipeline default(harness: Harness, task) {
+  const record = {hot: 7, cold: 2, nested: {value: 3}}
+  let i = 0
+  let total = 0
+  while i < 150000 {
+    total = total + record.hot + record.nested.value
+    i = i + 1
+  }
+  if total < 0 {
+    harness.stdio.log("unreachable")
+  }
+}

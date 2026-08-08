@@ -1,0 +1,122 @@
+import {
+  ComfyWorkflowBuilder,
+  MediaAssetOptions,
+  ModelJob,
+  ModelJobRequest,
+  ModelOutputSpec,
+  ModelTask,
+  comfyui_backend,
+  comfyui_flux2_klein_edit_workflow,
+  comfyui_flux2_klein_workflow,
+  media_asset_store_result,
+  model_job_request_digest,
+} from "std/model_job"
+
+pipeline test(harness: Harness, task) {
+  const endpoint = "https://comfy.example.test"
+  harness.testing.http_mock(
+    "POST",
+    endpoint + "/prompt",
+    {
+      responses: [
+        {status: 200, body: "{\"prompt_id\":\"prompt-1\"}"},
+        {status: 200, body: "{\"prompt_id\":\"prompt-edit\"}"},
+      ],
+    },
+  )
+  harness.testing.http_mock(
+    "POST",
+    endpoint + "/upload/image",
+    {status: 200, body: "{\"name\":\"sketch.png\",\"subfolder\":\"harn\",\"type\":\"input\"}"},
+  )
+  harness.testing.http_mock(
+    "GET",
+    endpoint + "/history/prompt-1",
+    {
+      responses: [
+        {status: 200, body: "{}"},
+        {
+          status: 200,
+          body:
+            "{\"prompt-1\":{\"status\":{\"status_str\":\"success\",\"completed\":true},\"outputs\":{\"13\":{\"images\":[{\"filename\":\"logo.png\",\"subfolder\":\"harn\",\"type\":\"output\"}]}}}}",
+        },
+      ],
+    },
+  )
+  harness.testing.http_mock("POST", endpoint + "/queue", {status: 200, body: "{}"})
+  harness.testing.http_mock(
+    "GET",
+    endpoint + "/queue",
+    {status: 200, body: "{\"queue_running\":[[1,\"prompt-1\",{},{}]],\"queue_pending\":[]}"},
+  )
+  harness.testing.http_mock("POST", endpoint + "/interrupt", {status: 200, body: "{}"})
+  const task_kind: ModelTask = "image.generate"
+  const output_spec: ModelOutputSpec = {mime_type: "image/png", width: 1024, height: 768}
+  const request: ModelJobRequest = {
+    id: "request-1",
+    task: task_kind,
+    prompt: "A simple cornflower",
+    output: output_spec,
+    seed: 42,
+  }
+  const build: ComfyWorkflowBuilder =
+    fn(job: ModelJobRequest) { return comfyui_flux2_klein_workflow(
+    job,
+  ) }
+  const backend = comfyui_backend(endpoint, build)
+  const submitted = unwrap(backend.submit(harness, request))
+  harness.stdio.log(submitted.state)
+  const job: ModelJob = {
+    schema: "harn.model_job.v1",
+    id: submitted.job_id,
+    request_id: request.id,
+    request_digest: model_job_request_digest(request),
+    backend: backend.id,
+    state: submitted.state,
+    submitted_at_ms: 0,
+    updated_at_ms: 0,
+  }
+  const running = unwrap(backend.inspect(harness, job))
+  harness.stdio.log(running.state)
+  const complete = unwrap(backend.inspect(harness, job + {state: "running"}))
+  harness.stdio.log(complete.state)
+  harness.stdio.log(complete.outputs[0]?.name ?? "missing")
+  harness.stdio.log(complete.outputs[0]?.url ?? "missing")
+  const canceled = unwrap(backend.cancel(harness, job + {state: "running"}))
+  harness.stdio.log(canceled.state)
+  const asset_root = harness.fs.mkdtemp_in_workspace("comfy-input-")
+  const asset_options: MediaAssetOptions = {
+    mime_type: "image/png",
+    width: 1,
+    height: 1,
+    root: asset_root,
+  }
+  const sketch = unwrap(
+    media_asset_store_result(
+      harness.fs,
+      bytes_from_base64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"),
+      asset_options,
+    ),
+  )
+  const edit_task: ModelTask = "image.edit"
+  const edit_request: ModelJobRequest = request
+    + {
+    id: "request-edit",
+    task: edit_task,
+    prompt: "Polish the sketch",
+    inputs: [sketch],
+  }
+  const edit_build: ComfyWorkflowBuilder =
+    fn(edit_job: ModelJobRequest) { return comfyui_flux2_klein_edit_workflow(
+    edit_job,
+  ) }
+  const edit_backend = comfyui_backend(endpoint, edit_build)
+  const edit_submitted = unwrap(edit_backend.submit(harness, edit_request))
+  harness.stdio.log(edit_submitted.state)
+  const graph = comfyui_flux2_klein_edit_workflow(
+    edit_request + {params: {comfy_input_names: ["harn/sketch.png"]}},
+  )
+  harness.stdio.log(graph["6"].class_type)
+  harness.stdio.log(graph["10"].class_type)
+  harness.stdio.log(to_string(len(harness.testing.http_mock_calls())))
+}

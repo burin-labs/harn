@@ -1,0 +1,74 @@
+{
+  "name": "mcp.completion_log_notification.boundaries",
+  "protocol": "mcp",
+  "schema": "schemas/mcp-2026-07-28.schema.json",
+  "expect": "valid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "id": "complete-1",
+      "method": "completion/complete",
+      "params": {
+        "ref": {
+          "type": "ref/prompt",
+          "name": "review"
+        },
+        "argument": {
+          "name": "diff",
+          "value": "src/"
+        },
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientInfo": {
+            "name": "harn-conformance",
+            "version": "0.10.59"
+          },
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": "complete-1",
+      "result": {
+        "completion": {
+          "values": [
+            "src/lib.rs",
+            "src/main.rs"
+          ],
+          "total": 2,
+          "hasMore": false
+        },
+        "resultType": "complete"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "notifications/message",
+      "params": {
+        "level": "notice",
+        "logger": "harn",
+        "data": {
+          "message": "tool finished"
+        },
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientInfo": {
+            "name": "harn-conformance",
+            "version": "0.10.59"
+          },
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
+    }
+  ],
+  "matrix": {
+    "version": "2026-07-28",
+    "family": "completion_log_notification",
+    "case": "success",
+    "source": {
+      "kind": "hand_authored",
+      "description": "Stable completion plus an inbound logging notification accepted by Harn's MCP client."
+    }
+  }
+}

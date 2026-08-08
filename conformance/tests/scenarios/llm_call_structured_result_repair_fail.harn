@@ -1,0 +1,29 @@
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Repair pass also fails: ok=false with error_category="repair_failed"
+ * so callers can distinguish "tried and failed" from a baseline
+ * schema_validation failure.
+ */
+pipeline default(harness: Harness) {
+  const schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
+  with_llm_script(
+    harness.llm,
+    [llm_text("{\"note\": \"nope\"}"), llm_text("{\"note\": \"still nope\"}")],
+    { ->
+      const r = harness.llm.call_structured_result(
+        "Grade",
+        schema,
+        {provider: "mock", retries: 0, repair: {enabled: true}},
+      )
+      harness.stdio.println(r.ok)
+      harness.stdio.println(r.data == nil)
+      harness.stdio.println(r.error_category)
+      harness.stdio.println(r.repaired)
+      harness.stdio.println(contains(r.raw_text, "nope"))
+      harness.stdio.println(len(harness.llm.mock_calls()))
+    },
+  )
+}
+// Main call: missing required key.
+// Repair call: still invalid.

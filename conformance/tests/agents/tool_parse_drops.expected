@@ -1,0 +1,39 @@
+# fenced unknown dialect, unregistered tool
+  calls=0 dropped=5
+  drop {"reason":"salvaged_as_prose","text":"```"}
+  drop {"reason":"fenced_narration","text":"<tool>"}
+  drop {"reason":"salvaged_as_prose","text":"search({ query: \"x\" })"}
+  drop {"reason":"fenced_narration","text":"</tool>"}
+  drop {"reason":"salvaged_as_prose","text":"```"}
+# invented fenced dialect
+  calls=0 dropped=5
+  drop {"reason":"salvaged_as_prose","text":"```"}
+  drop {"reason":"fenced_narration","text":"<perform_action>"}
+  drop {"reason":"salvaged_as_prose","text":"search({ query: \"x\" })"}
+  drop {"reason":"fenced_narration","text":"</perform_action>"}
+  drop {"reason":"salvaged_as_prose","text":"```"}
+# fenced json naming an unknown tool
+  calls=0 dropped=1
+  drop {"reason":"salvaged_as_prose","text":"```\n{\n  \"name\": \"search\",\n  \"arguments\": { \"query\": \"x\" }\n}\n```"}
+# fenced source code
+  calls=0 dropped=1
+  drop {"reason":"salvaged_as_prose","text":"```rust\nfn main() { println!(\"hi\"); }\n```"}
+# unknown tool at top level
+  calls=0 dropped=1
+  drop {"reason":"salvaged_as_prose","text":"fictitious_tool({ x: 1 })"}
+# truncated heredoc body
+  calls=0 dropped=3
+  drop {"reason":"salvaged_as_prose","text":"edit({\n    action: \"create\",\n    path: \"main.go\",\n    content:"}
+  drop {"reason":"fenced_narration","text":"<<EOF"}
+  drop {"reason":"salvaged_as_prose","text":"package main\n\nfunc main() {\n    fmt.Println(\"hello"}
+# fenced call naming a registered tool
+  calls=1 dropped=4
+  drop {"reason":"salvaged_as_prose","text":"```"}
+  drop {"reason":"fenced_narration","text":"<tool>"}
+  drop {"reason":"fenced_narration","text":"</tool>"}
+  drop {"reason":"salvaged_as_prose","text":"```"}
+# well formed wrapped call
+  calls=1 dropped=0
+# plain prose
+  calls=0 dropped=1
+  drop {"reason":"salvaged_as_prose","text":"just prose with no tags at all"}

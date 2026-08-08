@@ -1,0 +1,117 @@
+// Name resolution in the native-JSON lane: generic wrappers, harmony debris,
+// and the aliases cheap models reach for.
+//
+// Providers sometimes hand back a dispatchable-looking function literally named
+// `tool` or `tool_call`, whose arguments carry the real Harn name — policy has
+// to see `look`, not the wrapper, or the turn trips the tool ceiling before it
+// can self-repair. Harmony leaks glue a `<|channel|>` suffix or a
+// `<|constrain|>json` marker onto the name. And a model that asks for `read` or
+// `apply_patch` is not making a mistake worth a hard denial; it is naming a
+// tool from another harness, so the feedback points at Harn's equivalent.
+import { probe } from "_tool_parse_probe"
+
+/** `look` and `run` only — the registry the wrapper-unwrap case resolves in. */
+const LOOK_RUN = {
+  _type: "tool_registry",
+  tools: [
+    {name: "look", description: "Read a file.", parameters: {}},
+    {name: "run", description: "Run a shell command.", parameters: {}},
+  ],
+}
+
+/** Adds `search` so the intent-inference cases have a third name to land on. */
+const LOOK_RUN_SEARCH = {
+  _type: "tool_registry",
+  tools: [
+    {name: "look", description: "Read a file.", parameters: {}},
+    {name: "run", description: "Run a shell command.", parameters: {}},
+    {name: "search", description: "Search the tree.", parameters: {}},
+  ],
+}
+
+/**
+ * Has `look` and `edit` but NOT `read` or `apply_patch`, so those names are
+ * unknown and must be aliased rather than denied.
+ */
+const ALIAS_TARGETS = {
+  _type: "tool_registry",
+  tools: [
+    {name: "edit", description: "Precise code edit.", parameters: {}},
+    {name: "look", description: "Read a file.", parameters: {}},
+    {name: "run", description: "Run a shell command.", parameters: {}},
+  ],
+}
+
+pipeline main(harness: Harness) {
+  // The generic `tool` wrapper: unwrap to the inner name and args.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "generic tool wrapper unwraps to the real call",
+    "{\"name\":\"tool\",\"arguments\":{\"name\":\"look\",\"args\":{\"intent\":\"read\",\"file\":\"src/storage/page_cache.h\"}}}",
+    LOOK_RUN,
+  )
+  // The next three carry a harmony marker inside the JSON `name` value. The
+  // native-JSON parser has repair paths for exactly this — strip a `<|channel|>`
+  // suffix, infer the tool from the argument shape behind a `<|constrain|>`
+  // marker — but through the public entry point they never run: the tagged
+  // scanner consumes the marker as framing first and hands the native lane a
+  // name with a hole in it. These pin that reachability, not the repair.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "harmony channel suffix on the name",
+    "{\"name\":\"run<|channel|>commentary\",\"arguments\":{\"command\":\"cargo test\"}}",
+    LOOK_RUN,
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "constrain marker with a command argument",
+    "{\"name\":\"<|constrain|>json\",\"arguments\":{\"command\":\"cargo test\"}}",
+    LOOK_RUN,
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "constrain marker with a read intent",
+    "{\"name\":\"<|constrain|>json\",\"arguments\":{\"intent\":\"read\",\"path\":\"src/main.zig\"}}",
+    LOOK_RUN_SEARCH,
+  )
+  // `tool_call` is not a marker, so the wrapper does reach the native lane and
+  // the intent inference lands on `search`.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "tool_call wrapper with a search intent",
+    "{\"name\":\"tool_call\",\"arguments\":{\"intent\":\"search\",\"path\":\"src\",\"query\":\"fn parse\"}}",
+    LOOK_RUN_SEARCH,
+  )
+  // `read` is aliased to `look`, `apply_patch` to `edit`, rather than denied.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "read is aliased to look",
+    "[{\"function\":{\"name\":\"read\",\"arguments\":\"{}\"}}]",
+    ALIAS_TARGETS,
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "apply_patch is aliased to edit",
+    "[{\"function\":{\"name\":\"apply_patch\",\"arguments\":\"{}\"}}]",
+    ALIAS_TARGETS,
+  )
+  // A malformed `arguments` string longer than the 200-byte error preview, with
+  // a 3-byte scalar straddling byte 200. A byte slice at that index would land
+  // mid-codepoint; the preview must truncate on a char boundary instead.
+  const long_bad = "x" + repeat("a", 197) + "€" + " trailing"
+  harness.stdio.println("raw_argument_bytes=${len(long_bad)}")
+  probe(
+    harness.agent,
+    harness.stdio,
+    "malformed arguments preview truncates on a char boundary",
+    "[{\"id\":\"call_001\",\"type\":\"function\",\"function\":{\"name\":\"edit\",\"arguments\":${json_stringify(long_bad)}}}]",
+    ALIAS_TARGETS,
+  )
+}

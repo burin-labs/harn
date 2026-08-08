@@ -1,0 +1,1114 @@
+/**
+ * std/oauth/client — RFC 6749 + RFC 7636 OAuth client with PKCE +
+ * transparent refresh per RFC 9700 BCP.
+ *
+ * `client(harness, provider, opts)` builds a client handle around a provider
+ * record from `std/oauth/providers` (or any compatible dict) and a
+ * storage backend from `std/oauth/storage`. The handle exposes
+ * authorization-code helpers, an explicit refresh, and a
+ * `request(method, url, opts?)` wrapper that injects a Bearer token,
+ * detects 401, and refreshes + retries once.
+ *
+ * `token(client)` is the convenience that returns a valid access token
+ * string and refreshes transparently when the stored token is past 75%
+ * of its TTL. Tokens never travel through closure captures —
+ * `token()` always reads the storage backend as the source of truth.
+ * Refreshes run under `storage.with_refresh_lock(...)` and re-read
+ * inside that transaction so concurrent TTL, explicit, and post-401
+ * callers collapse to a single token-endpoint refresh per storage key.
+ *
+ *     import { providers } from "std/oauth/providers"
+ *     import { memory } from "std/oauth/storage"
+ *     import { client, token } from "std/oauth/client"
+ *
+ *     let cli = client(harness, *       providers().github,
+ *       {
+ *         client_id: env("GITHUB_CLIENT_ID"),
+ *         client_secret: env("GITHUB_CLIENT_SECRET"),
+ *         scopes: ["read:user", "user:email"],
+ *         redirect_uri: "http://127.0.0.1:8765/callback",
+ *         storage: memory(),
+ *       },
+ *     )
+ *
+ *     // Human-authorization phase (run once, then exchange the code):
+ *     let pkce = cli.start_authorization()
+ *     // open pkce.url in a browser, capture the redirect code + state,
+ *     // then:
+ *     cli.exchange_code(pkce, redirect_code, redirect_state)
+ *
+ *     // Subsequent calls: get a valid access token (auto-refresh):
+ *     let access = token(cli)
+ *
+ *     // Or let the client drive HTTP and retry once on 401:
+ *     let response = cli.request("GET", "https://api.github.com/user")
+ *
+ * Audit: every successful refresh emits an `oauth.client.audit`
+ * `token_refreshed` event log entry containing the provider id,
+ * storage key, and pre/post expiry — never the new access token.
+ *
+ * Concurrency: storage IS the source of truth. Token refresh is
+ * single-flight per `(storage backend, storage_key)`; waiters re-read
+ * the stored token inside the refresh transaction and reuse another
+ * worker's rotated access/refresh token instead of spending a second
+ * refresh grant.
+ */
+import { JsonParseFailure, merge } from "std/json"
+import {
+  token_exchange_capability,
+  token_exchange_grant_type,
+  token_type,
+} from "std/oauth/token_exchange"
+
+const __DEFAULT_PKCE_VERIFIER_BYTES = 64
+
+const __DEFAULT_STATE_BYTES = 16
+
+const __TTL_PREREFRESH_NUMERATOR = 3
+
+const __TTL_PREREFRESH_DENOMINATOR = 4
+
+const __DEFAULT_TOKEN_KEY = "access-token"
+
+const __AUDIT_TOPIC = "oauth.client.audit"
+
+const __AUDIT_KIND_REFRESH = "token_refreshed"
+
+const __AUDIT_KIND_EXCHANGE = "token_exchanged"
+
+const __AUDIT_KIND_REVOKED = "token_revoked"
+
+const __DIAGNOSTIC_REFRESH_EXPIRED = "HARN-OAU-002"
+
+type OAuthClient = dict
+
+fn __require_string(value, field) {
+  const text = to_string(value ?? "")
+  if text == "" {
+    throw "std/oauth/client: " + field + " is required"
+  }
+  return text
+}
+
+fn __require_url(value, field) {
+  return __require_string(value, field)
+}
+
+fn __require_provider(provider) {
+  if type_of(provider) != "dict" {
+    throw "std/oauth/client: provider must be a dict (use std/oauth/providers)"
+  }
+  const _ = __require_url(provider?.auth_url, "provider.auth_url")
+  const _ = __require_url(provider?.token_url, "provider.token_url")
+  return provider
+}
+
+fn __require_storage(storage) {
+  if type_of(storage) != "dict" {
+    throw "std/oauth/client: opts.storage is required (use std/oauth/storage)"
+  }
+  const g = storage?.get
+  const s = storage?.set
+  const d = storage?.delete
+  const w = storage?.with_refresh_lock
+  if type_of(g) != "closure" && type_of(g) != "builtin" {
+    throw "std/oauth/client: opts.storage.get must be a function"
+  }
+  if type_of(s) != "closure" && type_of(s) != "builtin" {
+    throw "std/oauth/client: opts.storage.set must be a function"
+  }
+  if type_of(d) != "closure" && type_of(d) != "builtin" {
+    throw "std/oauth/client: opts.storage.delete must be a function"
+  }
+  if type_of(w) != "closure" && type_of(w) != "builtin" {
+    throw "std/oauth/client: opts.storage.with_refresh_lock must be a function"
+  }
+  return storage
+}
+
+fn __pkce_verifier_string(random: HarnessRandom, n_bytes) {
+  // base64url-no-pad over CSPRNG bytes. RFC 7636 §4.1 requires 43..128
+  // chars from the URL-safe alphabet; 64 random bytes encode to ~86
+  // chars, well inside the band.
+  return bytes_to_base64url(random.bytes(n_bytes))
+}
+
+fn __pkce_challenge(verifier) {
+  // SHA-256 over the ASCII verifier, base64url-no-pad encoded —
+  // RFC 7636 §4.2 S256 method.
+  return sha256_base64url(verifier)
+}
+
+fn __random_state(random: HarnessRandom, n_bytes) {
+  return bytes_to_base64url(random.bytes(n_bytes))
+}
+
+fn __scope_separator(provider) {
+  const id = lowercase(to_string(provider?.id ?? ""))
+  if id == "linear" {
+    return ","
+  }
+  return " "
+}
+
+fn __join_scopes(scopes, separator) {
+  let parts = []
+  if scopes != nil {
+    for raw in scopes {
+      const text = trim(to_string(raw ?? ""))
+      if text != "" {
+        parts = parts + [text]
+      }
+    }
+  }
+  if len(parts) == 0 {
+    return nil
+  }
+  return join(parts, separator)
+}
+
+fn __url_encode_value(value) {
+  return url_encode(to_string(value ?? ""))
+}
+
+fn __form_body(params) {
+  let parts = []
+  for entry in params {
+    parts = parts + [url_encode(entry.key) + "=" + __url_encode_value(entry.value)]
+  }
+  return join(parts, "&")
+}
+
+fn __append_query(url, pairs) {
+  let sep = "?"
+  if contains(url, "?") {
+    sep = "&"
+  }
+  let built = url
+  let first = true
+  for entry in pairs {
+    const value = entry.value
+    if value == nil {
+      continue
+    }
+    const prefix = first ? sep : "&"
+    built = built + prefix + url_encode(entry.key) + "=" + __url_encode_value(value)
+    first = false
+  }
+  return built
+}
+
+fn __token_auth_method(opts, has_secret) {
+  const explicit = opts?.token_auth_method
+  if explicit != nil && to_string(explicit) != "" {
+    return to_string(explicit)
+  }
+  if has_secret {
+    return "client_secret_post"
+  }
+  return "none"
+}
+
+fn __validate_auth_method(method) {
+  if method == "none" || method == "client_secret_post" || method == "client_secret_basic" {
+    return method
+  }
+  throw "std/oauth/client: unsupported token_auth_method `" + method + "`"
+}
+
+fn __now_seconds(clock: HarnessClock) {
+  return to_int(clock.timestamp())
+}
+
+fn __token_expires_at(token, now_s) {
+  const stored = token?.expires_at_unix
+  if stored != nil {
+    return to_int(stored)
+  }
+  const ttl = token?.expires_in
+  if ttl != nil {
+    return now_s + to_int(ttl)
+  }
+  return nil
+}
+
+fn __token_is_stale(token, now_s) {
+  if token == nil {
+    return true
+  }
+  const access = to_string(token?.access_token ?? "")
+  if access == "" {
+    return true
+  }
+  const issued = token?.issued_at_unix
+  const expires = __token_expires_at(token, now_s)
+  if expires == nil {
+    return false
+  }
+  if now_s >= expires {
+    return true
+  }
+  if issued == nil {
+    return false
+  }
+  const lifetime = expires - to_int(issued)
+  if lifetime <= 0 {
+    return false
+  }
+  const threshold = to_int(issued)
+    + lifetime * __TTL_PREREFRESH_NUMERATOR
+    / __TTL_PREREFRESH_DENOMINATOR
+  return now_s >= threshold
+}
+
+fn __redact_token(token) {
+  if token == nil {
+    return nil
+  }
+  return {
+    has_access_token: token?.access_token != nil && to_string(token?.access_token) != "",
+    has_refresh_token: token?.refresh_token != nil && to_string(token?.refresh_token) != "",
+    expires_at_unix: token?.expires_at_unix,
+    issued_at_unix: token?.issued_at_unix,
+    scopes: token?.scopes,
+    token_type: token?.token_type,
+  }
+}
+
+fn __redact_endpoint(url) {
+  // Token endpoints are not secrets, but we strip query strings just
+  // in case a custom provider embeds a tenant token in a query param.
+  if url == nil {
+    return nil
+  }
+  const text = to_string(url)
+  if !contains(text, "?") {
+    return text
+  }
+  return split(text, "?")[0]
+}
+
+fn __post_token_request(
+  net: HarnessNet,
+  token_url,
+  client_id,
+  client_secret,
+  auth_method,
+  form_pairs,
+) {
+  const method = __validate_auth_method(auth_method)
+  let headers = {"Content-Type": "application/x-www-form-urlencoded", Accept: "application/json"}
+  let pairs = form_pairs + [{key: "client_id", value: client_id}]
+  if method == "client_secret_basic" {
+    if client_secret == nil {
+      throw "std/oauth/client: client_secret_basic requires client_secret"
+    }
+    const blob = to_string(client_id) + ":" + to_string(client_secret)
+    headers = merge(headers, {Authorization: "Basic " + base64_encode(blob)})
+  } else if method == "client_secret_post" {
+    if client_secret == nil {
+      throw "std/oauth/client: client_secret_post requires client_secret"
+    }
+    pairs = pairs + [{key: "client_secret", value: client_secret}]
+  }
+  const body = __form_body(pairs)
+  const response = net.post(token_url, body, {headers: headers})
+  if !(response?.ok ?? false) {
+    const parsed: Result<unknown, JsonParseFailure> = try {
+      json_parse(response?.body ?? "")
+    }
+    const error_body = if is_ok(parsed) && type_of(unwrap(parsed)) == "dict" {
+      unwrap(parsed)
+    } else {
+      {}
+    }
+    const detail = (error_body?.error_description ?? error_body?.error
+      ?? "token endpoint returned status ")
+      + to_string(response?.status ?? 0)
+    throw "std/oauth/client: token request failed: " + to_string(detail)
+  }
+  const parsed: Result<unknown, JsonParseFailure> = try {
+    json_parse(response?.body ?? "")
+  }
+  if is_err(parsed) {
+    throw "std/oauth/client: token endpoint did not return valid JSON: "
+      + unwrap_err(parsed).message
+  }
+  const parsed_body = unwrap(parsed)
+  if type_of(parsed_body) != "dict" {
+    throw "std/oauth/client: token endpoint returned non-object JSON"
+  }
+  const access = parsed_body?.access_token
+  if access == nil || to_string(access) == "" {
+    const err_msg = parsed_body?.error_description ?? parsed_body?.error ?? "missing access_token"
+    throw "std/oauth/client: token response invalid: " + to_string(err_msg)
+  }
+  return parsed_body
+}
+
+fn __build_token_set(parsed, scopes, issued_at, prev_refresh) {
+  let token_set = {access_token: to_string(parsed.access_token), issued_at_unix: issued_at}
+  const issued_token_type = parsed?.issued_token_type
+  if issued_token_type != nil && to_string(issued_token_type) != "" {
+    token_set = token_set + {issued_token_type: to_string(issued_token_type)}
+  }
+  const token_type = parsed?.token_type
+  if token_type != nil {
+    token_set = token_set + {token_type: to_string(token_type)}
+  }
+  const expires_in = parsed?.expires_in
+  if expires_in != nil {
+    const ttl_s = to_int(expires_in)
+    token_set = token_set + {expires_in: ttl_s, expires_at_unix: issued_at + ttl_s}
+  } else if parsed?.expires_at_unix != nil {
+    token_set = token_set + {expires_at_unix: to_int(parsed.expires_at_unix)}
+  }
+  const new_refresh = parsed?.refresh_token
+  if new_refresh != nil && to_string(new_refresh) != "" {
+    token_set = token_set + {refresh_token: to_string(new_refresh)}
+  } else if prev_refresh != nil && to_string(prev_refresh) != "" {
+    // Preserve the prior refresh token on grants that don't rotate.
+    token_set = token_set + {refresh_token: to_string(prev_refresh)}
+  }
+  const returned_scope = parsed?.scope
+  if returned_scope != nil && to_string(returned_scope) != "" {
+    token_set = token_set + {scopes: split(to_string(returned_scope), " ")}
+  } else if scopes != nil && len(scopes) > 0 {
+    token_set = token_set + {scopes: scopes}
+  }
+  return token_set
+}
+
+fn __audit_refresh(obs: HarnessObs, provider_id, storage_key, prev, next, reason) {
+  // Audit MUST NOT include the access token. Only timing and presence.
+  const payload = {
+    provider: to_string(provider_id),
+    storage_key: to_string(storage_key),
+    reason: to_string(reason),
+    prev: __redact_token(prev),
+    next: __redact_token(next),
+  }
+  const _ = obs.event_log_emit(
+    __AUDIT_TOPIC,
+    __AUDIT_KIND_REFRESH,
+    payload,
+    {provider: to_string(provider_id)},
+  )
+}
+
+fn __audit_exchange(obs: HarnessObs, provider_id, storage_key, next) {
+  const payload = {
+    provider: to_string(provider_id),
+    storage_key: to_string(storage_key),
+    next: __redact_token(next),
+  }
+  const _ = obs.event_log_emit(
+    __AUDIT_TOPIC,
+    __AUDIT_KIND_EXCHANGE,
+    payload,
+    {provider: to_string(provider_id)},
+  )
+}
+
+fn __audit_token_exchange(
+  obs: HarnessObs,
+  provider_id,
+  storage_key,
+  next,
+  mode,
+  requested_token_type,
+) {
+  const payload = {
+    provider: to_string(provider_id),
+    storage_key: storage_key,
+    grant_type: token_exchange_grant_type(),
+    mode: mode,
+    requested_token_type: requested_token_type,
+    issued_token_type: next?.issued_token_type,
+    next: __redact_token(next),
+  }
+  const _ = obs.event_log_emit(
+    __AUDIT_TOPIC,
+    __AUDIT_KIND_EXCHANGE,
+    payload,
+    {provider: to_string(provider_id)},
+  )
+}
+
+fn __audit_revoked(obs: HarnessObs, provider_id, storage_key, prev, revoke_url_used) {
+  // Audit MUST NOT include the access token. Records presence + the
+  // (sanitised) endpoint that was contacted so compliance reviewers
+  // can confirm the RFC 7009 hint was used.
+  const payload = {
+    provider: to_string(provider_id),
+    storage_key: to_string(storage_key),
+    revoke_endpoint: __redact_endpoint(revoke_url_used),
+    prev: __redact_token(prev),
+  }
+  const _ = obs.event_log_emit(
+    __AUDIT_TOPIC,
+    __AUDIT_KIND_REVOKED,
+    payload,
+    {provider: to_string(provider_id)},
+  )
+}
+
+fn __try_revoke_remote(net: HarnessNet, cfg, token_value) {
+  // Best-effort RFC 7009 revoke. We never let a remote failure block
+  // the local storage delete: revocation is a hygiene step on top of
+  // discarding the credential locally, and the storage delete is the
+  // authoritative client-side action.
+  if cfg.revoke_url == nil {
+    return nil
+  }
+  const url_text = to_string(cfg.revoke_url)
+  if url_text == "" {
+    return nil
+  }
+  const headers = {"Content-Type": "application/x-www-form-urlencoded", Accept: "application/json"}
+  const body = __form_body(
+    [{key: "token", value: token_value}, {key: "client_id", value: cfg.client_id}],
+  )
+  try {
+    const _ = net.post(url_text, body, {headers: headers})
+  } catch (_err) {
+    const _ = nil
+  }
+  return url_text
+}
+
+fn __revoke_locked(net: HarnessNet, obs: HarnessObs, cfg) {
+  const prev = cfg.storage.get(cfg.storage_key)
+  const access = prev?.access_token
+  const remote_url = access == nil || to_string(access) == "" ? nil : __try_revoke_remote(
+    net,
+    cfg,
+    to_string(access),
+  )
+  cfg.storage.delete(cfg.storage_key)
+  __audit_revoked(obs, cfg.provider_id, cfg.storage_key, prev, remote_url)
+  return nil
+}
+
+fn __refresh_locked(harness: Harness, cfg, prev_token, reason) {
+  const refresh = prev_token?.refresh_token
+  if refresh == nil || to_string(refresh) == "" {
+    throw __DIAGNOSTIC_REFRESH_EXPIRED
+      + ": std/oauth/client: no refresh_token available; re-run authorization"
+  }
+  let form = [{key: "grant_type", value: "refresh_token"}, {key: "refresh_token", value: refresh}]
+  const scopes_str = __join_scopes(cfg.scopes, cfg.scope_separator)
+  if scopes_str != nil {
+    form = form + [{key: "scope", value: scopes_str}]
+  }
+  const issued_at = __now_seconds(harness.clock)
+  let parsed = nil
+  try {
+    parsed = __post_token_request(
+      harness.net,
+      cfg.token_url,
+      cfg.client_id,
+      cfg.client_secret,
+      cfg.token_auth_method,
+      form,
+    )
+  } catch (err) {
+    // Refresh-grant failures are special: the stored refresh token is
+    // gone (expired, revoked, or rotated by another caller). Surface
+    // the dedicated HARN-OAU-002 diagnostic so scripts can pattern-
+    // match on it and re-run authorization rather than retrying.
+    throw __DIAGNOSTIC_REFRESH_EXPIRED + ": std/oauth/client: refresh failed (" + to_string(err)
+      + ")"
+  }
+  const next_token = __build_token_set(parsed, cfg.scopes, issued_at, refresh)
+  cfg.storage.set(cfg.storage_key, next_token)
+  __audit_refresh(harness.obs, cfg.provider_id, cfg.storage_key, prev_token, next_token, reason)
+  return next_token
+}
+
+fn __same_access_token(stored, observed_token) -> bool {
+  if observed_token == nil {
+    return true
+  }
+  return to_string(stored?.access_token ?? "") == to_string(observed_token?.access_token ?? "")
+}
+
+fn __same_token_identity(stored, observed_token) -> bool {
+  if observed_token == nil {
+    return true
+  }
+  return __same_access_token(stored, observed_token)
+    && to_string(stored?.refresh_token ?? "")
+    == to_string(
+    observed_token?.refresh_token ?? "",
+  )
+}
+
+fn __refresh_needed(stored, now_s, reason, observed_token = nil) -> bool {
+  if reason == "forced" {
+    if !__same_token_identity(stored, observed_token) {
+      return false
+    }
+    return true
+  }
+  if reason == "post_401" {
+    if !__same_access_token(stored, observed_token) {
+      return false
+    }
+    return true
+  }
+  return __token_is_stale(stored, now_s)
+}
+
+fn __maybe_refresh(harness: Harness, cfg, reason, observed_token = nil) {
+  const observed = cfg.storage.get(cfg.storage_key)
+  if observed == nil {
+    throw __DIAGNOSTIC_REFRESH_EXPIRED
+      + ": std/oauth/client: no token in storage; run authorization first"
+  }
+  const now_s = __now_seconds(harness.clock)
+  if !__refresh_needed(observed, now_s, reason, observed_token) {
+    return observed
+  }
+  return cfg.storage.with_refresh_lock(
+    cfg.storage_key,
+    { ->
+      const stored = cfg.storage.get(cfg.storage_key)
+      if stored == nil {
+        throw __DIAGNOSTIC_REFRESH_EXPIRED
+          + ": std/oauth/client: no token in storage; run authorization first"
+      }
+      const locked_now_s = __now_seconds(harness.clock)
+      if !__refresh_needed(stored, locked_now_s, reason, observed_token) {
+        return stored
+      }
+      return __refresh_locked(harness, cfg, stored, reason)
+    },
+  )
+}
+
+fn __get_valid_token(harness: Harness, cfg) {
+  const stored = cfg.storage.get(cfg.storage_key)
+  const now_s = __now_seconds(harness.clock)
+  if stored != nil && !__token_is_stale(stored, now_s) {
+    return stored
+  }
+  return __maybe_refresh(harness, cfg, "ttl_threshold")
+}
+
+fn __start_authorization(random: HarnessRandom, cfg) {
+  const verifier = __pkce_verifier_string(random, __DEFAULT_PKCE_VERIFIER_BYTES)
+  const challenge = __pkce_challenge(verifier)
+  const state = __random_state(random, __DEFAULT_STATE_BYTES)
+  const scopes_str = __join_scopes(cfg.scopes, cfg.scope_separator)
+  let pairs = [
+    {key: "response_type", value: "code"},
+    {key: "client_id", value: cfg.client_id},
+    {key: "redirect_uri", value: cfg.redirect_uri},
+    {key: "state", value: state},
+    {key: "code_challenge", value: challenge},
+    {key: "code_challenge_method", value: "S256"},
+  ]
+  if scopes_str != nil {
+    pairs = pairs + [{key: "scope", value: scopes_str}]
+  }
+  if cfg.audience != nil && to_string(cfg.audience) != "" {
+    pairs = pairs + [{key: "audience", value: cfg.audience}]
+  }
+  if cfg.extra_auth_params != nil {
+    for k in cfg.extra_auth_params.keys() {
+      pairs = pairs + [{key: k, value: cfg.extra_auth_params[k]}]
+    }
+  }
+  const url = __append_query(cfg.auth_url, pairs)
+  return {
+    url: url,
+    state: state,
+    code_verifier: verifier,
+    code_challenge: challenge,
+    code_challenge_method: "S256",
+    redirect_uri: cfg.redirect_uri,
+  }
+}
+
+fn __exchange_code(harness: Harness, cfg, pkce, code, state) {
+  if pkce == nil || type_of(pkce) != "dict" {
+    throw "std/oauth/client: exchange_code requires the pkce dict from start_authorization"
+  }
+  const expected_state = to_string(pkce?.state ?? "")
+  const supplied_state = to_string(state ?? "")
+  if expected_state == "" || supplied_state == "" || expected_state != supplied_state {
+    throw "std/oauth/client: OAuth state mismatch; aborting exchange"
+  }
+  const verifier = to_string(pkce?.code_verifier ?? "")
+  if verifier == "" {
+    throw "std/oauth/client: missing PKCE code_verifier in pkce dict"
+  }
+  const code_str = to_string(code ?? "")
+  if code_str == "" {
+    throw "std/oauth/client: authorization code is required"
+  }
+  let form = [
+    {key: "grant_type", value: "authorization_code"},
+    {key: "code", value: code_str},
+    {key: "redirect_uri", value: cfg.redirect_uri},
+    {key: "code_verifier", value: verifier},
+  ]
+  const scopes_str = __join_scopes(cfg.scopes, cfg.scope_separator)
+  if scopes_str != nil {
+    form = form + [{key: "scope", value: scopes_str}]
+  }
+  const issued_at = __now_seconds(harness.clock)
+  const parsed = __post_token_request(
+    harness.net,
+    cfg.token_url,
+    cfg.client_id,
+    cfg.client_secret,
+    cfg.token_auth_method,
+    form,
+  )
+  const token_set = __build_token_set(parsed, cfg.scopes, issued_at, nil)
+  cfg.storage.set(cfg.storage_key, token_set)
+  __audit_exchange(harness.obs, cfg.provider_id, cfg.storage_key, token_set)
+  return token_set
+}
+
+fn __append_repeated_form_values(form, key, values) {
+  if values == nil {
+    return form
+  }
+  if type_of(values) == "list" {
+    let out = form
+    for value in values {
+      if value != nil && to_string(value) != "" {
+        out = out + [{key: key, value: value}]
+      }
+    }
+    return out
+  }
+  if to_string(values) == "" {
+    return form
+  }
+  return form + [{key: key, value: values}]
+}
+
+fn __scope_string(scope) {
+  if scope == nil {
+    return nil
+  }
+  if type_of(scope) == "list" {
+    return __join_scopes(scope, " ")
+  }
+  const text = trim(to_string(scope))
+  return text == "" ? nil : text
+}
+
+fn __scope_list(scope) {
+  if scope == nil {
+    return nil
+  }
+  if type_of(scope) == "list" {
+    let out = []
+    for raw in scope {
+      const text = trim(to_string(raw ?? ""))
+      if text != "" {
+        out = out + [text]
+      }
+    }
+    return out
+  }
+  const text = trim(to_string(scope))
+  if text == "" {
+    return nil
+  }
+  let out = []
+  for raw in split(text, " ") {
+    const part = trim(to_string(raw ?? ""))
+    if part != "" {
+      out = out + [part]
+    }
+  }
+  return out
+}
+
+fn __list_allows(values, value) {
+  if value == nil {
+    return true
+  }
+  if values == nil || len(values) == 0 {
+    return false
+  }
+  return values.contains(value)
+}
+
+fn __require_token_exchange_capability(cfg) {
+  const capability = token_exchange_capability(
+    {id: cfg.provider_id, token_exchange: cfg.token_exchange},
+  )
+  if capability == nil || !capability.supported {
+    throw "std/oauth/client: token exchange is not supported for provider `" + cfg.provider_id + "`"
+  }
+  return capability
+}
+
+fn __validate_token_exchange(
+  capability,
+  subject_token_type,
+  actor_token_type,
+  requested_token_type,
+) {
+  if !__list_allows(capability?.subject_token_types, subject_token_type) {
+    throw "std/oauth/client: subject_token_type `" + subject_token_type + "` is not supported by "
+      + capability
+      .id
+  }
+  if actor_token_type != nil && !__list_allows(capability?.actor_token_types, actor_token_type) {
+    throw "std/oauth/client: actor_token_type `" + actor_token_type + "` is not supported by "
+      + capability
+      .id
+  }
+  if requested_token_type != nil
+    && !__list_allows(
+    capability?.requested_token_types,
+    requested_token_type,
+  ) {
+    throw "std/oauth/client: requested_token_type `" + requested_token_type
+      + "` is not supported by "
+      + capability.id
+  }
+  if actor_token_type == nil && !(capability?.impersonation ?? true) {
+    throw "std/oauth/client: token exchange impersonation is not supported by " + capability.id
+  }
+  if actor_token_type != nil && !(capability?.delegation ?? true) {
+    throw "std/oauth/client: token exchange delegation is not supported by " + capability.id
+  }
+}
+
+fn __token_exchange(harness: Harness, cfg, opts) {
+  if type_of(opts) != "dict" {
+    throw "std/oauth/client: token_exchange opts must be a dict"
+  }
+  const capability = __require_token_exchange_capability(cfg)
+  const subject_token = __require_string(opts?.subject_token, "opts.subject_token")
+  const subject_token_type = token_type(
+    __require_string(opts?.subject_token_type, "opts.subject_token_type"),
+  )
+  const actor_token = opts?.actor_token
+  const has_actor = actor_token != nil && to_string(actor_token) != ""
+  const actor_token_type = if has_actor {
+    token_type(__require_string(opts?.actor_token_type, "opts.actor_token_type"))
+  } else {
+    nil
+  }
+  if !has_actor && opts?.actor_token_type != nil {
+    throw "std/oauth/client: actor_token_type must not be sent without actor_token"
+  }
+  const requested_token_type = if opts?.requested_token_type == nil {
+    nil
+  } else {
+    token_type(opts.requested_token_type)
+  }
+  __validate_token_exchange(capability, subject_token_type, actor_token_type, requested_token_type)
+  let form = [
+    {key: "grant_type", value: token_exchange_grant_type()},
+    {key: "subject_token", value: subject_token},
+    {key: "subject_token_type", value: subject_token_type},
+  ]
+  form = __append_repeated_form_values(form, "resource", opts?.resource)
+  form = __append_repeated_form_values(form, "audience", opts?.audience)
+  const scope = __scope_string(opts?.scope)
+  if scope != nil {
+    form = form + [{key: "scope", value: scope}]
+  }
+  if requested_token_type != nil {
+    form = form + [{key: "requested_token_type", value: requested_token_type}]
+  }
+  if has_actor {
+    form = form
+      + [
+      {key: "actor_token", value: actor_token},
+      {key: "actor_token_type", value: actor_token_type},
+    ]
+  }
+  if opts?.extra_params != nil {
+    for key in opts.extra_params.keys() {
+      form = __append_repeated_form_values(form, key, opts.extra_params[key])
+    }
+  }
+  const issued_at = __now_seconds(harness.clock)
+  const parsed = __post_token_request(
+    harness.net,
+    capability?.token_url ?? cfg.token_url,
+    cfg.client_id,
+    cfg.client_secret,
+    cfg.token_auth_method,
+    form,
+  )
+  const issued_token_type = token_type(
+    __require_string(parsed?.issued_token_type, "token response issued_token_type"),
+  )
+  if !__list_allows(capability?.issued_token_types, issued_token_type) {
+    throw "std/oauth/client: issued_token_type `" + issued_token_type + "` is not supported by "
+      + capability
+      .id
+  }
+  let token_set = __build_token_set(parsed, __scope_list(opts?.scope), issued_at, nil)
+  const mode = has_actor ? "delegation" : "impersonation"
+  token_set = token_set
+    + {
+    issued_token_type: issued_token_type,
+    token_exchange_mode: mode,
+    subject_token_type: subject_token_type,
+    actor_token_type: actor_token_type,
+    requested_token_type: requested_token_type,
+  }
+  let storage_key = nil
+  if opts?.store ?? false {
+    storage_key = trim(to_string(opts?.storage_key ?? ""))
+    if storage_key == "" {
+      throw "std/oauth/client: token_exchange store=true requires storage_key"
+    }
+    cfg.storage.set(storage_key, token_set)
+  }
+  __audit_token_exchange(
+    harness.obs,
+    cfg.provider_id,
+    storage_key,
+    token_set,
+    mode,
+    requested_token_type,
+  )
+  return token_set
+}
+
+fn __with_bearer(headers, access_token) {
+  const base = headers ?? {}
+  return merge(base, {Authorization: "Bearer " + to_string(access_token)})
+}
+
+fn __token_request(harness: Harness, cfg, method, url, opts) {
+  const opts_dict = opts ?? {}
+  const access = __get_valid_token(harness, cfg)
+  const headers = __with_bearer(opts_dict?.headers ?? {}, access.access_token)
+  const body = opts_dict?.body
+  const http_opts = merge(opts_dict, {headers: headers})
+  const response = harness.net.request(method, url, http_opts)
+  if to_int(response?.status ?? 0) != 401 {
+    return response
+  }
+  // 401 on a token-bearing call -> refresh + retry once.
+  const refreshed = __maybe_refresh(harness, cfg, "post_401", access)
+  const retried_headers = __with_bearer(opts_dict?.headers ?? {}, refreshed.access_token)
+  const retried_opts = merge(opts_dict, {headers: retried_headers})
+  return harness.net.request(method, url, retried_opts)
+}
+
+/**
+ * client builds an OAuth client handle around a provider record and a
+ * storage backend. `opts` requires `client_id` and `storage`; the rest
+ * are optional and default from the provider record.
+ *
+ * Required `opts`:
+ *   - client_id:    OAuth client identifier.
+ *   - storage:      a handle from `std/oauth/storage`.
+ *
+ * Optional `opts`:
+ *   - client_secret:        non-nil enables confidential-client flows.
+ *   - scopes:               list<string>; defaults to provider.default_scopes.
+ *   - redirect_uri:         required for authorization-code flow.
+ *   - storage_key:          per-installation key; defaults to provider id.
+ *   - token_auth_method:    "none" | "client_secret_post" |
+ *                           "client_secret_basic".
+ *   - audience:             extra `audience=` parameter on /authorize.
+ *   - extra_auth_params:    additional key/value pairs on /authorize.
+ *
+ * @effects: [time, net]
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: client(harness, providers().github, {client_id: id, storage: memory()})
+ */
+pub fn client(harness: Harness, provider, opts) -> OAuthClient {
+  if type_of(opts) != "dict" {
+    throw "std/oauth/client: opts must be a dict"
+  }
+  const provider_record = __require_provider(provider)
+  const storage = __require_storage(opts?.storage)
+  const client_id = __require_string(opts?.client_id, "opts.client_id")
+  const client_secret = opts?.client_secret
+  const secret_str = client_secret == nil ? nil : to_string(client_secret)
+  const has_secret = secret_str != nil && secret_str != ""
+  const token_auth_method = __validate_auth_method(__token_auth_method(opts, has_secret))
+  const scopes = opts?.scopes ?? provider_record?.default_scopes ?? []
+  const scope_separator = __scope_separator(provider_record)
+  const storage_key = to_string(opts?.storage_key ?? provider_record?.id ?? __DEFAULT_TOKEN_KEY)
+  const cfg = {
+    provider_id: to_string(provider_record?.id ?? "custom"),
+    auth_url: to_string(provider_record.auth_url),
+    token_url: to_string(provider_record.token_url),
+    revoke_url: provider_record?.revoke_url,
+    client_id: client_id,
+    client_secret: has_secret ? secret_str : nil,
+    scopes: scopes,
+    scope_separator: scope_separator,
+    redirect_uri: opts?.redirect_uri == nil ? nil : to_string(opts.redirect_uri),
+    token_auth_method: token_auth_method,
+    storage: storage,
+    storage_key: storage_key,
+    audience: opts?.audience,
+    extra_auth_params: opts?.extra_auth_params,
+    token_exchange: provider_record?.token_exchange,
+  }
+  return {
+    _namespace: "oauth_client",
+    provider_id: cfg.provider_id,
+    storage_key: storage_key,
+    scopes: scopes,
+    redirect_uri: cfg.redirect_uri,
+    token_auth_method: token_auth_method,
+    token_endpoint: __redact_endpoint(cfg.token_url),
+    auth_endpoint: __redact_endpoint(cfg.auth_url),
+    start_authorization: { -> __start_authorization(harness.random, cfg) },
+    exchange_code: { pkce, code, state -> __exchange_code(harness, cfg, pkce, code, state) },
+    refresh: { -> __maybe_refresh(harness, cfg, "forced", cfg.storage.get(cfg.storage_key)) },
+    token: { -> __get_valid_token(harness, cfg).access_token },
+    current_token: { -> cfg.storage.get(cfg.storage_key) },
+    token_exchange: { exchange_opts -> __token_exchange(harness, cfg, exchange_opts) },
+    request: { method, url, http_opts = nil ->
+      __token_request(harness, cfg, method, url, http_opts)
+    },
+    revoke: { -> __revoke_locked(harness.net, harness.obs, cfg) },
+  }
+}
+
+/**
+ * token returns a valid access token for `client`, refreshing
+ * transparently when the stored token is past 75% of its TTL or
+ * already expired. Routes through the client's storage backend on
+ * every call; refreshes are single-flight per storage key.
+ *
+ * @effects: [time, net]
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ */
+pub fn token(cli) -> string {
+  if type_of(cli) != "dict" || cli?._namespace != "oauth_client" {
+    throw "std/oauth/client: token() requires an OAuth client handle"
+  }
+  const getter = cli.token
+  return to_string(getter())
+}
+
+/**
+ * refresh forces a refresh of the stored token, ignoring TTL. Useful
+ * when a downstream caller has separately observed token revocation.
+ *
+ * @effects: [time, net]
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ */
+pub fn refresh(cli) {
+  if type_of(cli) != "dict" || cli?._namespace != "oauth_client" {
+    throw "std/oauth/client: refresh() requires an OAuth client handle"
+  }
+  return cli.refresh()
+}
+
+/**
+ * request performs a token-bearing HTTP call through the client.
+ * Mirrors `http_request(method, url, opts)` with two additions:
+ * a Bearer token is injected on every call, and a single retry on 401
+ * issues a forced refresh and replays the request. Returns the same
+ * shape as `http_request`.
+ *
+ * @effects: [time, net]
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: request(cli, "GET", "https://api.github.com/user")
+ */
+pub fn request(cli, method, url, opts = nil) {
+  if type_of(cli) != "dict" || cli?._namespace != "oauth_client" {
+    throw "std/oauth/client: request() requires an OAuth client handle"
+  }
+  return cli.request(method, url, opts)
+}
+
+/**
+ * start_authorization builds an authorization URL plus the PKCE pair
+ * required to exchange the resulting code. The caller is responsible
+ * for sending the user to `pkce.url` and capturing the redirected
+ * `code` and `state`.
+ *
+ * @effects: []
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ */
+pub fn start_authorization(cli) {
+  if type_of(cli) != "dict" || cli?._namespace != "oauth_client" {
+    throw "std/oauth/client: start_authorization() requires an OAuth client handle"
+  }
+  if cli.redirect_uri == nil || to_string(cli.redirect_uri) == "" {
+    throw "std/oauth/client: redirect_uri is required for authorization-code flow"
+  }
+  return cli.start_authorization()
+}
+
+/**
+ * exchange_code completes the authorization-code flow by trading the
+ * redirected `code` for a token set, validating PKCE and `state`.
+ *
+ * @effects: [time, net]
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ */
+pub fn exchange_code(cli, pkce, code, state) {
+  if type_of(cli) != "dict" || cli?._namespace != "oauth_client" {
+    throw "std/oauth/client: exchange_code() requires an OAuth client handle"
+  }
+  return cli.exchange_code(pkce, code, state)
+}
+
+/**
+ * token_exchange performs an RFC 8693 token-exchange grant.
+ *
+ * Required opts:
+ *   - subject_token:       token representing the subject.
+ *   - subject_token_type:  RFC 8693 token type URI or alias.
+ *
+ * Optional opts:
+ *   - actor_token / actor_token_type: present for delegation, absent
+ *     for impersonation.
+ *   - requested_token_type, resource, audience, scope, extra_params.
+ *   - store: true plus storage_key persists the returned TokenSet.
+ *
+ * @effects: [time, net]
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ */
+pub fn token_exchange(cli, opts) {
+  if type_of(cli) != "dict" || cli?._namespace != "oauth_client" {
+    throw "std/oauth/client: token_exchange() requires an OAuth client handle"
+  }
+  return cli.token_exchange(opts)
+}
+
+/**
+ * revoke discards the locally-stored token and, when the provider
+ * declares a `revoke_url`, sends a best-effort RFC 7009 revocation
+ * POST so the server can invalidate the access token. The storage
+ * delete is authoritative on the client side — remote revocation
+ * failures are swallowed and never block the local discard.
+ *
+ * Subsequent calls to `token(cli)` or `request(cli, ...)` will throw
+ * `HARN-OAU-002` (no refresh_token available) until a new
+ * authorization flow is run.
+ *
+ * @effects: [time, net]
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ */
+pub fn revoke(cli) {
+  if type_of(cli) != "dict" || cli?._namespace != "oauth_client" {
+    throw "std/oauth/client: revoke() requires an OAuth client handle"
+  }
+  return cli.revoke()
+}

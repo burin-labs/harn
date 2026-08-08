@@ -1,0 +1,174 @@
+// Merge Captain entry pipeline.
+//
+// One invocation runs a single sweep across all configured repos. The
+// pipeline accepts arguments via runtime_pipeline_input(); when no input
+// is provided it falls back to the smoke fixture so `harn run
+// personas/merge_captain/manifest.harn` still produces a deterministic
+// receipt.
+import { runtime_pipeline_input } from "std/runtime"
+import { open_checkpoints } from "lib/checkpoint_store"
+import { fixture_adapter, live_adapter } from "lib/github_adapter"
+import { load_policies, sweep } from "lib/scheduler"
+
+@persona(name: "merge_captain", description: "Harn-native multi-repo PR queue captain.", tools: [github, ci], autonomy: act_with_approval, receipts: required, triggers: [github.pr_opened, github.pr_synchronized, github.check_failed, github.merge_group_completed])
+/** Static persona graph used by `harn persona inspect` to expose Merge Captain's durable steps. */
+pub fn merge_captain_persona(ctx) {
+  const resolved = resolve_input_step(ctx)
+  const policies = load_policies_step(resolved)
+  const adapter = select_adapter_step(resolved)
+  const checkpoint = open_checkpoint_step(resolved)
+  const discovered = discover_open_prs_step({input: resolved, policies: policies, adapter: adapter})
+  const observed = normalize_observations_step(discovered)
+  const classified = classify_pull_requests_step(observed)
+  const repaired = dispatch_repair_workers_step(classified)
+  const gated = gate_mutations_step(repaired)
+  const acted = apply_actions_step(gated)
+  const receipted = emit_receipts_step(acted)
+  return summarize_sweep_step({checkpoint: checkpoint, receipts: receipted})
+}
+
+@step(name: "resolve_input", receipt: audit, error_boundary: fail)
+fn resolve_input_step(ctx) {
+  return ctx
+}
+
+@step(name: "load_repo_policies", receipt: audit, error_boundary: fail)
+fn load_policies_step(ctx) {
+  return ctx
+}
+
+@step(name: "select_github_adapter", receipt: audit, error_boundary: fail)
+fn select_adapter_step(ctx) {
+  return ctx
+}
+
+@step(name: "open_checkpoint_store", receipt: audit, error_boundary: fail)
+fn open_checkpoint_step(ctx) {
+  return ctx
+}
+
+@step(name: "discover_open_prs", receipt: audit, error_boundary: continue, retry: {max_attempts: 2})
+fn discover_open_prs_step(ctx) {
+  return ctx
+}
+
+@step(name: "normalize_observations", receipt: audit, error_boundary: fail)
+fn normalize_observations_step(ctx) {
+  return ctx
+}
+
+@step(name: "classify_pull_requests", receipt: audit, error_boundary: fail)
+fn classify_pull_requests_step(ctx) {
+  return ctx
+}
+
+@step(name: "dispatch_repair_workers", model: "gpt-5.4", approval: required, receipt: audit, error_boundary: continue)
+fn dispatch_repair_workers_step(ctx) {
+  return ctx
+}
+
+@step(name: "gate_mutations", approval: required, receipt: audit, error_boundary: fail)
+fn gate_mutations_step(ctx) {
+  return ctx
+}
+
+@step(name: "apply_actions", approval: required, receipt: audit, error_boundary: escalate)
+fn apply_actions_step(ctx) {
+  return ctx
+}
+
+@step(name: "emit_receipts", receipt: audit, error_boundary: fail)
+fn emit_receipts_step(ctx) {
+  return ctx
+}
+
+@step(name: "summarize_sweep", receipt: audit, error_boundary: fail)
+fn summarize_sweep_step(ctx) {
+  return ctx
+}
+
+fn _default_input() {
+  return {
+    mode: "fixture",
+    fixture_path: "personas/merge_captain/fixtures/github_snapshot.json",
+    policy_paths: [
+      "personas/merge_captain/policies/harn.json",
+      "personas/merge_captain/policies/example-service.json",
+      "personas/merge_captain/policies/example-app.json",
+    ],
+    state_root: ".harn/merge-captain/state",
+    session_id: "smoke",
+    writer_id: "merge_captain",
+    dry_run: true,
+    sweep_id: "merge-captain-smoke",
+  }
+}
+
+fn _resolve_input() {
+  const attempt = try {
+    runtime_pipeline_input()
+  }
+  const provided = if is_ok(attempt) {
+    unwrap(attempt) ?? {}
+  } else {
+    {}
+  }
+  const defaults = _default_input()
+  return {
+    mode: provided.mode ?? defaults.mode,
+    fixture_path: provided.fixture_path ?? defaults.fixture_path,
+    policy_paths: provided.policy_paths ?? defaults.policy_paths,
+    state_root: provided.state_root ?? defaults.state_root,
+    session_id: provided.session_id ?? defaults.session_id,
+    writer_id: provided.writer_id ?? defaults.writer_id,
+    dry_run: provided.dry_run ?? defaults.dry_run,
+    sweep_id: provided.sweep_id ?? defaults.sweep_id,
+  }
+}
+
+fn _adapter_for(fs: HarnessFs, input) {
+  if input.mode == "live" {
+    return live_adapter()
+  }
+  const raw = fs.read_text(input.fixture_path)
+  const parsed = json_parse(raw)
+  return fixture_adapter(parsed)
+}
+
+pub pipeline run(harness: Harness, task) -> dict {
+  const input = _resolve_input()
+  const policies_load = load_policies(harness.fs, input.policy_paths)
+  if len(policies_load.errors) > 0 {
+    const summary = {
+      persona: "merge_captain",
+      sweep_id: input.sweep_id,
+      status: "policy_load_failed",
+      errors: policies_load.errors,
+    }
+    harness.stdio.println(json_stringify(summary))
+    return summary
+  }
+  const adapter = _adapter_for(harness.fs, input)
+  const checkpoint_handle = open_checkpoints(
+    harness.agent,
+    input.state_root,
+    input.session_id,
+    input.writer_id,
+  )
+  const summary = sweep(
+    harness,
+    harness,
+    {
+      adapter: adapter,
+      policies: policies_load.policies,
+      checkpoint_handle: checkpoint_handle,
+      dry_run: input.dry_run,
+      sweep_id: input.sweep_id,
+    },
+  )
+  const visible =
+    "merge_captain swept ${to_string(summary.pr_count)} PRs across ${to_string(len(policies_load.policies))} repos (dry_run=${to_string(input.dry_run)})"
+  harness.stdio.println(visible)
+  harness.stdio.println(json_stringify(summary))
+  return summary
+}

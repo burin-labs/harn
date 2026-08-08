@@ -1,0 +1,155 @@
+# Workflow-authoring prompting (small-model rules)
+
+This guide is consumed both by humans and by the eval harness. It pins down
+the response shape so a 4–8B local model (qwen, gemma, llama.cpp) can hit the
+validator's enum lists on the first try.
+
+## Output envelope
+
+The model **MUST** return three sections, in this order, each wrapped in a
+single XML-style tag with no surrounding prose. The harness strips everything
+outside these tags before validating.
+
+```text
+<bundle>
+{ ... valid WorkflowBundle JSON ... }
+</bundle>
+
+<rationale>
+- one bullet per design choice
+- ≤ 5 bullets, plain prose, no markdown beyond `-`
+</rationale>
+
+<verify>
+harn workflow validate --bundle out.bundle.json --json
+harn workflow preview  --bundle out.bundle.json --json
+harn workflow run      --bundle out.bundle.json --json
+</verify>
+```
+
+The `<bundle>` block is the **single source of truth**. The other two blocks
+are advisory; the validator never reads them.
+
+## Hard rules for the JSON
+
+These rules collapse the validator's surface area into a checklist. Keep the
+list in front of the model when prompting.
+
+1. `schema_version` is the integer `2`.
+2. `entrypoint`, `transitive_modules`, `stdlib_version`, `harn_version`,
+   `provider_catalog_hash`, `tool_manifest`, `sbom`, `signature`, and
+   `parent_trust_record_id` are present.
+3. BLAKE3 fields use `blake3:<64 lowercase hex digits>`.
+4. Every `id` field is non-empty kebab-case ASCII.
+5. `workflow._type` is `"workflow_graph"` (literal).
+6. `workflow.entry` references a key in `workflow.nodes`.
+7. Every key `k` in `workflow.nodes` matches `workflow.nodes[k].id`.
+8. Every `workflow.edges[].from` and `.to` references a node key.
+9. Every `triggers[].node_id` (when set) references a node key.
+10. Trigger kind ∈ `{github, cron, delay, webhook, mcp, manual}`.
+    `github` requires `provider: "github"` and ≥ 1 `events`; `cron`
+    requires `schedule` (5-field cron expression); `delay` requires an
+    ISO-8601 duration such as `PT10M`; `webhook` requires `webhook_path`;
+    `mcp` requires `mcp_tool`; `manual` requires no extra fields.
+11. `policy.autonomy_tier` ∈ `{shadow, suggest, act_with_approval, act_auto}`.
+12. `policy.retry.max_attempts` ≥ 1; `backoff` is one of
+    `{none, fixed, exponential}`.
+13. `policy.catchup.mode` ∈ `{none, latest, all}`.
+14. `environment.worktree_policy` ∈ `{reuse_current, new_worktree, host_managed}`.
+15. Every `prompt_capsules[k].id == k` and points at a real node.
+    At most one capsule per node.
+16. Every connector that a trigger references via `provider` appears in
+    `connectors[]` (otherwise the validator emits a warning).
+17. Do not invent fields. Unknown top-level fields stay in `metadata`.
+
+## Anti-patterns (small models fall into these)
+
+- **Inventing trigger kinds** (`pull_request`, `schedule`). Use exactly the
+  six kinds in rule 10.
+- **String autonomy tiers in PascalCase / TitleCase.** They are snake_case.
+- **`max_attempts: 0`.** Always ≥ 1.
+- **Mixing capsule keys and ids** (`{ "review": { "id": "review-pr", ... } }`).
+  Keys and ids must match.
+- **Forgetting `_type: "workflow_graph"`.** It is required for parser
+  compatibility with normalized graphs.
+- **Embedding markdown fences inside `<bundle>`.** The block must be raw
+  JSON only.
+
+## Validation-and-retry loop (the harness implements this)
+
+```text
+1. Send the system + user prompt.
+2. Extract <bundle>...</bundle>.
+3. Parse JSON; if it fails, return parse error to the model and retry once.
+4. Run `harn workflow validate --bundle <tmp> --json`.
+5. If invalid, return the diagnostics list to the model and retry once.
+6. Run `harn workflow preview --bundle <tmp> --json` to confirm graph health.
+7. Run `harn workflow run --bundle <tmp> --json` for a deterministic receipt.
+```
+
+Cap the retry count at 1 — a model that misses three of the rules above is
+not reliably authoring this contract and the harness should fail the case.
+
+## System-prompt skeleton
+
+A working system prompt the eval harness uses by default:
+
+```text
+You are authoring a portable Harn workflow bundle. You MUST return
+<bundle>, <rationale>, and <verify> blocks exactly as defined in
+examples/skill-packs/workflow-authoring/prompting.md.
+
+The <bundle> block contains a single JSON document conforming to
+WorkflowBundle (schema_version: 2). Validate against the rules in
+that prompting guide. Use the recipes/ directory as concrete examples.
+```
+
+## Workflow patches (modifying an existing bundle)
+
+When the user asks to **modify** a bundle that already exists (insert a
+verifier, narrow a node's tool policy, add an approval gate, add a repair
+branch), respond with a **patch** instead of a fresh bundle. The patch
+envelope mirrors the bundle envelope — three XML-style sections — but the
+JSON inside `<bundle>` is replaced with `<patch>`:
+
+```text
+<patch>
+{
+  "schema_version": 1,
+  "id": "kebab-case-patch-id",
+  "summary": "<one short sentence>",
+  "operations": [ ... ]
+}
+</patch>
+
+<rationale>
+- one bullet per operation
+- ≤ 5 bullets, plain prose
+</rationale>
+
+<verify>
+harn workflow patch validate --bundle in.bundle.json --patch out.patch.json --json
+harn workflow patch preview  --bundle in.bundle.json --patch out.patch.json --mermaid
+harn workflow patch apply    --bundle in.bundle.json --patch out.patch.json --out patched.bundle.json
+</verify>
+```
+
+Hard rules for patches (the validator enforces them):
+
+- `operations` must not be empty (a no-op patch is rejected).
+- `insert_node` must use a fresh `node_id`; `add_edge` endpoints must
+  exist (insert nodes first if needed); `upsert_prompt_capsule.node_id`
+  must already exist *after* prior ops apply.
+- Never raise `policy.autonomy_tier`, `side_effect_level`, the per-node
+  `capability_policy.tools`, or any `capability_policy.capabilities` that
+  the parent ceiling does not already grant. The validator returns a
+  per-dimension `widening` list when this happens — fix the patch by
+  either narrowing the request or redirecting the work to a node the
+  parent already trusts.
+
+## Why XML, not Markdown fences
+
+XML-style tags are robust against the model accidentally closing a fenced
+code block early (a common qwen/gemma failure on long JSON). The harness's
+extractor is `r"<bundle>([\s\S]+?)</bundle>"` — a markdown fence inside the
+block is fine, but no nested `</bundle>` is allowed.

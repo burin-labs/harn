@@ -1,0 +1,5 @@
+import { run } from "pub_import_typed_facade_api"
+
+pipeline default(harness: Harness) {
+  harness.stdio.println(run({owner: "direct", options: {token: "x"}}).owner)
+}

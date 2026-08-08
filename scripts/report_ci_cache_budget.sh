@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+policy_path="${HARN_CACHE_POLICY_PATH:-$repo_root/.github/cache-policy.json}"
+repository="${GITHUB_REPOSITORY:-burin-labs/harn}"
+
+configured_limit="$(jq -er '.storage_limit_bytes | select(type == "number" and . >= 1073741824 and floor == .)' "$policy_path")"
+
+list_cache_pages() {
+  gh api --paginate "repos/$repository/actions/caches?per_page=100" --slurp
+}
+
+inventory_from_pages() {
+  jq -cer '
+    [.[].actions_caches[]] as $c |
+    {
+      listed_count: ($c | length),
+      listed_bytes: (($c | map(.size_in_bytes) | add) // 0),
+      by_ref: ($c
+        | group_by(.ref)
+        | map({ref: .[0].ref, count: length, bytes: (map(.size_in_bytes) | add)})
+        | sort_by(-.bytes)),
+      by_class: ($c
+        | group_by(
+            if (.key | startswith("sccache/")) then "sccache"
+            elif (.key | startswith("v0-rust-release-")) then "release"
+            elif (.key | startswith("v0-rust-")) then "rust"
+            else "other"
+            end
+          )
+        | map({
+            class: (if (.[0].key | startswith("sccache/")) then "sccache"
+              elif (.[0].key | startswith("v0-rust-release-")) then "release"
+              elif (.[0].key | startswith("v0-rust-")) then "rust"
+              else "other"
+              end),
+            count: length,
+            bytes: (map(.size_in_bytes) | add)
+          })
+        | sort_by(-.bytes))
+    }
+  '
+}
+
+if [[ "${HARN_PRUNE_SUPERSEDED_RELEASE_CACHES:-0}" == "1" ]]; then
+  "$repo_root/scripts/prune_ci_cache_generations.sh" --all-release-families
+fi
+
+usage_json="$(gh api "repos/$repository/actions/cache/usage")"
+pages_json="$(list_cache_pages)"
+
+usage_bytes="$(jq -er '.active_caches_size_in_bytes | select(type == "number" and . >= 0 and floor == .)' <<<"$usage_json")"
+usage_count="$(jq -er '.active_caches_count | select(type == "number" and . >= 0 and floor == .)' <<<"$usage_json")"
+inventory="$(inventory_from_pages <<<"$pages_json")"
+listed_bytes="$(jq -r '.listed_bytes' <<<"$inventory")"
+
+budget_enforcement="null"
+if [[ "${HARN_ENFORCE_CACHE_BUDGET:-0}" == "1" && "$listed_bytes" -gt "$configured_limit" ]]; then
+  budget_enforcement="$(
+    "$repo_root/scripts/prune_ci_cache_generations.sh" --to-budget "$configured_limit"
+  )"
+  usage_json="$(gh api "repos/$repository/actions/cache/usage")"
+  pages_json="$(list_cache_pages)"
+  usage_bytes="$(jq -er '.active_caches_size_in_bytes | select(type == "number" and . >= 0 and floor == .)' <<<"$usage_json")"
+  usage_count="$(jq -er '.active_caches_count | select(type == "number" and . >= 0 and floor == .)' <<<"$usage_json")"
+  inventory="$(inventory_from_pages <<<"$pages_json")"
+  listed_bytes="$(jq -r '.listed_bytes' <<<"$inventory")"
+fi
+
+report="$(jq -cn \
+  --arg schema_version 'harn.ci_cache_budget.v3' \
+  --arg repository "$repository" \
+  --argjson configured_limit_bytes "$configured_limit" \
+  --argjson active_bytes "$usage_bytes" \
+  --argjson active_count "$usage_count" \
+  --argjson inventory "$inventory" \
+  --argjson budget_enforcement "$budget_enforcement" \
+  '{
+    schema_version: $schema_version,
+    repository: $repository,
+    configured_limit_bytes: $configured_limit_bytes,
+    active_bytes: $active_bytes,
+    active_count: $active_count,
+    listed_bytes: $inventory.listed_bytes,
+    listed_count: $inventory.listed_count,
+    by_ref: $inventory.by_ref,
+    by_class: $inventory.by_class,
+    budget_enforcement: $budget_enforcement,
+    within_budget: ($inventory.listed_bytes <= $configured_limit_bytes)
+  }')"
+
+printf '%s\n' "$report"
+
+if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+  {
+    echo "### GitHub Actions cache budget"
+    echo
+    echo "| Metric | Value |"
+    echo "| --- | ---: |"
+    jq -r '"| Policy limit | \(.configured_limit_bytes) bytes |", "| Active usage | \(.active_bytes) bytes / \(.active_count) entries |", "| Listed inventory | \(.listed_bytes) bytes / \(.listed_count) entries |"' <<<"$report"
+    echo
+    echo "#### By class"
+    jq -r '.by_class[] | "- \(.class): \(.bytes) bytes across \(.count) entries"' <<<"$report"
+    echo
+    echo "#### By ref"
+    jq -r '.by_ref[0:10][] | "- `\(.ref)`: \(.bytes) bytes across \(.count) entries"' <<<"$report"
+    if [[ "$(jq -r '.budget_enforcement != null' <<<"$report")" == "true" ]]; then
+      echo
+      echo "#### Budget enforcement"
+      jq -r '
+        "- Deficit: \(.budget_enforcement.deficit_bytes) bytes",
+        "- Deleted: \(.budget_enforcement.selected_bytes) bytes across \(.budget_enforcement.deleted | length) entries",
+        (.budget_enforcement.deleted[] | "  - `\(.key)`: \(.size_in_bytes) bytes")
+      ' <<<"$report"
+    fi
+  } >>"$GITHUB_STEP_SUMMARY"
+fi
+
+if [[ "$listed_bytes" -gt "$configured_limit" ]]; then
+  echo "::warning::GitHub Actions cache exceeds the $configured_limit-byte policy budget (active=$usage_bytes listed=$listed_bytes)" >&2
+  exit 1
+fi
+if [[ "$usage_bytes" -gt "$configured_limit" ]]; then
+  echo "::notice::GitHub cache usage telemetry is still above budget after the current inventory was pruned (active=$usage_bytes listed=$listed_bytes)" >&2
+fi

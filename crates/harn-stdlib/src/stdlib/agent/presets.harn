@@ -1,0 +1,899 @@
+// @harn-entrypoint-category agent.stdlib
+//
+// Generic role and captain-shaped presets for `agent_loop`. Harness
+// authors say "audit", "repair", "summary", "verify" for the generic
+// roles, or "merge_captain", "review_captain", "oncall_captain",
+// "release_captain" for opinionated captain templates. The presets bundle
+// completion behavior, iteration budgeting, provider-aware reasoning policy,
+// the LLM handler stack from `std/llm/handlers`, and the tool middleware stack
+// from `std/llm/tool_middleware` so durable personas declare their service
+// contracts by name instead of re-deriving the knobs at every call site. All
+// defaults remain caller-overridable.
+import { agent_tool_format_resolution } from "std/agent/options"
+import { pin_kinds } from "std/agent/pins"
+import { agent_apply_default_retry } from "std/agent/retry"
+import { default_llm_caller } from "std/llm/caller"
+import { compose, with_logging, with_routing } from "std/llm/handlers"
+import {
+  compose_tool_callers,
+  with_audit_log,
+  with_consent,
+  with_dry_run,
+  with_handoff_artifact,
+  with_rate_limit,
+  with_telemetry,
+} from "std/llm/tool_middleware"
+
+// -------------------------------------------------------------------------------------------------
+
+// Preset kind registry: user-defined kinds are first-class and discoverable
+// through the same register/validate path the built-in kinds are registered
+// through (no hardcoded kind lists). A spec is `{family, pack}` — `family`
+// selects the behavior template and `pack` carries the fill-nil option rows.
+
+// -------------------------------------------------------------------------------------------------
+
+// Fill-nil pack keys a spec may carry. Each is a lower-priority default that
+// fills ONLY a nil/absent option key; an explicit caller value always wins.
+// `completion_gate` carries a `CompletionGateOptions` spec so a preset can ship a
+// default done-time gate; a consumer lowers it with `agent_completion_gate(...)`
+// (std/agent/judge) and spreads the result into `agent_loop` options.
+// `lane_policy` carries `{rows, task_key?, hard_keep?}` — a consumer reads the
+// task text out of its own opts (e.g. `opts.task_key`) and lowers it with
+// `lane_policy(pack.lane_policy.rows, task, opts, pack.lane_policy)`
+// (std/agent/lanes). `overlay_policy` carries `{rows, mode, lane?, overrides?}` —
+// lowered with `overlay_policy(pack.overlay_policy.rows, pack.overlay_policy.mode,
+// opts, pack.overlay_policy)` (std/agent/overlays).
+// `pin_policy` carries a preset's default compaction-pin policy (see
+// std/agent/pins) — e.g. `{kinds: [...], preserve_on_compact: true}` — filled
+// into `opts.pin_policy` for pin-aware harnesses.
+const __PRESET_PACK_KEYS = [
+  "budget",
+  "completion_gate",
+  "fallback_chain",
+  "lane_policy",
+  "models",
+  "overlay_policy",
+  "pin_policy",
+  "provider",
+  "timeout_ms",
+]
+
+fn __preset_kind_string(value) {
+  if value == nil {
+    throw "agent_preset(kind, options?): kind is required"
+  }
+  if type_of(value) != "string" {
+    throw "agent_preset(kind, options?): kind must be a string; got " + type_of(value)
+  }
+  return lowercase(trim(value))
+}
+
+/**
+ * Validate a preset spec and return its normalized `{family, pack}` shape.
+ * Shared by the built-in registration and `agent_preset_register` so
+ * user-defined kinds are held to the same contract as the built-ins.
+ */
+fn __validate_preset_spec(kind, spec) {
+  if type_of(spec) != "dict" {
+    throw "agent_preset_register(\"" + kind + "\"): spec must be a dict; got " + type_of(spec)
+  }
+  const family = spec?.family ?? "generic"
+  if family != "generic" && family != "captain" {
+    throw "agent_preset_register(\"" + kind
+      + "\"): spec.family must be \"generic\" or \"captain\"; got "
+      + to_string(family)
+  }
+  const pack = spec?.pack ?? {}
+  if type_of(pack) != "dict" {
+    throw "agent_preset_register(\"" + kind + "\"): spec.pack must be a dict; got " + type_of(pack)
+  }
+  for key in pack.keys() {
+    if !contains(__PRESET_PACK_KEYS, key) {
+      throw "agent_preset_register(\"" + kind + "\"): spec.pack has unknown key \"" + key
+        + "\"; allowed: "
+        + join(__PRESET_PACK_KEYS, ", ")
+    }
+  }
+  __validate_pin_policy(kind, pack?.pin_policy)
+  return {family: family, pack: pack}
+}
+
+/**
+ * A pin_policy pack row carries default compaction-pin behavior (see
+ * std/agent/pins). Validate it loudly so a typo like `kinds: ["goals"]` fails at
+ * registration instead of silently carrying an unknown pin kind downstream.
+ */
+fn __validate_pin_policy(kind, pin_policy) {
+  if pin_policy == nil {
+    return nil
+  }
+  if type_of(pin_policy) != "dict" {
+    throw "agent_preset_register(\"" + kind + "\"): spec.pack.pin_policy must be a dict; got "
+      + type_of(
+      pin_policy,
+    )
+  }
+  if pin_policy?.kinds != nil {
+    if type_of(pin_policy.kinds) != "list" {
+      throw "agent_preset_register(\"" + kind + "\"): pin_policy.kinds must be a list; got "
+        + type_of(
+        pin_policy.kinds,
+      )
+    }
+    for k in pin_policy.kinds {
+      if !contains(pin_kinds(), k) {
+        throw "agent_preset_register(\"" + kind + "\"): pin_policy.kinds has unknown pin kind \""
+          + to_string(
+          k,
+        )
+          + "\"; allowed: "
+          + join(pin_kinds(), ", ")
+      }
+    }
+  }
+  return nil
+}
+
+/**
+ * Per-kind pack rows: the provider / transport-timeout / cost-budget /
+ * model-ladder defaults callers used to hand-roll around agent_preset,
+ * promoted to fill-nil data rows. Captains carry longer timeouts and larger
+ * budgets by design.
+ *
+ * `models` is normalized to canonical ladder-step records so each rung owns
+ * its provider. The named `[model_ladders.*]` catalog rows (providers.toml + catalog_sources/
+ * 62-ladders) have since landed, resolved via a `ladder: "<name>"` option on
+ * `llm_call`; packs intentionally do NOT reference them by name so a pack row
+ * stays self-contained and takes no hard dependency on catalog ladder names.
+ * Callers who want a named catalog ladder pass `ladder:` on their own options.
+ * Budgets are session-cumulative (`total_budget_usd`), NOT per-call ceilings:
+ * `budget.max_cost_usd` is pre-flight-checked against the worst-case
+ * projection (full `max_tokens` as output), so a tight per-call default would
+ * preemptively kill legitimate calls.
+ */
+fn __builtin_preset_specs() {
+  const frontier_ladder = ["claude-opus-5", "claude-sonnet-5"]
+  const cheap_ladder = ["gpt-4o-mini"]
+  // Long-running captains pin their binding context (goal, constraints, key
+  // decisions) so it survives compaction by construction (see std/agent/pins).
+  const captain_pins = {kinds: ["constraint", "decision", "goal"], preserve_on_compact: true}
+  return {
+    audit: {
+      family: "generic",
+      pack: {
+        budget: {total_budget_usd: 5.0},
+        models: frontier_ladder,
+        provider: "anthropic",
+        timeout_ms: 120000,
+      },
+    },
+    merge_captain: {
+      family: "captain",
+      pack: {
+        budget: {total_budget_usd: 25.0},
+        models: frontier_ladder,
+        pin_policy: captain_pins,
+        provider: "anthropic",
+        timeout_ms: 300000,
+      },
+    },
+    oncall_captain: {
+      family: "captain",
+      pack: {
+        budget: {total_budget_usd: 15.0},
+        models: frontier_ladder,
+        pin_policy: captain_pins,
+        provider: "anthropic",
+        timeout_ms: 180000,
+      },
+    },
+    release_captain: {
+      family: "captain",
+      pack: {
+        budget: {total_budget_usd: 25.0},
+        models: frontier_ladder,
+        pin_policy: captain_pins,
+        provider: "anthropic",
+        timeout_ms: 300000,
+      },
+    },
+    repair: {
+      family: "generic",
+      pack: {
+        budget: {total_budget_usd: 10.0},
+        // Mirrors `std/agent/lanes::default_lane_rows()` inline (presets.harn
+        // intentionally does not import std/agent/lanes — see the pack-key
+        // comment above `__PRESET_PACK_KEYS`); a consumer may just as well
+        // pass `default_lane_rows()` directly instead of this row.
+        lane_policy: {
+          hard_keep: [],
+          rows: [
+            {
+              match: {explicit_target_paths: {max: 4, min: 1}},
+              name: "explicit_patch",
+              tool_names: [
+                "look",
+                "search",
+                "edit",
+                "run",
+                "poll_command",
+                "wait_command",
+                "kill_command",
+                "read_command_output",
+              ],
+            },
+            {default: true, name: "general"},
+          ],
+        },
+        models: frontier_ladder,
+        provider: "anthropic",
+        timeout_ms: 180000,
+      },
+    },
+    review_captain: {
+      family: "captain",
+      pack: {
+        budget: {total_budget_usd: 15.0},
+        models: frontier_ladder,
+        // Mirrors `std/agent/overlays::default_overlay_rows()`'s `agent` row
+        // inline (see the lane_policy comment above on why presets.harn
+        // avoids importing the sibling module).
+        overlay_policy: {
+          mode: "agent",
+          rows: [
+            {
+              lines: [
+                "Batch related read-only tool calls together before acting; avoid narrating between them.",
+                "Prefer acting on information the task and current tools already provide over asking a clarifying question.",
+              ],
+              mode: "agent",
+            },
+          ],
+        },
+        pin_policy: captain_pins,
+        provider: "anthropic",
+        timeout_ms: 240000,
+      },
+    },
+    summary: {
+      family: "generic",
+      pack: {
+        budget: {total_budget_usd: 1.0},
+        models: cheap_ladder,
+        provider: "openai",
+        timeout_ms: 60000,
+      },
+    },
+    verify: {
+      family: "generic",
+      pack: {
+        budget: {total_budget_usd: 1.0},
+        models: cheap_ladder,
+        provider: "openai",
+        timeout_ms: 60000,
+      },
+    },
+  }
+}
+
+// Built-in registration is lazy (module-level initializers cannot call local
+// fns) but dogfoods the same validation path user kinds go through.
+let __BUILTIN_PRESETS = {}
+
+let __USER_PRESETS = {}
+
+fn __preset_registry() {
+  if len(__BUILTIN_PRESETS.keys()) == 0 {
+    const specs = __builtin_preset_specs()
+    let reg = {}
+    for kind in specs.keys() {
+      reg = reg + {[kind]: __validate_preset_spec(kind, specs[kind])}
+    }
+    __BUILTIN_PRESETS = reg
+  }
+  return __BUILTIN_PRESETS + __USER_PRESETS
+}
+
+/**
+ * agent_preset_register(kind, spec) registers (or overrides) a preset kind so
+ * `agent_preset(kind, ...)` and `agent_preset_kinds()` see it. `spec` is
+ * `{family?: "generic" | "captain", pack?: dict}`: `family` selects the
+ * behavior template (captains additionally compose the opt-in tool/LLM
+ * middleware layers), and `pack` supplies fill-nil option defaults
+ * (`provider`, `timeout_ms`, `budget`, `fallback_chain`, `models`,
+ * `completion_gate`, `lane_policy`, `overlay_policy`, `pin_policy`) that fill
+ * ONLY nil/absent keys. The spec shape is validated; an invalid family or
+ * unknown pack key throws. Returns the normalized kind string.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn agent_preset_register(kind, spec) {
+  const normalized = __preset_kind_string(kind)
+  if normalized == "" {
+    throw "agent_preset_register: kind must be a non-empty string"
+  }
+  __USER_PRESETS = __USER_PRESETS + {[normalized]: __validate_preset_spec(normalized, spec)}
+  return normalized
+}
+
+/**
+ * agent_preset_kinds() returns the registered preset kinds (built-in plus any
+ * user-registered), sorted. Discovery surface for tooling and pickers.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn agent_preset_kinds() {
+  return __preset_registry().keys().sorted()
+}
+
+fn __dict_or_empty(value) {
+  if value == nil {
+    return {}
+  }
+  if type_of(value) != "dict" {
+    throw "agent_preset: options must be a dict or nil; got " + type_of(value)
+  }
+  return value
+}
+
+fn __has_key(opts, key) {
+  return contains(opts.keys(), key)
+}
+
+fn __has_non_nil_key(opts, key) {
+  return type_of(opts) == "dict" && contains(opts.keys(), key) && opts[key] != nil
+}
+
+fn __is_captain(kind) {
+  const registry = __preset_registry()
+  return registry[kind]?.family == "captain"
+}
+
+fn __preset_kind(value) {
+  const kind = __preset_kind_string(value)
+  const registry = __preset_registry()
+  if !contains(registry.keys(), kind) {
+    throw "agent_preset: kind must be one of "
+      + join(registry.keys().sorted(), ", ")
+      + "; got "
+      + value
+  }
+  return kind
+}
+
+fn __caller_set_low_level_reasoning(opts) {
+  if __has_key(opts, "thinking") || __has_key(opts, "effort") {
+    return true
+  }
+  const llm_overrides = opts?.llm_options
+  return type_of(llm_overrides) == "dict"
+    && (contains(llm_overrides.keys(), "thinking")
+    || contains(
+    llm_overrides.keys(),
+    "effort",
+  ))
+}
+
+fn __caller_set_reasoning_policy(opts) {
+  return __has_key(opts, "reasoning_policy")
+}
+
+fn __caller_set_reasoning_scale(opts) {
+  return __has_key(opts, "reasoning_scale")
+}
+
+fn __caller_set_reasoning_task(opts) {
+  return __has_key(opts, "reasoning_task")
+}
+
+fn __reasoning_task_for_kind(kind) {
+  if kind == "summary" {
+    return "summarize"
+  }
+  if kind == "verify" || kind == "audit" {
+    return "verify"
+  }
+  if kind == "repair" {
+    return "code"
+  }
+  return "agent"
+}
+
+fn __default_iteration_budget_for_kind(kind) {
+  if kind == "audit" {
+    return {mode: "adaptive", initial: 4, max: 12, extend_by: 2}
+  }
+  if kind == "repair" {
+    return {mode: "adaptive", initial: 4, max: 16, extend_by: 2}
+  }
+  if kind == "summary" {
+    return {mode: "fixed", initial: 1, max: 1, extend_by: 0}
+  }
+  if kind == "verify" {
+    return {mode: "adaptive", initial: 1, max: 5, extend_by: 1}
+  }
+  if kind == "merge_captain" {
+    // Merge sweeps span repair turns, validation, and approval cycles
+    // Long-running by design.
+    return {mode: "adaptive", initial: 8, max: 60, extend_by: 4}
+  }
+  if kind == "review_captain" {
+    return {mode: "adaptive", initial: 6, max: 30, extend_by: 3}
+  }
+  if kind == "oncall_captain" {
+    return {mode: "adaptive", initial: 6, max: 24, extend_by: 3}
+  }
+  if kind == "release_captain" {
+    return {mode: "adaptive", initial: 8, max: 40, extend_by: 4}
+  }
+  return {mode: "fixed", initial: 50, max: 50, extend_by: 0}
+}
+
+fn __resolve_iteration_budget(kind, opts) {
+  if __has_key(opts, "iteration_budget") {
+    const raw = opts.iteration_budget
+    if type_of(raw) == "string" {
+      // Sugar: `iteration_budget: "adaptive"` keeps the kind's defaults
+      // but forces adaptive mode.
+      const defaults = __default_iteration_budget_for_kind(kind)
+      return defaults + {mode: raw}
+    }
+    return raw
+  }
+  if __has_key(opts, "max_iterations") {
+    return nil
+  }
+  return __default_iteration_budget_for_kind(kind)
+}
+
+fn __turn_policy_for_kind(kind, opts) {
+  if __has_key(opts, "turn_policy") {
+    return opts.turn_policy
+  }
+  if kind == "summary" {
+    return {allow_done_sentinel: false, max_prose_chars: 8000}
+  }
+  if kind == "verify" {
+    return {allow_done_sentinel: false, max_prose_chars: 12000}
+  }
+  // Captains can emit longer per-turn rationales: sweep summaries,
+  // approval rationale, and release notes.
+  if __is_captain(kind) {
+    return {allow_done_sentinel: false, max_prose_chars: 60000}
+  }
+  return {allow_done_sentinel: false, max_prose_chars: 30000}
+}
+
+fn __summary_defaults(opts) {
+  return {
+    profile: "completer",
+    loop_until_done: false,
+    done_sentinel: nil,
+    done_judge: nil,
+    max_nudges: 0,
+  }
+}
+
+fn __verify_defaults() {
+  return {profile: "verifier", loop_until_done: false, max_nudges: 0, done_judge: true}
+}
+
+fn __tool_using_defaults(kind) {
+  const profile = if kind == "audit" {
+    "verifier"
+  } else {
+    "tool_using"
+  }
+  const max_nudges = if kind == "audit" {
+    1
+  } else if __is_captain(kind) {
+    3
+  } else {
+    2
+  }
+  return {
+    profile: profile,
+    loop_until_done: true,
+    done_judge: nil,
+    native_tool_fallback: "allow_once",
+    max_nudges: max_nudges,
+    // The repair knobs ride inside `stall_diagnostics` (where
+    // `__agent_stall_config` parses them) and default OFF; `repair_aware:false`
+    // makes every repair field inert until a harness opts into the behavior.
+    stall_diagnostics: {
+      enabled: true,
+      threshold: 3,
+      inject_feedback: true,
+      max_feedback: 1,
+      repair_aware: false,
+      stuck_same_diagnostic_after: 3,
+      post_edit_reverify: true,
+      no_net_progress_extend_guard: false,
+      no_net_progress_extend_after: 3,
+      no_net_progress_hard_cap_after: 16,
+    },
+    // Discovery surface (#repair-diagnostics). Mirrors the repair knobs above
+    // so consumers (e.g. Burin, via a feature flag) can find and opt into the
+    // evidence-aware repair loop without spelunking `stall_diagnostics`.
+    // Subsumes Burin's futile-retry-guard.harn.
+    repair_diagnostics: {
+      repair_aware: false,
+      stuck_same_diagnostic_after: 3,
+      post_edit_reverify: true,
+      no_net_progress_extend_guard: false,
+      no_net_progress_extend_after: 3,
+      no_net_progress_hard_cap_after: 16,
+      reserved_terminal_verify: false,
+      reserved_terminal_verify_iterations: 2,
+      zero_write_terminal_verify: false,
+    },
+  }
+}
+
+fn __apply_tool_format(llm: HarnessLlm, opts, kind) {
+  if kind == "summary" || kind == "verify" {
+    return opts
+  }
+  const resolved = agent_tool_format_resolution(llm, opts)
+  if resolved?.tool_format == nil {
+    return opts
+  }
+  if resolved?.capability_gap_event != nil {
+    return opts
+  }
+  return opts + {tool_format: resolved.tool_format}
+}
+
+fn __kind_defaults(kind, opts) {
+  if kind == "summary" {
+    return __summary_defaults(opts)
+  }
+  if kind == "verify" {
+    return __verify_defaults()
+  }
+  return __tool_using_defaults(kind)
+}
+
+fn __apply_reasoning_defaults(opts, kind) {
+  if __caller_set_low_level_reasoning(opts) {
+    return opts
+  }
+  let resolved = opts
+  if !__caller_set_reasoning_policy(opts) {
+    resolved = resolved + {reasoning_policy: "auto"}
+  }
+  if !__caller_set_reasoning_scale(opts) {
+    resolved = resolved + {reasoning_scale: "small"}
+  }
+  if !__caller_set_reasoning_task(opts) {
+    resolved = resolved + {reasoning_task: __reasoning_task_for_kind(kind)}
+  }
+  return resolved
+}
+
+fn __apply_iteration_budget(opts, kind) {
+  const budget = __resolve_iteration_budget(kind, opts)
+  if budget == nil {
+    return opts
+  }
+  return opts + {iteration_budget: budget}
+}
+
+fn __apply_turn_policy(opts, kind) {
+  return opts + {turn_policy: __turn_policy_for_kind(kind, opts)}
+}
+
+fn __apply_kind_defaults(kind, raw_opts) {
+  const defaults = __kind_defaults(kind, raw_opts)
+  return defaults + raw_opts
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// Captain composition: build the tool-middleware + LLM-handler stacks
+// each captain ships by default. Layers are opt-in: every captain only
+// adds a layer when the caller has supplied the matching dependency
+// (sink, callable, rate-limit cap, etc.). Captains stay a no-op
+// behavior shim if the caller doesn't provide any layer inputs, which
+// keeps the preset useful as a pure budget/profile bundle as well.
+
+// -------------------------------------------------------------------------------------------------
+
+fn __captain_consent_default(kind) {
+  if kind == "merge_captain" {
+    // Approve read-only annotated tools without prompting; require an
+    // explicit consent callable for everything that mutates state.
+    return { call ->
+      const hints = call?.annotations ?? {}
+      const kind_label = to_string(hints?.kind ?? "")
+      if kind_label == "read" || kind_label == "search" || kind_label == "fetch"
+        || kind_label
+        == "think" {
+        return {decision: "approved", decided_by: "merge_captain.read_default"}
+      }
+      return {
+        decision: "denied",
+        reason: "merge_captain requires explicit `consent` for write tools",
+        decided_by: "merge_captain.write_default",
+      }
+    }
+  }
+  return nil
+}
+
+fn __captain_rate_limit_default(kind) {
+  if kind == "oncall_captain" {
+    return {max_calls: 50, message: "oncall_captain rate-limit reached"}
+  }
+  return nil
+}
+
+/**
+ * Resolve a captain layer's value, honoring the convention that an
+ * explicit `false` (or `nil`) opts the caller out of that layer
+ * entirely. If the caller passed nothing for `key`, returns the
+ * supplied `default_value`.
+ */
+fn __captain_layer_value(opts, key, default_value) {
+  if !__has_key(opts, key) {
+    return default_value
+  }
+  const supplied = opts[key]
+  if supplied == nil || (type_of(supplied) == "bool" && !supplied) {
+    return nil
+  }
+  return supplied
+}
+
+fn __captain_tool_layers(harness: Harness, kind, opts) {
+  let layers = []
+  const audit_sink = __captain_layer_value(opts, "audit_sink", nil)
+  if audit_sink != nil {
+    layers = layers.appending(with_audit_log(harness.clock, harness.fs, audit_sink))
+  }
+  const telemetry = __captain_layer_value(opts, "telemetry", nil)
+  if telemetry != nil {
+    layers = layers.appending(with_telemetry(harness, telemetry))
+  }
+  if kind == "merge_captain" {
+    const consent_fn = __captain_layer_value(opts, "consent", __captain_consent_default(kind))
+    if consent_fn != nil {
+      layers = layers.appending(with_consent(harness.clock, consent_fn))
+    }
+  }
+  if kind == "oncall_captain" {
+    const rate_limit = __captain_layer_value(opts, "rate_limit", __captain_rate_limit_default(kind))
+    if rate_limit != nil {
+      layers = layers.appending(with_rate_limit(harness.runtime, rate_limit))
+    }
+  }
+  if kind == "release_captain" {
+    const dry_value = __captain_layer_value(opts, "dry_run", nil)
+    if dry_value != nil {
+      const dry = if type_of(dry_value) == "dict" {
+        dry_value
+      } else {
+        {message: "release_captain preview"}
+      }
+      layers = layers.appending(with_dry_run(dry))
+    }
+  }
+  const handoff_sink = __captain_layer_value(opts, "handoff_sink", nil)
+  if handoff_sink != nil {
+    layers = layers.appending(
+      with_handoff_artifact({sink: handoff_sink, source: opts?.persona ?? kind}),
+    )
+  }
+  return layers
+}
+
+fn __apply_captain_tool_caller(harness: Harness, opts, kind) {
+  if !__is_captain(kind) {
+    return opts
+  }
+  if __has_key(opts, "tool_caller") {
+    return opts
+  }
+  const layers = __captain_tool_layers(harness, kind, opts)
+  if len(layers) == 0 {
+    return opts
+  }
+  return opts + {tool_caller: compose_tool_callers(harness.clock, layers)}
+}
+
+fn __captain_handler_layers(harness: Harness, opts) {
+  let layers = []
+  const logging_sink = opts?.logging_sink
+  if logging_sink != nil {
+    const logging_opts = if type_of(opts?.logging_options) == "dict" {
+      opts.logging_options + {sink: logging_sink}
+    } else {
+      {sink: logging_sink}
+    }
+    layers = layers.appending(with_logging(harness, logging_opts))
+  }
+  return layers
+}
+
+fn __apply_captain_llm_caller(harness: Harness, opts, kind) {
+  if !__is_captain(kind) {
+    return opts
+  }
+  if __has_key(opts, "llm_caller") {
+    return opts
+  }
+  const cheap = opts?.cheap_caller
+  const frontier = opts?.frontier_caller
+  const escalate = opts?.escalate_predicate
+  const logging_layers = __captain_handler_layers(harness, opts)
+  if cheap == nil && len(logging_layers) == 0 {
+    return opts
+  }
+  const base = if cheap != nil {
+    const routes = if frontier != nil && escalate != nil {
+      [{name: "frontier", when: escalate, caller: frontier}]
+    } else {
+      []
+    }
+    with_routing(harness.agent, {default: cheap, routes: routes})
+  } else {
+    default_llm_caller(harness.agent, harness.llm)
+  }
+  const composed = if len(logging_layers) > 0 {
+    const wrap = compose(logging_layers)
+    wrap(base)
+  } else {
+    base
+  }
+  return opts + {llm_caller: composed}
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// Fill-nil pack: the lower-priority seam that sits under the caller's explicit
+// input.
+
+// -------------------------------------------------------------------------------------------------
+
+fn __preset_route_keys() {
+  return ["fallback_chain", "ladder", "model", "models", "provider", "route_policy", "routing"]
+}
+
+fn __preset_pack_route_keys() {
+  return ["fallback_chain", "models", "provider"]
+}
+
+fn __preset_has_route_owner(opts) {
+  for key in __preset_route_keys() {
+    if __has_non_nil_key(opts, key) {
+      return true
+    }
+  }
+  const llm_options = opts?.llm_options
+  if type_of(llm_options) != "dict" {
+    return false
+  }
+  for key in __preset_route_keys() {
+    if __has_non_nil_key(llm_options, key) {
+      return true
+    }
+  }
+  return false
+}
+
+fn __preset_model_steps(models, provider) {
+  let steps = []
+  for model in models ?? [] {
+    if type_of(model) == "dict" || provider == nil {
+      steps = steps.appending(model)
+    } else {
+      steps = steps.appending({model: model, provider: provider})
+    }
+  }
+  return steps
+}
+
+fn __apply_preset_route_pack(opts, pack) {
+  // Routing is one ownership group. A caller-owned provider, model, ladder,
+  // or policy suppresses every route default from the preset.
+  if __preset_has_route_owner(opts) {
+    return opts
+  }
+  let resolved = opts
+  if pack?.fallback_chain != nil {
+    resolved = resolved + {fallback_chain: pack.fallback_chain}
+  }
+  if pack?.models != nil {
+    return resolved + {models: __preset_model_steps(pack.models, pack?.provider)}
+  }
+  if pack?.provider != nil {
+    resolved = resolved + {provider: pack.provider}
+  }
+  return resolved
+}
+
+/**
+ * Fill the kind's pack rows (provider / timeout / budget / model ladder) into
+ * ONLY the nil/absent option keys. Routing rows are a single ownership group:
+ * if the caller configured any route at top level or under `llm_options`, the
+ * preset does not splice in a different built-in provider or ladder.
+ */
+fn __apply_preset_pack(opts, kind) {
+  const spec = __preset_registry()[kind]
+  const pack = spec?.pack ?? {}
+  let resolved = opts
+  for key in pack.keys() {
+    if contains(__preset_pack_route_keys(), key) {
+      continue
+    }
+    if resolved?.[key] == nil {
+      resolved = resolved + {[key]: pack[key]}
+    }
+  }
+  return __apply_preset_route_pack(resolved, pack)
+}
+
+/**
+ * agent_preset is THE way to build `agent_loop` options: it returns a
+ * normalized `agent_loop` options dict for a generic role or a captain-shaped
+ * persona template. Pass the result straight to `agent_loop(harness, ...)`, or merge
+ * further overrides on top — caller input always wins over the preset's
+ * defaults.
+ *
+ * At the `llm_call` tier there is no equivalent preset machinery: a "preset"
+ * there is just a plain typed `LlmCallOptions` value you spread per call.
+ * Preset machinery (budgets, completion policy, middleware stacks, transport
+ * retry) only exists at the agent-cell tier this function serves.
+ *
+ * `kind` is one of:
+ *   - generic:  "audit", "repair", "summary", "verify"
+ *   - captain:  "merge_captain", "review_captain", "oncall_captain",
+ *               "release_captain"
+ *
+ * The kind set is the registry (`agent_preset_kinds()`); register your own
+ * with `agent_preset_register(kind, spec)`.
+ *
+ * The returned dict is a plain `agent_loop` options dict. Callers can
+ * spread it into `agent_loop(harness, ...)` directly, or merge further overrides
+ * on top. Every kind additionally fills its pack rows (provider, transport
+ * timeout, cost budget, model ladder, completion_gate, lane_policy,
+ * overlay_policy, pin policy) into nil/absent keys, and runs the shared
+ * agent-loop default transport retry normalizer (opt out with `retry: false`
+ * or `llm_retry: nil`). Captain presets additionally compose:
+ *   - a `tool_caller` middleware stack from any of `audit_sink`,
+ *     `telemetry`, `consent`, `rate_limit`, `dry_run`,
+ *     `handoff_sink` the caller supplied;
+ *   - an `llm_caller` handler stack from `cheap_caller` +
+ *     `frontier_caller` + `escalate_predicate` (cheap-default with
+ *     frontier escalation per the cost-moat substrate) and an optional
+ *     `logging_sink` for receipts.
+ *
+ * Layers default to the captain's documented persona shape (e.g.
+ * `oncall_captain` defaults `rate_limit` to `{max_calls: 50}`,
+ * `merge_captain` defaults `consent` to "auto-approve read tools, deny
+ * writes without explicit prompt"). Passing an explicit `false` (or
+ * `nil`) for that key opts the caller out of the layer entirely;
+ * passing `tool_caller`/`llm_caller` directly bypasses captain
+ * composition outright.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn agent_preset(harness: Harness, kind, options = nil) {
+  const resolved_kind = __preset_kind(kind)
+  let opts = __dict_or_empty(options)
+  const caller_supplied_llm_caller = __has_key(opts, "llm_caller")
+  opts = __apply_kind_defaults(resolved_kind, opts)
+  opts = __apply_iteration_budget(opts, resolved_kind)
+  opts = __apply_turn_policy(opts, resolved_kind)
+  opts = __apply_reasoning_defaults(opts, resolved_kind)
+  opts = __apply_captain_tool_caller(harness, opts, resolved_kind)
+  opts = __apply_captain_llm_caller(harness, opts, resolved_kind)
+  opts = __apply_preset_pack(opts, resolved_kind)
+  opts = agent_apply_default_retry(harness, opts, {wrap_existing: !caller_supplied_llm_caller})
+  opts = __apply_tool_format(harness.llm, opts, resolved_kind)
+  return opts + {_preset_kind: resolved_kind}
+}

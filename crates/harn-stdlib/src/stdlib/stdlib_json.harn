@@ -1,0 +1,64 @@
+// std/json — JSON utility patterns
+//
+// Import with: import "std/json"
+pub import "std/json/stream"
+
+/**
+ * Pretty-print a value as indented JSON (2-space indent).
+ * pretty.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn pretty(value) {
+  return json_stringify_pretty(value)
+}
+
+pub type JsonParseFailureKind = "malformed" | "recursion_limit"
+
+pub type JsonParseFailure = {
+  error: "structured_parse_error",
+  format: "json",
+  kind: JsonParseFailureKind,
+  message: string,
+  line: int,
+  column: int,
+}
+
+/**
+ * Shallow-merge two dicts. Keys in `b` override matching keys in `a`.
+ * Row-polymorphic: each argument carries its own row of fields, and the result
+ * is the right-biased merge of both rows (`b`'s fields override `a`'s, every
+ * field preserved with its real type). Merging two records with *different*
+ * value types is therefore sound and precise — `merge({a: 1}, {b: "x"})`
+ * returns `{a: int, b: string}` rather than collapsing to `dict`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn merge<R1, R2>(a: {...R1}, b: {...R2}) -> {...R1, ...R2} {
+  return __dict_merge(a ?? {}, b ?? {})
+}
+
+/**
+ * Pick the listed keys from `data`, dropping entries whose stored value is
+ * `nil`. Generic over the value type — when called with a `dict<string, V>`
+ * the projection keeps the same V.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn pick<V>(data: dict<string, V>, keys: list<string>) -> dict<string, V> {
+  return __dict_pick(data ?? {}, keys ?? [])
+}
+
+/**
+ * Drop the listed keys from `data`. Generic over the value type — the
+ * resulting dict keeps the same value contract as the input.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn omit<V>(data: dict<string, V>, keys: list<string>) -> dict<string, V> {
+  return __dict_omit(data ?? {}, keys ?? [])
+}

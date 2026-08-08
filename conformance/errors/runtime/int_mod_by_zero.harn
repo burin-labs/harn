@@ -1,0 +1,6 @@
+// Integer modulo by a zero divisor raises at runtime (a non-const divisor,
+// so this is the runtime path, not const-fold).
+pipeline default(harness: Harness) {
+  const d = 0
+  const _ = 5 % d
+}

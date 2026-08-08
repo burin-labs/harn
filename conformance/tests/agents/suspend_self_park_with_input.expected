@@ -1,0 +1,7 @@
+suspended_status=suspended
+resume_status=running
+final_status=completed
+input_in_reminder=true
+reason_in_reminder=true
+reminder_present_on_resumed_turn=true
+reminder_consumed_after_one_turn=true

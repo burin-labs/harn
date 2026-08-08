@@ -1,0 +1,24 @@
+import { with_llm_script } from "std/testing"
+
+/**
+ * Basic routing_policy smoke test: a single-link chain should run
+ * through the new executor and surface the routing block on the
+ * envelope.
+ */
+pipeline test(harness: Harness, task) {
+  with_llm_script(
+    harness.llm,
+    [{text: "hello from primary", model: "mock", provider: "mock"}],
+    { ->
+      const policy = harness.llm.routing_policy(
+        {chain: [{provider: "mock", model: "mock"}], label: "smoke"},
+      )
+      const result = harness.llm.call("hi", nil, {routing: policy})
+      harness.stdio.println(result.text)
+      harness.stdio.println(result.routing.policy)
+      harness.stdio.println(result.routing.attempts[0].provider)
+      harness.stdio.println(result.routing.attempts[0].status)
+      harness.stdio.println(result.routing.selected)
+    },
+  )
+}

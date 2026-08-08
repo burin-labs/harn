@@ -1,0 +1,763 @@
+# ── Providers ────────────────────────────────────────────────────────────────
+# Each [providers.X] block defines an LLM endpoint Harn can dial. The
+# `auth_env` field can be a single string or an array (tried in order).
+# `cost_per_1k_in/out` are coarse provider-level fallbacks used when a
+# specific [models.X] entry has no `pricing` table.
+# `cache_usage_accounting` records whether zero cache fields are a real miss.
+
+[providers.anthropic]
+cache_usage_accounting = true
+base_url = "https://api.anthropic.com/v1"
+auth_style = "header"
+auth_header = "x-api-key"
+auth_env = "ANTHROPIC_API_KEY"
+chat_endpoint = "/messages"
+features = ["prompt_caching", "thinking", "batch"]
+cost_per_1k_in = 0.003
+cost_per_1k_out = 0.015
+latency_p50_ms = 2500
+extra_headers = { "anthropic-version" = "2023-06-01" }
+
+[providers.anthropic.healthcheck]
+method = "GET"
+path = "/models"
+
+[providers.openai]
+cache_usage_accounting = true
+base_url = "https://api.openai.com/v1"
+auth_style = "bearer"
+auth_env = "OPENAI_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+features = ["batch"]
+cost_per_1k_in = 0.0025
+cost_per_1k_out = 0.010
+latency_p50_ms = 1800
+
+[providers.openai.healthcheck]
+method = "GET"
+path = "/models"
+
+[providers.openrouter]
+cache_usage_accounting = true
+base_url = "https://openrouter.ai/api/v1"
+auth_style = "bearer"
+auth_env = "OPENROUTER_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.003
+cost_per_1k_out = 0.015
+latency_p50_ms = 2200
+
+[providers.openrouter.healthcheck]
+method = "GET"
+path = "/auth/key"
+
+[providers.huggingface]
+base_url = "https://router.huggingface.co/v1"
+auth_style = "bearer"
+auth_env = ["HF_TOKEN", "HUGGINGFACE_API_KEY"]
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.0002
+cost_per_1k_out = 0.0006
+latency_p50_ms = 2400
+
+[providers.huggingface.healthcheck]
+method = "GET"
+url = "https://huggingface.co/api/whoami-v2"
+
+# Ollama defaults to /api/chat (native NDJSON) so the test stubs keep
+# working; hosts can flip to /v1/chat/completions via a providers.toml
+# overlay to bypass Ollama's per-model tool-call post-processors
+# (qwen3coder.go, qwen35.go) that raise HTTP 500s on text-mode responses
+# for the Qwen3.5 family.
+[providers.ollama]
+cache_usage_accounting = false
+base_url = "http://localhost:11434"
+base_url_env = "OLLAMA_HOST"
+auth_style = "none"
+chat_endpoint = "/api/chat"
+completion_endpoint = "/api/generate"
+cost_per_1k_in = 0.0
+cost_per_1k_out = 0.0
+latency_p50_ms = 1200
+
+[providers.ollama.healthcheck]
+method = "GET"
+path = "/api/tags"
+
+[providers.gemini]
+base_url = "https://generativelanguage.googleapis.com"
+base_url_env = "GEMINI_BASE_URL"
+auth_style = "header"
+auth_header = "x-goog-api-key"
+auth_env = ["GEMINI_API_KEY", "GOOGLE_API_KEY"]
+chat_endpoint = "/v1beta/models"
+features = ["batch"]
+cost_per_1k_in = 0.00125
+cost_per_1k_out = 0.005
+latency_p50_ms = 1800
+
+[providers.gemini.healthcheck]
+method = "GET"
+path = "/v1beta/models"
+
+[providers.mistral]
+base_url = "https://api.mistral.ai/v1"
+base_url_env = "MISTRAL_BASE_URL"
+auth_style = "bearer"
+auth_env = "MISTRAL_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.0005
+cost_per_1k_out = 0.0015
+latency_p50_ms = 1800
+features = ["native_tools", "batch"]
+
+[providers.mistral.healthcheck]
+method = "GET"
+path = "/models"
+
+[providers.cohere]
+base_url = "https://api.cohere.ai/compatibility/v1"
+base_url_env = "COHERE_BASE_URL"
+auth_style = "bearer"
+auth_env = "COHERE_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.0025
+cost_per_1k_out = 0.010
+latency_p50_ms = 1900
+features = ["native_tools", "reasoning"]
+
+[providers.cohere.healthcheck]
+method = "GET"
+path = "/models"
+
+[providers.xai]
+base_url = "https://api.x.ai/v1"
+base_url_env = "XAI_BASE_URL"
+auth_style = "bearer"
+auth_env = "XAI_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.001
+cost_per_1k_out = 0.002
+latency_p50_ms = 1600
+features = ["responses_api", "native_tools", "reasoning", "batch"]
+
+[providers.xai.healthcheck]
+method = "GET"
+path = "/models"
+
+[providers.together]
+base_url = "https://api.together.xyz/v1"
+base_url_env = "TOGETHER_AI_BASE_URL"
+auth_style = "bearer"
+auth_env = "TOGETHER_AI_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.0002
+cost_per_1k_out = 0.0006
+latency_p50_ms = 1600
+features = ["batch"]
+
+[providers.together.healthcheck]
+method = "GET"
+path = "/models"
+
+# Groq — OpenAI-compatible LPU-hosted fast inference. Headline ~840 tok/s
+# on Llama 3.1 8B, ~594 tok/s on Llama 4 Scout. Useful executor target
+# when sub-100ms TTFT matters more than raw quality.
+[providers.groq]
+base_url = "https://api.groq.com/openai/v1"
+base_url_env = "GROQ_BASE_URL"
+auth_style = "bearer"
+auth_env = "GROQ_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.0001
+cost_per_1k_out = 0.0003
+latency_p50_ms = 450
+features = ["native_tools", "batch"]
+
+[providers.groq.healthcheck]
+method = "GET"
+path = "/models"
+
+# Cerebras — OpenAI-compatible wafer-scale inference. High token throughput
+# makes it a strong fit for latency-budgeted binder workloads; end-to-end
+# p50 still includes client/provider round-trip time, so callers should keep
+# their own wall-clock budget. Provider-level pricing here is a coarse
+# default; per-model rows under [models.X] hold the authoritative numbers
+# from Cerebras's public model discovery endpoint.
+[providers.cerebras]
+base_url = "https://api.cerebras.ai/v1"
+base_url_env = "CEREBRAS_BASE_URL"
+auth_style = "bearer"
+auth_env = "CEREBRAS_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.00035
+cost_per_1k_out = 0.00075
+latency_p50_ms = 150
+features = ["native_tools"]
+
+[providers.cerebras.healthcheck]
+method = "GET"
+path = "/models"
+
+[providers.deepseek]
+cache_usage_accounting = true
+base_url = "https://api.deepseek.com/v1"
+base_url_env = "DEEPSEEK_BASE_URL"
+auth_style = "bearer"
+auth_env = "DEEPSEEK_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.00014
+cost_per_1k_out = 0.00028
+latency_p50_ms = 1800
+
+[providers.deepseek.healthcheck]
+method = "GET"
+path = "/models"
+
+[providers.fireworks]
+base_url = "https://api.fireworks.ai/inference/v1"
+base_url_env = "FIREWORKS_BASE_URL"
+auth_style = "bearer"
+auth_env = "FIREWORKS_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.0002
+cost_per_1k_out = 0.0006
+latency_p50_ms = 1400
+features = ["batch"]
+
+[providers.fireworks.healthcheck]
+method = "GET"
+path = "/models"
+
+[providers.dashscope]
+base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+base_url_env = "DASHSCOPE_BASE_URL"
+region_env = "DASHSCOPE_REGION"
+auth_style = "bearer"
+auth_env = "DASHSCOPE_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.0003
+cost_per_1k_out = 0.0012
+latency_p50_ms = 1600
+
+[providers.dashscope.regions.intl]
+base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+label = "International"
+source_url = "https://www.alibabacloud.com/help/en/model-studio/compatibility-of-openai-with-dashscope"
+last_verified = "2026-07-09"
+
+[providers.dashscope.regions.cn]
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+label = "China"
+source_url = "https://www.alibabacloud.com/help/en/model-studio/compatibility-of-openai-with-dashscope"
+last_verified = "2026-07-09"
+
+[providers.dashscope.healthcheck]
+method = "GET"
+path = "/models"
+
+# MiniMax — OpenAI-compatible endpoint for MiniMax M2/M3 models. The direct
+# API serves MiniMax-M3 plus the open-weight M2 family on the same
+# /v1/chat/completions URL; the wire format mirrors OpenAI chat completions
+# with native tool calls and model-specific thinking controls.
+[providers.minimax]
+base_url = "https://api.minimax.io/v1"
+base_url_env = "MINIMAX_BASE_URL"
+auth_style = "bearer"
+auth_env = "MINIMAX_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.0006
+cost_per_1k_out = 0.0024
+latency_p50_ms = 1700
+
+[providers.minimax.healthcheck]
+method = "GET"
+path = "/models"
+
+# Z.AI — OpenAI-compatible GLM API. Override `ZAI_BASE_URL` for custom plans.
+[providers.zai]
+base_url = "https://api.z.ai/api/paas/v4"
+base_url_env = "ZAI_BASE_URL"
+region_env = "ZAI_REGION"
+auth_style = "bearer"
+auth_env = ["ZAI_API_KEY", "ZHIPU_API_KEY"]
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.0004
+cost_per_1k_out = 0.0017
+latency_p50_ms = 1900
+
+[providers.zai.regions.global]
+base_url = "https://api.z.ai/api/paas/v4"
+label = "Global"
+source_url = "https://docs.z.ai/guides/start/quickstart"
+last_verified = "2026-07-09"
+
+[providers.zai.regions.cn]
+base_url = "https://open.bigmodel.cn/api/paas/v4"
+label = "China"
+source_url = "https://bigmodel.cn/dev/api/normal-model/glm-4"
+last_verified = "2026-07-09"
+
+[providers.zai.healthcheck]
+method = "GET"
+path = "/models"
+
+# Moonshot AI — first-party host of the Kimi K2 family. Harn dials the
+# OpenAI-compatible `/v1/chat/completions` endpoint so the shared
+# openai_chat_completions wire format Just Works.
+[providers.moonshot]
+base_url = "https://api.moonshot.ai/v1"
+base_url_env = "MOONSHOT_BASE_URL"
+region_env = "MOONSHOT_REGION"
+auth_style = "bearer"
+auth_env = ["MOONSHOT_API_KEY", "MOONSHOT_AI_API_KEY", "KIMI_API_KEY"]
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.0006
+cost_per_1k_out = 0.0025
+latency_p50_ms = 1900
+features = ["native_tools", "reasoning", "prompt_caching"]
+
+[providers.moonshot.regions.global]
+base_url = "https://api.moonshot.ai/v1"
+label = "Global"
+source_url = "https://platform.moonshot.ai/docs/intro"
+last_verified = "2026-07-09"
+
+[providers.moonshot.regions.cn]
+base_url = "https://api.moonshot.cn/v1"
+label = "China"
+source_url = "https://platform.moonshot.cn/docs"
+last_verified = "2026-07-09"
+
+[providers.moonshot.healthcheck]
+method = "GET"
+path = "/models"
+
+# Baseten Model APIs — OpenAI-compatible serverless inference for current
+# open-weight frontier models. Baseten's GLM-5.2 route is optimized with
+# Blackwell, KV-aware routing, prefill/decode disaggregation, and speculative
+# decoding; catalog rows use a `baseten/<wire-id>` prefix so the same weights
+# can be compared against Z.AI, Together, DeepInfra, OpenRouter, and NVIDIA.
+[providers.baseten]
+base_url = "https://inference.baseten.co/v1"
+base_url_env = "BASETEN_BASE_URL"
+auth_style = "bearer"
+auth_env = "BASETEN_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.0014
+cost_per_1k_out = 0.0044
+latency_p50_ms = 800
+features = ["native_tools", "reasoning", "prompt_caching"]
+rate_limits = { rpm = 15, tpm = 100000, tier = "basic_unverified", source_url = "https://docs.baseten.co/inference/model-apis/rate-limits-and-budgets", last_verified = "2026-06-23", notes = "Conservative default. Baseten also publishes Basic verified at 120 RPM / 500k TPM, Pro at 120 RPM / 1M TPM, and custom Enterprise limits." }
+
+[providers.baseten.healthcheck]
+method = "GET"
+path = "/models"
+
+# DeepInfra — OpenAI-compatible host for open-weight models (DeepSeek,
+# Qwen, Llama, Kimi, GPT-OSS, Gemma). The compat surface lives under the
+# `/v1/openai` path prefix, so the base_url carries it and chat_endpoint
+# stays the standard `/chat/completions`. Catalog rows are keyed with a
+# `deepinfra/<hf-id>` prefix and carry `wire_model` so they stay
+# collision-free with the bare/openrouter ids for the same weights.
+[providers.deepinfra]
+base_url = "https://api.deepinfra.com/v1/openai"
+base_url_env = "DEEPINFRA_BASE_URL"
+auth_style = "bearer"
+auth_env = ["DEEPINFRA_API_KEY", "DEEPINFRA_TOKEN"]
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.0002
+cost_per_1k_out = 0.0006
+latency_p50_ms = 1500
+features = ["native_tools"]
+
+[providers.deepinfra.healthcheck]
+method = "GET"
+path = "/models"
+
+# SambaNova Cloud — OpenAI-compatible RDU-hosted inference with very high
+# token throughput on large open-weight models (DeepSeek, Llama 4, Qwen).
+# A latency-budgeted executor target alongside Groq/Cerebras with a
+# different model mix. Catalog rows use a `sambanova/<wire-id>` prefix +
+# `wire_model` so they don't collide with other hosts of the same weights.
+[providers.sambanova]
+base_url = "https://api.sambanova.ai/v1"
+base_url_env = "SAMBANOVA_BASE_URL"
+auth_style = "bearer"
+auth_env = "SAMBANOVA_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.0006
+cost_per_1k_out = 0.0012
+latency_p50_ms = 350
+features = ["native_tools"]
+
+[providers.sambanova.healthcheck]
+method = "GET"
+path = "/models"
+
+# NVIDIA NIM — OpenAI-compatible hosted inference through the NVIDIA API
+# Catalog. Use NVIDIA_NIM_BASE_URL for self-hosted NIM or enterprise
+# gateways; the generic NVIDIA_BASE_URL is intentionally not consumed here
+# because common examples set it to the host root, while the OpenAI-compatible
+# API lives under /v1.
+[providers.nvidia]
+base_url = "https://integrate.api.nvidia.com/v1"
+base_url_env = "NVIDIA_NIM_BASE_URL"
+auth_style = "bearer"
+auth_env = ["NVIDIA_API_KEY", "NIM_API_KEY"]
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+latency_p50_ms = 1400
+features = ["native_tools"]
+
+[providers.nvidia.healthcheck]
+method = "GET"
+path = "/models"
+
+# Nebius Token Factory — OpenAI-compatible hosted inference for agentic
+# open-weight models. Public docs advertise native function calling and JSON
+# structured output; live per-model facts should come from /models/model cards.
+[providers.nebius]
+base_url = "https://api.tokenfactory.nebius.com/v1"
+base_url_env = "NEBIUS_BASE_URL"
+auth_style = "bearer"
+auth_env = "NEBIUS_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+features = ["native_tools", "reasoning"]
+
+[providers.nebius.healthcheck]
+method = "GET"
+path = "/models"
+
+# FlexAI Token Factory — OpenAI-compatible API with model-discovery metadata
+# for context windows, pricing, health, and support flags.
+[providers.flexai]
+base_url = "https://tokens.flex.ai/v1"
+base_url_env = "FLEXAI_BASE_URL"
+auth_style = "bearer"
+auth_env = "FLEXAI_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+features = ["native_tools", "reasoning", "vision"]
+
+[providers.flexai.healthcheck]
+method = "GET"
+path = "/models"
+
+# Hyperbolic — OpenAI-compatible inference with documented function calling
+# on current Qwen/Llama coding-agent routes.
+[providers.hyperbolic]
+base_url = "https://api.hyperbolic.xyz/v1"
+base_url_env = "HYPERBOLIC_BASE_URL"
+auth_style = "bearer"
+auth_env = "HYPERBOLIC_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+features = ["native_tools"]
+rate_limits = { rpm = 60, tier = "basic", source_url = "https://www.hyperbolic.ai/docs/inference/text-apis", last_verified = "2026-06-23", notes = "Docs also publish a 600 RPM Pro tier after account upgrade/deposit; this row records the conservative default tier." }
+
+[providers.hyperbolic.healthcheck]
+method = "GET"
+path = "/models"
+
+# SiliconFlow — OpenAI-compatible hosted inference for inexpensive DeepSeek,
+# Qwen, GLM, and other open-weight routes.
+[providers.siliconflow]
+base_url = "https://api.siliconflow.com/v1"
+base_url_env = "SILICONFLOW_BASE_URL"
+region_env = "SILICONFLOW_REGION"
+auth_style = "bearer"
+auth_env = "SILICONFLOW_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+features = ["native_tools", "reasoning"]
+
+[providers.siliconflow.regions.global]
+base_url = "https://api.siliconflow.com/v1"
+label = "Global"
+source_url = "https://docs.siliconflow.com/api-reference/chat-completions/chat-completions"
+last_verified = "2026-07-09"
+
+[providers.siliconflow.regions.cn]
+base_url = "https://api.siliconflow.cn/v1"
+label = "China"
+source_url = "https://docs.siliconflow.cn/cn/api-reference/chat-completions/chat-completions"
+last_verified = "2026-07-09"
+
+[providers.siliconflow.healthcheck]
+method = "GET"
+path = "/models"
+
+# Parasail — OpenAI-compatible serverless and batch API. Batch jobs are
+# particularly useful for offline eval/replay workloads where latency is not
+# on the critical path.
+[providers.parasail]
+base_url = "https://api.parasail.io/v1"
+base_url_env = "PARASAIL_BASE_URL"
+auth_style = "bearer"
+auth_env = "PARASAIL_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+features = ["native_tools", "batch"]
+
+[providers.parasail.healthcheck]
+method = "GET"
+path = "/models"
+
+# Atlas Cloud — OpenAI-compatible coding-plan/provider surface that overlaps
+# GLM, Kimi, DeepSeek, Qwen, and MiniMax families.
+[providers.atlas]
+base_url = "https://api.atlascloud.ai/v1"
+base_url_env = "ATLAS_BASE_URL"
+auth_style = "bearer"
+auth_env = ["ATLAS_API_KEY", "ATLASCLOUD_API_KEY"]
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+features = ["native_tools", "reasoning"]
+
+[providers.atlas.healthcheck]
+method = "GET"
+path = "/models"
+
+# GitHub Models — OpenAI-compatible inference over GitHub's model catalog.
+[providers.github_models]
+base_url = "https://models.github.ai/inference"
+base_url_env = "GITHUB_MODELS_BASE_URL"
+auth_style = "bearer"
+auth_env = "GITHUB_MODELS_TOKEN"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+features = ["native_tools"]
+
+[providers.github_models.healthcheck]
+method = "GET"
+url = "https://models.github.ai/catalog/models"
+
+# Vercel AI Gateway — one OpenAI-compatible endpoint for providers routed
+# through a Vercel project.
+[providers.vercel_ai_gateway]
+display_name = "Vercel AI Gateway"
+base_url = "https://ai-gateway.vercel.sh/v1"
+base_url_env = "VERCEL_AI_GATEWAY_BASE_URL"
+auth_style = "bearer"
+auth_env = ["AI_GATEWAY_API_KEY", "VERCEL_AI_GATEWAY_API_KEY"]
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+features = ["responses_api", "native_tools", "reasoning", "prompt_caching", "wire_model_capabilities"]
+
+[providers.vercel_ai_gateway.healthcheck]
+method = "GET"
+path = "/models"
+
+# Cloudflare Workers AI / AI Gateway — OpenAI-compatible path is scoped by
+# account id. Set CLOUDFLARE_AI_BASE_URL to the concrete account/gateway URL.
+[providers.cloudflare_ai_gateway]
+base_url = "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1"
+base_url_env = "CLOUDFLARE_AI_BASE_URL"
+auth_style = "bearer"
+auth_env = ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_API_KEY"]
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+features = ["responses_api", "native_tools", "reasoning"]
+
+# Inception Labs — diffusion LLM APIs exposed through OpenAI-compatible chat.
+[providers.inception]
+base_url = "https://api.inceptionlabs.ai/v1"
+base_url_env = "INCEPTION_BASE_URL"
+auth_style = "bearer"
+auth_env = "INCEPTION_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+features = ["native_tools", "reasoning"]
+
+[providers.inception.healthcheck]
+method = "GET"
+path = "/models"
+
+# Friendli Serverless Endpoints — OpenAI-compatible chat/completions.
+[providers.friendli]
+base_url = "https://api.friendli.ai/serverless/v1"
+base_url_env = "FRIENDLI_BASE_URL"
+auth_style = "bearer"
+auth_env = ["FRIENDLI_API_KEY", "FRIENDLI_TOKEN"]
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+features = ["native_tools"]
+
+[providers.friendli.healthcheck]
+method = "GET"
+path = "/models"
+
+# Volcengine Ark — OpenAI-compatible ByteDance model serving endpoint.
+[providers.volcengine_ark]
+base_url = "https://ark.cn-beijing.volces.com/api/v3"
+base_url_env = "VOLCENGINE_ARK_BASE_URL"
+auth_style = "bearer"
+auth_env = ["ARK_API_KEY", "VOLCENGINE_ARK_API_KEY", "VOLCENGINE_API_KEY"]
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+features = ["responses_api", "native_tools"]
+
+[providers.volcengine_ark.healthcheck]
+method = "GET"
+path = "/models"
+
+# Tencent Hunyuan — OpenAI-compatible `/v1/chat/completions` endpoint.
+[providers.hunyuan]
+base_url = "https://api.hunyuan.cloud.tencent.com/v1"
+base_url_env = "HUNYUAN_BASE_URL"
+auth_style = "bearer"
+auth_env = ["HUNYUAN_API_KEY", "TENCENT_HUNYUAN_API_KEY"]
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+features = ["native_tools"]
+
+[providers.hunyuan.healthcheck]
+method = "GET"
+path = "/models"
+
+# Baidu Qianfan v2 — OpenAI-compatible endpoint with tool-calling support.
+[providers.qianfan]
+base_url = "https://qianfan.baidubce.com/v2"
+base_url_env = "QIANFAN_BASE_URL"
+auth_style = "bearer"
+auth_env = ["QIANFAN_API_KEY", "BAIDU_QIANFAN_API_KEY"]
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+features = ["native_tools"]
+
+[providers.qianfan.healthcheck]
+method = "GET"
+path = "/models"
+
+# AWS Bedrock — resolves credentials through env, profile, container, or
+# EC2 instance roles, then signs Converse API calls with SigV4.
+[providers.bedrock]
+base_url = "https://bedrock-runtime.{region}.amazonaws.com"
+base_url_env = "BEDROCK_BASE_URL"
+auth_style = "aws_sigv4"
+credential_resolution = "platform_managed"
+chat_endpoint = "/model/{model}/converse"
+features = ["native_tools"]
+latency_p50_ms = 2600
+
+# Azure OpenAI — deployment name is routed in the URL; callers can
+# either pass the deployment as the Harn model field or set
+# AZURE_OPENAI_DEPLOYMENT.
+[providers.azure_openai]
+base_url = "https://{resource}.openai.azure.com"
+base_url_env = "AZURE_OPENAI_ENDPOINT"
+auth_style = "azure_openai"
+auth_env = ["AZURE_OPENAI_API_KEY", "AZURE_OPENAI_AD_TOKEN", "AZURE_OPENAI_BEARER_TOKEN"]
+chat_endpoint = "/openai/deployments/{deployment}/chat/completions?api-version={api_version}"
+features = ["native_tools", "batch"]
+cost_per_1k_in = 0.0025
+cost_per_1k_out = 0.010
+latency_p50_ms = 1900
+
+[providers.vertex]
+base_url = "https://aiplatform.googleapis.com/v1"
+base_url_env = "VERTEX_AI_BASE_URL"
+auth_style = "bearer"
+auth_env = ["VERTEX_AI_ACCESS_TOKEN", "GOOGLE_OAUTH_ACCESS_TOKEN", "GOOGLE_APPLICATION_CREDENTIALS"]
+credential_resolution = "platform_managed"
+chat_endpoint = "/projects/{project}/locations/{location}/publishers/google/models/{model}:generateContent"
+features = ["native_tools", "wire_model_capabilities"]
+cost_per_1k_in = 0.00125
+cost_per_1k_out = 0.005
+latency_p50_ms = 2100
+
+[providers.local]
+base_url = "http://localhost:8000"
+base_url_env = "LOCAL_LLM_BASE_URL"
+auth_style = "none"
+chat_endpoint = "/v1/chat/completions"
+completion_endpoint = "/v1/completions"
+cost_per_1k_in = 0.0
+cost_per_1k_out = 0.0
+latency_p50_ms = 900
+
+[providers.local.healthcheck]
+method = "GET"
+path = "/v1/models"
+
+# llama.cpp — separate from `local` so capability rules can isolate Qwen
+# chat-template thinking quirks from other local OpenAI-compatible hosts.
+[providers.llamacpp]
+cache_usage_accounting = false
+base_url = "http://127.0.0.1:8001"
+base_url_env = "LLAMACPP_BASE_URL"
+auth_style = "none"
+chat_endpoint = "/v1/chat/completions"
+completion_endpoint = "/v1/completions"
+cost_per_1k_in = 0.0
+cost_per_1k_out = 0.0
+latency_p50_ms = 900
+
+[providers.llamacpp.healthcheck]
+method = "GET"
+path = "/v1/models"
+
+# Apple Silicon MLX. Harn owns readiness probing; hosts that want
+# script-based auto-start should launch the process first, then call
+# Harn again to verify readiness.
+[providers.mlx]
+base_url = "http://127.0.0.1:8002"
+base_url_env = "MLX_BASE_URL"
+auth_style = "none"
+chat_endpoint = "/v1/chat/completions"
+completion_endpoint = "/v1/completions"
+cost_per_1k_in = 0.0
+cost_per_1k_out = 0.0
+latency_p50_ms = 900
+
+[providers.mlx.healthcheck]
+method = "GET"
+path = "/v1/models"
+
+[providers.vllm]
+base_url = "http://localhost:8000"
+base_url_env = "VLLM_BASE_URL"
+auth_style = "none"
+chat_endpoint = "/v1/chat/completions"
+completion_endpoint = "/v1/completions"
+cost_per_1k_in = 0.0
+cost_per_1k_out = 0.0
+latency_p50_ms = 800
+
+[providers.vllm.healthcheck]
+method = "GET"
+path = "/v1/models"
+
+[providers.tgi]
+base_url = "http://localhost:8080"
+base_url_env = "TGI_BASE_URL"
+auth_style = "none"
+chat_endpoint = "/v1/chat/completions"
+completion_endpoint = "/v1/completions"
+cost_per_1k_in = 0.0
+cost_per_1k_out = 0.0
+latency_p50_ms = 950
+
+[providers.tgi.healthcheck]
+method = "GET"
+path = "/health"

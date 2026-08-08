@@ -1,0 +1,90 @@
+/**
+ * with_required_reason — schema augmentation + execution-time strip + audit.
+ *
+ * 1. Calls without `reason` are short-circuited with status `schema_violation`.
+ * 2. Calls with `reason` strip it from the args passed to `next` and surface
+ *    it on `audit.summary`.
+ * 3. The paired schema_transform makes `reason` a required parameter by default.
+ * 4. Schema-required mode can be relaxed for forgiving native-provider surfaces.
+ */
+import { with_required_reason } from "std/llm/tool_middleware"
+
+fn synthetic_next() {
+  return { call ->
+    return {
+      ok: true,
+      status: "ok",
+      tool_name: call.tool_name,
+      tool_call_id: call.call_id,
+      arguments: call.tool_args,
+      result: "ran",
+      rendered_result: "ran",
+      observation: "[result]\n",
+      error: nil,
+      error_category: nil,
+      executor: "harn",
+    }
+  }
+}
+
+fn envelope(name, args) {
+  return {
+    tool_name: name,
+    tool_args: args,
+    call_id: "call-" + name,
+    declared_executor: "harn",
+    schema: nil,
+    description: "",
+    turn: {iteration: 1, session_id: ""},
+  }
+}
+
+pipeline default(harness: Harness) {
+  const mw = with_required_reason()
+  const next = synthetic_next()
+  // (1) missing reason → reject.
+  const r1 = mw.caller(envelope("read", {path: "/tmp/x"}), next)
+  harness.stdio.println(r1.ok)
+  harness.stdio.println(r1.error_category)
+  // (2) reason present → strip + audit.summary populated.
+  const r2 = mw.caller(envelope("read", {reason: "checking the file", path: "/tmp/x"}), next)
+  harness.stdio.println(r2.ok)
+  harness.stdio.println(r2.audit.summary)
+  harness.stdio.println(contains(r2.arguments.keys(), "reason"))
+  harness.stdio.println(r2.arguments.path)
+  // (3) schema_transform injects `reason` as a required field.
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "read",
+    "Read",
+    {
+      handler: { _ -> "" },
+      parameters: {type: "object", properties: {path: {type: "string"}}, required: ["path"]},
+      returns: {type: "string"},
+    },
+  )
+  const entry = mw.schema_transform(tools.tools[0])
+  harness.stdio.println(contains(entry.parameters.properties.keys(), "reason"))
+  harness.stdio.println(contains(entry.parameters.required, "reason"))
+  harness.stdio.println(entry.parameters.properties.reason.required)
+  harness.stdio.println(entry.parameters.properties.reason.description)
+  // (4) custom field name + audit_key.
+  const mw2 = with_required_reason({field: "intent", audit_key: "rationale"})
+  const r3 = mw2.caller(envelope("write", {intent: "ship the fix", body: "x"}), next)
+  harness.stdio.println(r3.ok)
+  harness.stdio.println(r3.audit.rationale)
+  harness.stdio.println(contains(r3.arguments.keys(), "intent"))
+  // (5) tolerant native-provider surfaces can advertise `reason` without
+  // marking it required. Missing reasons still flow through the audit layer,
+  // but original args are preserved when `strip: false`.
+  const mw3 = with_required_reason({on_missing: "fill_blank", strip: false, schema_required: false})
+  const entry3 = mw3.schema_transform(tools.tools[0])
+  harness.stdio.println(contains(entry3.parameters.properties.keys(), "reason"))
+  harness.stdio.println(contains(entry3.parameters.required, "reason"))
+  harness.stdio.println(entry3.parameters.properties.reason.required)
+  const r4 = mw3.caller(envelope("read", {path: "/tmp/y"}), next)
+  harness.stdio.println(r4.ok)
+  harness.stdio.println(r4.audit.summary)
+  harness.stdio.println(r4.arguments.path)
+}

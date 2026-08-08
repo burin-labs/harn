@@ -1,0 +1,99 @@
+import "std/edit"
+
+/**
+ * End-to-end exercise of `edit_dry_run` (issue #2510). Drives a
+ * multi-op plan through `hostlib_ast_dry_run` and verifies that:
+ *
+ * - The unified diff carries proper headers (`---`/`+++`) and hunk
+ *   markers (`@@ -a,b +c,d @@`).
+ * - Per-op outcomes capture both applied and rejected ops.
+ * - The on-disk file is byte-identical before and after the call.
+ * - Sequential ops within one plan see each other's pending writes
+ *   (via the shared transient staged-fs session).
+ */
+fn write_fixture(fs: HarnessFs, dir: string, name: string, body: string) -> string {
+  const path = path_join(dir, name)
+  fs.write_text(path, body)
+  return path
+}
+
+pipeline default(harness: Harness) {
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn_edit_dry_run_" + to_string(harness.random.range(100000, 999999)),
+  )
+  harness.fs.mkdir(root)
+  // 1) Multi-op plan: AST-precise body rewrite + safe text patch on the
+  //    rename. Both ops touch the same file so the response yields one
+  //    per-file diff that carries both edits.
+  const rs_path = write_fixture(
+    harness.fs,
+    root,
+    "lib.rs",
+    "fn greet(name: &str) -> String {\n    format!(\"hi {name}\")\n}\n",
+  )
+  const before = harness.fs.read_text(rs_path)
+  const bundle = edit_dry_run(
+    harness.ast,
+    {
+      plan: [
+        {
+          op: "apply_node",
+          path: rs_path,
+          query: "(function_item body: (block) @target)",
+          replacement: "{ format!(\"hi {name}!\") }",
+          select: "first",
+        },
+        {op: "safe_text_patch", path: rs_path, old_text: "fn greet", new_text: "fn greeter"},
+      ],
+    },
+  )
+  harness.stdio.println(bundle.result == "ok")
+  harness.stdio.println(bundle.summary.ops_applied == 2)
+  harness.stdio.println(bundle.summary.ops_rejected == 0)
+  harness.stdio.println(bundle.summary.files_touched == 1)
+  const diff = bundle.per_file_unified_diff[0].diff
+  harness.stdio.println(contains(diff, "--- a/") && contains(diff, "+++ b/"))
+  harness.stdio.println(contains(diff, "@@ -"))
+  harness.stdio.println(contains(diff, "fn greeter"))
+  harness.stdio.println(harness.fs.read_text(rs_path) == before)
+  // 2) Rejected ops (ambiguous safe_text_patch + unknown op) surface as
+  //    structured rejections without aborting the plan.
+  const multi_path = write_fixture(harness.fs, root, "multi.txt", "todo\ntodo\n")
+  const mixed = edit_dry_run(
+    harness.ast,
+    {
+      plan: [
+        {op: "safe_text_patch", path: multi_path, old_text: "todo", new_text: "done"},
+        {op: "blow_up_the_world", path: multi_path},
+      ],
+    },
+  )
+  harness.stdio.println(mixed.result == "no_ops_applied")
+  harness.stdio.println(mixed.summary.ops_applied == 0)
+  harness.stdio.println(mixed.summary.ops_rejected == 2)
+  harness.stdio.println(mixed.ops[0].result == "rejected" && mixed.ops[0].reason == "ambiguous")
+  harness.stdio.println(mixed.ops[1].result == "rejected" && mixed.ops[1].reason == "unknown_op")
+  // 3) Empty plan is a no-op: zero ops applied, zero rejected, no diffs.
+  const empty = edit_dry_run(harness.ast, {plan: []})
+  harness.stdio.println(empty.result == "no_ops_applied")
+  harness.stdio.println(empty.summary.files_touched == 0 && len(empty.per_file_unified_diff) == 0)
+  // 4) Partial: one applied + one rejected → `result == "partial"`.
+  const part_path = write_fixture(harness.fs, root, "part.rs", "fn alpha() { 1 }\n")
+  const partial = edit_dry_run(
+    harness.ast,
+    {
+      plan: [
+        {
+          op: "apply_node",
+          path: part_path,
+          query: "(function_item body: (block) @target)",
+          replacement: "{ 2 }",
+        },
+        {op: "safe_text_patch", path: part_path, old_text: "nonexistent", new_text: "x"},
+      ],
+    },
+  )
+  harness.stdio.println(partial.result == "partial")
+  harness.stdio.println(partial.summary.ops_applied == 1 && partial.summary.ops_rejected == 1)
+}

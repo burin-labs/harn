@@ -1,0 +1,52 @@
+import { agent_reminder_providers_fire, agent_session_messages } from "std/agent/state"
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline main(harness: Harness) {
+  // Mock stands in for routes without provider-specific directive behavior.
+  harness.agent.clear_reminder_providers()
+  harness.agent.register_reminder_provider(
+    {
+      id: "render_local_fallback",
+      subscribes_to: ["session_idle"],
+      evaluate: { _ctx ->
+        return {reminder: {body: "local fallback reminder", role_hint: "system"}}
+      },
+    },
+  )
+  const session = harness.agent.open("reminder-render-local-fallback")
+  harness.agent.reset(session)
+  harness.agent.inject(session, {role: "user", content: "hello"})
+  agent_reminder_providers_fire(
+    harness.agent,
+    session,
+    "session_idle",
+    {session: {id: session}},
+    {},
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text("ok")],
+    { ->
+      harness.llm.call(
+        "ignored",
+        "base system",
+        {
+          provider: "mock",
+          model: "mock",
+          messages: agent_session_messages(harness.agent, session),
+          session_id: session,
+        },
+      )
+      const call = harness.llm.mock_calls()[0]
+      const last = call.messages[len(call.messages) - 1]
+      harness.stdio.println(!contains(call.system, "<context-directives>"))
+      harness.stdio.println(contains(last.content, "<context-directives>"))
+      harness.stdio.println(contains(last.content, "authority=\"contract\""))
+      harness.stdio.println(contains(last.content, "local fallback reminder"))
+      harness.stdio.println(!contains(last.content, "<system-reminder>"))
+      harness.stdio.println(last.role)
+      harness.agent.clear_reminder_providers()
+    },
+  )
+}
+// The fallback route shares the one directive envelope and fixed user slot.

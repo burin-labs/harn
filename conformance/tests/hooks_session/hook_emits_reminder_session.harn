@@ -1,0 +1,34 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline main(harness: Harness) {
+  harness.agent.clear_session_hooks()
+  harness.agent.register_session_hook(
+    "post_turn",
+    { _hook_harness, _event ->
+      return [
+        {reminder: {body: "session reminder stale", dedupe_key: "session-hook", tags: ["session"]}},
+        {reminder: {body: "session reminder fresh", dedupe_key: "session-hook", tags: ["session"]}},
+      ]
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text("done")],
+    { ->
+      const result = agent_loop(
+        harness,
+        "session hook reminder",
+        nil,
+        {provider: "mock", session_id: "hook-reminder-session"},
+      )
+      const events = transcript_events_by_kind(result.transcript, "system_reminder")
+      harness.stdio.println(result.status)
+      harness.stdio.println(len(events))
+      harness.stdio.println(events[0].reminder.body)
+      harness.stdio.println(events[0].reminder.source)
+      harness.stdio.println(events[0].reminder.tags[0])
+      harness.agent.clear_session_hooks()
+    },
+  )
+}

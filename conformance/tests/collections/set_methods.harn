@@ -1,0 +1,38 @@
+/** Test set method syntax and new operations */
+pipeline default(harness: Harness, task) {
+  const a = set([1, 2, 3, 4])
+  const b = set([3, 4, 5, 6])
+  // Basic methods
+  harness.stdio.println(a.count())
+  harness.stdio.println(a.contains(2))
+  harness.stdio.println(a.contains(9))
+  harness.stdio.println(a.empty())
+  // add / remove (return new sets)
+  const c = a.adding(5)
+  harness.stdio.println(c.count())
+  const d = a.removing(1)
+  harness.stdio.println(d.count())
+  // Set operations
+  harness.stdio.println(a.union(b).count())
+  harness.stdio.println(a.intersect(b).count())
+  harness.stdio.println(a.difference(b).count())
+  harness.stdio.println(a.symmetric_difference(b).count())
+  // Subset / superset / disjoint
+  const small = set([2, 3])
+  harness.stdio.println(small.is_subset(a))
+  harness.stdio.println(a.is_superset(small))
+  harness.stdio.println(a.is_disjoint(b))
+  harness.stdio.println(set([10, 20]).is_disjoint(a))
+  // to_list
+  const lst = set([3, 1, 2]).to_list()
+  harness.stdio.println(len(lst))
+  // map / filter
+  const doubled = set([1, 2, 3]).map({ x -> x * 2 })
+  harness.stdio.println(doubled.count())
+  const evens = a.filter({ x -> x % 2 == 0 })
+  harness.stdio.println(evens.count())
+  // any / all
+  harness.stdio.println(a.any({ x -> x > 3 }))
+  harness.stdio.println(a.all({ x -> x > 0 }))
+  harness.stdio.println(a.all({ x -> x > 2 }))
+}

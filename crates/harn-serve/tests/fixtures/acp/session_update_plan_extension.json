@@ -1,0 +1,76 @@
+[
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "entries": [
+          {
+            "content": "Emit plan event.",
+            "status": "completed"
+          },
+          {
+            "content": "Verify fixtures.",
+            "status": "pending"
+          }
+        ],
+        "harnPlanDocument": {
+          "_type": "plan_document",
+          "comments": [],
+          "created_at": "2026-01-01T00:00:00Z",
+          "current_revision": {
+            "author": {
+              "id": "test-agent"
+            },
+            "created_at": "2026-01-01T00:00:00Z",
+            "markdown": "# Plan\n\nShip plan events.\n\n## Steps\n- [completed] Emit plan event.\n- [pending] Verify fixtures.\n\n## Verification commands\n- cargo test -p harn-serve acp\n\nApproval: unrequested",
+            "operation": {
+              "event_id": "plan-event-test",
+              "kind": "create"
+            },
+            "plan": {
+              "_type": "plan_artifact",
+              "approval": {
+                "state": "unrequested"
+              },
+              "assumptions": [],
+              "id": "plan_835c9eaf0b1e",
+              "open_questions": [],
+              "schema_version": "harn.plan.v1",
+              "steps": [
+                {
+                  "content": "Emit plan event.",
+                  "id": "step-1",
+                  "priority": null,
+                  "status": "completed"
+                },
+                {
+                  "content": "Verify fixtures.",
+                  "id": "step-2",
+                  "priority": null,
+                  "status": "pending"
+                }
+              ],
+              "summary": "Ship plan events.",
+              "title": "Plan",
+              "tool": "emit_plan",
+              "verification_commands": [
+                "cargo test -p harn-serve acp"
+              ]
+            },
+            "revision_id": "plan_revision_51300d55da384fde",
+            "source": {
+              "kind": "test"
+            }
+          },
+          "document_id": "plan_document_835c9eaf0b1e",
+          "resolution_receipts": [],
+          "schema_version": "harn.plan_document.v1",
+          "updated_at": "2026-01-01T00:00:00Z"
+        },
+        "sessionUpdate": "plan"
+      }
+    }
+  }
+]

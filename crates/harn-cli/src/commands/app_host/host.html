@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Harn App</title>
+    <style>
+      __HARN_APP_STYLE__
+    </style>
+  </head>
+  <body>
+    <header>
+      <span class="mark"></span>
+      <span class="name"></span>
+      <span id="status">starting</span>
+      <span class="uri"></span>
+    </header>
+    <main>
+      <iframe
+        id="sandbox"
+        title="Harn app"
+        sandbox="allow-scripts allow-same-origin"
+      ></iframe>
+    </main>
+    <script>
+      __HARN_APP_SCRIPT__;
+    </script>
+  </body>
+</html>

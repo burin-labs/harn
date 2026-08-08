@@ -1,0 +1,3 @@
+pipeline default(harness: Harness) {
+  harness.tools.mcp_connect("nonexistent_mcp_server_binary_xyz")
+}

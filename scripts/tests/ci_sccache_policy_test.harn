@@ -1,0 +1,569 @@
+import { ci_linux_lane_policy_errors, windows_shared_cache_errors } from "../check_ci_cache_policy"
+
+fn gha_expression(body: string) -> string {
+  return "$" + "{{ " + body + " }}"
+}
+
+/**
+ * A Linux compile lane as #6017 leaves it: one runner, one unconditional
+ * cache, and no trace of the retired sccache daemon.
+ */
+fn hosted_lane(cache_key: string, write_cache: bool = false) {
+  const cache_inputs = {"shared-key": cache_key, "cache-workspace-crates": "true"}
+  let lane = {
+    "runs-on": "ubuntu-latest",
+    env: {HARN_RUNNER_TIER: "github-hosted"},
+    steps: [{uses: "./.github/actions/rust-cache", with: cache_inputs}],
+  }
+  if write_cache {
+    lane = {
+      ...lane,
+      permissions: {contents: "read", actions: "write"},
+      steps: [{uses: "./.github/actions/rust-cache", with: {...cache_inputs, save: "true"}}],
+    }
+  }
+  return lane
+}
+
+fn workflow() {
+  const rust = hosted_lane(gha_expression("matrix.cache_key"))
+  const rust_with_flags = {
+    ...rust,
+    env: {...rust.env, RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"},
+  }
+  const rust_test = {
+    env: {RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"},
+    "runs-on": "ubuntu-latest",
+    needs: ["changes", "rust-checks"],
+    if:
+      "needs.changes.outputs.rust == 'true' && needs.rust-checks.result == 'success' && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'",
+    "timeout-minutes": 35,
+    steps: [
+      {
+        name: "Verify workspace test archive",
+        env: {HARN_VERIFY_RUST_RUNTIME: "1"},
+        run: "./scripts/ci/rust_artifact.sh restore-tests bundle destination sha",
+      },
+      {
+        name: "Run Rust workspace tests",
+        run:
+          "scripts/ci/run_rust_test_lane.sh cargo nextest run --profile ci --archive-file harn-tests.tar.zst --workspace-remap workspace",
+      },
+    ],
+  }
+  return {
+    jobs: {
+      "package-audit": hosted_lane("package-audit", true),
+      "rust-check-inputs": hosted_lane("rust-check-inputs"),
+      "rust-checks": {
+        ...rust_with_flags,
+        permissions: {contents: "read", actions: "write"},
+        strategy: {
+          matrix: {
+            include: [
+              {kind: "lint", cache_key: "workspace-lint"},
+              {kind: "workspace-tests", cache_key: "workspace-tests"},
+            ],
+          },
+        },
+        steps: rust_with_flags.steps
+          + [
+          {
+            name: "Run Rust lint",
+            if: "matrix.kind == 'lint'",
+            run: "./scripts/ci/run_rust_lint_lane.sh",
+          },
+          {
+            name: "Build portable workspace test archive",
+            if:
+              "matrix.kind == 'workspace-tests' && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'",
+            env: {CARGO_BUILD_JOBS: "4"},
+            run: "./scripts/ci/rust_artifact.sh build-tests bundle sha",
+          },
+          {
+            name: "Run Rust workspace tests",
+            id: "release-audit-rust-test",
+            if:
+              "matrix.kind == 'workspace-tests' && vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'",
+            env: {HARN_LLM_CALLS_DISABLED: "1"},
+            run:
+              "scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --profile ci -E 'not test(landlock)'",
+          },
+        ],
+      },
+      "rust-cache-refresh": {
+        "runs-on": "ubuntu-latest",
+        if: "needs.changes.outputs.rust_cache_refresh == 'true'",
+        permissions: {contents: "read", actions: "write"},
+        env: {HARN_RUNNER_TIER: "github-hosted", RUSTFLAGS: gha_expression("matrix.rustflags")},
+        strategy: {
+          matrix: {
+            include: [
+              {cache_key: "workspace-tests", warm_script: "./scripts/ci/warm_rust_cache.sh"},
+              {cache_key: "package-audit", warm_script: "./scripts/ci/warm_package_audit_cache.sh"},
+            ],
+          },
+        },
+        steps: [
+          {
+            name: "Reserve cache headroom for Linux CI",
+            run: "./scripts/prune_ci_cache_generations.sh --ensure-headroom 1610612736",
+          },
+          {
+            uses: "./.github/actions/rust-cache",
+            with: {
+              "shared-key": gha_expression("matrix.cache_key"),
+              "cache-workspace-crates": "true",
+              save: "true",
+            },
+          },
+          {name: "Warm Cargo graph", run: gha_expression("matrix.warm_script")},
+        ],
+      },
+      "rust-test": rust_test,
+      "ci-status": {
+        steps: [
+          {
+            name: "Verify required CI jobs",
+            env: {COLOCATED_TESTS_DISABLED: gha_expression("vars.HARN_CI_DISABLE_COLOCATED_TESTS")},
+            run:
+              "if [ \"$rust_test_result\" = skipped ] && [ \"$COLOCATED_TESTS_DISABLED\" != true ]; then :; fi",
+          },
+        ],
+      },
+    },
+  }
+}
+
+fn windows_cache_pair() {
+  const checkout = {uses: "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"}
+  const toolchain = {uses: "./.github/actions/rust-toolchain"}
+  const environment = {CARGO_INCREMENTAL: "0", CARGO_TERM_COLOR: "always", RUSTFLAGS: "-D warnings"}
+  const cache_inputs = {
+    "shared-key": "workspace-windows",
+    "target-dir": gha_expression("env.CARGO_TARGET_DIR"),
+  }
+  return {
+    consumer: {
+      env: environment,
+      jobs: {
+        windows: {
+          steps: [checkout, toolchain, {uses: "./.github/actions/rust-cache", with: cache_inputs}],
+        },
+      },
+    },
+    producer: {
+      env: environment,
+      jobs: {
+        nextest: {
+          steps: [
+            checkout,
+            toolchain,
+            {
+              uses: "./.github/actions/rust-cache",
+              if: gha_expression("!startsWith(github.ref_name, 'release-certify/')"),
+              with: {...cache_inputs, save: true},
+            },
+          ],
+        },
+      },
+    },
+  }
+}
+
+@test
+pipeline test_accepts_single_rung_hosted_linux_lanes(harness: Harness, task) {
+  assert_eq(ci_linux_lane_policy_errors(workflow()), [])
+}
+
+@test
+pipeline test_rejects_cache_writer_without_actions_write(harness: Harness, task) {
+  const valid = workflow()
+  const invalid = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "rust-cache-refresh": {...valid.jobs["rust-cache-refresh"], permissions: {contents: "read"}},
+    },
+  }
+  const errors = ci_linux_lane_policy_errors(invalid)
+  assert(
+    errors.contains("ci.yml:rust-cache-refresh must grant actions: write to persist rust-cache"),
+  )
+}
+
+@test
+pipeline test_rejects_incomplete_workspace_cache_generation(harness: Harness, task) {
+  const valid = workflow()
+  const audit = valid.jobs["package-audit"]
+  const cache = audit.steps[0]
+  const invalid = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "package-audit": {
+        ...audit,
+        steps: [{...cache, with: {...cache?.with ?? {}, "cache-workspace-crates": "false"}}],
+      },
+    },
+  }
+  assert(
+    ci_linux_lane_policy_errors(invalid).contains(
+      "ci.yml:package-audit must use the workspace-crate cache generation for complete Rust restores",
+    ),
+  )
+}
+
+@test
+pipeline test_rejects_missing_main_scoped_cache_refresh(harness: Harness, task) {
+  const valid = workflow()
+  let jobs = {}
+  for {key: name, value: job} in valid.jobs {
+    if name != "rust-cache-refresh" {
+      jobs[name] = job
+    }
+  }
+  const errors = ci_linux_lane_policy_errors({...valid, jobs: jobs})
+  assert(errors.contains("ci.yml:rust-cache-refresh must define the hosted Linux compile lane"))
+  assert(errors.contains("ci.yml:rust-cache-refresh must define the main-scoped cache writer"))
+}
+
+@test
+pipeline test_rejects_recompiling_workspace_test_consumer(harness: Harness, task) {
+  const valid = workflow()
+  const invalid = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "rust-test": {
+        ...valid.jobs["rust-test"],
+        "timeout-minutes": 12,
+        steps: [
+          {uses: "./.github/actions/rust-cache"},
+          {
+            name: "Run Rust workspace tests",
+            env: {CARGO_BUILD_JOBS: "4"},
+            run: "cargo nextest run --workspace --profile ci",
+          },
+        ],
+      },
+    },
+  }
+  const errors = ci_linux_lane_policy_errors(invalid)
+  assert(errors.contains("ci.yml:rust-test must keep the execution-only 35-minute timeout"))
+  assert(errors.contains("ci.yml:rust-test must not restore compiler caches or build-disk setup"))
+  assert(errors.contains("ci.yml:rust-test must verify the archived Rust runtime contract"))
+  assert(errors.contains("ci.yml:rust-test must execute only the remapped nextest archive"))
+  assert(errors.contains("ci.yml:rust-test must not configure compile fan-out"))
+}
+
+@test
+pipeline test_rejects_co_location_without_fail_closed_fallback(harness: Harness, task) {
+  const valid = workflow()
+  const rust_job = valid.jobs["rust-checks"]
+  const invalid = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "rust-checks": {
+        ...rust_job,
+        steps: rust_job.steps.filter({ step -> step?.name != "Run Rust workspace tests" }).map(
+          { step ->
+            if step?.name != "Build portable workspace test archive" {
+              return step
+            }
+            return {...step, if: "matrix.kind == 'workspace-tests'", run: "cargo build"}
+          },
+        )
+          .to_list(),
+      },
+      "rust-test": {...valid.jobs["rust-test"], if: "false"},
+      "ci-status": {
+        steps: [
+          {
+            name: "Verify required CI jobs",
+            env: {BLACKSMITH_DISABLED: "true"},
+            run: "[ \"$BLACKSMITH_DISABLED\" = true ]",
+          },
+        ],
+      },
+    },
+  }
+  const errors = ci_linux_lane_policy_errors(invalid)
+  assert(
+    errors.contains(
+      "ci.yml:rust-checks must build the workspace test archive only for the standalone fallback",
+    ),
+  )
+  assert(
+    errors.contains(
+      "ci.yml:rust-checks must own the exact co-located environment-neutral Rust proof",
+    ),
+  )
+  assert(errors.contains("ci.yml:rust-test must run only as the co-location kill-switch fallback"))
+  assert(
+    errors.contains("ci.yml:ci-status must fail closed across co-located and fallback Rust proofs"),
+  )
+}
+
+@test
+pipeline test_rejects_strict_clippy_cache_safety_bypass(harness: Harness, task) {
+  const valid = workflow()
+  const rust_job = valid.jobs["rust-checks"]
+  const invalid = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "rust-checks": {
+        ...rust_job,
+        steps: rust_job.steps.map(
+          { step ->
+            if step?.name != "Run Rust lint" {
+              return step
+            }
+            return {...step, run: "cargo clippy --workspace --all-targets -- -D warnings"}
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  const errors = ci_linux_lane_policy_errors(invalid)
+  assert(
+    errors.contains(
+      "ci.yml:rust-checks must route strict Clippy through the cache-safe Rust lint entrypoint",
+    ),
+  )
+}
+
+/**
+ * The ladder is gone, so a lane that names any other runner is not choosing a
+ * faster rung — it is routing work at machines this repository no longer
+ * operates.
+ */
+@test
+pipeline test_rejects_runner_routing_growing_back(harness: Harness, task) {
+  const valid = workflow()
+  const rust_job = valid.jobs["rust-checks"]
+  const matrix = rust_job.strategy.matrix.include
+  const invalid = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "package-audit": {
+        ...valid.jobs["package-audit"],
+        "runs-on": gha_expression(
+          "vars.HARN_CI_DISABLE_SELFHOSTED_LINUX != 'true'"
+            + " && fromJSON('[\"self-hosted\", \"Linux\", \"X64\"]') || 'ubuntu-latest'",
+        ),
+      },
+      "rust-checks": {
+        ...rust_job,
+        strategy: {
+          matrix: {
+            include: [
+              matrix[0],
+              {...matrix[1], runner: "blacksmith-8vcpu-ubuntu-2404", selfhosted: "big"},
+            ],
+          },
+        },
+      },
+    },
+  }
+  const errors = ci_linux_lane_policy_errors(invalid)
+  assert(
+    errors.contains(
+      "ci.yml:package-audit must run on ubuntu-latest with no runner-selection expression",
+    ),
+  )
+  assert(errors.contains("ci.yml:rust-checks matrix must not reintroduce per-row runner routing"))
+}
+
+/**
+ * A `rust-cache` step left behind a runner-tier condition would evaluate false
+ * on the only rung that exists, silently turning caching off on every lane —
+ * the exact failure the old three-rung layout could not express.
+ */
+@test
+pipeline test_rejects_cache_left_behind_a_retired_tier_condition(harness: Harness, task) {
+  const valid = workflow()
+  const audit = valid.jobs["package-audit"]
+  const invalid = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "package-audit": {
+        ...audit,
+        env: {...audit.env, SCCACHE_CACHE_SIZE: "40G", SCCACHE_SERVER_PORT: "4227"},
+        steps: [
+          {uses: "./.github/actions/rust-cache", if: "env.HARN_RUNNER_TIER == 'github-hosted'"},
+        ],
+      },
+    },
+  }
+  const errors = ci_linux_lane_policy_errors(invalid)
+  assert(
+    errors.contains(
+      "ci.yml:package-audit must restore rust-cache unconditionally, not behind a runner tier",
+    ),
+  )
+  assert(
+    errors.contains(
+      "ci.yml:package-audit must not carry SCCACHE_CACHE_SIZE; no hosted lane starts an sccache daemon",
+    ),
+  )
+  assert(
+    errors.contains(
+      "ci.yml:package-audit must not carry SCCACHE_SERVER_PORT; no hosted lane starts an sccache daemon",
+    ),
+  )
+}
+
+/** The Blacksmith sticky-disk lane was deleted; no job may mount it again. */
+@test
+pipeline test_rejects_remounting_the_retired_sccache_lane(harness: Harness, task) {
+  const valid = workflow()
+  const invalid = {
+    ...valid,
+    jobs: {...valid.jobs, surprise: {steps: [{uses: "./.github/actions/sccache"}]}},
+  }
+  const errors = ci_linux_lane_policy_errors(invalid)
+  assert(errors.contains("ci.yml:surprise must not mount the retired persistent sccache lane"))
+}
+
+/** Every compile lane must be present; a missing one is not a silent pass. */
+@test
+pipeline test_rejects_a_missing_compile_lane(harness: Harness, task) {
+  const errors = ci_linux_lane_policy_errors({jobs: {}})
+  assert(errors.contains("ci.yml:rust-check-inputs must define the hosted Linux compile lane"))
+  assert(errors.contains("ci.yml:package-audit must define the hosted Linux compile lane"))
+}
+
+@test
+pipeline test_accepts_plain_rustc_windows_cache_pair(harness: Harness, task) {
+  const pair = windows_cache_pair()
+  assert_eq(windows_shared_cache_errors(pair.consumer, pair.producer), [])
+}
+
+@test
+pipeline test_rejects_windows_cache_wrapper_drift(harness: Harness, task) {
+  const pair = windows_cache_pair()
+  const producer = {
+    ...pair.producer,
+    jobs: {
+      ...pair.producer.jobs,
+      nextest: {
+        ...pair.producer.jobs.nextest,
+        steps: [
+          pair.producer.jobs.nextest.steps[0],
+          pair.producer.jobs.nextest.steps[1],
+          {uses: "mozilla-actions/sccache-action@untrusted"},
+          pair.producer.jobs.nextest.steps[2],
+        ],
+      },
+    },
+  }
+  const errors = windows_shared_cache_errors(pair.consumer, producer)
+  assert_eq(len(errors), 2)
+  assert(
+    errors.contains(
+      "workspace-windows producer and consumer must use plain rustc: [\"mozilla-actions/sccache-action@untrusted\"]",
+    ),
+  )
+  assert(errors.any({ error -> error.starts_with("workspace-windows cache-key inputs drift:") }))
+  assert(errors.any({ error -> error.contains("rust-cache-source-key=") }))
+}
+
+@test
+pipeline test_rejects_windows_cache_environment_drift(harness: Harness, task) {
+  const pair = windows_cache_pair()
+  const producer = {
+    ...pair.producer,
+    env: {...pair.producer.env, RUSTFLAGS: "-D warnings -C target-cpu=native"},
+  }
+  const errors = windows_shared_cache_errors(pair.consumer, producer)
+  assert_eq(len(errors), 1)
+  assert(errors.any({ error -> error.starts_with("workspace-windows cache-key inputs drift:") }))
+  assert(errors.any({ error -> error.contains("RUSTFLAGS=-D warnings -C target-cpu=native") }))
+  assert(errors.any({ error -> error.contains("rust-cache-source-key=") }))
+}
+
+@test
+pipeline test_rejects_windows_cache_source_partitioning(harness: Harness, task) {
+  const pair = windows_cache_pair()
+  const producer_cache = pair.producer.jobs.nextest.steps[2]
+  const producer = {
+    ...pair.producer,
+    jobs: {
+      ...pair.producer.jobs,
+      nextest: {
+        ...pair.producer.jobs.nextest,
+        steps: [
+          pair.producer.jobs.nextest.steps[0],
+          pair.producer.jobs.nextest.steps[1],
+          {
+            ...producer_cache,
+            with: {
+              ...producer_cache?.with ?? {},
+              "source-key": gha_expression("hashFiles('Cargo.lock')"),
+            },
+          },
+        ],
+      },
+    },
+  }
+  const errors = windows_shared_cache_errors(pair.consumer, producer)
+  assert_eq(len(errors), 2)
+  assert(
+    errors.contains(
+      "workspace-windows producer and consumer must use one stable native restore namespace",
+    ),
+  )
+  assert(errors.any({ error -> error.starts_with("workspace-windows cache-key inputs drift:") }))
+}
+
+@test
+pipeline test_rejects_paired_windows_cache_source_partitioning(harness: Harness, task) {
+  const pair = windows_cache_pair()
+  const drifted_source_key = gha_expression("hashFiles('Cargo.lock')")
+  const consumer_cache = pair.consumer.jobs.windows.steps[2]
+  const producer_cache = pair.producer.jobs.nextest.steps[2]
+  const consumer = {
+    ...pair.consumer,
+    jobs: {
+      ...pair.consumer.jobs,
+      windows: {
+        ...pair.consumer.jobs.windows,
+        steps: [
+          pair.consumer.jobs.windows.steps[0],
+          pair.consumer.jobs.windows.steps[1],
+          {
+            ...consumer_cache,
+            with: {...consumer_cache?.with ?? {}, "source-key": drifted_source_key},
+          },
+        ],
+      },
+    },
+  }
+  const producer = {
+    ...pair.producer,
+    jobs: {
+      ...pair.producer.jobs,
+      nextest: {
+        ...pair.producer.jobs.nextest,
+        steps: [
+          pair.producer.jobs.nextest.steps[0],
+          pair.producer.jobs.nextest.steps[1],
+          {
+            ...producer_cache,
+            with: {...producer_cache?.with ?? {}, "source-key": drifted_source_key},
+          },
+        ],
+      },
+    },
+  }
+  assert_eq(
+    windows_shared_cache_errors(consumer, producer),
+    ["workspace-windows producer and consumer must use one stable native restore namespace"],
+  )
+}

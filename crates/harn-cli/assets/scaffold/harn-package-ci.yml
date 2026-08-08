@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    uses: burin-labs/.github/.github/workflows/harn-package.yml@bcdcf64e5c7021f649432b77fe2e1f9f489c4824
+
+  status:
+    name: CI status
+    if: always()
+    needs: [package]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce required jobs
+        env:
+          PACKAGE_RESULT: ${{ needs.package.result }}
+        run: test "$PACKAGE_RESULT" = success

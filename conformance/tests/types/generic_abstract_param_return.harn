@@ -1,0 +1,6 @@
+pipeline test(harness: Harness, task) {
+  fn bad<T>(x: T) -> int {
+    return x
+  }
+  bad(1)
+}

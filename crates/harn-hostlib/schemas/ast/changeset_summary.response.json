@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/changeset_summary.response.json",
+  "title": "ast.changeset_summary response",
+  "description": "An honest symbol-level changeset summary. Candidate callers are name-matched heuristic evidence, never data-flow claims.",
+  "type": "object",
+  "properties": {
+    "schema": { "const": "harn.review_changeset.v1" },
+    "status": { "enum": ["complete", "degraded"] },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "classification": {
+            "enum": ["structural", "reshaped_only", "unchanged", "degraded"]
+          },
+          "language": { "type": "string" },
+          "reason": { "type": "string" }
+        },
+        "required": ["path", "classification"],
+        "additionalProperties": false
+      }
+    },
+    "changes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "enum": ["added", "removed", "moved", "renamed", "signature_changed"]
+          },
+          "before": { "$ref": "#/$defs/Symbol" },
+          "after": { "$ref": "#/$defs/Symbol" }
+        },
+        "required": ["kind"],
+        "additionalProperties": false
+      }
+    },
+    "candidate_callers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "symbol_name": { "type": "string" },
+          "relation": { "const": "CALLS" },
+          "match_kind": { "const": "name_matched_call" },
+          "precision": { "const": "heuristic" },
+          "callers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": { "type": "string" },
+                "line": { "type": "integer", "minimum": 1 },
+                "signature": { "type": "string" }
+              },
+              "required": ["path", "line", "signature"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["symbol_name", "relation", "match_kind", "precision", "callers"],
+        "additionalProperties": false
+      }
+    },
+    "counts": {
+      "type": "object",
+      "properties": {
+        "files_structural": { "type": "integer", "minimum": 0 },
+        "files_reshaped_only": { "type": "integer", "minimum": 0 },
+        "files_unchanged": { "type": "integer", "minimum": 0 },
+        "files_degraded": { "type": "integer", "minimum": 0 },
+        "symbols_added": { "type": "integer", "minimum": 0 },
+        "symbols_removed": { "type": "integer", "minimum": 0 },
+        "symbols_moved": { "type": "integer", "minimum": 0 },
+        "symbols_renamed": { "type": "integer", "minimum": 0 },
+        "signatures_changed": { "type": "integer", "minimum": 0 },
+        "exported_signatures_changed": { "type": "integer", "minimum": 0 }
+      },
+      "required": [
+        "files_structural",
+        "files_reshaped_only",
+        "files_unchanged",
+        "files_degraded",
+        "symbols_added",
+        "symbols_removed",
+        "symbols_moved",
+        "symbols_renamed",
+        "signatures_changed",
+        "exported_signatures_changed"
+      ],
+      "additionalProperties": false
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "reason": { "type": "string" }
+        },
+        "required": ["path", "reason"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "status",
+    "files",
+    "changes",
+    "candidate_callers",
+    "counts",
+    "warnings"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "Symbol": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "kind": { "type": "string" },
+        "path": { "type": "string" },
+        "line": { "type": "integer", "minimum": 1 },
+        "signature": { "type": "string" },
+        "container": { "type": "string" },
+        "access_level": { "type": "string" },
+        "exported": { "type": "boolean" }
+      },
+      "required": ["name", "kind", "path", "line", "signature"],
+      "additionalProperties": false
+    }
+  }
+}

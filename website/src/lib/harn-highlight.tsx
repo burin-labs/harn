@@ -1,0 +1,126 @@
+import type { ReactNode } from "react"
+import type { Mode } from "highlight.js"
+import { createLowlight, type LanguageFn } from "lowlight"
+import vocabulary from "../../../spec/language-vocabulary.json"
+import { KEYWORD_DOCS } from "./keyword-docs"
+
+const harnLanguage: LanguageFn = (hljs) => {
+  const keywords = {
+    keyword: vocabulary.keywords.join(" "),
+    literal: vocabulary.literals.join(" "),
+    built_in: vocabulary.builtins.join(" "),
+  }
+  const interpolation: Mode = {
+    className: "subst",
+    begin: /\$\{/,
+    end: /\}/,
+    keywords,
+    contains: [],
+  }
+  const string: Mode = {
+    className: "string",
+    begin: '"',
+    end: '"',
+    illegal: "\\n",
+    contains: [{ begin: "\\\\." }, interpolation],
+  }
+  const mainContains: Mode[] = [
+    hljs.C_LINE_COMMENT_MODE,
+    hljs.C_BLOCK_COMMENT_MODE,
+    string,
+    {
+      className: "number",
+      begin: /\b\d+(?:\.\d+)?(?:ms|s|m|h)?\b/,
+      relevance: 0,
+    },
+    {
+      className: "title.function",
+      beginKeywords: "fn pipeline",
+      end: /[(\s]/,
+      excludeEnd: true,
+      contains: [{ begin: /[a-z_][A-Za-z0-9_]*/ }],
+      relevance: 0,
+    },
+  ]
+  interpolation.contains = mainContains
+  return {
+    name: "Harn",
+    aliases: ["harn"],
+    keywords,
+    contains: mainContains,
+  }
+}
+
+type HighlightNode = {
+  type: string
+  value?: string
+  tagName?: string
+  properties?: { className?: string[] | string }
+  children?: HighlightNode[]
+}
+
+const harnLowlight = createLowlight({ harn: harnLanguage })
+
+// Token classes whose text we offer inline docs for (keywords + built-ins).
+const TIPPABLE = new Set(["hljs-keyword", "hljs-built_in"])
+
+function nodeText(node: HighlightNode): string {
+  if (node.type === "text") return node.value ?? ""
+  return (node.children ?? []).map(nodeText).join("")
+}
+
+function classList(node: HighlightNode): string[] {
+  const className = node.properties?.className
+  if (!className) return []
+  return Array.isArray(className) ? className : [className]
+}
+
+function renderHighlightNode(node: HighlightNode, index: number): ReactNode {
+  if (node.type === "text") return node.value ?? ""
+  if (node.type !== "element") return null
+
+  const classes = classList(node)
+  // Offer a hover doc when this token is a keyword/built-in we have a note for.
+  // The shared KeywordTooltip listener reads `data-harn-tip`, so there is no per-token JS.
+  const tip = classes.some((c) => TIPPABLE.has(c)) ? KEYWORD_DOCS[nodeText(node).trim()] : undefined
+
+  return (
+    <span
+      key={index}
+      className={tip ? [...classes, "harn-tip"].join(" ") : classes.join(" ")}
+      data-harn-tip={tip}
+    >
+      {(node.children ?? []).map(renderHighlightNode)}
+    </span>
+  )
+}
+
+export function highlightHarnSource(source: string) {
+  return harnLowlight.highlight("harn", source).children.map(renderHighlightNode)
+}
+
+// `.harn.prompt` files are plain text with `{{ … }}` interpolation. Rather than
+// pretend they are Harn code, we highlight only the template markers so the
+// shape of `render_prompt` substitution reads at a glance. No lowlight grammar
+// needed: split on the marker pattern and wrap the matches.
+const TEMPLATE_MARKER = /\{\{[\s\S]*?\}\}/g
+
+export function highlightPromptTemplate(source: string): ReactNode[] {
+  const nodes: ReactNode[] = []
+  let lastIndex = 0
+  let key = 0
+  for (const match of source.matchAll(TEMPLATE_MARKER)) {
+    const start = match.index ?? 0
+    if (start > lastIndex) nodes.push(source.slice(lastIndex, start))
+    // Bright teal so the substitution slots stand out against the dark panel.
+    // (The hljs theme's own token colors are too low-contrast here.)
+    nodes.push(
+      <span key={key++} className="font-semibold text-[#5eead4]">
+        {match[0]}
+      </span>,
+    )
+    lastIndex = start + match[0].length
+  }
+  if (lastIndex < source.length) nodes.push(source.slice(lastIndex))
+  return nodes
+}

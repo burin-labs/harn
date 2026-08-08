@@ -1,0 +1,39 @@
+/**
+ * Preset kind registry (item 2): built-in kinds are registered through the
+ * same `agent_preset_register` path user kinds are, `agent_preset_kinds()`
+ * discovers them, and registration validates the spec shape.
+ */
+import { agent_preset, agent_preset_kinds, agent_preset_register } from "std/agent/presets"
+
+pipeline default(harness: Harness) {
+  // Built-in kinds are registered and discoverable.
+  const kinds = agent_preset_kinds()
+  harness.stdio.println(contains(kinds, "audit"))
+  harness.stdio.println(contains(kinds, "release_captain"))
+  harness.stdio.println(len(kinds))
+  // Register a user kind through the same path; it becomes first-class.
+  const registered = agent_preset_register(
+    "triage",
+    {family: "captain", pack: {provider: "openai", timeout_ms: 90000}},
+  )
+  harness.stdio.println(registered)
+  harness.stdio.println(contains(agent_preset_kinds(), "triage"))
+  const triage = agent_preset(harness, "triage")
+  harness.stdio.println(triage._preset_kind)
+  harness.stdio.println(triage.provider)
+  harness.stdio.println(triage.timeout_ms)
+  harness.stdio.println(triage?._llm_retry != nil)
+  // Validation: bad family and unknown pack key throw; unknown kind throws.
+  const bad_family = try {
+    agent_preset_register("bad", {family: "nope"})
+  }
+  harness.stdio.println(is_err(bad_family))
+  const bad_pack = try {
+    agent_preset_register("bad", {pack: {frobnicate: 1}})
+  }
+  harness.stdio.println(is_err(bad_pack))
+  const bad_kind = try {
+    agent_preset(harness, "does_not_exist")
+  }
+  harness.stdio.println(is_err(bad_kind))
+}

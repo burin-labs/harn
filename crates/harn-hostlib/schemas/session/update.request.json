@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/session/update.request.json",
+  "title": "session.update request",
+  "description": "Update typed mutable facts on one canonical session.",
+  "type": "object",
+  "properties": {
+    "root": { "type": "string", "minLength": 1 },
+    "session_id": { "type": "string", "minLength": 1 },
+    "title": { "type": ["string", "null"] },
+    "cwd": { "type": ["string", "null"] },
+    "model": { "type": ["string", "null"] },
+    "parent_session_id": { "type": ["string", "null"] },
+    "session_type": {
+      "type": ["string", "null"],
+      "enum": ["user", "subagent", "scheduled", null]
+    },
+    "project_scope": { "type": ["string", "null"] },
+    "usage_input": { "type": ["integer", "null"], "minimum": 0 },
+    "usage_output": { "type": ["integer", "null"], "minimum": 0 },
+    "usage_cost_usd_micros": { "type": ["integer", "null"], "minimum": 0 }
+  },
+  "required": ["root", "session_id"],
+  "additionalProperties": false
+}

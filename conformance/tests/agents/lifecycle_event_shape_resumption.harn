@@ -1,0 +1,29 @@
+pipeline main(harness: Harness) {
+  const evt = transcript_resumption_event(
+    {
+      handle: "worker://triage/42",
+      initiator: "drain_agent",
+      initiator_id: "settlement-session-1",
+      input: {approved: true},
+      input_hash: "sha256:abc",
+      continue_transcript: true,
+      trigger_match: {source: "github", event_id: "evt-1", filter_summary: "label matched"},
+      linked_suspension_span_id: "span-1",
+      resumed_at_turn: 6,
+    },
+  )
+  harness.stdio.println(evt?.kind == "resumption")
+  harness.stdio.println(evt?.role == "system")
+  harness.stdio.println(evt?.visibility == "public")
+  harness.stdio.println(evt?.text == "settlement-session-1")
+  harness.stdio.println(evt?.resumption?.handle == "worker://triage/42")
+  harness.stdio.println(evt?.resumption?.initiator == "drain_agent")
+  harness.stdio.println(evt?.resumption?.initiator_id == "settlement-session-1")
+  harness.stdio.println(evt?.resumption?.input?.approved)
+  harness.stdio.println(evt?.resumption?.input_hash == "sha256:abc")
+  harness.stdio.println(evt?.resumption?.continue_transcript)
+  harness.stdio.println(evt?.resumption?.trigger_match?.event_id == "evt-1")
+  harness.stdio.println(evt?.resumption?.linked_suspension_span_id == "span-1")
+  harness.stdio.println(evt?.resumption?.resumed_at_turn == 6)
+  harness.stdio.println(evt?.metadata?.input_hash == "sha256:abc")
+}

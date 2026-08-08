@@ -1,0 +1,16 @@
+wall_status=budget_exhausted
+wall_reason=wall_clock
+wall_kind=wall_clock
+wall_event_elapsed=true
+wall_iteration_elapsed=true
+cost_status=budget_exhausted
+cost_reason=total_cost
+cost_kind=total_cost
+cost_event_positive=true
+cost_iteration_positive=true
+circuit_status=budget_exhausted
+circuit_reason=circuit_breaker
+circuit_count=2
+circuit_pause=2500
+circuit_budget_kind=consecutive_failures
+circuit_clock=2500

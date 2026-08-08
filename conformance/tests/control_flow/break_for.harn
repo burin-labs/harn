@@ -1,0 +1,10 @@
+pipeline default(harness: Harness, task) {
+  let result = ""
+  for item in ["a", "b", "c", "d", "e"] {
+    if item == "d" {
+      break
+    }
+    result = result + item
+  }
+  harness.stdio.log(result)
+}

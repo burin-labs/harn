@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/terminal_session/wait_idle.request.json",
+  "title": "terminal_session.wait_idle request",
+  "type": "object",
+  "properties": {
+    "session_id": { "type": "string", "minLength": 1 },
+    "after_revision": { "type": "integer", "minimum": 0 },
+    "quiet_ms": { "type": "integer", "minimum": 0, "maximum": 30000, "default": 50 },
+    "timeout_ms": { "type": "integer", "minimum": 1, "maximum": 30000, "default": 10000 }
+  },
+  "required": ["session_id"],
+  "additionalProperties": false
+}

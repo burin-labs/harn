@@ -1,0 +1,24 @@
+pipeline test(harness: Harness, task) {
+  // Basic integer dedup
+  harness.stdio.log([1, 2, 2, 3, 1].unique())
+  // String dedup
+  harness.stdio.log(["a", "b", "a"].unique())
+  // Mixed types stay distinct
+  harness.stdio.log([1, "1", true].unique())
+  // Nested list dedup
+  harness.stdio.log([[1, 2], [3, 4], [1, 2]].unique())
+  // Nested dict dedup
+  harness.stdio.log([{a: 1}, {b: 2}, {a: 1}].unique())
+  // Empty list
+  harness.stdio.log([].unique())
+  // Single element
+  harness.stdio.log([42].unique())
+  // Nil dedup
+  harness.stdio.log([nil, 1, nil].unique())
+  // Bool dedup
+  harness.stdio.log([true, false, true, false].unique())
+  // Float dedup
+  harness.stdio.log([1.5, 2.5, 1.5].unique())
+  // Strings with special chars (hash collision regression)
+  harness.stdio.log(["a,b", "a", "b"].unique())
+}

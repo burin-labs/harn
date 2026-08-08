@@ -1,0 +1,39 @@
+import "std/agents"
+import "std/context"
+
+pipeline default(harness: Harness) {
+  const flow = workflow(
+    {
+      name: "session-demo",
+      model_tier: "mid",
+      loop_until_done: false,
+      act: {mode: "llm", context: context([section("brief", "Stay concise.", nil)], nil)},
+    },
+  )
+  const result = task_run(harness, "Write a note", flow, {provider: "mock"})
+  const session = workflow_session(result)
+  harness.stdio.println(session?._type == "workflow_session")
+  harness.stdio.println(session?.message_count >= 1)
+  const forked = workflow_session_fork(session)
+  harness.stdio.println(forked?.transcript_state == "forked")
+  const archived = workflow_session_archive(forked)
+  harness.stdio.println(archived?.transcript_state == "archived")
+  const resumed = workflow_session_resume(archived)
+  harness.stdio.println(resumed?.transcript_state == "active")
+  const compacted = workflow_session_compact(
+    harness.agent,
+    resumed,
+    {provider: "mock", keep_last: 1},
+  )
+  harness.stdio.println(compacted?.summary != nil)
+  const persisted = workflow_session_persist(
+    harness.fs,
+    result,
+    ".harn-runs/conformance-session.json",
+  )
+  harness.stdio.println(persisted?.run?.persisted_path != nil)
+  const restored = workflow_session_restore(harness.fs, persisted?.run?.persisted_path)
+  harness.stdio.println(restored?.message_count >= 1)
+  const reset = workflow_session_reset(harness.agent, restored, true)
+  harness.stdio.println(reset?.message_count == 0)
+}

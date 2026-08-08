@@ -1,0 +1,23 @@
+// Verifies that std/json's merge/pick/omit preserve typing through generic
+// projection. `merge` is row-polymorphic, so merging two record literals
+// infers the precise merged shape (no explicit type arguments needed); `pick`
+// and `omit` preserve the `dict<string, V>` value contract.
+import { merge, omit, pick } from "std/json"
+
+pipeline default(harness: Harness, task) {
+  const scores: dict<string, int> = {alice: 1, bob: 2}
+  const bonus: dict<string, int> = {bob: 5, carol: 3}
+  const combined: dict<string, int> = merge(scores, bonus)
+  harness.stdio.println(combined.alice)
+  harness.stdio.println(combined.bob)
+  harness.stdio.println(combined.carol)
+  const kept: dict<string, int> = pick(scores, ["alice"])
+  harness.stdio.println(kept.alice)
+  harness.stdio.println(contains(kept.keys(), "bob"))
+  const dropped: dict<string, int> = omit(scores, ["bob"])
+  harness.stdio.println(dropped.alice)
+  harness.stdio.println(contains(dropped.keys(), "bob"))
+  const extras = merge({region: "us"}, {tier: "gold"})
+  harness.stdio.println(extras.region)
+  harness.stdio.println(extras.tier)
+}

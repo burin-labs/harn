@@ -1,0 +1,55 @@
+import "../_common"
+
+fn first_snapshot_line(text) {
+  const matches = regex_captures("snapshot=(.+)", text)
+  if len(matches) == 0 {
+    return nil
+  }
+  return matches[0].groups[0]
+}
+
+pipeline main(harness: Harness) {
+  const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const harn_bin = harness.env.get_or(
+    "HARN_CONFORMANCE_HARN_BIN",
+    resolve_harn_bin(harness, repo_root),
+  )
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-top-level-resume-" + harness.random.uuid_v7(),
+  )
+  harness.fs.mkdir(root)
+  const script = path_join(root, "top_level_suspend.harn")
+  harness.fs.write_text(
+    script,
+    "import { agent_loop } from \"std/agent/loop\"\n\npipeline main(harness: Harness) {\n"
+      + "  harness.llm.mock_enqueue({tool_calls: [{id: \"park_1\", name: \"agent_await_resumption\", arguments: {reason: \"waiting on operator\"}}]})\n"
+      + "  let result = agent_loop(harness, \"Park until the operator resumes.\", nil, {provider: \"mock\", tool_format: \"native\", max_iterations: 2, session_id: \"top-level-\" + harness.random.uuid_v7()})\n"
+      + "  harness.stdio.println(\"status=\" + result.status)\n"
+      + "  harness.stdio.println(\"reason=\" + result.reason)\n"
+      + "  harness.stdio.println(\"handle_status=\" + result.handle.status)\n"
+      + "  harness.stdio.println(\"snapshot=\" + result.handle.snapshot_path)\n"
+      + "}\n",
+  )
+  const first = harness.process.exec_at(root, harn_bin, "run", script)
+  harness.stdio.println(first.success)
+  harness.stdio.println(contains(first.stdout, "status=suspended"))
+  harness.stdio.println(contains(first.stdout, "reason=waiting on operator"))
+  harness.stdio.println(contains(first.stdout, "handle_status=suspended"))
+  const snapshot = first_snapshot_line(first.stdout)
+  require snapshot != nil, "top-level suspend did not print a snapshot path"
+  const snapshot_path = if path_is_absolute(snapshot) {
+    snapshot
+  } else {
+    path_join(root, snapshot)
+  }
+  harness.stdio.println(harness.fs.exists(snapshot_path))
+  const second = harness.process.exec_at(root, harn_bin, "run", "--resume", snapshot, "--json")
+  harness.stdio.println(second.success)
+  const lines = second.stdout.trim().split("\n")
+  const final = json_parse(lines[len(lines) - 1])
+  harness.stdio.println(final.data.event_type)
+  harness.stdio.println(final.data.value.status)
+  harness.stdio.println(contains(final.data.value.result.summary, "Mock response"))
+  harness.stdio.println(final.data.value.has_transcript)
+}

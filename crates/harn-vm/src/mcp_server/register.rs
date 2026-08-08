@@ -1,0 +1,532 @@
+use std::cell::RefCell;
+use std::collections::BTreeMap;
+
+use serde_json::Value as JsonValue;
+
+use crate::mcp_progress::{current_context as current_progress_context, is_valid_progress_token};
+use crate::value::{VmError, VmValue};
+use crate::vm::Vm;
+
+use super::defs::{
+    McpCompletionSource, McpPromptArgDef, McpPromptDef, McpResourceDef, McpResourceTemplateDef,
+    McpServerMetadata,
+};
+
+thread_local! {
+    /// Stores the tool registry set by `mcp_tools` / `mcp_serve`.
+    static MCP_SERVE_REGISTRY: RefCell<Option<VmValue>> = const { RefCell::new(None) };
+    /// Static resources registered by `mcp_resource`.
+    static MCP_SERVE_RESOURCES: RefCell<Vec<McpResourceDef>> = const { RefCell::new(Vec::new()) };
+    /// Resource templates registered by `mcp_resource_template`.
+    static MCP_SERVE_RESOURCE_TEMPLATES: RefCell<Vec<McpResourceTemplateDef>> = const { RefCell::new(Vec::new()) };
+    /// Prompts registered by `mcp_prompt`.
+    static MCP_SERVE_PROMPTS: RefCell<Vec<McpPromptDef>> = const { RefCell::new(Vec::new()) };
+    /// Optional metadata registered by `mcp_server_metadata`.
+    static MCP_SERVE_METADATA: RefCell<Option<McpServerMetadata>> = const { RefCell::new(None) };
+}
+
+/// Register all MCP server builtins on a VM.
+pub fn register_mcp_server_builtins(vm: &mut Vm) {
+    fn register_tools_impl(args: &[VmValue]) -> Result<VmValue, VmError> {
+        let registry = args.first().cloned().ok_or_else(|| {
+            VmError::Runtime("mcp_tools: requires a tool_registry argument".into())
+        })?;
+        if let VmValue::Dict(d) = &registry {
+            match d.get("_type") {
+                Some(VmValue::String(t)) if &**t == "tool_registry" => {}
+                _ => {
+                    return Err(VmError::Runtime(
+                        "mcp_tools: argument must be a tool registry (created with tool_registry())"
+                            .into(),
+                    ));
+                }
+            }
+        } else {
+            return Err(VmError::Runtime(
+                "mcp_tools: argument must be a tool registry".into(),
+            ));
+        }
+        MCP_SERVE_REGISTRY.with(|cell| {
+            *cell.borrow_mut() = Some(registry);
+        });
+        Ok(VmValue::Nil)
+    }
+
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_tools",
+        |args, _out| register_tools_impl(args),
+    );
+
+    // mcp_server_metadata({name?, version?, instructions?}) -> nil
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_server_metadata",
+        |args, _out| {
+            let dict = match args.first() {
+                Some(VmValue::Dict(d)) => d,
+                _ => {
+                    return Err(VmError::Runtime(
+                        "mcp_server_metadata: argument must be a dict".into(),
+                    ));
+                }
+            };
+
+            let metadata = McpServerMetadata {
+                name: optional_non_empty_string(dict, "name", "mcp_server_metadata")?,
+                version: optional_non_empty_string(dict, "version", "mcp_server_metadata")?,
+                instructions: optional_non_empty_string(
+                    dict,
+                    "instructions",
+                    "mcp_server_metadata",
+                )?,
+            };
+            if metadata == McpServerMetadata::default() {
+                return Err(VmError::Runtime(
+                "mcp_server_metadata: at least one of name, version, or instructions is required"
+                    .into(),
+            ));
+            }
+
+            MCP_SERVE_METADATA.with(|cell| {
+                *cell.borrow_mut() = Some(metadata);
+            });
+            Ok(VmValue::Nil)
+        },
+    );
+
+    // mcp_resource({uri, name, text, description?, mime_type?, meta?}) -> nil
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_resource",
+        |args, _out| {
+            let dict = match args.first() {
+                Some(VmValue::Dict(d)) => d,
+                _ => {
+                    return Err(VmError::Runtime(
+                        "mcp_resource: argument must be a dict with {uri, name, text}".into(),
+                    ));
+                }
+            };
+
+            let uri = dict
+                .get("uri")
+                .map(|v| v.display())
+                .ok_or_else(|| VmError::Runtime("mcp_resource: 'uri' is required".into()))?;
+            let name = dict
+                .get("name")
+                .map(|v| v.display())
+                .ok_or_else(|| VmError::Runtime("mcp_resource: 'name' is required".into()))?;
+            let title = dict.get("title").map(|v| v.display());
+            let description = dict.get("description").map(|v| v.display());
+            let mime_type = dict.get("mime_type").map(|v| v.display());
+            let meta = match dict.get("meta") {
+                Some(VmValue::Dict(value)) => Some(super::convert::vm_value_to_json(
+                    &VmValue::Dict(value.clone()),
+                )),
+                Some(VmValue::Nil) | None => None,
+                Some(_) => {
+                    return Err(VmError::Runtime(
+                        "mcp_resource: 'meta' must be a dict".into(),
+                    ));
+                }
+            };
+            let text = dict
+                .get("text")
+                .map(|v| v.display())
+                .ok_or_else(|| VmError::Runtime("mcp_resource: 'text' is required".into()))?;
+
+            MCP_SERVE_RESOURCES.with(|cell| {
+                cell.borrow_mut().push(McpResourceDef {
+                    uri,
+                    name,
+                    title,
+                    description,
+                    mime_type,
+                    meta,
+                    text,
+                });
+            });
+
+            Ok(VmValue::Nil)
+        },
+    );
+
+    // mcp_resource_template({uri_template, name, handler, description?, mime_type?}) -> nil
+    // The handler receives a dict of URI template arguments and returns a string.
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_resource_template",
+        |args, _out| {
+            let dict = match args.first() {
+                Some(VmValue::Dict(d)) => d,
+                _ => {
+                    return Err(VmError::Runtime(
+                        "mcp_resource_template: argument must be a dict".into(),
+                    ));
+                }
+            };
+
+            let uri_template = dict
+                .get("uri_template")
+                .map(|v| v.display())
+                .ok_or_else(|| {
+                    VmError::Runtime("mcp_resource_template: 'uri_template' is required".into())
+                })?;
+            let name = dict.get("name").map(|v| v.display()).ok_or_else(|| {
+                VmError::Runtime("mcp_resource_template: 'name' is required".into())
+            })?;
+            let title = dict.get("title").map(|v| v.display());
+            let description = dict.get("description").map(|v| v.display());
+            let mime_type = dict.get("mime_type").map(|v| v.display());
+            let handler = match dict.get("handler") {
+                Some(VmValue::Closure(c)) => (**c).clone(),
+                _ => {
+                    return Err(VmError::Runtime(
+                        "mcp_resource_template: 'handler' closure is required".into(),
+                    ));
+                }
+            };
+            let completions = completion_sources_from_dict(
+                dict.get("completions").or_else(|| dict.get("suggestions")),
+            );
+
+            MCP_SERVE_RESOURCE_TEMPLATES.with(|cell| {
+                cell.borrow_mut().push(McpResourceTemplateDef {
+                    uri_template,
+                    name,
+                    title,
+                    description,
+                    mime_type,
+                    completions,
+                    handler,
+                });
+            });
+
+            Ok(VmValue::Nil)
+        },
+    );
+
+    // mcp_prompt({name, handler, description?, arguments?}) -> nil
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_prompt",
+        |args, _out| {
+            let dict = match args.first() {
+                Some(VmValue::Dict(d)) => d,
+                _ => {
+                    return Err(VmError::Runtime(
+                        "mcp_prompt: argument must be a dict with {name, handler}".into(),
+                    ));
+                }
+            };
+
+            let name = dict
+                .get("name")
+                .map(|v| v.display())
+                .ok_or_else(|| VmError::Runtime("mcp_prompt: 'name' is required".into()))?;
+            let title = dict.get("title").map(|v| v.display());
+            let description = dict.get("description").map(|v| v.display());
+
+            let handler = match dict.get("handler") {
+                Some(VmValue::Closure(c)) => (**c).clone(),
+                _ => {
+                    return Err(VmError::Runtime(
+                        "mcp_prompt: 'handler' closure is required".into(),
+                    ));
+                }
+            };
+
+            let arguments = dict.get("arguments").and_then(|v| {
+                if let VmValue::List(list) = v {
+                    let args: Vec<McpPromptArgDef> = list
+                        .iter()
+                        .filter_map(|item| {
+                            if let VmValue::Dict(d) = item {
+                                Some(McpPromptArgDef {
+                                    name: d.get("name").map(|v| v.display()).unwrap_or_default(),
+                                    description: d.get("description").map(|v| v.display()),
+                                    required: matches!(
+                                        d.get("required"),
+                                        Some(VmValue::Bool(true))
+                                    ),
+                                    completion: completion_source_from_argument_dict(d),
+                                })
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    if args.is_empty() {
+                        None
+                    } else {
+                        Some(args)
+                    }
+                } else {
+                    None
+                }
+            });
+
+            MCP_SERVE_PROMPTS.with(|cell| {
+                cell.borrow_mut().push(McpPromptDef {
+                    name,
+                    title,
+                    description,
+                    arguments,
+                    handler,
+                });
+            });
+
+            Ok(VmValue::Nil)
+        },
+    );
+
+    // mcp_elicit({message, requestedSchema}) -> {action, content?}
+    //
+    // Return a stable input_required round and resolve the client response
+    // when the original handler is re-entered.
+    //
+    // The client may respond with one of:
+    //   - {action: "accept", content: <validated against requestedSchema>}
+    //   - {action: "decline"}
+    //   - {action: "cancel"}
+    //
+    // Spec: https://modelcontextprotocol.io/specification/2026-07-28/client/elicitation
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_elicit",
+        |_ctx, args| async move {
+            let dict = match args.first() {
+                Some(VmValue::Dict(d)) => d.clone(),
+                _ => {
+                    return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                        "mcp_elicit: argument must be a dict with {message, requestedSchema}",
+                    ))));
+                }
+            };
+            let message = dict.get("message").map(VmValue::display).ok_or_else(|| {
+                VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                    "mcp_elicit: 'message' is required",
+                )))
+            })?;
+            let requested_schema = dict.get("requestedSchema").or_else(|| dict.get("schema"));
+            let requested_schema = requested_schema.ok_or_else(|| {
+                VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                    "mcp_elicit: 'requestedSchema' is required",
+                )))
+            })?;
+            let requested_schema_json: JsonValue = crate::mcp::vm_value_to_serde(requested_schema);
+
+            crate::mcp_elicit::elicit_form(message, requested_schema_json)
+        },
+    );
+
+    // Ask the MCP client for roots through a stable input_required round.
+    vm.register_async_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_client_roots",
+        |_ctx, args| async move {
+            if !args.is_empty() {
+                return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
+                    "mcp_client_roots: takes no arguments",
+                ))));
+            }
+            crate::mcp_client_roots::request_client_roots().await
+        },
+    );
+    // mcp_report_progress(progress, opts?) -> bool
+    //
+    // Emit a `notifications/progress` notification for the in-flight
+    // tool call. Returns `true` when the notification was sent and
+    // `false` when it was dropped (no client opt-in via
+    // `_meta.progressToken`, or progress would not strictly increase).
+    //
+    // `opts` is an optional dict supporting:
+    //   - `total`: optional ceiling so the client can render a bar
+    //   - `message`: human-readable status string
+    //   - `token`: override the ambient request token (rarely needed;
+    //     useful only when manually fanning out progress for nested work)
+    //
+    // Spec:
+    //   https://modelcontextprotocol.io/specification/2026-07-28/basic/utilities/progress
+    vm.register_capability_method(
+        harn_builtin_meta::CapabilityId::Tools,
+        "mcp_report_progress",
+        |args, _out| {
+            let progress = match args.first() {
+                Some(value) => coerce_progress_number(value).ok_or_else(|| {
+                    VmError::Runtime(format!(
+                        "mcp_report_progress: 'progress' must be a number (got {})",
+                        value.display()
+                    ))
+                })?,
+                None => {
+                    return Err(VmError::Runtime(
+                        "mcp_report_progress: 'progress' is required".into(),
+                    ));
+                }
+            };
+
+            let mut total: Option<f64> = None;
+            let mut message: Option<String> = None;
+            let mut explicit_token: Option<JsonValue> = None;
+            if let Some(VmValue::Dict(opts)) = args.get(1) {
+                if let Some(value) = opts.get("total") {
+                    match value {
+                        VmValue::Nil => {}
+                        other => {
+                            total = Some(coerce_progress_number(other).ok_or_else(|| {
+                                VmError::Runtime(format!(
+                                    "mcp_report_progress: 'total' must be a number (got {})",
+                                    other.display()
+                                ))
+                            })?);
+                        }
+                    }
+                }
+                if let Some(value) = opts.get("message") {
+                    match value {
+                        VmValue::String(s) => message = Some(s.to_string()),
+                        VmValue::Nil => {}
+                        other => message = Some(other.display()),
+                    }
+                }
+                if let Some(value) = opts.get("token") {
+                    let candidate = crate::mcp::vm_value_to_serde(value);
+                    if !is_valid_progress_token(&candidate) {
+                        return Err(VmError::Runtime(
+                            "mcp_report_progress: 'token' must be a string or number".into(),
+                        ));
+                    }
+                    explicit_token = Some(candidate);
+                }
+            }
+
+            let Some(ctx) = current_progress_context() else {
+                // No active per-call context — either the client didn't opt
+                // in with `_meta.progressToken` or the call originates
+                // outside an MCP tool handler. Either way, silently drop:
+                // scripts can sprinkle this builtin liberally without
+                // checking.
+                return Ok(VmValue::Bool(false));
+            };
+
+            let sent = if let Some(token) = explicit_token {
+                ctx.bus.report(&token, progress, total, message)
+            } else {
+                ctx.report(progress, total, message)
+            };
+            Ok(VmValue::Bool(sent))
+        },
+    );
+}
+
+fn completion_sources_from_dict(value: Option<&VmValue>) -> BTreeMap<String, McpCompletionSource> {
+    let Some(VmValue::Dict(sources)) = value else {
+        return BTreeMap::new();
+    };
+    sources
+        .iter()
+        .filter_map(|(name, value)| {
+            completion_source_from_value(value).map(|source| (name.to_string(), source))
+        })
+        .collect()
+}
+
+fn completion_source_from_argument_dict(
+    dict: &crate::value::DictMap,
+) -> Option<McpCompletionSource> {
+    let mut source = McpCompletionSource::default();
+    for key in ["suggestions", "completions", "values"] {
+        if let Some(value) = dict.get(key) {
+            source.values.extend(completion_values_from_value(value));
+        }
+    }
+    for key in ["complete", "completion", "handler"] {
+        if let Some(VmValue::Closure(closure)) = dict.get(key) {
+            source.handler = Some((**closure).clone());
+            break;
+        }
+    }
+    (!source.values.is_empty() || source.handler.is_some()).then_some(source)
+}
+
+fn completion_source_from_value(value: &VmValue) -> Option<McpCompletionSource> {
+    match value {
+        VmValue::Closure(closure) => Some(McpCompletionSource {
+            values: Vec::new(),
+            handler: Some((**closure).clone()),
+        }),
+        VmValue::Dict(dict) => completion_source_from_argument_dict(dict),
+        _ => {
+            let values = completion_values_from_value(value);
+            (!values.is_empty()).then_some(McpCompletionSource {
+                values,
+                handler: None,
+            })
+        }
+    }
+}
+
+fn completion_values_from_value(value: &VmValue) -> Vec<String> {
+    match value {
+        VmValue::List(items) => items.iter().map(completion_value_to_string).collect(),
+        VmValue::String(value) => vec![value.to_string()],
+        _ => Vec::new(),
+    }
+}
+
+fn coerce_progress_number(value: &VmValue) -> Option<f64> {
+    match value {
+        VmValue::Int(n) => Some(*n as f64),
+        VmValue::Float(n) => Some(*n),
+        _ => None,
+    }
+}
+
+fn completion_value_to_string(value: &VmValue) -> String {
+    match value {
+        VmValue::String(value) => value.to_string(),
+        _ => value.display(),
+    }
+}
+
+// Thread-local accessors used by the CLI after pipeline execution.
+
+pub fn take_mcp_serve_registry() -> Option<VmValue> {
+    MCP_SERVE_REGISTRY.with(|cell| cell.borrow_mut().take())
+}
+
+pub fn take_mcp_serve_resources() -> Vec<McpResourceDef> {
+    MCP_SERVE_RESOURCES.with(|cell| cell.borrow_mut().drain(..).collect())
+}
+
+pub fn take_mcp_serve_resource_templates() -> Vec<McpResourceTemplateDef> {
+    MCP_SERVE_RESOURCE_TEMPLATES.with(|cell| cell.borrow_mut().drain(..).collect())
+}
+
+pub fn take_mcp_serve_prompts() -> Vec<McpPromptDef> {
+    MCP_SERVE_PROMPTS.with(|cell| cell.borrow_mut().drain(..).collect())
+}
+
+pub fn take_mcp_serve_metadata() -> Option<McpServerMetadata> {
+    MCP_SERVE_METADATA.with(|cell| cell.borrow_mut().take())
+}
+
+fn optional_non_empty_string(
+    dict: &crate::value::DictMap,
+    key: &str,
+    builtin: &str,
+) -> Result<Option<String>, VmError> {
+    match dict.get(key) {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::String(value)) if !value.is_empty() => Ok(Some(value.to_string())),
+        Some(VmValue::String(_)) => Err(VmError::Runtime(format!(
+            "{builtin}: '{key}' must be a non-empty string"
+        ))),
+        Some(value) => Err(VmError::Runtime(format!(
+            "{builtin}: '{key}' must be a string (got {})",
+            value.display()
+        ))),
+    }
+}
