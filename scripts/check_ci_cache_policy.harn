@@ -1125,6 +1125,11 @@ fn blacksmith_tier_expression() -> string {
     + "{{ vars.${BLACKSMITH_DISABLE_VAR} == 'true' && '${HOSTED_RUNNER_TIER}' || (github.event_name == 'merge_group' && '${BLACKSMITH_RUNNER_TIER}' || '${HOSTED_RUNNER_TIER}') }}"
 }
 
+fn blacksmith_timeout_expression() -> string {
+  return "$"
+    + "{{ github.event_name == 'merge_group' && vars.${BLACKSMITH_DISABLE_VAR} != 'true' && 10 || 25 }}"
+}
+
 /** Keep a compile lane on free hosted capacity with one complete coarse cache. */
 fn hosted_compile_lane_errors(workflow, job_name: string, rust_cache_key: string) -> list<string> {
   const job = workflow?.jobs?.[job_name]
@@ -1193,8 +1198,11 @@ fn persistent_compile_lane_errors(
   if trim(to_string(job?.env?.SCCACHE_CACHE_SIZE ?? "")) != "15G" {
     errors = errors + ["ci.yml:${job_name} must bound persistent sccache at 15G"]
   }
-  if trim(to_string(job?.["timeout-minutes"] ?? "")) != "10" {
-    errors = errors + ["ci.yml:${job_name} must keep the 10-minute paid-runner cost fuse"]
+  if trim(to_string(job?.["timeout-minutes"] ?? "")) != blacksmith_timeout_expression() {
+    errors = errors
+      + [
+      "ci.yml:${job_name} must keep the 10-minute paid-runner fuse and 25-minute hosted fallback",
+    ]
   }
   const persistent = matching_steps(job, PERSISTENT_SCCACHE_ACTION)
   if len(persistent) != 1 {
