@@ -13,7 +13,9 @@
 //! [`truncate_end`] / [`truncate_start`] when it counts characters. Both cut on
 //! character boundaries; hand-rolled copies that indexed a `&str` by a fixed
 //! byte offset panicked on any multi-byte character straddling the limit, which
-//! is why the byte-budget variant lives here too.
+//! is why the byte-budget variant lives here too. [`clip_end`] is the one
+//! markerless cut, for outputs that are values (dedup keys, fingerprints,
+//! prompt budgets) rather than display strings.
 
 /// The single ellipsis marker used by every truncating surface. Keeping one
 /// constant is what makes the "ellipsis counts toward the budget" arithmetic
@@ -36,6 +38,21 @@ pub fn truncate_end(text: &str, max_chars: usize) -> String {
     head.pop();
     head.push(ELLIPSIS);
     head
+}
+
+/// Keep the head of `text` with no truncation marker.
+///
+/// The result is at most `max_chars` Unicode scalars. Reach for this only when
+/// the output is a value rather than a display string — a dedup key, a content
+/// fingerprint, a prompt-budget slice — where an ellipsis would corrupt the
+/// value being keyed or measured. Anything a human reads should use
+/// [`truncate_end`] so the shortening stays visible.
+pub fn clip_end(text: &str, max_chars: usize) -> String {
+    let mut chars = text.char_indices();
+    match chars.nth(max_chars) {
+        None => text.to_string(),
+        Some((cut, _)) => text[..cut].to_string(),
+    }
 }
 
 /// Keep the tail of `text`, replacing the dropped head with an ellipsis.
@@ -131,6 +148,19 @@ mod tests {
                     "truncate_end_bytes({input:?}, {max}) = {bytes:?} exceeds budget"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn clip_end_cuts_on_char_boundaries_without_a_marker() {
+        assert_eq!(clip_end("abcdefgh", 5), "abcde");
+        assert_eq!(clip_end("abcde", 5), "abcde");
+        assert_eq!(clip_end("日本語のテキスト", 3), "日本語");
+        assert_eq!(clip_end("anything", 0), "");
+        for max in 0..12usize {
+            let clipped = clip_end("héllo wörld with wide ünicode", max);
+            assert!(clipped.chars().count() <= max);
+            assert!(!clipped.contains(ELLIPSIS));
         }
     }
 

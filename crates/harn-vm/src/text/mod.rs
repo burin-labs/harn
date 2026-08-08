@@ -10,4 +10,4 @@ pub mod case;
 pub mod truncate;
 
 pub use ansi::strip_ansi;
-pub use truncate::{truncate_end, truncate_end_bytes, truncate_start};
+pub use truncate::{clip_end, truncate_end, truncate_end_bytes, truncate_start};
