@@ -791,16 +791,14 @@ fn trigger_payload_text(payload: &VmValue) -> String {
 }
 
 fn summarize_text(text: &str) -> Option<String> {
+    /// Byte ceiling for a daemon event summary.
+    const MAX_LEN: usize = 160;
+
     let compact = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if compact.is_empty() {
         return None;
     }
-    const MAX_LEN: usize = 160;
-    if compact.len() <= MAX_LEN {
-        Some(compact)
-    } else {
-        Some(format!("{}...", &compact[..MAX_LEN]))
-    }
+    Some(crate::text::truncate_end_bytes(&compact, MAX_LEN))
 }
 
 fn summarize_snapshot(snapshot: Option<&DaemonSnapshot>) -> Option<String> {
@@ -1202,5 +1200,32 @@ pipeline test(harness: Harness, task) {
             .filter(|line| !line.is_empty())
             .collect();
         assert_eq!(lines, vec!["true", "true", "true", "true"]);
+    }
+
+    /// `summarize_text` bounds its result in bytes. Cutting the compacted text
+    /// at a fixed byte index panicked whenever a multi-byte character straddled
+    /// the limit, so an ordinary non-ASCII trigger payload aborted the daemon
+    /// event summary instead of shortening it.
+    #[test]
+    fn summarize_text_bounds_multibyte_payloads_without_panicking() {
+        // "æ" is two bytes: shifting the length by one walks the byte cut
+        // across a character boundary in every possible alignment.
+        for chars in 70..100 {
+            let summary = summarize_text(&"æ".repeat(chars)).expect("non-empty text summarizes");
+            assert!(
+                summary.len() <= 160,
+                "summary of {chars} chars was {} bytes",
+                summary.len()
+            );
+        }
+    }
+
+    #[test]
+    fn summarize_text_collapses_whitespace_and_skips_empty_input() {
+        assert_eq!(
+            summarize_text("  hello\n\tworld  ").as_deref(),
+            Some("hello world")
+        );
+        assert_eq!(summarize_text("   \n  "), None);
     }
 }

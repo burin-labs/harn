@@ -605,7 +605,7 @@ fn warn_git_failure(operation: &str, exit_code: i64, stderr: &str) {
     if PROBE_OPERATIONS.contains(&operation) {
         return;
     }
-    let first_line = truncate_chars(
+    let first_line = crate::text::truncate_end(
         stderr.lines().next().unwrap_or("").trim(),
         FAILURE_STDERR_MAX_CHARS,
     );
@@ -633,17 +633,6 @@ fn warn_git_failure(operation: &str, exit_code: i64, stderr: &str) {
 /// with no suppressed diagnostics, mirroring `sandbox::reset_sandbox_state`.
 pub(crate) fn reset_git_state() {
     WARNED_GIT_FAILURES.with(|keys| keys.borrow_mut().clear());
-}
-
-/// Truncate `text` to at most `max` characters (not bytes), appending an
-/// ellipsis when it was shortened, so the excerpt never splits a UTF-8
-/// codepoint.
-fn truncate_chars(text: &str, max: usize) -> String {
-    if text.chars().count() <= max {
-        return text.to_string();
-    }
-    let head: String = text.chars().take(max).collect();
-    format!("{head}…")
 }
 
 async fn planned_or_noop_receipt(

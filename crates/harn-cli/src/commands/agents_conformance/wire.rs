@@ -337,6 +337,9 @@ pub(super) fn expect_status_any(response: &HttpResult, expected: &[StatusCode]) 
     }
 }
 
+/// How much of a failing response body a probe error quotes back.
+const BODY_SNIPPET_MAX_BYTES: usize = 500;
+
 fn body_suffix(response: &HttpResult) -> String {
     let mut suffix = String::new();
     if let Some(content_type) = response
@@ -347,9 +350,11 @@ fn body_suffix(response: &HttpResult) -> String {
         suffix.push_str(&format!(" content-type={content_type}"));
     }
     if !response.body.trim().is_empty() {
-        let body = response.body.trim();
         suffix.push_str(": ");
-        suffix.push_str(if body.len() > 500 { &body[..500] } else { body });
+        suffix.push_str(&harn_vm::text::truncate_end_bytes(
+            response.body.trim(),
+            BODY_SNIPPET_MAX_BYTES,
+        ));
     }
     suffix
 }
@@ -519,6 +524,30 @@ mod tests {
         assert!(
             validate_status_transitions(&["COMPLETED".to_string(), "WORKING".to_string()]).is_err()
         );
+    }
+
+    /// `body_suffix` bounds the quoted body in bytes. Cutting at a fixed byte
+    /// index panicked whenever a multi-byte character straddled the limit, so a
+    /// non-ASCII error body from the agent under test aborted the probe run
+    /// instead of reporting the failed assertion.
+    #[test]
+    fn body_suffix_bounds_multibyte_bodies_without_panicking() {
+        // "æ" is two bytes: shifting the length by one walks the byte cut
+        // across a character boundary in every possible alignment.
+        for chars in 240..280 {
+            let response = HttpResult {
+                status: StatusCode::BAD_REQUEST,
+                headers: HeaderMap::new(),
+                body: "æ".repeat(chars),
+                json: None,
+            };
+            let suffix = body_suffix(&response);
+            assert!(
+                suffix.len() <= ": ".len() + BODY_SNIPPET_MAX_BYTES,
+                "suffix for {chars} chars was {} bytes",
+                suffix.len()
+            );
+        }
     }
 
     #[test]

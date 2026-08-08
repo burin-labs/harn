@@ -249,6 +249,10 @@ pub(crate) fn swap_mutation_session(
 ) -> Option<MutationSessionRecord> {
     CURRENT_MUTATION_SESSION.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), next))
 }
+
+/// How much of the offending payload a deserialization error quotes back.
+const PAYLOAD_SNIPPET_MAX_BYTES: usize = 600;
+
 pub(crate) fn parse_json_payload<T: for<'de> Deserialize<'de>>(
     json: serde_json::Value,
     label: &str,
@@ -258,11 +262,7 @@ pub(crate) fn parse_json_payload<T: for<'de> Deserialize<'de>>(
     let mut tracker = serde_path_to_error::Track::new();
     let path_deserializer = serde_path_to_error::Deserializer::new(&mut deserializer, &mut tracker);
     T::deserialize(path_deserializer).map_err(|error| {
-        let snippet = if payload.len() > 600 {
-            format!("{}...", &payload[..600])
-        } else {
-            payload.clone()
-        };
+        let snippet = crate::text::truncate_end_bytes(&payload, PAYLOAD_SNIPPET_MAX_BYTES);
         VmError::Runtime(format!(
             "{label} parse error at {}: {} | payload={}",
             tracker.path(),

@@ -150,14 +150,15 @@ fn sanitize_provider_error_body(body: &str) -> String {
     let summary =
         structured_provider_error_summary(body).unwrap_or_else(|| body.trim().to_string());
     let redacted = redact_provider_error_secrets(&summary);
-    truncate_chars(&redacted, MAX_PROVIDER_ERROR_BODY_CHARS)
+    crate::text::truncate_end(&redacted, MAX_PROVIDER_ERROR_BODY_CHARS)
 }
 
 fn structured_provider_error_summary(body: &str) -> Option<String> {
     let json: serde_json::Value = serde_json::from_str(body).ok()?;
     let error = json.get("error").unwrap_or(&json);
     if let Some(message) = provider_error_message(error).or_else(|| provider_error_message(&json)) {
-        let message = truncate_chars(message, MAX_PROVIDER_ERROR_BODY_CHARS.saturating_sub(256));
+        let message =
+            crate::text::truncate_end(message, MAX_PROVIDER_ERROR_BODY_CHARS.saturating_sub(256));
         let mut details = Vec::new();
         collect_error_details(error, &mut details);
         if !std::ptr::eq(std::ptr::from_ref(error), std::ptr::addr_of!(json)) {
@@ -233,7 +234,7 @@ fn previous_errors_summary(errors: &[serde_json::Value]) -> Option<String> {
             .and_then(provider_error_message)
             .or_else(|| provider_error_message(error));
         if let Some(message) = message {
-            let message = truncate_chars(message, 180);
+            let message = crate::text::truncate_end(message, 180);
             if let Some(provider) = provider {
                 parts.push(format!("{provider}: {message}"));
             } else {
@@ -289,15 +290,6 @@ fn redact_provider_error_secrets(text: &str) -> String {
     crate::redact::current_policy()
         .redact_string(&redacted)
         .into_owned()
-}
-
-fn truncate_chars(text: &str, max_chars: usize) -> String {
-    if text.chars().count() <= max_chars {
-        return text.to_string();
-    }
-    let mut out = text.chars().take(max_chars).collect::<String>();
-    out.push_str("...");
-    out
 }
 
 pub(crate) fn classify_llm_error(category: ErrorCategory, message: &str) -> LlmErrorInfo {

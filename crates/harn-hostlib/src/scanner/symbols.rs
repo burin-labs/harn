@@ -399,12 +399,7 @@ fn truncate_signature(rest: &str, max_len: usize) -> String {
         }
     }
     let candidate = if end > 0 { &rest[..end] } else { rest };
-    if candidate.chars().count() > max_len {
-        let truncated: String = candidate.chars().take(max_len).collect();
-        format!("{truncated}…")
-    } else {
-        candidate.to_string()
-    }
+    harn_vm::text::truncate_end(candidate, max_len)
 }
 
 macro_rules! pattern {
