@@ -289,8 +289,7 @@ mod fixture_dispatch_tests {
             false,
         );
 
-        let params = request_dict("echo not-executed");
-        let args = [VmValue::dict(params.clone())];
+        let args = [VmValue::dict(request_dict("echo not-executed"))];
         let value = fixtures
             .dispatch(
                 harn_builtin_meta::CapabilityId::Tools,
