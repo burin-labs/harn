@@ -52,7 +52,7 @@
           "id": "release-audit-rust-test",
           "condition": "vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'",
           "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
-          "run": "scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --profile ci -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'"
+          "run": "scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --profile ci -E 'not (test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration))'"
         }
       ]
     },
@@ -65,7 +65,7 @@
         {
           "id": "release-audit-rust-security",
           "condition": "",
-          "run": "scripts/ci/run_rust_test_lane.sh cargo nextest run --profile ci --archive-file \"$RUNNER_TEMP/harn-security/harn-security-tests.tar.zst\" --workspace-remap \"$GITHUB_WORKSPACE\" -E 'test(test_linux_process_sandbox_catches_ten_process_escapes)'"
+          "run": "scripts/ci/run_rust_test_lane.sh cargo nextest run --profile ci --archive-file \"$RUNNER_TEMP/harn-security/harn-security-tests.tar.zst\" --workspace-remap \"$GITHUB_WORKSPACE\" -E 'test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration)'"
         }
       ]
     },
