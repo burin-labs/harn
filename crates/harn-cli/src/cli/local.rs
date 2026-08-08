@@ -28,8 +28,8 @@ pub(crate) enum LocalCommand {
     Switch(LocalSwitchArgs),
     /// Explain the selected local runtime profile and required probes.
     Profile(LocalProfileArgs),
-    /// Unload loaded local models. By default targets the active provider;
-    /// pass `--all` to unload every reachable local provider.
+    /// Unload loaded local models. Failed managed-process termination remains
+    /// tracked for retry. Pass `--all` to target every local provider.
     Stop(LocalStopArgs),
 }
 

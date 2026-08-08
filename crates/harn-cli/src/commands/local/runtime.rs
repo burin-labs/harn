@@ -12,6 +12,8 @@ use serde::Serialize;
 
 use crate::net;
 
+#[cfg(any(unix, test))]
+use super::state::clear_pid_record;
 use super::state::{read_pid_record, PidRecord};
 
 pub(crate) fn normalize_local_provider_id(provider: &str) -> String {
@@ -363,28 +365,130 @@ pub(crate) async fn ollama_unload_model(base_url: &str, model: &str) -> Result<(
     }
 }
 
+#[cfg(any(unix, test))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PidTermination {
+    Signaled,
+    AlreadyExited,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ManagedPidStopStatus {
+    #[cfg(any(unix, test))]
+    Stopped,
+    #[cfg(any(unix, test))]
+    AlreadyStopped,
+    Failed(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ManagedPidStop {
+    pid: u32,
+    status: ManagedPidStopStatus,
+}
+
+impl ManagedPidStop {
+    pub(crate) fn into_action(self) -> (String, String) {
+        let outcome = match self.status {
+            #[cfg(any(unix, test))]
+            ManagedPidStopStatus::Stopped => "stopped".to_string(),
+            #[cfg(any(unix, test))]
+            ManagedPidStopStatus::AlreadyStopped => {
+                "already stopped; cleared stale PID record".to_string()
+            }
+            ManagedPidStopStatus::Failed(error) => format!("error: {error}"),
+        };
+        (format!("pid {}", self.pid), outcome)
+    }
+}
+
+/// Stop the process in a provider's Harn-owned PID record. Clear the record
+/// only when SIGTERM is accepted or the process is already gone; retain it
+/// after a failed request so a later `harn local stop` can retry.
+#[cfg(unix)]
+pub(crate) fn terminate_managed_pid(
+    provider: &str,
+    base_dir: &Path,
+) -> Result<Option<ManagedPidStop>, String> {
+    terminate_managed_pid_with(provider, base_dir, terminate_pid)
+}
+
+#[cfg(not(unix))]
+pub(crate) fn terminate_managed_pid(
+    provider: &str,
+    base_dir: &Path,
+) -> Result<Option<ManagedPidStop>, String> {
+    let Some(record) = read_pid_record(base_dir, provider)? else {
+        return Ok(None);
+    };
+    Ok(Some(ManagedPidStop {
+        pid: record.pid,
+        status: ManagedPidStopStatus::Failed(format!(
+            "terminating pid {} is not supported on this platform",
+            record.pid
+        )),
+    }))
+}
+
+#[cfg(any(unix, test))]
+fn terminate_managed_pid_with<F>(
+    provider: &str,
+    base_dir: &Path,
+    terminate: F,
+) -> Result<Option<ManagedPidStop>, String>
+where
+    F: FnOnce(u32) -> Result<PidTermination, String>,
+{
+    let Some(record) = read_pid_record(base_dir, provider)? else {
+        return Ok(None);
+    };
+    let termination = match terminate(record.pid) {
+        Ok(termination) => termination,
+        Err(error) => {
+            return Ok(Some(ManagedPidStop {
+                pid: record.pid,
+                status: ManagedPidStopStatus::Failed(error),
+            }));
+        }
+    };
+    if let Err(error) = clear_pid_record(base_dir, provider) {
+        return Ok(Some(ManagedPidStop {
+            pid: record.pid,
+            status: ManagedPidStopStatus::Failed(format!(
+                "termination was requested but the PID record could not be cleared: {error}"
+            )),
+        }));
+    }
+    let status = match termination {
+        PidTermination::Signaled => ManagedPidStopStatus::Stopped,
+        PidTermination::AlreadyExited => ManagedPidStopStatus::AlreadyStopped,
+    };
+    Ok(Some(ManagedPidStop {
+        pid: record.pid,
+        status,
+    }))
+}
+
 /// SIGTERM a child PID Harn previously launched (llama.cpp / MLX). We
 /// deliberately do not retry with SIGKILL: a stuck launcher is a signal
 /// for the user to investigate, not for us to silently force-kill.
 #[cfg(unix)]
-pub(crate) fn terminate_pid(pid: u32) -> Result<(), String> {
+fn terminate_pid(pid: u32) -> Result<PidTermination, String> {
     use std::convert::TryFrom;
     let raw = i32::try_from(pid).map_err(|_| format!("pid {pid} is out of range"))?;
     // SAFETY: `libc::kill` is FFI; we pass a well-formed PID + SIGTERM and
     // check the return code. No memory is shared with C.
     let rc = unsafe { libc::kill(raw, libc::SIGTERM) };
     if rc == 0 {
-        Ok(())
+        Ok(PidTermination::Signaled)
     } else {
-        Err(std::io::Error::last_os_error().to_string())
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() == Some(libc::ESRCH) {
+            Ok(PidTermination::AlreadyExited)
+        } else {
+            Err(error.to_string())
+        }
     }
-}
-
-#[cfg(not(unix))]
-pub(crate) fn terminate_pid(pid: u32) -> Result<(), String> {
-    Err(format!(
-        "terminating pid {pid} is not supported on this platform"
-    ))
 }
 
 pub(crate) fn resolve_provider_def(provider: &str) -> Result<ProviderDef, String> {
@@ -413,6 +517,7 @@ fn local_http_client() -> Result<reqwest::Client, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::local::state::{write_pid_record, PidRecord};
     use harn_vm::llm_config::{LocalRuntimeKind, LocalRuntimeStop};
     use std::io::{Read, Write};
     use std::net::TcpListener;
@@ -533,6 +638,60 @@ mod tests {
         assert_eq!(
             readiness_status_label(ReadinessStatus::ProviderMismatch),
             "provider_mismatch"
+        );
+    }
+
+    fn test_pid_record(provider: &str, pid: u32) -> PidRecord {
+        PidRecord {
+            provider: provider.to_string(),
+            pid,
+            model: "test-model".to_string(),
+            base_url: "http://127.0.0.1:8001".to_string(),
+            command: "llama-server".to_string(),
+            args: Vec::new(),
+            started_at: "2026-08-07T00:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn managed_pid_stop_clears_record_after_success() {
+        let dir = tempfile::tempdir().expect("state directory");
+        let record = test_pid_record("llamacpp", 4242);
+        write_pid_record(dir.path(), &record).expect("write PID record");
+
+        let stopped = terminate_managed_pid_with(&record.provider, dir.path(), |_| {
+            Ok(PidTermination::Signaled)
+        })
+        .expect("stop result")
+        .expect("tracked PID");
+
+        assert_eq!(stopped.status, ManagedPidStopStatus::Stopped);
+        assert!(
+            read_pid_record(dir.path(), &record.provider)
+                .expect("read PID record after success")
+                .is_none(),
+            "a successful termination must clear ownership state"
+        );
+    }
+
+    #[test]
+    fn managed_pid_stop_clears_record_for_already_exited_process() {
+        let dir = tempfile::tempdir().expect("state directory");
+        let record = test_pid_record("mlx", 4243);
+        write_pid_record(dir.path(), &record).expect("write PID record");
+
+        let stopped = terminate_managed_pid_with(&record.provider, dir.path(), |_| {
+            Ok(PidTermination::AlreadyExited)
+        })
+        .expect("stop result")
+        .expect("tracked PID");
+
+        assert_eq!(stopped.status, ManagedPidStopStatus::AlreadyStopped);
+        assert!(
+            read_pid_record(dir.path(), &record.provider)
+                .expect("read PID record after stale cleanup")
+                .is_none(),
+            "an exited process must not leave a stale ownership record"
         );
     }
 }
