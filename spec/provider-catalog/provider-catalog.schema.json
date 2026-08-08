@@ -121,6 +121,30 @@
       ],
       "type": "object"
     },
+    "automatic_model_eligibility": {
+      "additionalProperties": false,
+      "properties": {
+        "decision": {
+          "const": "eligible"
+        },
+        "receipts": {
+          "items": {
+            "$ref": "#/$defs/model_eligibility_measurement"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "schema": {
+          "const": "harn.automatic_model_eligibility.v1"
+        }
+      },
+      "required": [
+        "schema",
+        "decision",
+        "receipts"
+      ],
+      "type": "object"
+    },
     "deprecation": {
       "additionalProperties": false,
       "properties": {
@@ -772,6 +796,47 @@
         "result_ordering",
         "partial_failure",
         "cancellation"
+      ],
+      "type": "object"
+    },
+    "model_eligibility_measurement": {
+      "additionalProperties": false,
+      "properties": {
+        "harn_version": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "meter_holdout",
+            "tool_call_fidelity",
+            "provider_health"
+          ]
+        },
+        "observed_at": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "passed": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "trials": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "source",
+        "observed_at",
+        "harn_version",
+        "passed",
+        "trials"
       ],
       "type": "object"
     },
@@ -1466,6 +1531,9 @@
     "variant": {
       "additionalProperties": false,
       "properties": {
+        "automatic_eligibility": {
+          "$ref": "#/$defs/automatic_model_eligibility"
+        },
         "description": {
           "type": "string"
         },
@@ -1548,7 +1616,7 @@
       "const": "https://harnlang.com/schemas/provider-catalog.v7.json"
     },
     "schema_version": {
-      "const": 7
+      "const": 8
     },
     "variants": {
       "items": {

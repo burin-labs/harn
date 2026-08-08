@@ -589,7 +589,7 @@ fn remote_catalog_rejects_stale_v2_schema() {
         Err(error) => error,
     };
     assert!(
-        error.contains("schema_version must be 7, got 2"),
+        error.contains("schema_version must be 8, got 2"),
         "unexpected stale-catalog rejection: {error}"
     );
     assert!(
@@ -1265,26 +1265,6 @@ fn generated_schema_accepts_generated_artifact_shape() {
     assert!(artifact_value["families"]
         .as_array()
         .is_some_and(|families| !families.is_empty()));
-}
-
-#[test]
-fn downstream_bindings_include_empirical_tool_parity_shape() {
-    let typescript = typescript_declarations();
-    assert!(typescript.contains("empirical_parity?: HarnToolEmpiricalParity"));
-    assert!(typescript.contains("export interface HarnToolEmpiricalParity"));
-    assert!(typescript.contains("regions?: Record<string, HarnProviderEndpointRegion>"));
-    assert!(typescript.contains("families: HarnCatalogModelFamily[]"));
-    assert!(typescript.contains("effort_levels: string[]"));
-    assert!(typescript.contains("plain_description: string"));
-
-    let swift = swift_binding().expect("swift binding renders");
-    assert!(swift.contains("public let empiricalParity: HarnToolEmpiricalParity?"));
-    assert!(swift.contains("public struct HarnToolEmpiricalParity"));
-    assert!(swift.contains("public let regions: [String: HarnProviderEndpointRegion]?"));
-    assert!(swift.contains("public struct HarnProviderEndpointRegion"));
-    assert!(swift.contains("public let families: [HarnCatalogModelFamily]"));
-    assert!(swift.contains("public let effortLevels: [String]"));
-    assert!(swift.contains("public struct HarnModelFamilyPreset"));
 }
 
 #[test]

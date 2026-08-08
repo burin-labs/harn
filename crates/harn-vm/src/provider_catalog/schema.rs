@@ -525,7 +525,35 @@ pub fn schema_value() -> Value {
                     "description": {"type": "string"},
                     "model_id": {"type": "string", "minLength": 1},
                     "provider": {"type": "string", "minLength": 1},
-                    "source": {"type": "string", "minLength": 1}
+                    "source": {"type": "string", "minLength": 1},
+                    "automatic_eligibility": {"$ref": "#/$defs/automatic_model_eligibility"}
+                },
+                "additionalProperties": false
+            },
+            "automatic_model_eligibility": {
+                "type": "object",
+                "required": ["schema", "decision", "receipts"],
+                "properties": {
+                    "schema": {"const": "harn.automatic_model_eligibility.v1"},
+                    "decision": {"const": "eligible"},
+                    "receipts": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {"$ref": "#/$defs/model_eligibility_measurement"}
+                    }
+                },
+                "additionalProperties": false
+            },
+            "model_eligibility_measurement": {
+                "type": "object",
+                "required": ["kind", "source", "observed_at", "harn_version", "passed", "trials"],
+                "properties": {
+                    "kind": {"enum": ["meter_holdout", "tool_call_fidelity", "provider_health"]},
+                    "source": {"type": "string", "minLength": 1},
+                    "observed_at": {"type": "string", "minLength": 1},
+                    "harn_version": {"type": "string", "minLength": 1},
+                    "passed": {"type": "integer", "minimum": 0},
+                    "trials": {"type": "integer", "minimum": 1}
                 },
                 "additionalProperties": false
             },

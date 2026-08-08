@@ -1,5 +1,5 @@
 {
-  "schema_version": 7,
+  "schema_version": 8,
   "schema": "https://harnlang.com/schemas/provider-catalog.v7.json",
   "generated_by": "harn provider catalog generate",
   "providers": [
@@ -7255,7 +7255,9 @@
       "name": "GPT-OSS 120B (Fireworks)",
       "display_name": "GPT-OSS 120B",
       "provider": "fireworks",
-      "aliases": [],
+      "aliases": [
+        "fw-gpt-oss-120b"
+      ],
       "context_window": 131072,
       "logical_model": "openai-gpt-oss-120b",
       "equivalence_group": "openai-gpt-oss-120b",
@@ -24081,6 +24083,11 @@
       "provider": "anthropic"
     },
     {
+      "name": "fw-gpt-oss-120b",
+      "model_id": "accounts/fireworks/models/gpt-oss-120b",
+      "provider": "fireworks"
+    },
+    {
       "name": "gemini-gemma4-26b",
       "model_id": "models/gemma-4-26b-a4b-it",
       "provider": "gemini"
@@ -24738,9 +24745,39 @@
       "id": "balanced",
       "label": "Balanced",
       "description": "Default cost and capability trade-off for everyday work.",
-      "model_id": "qwen/qwen3-coder-next",
-      "provider": "openrouter",
-      "source": "alias:mid"
+      "model_id": "accounts/fireworks/models/gpt-oss-120b",
+      "provider": "fireworks",
+      "source": "alias:fw-gpt-oss-120b",
+      "automatic_eligibility": {
+        "schema": "harn.automatic_model_eligibility.v1",
+        "decision": "eligible",
+        "receipts": [
+          {
+            "kind": "meter_holdout",
+            "source": "burin-labs/burin-code:scripts/meter-records/ledger.ndjson#f2a100670546|fw-gpt-oss-120b|meter-holdout",
+            "observed_at": "2026-07-08",
+            "harn_version": "v0.10.0",
+            "passed": 80,
+            "trials": 100
+          },
+          {
+            "kind": "tool_call_fidelity",
+            "source": "burin-labs/burin-code:scripts/meter-records/ledger.ndjson#f2a100670546|fw-gpt-oss-120b|meter-holdout|outcome_kind_counts.tool_call_format_parse_loop",
+            "observed_at": "2026-07-08",
+            "harn_version": "v0.10.0",
+            "passed": 97,
+            "trials": 100
+          },
+          {
+            "kind": "provider_health",
+            "source": "burin-labs/burin-code:scripts/meter-records/ledger.ndjson#f2a100670546|fw-gpt-oss-120b|meter-holdout|timeouts+harness_error_count",
+            "observed_at": "2026-07-08",
+            "harn_version": "v0.10.0",
+            "passed": 99,
+            "trials": 100
+          }
+        ]
+      }
     },
     {
       "id": "high-reasoning",

@@ -32,7 +32,7 @@ fn generated_header(comment: &str, language: &str) -> String {
 }
 
 const TYPESCRIPT_TYPES: &str = r#"export interface HarnProviderCatalog {
-  schema_version: 7
+  schema_version: 8
   schema: string
   generated_by: string
   providers: HarnCatalogProvider[]
@@ -342,6 +342,22 @@ export interface HarnCatalogVariant {
   model_id: string
   provider: string
   source: string
+  automatic_eligibility?: HarnAutomaticModelEligibility
+}
+
+export interface HarnAutomaticModelEligibility {
+  schema: "harn.automatic_model_eligibility.v1"
+  decision: "eligible"
+  receipts: HarnModelEligibilityMeasurement[]
+}
+
+export interface HarnModelEligibilityMeasurement {
+  kind: "meter_holdout" | "tool_call_fidelity" | "provider_health"
+  source: string
+  observed_at: string
+  harn_version: string
+  passed: number
+  trials: number
 }
 
 export interface HarnCatalogModelFamily {
@@ -1091,6 +1107,7 @@ public struct HarnCatalogVariant: Codable, Sendable, Equatable {
     public let modelID: String
     public let provider: String
     public let source: String
+    public let automaticEligibility: HarnAutomaticModelEligibility?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -1099,6 +1116,31 @@ public struct HarnCatalogVariant: Codable, Sendable, Equatable {
         case modelID = "model_id"
         case provider
         case source
+        case automaticEligibility = "automatic_eligibility"
+    }
+}
+
+public struct HarnAutomaticModelEligibility: Codable, Sendable, Equatable {
+    public let schema: String
+    public let decision: String
+    public let receipts: [HarnModelEligibilityMeasurement]
+}
+
+public struct HarnModelEligibilityMeasurement: Codable, Sendable, Equatable {
+    public let kind: String
+    public let source: String
+    public let observedAt: String
+    public let harnVersion: String
+    public let passed: Int
+    public let trials: Int
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case source
+        case observedAt = "observed_at"
+        case harnVersion = "harn_version"
+        case passed
+        case trials
     }
 }
 

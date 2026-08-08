@@ -348,6 +348,8 @@ pub struct CatalogVariant {
     pub model_id: String,
     pub provider: String,
     pub source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub automatic_eligibility: Option<llm_config::AutomaticModelEligibility>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

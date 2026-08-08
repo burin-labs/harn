@@ -1,5 +1,6 @@
-# Host-facing model-selection metadata. These rows describe presentation only;
-# they do not change routing, defaults, escalation, or request parameters.
+# Host-facing model-selection metadata. These rows describe picker choices and,
+# when backed by automatic_eligibility receipts, the one measured host default.
+# They do not change runtime routing, escalation, or request parameters.
 
 [presentation.variants.fast]
 order = 10
@@ -11,7 +12,12 @@ selector = { kind = "alias", name = "small" }
 order = 20
 label = "Balanced"
 description = "Default cost and capability trade-off for everyday work."
-selector = { kind = "alias", name = "mid" }
+selector = { kind = "alias", name = "fw-gpt-oss-120b" }
+automatic_eligibility = { schema = "harn.automatic_model_eligibility.v1", decision = "eligible", receipts = [
+  { kind = "meter_holdout", source = "burin-labs/burin-code:scripts/meter-records/ledger.ndjson#f2a100670546|fw-gpt-oss-120b|meter-holdout", observed_at = "2026-07-08", harn_version = "v0.10.0", passed = 80, trials = 100 },
+  { kind = "tool_call_fidelity", source = "burin-labs/burin-code:scripts/meter-records/ledger.ndjson#f2a100670546|fw-gpt-oss-120b|meter-holdout|outcome_kind_counts.tool_call_format_parse_loop", observed_at = "2026-07-08", harn_version = "v0.10.0", passed = 97, trials = 100 },
+  { kind = "provider_health", source = "burin-labs/burin-code:scripts/meter-records/ledger.ndjson#f2a100670546|fw-gpt-oss-120b|meter-holdout|timeouts+harness_error_count", observed_at = "2026-07-08", harn_version = "v0.10.0", passed = 99, trials = 100 },
+] }
 
 [presentation.variants.high-reasoning]
 order = 30

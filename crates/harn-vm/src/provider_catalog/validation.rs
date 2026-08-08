@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::llm_config::ModelEligibilityMeasurementKind;
+
 use super::*;
 
 const RETIRED_DEEPSEEK_DIRECT_IDS: &[&str] = &["deepseek-chat", "deepseek-reasoner"];
@@ -468,6 +470,17 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
         }
     }
 
+    let automatic_variants = artifact
+        .variants
+        .iter()
+        .filter(|variant| variant.automatic_eligibility.is_some())
+        .count();
+    if automatic_variants > 1 {
+        result.errors.push(format!(
+            "catalog has {automatic_variants} automatic model variants; exactly zero or one is allowed"
+        ));
+    }
+
     for variant in &artifact.variants {
         if variant.id.trim().is_empty() {
             result.errors.push("variant id cannot be empty".to_string());
@@ -483,6 +496,56 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
                 "variant {} targets {}/{} without a catalog row",
                 variant.id, variant.provider, variant.model_id
             ));
+        }
+        if let Some(eligibility) = &variant.automatic_eligibility {
+            if eligibility.receipts.is_empty() {
+                result.errors.push(format!(
+                    "automatic variant {} must carry at least one measurement receipt",
+                    variant.id
+                ));
+            }
+            if !eligibility
+                .receipts
+                .iter()
+                .any(|receipt| receipt.kind == ModelEligibilityMeasurementKind::ToolCallFidelity)
+            {
+                result.errors.push(format!(
+                    "automatic variant {} must carry a tool_call_fidelity receipt",
+                    variant.id
+                ));
+            }
+            if !eligibility
+                .receipts
+                .iter()
+                .any(|receipt| receipt.kind == ModelEligibilityMeasurementKind::ProviderHealth)
+            {
+                result.errors.push(format!(
+                    "automatic variant {} must carry a provider_health receipt",
+                    variant.id
+                ));
+            }
+            for receipt in &eligibility.receipts {
+                if receipt.source.trim().is_empty()
+                    || receipt.observed_at.trim().is_empty()
+                    || receipt.harn_version.trim().is_empty()
+                {
+                    result.errors.push(format!(
+                        "automatic variant {} has a measurement receipt with missing provenance",
+                        variant.id
+                    ));
+                }
+                if receipt.trials == 0 {
+                    result.errors.push(format!(
+                        "automatic variant {} has a zero-trial measurement receipt",
+                        variant.id
+                    ));
+                } else if receipt.passed > receipt.trials {
+                    result.errors.push(format!(
+                        "automatic variant {} receipt passes {} exceed trials {}",
+                        variant.id, receipt.passed, receipt.trials
+                    ));
+                }
+            }
         }
     }
 

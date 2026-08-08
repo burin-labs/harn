@@ -14,7 +14,7 @@ use crate::llm_config::{
 };
 use chrono::{NaiveDate, Utc};
 
-pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 7;
+pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 8;
 pub const PROVIDER_CATALOG_SCHEMA_ID: &str =
     "https://harnlang.com/schemas/provider-catalog.v7.json";
 pub const PROVIDER_CATALOG_GENERATOR: &str = "harn provider catalog generate";
@@ -31,6 +31,8 @@ const REMOTE_CACHE_BODY_FILE: &str = "catalog.json";
 const REMOTE_CACHE_META_FILE: &str = "catalog.meta.json";
 const FACT_FRESHNESS_WARNING_DAYS: i64 = 180;
 
+#[cfg(test)]
+mod automatic_eligibility_tests;
 mod bindings;
 #[cfg(test)]
 mod cache_accounting_tests;
@@ -112,6 +114,7 @@ fn config_from_artifact(artifact: &ProviderCatalogArtifact) -> llm_config::Provi
                             selector: llm_config::PresentationVariantSelector::Model {
                                 model_id: variant.model_id.clone(),
                             },
+                            automatic_eligibility: variant.automatic_eligibility.clone(),
                         },
                     )
                 })
@@ -853,6 +856,7 @@ fn catalog_variants(
                 model_id,
                 provider,
                 source,
+                automatic_eligibility: definition.automatic_eligibility.clone(),
             })
         })
         .collect()
