@@ -383,7 +383,8 @@ mod tests {
         );
         for (name, start, end) in found {
             #[expect(clippy::string_slice, reason = "test input is ASCII")]
-            assert_eq!(&source[start..end], name);
+            let snippet = &source[start..end];
+            assert_eq!(snippet, name);
         }
     }
 

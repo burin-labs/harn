@@ -618,8 +618,9 @@ fn char_range_to_byte_range_matches_reference_slicing() {
                     clippy::string_slice,
                     reason = "start_byte/end_byte are asserted char boundaries above"
                 )]
+                let byte_slice = &text[start_byte..end_byte];
                 assert_eq!(
-                    &text[start_byte..end_byte],
+                    byte_slice,
                     reference_char_slice(text, start, end),
                     "{text:?} [{start}..{end}] diverged from char-vector slicing"
                 );

@@ -246,7 +246,8 @@ fn run_blame(
                 clippy::string_slice,
                 reason = "the first 40 chars are checked ASCII hex, so byte 40 is a char boundary"
             )]
-            current_sha = line[..40].to_string();
+            let sha = &line[..40];
+            current_sha = sha.to_string();
         } else if let Some(stripped) = line.strip_prefix('\t') {
             line_no += 1;
             blame_entries.push(build_dict([

@@ -620,11 +620,8 @@ mod tests {
         let out = scan_secret_patterns(&input, crate::redact::REDACTED_PLACEHOLDER);
         assert!(matches!(out, Cow::Owned(_)), "oversized secret must redact");
         #[expect(clippy::string_slice, reason = "test input is ASCII")]
-        assert!(
-            !out.contains(AWS_KEY),
-            "secret leaked: {}",
-            &out[out.len().saturating_sub(64)..]
-        );
+        let tail = &out[out.len().saturating_sub(64)..];
+        assert!(!out.contains(AWS_KEY), "secret leaked: {tail}");
         assert!(out.contains("<redacted:aws_access_key:20>"));
     }
 
