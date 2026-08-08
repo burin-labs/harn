@@ -44,7 +44,7 @@ fn build_request_body_clamps_sampling_ranges_before_send() {
 }
 
 #[test]
-fn openrouter_kimi27_code_strips_fixed_sampling_params() {
+fn openrouter_builder_projects_sampling_params_after_admission() {
     let mut payload = base_request_payload();
     payload.provider = "openrouter".to_string();
     payload.model = "moonshotai/kimi-k2.7-code".to_string();
@@ -55,19 +55,17 @@ fn openrouter_kimi27_code_strips_fixed_sampling_params() {
 
     let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
 
-    assert!(body.get("temperature").is_none());
-    assert!(body.get("top_p").is_none());
-    assert!(body.get("frequency_penalty").is_none());
-    assert!(body.get("presence_penalty").is_none());
+    assert_eq!(body["temperature"], json!(0.2));
+    assert_eq!(body["top_p"], json!(0.8));
+    assert_eq!(body["frequency_penalty"], json!(0.1));
+    assert_eq!(body["presence_penalty"], json!(0.2));
 }
 
 #[test]
-fn grok_strips_stop_and_penalties_it_rejects() {
-    // xAI returns HTTP 400 on `stop`, `frequency_penalty`, and
-    // `presence_penalty` for every Grok model (live probe 2026-07-14). The
-    // `grok-*` capability rule marks all three unsupported so the compat
-    // layer drops them before dispatch. `temperature`/`top_p` are accepted
-    // and must survive.
+fn openai_compatible_builder_does_not_repeat_capability_policy() {
+    // Runtime admission rejects this Grok composition before request shaping.
+    // The adapter receives admitted payloads and projects every portable field
+    // instead of maintaining a second, silently-dropping capability gate.
     let mut payload = base_request_payload();
     payload.provider = "xai".to_string();
     payload.model = "grok-4.5".to_string();
@@ -79,20 +77,11 @@ fn grok_strips_stop_and_penalties_it_rejects() {
 
     let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
 
-    assert!(body.get("stop").is_none(), "grok rejects stop");
-    assert!(
-        body.get("frequency_penalty").is_none(),
-        "grok rejects frequency_penalty"
-    );
-    assert!(
-        body.get("presence_penalty").is_none(),
-        "grok rejects presence_penalty"
-    );
-    assert!(
-        body.get("temperature").is_some(),
-        "grok accepts temperature"
-    );
-    assert!(body.get("top_p").is_some(), "grok accepts top_p");
+    assert_eq!(body["stop"], json!(["STOP"]));
+    assert_eq!(body["frequency_penalty"], json!(0.1));
+    assert_eq!(body["presence_penalty"], json!(0.2));
+    assert_eq!(body["temperature"], json!(0.7));
+    assert_eq!(body["top_p"], json!(0.9));
 }
 
 #[test]

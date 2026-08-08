@@ -557,9 +557,11 @@ the agent loop emits a `tool_format_override` transcript event; pass
 `tool_format_override_reason` when intentionally forcing a catalog-marked
 unreliable side. `harn check` rejects that same conflict when the provider,
 model, and format are all literal, so known-bad compositions fail before they
-consume tokens. Dynamic and custom routes remain open-world and stay under the
-runtime guard. Raw tool-bearing `llm_call` options have no override event, so
-they must use a viable catalog format. Model-catalog display tags are derived
+consume tokens. Dynamic routes stay under the runtime guard. Custom generation
+routes remain open-world, while explicit prompt-cache controls require authored
+capability facts because their lowering is provider-specific. Raw tool-bearing
+`llm_call` options have no override event, so they must use a viable catalog
+format. Model-catalog display tags are derived
 from this matrix too;
 legacy `models.*.capabilities` entries are parsed for backwards compatibility
 but do not override runtime capability resolution.
@@ -669,7 +671,7 @@ accepts these fields:
 | `vision_supported` | bool | Image content accepted by the provider/model route. |
 | `image_url_input_supported` | bool | Image content may reference remote URLs. Set false for routes that require base64 images. |
 | `file_upload_wire_format` | string | Upload API family used by `files.upload`: `anthropic` or `gemini`. |
-| `seed_supported`, `top_k_supported`, `frequency_penalty_supported`, `presence_penalty_supported` | bool | Generation option support flags used for warnings and provider-neutral validation. |
+| `temperature_supported`, `top_p_supported`, `top_k_supported`, `seed_supported`, `frequency_penalty_supported`, `presence_penalty_supported`, `stop_supported` | bool | Portable generation-option admission facts. An authored `false` rejects caller intent before provider transport; an unknown custom generation route remains open-world. |
 | `thinking_disable_directive` | string | In-prompt directive (e.g. `"/no_think"` for Qwen3 chat templates) auto-prepended to the system message when the resolved `thinking` is `Disabled`. Lets script authors write `thinking: false` uniformly across providers without learning per-template prompt directives. Idempotent — never injected twice. |
 
 `tool_mode_parity` is a *declaration* about a route, and it is always

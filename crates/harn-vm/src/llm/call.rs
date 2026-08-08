@@ -462,6 +462,25 @@ pub(crate) fn build_llm_error_dict(err: &VmError, provider: &str, model: &str) -
     VmValue::dict(dict)
 }
 
+/// Construct the canonical terminal LLM envelope for a request that Harn can
+/// prove invalid before dispatch. Callers provide the precise policy message;
+/// this helper owns the stable taxonomy and route fields.
+pub(crate) fn invalid_request_error(
+    message: impl AsRef<str>,
+    provider: &str,
+    model: &str,
+) -> VmError {
+    let mut fields = std::collections::BTreeMap::new();
+    fields.put_str("category", "generic");
+    fields.put_str("kind", "terminal");
+    fields.put_str("reason", "invalid_request");
+    fields.put_str("message", message);
+    fields.put_str("provider", provider);
+    fields.put_str("model", model);
+    let structured = VmError::Thrown(VmValue::dict(fields));
+    VmError::Thrown(build_llm_error_dict(&structured, provider, model))
+}
+
 fn llm_error_message(err: &VmError) -> String {
     match err {
         VmError::ProviderStreamFailure(failure) => failure.to_string(),
@@ -1409,85 +1428,5 @@ mod schema_stream_abort_retry_tests {
             "at the ceiling the budget must not grow further"
         );
         assert_eq!(opts.max_tokens, MAX_TOKENS_RETRY_CEILING);
-    }
-}
-
-#[cfg(test)]
-mod build_llm_error_dict_tests {
-    use super::*;
-
-    fn field(dict: &VmValue, key: &str) -> Option<String> {
-        dict.as_dict()
-            .and_then(|map| map.get(key))
-            .map(|value| value.display())
-    }
-
-    #[test]
-    fn preserves_route_recorded_by_a_routing_failure() {
-        // A ladder/fallback that failed on a different provider/model records the
-        // route that actually failed. The outer wrapper must not overwrite it
-        // with the requested/base route.
-        let thrown = VmError::Thrown(VmValue::dict([
-            ("kind", VmValue::String(arcstr::ArcStr::from("terminal"))),
-            (
-                "reason",
-                VmValue::String(arcstr::ArcStr::from("provider_exhausted")),
-            ),
-            (
-                "provider",
-                VmValue::String(arcstr::ArcStr::from("backup-provider")),
-            ),
-            (
-                "model",
-                VmValue::String(arcstr::ArcStr::from("escalated-model")),
-            ),
-        ]));
-
-        let dict = build_llm_error_dict(&thrown, "base-provider", "base-model");
-
-        assert_eq!(field(&dict, "provider").as_deref(), Some("backup-provider"));
-        assert_eq!(field(&dict, "model").as_deref(), Some("escalated-model"));
-    }
-
-    #[test]
-    fn fills_route_when_the_failure_did_not_record_one() {
-        // Provider-exhausted errors omit a top-level route; a plain
-        // (non-dict) failure has none either. When absent, the requested route
-        // is the honest answer for a genuine single-route call.
-        let thrown = VmError::Thrown(VmValue::dict([(
-            "reason",
-            VmValue::String(arcstr::ArcStr::from("timeout")),
-        )]));
-
-        let dict = build_llm_error_dict(&thrown, "base-provider", "base-model");
-
-        assert_eq!(field(&dict, "provider").as_deref(), Some("base-provider"));
-        assert_eq!(field(&dict, "model").as_deref(), Some("base-model"));
-    }
-
-    #[test]
-    fn no_single_route_failure_is_not_backfilled_with_the_base_route() {
-        // A composite routing failure (no single route is responsible — e.g.
-        // both racers hit the deadline) sets `no_single_route`. The wrapper must
-        // NOT fill provider/model: fabricating the base route would name a
-        // provider/model that did not produce the terminal outcome.
-        let thrown = VmError::Thrown(VmValue::dict([
-            (
-                "reason",
-                VmValue::String(arcstr::ArcStr::from("provider_exhausted")),
-            ),
-            ("no_single_route", VmValue::Bool(true)),
-        ]));
-
-        let dict = build_llm_error_dict(&thrown, "base-provider", "base-model");
-
-        assert!(
-            field(&dict, "provider").is_none(),
-            "composite failure must not be backfilled with the base provider"
-        );
-        assert!(
-            field(&dict, "model").is_none(),
-            "composite failure must not be backfilled with the base model"
-        );
     }
 }

@@ -189,6 +189,17 @@ pub(crate) fn extract_llm_options(
     // Apply providers.toml model_defaults as fallbacks for unspecified params
     // (e.g. presence_penalty=1.5 for Qwen to avoid repetition loops).
     let model_defaults = crate::llm_config::model_params_for_route(&provider, &model);
+    let mut portable_option_intent: std::collections::BTreeSet<
+        crate::llm::capabilities::PortableOption,
+    > = options
+        .as_ref()
+        .map(|resolved| {
+            crate::llm::capabilities::PortableOption::PRESENCE_DRIVEN
+                .into_iter()
+                .filter(|option| option_is_explicitly_set(resolved, option.name()))
+                .collect()
+        })
+        .unwrap_or_default();
     let default_float =
         |key: &str| -> Option<f64> { model_defaults.get(key).and_then(|v| v.as_float()) };
     let default_int =
@@ -231,7 +242,13 @@ pub(crate) fn extract_llm_options(
         Some(value) => value.is_truthy(),
         None => caps.prompt_caching,
     };
+    if matches!(options.as_ref().and_then(|o| o.get("cache")), Some(value) if value.is_truthy()) {
+        portable_option_intent.insert(crate::llm::capabilities::PortableOption::Cache);
+    }
     let prompt_cache_ttl = parse_prompt_cache_ttl_option(options.as_ref())?;
+    if prompt_cache_ttl.is_some() {
+        portable_option_intent.insert(crate::llm::capabilities::PortableOption::PromptCacheTtl);
+    }
     if prompt_cache_ttl.is_some()
         && matches!(
             options.as_ref().and_then(|o| o.get("cache")),
@@ -336,12 +353,6 @@ pub(crate) fn extract_llm_options(
             &mut anthropic_beta_features,
             crate::stdlib::files::ANTHROPIC_FILES_API_BETA,
         );
-    }
-    if enforce_capability_gates && cache && !caps.prompt_caching {
-        return Err(unsupported_option_error("cache", &provider, &model));
-    }
-    if enforce_capability_gates {
-        validate_prompt_cache_ttl_supported(prompt_cache_ttl, &provider, &model, &caps)?;
     }
     if vision
         && !crate::llm::provider::provider_supports_image_urls(&provider, &model)
@@ -755,6 +766,7 @@ pub(crate) fn extract_llm_options(
         seed,
         frequency_penalty,
         presence_penalty,
+        portable_option_intent,
         fast,
         output_format,
         response_format,
@@ -806,7 +818,9 @@ pub(crate) fn extract_llm_options(
         });
     }
 
-    validate_options(&opts);
+    if enforce_capability_gates {
+        validate_options(&opts)?;
+    }
     Ok(opts)
 }
 
@@ -844,43 +858,6 @@ fn parse_prompt_cache_ttl_option(
     }
 }
 
-fn validate_prompt_cache_ttl_supported(
-    ttl: Option<crate::llm::api::PromptCacheTtl>,
-    provider: &str,
-    model: &str,
-    caps: &crate::llm::capabilities::Capabilities,
-) -> Result<(), VmError> {
-    let Some(ttl) = ttl else {
-        return Ok(());
-    };
-    if !caps.prompt_caching {
-        return Err(unsupported_option_error(
-            "prompt_cache_ttl",
-            provider,
-            model,
-        ));
-    }
-    if caps
-        .prompt_cache_ttls
-        .iter()
-        .any(|supported| supported == ttl.as_str())
-    {
-        return Ok(());
-    }
-    let supported = if caps.prompt_cache_ttls.is_empty() {
-        "no explicit TTL values".to_string()
-    } else {
-        caps.prompt_cache_ttls.join(", ")
-    };
-    Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
-        format!(
-            "llm_call: provider \"{provider}\" model \"{model}\" does not support \
-         prompt_cache_ttl \"{}\"; supported: {supported}",
-            ttl.as_str()
-        ),
-    ))))
-}
-
 pub(crate) fn opt_str_list(
     options: &Option<crate::value::DictMap>,
     key: &str,
@@ -899,71 +876,28 @@ pub(crate) fn opt_str_list(
     }
 }
 
-thread_local! {
-    /// Unsupported-param warnings already emitted this process, keyed by
-    /// `"{param}|{provider}|{model}"`. `validate_options` runs on every LLM
-    /// call, so without this the same "ignoring top_k" line floods agent
-    /// logs once per turn. The capability mismatch is a static config fact,
-    /// so one warning per (param, provider, model) is all the operator needs.
-    static WARNED_UNSUPPORTED: std::cell::RefCell<std::collections::BTreeSet<String>> =
-        const { std::cell::RefCell::new(std::collections::BTreeSet::new()) };
-}
-
-/// Returns true the first time a `(param, provider, model)` triple is seen,
-/// false on every repeat. Lets `validate_options` warn once instead of on
-/// every LLM call.
-fn first_unsupported_warning(param: &str, provider: &str, model: &str) -> bool {
-    let key = format!("{param}|{provider}|{model}");
-    WARNED_UNSUPPORTED.with(|seen| seen.borrow_mut().insert(key))
-}
-
-/// Emit warnings for options not supported by the target provider.
-pub(super) fn validate_options(opts: &crate::llm::api::LlmCallOptions) {
-    let caps = crate::llm::capabilities::lookup(&opts.provider, &opts.model);
-    let warn = |param: &str| {
-        if !first_unsupported_warning(param, &opts.provider, &opts.model) {
-            return;
-        }
-        crate::events::log_warn(
-            "llm",
-            &format!(
-                "\"{param}\" is not supported by provider \"{}\" model \"{}\", ignoring",
-                opts.provider, opts.model
-            ),
-        );
-    };
-
-    if opts.seed.is_some() && !caps.seed_supported {
-        warn("seed");
+/// Reject caller-selected portable options that the resolved route cannot
+/// represent. Catalog-owned model defaults are not caller intent and are not
+/// present in `portable_option_intent`.
+pub(crate) fn validate_options(opts: &crate::llm::api::LlmCallOptions) -> Result<(), VmError> {
+    for option in &opts.portable_option_intent {
+        let admitted = if *option == crate::llm::capabilities::PortableOption::PromptCacheTtl {
+            let ttl = opts
+                .prompt_cache_ttl
+                .expect("prompt-cache TTL intent has a parsed value");
+            crate::llm::capabilities::admit_prompt_cache_ttl(
+                &opts.provider,
+                &opts.model,
+                ttl.as_str(),
+            )
+        } else {
+            crate::llm::capabilities::admit_portable_option(&opts.provider, &opts.model, *option)
+        };
+        admitted.map_err(|error| {
+            crate::llm::call::invalid_request_error(error.to_string(), &opts.provider, &opts.model)
+        })?;
     }
-    if opts.top_k.is_some() && !caps.top_k_supported {
-        warn("top_k");
-    }
-    if opts.temperature.is_some() && !caps.temperature_supported {
-        warn("temperature");
-    }
-    if opts.top_p.is_some() && !caps.top_p_supported {
-        warn("top_p");
-    }
-    if opts.frequency_penalty.is_some() && !caps.frequency_penalty_supported {
-        warn("frequency_penalty");
-    }
-    if opts.presence_penalty.is_some() && !caps.presence_penalty_supported {
-        warn("presence_penalty");
-    }
-    if opts.cache && !caps.prompt_caching {
-        warn("cache");
-    }
-    if let Some(ttl) = opts.prompt_cache_ttl {
-        if !caps.prompt_caching
-            || !caps
-                .prompt_cache_ttls
-                .iter()
-                .any(|supported| supported == ttl.as_str())
-        {
-            warn("prompt_cache_ttl");
-        }
-    }
+    Ok(())
 }
 
 /// Provider stop-sequence count cap. OpenAI and Anthropic both reject more than
@@ -1143,17 +1077,27 @@ mod cache_default_tests {
     fn thrown_message(err: VmError) -> String {
         match err {
             VmError::Thrown(VmValue::String(message)) => message.to_string(),
+            VmError::Thrown(VmValue::Dict(fields)) => fields
+                .get("message")
+                .map(VmValue::display)
+                .unwrap_or_else(|| "missing structured error message".to_string()),
             other => format!("{other:?}"),
         }
     }
 
-    // The `mock` provider needs no API key and resolves its capability row by
-    // spoofing the real provider family of the model-id shape: a Claude-shaped
-    // id lands on the Anthropic row (prompt_caching = true), while a bare,
-    // unrecognised id falls through to defaults (prompt_caching = false). This
-    // lets us exercise both default branches against the real capability
-    // lookup, offline.
+    // Install an authored mock route so admission sees both prompt caching and
+    // the provider-specific TTL lowering without requiring a live API key. A
+    // bare mock model still falls through to non-caching defaults.
     fn caching_route() -> DictMap {
+        crate::llm::capabilities::set_user_overrides_toml(
+            r#"
+[[provider.mock]]
+model_match = "claude-sonnet-4.6"
+prompt_caching = true
+prompt_cache_ttls = ["5m", "1h"]
+"#,
+        )
+        .expect("mock cache capability override");
         let mut options = DictMap::new();
         options.put_str("provider", "mock");
         options.put_str("model", "claude-sonnet-4.6");
@@ -1372,47 +1316,5 @@ mod cache_default_tests {
             Err(err) => err,
         };
         assert!(thrown_message(err).contains("prompt_cache_ttl"));
-    }
-}
-
-#[cfg(test)]
-mod unsupported_warning_tests {
-    use super::first_unsupported_warning;
-
-    #[test]
-    fn warns_once_per_param_provider_model() {
-        // Use a unique synthetic triple so the process-wide thread-local set
-        // is not polluted by (or polluting) any real provider calls.
-        let m = "test-model-warns-once";
-        assert!(
-            first_unsupported_warning("top_k", "openrouter", m),
-            "first sighting must warn"
-        );
-        assert!(
-            !first_unsupported_warning("top_k", "openrouter", m),
-            "repeat must be silent"
-        );
-        assert!(
-            !first_unsupported_warning("top_k", "openrouter", m),
-            "still silent on third call"
-        );
-    }
-
-    #[test]
-    fn distinct_param_provider_model_each_warn_once() {
-        let m = "test-model-distinct";
-        // Different param, different provider, and different model are each a
-        // distinct key that warns on its own first sighting.
-        assert!(first_unsupported_warning("top_k", "openrouter", m));
-        assert!(first_unsupported_warning("seed", "openrouter", m));
-        assert!(first_unsupported_warning("top_k", "other-prov", m));
-        assert!(first_unsupported_warning(
-            "top_k",
-            "openrouter",
-            "test-model-distinct-2"
-        ));
-        // ...and each repeat stays silent.
-        assert!(!first_unsupported_warning("top_k", "openrouter", m));
-        assert!(!first_unsupported_warning("seed", "openrouter", m));
     }
 }

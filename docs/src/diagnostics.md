@@ -149,7 +149,7 @@ A `harness.llm.call(...)` invocation violates the schema Harn enforces. Schema-v
 | [`HARN-LLM-003`](#harn-llm-003) | LLM call is missing schema validation | `llm/add-schema` | `surface-changing` |
 | [`HARN-LLM-004`](#harn-llm-004) | LLM schema option is invalid | — | — |
 | [`HARN-LLM-005`](#harn-llm-005) | prompt branches on provider identity instead of capability flags | `llm/use-capability-flag` | `capability-changing` |
-| [`HARN-LLM-006`](#harn-llm-006) | provider, model, and tool format form a known-unsafe composition | — | — |
+| [`HARN-LLM-006`](#harn-llm-006) | provider, model, and requested options form a known-unsafe composition | — | — |
 
 ## ORC — Orchestration constructs
 
@@ -1282,16 +1282,22 @@ prompt branches on provider identity instead of capability flags
 
 **Category:** `LLM` (LLM calls) &nbsp;·&nbsp; **API stability:** `stable`
 
-provider, model, and tool format form a known-unsafe composition
+provider, model, and requested options form a known-unsafe composition
 
 #### How to fix
 
+- Remove a portable generation option that the selected route does not support, or choose a compatible route.
+- For `cache` or `prompt_cache_ttl`, declare prompt-cache support and
+  selectable TTL values for the custom route, or remove the request.
+- Put a provider-native control below `provider_options.<provider>` instead of spelling it as a portable top-level option.
 - Omit `tool_format` to use the catalog default, or select the catalog-recommended format.
 - Choose a provider/model route whose declared tool-calling channel supports the requested format.
 - For a deliberate agent-loop probe, add a non-empty `tool_format_override_reason`; Harn records the override in the transcript.
 
-Dynamic and custom routes remain open-world. This diagnostic only rejects literal compositions that Harn's capability
-registry already knows it must correct or cannot serve.
+Dynamic values remain under the runtime guard. Custom generation routes remain
+open-world, but custom cache controls require authored capability facts because
+Harn must select a provider-specific lowering. This diagnostic only rejects a
+literal composition the registry can already prove unsafe.
 
 ### `HARN-ORC-001`
 

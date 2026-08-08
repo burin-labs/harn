@@ -102,7 +102,6 @@ impl OpenAiResponsesProvider {
     }
 
     pub(crate) fn build_request_body(opts: &LlmRequestPayload) -> serde_json::Value {
-        let caps = crate::llm::capabilities::lookup(&opts.provider, &opts.model);
         let wire_model = crate::llm_config::wire_model_id(&opts.model);
         let mut body = serde_json::json!({
             "model": wire_model,
@@ -115,28 +114,22 @@ impl OpenAiResponsesProvider {
         if opts.max_tokens > 0 {
             body["max_output_tokens"] = serde_json::json!(opts.max_tokens);
         }
-        if let Some(temp) = opts.temperature.filter(|_| caps.temperature_supported) {
+        if let Some(temp) = opts.temperature {
             body["temperature"] = serde_json::json!(temp);
         }
-        if let Some(top_p) = opts.top_p.filter(|_| caps.top_p_supported) {
+        if let Some(top_p) = opts.top_p {
             body["top_p"] = serde_json::json!(top_p);
         }
         if let Some(ref stop) = opts.stop {
             body["stop"] = serde_json::json!(stop);
         }
-        if let Some(seed) = opts.seed.filter(|_| caps.seed_supported) {
+        if let Some(seed) = opts.seed {
             body["seed"] = serde_json::json!(seed);
         }
-        if let Some(fp) = opts
-            .frequency_penalty
-            .filter(|_| caps.frequency_penalty_supported)
-        {
+        if let Some(fp) = opts.frequency_penalty {
             body["frequency_penalty"] = serde_json::json!(fp);
         }
-        if let Some(pp) = opts
-            .presence_penalty
-            .filter(|_| caps.presence_penalty_supported)
-        {
+        if let Some(pp) = opts.presence_penalty {
             body["presence_penalty"] = serde_json::json!(pp);
         }
         if let Some(ref previous_response_id) = opts.previous_response_id {
@@ -691,7 +684,7 @@ mod tests {
     }
 
     #[test]
-    fn responses_body_omits_model_unsupported_sampling_controls() {
+    fn responses_builder_projects_sampling_controls_after_admission() {
         let mut opts = crate::llm::api::options::base_opts("openai");
         opts.model = "gpt-5.6-terra".to_string();
         opts.api_mode = LlmApiMode::Responses;
@@ -700,7 +693,7 @@ mod tests {
 
         let body = OpenAiResponsesProvider::build_request_body(&payload);
 
-        assert!(body.get("temperature").is_none());
+        assert_eq!(body["temperature"], serde_json::json!(0.0));
     }
 
     #[test]

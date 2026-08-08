@@ -166,19 +166,13 @@ impl GeminiProvider {
         if let Some(stop) = &opts.stop {
             generation_config.insert("stopSequences".to_string(), serde_json::json!(stop));
         }
-        if let Some(seed) = opts.seed.filter(|_| caps.seed_supported) {
+        if let Some(seed) = opts.seed {
             generation_config.insert("seed".to_string(), serde_json::json!(seed));
         }
-        if let Some(fp) = opts
-            .frequency_penalty
-            .filter(|_| caps.frequency_penalty_supported)
-        {
+        if let Some(fp) = opts.frequency_penalty {
             generation_config.insert("frequencyPenalty".to_string(), serde_json::json!(fp));
         }
-        if let Some(pp) = opts
-            .presence_penalty
-            .filter(|_| caps.presence_penalty_supported)
-        {
+        if let Some(pp) = opts.presence_penalty {
             generation_config.insert("presencePenalty".to_string(), serde_json::json!(pp));
         }
         // No capability flag exists for logprobs (mirroring openai_compat,

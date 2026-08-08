@@ -619,6 +619,9 @@ pub(crate) async fn observed_llm_call(
     streaming_detector: Option<StreamingDetectorContext>,
     delta_sink: Option<DeltaSender>,
 ) -> Result<super::api::LlmResult, VmError> {
+    if !super::mock::cli_llm_mock_replay_active() && !super::mock::builtin_llm_mock_active() {
+        super::helpers::validate_options(opts)?;
+    }
     let _in_flight_guard = super::call::InFlightLlmCallGuard::enter(opts);
     let mut effective_tool_format = tool_format
         .map(str::to_string)

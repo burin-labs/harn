@@ -227,7 +227,7 @@ diagnostic_codes! {
     LlmSchemaMissing, "HARN-LLM-003", Llm, "LLM call is missing schema validation";
     LlmSchemaInvalid, "HARN-LLM-004", Llm, "LLM schema option is invalid";
     LlmProviderIdentityBranch, "HARN-LLM-005", Llm, "prompt branches on provider identity instead of capability flags";
-    LlmToolFormatCompositionInvalid, "HARN-LLM-006", Llm, "provider, model, and tool format form a known-unsafe composition";
+    LlmCapabilityCompositionInvalid, "HARN-LLM-006", Llm, "provider, model, and requested options form a known-unsafe composition";
     OrchestrationArity, "HARN-ORC-001", Orc, "orchestration construct has invalid arity";
     OrchestrationType, "HARN-ORC-002", Orc, "orchestration construct argument has invalid type";
     AgentDefinitionInvalid, "HARN-ORC-003", Orc, "agent declaration is invalid";

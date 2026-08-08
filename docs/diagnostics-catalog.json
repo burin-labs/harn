@@ -867,7 +867,7 @@
     {
       "code": "HARN-LLM-006",
       "category": "LLM",
-      "summary": "provider, model, and tool format form a known-unsafe composition",
+      "summary": "provider, model, and requested options form a known-unsafe composition",
       "repairs": [],
       "related": [],
       "explanationPresent": true,

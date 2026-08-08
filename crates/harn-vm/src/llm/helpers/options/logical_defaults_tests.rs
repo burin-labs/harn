@@ -73,3 +73,55 @@ fn logical_defaults_flow_through_request_options_with_caller_precedence() {
 
     crate::llm_config::clear_user_overrides();
 }
+
+#[test]
+fn fixed_server_value_default_is_not_mistaken_for_caller_intent() {
+    let _guard = crate::llm::env_guard();
+    let model_id = "fixed-server-value-test";
+    let mut overlay = ProvidersConfig::default();
+    overlay.model_defaults.insert(
+        format!("local/{model_id}"),
+        std::collections::BTreeMap::from_iter([(
+            "temperature".to_string(),
+            toml::Value::Float(1.0),
+        )]),
+    );
+    crate::llm_config::set_user_overrides(Some(overlay));
+    crate::llm::capabilities::set_user_overrides_toml(&format!(
+        r#"
+[[provider.local]]
+model_match = "{model_id}"
+temperature_supported = false
+"#
+    ))
+    .expect("capability override");
+
+    let base = crate::value::DictMap::from_iter([
+        (
+            crate::value::intern_key("provider"),
+            VmValue::String(arcstr::ArcStr::from("local")),
+        ),
+        (
+            crate::value::intern_key("model"),
+            VmValue::String(arcstr::ArcStr::from(model_id)),
+        ),
+    ]);
+    let defaults = extract(base.clone()).expect("catalog default should remain admissible");
+    assert_eq!(defaults.temperature, Some(1.0));
+    assert!(!defaults
+        .portable_option_intent
+        .contains(&crate::llm::capabilities::PortableOption::Temperature));
+
+    let mut explicit = base;
+    explicit.insert(crate::value::intern_key("temperature"), VmValue::Float(1.0));
+    let error = extract(explicit).expect_err("caller intent must be admitted");
+    assert!(
+        error
+            .to_string()
+            .contains("option `temperature` is not supported"),
+        "unexpected error: {error}"
+    );
+
+    crate::llm::capabilities::clear_user_overrides();
+    crate::llm_config::clear_user_overrides();
+}

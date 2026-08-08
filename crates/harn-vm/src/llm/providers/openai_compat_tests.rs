@@ -216,7 +216,7 @@ fn moonshot_kimi_k3_replays_only_harn_owned_assistant_reasoning() {
 }
 
 #[test]
-fn moonshot_kimi_k3_uses_only_its_catalog_authorized_request_knobs() {
+fn moonshot_kimi_k3_builder_projects_admitted_generation_knobs() {
     let mut opts = base_opts("moonshot");
     opts.model = "moonshot/kimi-k3".to_string();
     opts.max_tokens = 128;
@@ -249,16 +249,9 @@ fn moonshot_kimi_k3_uses_only_its_catalog_authorized_request_knobs() {
     assert_eq!(body["reasoning_effort"], "max");
     assert_eq!(body["tool_choice"], "auto");
     assert_eq!(body["tools"][0]["function"]["name"], "read");
-    for field in [
-        "max_tokens",
-        "temperature",
-        "top_p",
-        "frequency_penalty",
-        "presence_penalty",
-    ] {
-        assert!(
-            body.get(field).is_none(),
-            "K3 request leaked `{field}`: {body}"
-        );
-    }
+    assert!(body.get("max_tokens").is_none());
+    assert_eq!(body["temperature"], 0.7);
+    assert_eq!(body["top_p"], 0.8);
+    assert_eq!(body["frequency_penalty"], 0.3);
+    assert_eq!(body["presence_penalty"], 0.2);
 }
