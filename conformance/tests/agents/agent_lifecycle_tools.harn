@@ -1,0 +1,16 @@
+import { agent_lifecycle_tools } from "std/agent/workers"
+
+pipeline main(harness: Harness) {
+  const base = tool_registry()
+  const lifecycle = agent_lifecycle_tools(harness.agent, base)
+  harness.stdio.println(tool_find(lifecycle, "agent_await_resumption")?.name)
+  harness.stdio.println(tool_find(lifecycle, "subagent_pause") == nil)
+  harness.stdio.println(tool_find(lifecycle, "subagent_resume") == nil)
+  const parent = agent_lifecycle_tools(harness.agent, base, {subagents: true})
+  harness.stdio.println(tool_find(parent, "agent_await_resumption")?.name)
+  harness.stdio.println(tool_find(parent, "subagent_pause")?.name)
+  harness.stdio.println(tool_find(parent, "subagent_resume")?.name)
+  harness.stdio.println(tool_find(parent, "subagent_stop")?.name)
+  const reapplied = agent_lifecycle_tools(harness.agent, parent, {subagents: true})
+  harness.stdio.println(tool_count(reapplied) == tool_count(parent))
+}

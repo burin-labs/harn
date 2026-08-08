@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/search.request.json",
+  "title": "tools.search request",
+  "description": "Ripgrep-style content search powered by `grep-searcher` + `ignore`.",
+  "type": "object",
+  "properties": {
+    "pattern": { "type": "string", "minLength": 1 },
+    "path": { "type": "string" },
+    "glob": { "type": "string" },
+    "case_insensitive": { "type": "boolean", "default": false },
+    "fixed_strings": {
+      "type": "boolean",
+      "description": "Treat `pattern` as a literal substring rather than a regex.",
+      "default": false
+    },
+    "exclude_globs": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Glob patterns to exclude from the search after root and include-glob filtering."
+    },
+    "max_matches": { "type": "integer", "minimum": 1, "default": 1000 },
+    "max_line_bytes": {
+      "type": "integer",
+      "minimum": 64,
+      "maximum": 65536,
+      "default": 1024,
+      "description": "Maximum UTF-8 bytes returned for each matched or context line. Long matched lines are clipped around the first match; context lines are prefix-clipped."
+    },
+    "context_before": { "type": "integer", "minimum": 0, "default": 0 },
+    "context_after": { "type": "integer", "minimum": 0, "default": 0 },
+    "include_hidden": { "type": "boolean", "default": false },
+    "ignore_policy": {
+      "type": "string",
+      "enum": ["none", "builtin", "project"],
+      "default": "project",
+      "description": "How much of the ignore stack applies. `none` walks everything; `builtin` applies Harn's built-in directory defaults; `project` adds `.gitignore`, `.ignore`, and `.agentignore`."
+    }
+  },
+  "required": ["pattern"],
+  "additionalProperties": false
+}

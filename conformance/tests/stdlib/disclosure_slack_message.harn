@@ -1,0 +1,34 @@
+import { render, slack_message_disclosure } from "std/disclosure"
+
+pipeline default(harness: Harness) {
+  const chain = {sub: "user:kenneth", act: {sub: "agent:merge-captain"}}
+  const config = {
+    identities: {
+      "user:kenneth": {name: "Kenneth Sinder", email: "kenneth@example.com"},
+      "agent:merge-captain": {
+        name: "Merge Captain",
+        label: "Merge Captain",
+        email: "merge-captain@bots.example",
+      },
+    },
+    surfaces: {slack: {customize_icon_emoji: ":harn:"}},
+  }
+  const options = {project: false, env: false, config: config}
+  const byline = render(harness.env, harness.fs, chain, "slack", options)
+  const disclosure = slack_message_disclosure(harness.env, harness.fs, chain, options)
+  harness.stdio.println(byline)
+  harness.stdio.println(disclosure.kind)
+  harness.stdio.println(disclosure.byline)
+  harness.stdio.println(disclosure.customize.scope)
+  harness.stdio.println(disclosure.customize.username)
+  harness.stdio.println(disclosure.customize.icon_emoji)
+  harness.stdio.println(disclosure.ai_mark.event_type)
+  harness.stdio.println(disclosure.ai_mark.event_payload.kind)
+  harness.stdio.println(disclosure.ai_mark.event_payload.standard)
+  harness.stdio.println(disclosure.ai_mark.event_payload.principals[0].subject)
+  harness.stdio.println(disclosure.ai_mark.event_payload.principals[0].email == nil)
+  harness.stdio.println(disclosure.ai_mark.event_payload.actor_chain[0].email == nil)
+  harness.stdio.println(disclosure.principals[0].email == nil)
+  harness.stdio.println(disclosure.actor_chain[0].email == nil)
+  harness.stdio.println(disclosure.ai_mark.event_payload.principals[1].subject)
+}

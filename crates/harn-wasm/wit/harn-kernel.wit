@@ -1,0 +1,109 @@
+package harn:kernel@1.0.0;
+
+/// The portable execution contract shared by browser, native, and future
+/// Component Model adapters.
+interface kernel {
+  /// A flat graph keeps recursive JSON-shaped data bounded and ABI-friendly.
+  variant value-node {
+    null,
+    boolean(bool),
+    signed(s64),
+    floating(f64),
+    text(string),
+    bytes(list<u8>),
+    %list(list<u32>),
+    %record(list<field>),
+  }
+
+  record field {
+    name: string,
+    value: u32,
+  }
+
+  record value {
+    nodes: list<value-node>,
+    root: u32,
+  }
+
+  record diagnostic {
+    code: string,
+    message: string,
+    line: option<u32>,
+    column: option<u32>,
+  }
+
+  enum entry-kind {
+    function,
+    pipeline,
+  }
+
+  record program {
+    artifact: list<u8>,
+    digest: string,
+  }
+
+  record capability-request {
+    id: string,
+    capability: string,
+    operation: string,
+    arguments: value,
+    expected: value-shape,
+  }
+
+  record grant-set {
+    capabilities: list<string>,
+    /// When present, this is exactly 32 bytes. Hosts retain the secret and use
+    /// it to authenticate snapshots returned across untrusted storage.
+    snapshot-key: option<list<u8>>,
+  }
+
+  enum value-shape {
+    any,
+    null,
+    boolean,
+    signed,
+    floating,
+    text,
+    bytes,
+    %list,
+    %record,
+  }
+
+  record capability-success {
+    request-id: string,
+    value: value,
+  }
+
+  record capability-error {
+    request-id: string,
+    code: string,
+    message: string,
+  }
+
+  variant capability-result {
+    ok(capability-success),
+    error(capability-error),
+  }
+
+  record suspension {
+    request: capability-request,
+    snapshot: list<u8>,
+  }
+
+  variant execution-result {
+    completed(value),
+    suspended(suspension),
+    failed(diagnostic),
+  }
+
+  compile: func(source: string, entry: string, kind: entry-kind) -> result<program, list<diagnostic>>;
+  /// Compile a host-linked JSON source package. The manifest contains stable
+  /// module IDs, resolved import targets, and public export projections.
+  compile-package: func(manifest-json: string, entry: string, kind: entry-kind) -> result<program, list<diagnostic>>;
+  start: func(program: program, input: value, grants: grant-set) -> execution-result;
+  resume: func(program: program, snapshot: list<u8>, outcome: capability-result, grants: grant-set) -> execution-result;
+}
+
+world portable-kernel {
+  export kernel;
+}

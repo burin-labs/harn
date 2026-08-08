@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/file_hash_snapshot.response.json",
+  "title": "code_index.file_hash_snapshot response",
+  "description": "A seq-bound batch of current file hashes for stale-diagnostic and background-check binding.",
+  "type": "object",
+  "properties": {
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Current code-index version-log sequence when the snapshot was captured."
+    },
+    "captured_at_ms": {
+      "type": "integer",
+      "description": "Wall-clock capture time in milliseconds since the Unix epoch."
+    },
+    "algorithm": {
+      "type": "string",
+      "enum": ["fnv1a64"],
+      "description": "Hash algorithm used for current and indexed hashes."
+    },
+    "snapshot": {
+      "type": "object",
+      "description": "Direct workspace-relative path to decimal FNV-1a hash map suitable for verification_diagnostic_classify.",
+      "additionalProperties": { "type": "string" }
+    },
+    "missing": {
+      "type": "array",
+      "description": "Workspace-relative paths whose current bytes could not be read.",
+      "items": { "type": "string" }
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Workspace-relative path when resolvable; otherwise the caller-supplied path."
+          },
+          "known": {
+            "type": "boolean",
+            "description": "True when the path is currently present in the code-index file table."
+          },
+          "readable": {
+            "type": "boolean",
+            "description": "True when the current on-disk bytes were readable inside the workspace."
+          },
+          "hash": {
+            "type": ["string", "null"],
+            "description": "Decimal-encoded FNV-1a 64-bit hash of current bytes, or null when unreadable."
+          },
+          "hash_source": {
+            "type": "string",
+            "enum": ["indexed", "disk", "missing"],
+            "description": "Whether the current hash reused fresh code-index metadata, read disk bytes, or could not be produced."
+          },
+          "size": {
+            "type": ["integer", "null"],
+            "minimum": 0,
+            "description": "Current byte length, or null when unreadable."
+          },
+          "mtime_ms": {
+            "type": ["integer", "null"],
+            "description": "Current mtime in milliseconds since epoch, or null when unavailable."
+          },
+          "indexed_hash": {
+            "type": ["string", "null"],
+            "description": "Decimal-encoded hash last observed by the index, or null when not indexed."
+          },
+          "indexed_mtime_ms": {
+            "type": ["integer", "null"],
+            "description": "Mtime last observed by the index, or null when not indexed."
+          },
+          "last_edit_seq": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Latest version-log sequence recorded for this path, or 0 when none exists."
+          }
+        },
+        "required": [
+          "path",
+          "known",
+          "readable",
+          "hash",
+          "hash_source",
+          "size",
+          "mtime_ms",
+          "indexed_hash",
+          "indexed_mtime_ms",
+          "last_edit_seq"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["seq", "captured_at_ms", "algorithm", "snapshot", "missing", "files"],
+  "additionalProperties": false
+}

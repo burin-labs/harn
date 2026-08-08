@@ -1,0 +1,78 @@
+import { agent_fanout } from "std/agent/workers"
+// The mock-only nested-budget scope makes delegated children measurable at the
+// provider boundary. This test is deliberately non-vacuous: one fanout child
+// must emit one provider request and a non-empty manifest.
+import { read_jsonl } from "std/jsonl"
+import { llm_done, with_llm_script, with_nested_execution_budget } from "std/testing"
+
+pipeline main(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [llm_done()],
+    { ->
+      with_nested_execution_budget(
+        2,
+        { ->
+          const transcript_dir = path_join(
+            harness.fs.workspace_temp_dir(),
+            "harn-fanout-context-manifest-" + harness.random.uuid(),
+          )
+          const results = agent_fanout(
+            harness,
+            [
+              {
+                task: "Return done.",
+                label: "measurable-child",
+                options: {
+                  provider: "mock",
+                  model: "mock",
+                  loop_until_done: true,
+                  done_sentinel: "##DONE##",
+                  max_iterations: 1,
+                  llm_transcript_dir: transcript_dir,
+                },
+              },
+            ],
+            {max_parallel: 1},
+          )
+          const records = read_jsonl(
+            harness.fs,
+            path_join(transcript_dir, "llm_transcript.jsonl"),
+            {strict: true},
+          )
+          const manifests = records.filter({ record -> record.type == "context_manifest" })
+          const requests = records.filter({ record -> record.type == "provider_call_request" })
+          const manifest = manifests[0]?.manifest
+          let included_count = 0
+          let included_bytes = 0
+          for segment in manifest?.segments ?? [] {
+            if segment.included {
+              included_count += 1
+              included_bytes += segment.bytes
+            }
+          }
+          harness.stdio.println(len(results) == 1)
+          harness.stdio.println(results[0].ok)
+          harness.stdio.println(len(harness.llm.mock_calls()) == 1)
+          harness.stdio.println(len(manifests) == 1)
+          harness.stdio.println(len(requests) == 1)
+          harness.stdio.println(manifest.root == "composed")
+          harness.stdio.println(included_count > 1)
+          harness.stdio.println(manifest.join_separator_count == included_count - 1)
+          harness.stdio.println(
+            included_bytes
+              + manifest.join_separator_bytes * manifest.join_separator_count
+              == manifest
+              .system_prompt_bytes,
+          )
+          harness.stdio.println(requests[0].call_role == "agent.main")
+          harness.stdio.println(requests[0].actor_chain == manifest.actor_chain)
+          harness.stdio.println(
+            requests[0].served_context.manifest_content_hash == manifests[0].content_hash,
+          )
+          harness.fs.delete(transcript_dir)
+        },
+      )
+    },
+  )
+}

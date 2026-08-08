@@ -1,0 +1,5 @@
+## Tools available via `{{ search_name }}` (deferred)
+
+Call `{{ search_name }}` with a query to surface any of:
+
+{{ list }}

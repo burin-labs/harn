@@ -1,0 +1,99 @@
+# Connector architecture status
+
+The original Rust-side connector library plan covered shared connector traits,
+generic webhooks, cron, GitHub, Slack, Linear, Notion, OAuth helpers, catalog
+docs, and provider-specific runtime behavior. That plan has since been split
+into a smaller core substrate plus pure-Harn provider packages.
+
+This page is the current source of truth for what belongs in this repository
+after the connector pivot.
+
+For declared package feature coverage, see the generated
+[connector parity matrix](./parity-matrix.md). It is built from connector
+package manifests and checked in CI so docs drift fails the build.
+
+## Core responsibilities
+
+Harn core owns the primitives that every connector implementation needs:
+
+- the `Connector` trait, `ConnectorBase` base-contract name, registry,
+  provider catalog, and Harn module adapter
+- raw HTTP ingress into `RawInbound`, including original body bytes and headers
+- `TriggerEvent` normalization, raw-body exposure, dispatcher handoff, and
+  inbox/outbox dedupe
+- signature helpers for raw-body HMAC verification, constant-time comparison,
+  timestamp-window replay checks, and audit events
+- the `cron`, generic `webhook`, `a2a-push`, and stream ingress providers
+- `NormalizeResult` v1 for ack-first webhooks and batched deliveries
+- `poll_tick` scheduling for Harn connector packages
+- connector hot-path effect policy for deterministic `normalize_inbound`
+  exports
+- `std/connectors/shared` helpers for package-side HMAC checks, JWT/JWKS
+  verification, OAuth refresh, token buckets, cursor pagination, and the
+  forge-agnostic PR/MR lifecycle shape
+- shared HTTP, encoding, package-manager, and testkit surfaces that provider
+  packages compose
+
+Provider-specific business logic should not be added to Harn core unless the
+ticket is explicitly about compatibility or removal of an existing Rust shim.
+
+## External provider packages
+
+Provider business logic now lives in first-party or community Harn packages.
+The first-party package track is:
+
+| Provider | Package repo | Status |
+|---|---|---|
+| GitHub | <https://github.com/burin-labs/harn-github-connector> | First-party package track |
+| Slack | <https://github.com/burin-labs/harn-slack-connector> | First-party package track |
+| Linear | <https://github.com/burin-labs/harn-linear-connector> | First-party package track |
+| Notion | <https://github.com/burin-labs/harn-notion-connector> | First-party package track |
+| GitLab | <https://github.com/burin-labs/harn-gitlab-connector> | Additional forge package track |
+
+Each package should declare connector contract v1 metadata, ship deterministic
+fixtures, and pass:
+
+```sh
+harn package verify .
+```
+
+Poll-based packages should also run:
+
+```sh
+harn package verify . --run-poll-tick
+```
+
+## Provider packages
+
+GitHub, Slack, Linear, Notion, and additional forge integrations live in
+pure-Harn connector package repositories. Harn core should not grow
+provider-specific transport consumers or outbound API clients unless the change
+is a reusable host transport primitive with no provider policy.
+
+For provider work, use:
+
+- the pure-Harn connector package track for provider packages
+- the external package repos for provider-specific event support, outbound
+  methods, scopes, fixtures, and release readiness
+- the additional forge package track for GitLab and similar providers
+
+## Core closure checklist
+
+The repository-local connector substrate is considered complete when these
+surfaces exist and are tested:
+
+| Surface | Current home |
+|---|---|
+| Connector trait/base name, registry, and provider metadata | `crates/harn-vm/src/connectors/mod.rs`, `std/triggers::list_providers()` |
+| Raw webhook substrate and signed generic webhook receiver | `crates/harn-vm/src/connectors/webhook/`, `crates/harn-cli/src/commands/orchestrator/listener.rs` |
+| Cron scheduler primitive | `crates/harn-vm/src/connectors/cron/` |
+| Raw body, bytes, HMAC, encoding, JWT/JWKS, OAuth refresh, and constant-time helpers | `TriggerEvent.raw_body`, stdlib crypto/encoding builtins, `connectors::{hmac, shared}`, `std/connectors/shared` |
+| Durable inbox dedupe and dispatcher handoff | `crates/harn-vm/src/triggers/inbox.rs`, `triggers/dispatcher/` |
+| Rate-limit and cursor pagination behavior | connector clients, `RateLimiterFactory`, `connectors::shared::paginate_cursor`, `std/connectors/shared` |
+| Git forge PR/MR lifecycle event and writeback contract | `std/connectors/shared::git_forge_pull_request_event`, `GitForgePullRequestEvent` generated from `crates/harn-stdlib/src/stdlib/stdlib_event_schemas.harn` |
+| Harn connector contract, `NormalizeResult`, `poll_tick`, and effect policy | `crates/harn-vm/src/connectors/harn_module.rs`, `crates/harn-lint/src/tests/connector_effect_policy.rs` |
+| Connector package conformance harness | `harn package verify`, `harn connector check`, and connector contract fixtures |
+| Catalog, examples, and migration guidance | `docs/src/connectors/catalog.md`, `examples/triggers/`, `docs/src/migrations/rust-connectors-to-harn-packages.md` |
+
+Future work should update those newer ownership surfaces, not reopen the old
+Rust-provider plugin-library plan.

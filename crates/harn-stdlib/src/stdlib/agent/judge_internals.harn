@@ -1,0 +1,528 @@
+// std/agent/judge_internals — private helpers shared by `std/agent/judge`
+// (verify_completion + done_judge) and `std/agent/step_judge`. NOT
+// intended as a public surface: every export is prefixed `__judge_` and
+// the file is excluded from the docs sweep. Keep shared judge plumbing here:
+// LLM-option overrides, structured-output schema field names, the shared
+// checkpoint-invocation preamble, and the "raw_verdict -> {vetoed, feedback}"
+// classifier.
+import { agent_typed_output_checkpoint } from "std/agent/primitives"
+import { agent_emit_event } from "std/agent/state"
+
+/**
+ * Keys on `judge_cfg` that override `opts.llm_options` when present.
+ * Listed once here so adding (or renaming) an LLM tuning knob is a
+ * single-line change instead of a 2x sweep.
+ */
+const __JUDGE_LLM_OVERRIDE_KEYS = ["temperature", "max_tokens", "top_p", "tool_format", "effort"]
+
+/**
+ * Apply per-judge LLM overrides on top of an already-built `llm_opts`
+ * dict. Mirrors the `for key in [...]` block that lived inline at both
+ * call sites before v0.8.43.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __judge_apply_llm_overrides(llm_opts, judge_cfg) {
+  let out = llm_opts
+  for key in __JUDGE_LLM_OVERRIDE_KEYS {
+    if judge_cfg[key] != nil {
+      out = out + {[key]: judge_cfg[key]}
+    }
+  }
+  return out
+}
+
+/**
+ * Shared checkpoint-invocation preamble for the completion (`std/agent/judge`)
+ * and step (`std/agent/step_judge`) judges: build the per-judge `llm_opts`
+ * (base `opts.llm_options` + model/provider/schema/session/system, then the
+ * `__judge_apply_llm_overrides` tuning knobs) and time the named
+ * `agent_typed_output_checkpoint` call. Returns `{checkpoint, duration_ms}`;
+ * the callers keep their own divergent fail-open defaults and verdict shaping.
+ *
+ * @effects: [llm.call]
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __judge_run_checkpoint(
+  harness: Harness,
+  judge_cfg,
+  opts,
+  payload,
+  checkpoint_name,
+  system,
+  user,
+  schema,
+) {
+  const base = opts?.llm_options ?? {}
+  const mock_scope = if checkpoint_name == "agent.completion_judge" {
+    "completion.judge"
+  } else if checkpoint_name == "agent.step_judge" {
+    "step.judge"
+  } else {
+    "default"
+  }
+  const llm_opts = __judge_apply_llm_overrides(
+    base
+      + {
+      model: judge_cfg?.model ?? opts?.model,
+      provider: judge_cfg?.provider ?? opts?.provider,
+      output: {schema: schema, strict: true, validation: "error"},
+      session_id: payload.session_id,
+      system: system,
+      mock_scope: base?.mock_scope ?? mock_scope,
+    },
+    judge_cfg,
+  )
+  const started = harness.clock.monotonic_ms()
+  const checkpoint = agent_typed_output_checkpoint(
+    harness.agent,
+    harness.llm,
+    checkpoint_name,
+    user,
+    schema,
+    llm_opts,
+  )
+  const duration_ms = harness.clock.monotonic_ms() - started
+  if checkpoint_name == "agent.completion_judge" {
+    const usage = checkpoint?.usage ?? checkpoint?.final_result?.usage ?? {}
+    const cache_read_tokens = usage?.cache_read_tokens ?? 0
+    const cache_write_tokens = usage?.cache_write_tokens ?? 0
+    agent_emit_event(
+      harness.agent,
+      payload.session_id,
+      "typed_checkpoint",
+      {
+        schema: "harn.completion_judge_cache.v1",
+        eligible: system != "" && llm_opts?.cache != false,
+        stable_prefix_hash: "sha256:" + sha256(system),
+        stable_prefix_chars: len(system),
+        cache_read_tokens: cache_read_tokens,
+        cache_write_tokens: cache_write_tokens,
+        cache_used: cache_read_tokens > 0,
+      },
+    )
+  }
+  return {checkpoint: checkpoint, duration_ms: duration_ms}
+}
+
+/**
+ * JSON structural characters can never be part of a legitimate verdict
+ * token, so a captured verdict containing one was mangled upstream.
+ */
+const __JUDGE_VERDICT_JSON_JUNK = ["\"", ",", "{", "}", ":", "\\"]
+
+/**
+ * Normalize a captured judge verdict to its leading token. Structured
+ * judges occasionally emit sloppy JSON (double commas, run-on key/value
+ * pairs) that the structured-call repair layer salvages by capturing
+ * trailing JSON junk into the verdict string — observed live in
+ * `judge_decision` events as `continue",,` and `continue",  "reasoning":`.
+ * Cut at the first JSON structural character and trim; verdicts without
+ * JSON junk (including multi-word prose verdicts) pass through unchanged.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ * @example: __judge_verdict_token("continue\",,")
+ */
+pub fn __judge_verdict_token(raw_verdict) {
+  const normalized = lowercase(trim(to_string(raw_verdict ?? "")))
+  let cut = len(normalized)
+  for junk in __JUDGE_VERDICT_JSON_JUNK {
+    const idx = normalized.index_of(junk)
+    if idx >= 0 && idx < cut {
+      cut = idx
+    }
+  }
+  if cut == len(normalized) {
+    return normalized
+  }
+  return trim(normalized[0:cut])
+}
+
+/**
+ * Punctuation that cheap models hang off the leading verdict word
+ * (`"done."`, `"done!"`, `"pass:"`, `"(done)"`, quotes/asterisks from
+ * markdown emphasis). Stripped from both ends of the leading token before
+ * the allow-list compare so a decorated `done` still classifies as DONE.
+ */
+const __JUDGE_TOKEN_PUNCT = ".,;:!?\"'`*_-)("
+
+/**
+ * Reduce a normalized verdict to its leading whitespace-delimited word with
+ * surrounding punctuation stripped. Cheap models decorate enum values
+ * (`"done."`, `"yes, complete"`, `"done — all tests pass"`); the verdict's
+ * *intent* is its first word, so classification keys on that word instead of
+ * requiring whole-string equality. `"not done yet"` reduces to `"not"`
+ * (still a veto), while `"done."` reduces to `"done"` (a pass).
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ * @example: __judge_leading_word("done.")
+ */
+pub fn __judge_leading_word(normalized) {
+  let first = ""
+  for piece in normalized.split(" ") {
+    if first == "" && trim(piece) != "" {
+      first = trim(piece)
+    }
+  }
+  // Strip leading punctuation.
+  let start = 0
+  while start < len(first) && __JUDGE_TOKEN_PUNCT.contains(first.char_at(start)) {
+    start = start + 1
+  }
+  // Strip trailing punctuation.
+  let stop = len(first)
+  while stop > start && __JUDGE_TOKEN_PUNCT.contains(first.char_at(stop - 1)) {
+    stop = stop - 1
+  }
+  return first[start:stop]
+}
+
+/**
+ * Classify a raw verdict string against an allow-list of pass tokens and
+ * compose the `{vetoed, feedback?}` outcome. `feedback_candidates` is
+ * tried in order: the first non-nil, non-empty entry wins. Falls back
+ * to `feedback_default` when nothing else is set.
+ *
+ * Used by `agent_step_judge` (pass tokens like "pass"/"yes"/"approve") and
+ * by `agent_verify_or_continue` (pass tokens like "done"/"complete").
+ * The raw verdict is normalized through `__judge_verdict_token` first, then
+ * reduced to its leading word so a decorated enum value (`"done."`,
+ * `"done — all tests pass"`) still classifies. The stored/emitted `verdict`
+ * field carries the clean leading word.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ * @example: __judge_classify_verdict("pass", ["pass", "yes"], [critique], default)
+ */
+pub fn __judge_classify_verdict(raw_verdict, pass_tokens, feedback_candidates, feedback_default) {
+  const normalized = __judge_leading_word(__judge_verdict_token(raw_verdict))
+  if contains(pass_tokens, normalized) {
+    return {vetoed: false, verdict: normalized}
+  }
+  let feedback = ""
+  for candidate in feedback_candidates {
+    if feedback == "" && candidate != nil && to_string(candidate) != "" {
+      feedback = to_string(candidate)
+    }
+  }
+  if feedback == "" {
+    feedback = feedback_default
+  }
+  return {vetoed: true, feedback: feedback, verdict: normalized}
+}
+
+// -------------------------------------------------------------------------------------------------
+
+// Completion-gate policy (pure). These implement the deterministic veto
+// arithmetic that `std/agent/judge::completion_gate` rides on `verify_completion`.
+// They are PURE (no store / no LLM / no host calls) so the parity fixtures can
+// pin burin-code's decisions on synthetic verdict sets. All host facts
+// (source-vs-cosmetic write classification, verifier verdict) enter as data —
+// the split from burin-code's harn#3817 principle "Harn owns orchestration
+// policy; hosts supply facts". NEVER key any decision on a done-sentinel string
+// (ledger ⛔#3): the gate reads only write/verify facts.
+
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Reduce a list of host write facts to `{source_write_count, cosmetic_write_count,
+ * other_write_count}`. Each write is classified by `classify_write(path, diff?)`
+ * when the callback is supplied, else by the write's own `kind` field, else
+ * conservatively as `"source"` (an unclassified write counts as source progress,
+ * so the evidence gate never manufactures a false veto — ledger ⛔#5's spirit).
+ * Only the literal kind `"cosmetic"` is excluded from source progress; any other
+ * non-`"source"` kind (e.g. `"test"`, `"doc"`) is counted as `other`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __completion_gate_classify_writes(writes, classify_write) {
+  let source = 0
+  let cosmetic = 0
+  let other = 0
+  for write in writes ?? [] {
+    const path = to_string(write?.path ?? "")
+    const kind = if classify_write != nil && path != "" {
+      to_string(classify_write(path, write?.diff) ?? "source")
+    } else {
+      to_string(write?.kind ?? "source")
+    }
+    if kind == "cosmetic" {
+      cosmetic = cosmetic + 1
+    } else if kind == "source" {
+      source = source + 1
+    } else {
+      other = other + 1
+    }
+  }
+  return {source_write_count: source, cosmetic_write_count: cosmetic, other_write_count: other}
+}
+
+/**
+ * Combine one or more host verifier verdicts (`{ok, findings?}`) into a single
+ * verdict. A caller-supplied `veto_combine(verdicts)` overrides the default; the
+ * default is explicit AND-of-oracles arithmetic — the combined verdict is green
+ * only when EVERY verdict is green, and red findings are concatenated. Returns
+ * nil when there is no verdict to combine (verifier state unknown).
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __completion_gate_combine_verify(verify, veto_combine) {
+  if verify == nil {
+    return nil
+  }
+  const verdicts = if type_of(verify) == "list" {
+    verify
+  } else {
+    [verify]
+  }
+  if len(verdicts) == 0 {
+    return nil
+  }
+  if veto_combine != nil {
+    return veto_combine(verdicts)
+  }
+  let all_ok = true
+  let findings = []
+  for verdict in verdicts {
+    if !(verdict?.ok ?? false) {
+      all_ok = false
+      const finding = to_string(verdict?.findings ?? "")
+      if finding != "" {
+        findings = findings.appending(finding)
+      }
+    }
+  }
+  return {ok: all_ok, findings: join(findings, "; ")}
+}
+
+/**
+ * Default rendered feedback strings for each vetoing ladder rule. The MECHANISM
+ * (evidence gate + post-write-verify gate) is generic; these strings are host
+ * DOMAIN content (burin-editorial coding prose), so `completion_gate`'s
+ * `feedback_templates` option lets a host override any of them by key. Keys:
+ *   - `no_source_write_cosmetic` — evidence gate tripped, only cosmetic writes seen.
+ *   - `no_source_write_absent`   — evidence gate tripped, no writes seen.
+ *   - `verification_after_write_red` — a red verifier after a write. The `{findings}`
+ *     token is substituted with the rendered findings detail (` Findings: <x>.` or
+ *     empty), so an override keeps the dynamic findings unless it drops the token.
+ *   - `failed_verification` — the opt-in streak-aware form before escalation.
+ *   - `repeated_verification_failures` — the opt-in escalated form. Supports both
+ *     `{attempts}` and `{findings}` tokens.
+ *   - `missing_verification`     — a source write with a configured-but-unrun verifier.
+ */
+const __COMPLETION_GATE_FEEDBACK_DEFAULTS = {
+  failed_verification:
+    "Verification is still failing after your change.{findings} Fix the specific failure and re-run the verifier before finishing.",
+  missing_verification:
+    "You changed source but have not run the verifier yet. Run the narrowest verification for your change before finishing.",
+  no_source_write_absent:
+    "This task expects a source-code change, but no source file has been written yet. Make the required change before finishing.",
+  no_source_write_cosmetic:
+    "This task expects a source-code change, but only cosmetic / non-source writes have been made. Make the required change to a source file before finishing.",
+  repeated_verification_failures:
+    "Verification has failed {attempts} consecutive times after your changes.{findings} Stop re-running the same check unchanged: inspect the failure, make a targeted repair, then verify again.",
+  verification_after_write_red:
+    "Verification is still failing after your change.{findings} Fix the specific failure and re-run the verifier before finishing.",
+}
+
+/**
+ * The recognized `completion_gate` `feedback_templates` keys (the vetoing ladder
+ * rules a host may override). Exposed so `std/agent/judge` can validate an override
+ * dict loudly at config time.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __completion_gate_feedback_keys() {
+  return keys(__COMPLETION_GATE_FEEDBACK_DEFAULTS)
+}
+
+/**
+ * Resolve one ladder feedback string: the host override (if any) else the default,
+ * with the `{findings}` and `{attempts}` tokens substituted. Only red-verifier
+ * rules pass non-empty values; for the other rules the defaults carry no tokens, so
+ * the substitutions are no-ops.
+ */
+fn __completion_gate_render_feedback(templates, key, findings, attempts = "") {
+  return replace(
+    replace(to_string(templates[key] ?? ""), "{findings}", findings),
+    "{attempts}",
+    attempts,
+  )
+}
+
+/** Build the strict red-verifier verdict, including opt-in streak escalation. */
+fn __completion_gate_red_verdict(derived, templates, detail) {
+  if derived?.consecutive_failed_after_write == nil {
+    return {
+      ok: false,
+      reason: "verification_after_write_red",
+      strict: true,
+      feedback: __completion_gate_render_feedback(
+        templates,
+        "verification_after_write_red",
+        detail,
+      ),
+    }
+  }
+  const streak = max(to_int(derived?.consecutive_failed_after_write ?? 0) ?? 0, 0)
+  const threshold = max(to_int(derived?.escalation_threshold ?? 3) ?? 3, 1)
+  const converging = derived?.verification_failures_converging ?? false
+  const escalation_recommended = streak >= threshold && !converging
+  const reason = if escalation_recommended {
+    "repeated_verification_failures"
+  } else {
+    "failed_verification"
+  }
+  let verdict = {
+    ok: false,
+    reason: reason,
+    strict: true,
+    escalation_recommended: escalation_recommended,
+    feedback: __completion_gate_render_feedback(templates, reason, detail, to_string(streak)),
+  }
+  if escalation_recommended && derived?.escalation_target != nil {
+    verdict = verdict + {escalation_target: derived.escalation_target}
+  }
+  return verdict
+}
+
+/**
+ * The default completion-gate veto arithmetic: an ordered precedence ladder over
+ * derived facts, ported from burin-code `completion_gate_uncapped_status`. First
+ * matching rule wins.
+ *
+ * `derived` fields: `source_known` (whether write facts were supplied),
+ * `source_write_count`, `cosmetic_write_count`, `requires_write` (task needs a
+ * source change), `verify` (`{ok, findings}` or nil = unknown), `oracle_expected`
+ * (a verifier is configured), and optional streak-aware escalation facts:
+ * `consecutive_failed_after_write`, `verification_failures_converging`,
+ * `escalation_threshold`, and `escalation_target`.
+ *
+ * Returns `{ok, reason, strict?, feedback?}`. `strict: true` marks a veto that the
+ * per-session veto budget may NEVER convert to an allow — every post-write-not-green
+ * class (a red verifier, or a source write whose expected verifier has not produced a
+ * green verdict yet). This matches burin's carve-out: its budget-exhaustion refuses to
+ * release the whole `saw_write && !verification_after_last_write` set, because a source
+ * write always needs a fresh green verifier before completion.
+ *
+ * `feedback_templates` (optional) overrides the rendered feedback string per rule
+ * (see `__COMPLETION_GATE_FEEDBACK_DEFAULTS`); nil/absent keeps the byte-identical
+ * defaults.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __completion_gate_ladder(derived, feedback_templates = nil) {
+  const templates = __COMPLETION_GATE_FEEDBACK_DEFAULTS + (feedback_templates ?? {})
+  const source_known = derived?.source_known ?? false
+  const source_writes = to_int(derived?.source_write_count ?? 0) ?? 0
+  const cosmetic_writes = to_int(derived?.cosmetic_write_count ?? 0) ?? 0
+  const saw_source = source_known && source_writes > 0
+  const requires_write = derived?.requires_write ?? true
+  const verify = derived?.verify
+  const verify_known = verify != nil
+  const verify_ok = verify_known && (verify?.ok ?? false)
+  const findings = to_string(verify?.findings ?? "")
+  const oracle_expected = derived?.oracle_expected ?? false
+  // 1. Evidence requirement (ledger ⛔#5): a task that must change source may not
+  // finish with zero SOURCE writes. Cosmetic/test-scaffold writes are not progress.
+  if source_known && requires_write && !saw_source {
+    const key = if cosmetic_writes > 0 {
+      "no_source_write_cosmetic"
+    } else {
+      "no_source_write_absent"
+    }
+    const message = __completion_gate_render_feedback(templates, key, "")
+    return {ok: false, reason: "no_source_write", strict: false, feedback: message}
+  }
+  // 2. Post-write verification: a source write (or an unclassified write set) with
+  // a RED verifier blocks, and this class is strict — the budget can never let it
+  // through; only a fresh green verifier ends it.
+  if verify_known && !verify_ok && (saw_source || !source_known) {
+    const detail = if findings != "" {
+      " Findings: " + findings + "."
+    } else {
+      ""
+    }
+    return __completion_gate_red_verdict(derived, templates, detail)
+  }
+  // 3. Green verifier -> completion is honorable.
+  if verify_ok {
+    return {
+      ok: true,
+      reason: if saw_source {
+        "verified_after_write"
+      } else {
+        "verified"
+      },
+    }
+  }
+  // 4. Source written, a verifier is configured, but it has not run yet. Strict:
+  // burin never budget-releases a post-write state without a fresh green verifier
+  // (`saw_write && !verification_after_last_write`), so this class — like the red
+  // one above — is never converted to an allow. Only a green verifier ends it.
+  if saw_source && oracle_expected && !verify_known {
+    return {
+      ok: false,
+      reason: "missing_verification",
+      strict: true,
+      feedback: __completion_gate_render_feedback(templates, "missing_verification", ""),
+    }
+  }
+  // 5. Nothing left to gate.
+  if source_known && !saw_source && !requires_write {
+    return {ok: true, reason: "no_workspace_write"}
+  }
+  if saw_source {
+    return {ok: true, reason: "wrote_source_no_oracle"}
+  }
+  // Facts too thin for a deterministic verdict (unknown writes, no verifier
+  // signal): the deterministic gate ABSTAINS and lets any configured LLM judge
+  // decide. Never a silent fabricated pass — the caller surfaces the degraded mode.
+  return {ok: true, reason: "gate_abstain"}
+}
+
+/**
+ * Apply the per-session veto budget to a ladder verdict. Pure: the caller reads
+ * `vetoes_used` from the store and persists the charge. After `max_vetoes`
+ * non-strict vetoes the gate converts a would-be veto into an attributable allow
+ * (`veto_budget_exhausted`), so a run that a weak model can never satisfy still
+ * ends with a named reason instead of riding vetoes to the wall-clock timeout.
+ * A `strict` veto (post-write-red) is NEVER converted. `max_vetoes <= 0` disables
+ * the budget (unbounded vetoes).
+ *
+ * Returns `{verdict, charge}` — `charge: true` means the caller should increment
+ * the session veto counter.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn __completion_gate_apply_budget(verdict, vetoes_used, max_vetoes) {
+  if verdict?.ok ?? false {
+    return {verdict: verdict, charge: false}
+  }
+  const strict = verdict?.strict ?? false
+  if !strict && max_vetoes > 0 && vetoes_used >= max_vetoes {
+    return {
+      verdict: {ok: true, reason: "veto_budget_exhausted", converted_from: verdict?.reason ?? ""},
+      charge: false,
+    }
+  }
+  return {verdict: verdict, charge: true}
+}

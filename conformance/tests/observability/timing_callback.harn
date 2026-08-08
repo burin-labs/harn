@@ -1,0 +1,11 @@
+import { timed } from "std/timing"
+
+pipeline default(harness: Harness) {
+  const outcome = timed(harness.clock, "work.compute", {phase: "warmup"}, { -> return 42 })
+  harness.stdio.println(outcome.result)
+  harness.stdio.println(outcome.timing.name)
+  harness.stdio.println(outcome.timing.kind)
+  harness.stdio.println(outcome.timing.status)
+  harness.stdio.println(outcome.timing.duration_ms >= 0)
+  harness.stdio.println(outcome.timing.attributes.phase)
+}

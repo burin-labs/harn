@@ -1,0 +1,1638 @@
+import { prompt_cap } from "std/agent/truncation"
+pub import { CommandResult, command_result_fail, command_result_ok } from "std/command/results"
+import { shell_quote } from "std/runtime"
+
+/** One output-match, exit, or timeout event for a background command. */
+pub type CommandOutputMatch = {
+  status: "matched" | "exited" | "timed_out",
+  matched: bool,
+  timed_out: bool,
+  source: "stdout" | "stderr" | "combined",
+  pattern: string,
+  match?: string?,
+  match_start?: int?,
+  match_end?: int?,
+  next_offset?: int?,
+  result: CommandResult,
+}
+
+/** Portable command-step fields suitable for durable receipts. */
+pub type CommandStepReceipt = {
+  name: string,
+  command?: string | list<string>,
+  success: bool,
+  status: string,
+  exit_code?: int?,
+  cwd: string,
+  classification?: unknown,
+  recovery_hint?: string,
+}
+
+fn __command_options(options) {
+  return options ?? {}
+}
+
+fn __command_is_callable(value) -> bool {
+  const kind = type_of(value)
+  return kind == "function" || kind == "closure" || kind == "fn"
+}
+
+fn __command_has_key(value, key) -> bool {
+  return type_of(value) == "dict" && contains(value.keys(), key)
+}
+
+fn __command_require_argv(argv) {
+  if type_of(argv) != "list" || len(argv) == 0 {
+    throw "command_run: argv must be a non-empty list"
+  }
+  return argv
+}
+
+fn __command_copy_common(req, source) {
+  if source == nil {
+    return req
+  }
+  let out = req
+  for key in [
+    "cwd",
+    "env",
+    "env_remove",
+    "env_mode",
+    "stdin",
+    "timeout_ms",
+    "background",
+    "background_after_ms",
+    "progress_interval_ms",
+    "progress_max_inline_bytes",
+    "policy_context",
+  ] {
+    if source?.[key] != nil {
+      out = out + {[key]: source[key]}
+    }
+  }
+  let capture = source?.capture
+  if source?.max_inline_bytes != nil {
+    const base_capture = capture ?? {}
+    capture = base_capture + {max_inline_bytes: source.max_inline_bytes}
+  }
+  if capture != nil {
+    out = out + {capture: capture}
+  }
+  return out
+}
+
+fn __command_apply_option_defaults(req, options) {
+  const opts = __command_options(options)
+  let out = req
+  for key in [
+    "cwd",
+    "env",
+    "env_remove",
+    "env_mode",
+    "stdin",
+    "timeout_ms",
+    "background",
+    "background_after_ms",
+    "progress_interval_ms",
+    "progress_max_inline_bytes",
+    "policy_context",
+  ] {
+    if out?.[key] == nil && opts[key] != nil {
+      out = out + {[key]: opts[key]}
+    }
+  }
+  if out.mode == "shell" {
+    for key in ["shell", "shell_id", "login", "interactive"] {
+      if out?.[key] == nil && opts[key] != nil {
+        out = out + {[key]: opts[key]}
+      }
+    }
+  }
+  let capture = out?.capture ?? opts?.capture
+  if opts?.max_inline_bytes != nil && capture?.max_inline_bytes == nil {
+    const base_capture = capture ?? {}
+    capture = base_capture + {max_inline_bytes: opts.max_inline_bytes}
+  }
+  if capture != nil {
+    out = out + {capture: capture}
+  }
+  return out
+}
+
+fn __command_request(spec, options) {
+  if type_of(spec) == "list" {
+    return __command_apply_option_defaults(
+      {mode: "argv", argv: __command_require_argv(spec)},
+      options,
+    )
+  }
+  if type_of(spec) != "dict" {
+    throw "command_run: spec must be an argv list or command spec dict"
+  }
+  const mode = spec?.mode ?? "argv"
+  let req = {}
+  if mode == "argv" {
+    if spec?.command != nil && spec?.argv == nil {
+      throw "command_run: shell mode requires mode: \"shell\""
+    }
+    req = {mode: "argv", argv: __command_require_argv(spec?.argv)}
+  } else if mode == "shell" {
+    if type_of(spec?.command) != "string" || trim(spec.command) == "" {
+      throw "command_run: shell mode requires a non-empty command"
+    }
+    req = {mode: "shell", command: spec.command}
+    for key in ["shell", "shell_id", "login", "interactive"] {
+      if spec?.[key] != nil {
+        req = req + {[key]: spec[key]}
+      }
+    }
+  } else {
+    throw "command_run: unsupported mode " + to_string(mode)
+  }
+  return __command_apply_option_defaults(__command_copy_common(req, spec), options)
+}
+
+fn __command_success(result) -> bool {
+  if result?.success != nil {
+    return result.success ? true : false
+  }
+  const {status = "completed", exit_code = -1} = result ?? {}
+  return status == "completed" && exit_code == 0 && !(result?.timed_out ?? false)
+}
+
+fn __command_combined(result) -> string {
+  if result?.combined != nil {
+    return result.combined
+  }
+  if result?.inline_output != nil {
+    return result.inline_output
+  }
+  const {stdout = "", stderr = ""} = result ?? {}
+  return stdout + stderr
+}
+
+fn __command_normalize_result(result) -> CommandResult {
+  const raw = result ?? {}
+  const success = __command_success(raw)
+  const status = if raw?.status != nil {
+    raw.status
+  } else if success {
+    "completed"
+  } else {
+    "failed"
+  }
+  return raw
+    + {
+    ok: success,
+    success: success,
+    status: status,
+    exit_code: raw?.exit_code,
+    cwd: raw?.cwd ?? "",
+    timed_out: raw?.timed_out ?? (raw?.status == "timed_out"),
+    command_id: raw?.command_id,
+    handle_id: raw?.handle_id,
+    stdout: raw?.stdout ?? "",
+    stderr: raw?.stderr ?? "",
+    combined: __command_combined(raw),
+    output_path: raw?.output_path,
+    stdout_path: raw?.stdout_path,
+    stderr_path: raw?.stderr_path,
+    byte_count: raw?.byte_count,
+    line_count: raw?.line_count,
+    output_sha256: raw?.output_sha256,
+    started_at: raw?.started_at,
+    ended_at: raw?.ended_at,
+    duration_ms: raw?.duration_ms,
+  }
+}
+
+/**
+ * command_run runs an argv-first hostlib command and returns a normalized result.
+ *
+ * @effects: [process]
+ * @errors: [process_spawn]
+ */
+pub fn command_run(tools: HarnessTools, spec, options = nil) -> CommandResult {
+  return __command_normalize_result(tools.run_command(__command_request(spec, options)))
+}
+
+fn __command_handle_id(locator, builtin: string) -> string {
+  if type_of(locator) == "string" {
+    return locator
+  }
+  if type_of(locator) == "dict" && locator?.handle_id != nil {
+    return to_string(locator.handle_id)
+  }
+  throw builtin + ": pass a handle id string or a command result with handle_id"
+}
+
+fn __command_wait_request(locator, options) {
+  const opts = __command_options(options)
+  let req = {handle_id: __command_handle_id(locator, "command_wait")}
+  if opts?.timeout_ms != nil {
+    req = req + {timeout_ms: opts.timeout_ms}
+  }
+  if opts?.session_id != nil {
+    req = req + {session_id: opts.session_id}
+  }
+  return req
+}
+
+/**
+ * command_wait waits for one background command handle and returns a normalized command result.
+ *
+ * @effects: [process]
+ * @errors: []
+ * @example: command_wait(result, {timeout_ms: 1000})
+ */
+pub fn command_wait(tools: HarnessTools, locator, options = nil) -> CommandResult {
+  return __command_normalize_result(tools.wait_command(__command_wait_request(locator, options)))
+}
+
+/**
+ * command_wait_for_output waits for new background output to match, the process to exit, or a timeout.
+ * @effects: [process]
+ * @errors: []
+ * @example: command_wait_for_output(result, "ready", {timeout_ms: 10000})
+ */
+pub fn command_wait_for_output(
+  tools: HarnessTools,
+  locator,
+  pattern: string,
+  options = nil,
+) -> CommandOutputMatch {
+  const opts = __command_options(options)
+  let req = {handle_id: __command_handle_id(locator, "command_wait_for_output"), pattern: pattern}
+  for key in ["source", "regex", "from_offset", "timeout_ms", "session_id"] {
+    if opts?.[key] != nil {
+      req = req + {[key]: opts[key]}
+    }
+  }
+  const event = tools.wait_command_output(req)
+  const base = type_of(locator) == "dict" ? locator : {handle_id: req.handle_id}
+  return schema_expect(
+    event + {result: __command_normalize_result(base + event.result)},
+    schema_of(CommandOutputMatch),
+  )
+}
+
+/**
+ * command_cancel cancels one background command handle.
+ *
+ * @effects: [process]
+ * @errors: []
+ */
+pub fn command_cancel(tools: HarnessTools, locator, options = nil) -> dict {
+  const opts = __command_options(options)
+  let req = {handle_id: __command_handle_id(locator, "command_cancel")}
+  if opts?.wait_result_ms != nil {
+    req = req + {wait_result_ms: opts.wait_result_ms}
+  }
+  if opts?.timed_out != nil {
+    req = req + {timed_out: opts.timed_out}
+  }
+  return tools.cancel_handle(req)
+}
+
+fn __command_positive_int(value, fallback: int) -> int {
+  const resolved = to_int(value) ?? fallback
+  if resolved > 0 {
+    return resolved
+  }
+  return fallback
+}
+
+fn __command_stream_target(source: string, options) -> string {
+  const opts = __command_options(options)
+  if opts.tee != nil && !opts.tee {
+    return "none"
+  }
+  if source == "stdout" {
+    return opts?.tee_stdout ?? "stdout"
+  }
+  if source == "stderr" {
+    return opts?.tee_stderr ?? "stderr"
+  }
+  return "none"
+}
+
+fn __command_stream_write(stdio: HarnessStdio, source: string, content: string, options) {
+  if content == "" {
+    return nil
+  }
+  const target = __command_stream_target(source, options)
+  if target == "none" {
+    return nil
+  }
+  if target == "stdout" {
+    stdio.print(content)
+    return nil
+  }
+  if target == "stderr" {
+    stdio.eprint(content)
+    return nil
+  }
+  throw "command_run_streaming: tee target must be stdout, stderr, or none"
+}
+
+fn __command_stream_drain_once(
+  tools: HarnessTools,
+  stdio: HarnessStdio,
+  locator,
+  source: string,
+  offset: int,
+  length: int,
+  options,
+) {
+  const read = try {
+    command_output_range(tools, locator, {source: source, offset: offset, length: length})
+  } catch (_e) {
+    nil
+  }
+  if read == nil {
+    return {offset: offset, bytes_read: 0, eof: false}
+  }
+  if read.bytes_read > 0 {
+    __command_stream_write(stdio, source, read.content, options)
+  }
+  return {offset: read.offset + read.bytes_read, bytes_read: read.bytes_read, eof: read.eof}
+}
+
+fn __command_stream_flush(
+  tools: HarnessTools,
+  stdio: HarnessStdio,
+  locator,
+  source: string,
+  offset: int,
+  length: int,
+  options,
+) -> int {
+  let current = offset
+  while true {
+    const drained = __command_stream_drain_once(
+      tools,
+      stdio,
+      locator,
+      source,
+      current,
+      length,
+      options,
+    )
+    current = drained.offset
+    if drained.bytes_read == 0 || drained.eof {
+      return current
+    }
+  }
+}
+
+fn __command_stream_read_inline(tools: HarnessTools, locator, source: string, options) -> string {
+  const opts = __command_options(options)
+  const length = __command_positive_int(
+    opts?.max_inline_bytes ?? opts?.capture?.max_inline_bytes,
+    50000,
+  )
+  const read = try {
+    command_output_range(tools, locator, {source: source, offset: 0, length: length})
+  } catch (_e) {
+    nil
+  }
+  return read?.content ?? ""
+}
+
+fn __command_stream_timeout_result(tools: HarnessTools, start, elapsed_ms: int, options) -> dict {
+  return __command_normalize_result(
+    start
+      + {
+      status: "timed_out",
+      timed_out: true,
+      exit_code: -1,
+      signal: "SIGKILL",
+      duration_ms: elapsed_ms,
+      stdout: __command_stream_read_inline(tools, start, "stdout", options),
+      stderr: __command_stream_read_inline(tools, start, "stderr", options),
+    },
+  )
+}
+
+fn __command_stream_cancel_timeout(tools: HarnessTools, start, options) {
+  const opts = __command_options(options)
+  const wait_ms = __command_positive_int(opts?.cancel_wait_ms ?? opts?.wait_result_ms, 5000)
+  const cancelled = command_cancel(tools, start, {wait_result_ms: wait_ms, timed_out: true})
+  return cancelled?.result
+}
+
+fn __command_stream_run_options(options) {
+  const opts = __command_options(options)
+  let out = {}
+  for key in [
+    "cwd",
+    "env",
+    "env_remove",
+    "env_mode",
+    "stdin",
+    "capture",
+    "max_inline_bytes",
+    "background",
+    "background_after_ms",
+    "progress_interval_ms",
+    "progress_max_inline_bytes",
+    "policy_context",
+    "shell",
+    "shell_id",
+    "login",
+    "interactive",
+  ] {
+    if opts[key] != nil {
+      out = out + {[key]: opts[key]}
+    }
+  }
+  return out
+}
+
+/**
+ * command_run_streaming runs a command in the background, tees new output, and returns the final result.
+ *
+ * @effects: [process]
+ * @errors: []
+ * @example: command_run_streaming(spec, {timeout_ms: 30000})
+ */
+pub fn command_run_streaming(
+  tools: HarnessTools,
+  stdio: HarnessStdio,
+  spec,
+  options = nil,
+) -> dict {
+  const opts = __command_options(options)
+  const poll_interval_ms = __command_positive_int(opts?.poll_interval_ms, 100)
+  const read_bytes = __command_positive_int(opts?.read_bytes ?? opts?.read_length, 65536)
+  const timeout_ms = to_int(opts?.timeout_ms) ?? 0
+  const start = command_run(tools, spec, __command_stream_run_options(opts) + {background: true})
+  let stdout_offset = 0
+  let stderr_offset = 0
+  let elapsed_wait_ms = 0
+  while true {
+    stdout_offset = __command_stream_flush(
+      tools,
+      stdio,
+      start,
+      "stdout",
+      stdout_offset,
+      read_bytes,
+      opts,
+    )
+    stderr_offset = __command_stream_flush(
+      tools,
+      stdio,
+      start,
+      "stderr",
+      stderr_offset,
+      read_bytes,
+      opts,
+    )
+    if timeout_ms > 0 && elapsed_wait_ms >= timeout_ms {
+      const timed_result = __command_stream_cancel_timeout(tools, start, opts)
+      stdout_offset = __command_stream_flush(
+        tools,
+        stdio,
+        start,
+        "stdout",
+        stdout_offset,
+        read_bytes,
+        opts,
+      )
+      stderr_offset = __command_stream_flush(
+        tools,
+        stdio,
+        start,
+        "stderr",
+        stderr_offset,
+        read_bytes,
+        opts,
+      )
+      if timed_result != nil {
+        return __command_normalize_result(timed_result)
+      }
+      return __command_stream_timeout_result(tools, start, elapsed_wait_ms, opts)
+    }
+    const wait_ms = if timeout_ms > 0 && timeout_ms - elapsed_wait_ms < poll_interval_ms {
+      timeout_ms - elapsed_wait_ms
+    } else {
+      poll_interval_ms
+    }
+    const result = command_wait(tools, start, {timeout_ms: wait_ms})
+    elapsed_wait_ms = elapsed_wait_ms + wait_ms
+    stdout_offset = __command_stream_flush(
+      tools,
+      stdio,
+      start,
+      "stdout",
+      stdout_offset,
+      read_bytes,
+      opts,
+    )
+    stderr_offset = __command_stream_flush(
+      tools,
+      stdio,
+      start,
+      "stderr",
+      stderr_offset,
+      read_bytes,
+      opts,
+    )
+    if result.status != "running" {
+      return result
+    }
+    if timeout_ms > 0 && elapsed_wait_ms >= timeout_ms {
+      const timed_result = __command_stream_cancel_timeout(tools, start, opts)
+      stdout_offset = __command_stream_flush(
+        tools,
+        stdio,
+        start,
+        "stdout",
+        stdout_offset,
+        read_bytes,
+        opts,
+      )
+      stderr_offset = __command_stream_flush(
+        tools,
+        stdio,
+        start,
+        "stderr",
+        stderr_offset,
+        read_bytes,
+        opts,
+      )
+      if timed_result != nil {
+        return __command_normalize_result(timed_result)
+      }
+      return __command_stream_timeout_result(tools, start, elapsed_wait_ms, opts)
+    }
+  }
+}
+
+fn __command_locator(locator, options) {
+  const opts = __command_options(options)
+  if type_of(locator) == "string" {
+    return {path: locator}
+  }
+  if type_of(locator) != "dict" {
+    throw "command_output_range: locator must be a dict or path string"
+  }
+  const source = opts?.source ?? opts?.stream ?? "combined"
+  if source == "stdout" && locator?.stdout_path != nil {
+    return {path: locator.stdout_path}
+  }
+  if source == "stderr" && locator?.stderr_path != nil {
+    return {path: locator.stderr_path}
+  }
+  if (source == "combined" || source == "output") && locator?.output_path != nil {
+    return {path: locator.output_path}
+  }
+  if locator?.command_id != nil {
+    return {command_id: locator.command_id}
+  }
+  if locator?.handle_id != nil {
+    return {handle_id: locator.handle_id}
+  }
+  if locator?.path != nil {
+    return {path: locator.path}
+  }
+  if locator?.output_path != nil {
+    return {path: locator.output_path}
+  }
+  throw "command_output_range: pass command_id, handle_id, path, or command result"
+}
+
+/**
+ * command_output_range reads a command output artifact by command result, id, handle, or path.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn command_output_range(tools: HarnessTools, locator, options = nil) -> dict {
+  const opts = __command_options(options)
+  const req = __command_locator(locator, opts)
+    + {
+    offset: opts?.offset ?? 0,
+    length: opts?.length ?? 65536,
+  }
+  const result = tools.read_command_output(req)
+  return {
+    content: result?.content ?? "",
+    total_bytes: result?.total_bytes ?? 0,
+    offset: result?.offset ?? 0,
+    bytes_read: result?.bytes_read ?? 0,
+    eof: result?.eof ?? true,
+    path: result?.path,
+  }
+}
+
+/**
+ * command_output_tail reads the last bytes of a command output artifact.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn command_output_tail(tools: HarnessTools, locator, options = nil) -> dict {
+  const opts = __command_options(options)
+  const length = opts?.length ?? opts?.tail_bytes ?? 12000
+  const base = __command_locator(locator, opts)
+  const meta = command_output_range(tools, base, {offset: 0, length: 0})
+  const offset = if meta.total_bytes > length {
+    meta.total_bytes - length
+  } else {
+    0
+  }
+  return command_output_range(tools, base, opts + {offset: offset, length: length})
+}
+
+fn __command_tail_inline(result, length) -> string {
+  const content = __command_combined(result)
+  if length == nil || len(content) <= length {
+    return content
+  }
+  return substring(content, len(content) - length)
+}
+
+fn __command_tail(tools: HarnessTools, result, options) {
+  const opts = __command_options(options)
+  const length = opts?.tail_bytes ?? 12000
+  if length == 0 {
+    return ""
+  }
+  if result?.output_path != nil {
+    const read = try {
+      command_output_tail(tools, result, {length: length, source: opts?.tail_source ?? "combined"})
+    } catch (_e) {
+      nil
+    }
+    if read != nil {
+      return read.content
+    }
+  }
+  return __command_tail_inline(result, length)
+}
+
+fn __command_artifacts(result) {
+  return {
+    combined: result?.output_path,
+    stdout: result?.stdout_path,
+    stderr: result?.stderr_path,
+    output_sha256: result?.output_sha256,
+    byte_count: result?.byte_count,
+    line_count: result?.line_count,
+  }
+}
+
+fn __command_spec_field(spec, key) {
+  if type_of(spec) == "dict" {
+    return spec?.[key]
+  }
+  if key == "argv" && type_of(spec) == "list" {
+    return spec
+  }
+  return nil
+}
+
+fn __command_apply_advice(step, options) {
+  const opts = __command_options(options)
+  let out = step
+  if opts?.classify != nil {
+    if !__command_is_callable(opts.classify) {
+      throw "command_step: classify must be callable"
+    }
+    const classification = opts.classify(out)
+    if classification != nil {
+      out = out + {classification: classification}
+    }
+  }
+  if opts?.recovery_hint != nil {
+    if !__command_is_callable(opts.recovery_hint) {
+      throw "command_step: recovery_hint must be callable"
+    }
+    const hint = opts.recovery_hint(out)
+    if hint != nil {
+      out = out + {recovery_hint: hint}
+    }
+  }
+  return out
+}
+
+fn __command_step_from_result(tools: HarnessTools, name, spec, result, options, attempts) {
+  const normalized = __command_normalize_result(result)
+  const tail = __command_tail(tools, normalized, options)
+  let step = {
+    name: name,
+    argv: __command_spec_field(spec, "argv"),
+    command: __command_spec_field(spec, "command") ?? normalized?.command,
+    cwd: normalized.cwd,
+    success: normalized.success,
+    ok: normalized.ok,
+    status: normalized.status,
+    exit_code: normalized.exit_code,
+    timed_out: normalized.timed_out,
+    stdout: normalized.stdout,
+    stderr: normalized.stderr,
+    combined: normalized.combined,
+    command_id: normalized.command_id,
+    handle_id: normalized.handle_id,
+    live_log: normalized.output_path,
+    output_path: normalized.output_path,
+    stdout_path: normalized.stdout_path,
+    stderr_path: normalized.stderr_path,
+    artifacts: __command_artifacts(normalized),
+    tail: tail,
+    failure_tail: normalized.success ? nil : tail,
+    started_at: normalized.started_at,
+    ended_at: normalized.ended_at,
+    duration_ms: normalized.duration_ms,
+    attempts: attempts ?? [],
+  }
+  return __command_apply_advice(step, options)
+}
+
+fn __command_result_summary(step) {
+  return {
+    success: step.success,
+    ok: step.ok,
+    status: step.status,
+    exit_code: step.exit_code,
+    cwd: step.cwd,
+    timed_out: step.timed_out,
+    command_id: step.command_id,
+    handle_id: step.handle_id,
+    output_path: step.output_path,
+    stdout_path: step.stdout_path,
+    stderr_path: step.stderr_path,
+    byte_count: step.artifacts?.byte_count,
+    line_count: step.artifacts?.line_count,
+    output_sha256: step.artifacts?.output_sha256,
+  }
+}
+
+fn __command_attempt_record(number, spec, step) {
+  return {
+    attempt: number,
+    number: number,
+    spec: spec,
+    argv: step?.argv,
+    command: step?.command,
+    cwd: step?.cwd,
+    result: __command_result_summary(step),
+    success: step?.success,
+    ok: step?.ok,
+    status: step?.status,
+    exit_code: step?.exit_code,
+    timed_out: step?.timed_out,
+    command_id: step?.command_id,
+    handle_id: step?.handle_id,
+    output_path: step?.output_path,
+    stdout_path: step?.stdout_path,
+    stderr_path: step?.stderr_path,
+    tail: step?.tail,
+    classification: step?.classification,
+    recovery_hint: step?.recovery_hint,
+  }
+}
+
+fn __command_run_options(options) {
+  const opts = __command_options(options)
+  let out = {}
+  for key in [
+    "cwd",
+    "env",
+    "env_remove",
+    "env_mode",
+    "stdin",
+    "timeout_ms",
+    "capture",
+    "max_inline_bytes",
+    "background",
+    "background_after_ms",
+    "progress_interval_ms",
+    "progress_max_inline_bytes",
+    "policy_context",
+    "shell",
+    "shell_id",
+    "login",
+    "interactive",
+  ] {
+    if opts[key] != nil {
+      out = out + {[key]: opts[key]}
+    }
+  }
+  return out
+}
+
+fn __command_invoke_runner(tools: HarnessTools, spec, options) {
+  const opts = __command_options(options)
+  if opts?.runner != nil {
+    if !__command_is_callable(opts.runner) {
+      throw "command_step: runner must be callable"
+    }
+    return opts.runner(spec, __command_run_options(opts))
+  }
+  return command_run(tools, spec, __command_run_options(opts))
+}
+
+fn __command_retry_delay_ms(policy, attempt_number) -> int {
+  const base = policy?.delay_ms ?? 0
+  if base <= 0 {
+    return 0
+  }
+  if policy?.jitter ?? false {
+    throw "command_step: retry.jitter is not supported by the deterministic stdlib runner"
+  }
+  const backoff = policy?.backoff
+  if backoff == "linear" {
+    return base * attempt_number
+  }
+  if backoff == "exponential" {
+    let multiplier = 1
+    let index = 1
+    while index < attempt_number {
+      multiplier = multiplier * 2
+      index += 1
+    }
+    return base * multiplier
+  }
+  return base
+}
+
+fn __command_should_retry(policy, step, attempt_number) -> bool {
+  if step.success {
+    return false
+  }
+  if policy?.should_retry == nil {
+    return true
+  }
+  if !__command_is_callable(policy.should_retry) {
+    throw "command_step: retry.should_retry must be callable"
+  }
+  return policy.should_retry(step, attempt_number) ? true : false
+}
+
+fn __command_before_retry(policy, step, attempt_number) {
+  if policy?.before_retry == nil {
+    return nil
+  }
+  if !__command_is_callable(policy.before_retry) {
+    throw "command_step: retry.before_retry must be callable"
+  }
+  return policy.before_retry(step, attempt_number)
+}
+
+/**
+ * command_step runs one named command and returns a normalized step record.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn command_step(
+  tools: HarnessTools,
+  clock: HarnessClock,
+  name: string,
+  spec,
+  options = nil,
+) -> dict {
+  const opts = __command_options(options)
+  const policy = opts?.retry ?? {}
+  const configured_max_attempts = policy?.max_attempts ?? 1
+  const max_attempts = configured_max_attempts < 1 ? 1 : configured_max_attempts
+  let attempts = []
+  let attempt_number = 1
+  let final_step = {}
+  while attempt_number <= max_attempts {
+    const result = __command_invoke_runner(tools, spec, opts)
+    let step = __command_step_from_result(tools, name, spec, result, opts, attempts)
+    const attempt = __command_attempt_record(attempt_number, spec, step)
+    attempts = attempts + [attempt]
+    step = step + {attempts: attempts}
+    final_step = step
+    if step.success || attempt_number >= max_attempts
+      || !__command_should_retry(
+      policy,
+      step,
+      attempt_number,
+    ) {
+      return final_step
+    }
+    __command_before_retry(policy, step, attempt_number)
+    const delay = __command_retry_delay_ms(policy, attempt_number)
+    if delay > 0 {
+      clock.sleep_ms(delay)
+    }
+    attempt_number += 1
+  }
+  return final_step
+}
+
+/**
+ * command_step_with_retry is an explicit alias for command_step retry policies.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn command_step_with_retry(
+  tools: HarnessTools,
+  clock: HarnessClock,
+  name: string,
+  spec,
+  options = nil,
+) -> dict {
+  return command_step(tools, clock, name, spec, options)
+}
+
+/**
+ * command_steps_append runs a command step and appends its record to an existing step list.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn command_steps_append(
+  tools: HarnessTools,
+  clock: HarnessClock,
+  steps,
+  name: string,
+  spec,
+  options = nil,
+) -> dict {
+  const current = steps ?? []
+  const step = command_step(tools, clock, name, spec, options)
+  const out = current + [step]
+  return {
+    steps: out,
+    step: step,
+    success: step.success,
+    ok: step.ok,
+    status: step.status,
+    exit_code: step.exit_code,
+  }
+}
+
+fn __command_step_success(step) -> bool {
+  const success = step?.success ?? step?.ok ?? false
+  return success ? true : false
+}
+
+fn __command_is_recovered(step, options) -> bool {
+  const opts = __command_options(options)
+  if opts?.is_recovered == nil {
+    return false
+  }
+  if !__command_is_callable(opts.is_recovered) {
+    throw "command_steps_failed: is_recovered must be callable"
+  }
+  return opts.is_recovered(step) ? true : false
+}
+
+/**
+ * command_steps_failed reports whether any step failed and was not caller-marked recovered.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn command_steps_failed(steps, options = nil) -> bool {
+  for step in steps ?? [] {
+    if !__command_step_success(step) && !__command_is_recovered(step, options) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * command_last_failed_step returns the last unrecovered failed step, if any.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn command_last_failed_step(steps, options = nil) {
+  let failed = nil
+  for step in steps ?? [] {
+    if !__command_step_success(step) && !__command_is_recovered(step, options) {
+      failed = step
+    }
+  }
+  return failed
+}
+
+fn __command_suffix(value, limit) {
+  if value == nil {
+    return nil
+  }
+  const text = to_string(value)
+  if limit == nil || len(text) <= limit {
+    return text
+  }
+  return substring(text, len(text) - limit)
+}
+
+/**
+ * command_step_ref returns compact context for agents or recovery reports.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn command_step_ref(step, options = nil) -> dict {
+  const opts = __command_options(options)
+  const tail_bytes = opts?.tail_bytes ?? 4000
+  return {
+    name: step?.name,
+    argv: step?.argv,
+    command: step?.command,
+    cwd: step?.cwd,
+    success: step?.success,
+    ok: step?.ok,
+    status: step?.status,
+    exit_code: step?.exit_code,
+    timed_out: step?.timed_out,
+    classification: step?.classification,
+    recovery_hint: step?.recovery_hint,
+    live_log: step?.live_log,
+    output_path: step?.output_path,
+    stdout_path: step?.stdout_path,
+    stderr_path: step?.stderr_path,
+    tail: __command_suffix(step?.failure_tail ?? step?.tail ?? step?.combined, tail_bytes),
+  }
+}
+
+/**
+ * argv_label renders argv parts as the same stable space-separated label used in step records.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn argv_label(argv: list) -> string {
+  return join((argv ?? []).map({ arg -> to_string(arg) }), " ")
+}
+
+fn __command_shell_flag_invokes_script(flag: string) -> bool {
+  return flag == "-lc" || flag == "-c" || flag == "lc" || flag == "c"
+}
+
+fn __command_shell_accepts_script_flag(shell: string) -> bool {
+  return shell == "bash"
+    || shell.ends_with("/bash")
+    || shell == "sh"
+    || shell.ends_with("/sh")
+    || shell == "zsh"
+    || shell.ends_with("/zsh")
+}
+
+/**
+ * shell_command_from_argv renders argv as shell text without corrupting
+ * whitespace or quotes. Shell wrapper argv such as ["bash", "-lc", "cmd"]
+ * returns the script payload; all other argv items are shell-quoted.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn shell_command_from_argv(argv: list) -> string {
+  const values = argv ?? []
+  if len(values) >= 3 {
+    const shell = to_string(values[0] ?? "").trim()
+    const flag = to_string(values[1] ?? "").trim()
+    if __command_shell_accepts_script_flag(shell) && __command_shell_flag_invokes_script(flag) {
+      return to_string(values[2] ?? "").trim()
+    }
+  }
+  return join(values.map({ arg -> shell_quote(arg) }), " ").trim()
+}
+
+fn __command_shell_command_from_field(value) {
+  if type_of(value) == "string" {
+    return to_string(value ?? "").trim()
+  }
+  if type_of(value) == "list" {
+    return shell_command_from_argv(value)
+  }
+  return nil
+}
+
+/**
+ * shell_command_from_value normalizes a provider-style command value. Strings
+ * pass through trimmed; argv lists use shell_command_from_argv; dict values
+ * accept `argv`, `command`, or `cmd` fields in either string or list form.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn shell_command_from_value(value) -> string {
+  const direct = __command_shell_command_from_field(value)
+  if direct != nil {
+    return direct
+  }
+  if type_of(value) == "dict" {
+    return __command_shell_command_from_field(value?.argv)
+      ?? __command_shell_command_from_field(
+      value?.command,
+    )
+      ?? __command_shell_command_from_field(value?.cmd)
+      ?? ""
+  }
+  return ""
+}
+
+/**
+ * command_output_text returns stdout, stderr, combined, tail, or failure_tail from a command result.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn command_output_text(result, stream: string = "combined") -> string {
+  const mode = stream ?? "combined"
+  if mode == "stdout" {
+    return result?.stdout ?? ""
+  }
+  if mode == "stderr" {
+    return result?.stderr ?? ""
+  }
+  if mode == "tail" {
+    return result?.tail ?? ""
+  }
+  if mode == "failure_tail" {
+    return result?.failure_tail ?? result?.tail ?? ""
+  }
+  return __command_combined(result)
+}
+
+/**
+ * command_failure_text formats a compact failure block for logs and recovery prompts.
+ *
+ * @effects: [host]
+ * @errors: []
+ */
+pub fn command_failure_text(agent: HarnessAgent, result, options = nil) -> string {
+  const opts = __command_options(options)
+  const max_stdout = opts?.max_stdout_chars ?? 8000
+  const max_stderr = opts?.max_stderr_chars ?? 4000
+  const {status = "failed", exit_code = result?.status} = result ?? {}
+  let heading = "status=" + to_string(status) + " exit=" + to_string(exit_code)
+  if trim(result?.cwd ?? "") != "" {
+    heading = heading + " cwd=" + result.cwd
+  }
+  let lines = [heading]
+  if trim(result?.stdout ?? "") != "" {
+    lines = lines + ["stdout:", prompt_cap(agent, result.stdout, max_stdout, "stdout")]
+  }
+  if trim(result?.stderr ?? "") != "" {
+    lines = lines + ["stderr:", prompt_cap(agent, result.stderr, max_stderr, "stderr")]
+  }
+  if len(lines) == 1 && trim(command_output_text(result)) != "" {
+    lines = lines
+      + ["output:", prompt_cap(agent, command_output_text(result), max_stdout, "output")]
+  }
+  return join(lines, "\n")
+}
+
+fn __command_label(spec, fallback = "command") -> string {
+  const argv = __command_spec_field(spec, "argv")
+  if argv != nil {
+    return argv_label(argv)
+  }
+  const command = __command_spec_field(spec, "command")
+  if command != nil {
+    return to_string(command)
+  }
+  return fallback
+}
+
+fn __command_json_stream(options) -> string {
+  const opts = __command_options(options)
+  const stream = opts?.stream ?? opts?.source ?? opts?.output ?? "stdout"
+  if stream == "stdout" || stream == "stderr" || stream == "combined"
+    || stream == "tail"
+    || stream == "failure_tail" {
+    return stream
+  }
+  throw "command_json: unsupported output stream " + to_string(stream)
+}
+
+fn __command_json_error(category, label, message, step, extra = nil) {
+  const base = extra ?? {}
+  return base
+    + {
+    category: category,
+    label: label,
+    message: message,
+    status: step?.status,
+    exit_code: step?.exit_code,
+    cwd: step?.cwd,
+    stderr: step?.stderr,
+    tail: step?.failure_tail ?? step?.tail,
+  }
+}
+
+fn __command_json_failure_error(label, step) {
+  let message = label
+    + " failed (status="
+    + to_string(step?.status ?? "failed")
+    + " exit="
+    + to_string(step?.exit_code ?? "unknown")
+    + ")"
+  const detail = trim(step?.stderr ?? step?.failure_tail ?? step?.tail ?? "")
+  if detail != "" {
+    message = message + ": " + detail
+  }
+  return __command_json_error("command_failed", label, message, step)
+}
+
+fn __command_json_empty_error(label, stream, step) {
+  return __command_json_error(
+    "empty_output",
+    label,
+    label + " produced empty " + stream + " output",
+    step,
+    {source: stream},
+  )
+}
+
+fn __command_json_parse_error(agent: HarnessAgent, label, stream, text, parsed, step, options) {
+  const opts = __command_options(options)
+  const reason = unwrap_err(parsed).message
+  return __command_json_error(
+    "invalid_json",
+    label,
+    label + " produced invalid JSON on " + stream + ": " + reason,
+    step,
+    {
+      source: stream,
+      reason: reason,
+      text_tail: prompt_cap(agent, text, opts?.parse_error_chars ?? 1000, "parse-error tail"),
+    },
+  )
+}
+
+fn __command_json_annotate_step(agent: HarnessAgent, step, spec, options) {
+  const opts = __command_options(options)
+  const label = to_string(opts?.label ?? step?.name ?? __command_label(spec))
+  if !(step?.success ?? step?.ok ?? false) {
+    const error = __command_json_failure_error(label, step)
+    return step + {json: nil, error: error}
+  }
+  const stream = __command_json_stream(opts)
+  const text = trim(command_output_text(step, stream))
+  if text == "" {
+    if opts?.allow_empty ?? false {
+      return step + {json: nil}
+    }
+    const error = __command_json_empty_error(label, stream, step)
+    return step + {success: false, ok: false, status: "empty_output", json: nil, error: error}
+  }
+  const parsed = try {
+    json_parse(text)
+  }
+  if is_ok(parsed) {
+    return step + {json: unwrap(parsed)}
+  }
+  const error = __command_json_parse_error(agent, label, stream, text, parsed, step, opts)
+  return step
+    + {
+    success: false,
+    ok: false,
+    status: "invalid_json",
+    json: nil,
+    parse_error: error,
+    error: error,
+  }
+}
+
+fn __command_json_record(step) {
+  if step?.ok ?? false {
+    return {ok: true, value: step?.json, json: step?.json, step: step}
+  }
+  return {
+    ok: false,
+    error: step?.error ?? step?.parse_error
+      ?? __command_json_failure_error(
+      step?.name ?? "command",
+      step,
+    ),
+    step: step,
+  }
+}
+
+fn __command_json_throw(step) {
+  const error = step?.error ?? step?.parse_error
+  throw error?.message ?? to_string(error ?? "command_json failed")
+}
+
+fn __command_json_uses_step(options) -> bool {
+  const opts = __command_options(options)
+  return opts?.step_name != nil
+    || opts?.name != nil
+    || opts?.retry != nil
+    || opts?.classify != nil
+    || opts?.recovery_hint != nil
+    || opts?.runner != nil
+}
+
+/**
+ * command_json_step runs one named command step and parses the selected output as JSON.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: command_json_step("gh repo", ["gh", "api", "repos/owner/repo"])
+ */
+pub fn command_json_step(
+  agent: HarnessAgent,
+  tools: HarnessTools,
+  clock: HarnessClock,
+  name: string,
+  spec,
+  options = nil,
+) -> dict {
+  const step = command_step(tools, clock, name, spec, options)
+  return __command_json_annotate_step(agent, step, spec, options)
+}
+
+/**
+ * command_json runs a command and returns parsed JSON from stdout by default.
+ *
+ * @effects: [process]
+ * @errors: [command_failed, empty_output, invalid_json]
+ * @example: command_json(["gh", "api", "repos/owner/repo"])
+ */
+pub fn command_json(
+  agent: HarnessAgent,
+  tools: HarnessTools,
+  clock: HarnessClock,
+  spec,
+  options = nil,
+) {
+  const opts = __command_options(options)
+  const result_mode = opts?.result ?? "throw"
+  if result_mode != "throw" && result_mode != "record" {
+    throw "command_json: result must be \"throw\" or \"record\""
+  }
+  let step = nil
+  if __command_json_uses_step(opts) {
+    const name = to_string(opts?.step_name ?? opts?.name ?? __command_label(spec))
+    step = command_json_step(agent, tools, clock, name, spec, opts)
+  } else {
+    const result = command_run(tools, spec, __command_run_options(opts))
+    step = __command_json_annotate_step(
+      agent,
+      __command_step_from_result(tools, __command_label(spec), spec, result, opts, []),
+      spec,
+      opts,
+    )
+  }
+  if result_mode == "record" {
+    return __command_json_record(step)
+  }
+  if step?.ok ?? false {
+    return step?.json
+  }
+  __command_json_throw(step)
+}
+
+fn __command_try_source(attempt, index) -> string {
+  if type_of(attempt) == "dict" {
+    if attempt?.source != nil {
+      return to_string(attempt.source)
+    }
+    if attempt?.name != nil {
+      return to_string(attempt.name)
+    }
+    if attempt?.spec != nil {
+      return __command_label(attempt.spec, "attempt-" + to_string(index))
+    }
+    return __command_label(attempt, "attempt-" + to_string(index))
+  }
+  if type_of(attempt) == "list" {
+    return argv_label(attempt)
+  }
+  return "attempt-" + to_string(index)
+}
+
+fn __command_try_command_options(attempt, options) {
+  const opts = __command_options(options)
+  const base = opts?.command_options ?? {}
+  if type_of(attempt) == "dict" {
+    const extra = attempt?.options ?? {}
+    return base + extra
+  }
+  return base
+}
+
+fn __command_try_raw(
+  agent: HarnessAgent,
+  tools: HarnessTools,
+  clock: HarnessClock,
+  attempt,
+  options,
+) {
+  if __command_is_callable(attempt) {
+    return attempt()
+  }
+  if type_of(attempt) == "list" {
+    return {
+      ok: true,
+      value: command_json(
+        agent,
+        tools,
+        clock,
+        attempt,
+        __command_try_command_options(attempt, options),
+      ),
+    }
+  }
+  if type_of(attempt) != "dict" {
+    throw "command_try: attempt must be callable, command spec, or attempt dict"
+  }
+  if attempt?.run != nil {
+    if !__command_is_callable(attempt.run) {
+      throw "command_try: attempt.run must be callable"
+    }
+    return attempt.run()
+  }
+  if attempt?.spec != nil {
+    return {
+      ok: true,
+      value: command_json(
+        agent,
+        tools,
+        clock,
+        attempt.spec,
+        __command_try_command_options(attempt, options),
+      ),
+    }
+  }
+  if attempt?.argv != nil || attempt?.command != nil {
+    return {
+      ok: true,
+      value: command_json(
+        agent,
+        tools,
+        clock,
+        attempt,
+        __command_try_command_options(attempt, options),
+      ),
+    }
+  }
+  throw "command_try: attempt dict must contain run, spec, argv, or command"
+}
+
+fn __command_try_value(raw, source) {
+  if raw == nil {
+    return {
+      ok: false,
+      status: "nil_result",
+      error: {category: "nil_result", source: source, message: source + " returned nil"},
+    }
+  }
+  if type_of(raw) == "dict" && raw?.ok != nil {
+    if raw.ok {
+      if __command_has_key(raw, "value") {
+        return {ok: true, value: raw.value}
+      }
+      if __command_has_key(raw, "json") {
+        return {ok: true, value: raw.json}
+      }
+      return {ok: true, value: raw}
+    }
+    return {ok: false, status: raw?.status ?? "failed", error: raw?.error ?? raw}
+  }
+  return {ok: true, value: raw}
+}
+
+fn __command_try_normalize(value, source, attempt, options) {
+  const opts = __command_options(options)
+  const normalizer = if type_of(attempt) == "dict" && attempt?.normalize != nil {
+    attempt.normalize
+  } else {
+    opts?.normalize
+  }
+  if normalizer == nil {
+    return value
+  }
+  if !__command_is_callable(normalizer) {
+    throw "command_try: normalize must be callable"
+  }
+  return normalizer(value, source)
+}
+
+fn __command_try_attempt(
+  agent: HarnessAgent,
+  tools: HarnessTools,
+  clock: HarnessClock,
+  attempt,
+  index,
+  total,
+  options,
+) {
+  const source = __command_try_source(attempt, index)
+  const raw_result = try {
+    __command_try_raw(agent, tools, clock, attempt, options)
+  }
+  if is_err(raw_result) {
+    const reason = to_string(unwrap_err(raw_result))
+    return {
+      ok: false,
+      source: source,
+      fallback_index: index,
+      fallback_total: total,
+      status: "exception",
+      error: {category: "exception", source: source, message: reason},
+    }
+  }
+  const envelope = __command_try_value(unwrap(raw_result), source)
+  if !(envelope.ok ?? false) {
+    return {
+      ok: false,
+      source: source,
+      fallback_index: index,
+      fallback_total: total,
+      status: envelope?.status ?? "failed",
+      error: envelope?.error,
+    }
+  }
+  const normalized = try {
+    __command_try_normalize(envelope?.value, source, attempt, options)
+  }
+  if is_err(normalized) {
+    const reason = to_string(unwrap_err(normalized))
+    return {
+      ok: false,
+      source: source,
+      fallback_index: index,
+      fallback_total: total,
+      status: "normalize_failed",
+      error: {category: "normalize_failed", source: source, message: reason},
+    }
+  }
+  return {
+    ok: true,
+    source: source,
+    fallback_index: index,
+    fallback_total: total,
+    value: unwrap(normalized),
+  }
+}
+
+fn __command_try_attempt_record(attempt) {
+  return {
+    ok: attempt?.ok ?? false,
+    source: attempt?.source,
+    fallback_index: attempt?.fallback_index,
+    fallback_total: attempt?.fallback_total,
+    status: attempt?.status,
+    error: attempt?.error,
+  }
+}
+
+/**
+ * command_try runs ordered equivalent probes until one returns an ok value.
+ *
+ * @effects: []
+ * @errors: []
+ * @example: command_try([{source: "cli", spec: ["tool", "--json"]}])
+ */
+pub fn command_try(
+  agent: HarnessAgent,
+  tools: HarnessTools,
+  clock: HarnessClock,
+  attempts,
+  options = nil,
+) -> dict {
+  if type_of(attempts) != "list" {
+    throw "command_try: attempts must be a list"
+  }
+  const total = len(attempts)
+  let records = []
+  let last = nil
+  let index = 0
+  while index < total {
+    const attempt = __command_try_attempt(
+      agent,
+      tools,
+      clock,
+      attempts[index],
+      index,
+      total,
+      options,
+    )
+    records = records + [__command_try_attempt_record(attempt)]
+    last = attempt
+    if attempt.ok {
+      return {
+        ok: true,
+        source: attempt.source,
+        value: attempt.value,
+        attempts: records,
+        fallback_index: index,
+        fallback_total: total,
+      }
+    }
+    index += 1
+  }
+  return {
+    ok: false,
+    attempts: records,
+    fallback_total: total,
+    status: last?.status ?? "no_attempts",
+    error: last?.error ?? {category: "no_attempts", message: "command_try: no attempts supplied"},
+  }
+}

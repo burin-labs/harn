@@ -1,0 +1,39 @@
+// Verifies std/jsonl read/parse/write/append/fold over JSON-lines streams,
+// including blank-line skipping, malformed-line tolerance, max_records,
+// and round-tripping a list to disk.
+import { append_jsonl, fold_jsonl, parse_jsonl, read_jsonl, write_jsonl } from "std/jsonl"
+
+pipeline default(harness: Harness) {
+  const body = "{\"a\":1}\n\n{\"b\":2}\n  \n{\"c\":3}\n"
+  const parsed = parse_jsonl(body)
+  harness.stdio.println(len(parsed))
+  harness.stdio.println(parsed[0].a)
+  harness.stdio.println(parsed[1].b)
+  harness.stdio.println(parsed[2].c)
+  const limited = parse_jsonl(body, {max_records: 2})
+  harness.stdio.println(len(limited))
+  const lenient = parse_jsonl("{\"ok\":1}\nNOT JSON\n{\"ok\":2}\n")
+  harness.stdio.println(len(lenient))
+  const path = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-jsonl-roundtrip-" + harness.random.uuid() + ".jsonl",
+  )
+  const written = write_jsonl(harness.fs, path, [{x: 1}, {x: 2}, {x: 3}])
+  harness.stdio.println(written)
+  const reread = read_jsonl(harness.fs, path)
+  harness.stdio.println(len(reread))
+  harness.stdio.println(reread[2].x)
+  append_jsonl(harness.fs, path, {x: 4})
+  const after_append = read_jsonl(harness.fs, path)
+  harness.stdio.println(len(after_append))
+  harness.stdio.println(after_append[3].x)
+  const total = fold_jsonl(
+    body,
+    0,
+    fn(acc, record, index) {
+      let value = record?.a ?? record?.b ?? record?.c ?? 0
+      return acc + value
+    },
+  )
+  harness.stdio.println(total)
+}

@@ -1,0 +1,15 @@
+[package]
+name = "slack-keyword-router"
+
+[exports]
+handlers = "lib.harn"
+
+[[triggers]]
+id = "slack-keyword-router"
+kind = "webhook"
+provider = "slack"
+match = { path = "/hooks/slack", events = ["message", "app_mention"] }
+handler = "handlers::route_message"
+dedupe_key = "event.dedupe_key"
+retry = { max = 4, backoff = "svix" }
+secrets = { signing_secret = "slack/signing-secret" }

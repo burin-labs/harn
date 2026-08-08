@@ -1,0 +1,23 @@
+human
+human_author_agent_coauthor
+user
+any
+user
+user:kenneth
+agent:merge-captain
+Kenneth Sinder
+kenneth@example.com
+true
+true
+Co-Authored-By: Merge Captain <merge-captain@bots.example>
+bot
+bot_author
+github_app
+github_app
+github_app
+agent:merge-captain
+true
+true
+true
+false
+std/disclosure: github.author_mode must be `human` or `bot`, got `robot`

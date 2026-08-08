@@ -1,0 +1,61 @@
+// Verifies std/settled aggregation helpers correctly partition, count,
+// and tally a list of Result values produced by `parallel settle` (or
+// any other code path that emits Ok/Err).
+import {
+  count_errs,
+  count_oks,
+  enumerate_settled,
+  errs,
+  map_settled,
+  oks,
+  partition,
+  summary,
+  tally_by,
+} from "std/settled"
+
+pipeline default(harness: Harness) {
+  const results = [
+    Ok({status: "pass"}),
+    Err("bad-input"),
+    Ok({status: "fail"}),
+    Err("timeout"),
+    Ok({status: "pass"}),
+  ]
+  const parts = partition(results)
+  harness.stdio.println(parts.ok_count)
+  harness.stdio.println(parts.err_count)
+  harness.stdio.println(len(parts.oks))
+  harness.stdio.println(len(parts.errs))
+  harness.stdio.println(len(oks(results)))
+  harness.stdio.println(len(errs(results)))
+  harness.stdio.println(count_oks(results))
+  harness.stdio.println(count_errs(results))
+  const summarized = summary(results)
+  harness.stdio.println(summarized.total)
+  harness.stdio.println(summarized.any_failed)
+  harness.stdio.println(summarized.all_ok)
+  const mapped = map_settled(
+    results,
+    fn(value, idx) { return "ok#" + to_string(idx) + ":" + value.status },
+    fn(error, idx) { return "err#" + to_string(idx) + ":" + to_string(error) },
+  )
+  for row in mapped {
+    harness.stdio.println(row)
+  }
+  const by_status = tally_by(
+    results,
+    fn(payload, was_ok) {
+      if was_ok {
+        return payload.status
+      }
+      return "error"
+    },
+  )
+  harness.stdio.println(by_status?.pass)
+  harness.stdio.println(by_status?.fail)
+  harness.stdio.println(by_status?.error)
+  const rows = enumerate_settled(results)
+  harness.stdio.println(rows[0].ok)
+  harness.stdio.println(rows[1].ok)
+  harness.stdio.println(rows[1].error)
+}

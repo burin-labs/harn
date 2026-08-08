@@ -1,0 +1,38 @@
+[harn] true
+[harn] 1.2.3-stable
+[harn] 1.2.3-rc.1
+[harn] <nil>
+[harn] <nil>
+[harn] <nil>
+[harn] true
+[harn] true
+[harn] false
+[harn] true
+[harn] false
+[harn] true
+[harn] true
+[harn] true
+[harn] false
+[harn] false
+[harn] false
+[harn] -1
+[harn] -1
+[harn] -1
+[harn] 0
+[harn] 2.0.0-rc.0
+[harn] 1.3.0-beta.0
+[harn] 1.2.4-rc.0
+[harn] 1.2.4-rc.0
+[harn] 1.2.4-rc.1
+[harn] 1.2.4-rc.10
+[harn] 1.2.4-rc.0
+[harn] 1.2.4-rc.0
+[harn] std/semver: prerelease identifier is required and must be canonical: <empty>
+[harn] std/semver: prerelease identifier is required and must be canonical: rc.01
+[harn] std/semver: prerelease numeric identifier is outside the integer range: 999999999999999999999999999999
+[harn] 2.0.0
+[harn] 1.3.0
+[harn] 1.2.4
+[harn] 1.3.0
+[harn] 1.2.3-rc.1
+[harn] true

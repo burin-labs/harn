@@ -1,0 +1,502 @@
+//! `harn dump-trigger-quickref` — regenerate the LLM trigger quickref.
+//!
+//! The quickref is intentionally generated from the runtime provider catalog
+//! so connector docs do not drift from `std/triggers::list_providers()`.
+
+use std::fs;
+use std::path::Path;
+use std::process;
+
+use harn_vm::{
+    registered_provider_metadata, ProviderMetadata, ProviderRuntimeMetadata,
+    SignatureVerificationMetadata,
+};
+
+struct FirstPartyConnectorPackage {
+    provider: &'static str,
+    package_url: &'static str,
+    install: &'static str,
+    package_gate: &'static str,
+}
+
+const FIRST_PARTY_CONNECTOR_PACKAGES: &[FirstPartyConnectorPackage] = &[
+    FirstPartyConnectorPackage {
+        provider: "GitHub",
+        package_url: "https://github.com/burin-labs/harn-github-connector",
+        install: "harn add github.com/burin-labs/harn-github-connector@v0.2.0",
+        package_gate: "harn package verify . --provider github",
+    },
+    FirstPartyConnectorPackage {
+        provider: "Slack",
+        package_url: "https://github.com/burin-labs/harn-slack-connector",
+        install: "harn add github.com/burin-labs/harn-slack-connector@v0.1.0",
+        package_gate: "harn package verify . --provider slack",
+    },
+    FirstPartyConnectorPackage {
+        provider: "Linear",
+        package_url: "https://github.com/burin-labs/harn-linear-connector",
+        install: "harn add github.com/burin-labs/harn-linear-connector@v0.1.0",
+        package_gate: "harn package verify . --provider linear",
+    },
+    FirstPartyConnectorPackage {
+        provider: "Notion",
+        package_url: "https://github.com/burin-labs/harn-notion-connector",
+        install: "harn add github.com/burin-labs/harn-notion-connector@v0.1.0",
+        package_gate: "harn package verify . --provider notion --run-poll-tick",
+    },
+    FirstPartyConnectorPackage {
+        provider: "GitLab",
+        package_url: "https://github.com/burin-labs/harn-gitlab-connector",
+        install: "harn add github.com/burin-labs/harn-gitlab-connector@v0.1.0",
+        package_gate: "harn package verify . --provider gitlab",
+    },
+    FirstPartyConnectorPackage {
+        provider: "Forgejo",
+        package_url: "https://github.com/burin-labs/harn-forgejo-connector",
+        install: "harn add github.com/burin-labs/harn-forgejo-connector@v0.1.0",
+        package_gate: "harn package verify . --provider forgejo",
+    },
+    FirstPartyConnectorPackage {
+        provider: "Gitea",
+        package_url: "https://github.com/burin-labs/harn-gitea-connector",
+        install: "harn add github.com/burin-labs/harn-gitea-connector@v0.1.0",
+        package_gate: "harn package verify . --provider gitea",
+    },
+    FirstPartyConnectorPackage {
+        provider: "Bitbucket",
+        package_url: "https://github.com/burin-labs/harn-bitbucket-connector",
+        install: "harn add github.com/burin-labs/harn-bitbucket-connector@v0.1.0",
+        package_gate: "harn package verify . --provider bitbucket",
+    },
+    FirstPartyConnectorPackage {
+        provider: "CircleCI",
+        package_url: "https://github.com/burin-labs/harn-circleci-connector",
+        install: "harn add github.com/burin-labs/harn-circleci-connector@v0.1.0",
+        package_gate: "harn package verify . --provider circleci",
+    },
+    FirstPartyConnectorPackage {
+        provider: "Buildkite",
+        package_url: "https://github.com/burin-labs/harn-buildkite-connector",
+        install: "harn add github.com/burin-labs/harn-buildkite-connector@v0.1.0",
+        package_gate: "harn package verify . --provider buildkite",
+    },
+    FirstPartyConnectorPackage {
+        provider: "SourceHut",
+        package_url: "https://github.com/burin-labs/harn-sourcehut-connector",
+        install: "harn add github.com/burin-labs/harn-sourcehut-connector@v0.1.0",
+        package_gate: "harn package verify . --provider sourcehut",
+    },
+    FirstPartyConnectorPackage {
+        provider: "Subversion",
+        package_url: "https://github.com/burin-labs/harn-svn-connector",
+        install: "harn add github.com/burin-labs/harn-svn-connector@v0.1.0",
+        package_gate: "harn package verify . --provider svn --run-poll-tick",
+    },
+];
+
+pub(crate) fn run(output_path: &str, check_only: bool) {
+    let generated = generate_file();
+    let path = Path::new(output_path);
+
+    if check_only {
+        let existing = match fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: cannot read {}: {e}", path.display());
+                eprintln!("hint: run `make gen-trigger-quickref` to regenerate.");
+                process::exit(1);
+            }
+        };
+        if normalize_line_endings(&existing) != normalize_line_endings(&generated) {
+            eprintln!(
+                "error: {} is stale relative to the trigger provider catalog.",
+                path.display()
+            );
+            eprintln!("hint: run `make gen-trigger-quickref` to regenerate.");
+            process::exit(1);
+        }
+        return;
+    }
+
+    if let Some(parent) = path.parent() {
+        if let Err(e) = fs::create_dir_all(parent) {
+            eprintln!("error: cannot create {}: {e}", parent.display());
+            process::exit(1);
+        }
+    }
+    if let Err(e) = fs::write(path, &generated) {
+        eprintln!("error: cannot write {}: {e}", path.display());
+        process::exit(1);
+    }
+    println!("wrote {}", path.display());
+}
+
+fn generate_file() -> String {
+    let mut providers = registered_provider_metadata();
+    providers.sort_by(|a, b| a.provider.cmp(&b.provider));
+
+    let mut out = String::new();
+    out.push_str("# Harn trigger quick reference (LLM-friendly)\n\n");
+    out.push_str("<!-- GENERATED by `harn dump-trigger-quickref` -- do not edit by hand. -->\n");
+    out.push_str("<!-- Sources of truth: crates/harn-vm/src/triggers/event.rs ProviderCatalog metadata and connector contract v1 docs. -->\n\n");
+    out.push_str("<!-- markdownlint-disable MD013 -->\n\n");
+    out.push_str(
+        "**Canonical URL:** <https://harnlang.com/docs/llm/harn-triggers-quickref.html>\n\n",
+    );
+    out.push_str("Use this with `docs/llm/harn-quickref.md` when writing trigger, connector, or orchestrator code. It covers manifest shape, provider catalog metadata, the pure-Harn connector contract, and example-library commands.\n\n");
+    out.push_str("**Reminders ≠ triggers.** Triggers spawn or schedule tasks from external or timed events; system reminders modify a running agent session by injecting typed ambient context. See `docs/src/system-reminders.md` and the Reminders section in `docs/llm/harn-quickref.md`.\n\n");
+    out.push_str("## Trigger manifest\n\n");
+    out.push_str("```toml\n");
+    out.push_str("[package]\nname = \"review-bot\"\n\n");
+    out.push_str("[exports]\nhandlers = \"lib.harn\"\n\n");
+    out.push_str("[[triggers]]\n");
+    out.push_str("id = \"github-prs\"\nkind = \"webhook\"\nprovider = \"github\"\nmatch = { path = \"/hooks/github\", events = [\"pull_request.opened\"] }\nhandler = \"handlers::on_pull_request\"\nwhen = \"handlers::should_handle\"\ndedupe_key = \"event.dedupe_key\"\nretry = { max = 7, backoff = \"svix\" }\nbudget = { daily_cost_usd = 5.00, max_concurrent = 4 }\nsecrets = { signing_secret = \"github/webhook-secret\" }\n\n");
+    out.push_str("[[triggers]]\nid = \"weekday-digest\"\nkind = \"cron\"\nprovider = \"cron\"\nmatch = { events = [\"cron.tick\"] }\nschedule = \"0 9 * * 1-5\"\ntimezone = \"America/Los_Angeles\"\nhandler = \"handlers::send_digest\"\n\n");
+    out.push_str("[[triggers]]\nid = \"nightly-regression\"\nkind = \"cron\"\nprovider = \"cron\"\nmatch = { events = [\"cron.tick\"] }\nschedule = \"0 3 * * *\"\ntimezone = \"UTC\"\nhandler = \"eval_pack://scheduled-regression\"\nbudget = { daily_cost_usd = 0.25, on_budget_exhausted = \"retry_later\" }\nconcurrency = { max = 1 }\n```\n\n");
+    out.push_str("Key fields: `id`, `kind`, `provider`, `handler`, `path` or `match.path`, `match.events`, `when`, `dedupe_key`, `retry`, `budget`, `secrets`, `schedule`, `timezone`, and provider-specific config tables such as `poll`.\n\n");
+    out.push_str("A nominal trigger handler has the boundary signature `fn on_event(harness: Harness, event: TriggerEvent)`. The runtime supplies the root `Harness` and the typed event. Keep `when` predicates pure as `fn should_handle(event: TriggerEvent) -> bool`; they do not receive authority. At the boundary, attenuate authority by passing helpers the smallest coherent nominal handles they need (for example `HarnessFs` or `HarnessLlm`). Root `Harness` parameters are appropriate for entrypoints and orchestration functions that genuinely coordinate several capabilities, but reusable helpers should not inherit process-wide authority by default. The `capability-attenuation` lint reports unnecessarily broad helper signatures and suggests the handles actually used.\n\n");
+    out.push_str("Audit a project before deploy with `harn routes <root> --json`; it reports each declarative trigger's route path, handler module, budgets, inferred host capabilities, vendor-lock disclosure, and prompt/template overhead without executing handler code.\n\n");
+
+    out.push_str("## Handler variants\n\n");
+    out.push_str("`handler:` accepts a closure (in-process), an `a2a://`, `worker://`, or `eval_pack://` URI string, or a handler-variant dict. `eval_pack://<target>` resolves a bare target from `[package].evals` by id/name/file stem or a path-like target relative to `harn.toml`, then dispatches through `eval_pack_run(manifest, options?)` under the trigger's normal budget, retry, DLQ, replay/cancel, and flow-control rules. The dict form covers compositions that need more than a single callable; `SpawnToPool` and `ReminderInject` ship today, more variants will plug into the same syntax over time.\n\n");
+    out.push_str("```harn\n");
+    out.push_str("import { SpawnToPool } from \"std/triggers\"\n");
+    out.push_str("import { pool_create } from \"std/lifecycle/pool\"\n\n");
+    out.push_str(
+        "fn configure_review_trigger(harness: Harness) {\n  \
+         pool_create(harness.agent, {name: \"pr-review-pool\", max_concurrent: 4})\n\n  \
+         harness.runtime.trigger_register({\n",
+    );
+    out.push_str("    kind: \"issue.opened\",\n");
+    out.push_str("    provider: \"github\",\n");
+    out.push_str("    handler: SpawnToPool({\n");
+    out.push_str("      pool: \"pr-review-pool\",\n");
+    out.push_str("      priority_from: \"headers.priority\",   // optional dotted JSON path\n");
+    out.push_str("      key_from: \"tenant_id\",               // optional dotted JSON path\n");
+    out.push_str("      task_factory: { event -> { -> review(event) } },\n");
+    out.push_str("    }),\n");
+    out.push_str("    match: {events: [\"issue.opened\"]},\n");
+    out.push_str("  })\n}\n");
+    out.push_str("```\n\n");
+    out.push_str("The dispatcher invokes `task_factory(event)` per match, extracts priority + fair-queue key from the event payload (missing paths fall back to default priority 0 / null key), and submits the resulting closure to the named pool under its queue strategy + backpressure policy. Pool rejections (`drop_newest`, etc.) reuse the `lifecycle.pool.audit` channel that direct `pool.submit` calls emit on. The dispatch result is shaped as a `pool_task` handle so handlers can call `pool_wait(harness.agent, dispatch.result)` directly.\n\n");
+
+    out.push_str("```harn\n");
+    out.push_str("import { ReminderInject } from \"std/triggers\"\n\n");
+    out.push_str("fn register_release_reminder(runtime: HarnessRuntime) {\n");
+    out.push_str("  runtime.trigger_register({\n");
+    out.push_str("    kind: \"channel.emit\",\n");
+    out.push_str("    provider: \"channel\",\n");
+    out.push_str("    match: {events: [\"channel:pr.merged\"]},\n");
+    out.push_str("    handler: ReminderInject({\n");
+    out.push_str("      target: \"current\",                     // \"current\", \"parent\", a literal session id, or a closure\n");
+    out.push_str("      body: \"PR {{ event.provider_payload.payload.number }} merged. Consider cutting a patch release.\",\n");
+    out.push_str("      tags: [\"release_reminder\"],\n");
+    out.push_str("      ttl_turns: 1,\n");
+    out.push_str("      dedupe_key: \"release_reminder\",\n");
+    out.push_str("    }),\n");
+    out.push_str("  })\n}\n");
+    out.push_str("```\n\n");
+    out.push_str("`ReminderInject` (#1876) injects a `SystemReminder` (#1815) into the target running session at its next turn boundary — no spawn, no resume, no signal. `target` resolves at dispatch time: `\"current\"` walks the owning session, `\"parent\"` walks its parent in the session lineage, any other string is a literal session id, and a closure `event -> string?` lets the trigger pick a target dynamically. `body` is a `.harn.prompt` template rendered against `{{ event }}` (the full trigger event), `{{ match }}` (`matched_at`), and `{{ batch }}` (when flow-control batching is in effect). `tags`, `ttl_turns`, `dedupe_key`, `propagate`, `role_hint`, and `preserve_on_compact` mirror `transcript.inject_reminder`. Missing target sessions are dropped gracefully with a `triggers.reminder_inject.audit` audit entry instead of failing the dispatch.\n\n");
+
+    out.push_str("## Provider catalog\n\n");
+    out.push_str("This table is generated from `std/triggers::list_providers()` / `ProviderCatalog` metadata.\n\n");
+    out.push_str(
+        "| Provider | Kinds | Schema | Runtime | Signature | Secrets | Outbound methods |\n",
+    );
+    out.push_str("|---|---|---|---|---|---|---|\n");
+    for provider in &providers {
+        out.push_str(&provider_row(provider));
+    }
+
+    out.push_str("\n## First-party connector packages\n\n");
+    out.push_str("Provider business logic ships as pure-Harn packages. The Rust runtime keeps only core connector primitives such as webhook intake, cron, A2A push, and stream ingress.\n\n");
+    out.push_str("| Provider | Package | Install | Package gate |\n");
+    out.push_str("|---|---|---|---|\n");
+    for package in FIRST_PARTY_CONNECTOR_PACKAGES {
+        out.push_str(&format!(
+            "| {} | <{}> | `{}` | `{}` |\n",
+            package.provider, package.package_url, package.install, package.package_gate
+        ));
+    }
+    out.push('\n');
+    out.push_str("Community connectors are Harn packages that declare `connector_contract = \"v1\"` and export the connector functions below. Direct GitHub refs are enough for private or pre-registry packages; registry names such as `@burin/notion-connector` are for discoverable package-index entries.\n\n");
+
+    out.push_str("## Connector contract V1\n\n");
+    out.push_str("Required exports for a pure-Harn connector package:\n\n");
+    out.push_str("| Export | Required | Purpose |\n");
+    out.push_str("|---|---:|---|\n");
+    out.push_str(
+        "| `provider_id() -> string` | Yes | Provider id, matching `[[providers]].id`. |\n",
+    );
+    out.push_str("| `kinds() -> list<string>` | Yes | Trigger kinds such as `webhook`, `poll`, `cron`, `a2a-push`, or `stream`. |\n");
+    out.push_str("| `payload_schema() -> dict` | Yes | `{ harn_schema_name, json_schema? }`; the contract check rejects `{ name = ... }` drift. |\n");
+    out.push_str("| `normalize_inbound(harness, raw) -> dict` | Inbound | Returns `NormalizeResult` v1 for webhook-style input. |\n");
+    out.push_str("| `poll_tick(harness, ctx) -> dict` | Poll | Required when `kinds()` includes `poll`; returns events plus optional `cursor`/`state`. |\n");
+    out.push_str("| `call(harness, method, args) -> dict` | Outbound | Provider API escape hatch. Unknown probes may throw `method_not_found:<method>`. |\n");
+    out.push_str("| `init(harness, ctx)` | No | Receives event log, secrets, metrics, inbox, and rate-limit handles. |\n");
+    out.push_str("| `activate(harness, bindings)` | No | Runs on manifest activation/reload. |\n");
+    out.push_str("| `shutdown(harness)` | No | Cleanup on reload or process shutdown. |\n\n");
+    out.push_str("`normalize_inbound(harness, raw)` must return one of these tagged shapes: `{ type: \"event\", event }`, `{ type: \"batch\", events }`, `{ type: \"immediate_response\", immediate_response, event?, events? }`, or `{ type: \"reject\", status, body? }`. Direct legacy event dicts are rejected.\n\n");
+    out.push_str("Every runtime export takes the root `Harness` first; the metadata exports (`provider_id`, `kinds`, `payload_schema`) stay pure and take nothing. Reach secrets, the event log, and metrics through that handle: `harness.secrets.read`, `harness.obs.event_log_emit`, and `harness.obs.metrics_inc`. The hot-path `normalize_inbound` effect policy rejects network calls, LLM calls, process execution, host calls, MCP calls, and ambient filesystem/project access.\n\n");
+    out.push_str("Runtime scripts can observe EventLog topics directly with `event_log.subscribe({topic, from_cursor, kind_prefix?})`, which returns a `Stream<dict>` of `{id, cursor, topic, kind, payload, headers, occurred_at_ms}` records. Use `event_log.latest(topic)` before subscribing to tail new events only, pass `kind_prefix` to receive only matching event kinds, or persist the `cursor` field to resume after a reconnect.\n\n");
+
+    out.push_str("## Package fixtures\n\n");
+    out.push_str("Connector packages should declare deterministic fixtures in `harn.toml` and run them in CI:\n\n");
+    out.push_str("```toml\n[connector_contract]\nversion = 1\n\n[[connector_contract.fixtures]]\nprovider = \"slack\"\nname = \"url verification\"\nkind = \"webhook\"\nheaders = { \"content-type\" = \"application/json\" }\nbody_json = { type = \"url_verification\", challenge = \"challenge-token\" }\nexpect_type = \"immediate_response\"\nexpect_event_count = 0\n```\n\n");
+    out.push_str("Run `harn package verify .` locally. Add `--strict` for warning-fatal check/lint gates and strict boundary typing, use `--provider <id>` for a multi-provider package, `--run-poll-tick` to execute the first poll tick, and `--json` for a schema-v2 CI receipt.\n\n");
+
+    out.push_str("## Example library\n\n");
+    out.push_str("Ready-to-customize pipelines live under `examples/triggers/`. Each example includes `harn.toml`, `lib.harn`, `README.md`, and `SKILL.md` so it can be copied into a project or installed as a local skill bundle. Validate examples with `make check-trigger-examples`.\n\n");
+
+    out.push_str("## Generic webhook intake substrate\n\n");
+    out.push_str(
+        "Below the per-provider connectors lives a forge-agnostic intake substrate\n\
+that any connector can wire into. It is the lowest-level entry point: a\n\
+connector declares a path scope, a signature header + algorithm, a\n\
+delivery-id header, and a topic; the substrate handles HMAC verification,\n\
+delivery-id deduplication (durable across process restarts), and\n\
+republishing onto the chosen topic. Per-forge event normalization lives in\n\
+the connector that consumes the topic.\n\n",
+    );
+    out.push_str("Builtins:\n\n");
+    out.push_str(
+        "- `webhook_intake_register(config) -> dict` — register an intake. Returns\n  \
+`{ id, path, topic, signature_header, signature_prefix,\n  signature_encoding, algorithm, allow_legacy_sha1, delivery_id_header,\n  dedupe_ttl_seconds }`. Config keys:\n  \
+- `id` (optional) — pin the intake id; one is generated if omitted.\n  \
+- `path` (optional) — HTTP path scope. When set, `webhook_intake_feed`\n    rejects deliveries on a different path.\n  \
+- `secret` (string or bytes, required) — HMAC key.\n  \
+- `signature_header` (required) — e.g. `\"x-hub-signature-256\"`.\n  \
+- `signature_prefix` — defaults to `\"<algorithm>=\"`. Pass `\"\"` to opt out.\n  \
+- `signature_encoding` — `\"hex\"` (default) or `\"base64\"`.\n  \
+- `algorithm` — `\"sha256\"` (default) or legacy `\"sha1\"` when `allow_legacy_sha1` is true.\n  \
+- `allow_legacy_sha1` — explicit opt-in for existing providers that still sign with HMAC-SHA1.\n  \
+- `delivery_id_header` (required) — e.g. `\"x-github-delivery\"`.\n  \
+- `topic` (required) — event-log topic accepted deliveries are appended to.\n  \
+- `dedupe_ttl_seconds` — defaults to 24h.\n\
+- `webhook_intake_feed(intake_id, request) -> dict` — feed a delivery.\n  \
+Request keys: `headers` (dict), `body` (string or bytes), optional `path`\n  \
+and `received_at` (RFC3339). Returns `{ status, intake_id, topic,\n  \
+delivery_id, topic_event_id, reason, received_at }`. `status` is\n  \
+`\"accepted\"`, `\"duplicate\"`, or `\"rejected\"`.\n\
+- `webhook_intake_recent(intake_id, limit?) -> list` — bounded replay\n  \
+buffer. Reads the last `limit` accepted deliveries from the topic.\n\
+- `webhook_intake_list() -> list` — all currently-registered intakes.\n\
+- `webhook_intake_deregister(intake_id) -> bool` — remove an intake.\n\n",
+    );
+    out.push_str("A connector wires this in well under 30 lines:\n\n");
+    out.push_str(
+        "```harn\n\
+import \"std/triggers\"\n\n\
+const intake = webhook_intake_register({\n  \
+id: \"github\",\n  \
+path: \"/hooks/github\",\n  \
+secret: harness.secrets.read(\"github/webhook-secret\"),\n  \
+signature_header: \"x-hub-signature-256\",\n  \
+delivery_id_header: \"x-github-delivery\",\n  \
+topic: \"github.events\",\n\
+})\n\n\
+// In your inbound HTTP handler:\n\
+const outcome = webhook_intake_feed(intake.id, {\n  \
+headers: request.headers,\n  \
+body: request.body,\n  \
+path: request.path,\n\
+})\n\
+return { status: outcome.status == \"rejected\" ? 401 : 202 }\n\
+```\n\n",
+    );
+    out.push_str("Rejections are appended to `triggers.webhook_intake.rejections` with the\nintake id and reason for audit. The substrate is agnostic to per-forge\nevent shape — connectors normalize the opaque payload after consuming the\ntopic.\n");
+    out
+}
+
+fn normalize_line_endings(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+fn provider_row(provider: &ProviderMetadata) -> String {
+    format!(
+        "| `{}` | {} | `{}` | {} | {} | {} | {} |\n",
+        provider.provider,
+        comma_code(&provider.kinds),
+        provider.schema_name,
+        runtime_summary(&provider.runtime),
+        signature_summary(&provider.signature_verification),
+        secret_summary(provider),
+        method_summary(provider),
+    )
+}
+
+fn comma_code(values: &[String]) -> String {
+    if values.is_empty() {
+        "-".to_string()
+    } else {
+        values
+            .iter()
+            .map(|value| format!("`{value}`"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+fn runtime_summary(runtime: &ProviderRuntimeMetadata) -> String {
+    match runtime {
+        ProviderRuntimeMetadata::Builtin {
+            connector,
+            default_signature_variant,
+        } => match default_signature_variant {
+            Some(variant) => format!("builtin `{connector}` / `{variant}` signatures"),
+            None => format!("builtin `{connector}`"),
+        },
+        ProviderRuntimeMetadata::Placeholder => "placeholder".to_string(),
+    }
+}
+
+fn signature_summary(signature: &SignatureVerificationMetadata) -> String {
+    match signature {
+        SignatureVerificationMetadata::None => "none".to_string(),
+        SignatureVerificationMetadata::Hmac {
+            variant,
+            signature_header,
+            timestamp_header,
+            id_header,
+            default_tolerance_secs,
+            digest,
+            encoding,
+            ..
+        } => {
+            let mut parts = vec![
+                format!("HMAC `{variant}`"),
+                format!("header `{signature_header}`"),
+                format!("{digest}/{encoding}"),
+            ];
+            if let Some(header) = timestamp_header {
+                parts.push(format!("ts `{header}`"));
+            }
+            if let Some(header) = id_header {
+                parts.push(format!("id `{header}`"));
+            }
+            if let Some(tolerance) = default_tolerance_secs {
+                parts.push(format!("{tolerance}s tolerance"));
+            }
+            parts.join(", ")
+        }
+    }
+}
+
+fn secret_summary(provider: &ProviderMetadata) -> String {
+    if provider.secret_requirements.is_empty() {
+        return "-".to_string();
+    }
+    provider
+        .secret_requirements
+        .iter()
+        .map(|secret| {
+            let required = if secret.required {
+                "required"
+            } else {
+                "optional"
+            };
+            format!("`{}/{}` ({required})", secret.namespace, secret.name)
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn method_summary(provider: &ProviderMetadata) -> String {
+    if provider.outbound_methods.is_empty() {
+        "-".to_string()
+    } else {
+        provider
+            .outbound_methods
+            .iter()
+            .map(|method| format!("`{}`", method.name))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::package::lock_manifest_provider_schemas;
+    use crate::tests::common::harn_state_lock::{lock_harn_state_async, HarnStateGuard};
+
+    /// `collect_manifest_triggers` (in `package::extensions`) contributes a
+    /// manifest-derived `ProviderCatalog` to the process-global catalog.
+    /// Without a clean baseline the regenerator picks up stray dynamic
+    /// providers (like the `echo` fixtures registered by package tests) and
+    /// the snapshot diverges from the committed file under workspace test
+    /// ordering.
+    ///
+    /// The state lock supplies that baseline — it drops contributed
+    /// providers on acquisition. The schema lock underneath it is what
+    /// production registration holds, so taking it too keeps a package load
+    /// running in a sibling test from contributing between the reset and
+    /// `generate_file()`.
+    struct CatalogTestScope {
+        _schema_guard: tokio::sync::MutexGuard<'static, ()>,
+        _state_guard: HarnStateGuard,
+    }
+
+    impl CatalogTestScope {
+        async fn new() -> Self {
+            let state_guard = lock_harn_state_async().await;
+            let schema_guard = lock_manifest_provider_schemas().await;
+            Self {
+                _schema_guard: schema_guard,
+                _state_guard: state_guard,
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn generated_quickref_contains_catalog_and_contract() {
+        let _scope = CatalogTestScope::new().await;
+        let out = generate_file();
+        assert!(out.contains(
+            "| `webhook` | `webhook` | `GenericWebhookPayload` | builtin `webhook` / `standard` signatures |"
+        ));
+        assert!(!out.contains("| `github` |"));
+        assert!(out.contains("Connector contract V1"));
+        assert!(out.contains("harn package verify ."));
+        assert!(out.contains("harn-forgejo-connector"));
+        assert!(out.contains("harn-svn-connector"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn committed_trigger_quickref_matches_generator() {
+        let _scope = CatalogTestScope::new().await;
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let path = std::path::Path::new(manifest_dir)
+            .join("..")
+            .join("..")
+            .join("docs")
+            .join("llm")
+            .join("harn-triggers-quickref.md");
+        let on_disk = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            panic!(
+                "failed to read {}: {e}\n\
+                 hint: run `make gen-trigger-quickref` to regenerate.",
+                path.display()
+            )
+        });
+        let generated = generate_file();
+        assert_eq!(
+            normalize_line_endings(&on_disk),
+            normalize_line_endings(&generated),
+            "docs/llm/harn-triggers-quickref.md is stale relative to the trigger provider catalog.\n\
+             Run `make gen-trigger-quickref` to regenerate."
+        );
+    }
+
+    #[test]
+    fn generated_quickref_comparison_ignores_platform_line_endings() {
+        let generated = "# Harn Trigger Quick Reference\n\n| Provider |\n";
+        let on_disk = generated.replace('\n', "\r\n");
+
+        assert_eq!(
+            normalize_line_endings(&on_disk),
+            normalize_line_endings(generated)
+        );
+    }
+}

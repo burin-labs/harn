@@ -1,0 +1,185 @@
+import { parse, parser } from "std/cli/argparse"
+
+fn __load_cell_summaries(fs: HarnessFs, results_dir: string) {
+  const entries = fs.list_dir(results_dir)
+  let summaries = []
+  for entry in entries {
+    const path = path_join(results_dir, entry)
+    const summary_path = path_join(path, "summary.json")
+    if fs.exists(summary_path) {
+      const parsed = json_parse(fs.read_text(summary_path))
+      summaries = summaries.appending({label: entry, summary: parsed})
+    }
+  }
+  return summaries
+}
+
+fn __cell_from_label(label: string) {
+  // Labels look like "asymmetric-r2" or "probe-rubric-adversarial".
+  // Strip trailing "-rN" suffix to recover the cell name.
+  const parts = split(label, "-")
+  if len(parts) >= 2 {
+    const last = parts[len(parts) - 1]
+    if starts_with(last, "r") && len(last) > 1 {
+      return join(parts.take(len(parts) - 1), "-")
+    }
+  }
+  return label
+}
+
+fn __cell_stats(cell_summaries) {
+  let total_runs = 0
+  let passed_runs = 0
+  let total_cost = 0.0
+  let total_input_tokens = 0
+  let total_output_tokens = 0
+  for entry in cell_summaries {
+    const s = entry.summary
+    total_runs = total_runs + (s?.total_runs ?? 0)
+    passed_runs = passed_runs + (s?.passed_runs ?? 0)
+    total_cost = total_cost + (s?.total_cost_usd ?? 0.0)
+    const runs = s?.runs ?? []
+    for run in runs {
+      total_input_tokens = total_input_tokens + (run?.input_tokens ?? 0)
+      total_output_tokens = total_output_tokens + (run?.output_tokens ?? 0)
+    }
+  }
+  const pass_rate = if total_runs > 0 {
+    passed_runs * 100 / total_runs
+  } else {
+    0
+  }
+  return {
+    runs: total_runs,
+    passed: passed_runs,
+    pass_rate_pct: pass_rate,
+    cost_usd: total_cost,
+    input_tokens: total_input_tokens,
+    output_tokens: total_output_tokens,
+  }
+}
+
+fn __group_by_cell(summaries) {
+  let groups = {}
+  for entry in summaries {
+    const cell = __cell_from_label(entry.label)
+    const bucket = groups[cell] ?? []
+    groups = groups + {[cell]: bucket.appending(entry)}
+  }
+  return groups
+}
+
+fn __format_md(groups, results_dir: string) {
+  let lines = []
+  lines = lines.appending("# Step-Judge Experiment Report")
+  lines = lines.appending("")
+  lines = lines.appending("Source: `" + results_dir + "`")
+  lines = lines.appending("")
+  lines = lines.appending("## Cells")
+  lines = lines.appending("")
+  lines = lines.appending("| Cell | Runs | Pass | Pass% | Cost USD | Input tok | Output tok |")
+  lines = lines.appending("|---|---:|---:|---:|---:|---:|---:|")
+  const cell_order = ["baseline-cheap", "symmetric-cheap", "asymmetric", "symmetric-strong"]
+  let baseline_pass_rate = nil
+  for cell in cell_order {
+    if groups?.[cell] != nil {
+      const stats = __cell_stats(groups[cell])
+      if cell == "baseline-cheap" {
+        baseline_pass_rate = stats.pass_rate_pct
+      }
+      lines = lines.appending(
+        "| " + cell + " | " + to_string(stats.runs) + " | " + to_string(stats.passed) + " | "
+          + to_string(
+          stats.pass_rate_pct,
+        )
+          + "% | "
+          + to_string(stats.cost_usd)
+          + " | "
+          + to_string(stats.input_tokens)
+          + " | "
+          + to_string(stats.output_tokens)
+          + " |",
+      )
+    }
+  }
+  lines = lines.appending("")
+  if baseline_pass_rate != nil {
+    lines = lines.appending("## Lift vs baseline-cheap")
+    lines = lines.appending("")
+    lines = lines.appending("| Cell | Lift (pp) |")
+    lines = lines.appending("|---|---:|")
+    for cell in cell_order {
+      if cell != "baseline-cheap" && groups?.[cell] != nil {
+        const stats = __cell_stats(groups[cell])
+        const lift = stats.pass_rate_pct - baseline_pass_rate
+        lines = lines.appending("| " + cell + " | " + to_string(lift) + " |")
+      }
+    }
+    lines = lines.appending("")
+  }
+  // Probes (any cell not in the main 4).
+  let probe_cells = []
+  for cell in groups.keys() {
+    if !contains(cell_order, cell) {
+      probe_cells = probe_cells.appending(cell)
+    }
+  }
+  if len(probe_cells) > 0 {
+    lines = lines.appending("## Probes")
+    lines = lines.appending("")
+    lines = lines.appending("| Probe | Runs | Pass | Pass% | Cost USD |")
+    lines = lines.appending("|---|---:|---:|---:|---:|")
+    for cell in probe_cells {
+      const stats = __cell_stats(groups[cell])
+      lines = lines.appending(
+        "| " + cell + " | " + to_string(stats.runs) + " | " + to_string(stats.passed) + " | "
+          + to_string(
+          stats.pass_rate_pct,
+        )
+          + "% | "
+          + to_string(stats.cost_usd)
+          + " |",
+      )
+    }
+    lines = lines.appending("")
+  }
+  lines = lines.appending("## Go / no-go")
+  lines = lines.appending("")
+  lines = lines.appending("Compare lift to the criteria in `experiments/step-judge/README.md`:")
+  lines = lines.appending("")
+  lines = lines.appending("- asymmetric lift ≥ 15pp at ≤3× baseline cost → GO (recommended opt-in)")
+  lines = lines.appending("- symmetric-cheap lift ≥ 10pp at ≤2× baseline cost → GO (both presets)")
+  lines = lines.appending("- 5pp ≤ lift < threshold → SHIP AS OPT-IN with mixed-evidence note")
+  lines = lines.appending(
+    "- lift < 5pp or degraded → NO-GO; ship primitive @experimental, file follow-up",
+  )
+  return join(lines, "\n") + "\n"
+}
+
+fn main(harness: Harness) {
+  const parsed = parse(
+    parser(
+      {
+        name: "step_judge_aggregate",
+        args: [
+          {kind: "flag", name: "results_dir", long: "--results-dir", required: true},
+          {kind: "flag", name: "output", long: "--output", required: true},
+        ],
+      },
+    ),
+    argv,
+  )
+  if is_err(parsed) {
+    throw unwrap_err(parsed).message
+  }
+  const args = unwrap(parsed).options
+  const summaries = __load_cell_summaries(harness.fs, args.results_dir)
+  if len(summaries) == 0 {
+    throw "no summary.json files found under " + args.results_dir
+  }
+  const groups = __group_by_cell(summaries)
+  const md = __format_md(groups, args.results_dir)
+  harness.fs.write_text(args.output, md)
+  harness.stdio.println("wrote " + args.output)
+  return 0
+}

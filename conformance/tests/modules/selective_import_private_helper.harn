@@ -1,0 +1,3 @@
+import { greet } from "selective_import_private_helper_lib"
+
+assert_eq(greet(), "hello world")

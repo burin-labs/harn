@@ -1,0 +1,33 @@
+/**
+ * Counterfactual session fork
+ *
+ * Demonstrates agent_session_fork for exploring a conversation branch
+ * without mutating the original. Both branches share the seeded prefix
+ * and then evolve independently.
+ *
+ * Run with: cargo run --bin harn -- run examples/session-fork.harn
+ */
+pipeline main(harness: Harness, task) {
+  const base = harness.agent.open()
+  harness.agent.inject(base, {role: "user", content: "Plan a weekend in Kyoto."})
+  harness.agent.inject(
+    base,
+    {role: "assistant", content: "Day 1: Fushimi Inari. Day 2: Arashiyama."},
+  )
+  // Fork two counterfactual branches from the same starting point.
+  const rainy = harness.agent.fork(base)
+  const sunny = harness.agent.fork(base)
+  harness.agent.inject(rainy, {role: "user", content: "What if it rains the whole weekend?"})
+  harness.agent.inject(sunny, {role: "user", content: "What if the weather is perfect?"})
+  harness.stdio.println("base len=${harness.agent.length(base)}")
+  harness.stdio.println("rainy len=${harness.agent.length(rainy)} id=${rainy}")
+  harness.stdio.println("sunny len=${harness.agent.length(sunny)} id=${sunny}")
+  // Keep the original clean; release the branches.
+  harness.agent.close(rainy)
+  harness.agent.close(sunny)
+  if harness.agent.length(base) == 2 {
+    harness.stdio.log("fork branches did not leak into base")
+  } else {
+    harness.stdio.log("warning: base was mutated by a branch — session_fork should not share state")
+  }
+}

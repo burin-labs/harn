@@ -1,0 +1,27 @@
+/**
+ * The contract: a guard that inspected nothing must be told to fail, and the
+ * message must name the pattern that matched nothing.
+ */
+import { empty_scope_failure } from "../guard_scope.harn"
+
+@test
+pipeline test_a_positive_count_is_not_a_failure(harness: Harness, task) {
+  assert_eq(empty_scope_failure("some check", 1, "**/*.rs"), "")
+  assert_eq(empty_scope_failure("some check", 2621, "**/*.rs"), "")
+}
+
+@test
+pipeline test_zero_inspected_produces_a_failure_naming_the_pattern(harness: Harness, task) {
+  const message = empty_scope_failure("some check", 0, ".github/workflows/*.yml")
+  assert_eq(message != "", true)
+  assert_eq(message.contains("some check"), true)
+  assert_eq(message.contains(".github/workflows/*.yml"), true)
+  // The reader has to learn why an empty result is not a pass.
+  assert_eq(message.contains("vacuous"), true)
+}
+
+@test
+pipeline test_a_negative_count_is_still_a_failure(harness: Harness, task) {
+  // Defensive: a caller that subtracts its way below zero inspected nothing.
+  assert_eq(empty_scope_failure("some check", -1, "x") != "", true)
+}

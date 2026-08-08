@@ -1,0 +1,44 @@
+import { pool_create, pool_wait } from "std/lifecycle/pool"
+
+/**
+ * PL-06 (#1891): pool.submit emits SpanKind::PoolSubmit, the dispatcher
+ * emits SpanKind::PoolDequeue when a slot opens, and both phases emit
+ * audit receipts onto `lifecycle.pool.audit`. The dequeue span links
+ * back to the originating submit span via SpanLink (set_span_link from
+ * P-05, #1858) so cross-async correlation works.
+ */
+pipeline default(harness: Harness) {
+  harness.obs.enable_tracing(true)
+  // Subscribe to the audit topic ahead of submit so both receipts land.
+  const stream = harness.obs.event_log_subscribe({topic: "lifecycle.pool.audit"})
+  const pool = pool_create(harness.agent, {name: "otel-demo", max_concurrent: 1})
+  const h = pool.submit({ -> 42 }, {priority: 5, key: "alpha"})
+  const r = pool_wait(harness.agent, h)
+  harness.stdio.println(r.status)
+  harness.stdio.println(r.result)
+  // Walk the audit stream: first event is the submit receipt, second
+  // is the dequeue receipt. Both share the same task_id.
+  const first = stream.next().value
+  const second = stream.next().value
+  harness.stdio.println(first.kind)
+  harness.stdio.println(first.headers.schema)
+  harness.stdio.println(first.payload.pool)
+  harness.stdio.println(first.payload.priority)
+  harness.stdio.println(first.payload.key)
+  harness.stdio.println(second.kind)
+  harness.stdio.println(second.headers.schema)
+  harness.stdio.println(second.payload.pool)
+  harness.stdio.println(first.payload.task_id == second.payload.task_id)
+  harness.stdio.println(second.payload.queued_for_ms >= 0)
+  // Spans: at least one PoolSubmit and one PoolDequeue must be present,
+  // and the dequeue span must carry a link back to the submit span.
+  const spans = harness.obs.trace_spans()
+  const submits = spans.filter({ s -> s.kind == "pool_submit" })
+  const dequeues = spans.filter({ s -> s.kind == "pool_dequeue" })
+  harness.stdio.println(len(submits) >= 1)
+  harness.stdio.println(len(dequeues) >= 1)
+  const dequeue = dequeues[0]
+  harness.stdio.println(dequeue.links != nil)
+  harness.stdio.println(len(dequeue.links) >= 1)
+  harness.obs.enable_tracing(false)
+}

@@ -1,0 +1,98 @@
+{
+  "schema_version": "harn.orchestration.replay_trace.v1",
+  "name": "composition_readonly",
+  "description": "A read-only Code Mode composition run with separate parent and child receipts.",
+  "expect": "match",
+  "first_run": {
+    "run_id": "composition_readonly",
+    "effect_receipts": [
+      {
+        "kind": "composition_parent",
+        "run_id": "composition_readonly",
+        "schema_version": 1,
+        "snippet_hash": "sha256:composition-snippet",
+        "binding_manifest_hash": "sha256:composition-manifest",
+        "requested_side_effect_ceiling": "read_only",
+        "ok": true,
+        "result": {
+          "text": "hello"
+        },
+        "stdout": ""
+      },
+      {
+        "kind": "composition_child",
+        "run_id": "composition_readonly",
+        "tool_call_id": "composition_readonly:0",
+        "tool_name": "read_file",
+        "operation_index": 0,
+        "requested_side_effect_level": "read_only",
+        "input": {
+          "path": "README.md"
+        },
+        "status": "completed",
+        "output": {
+          "text": "hello"
+        }
+      }
+    ],
+    "policy_decisions": [
+      {
+        "kind": "composition_child_policy",
+        "run_id": "composition_readonly",
+        "tool_call_id": "composition_readonly:0",
+        "tool_name": "read_file",
+        "requested_side_effect_level": "read_only",
+        "policy_context": {
+          "disposition": "allowed",
+          "ceiling": "read_only"
+        }
+      }
+    ]
+  },
+  "second_run": {
+    "run_id": "composition_readonly",
+    "effect_receipts": [
+      {
+        "kind": "composition_parent",
+        "run_id": "composition_readonly",
+        "schema_version": 1,
+        "snippet_hash": "sha256:composition-snippet",
+        "binding_manifest_hash": "sha256:composition-manifest",
+        "requested_side_effect_ceiling": "read_only",
+        "ok": true,
+        "result": {
+          "text": "hello"
+        },
+        "stdout": ""
+      },
+      {
+        "kind": "composition_child",
+        "run_id": "composition_readonly",
+        "tool_call_id": "composition_readonly:0",
+        "tool_name": "read_file",
+        "operation_index": 0,
+        "requested_side_effect_level": "read_only",
+        "input": {
+          "path": "README.md"
+        },
+        "status": "completed",
+        "output": {
+          "text": "hello"
+        }
+      }
+    ],
+    "policy_decisions": [
+      {
+        "kind": "composition_child_policy",
+        "run_id": "composition_readonly",
+        "tool_call_id": "composition_readonly:0",
+        "tool_name": "read_file",
+        "requested_side_effect_level": "read_only",
+        "policy_context": {
+          "disposition": "allowed",
+          "ceiling": "read_only"
+        }
+      }
+    ]
+  }
+}

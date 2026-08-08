@@ -1,0 +1,57 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Skills & Tool Vault phase 3 (harn#74): session-resume restores
+ * the last active skill when the user re-enters a named session.
+ *
+ * The resume path reads `agent_sessions::active_skills(session_id)`;
+ * this test rides on the public `agent_session_*` builtins to bake
+ * a durable session first, then re-enters it under a fresh
+ * agent_loop invocation and checks the skill stayed hot without
+ * re-matching.
+ */
+pipeline test(harness: Harness, task) {
+  skill sticky_skill {
+    description "Handle every task"
+    prompt "Take a careful, confirmed approach."
+  }
+  with_llm_script(
+    harness.llm,
+    [llm_text("First turn done."), llm_text("Resume done.")],
+    { ->
+      const sid = "skill-resume-test"
+      const r1 = agent_loop(
+        harness,
+        "please handle this task carefully",
+        nil,
+        {
+          provider: "mock",
+          max_iterations: 1,
+          skills: sticky_skill,
+          session_id: sid,
+          skill_match: {strategy: "metadata"},
+        },
+      )
+      assert(r1?.status == "done", "first run completes")
+      const r2 = agent_loop(
+        harness,
+        "continue",
+        nil,
+        {
+          provider: "mock",
+          max_iterations: 1,
+          skills: sticky_skill,
+          session_id: sid,
+          skill_match: {strategy: "metadata"},
+        },
+      )
+      assert(r2?.status == "done", "resume run completes")
+      const calls = harness.llm.mock_calls()
+      const last = calls[len(calls) - 1]
+      assert(contains(last.system, "sticky_skill"), "resume turn keeps skill active")
+      harness.stdio.log("skill_lifecycle_session_resume tests passed")
+    },
+  )
+}
+// The second run's system prompt still mentions the skill body.

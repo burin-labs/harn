@@ -1,0 +1,1 @@
+B-start {{ include "cycle_a.prompt" }} B-end

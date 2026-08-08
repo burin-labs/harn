@@ -1,0 +1,5 @@
+after-one-each:0
+after-repoA-pair:1
+first-fired-repo:repoA
+after-repoB-pair:2
+second-fired-repo:repoB

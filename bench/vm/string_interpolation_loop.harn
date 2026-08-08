@@ -1,0 +1,16 @@
+pipeline default(harness: Harness, task) {
+  let i = 0
+  let text = "x"
+  let total = 0
+  while i < 5000 {
+    text = "${text}${i % 10}"
+    if len(text) > 64 {
+      text = "x"
+    }
+    total = total + len(text)
+    i = i + 1
+  }
+  if total < 0 {
+    harness.stdio.log("unreachable")
+  }
+}

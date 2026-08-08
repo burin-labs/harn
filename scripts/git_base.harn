@@ -1,0 +1,205 @@
+/**
+ * Shared plumbing for guards that compare this branch against a base ref.
+ *
+ * Two checks now need the same four things — run git, resolve the base, read
+ * the commit messages between base and HEAD, and decide whether a named
+ * `Allow-...:` trailer appears in them. Keeping one copy means the shallow-clone
+ * fallback and the trailer semantics cannot drift between guards, which is
+ * exactly the kind of divergence that makes one guard quietly weaker than its
+ * sibling.
+ */
+pub fn git_run(process: HarnessProcess, args: list<string>) {
+  return process.run({program: "git", args: args})
+}
+
+/**
+ * Resolve the base ref: explicit value, then the named environment variable,
+ * then merge-base with origin/main (falling back to main, then HEAD~1).
+ *
+ * The merge-base — not `origin/main` itself — is what makes these guards judge
+ * only what the branch introduced. Comparing against the moving branch tip
+ * would blame a branch for removals that landed on main beside it.
+ */
+pub fn resolve_base_ref(
+  env: HarnessEnv,
+  process: HarnessProcess,
+  base: string?,
+  env_var: string = "",
+) -> string {
+  if base != nil && base != "" {
+    return base ?? ""
+  }
+  if env_var != "" {
+    const env_base = env.get(env_var)
+    if env_base != nil && env_base != "" {
+      return env_base ?? ""
+    }
+  }
+  for candidate in ["origin/main", "main"] {
+    const result = git_run(process, ["merge-base", "HEAD", candidate])
+    if result.success {
+      return result.stdout.trim()
+    }
+  }
+  return "HEAD~1"
+}
+
+/**
+ * Concatenate commit messages between base and HEAD.
+ *
+ * Falls back to the last 50 commits when the range is empty, which is what a
+ * shallow CI clone produces. Without the fallback a guard reads "no commits"
+ * as "no declarations" and rejects a change that did declare itself.
+ */
+pub fn commit_messages_since(process: HarnessProcess, base: string) -> string {
+  const result = git_run(process, ["log", "--format=%B%x00", base + "..HEAD"])
+  if result.success && result.stdout.trim() != "" {
+    return result.stdout
+  }
+  const fallback = git_run(process, ["log", "-50", "--format=%B%x00", "HEAD"])
+  if fallback.success {
+    return fallback.stdout
+  }
+  return ""
+}
+
+/**
+ * True when some line of `messages` begins with `prefix` and carries a
+ * non-whitespace remainder.
+ *
+ * The remainder may continue past the line, because git wraps long trailers
+ * and a reason written on the next line is still a reason.
+ */
+pub fn has_trailer(messages: string, prefix: string) -> bool {
+  const lines = messages.split("\n")
+  for item in lines.enumerate() {
+    if item.value.starts_with(prefix) {
+      let rest = item.value.substring(prefix.len(), item.value.len())
+      let k = item.index + 1
+      while k < lines.count {
+        rest = rest + "\n" + lines[k]
+        k = k + 1
+      }
+      if rest.trim() != "" {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+/**
+ * Every value declared by a `prefix` trailer, whitespace-split.
+ *
+ * A declaration names what it permits, so `Allow-Protocol-Removal: A B` and two
+ * separate trailers mean the same thing.
+ */
+pub fn trailer_values(messages: string, prefix: string) -> list<string> {
+  let values: list<string> = []
+  for line in messages.split("\n") {
+    if !line.starts_with(prefix) {
+      continue
+    }
+    const rest = line.substring(prefix.len(), line.len())
+    for token in rest.split(" ") {
+      const name = token.trim()
+      if name != "" {
+        values = values + [name]
+      }
+    }
+  }
+  return values.sorted()
+}
+
+/**
+ * Condense git's stderr into one reportable line.
+ *
+ * Every non-empty line is kept, joined with `; `. Taking only the first line
+ * loses the decisive one: git prefixes an unreadable `include.path` with
+ * `warning:` and then fails anyway, so a first-line-only report names a warning
+ * and hides the fatal error that actually stopped the command.
+ */
+pub fn git_error_detail(stderr: string, exit_code: int) -> string {
+  let parts: list<string> = []
+  for raw in stderr.split("\n") {
+    const line = raw.trim()
+    if line != "" {
+      parts = parts + [line]
+    }
+  }
+  if parts.count == 0 {
+    return "git exited " + to_string(exit_code) + " with no message"
+  }
+  const joined = parts.join("; ")
+  if joined.len() > 400 {
+    return joined.substring(0, 400) + " …"
+  }
+  return joined
+}
+
+/**
+ * Resolve `ref` to a commit id. Returns `{sha, error}`; exactly one is set.
+ *
+ * Guards must do this before reading any path at `ref`, because `git show
+ * <unfetched-sha>:<path>` reports the same "exists on disk, but not in ..."
+ * message as a path that genuinely was not in the tree. Without a separate
+ * resolution step, a base commit the clone never fetched is indistinguishable
+ * from a file the branch just added — and the second reading is the one that
+ * exits 0.
+ */
+pub fn resolve_commit(process: HarnessProcess, ref: string) -> dict {
+  const result = git_run(process, ["rev-parse", "--verify", "--quiet", ref + "^{commit}"])
+  if result.success && result.stdout.trim() != "" {
+    return {sha: result.stdout.trim(), error: ""}
+  }
+  if result.stderr.trim() == "" && result.exit_code == 1 {
+    // `--quiet` reports "no such commit" as a silent exit 1.
+    return {sha: "", error: "not a commit in this clone"}
+  }
+  return {sha: "", error: git_error_detail(result.stderr, result.exit_code)}
+}
+
+/**
+ * Read `path` as it stood at `ref`.
+ *
+ * Returns `{found, text, error}`. `found` is true only when git produced the
+ * blob. When git says the path is absent at that ref, `found` is false and
+ * `error` is empty: with `ref` already resolved to a commit, that is a real
+ * answer and it means nothing could have been removed. Every other git failure
+ * leaves `error` set.
+ *
+ * The distinction is the whole point. Collapsing "absent at base" and "git
+ * could not answer" into one falsy result is what lets a guard report a clean
+ * comparison it never performed.
+ */
+pub fn git_show_at(process: HarnessProcess, ref: string, path: string) -> dict {
+  const result = git_run(process, ["show", ref + ":" + path])
+  if result.success {
+    return {found: true, text: result.stdout, error: ""}
+  }
+  const stderr = result.stderr
+  const absent = stderr.contains("does not exist in")
+    || stderr.contains("exists on disk, but not in")
+  if absent {
+    return {found: false, text: "", error: ""}
+  }
+  return {found: false, text: "", error: git_error_detail(stderr, result.exit_code)}
+}
+
+/**
+ * Read `--flag value` or `--flag=value` style options out of argv.
+ * Returns nil when the flag is absent.
+ */
+pub fn flag_value(args: list<string>, name: string) -> string? {
+  const prefix = name + "="
+  for item in args.enumerate() {
+    const a = item.value
+    if a == name && item.index + 1 < args.count {
+      return args[item.index + 1]
+    }
+    if a.starts_with(prefix) {
+      return a.substring(prefix.len(), a.len())
+    }
+  }
+  return nil
+}

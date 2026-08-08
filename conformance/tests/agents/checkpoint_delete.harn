@@ -1,0 +1,29 @@
+pipeline test(harness: Harness, task) {
+  // Start clean
+  harness.runtime.checkpoint_clear()
+  // Set up multiple checkpoints
+  harness.runtime.checkpoint("a", 1)
+  harness.runtime.checkpoint("b", 2)
+  harness.runtime.checkpoint("c", 3)
+  const keys = harness.runtime.checkpoint_list()
+  assert(len(keys) == 3, "should have 3 keys")
+  // Delete a single key
+  harness.runtime.checkpoint_delete("b")
+  assert(!harness.runtime.checkpoint_exists("b"), "b should be gone")
+  assert(harness.runtime.checkpoint_exists("a"), "a should still exist")
+  assert(harness.runtime.checkpoint_exists("c"), "c should still exist")
+  assert(harness.runtime.checkpoint_get("a") == 1, "a value intact")
+  assert(harness.runtime.checkpoint_get("c") == 3, "c value intact")
+  const keys2 = harness.runtime.checkpoint_list()
+  assert(len(keys2) == 2, "should have 2 keys after delete")
+  // Deleting a non-existent key is a no-op
+  harness.runtime.checkpoint_delete("nonexistent")
+  assert(len(harness.runtime.checkpoint_list()) == 2, "count unchanged after deleting missing key")
+  // Deleting the same key twice is a no-op
+  harness.runtime.checkpoint_delete("a")
+  harness.runtime.checkpoint_delete("a")
+  assert(!harness.runtime.checkpoint_exists("a"), "a should remain gone")
+  assert(len(harness.runtime.checkpoint_list()) == 1, "only c remains")
+  harness.runtime.checkpoint_clear()
+  harness.stdio.log("checkpoint_delete tests passed")
+}

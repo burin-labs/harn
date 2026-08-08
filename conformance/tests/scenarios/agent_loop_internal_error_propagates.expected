@@ -1,0 +1,5 @@
+seq.aborted=true
+seq.category=internal
+par.aborted=true
+par.category=internal
+recoverable.aborted=false

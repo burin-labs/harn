@@ -1,0 +1,5 @@
+pipeline default(harness: Harness) {
+  harness.stdio.println(
+    harness.fs.render_prompt("fixtures/template/whitespace_trim.prompt", {xs: ["a", "b", "c"]}),
+  )
+}

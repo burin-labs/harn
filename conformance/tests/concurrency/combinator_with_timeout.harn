@@ -1,0 +1,51 @@
+import { lifecycle_audit_log_take } from "std/lifecycle"
+/**
+ * `with_timeout(callback, ms)` is a soft, clock-aware deadline. Under
+ * the deadline the wrapper passes the callback's return value through
+ * unchanged. When the callback overruns the deadline the wrapper
+ * emits a `lifecycle_callback_timed_out` audit entry and returns a
+ * sentinel dict `{__timed_out: true, timeout_ms, elapsed_ms,
+ * return_value}` so downstream composition can detect the overrun.
+ *
+ * Tracking: harn#1860 (P-07).
+ */
+import { with_timeout } from "std/lifecycle/combinators"
+
+pipeline default(harness: Harness) {
+  const fast = { _harness, return_value -> return return_value + "_fast" }
+  const slow = { _harness, return_value ->
+    let _ = harness.testing.clock_advance(2000)
+    return return_value + "_slow"
+  }
+  harness.agent.pipeline_on_finish(
+    { harness, return_value ->
+      const _ = harness.testing.clock_set(0)
+      const fast_wrap = with_timeout(fast, 500)
+      const fast_result = fast_wrap(harness, return_value)
+      const fast_audits = lifecycle_audit_log_take(harness.obs)
+      harness.stdio.println("fast=" + fast_result)
+      harness.stdio.println("fast_audit_count=" + to_string(len(fast_audits)))
+      const slow_wrap = with_timeout(slow, 500)
+      const slow_result = slow_wrap(harness, return_value)
+      const slow_audits = lifecycle_audit_log_take(harness.obs)
+      harness.stdio.println("slow_timed_out=" + to_string(slow_result.__timed_out))
+      harness.stdio.println("slow_timeout_ms=" + to_string(slow_result.timeout_ms))
+      harness.stdio.println("slow_elapsed_ge=" + to_string(slow_result.elapsed_ms >= 500))
+      harness.stdio.println("slow_return_value=" + slow_result.return_value)
+      harness.stdio.println("slow_audit_kind=" + slow_audits[0].kind)
+      harness.stdio.println("slow_audit_timeout=" + to_string(slow_audits[0].payload.timeout_ms))
+      const no_deadline = with_timeout(slow, 0)
+      const _ = harness.testing.clock_advance(1000)
+      const unbounded = no_deadline(harness, return_value)
+      const trailing = lifecycle_audit_log_take(harness.obs)
+      harness.stdio.println("unbounded=" + unbounded)
+      harness.stdio.println("unbounded_audit_count=" + to_string(len(trailing)))
+      const _ = harness.testing.clock_reset()
+      return return_value
+    },
+  )
+  return "seed"
+}
+// Callback finishes under the deadline; value flows through unchanged.
+// Callback overruns; sentinel + audit fire.
+// Zero/negative deadline disables the check; value flows through unchanged.

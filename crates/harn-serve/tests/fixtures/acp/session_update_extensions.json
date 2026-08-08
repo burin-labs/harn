@@ -1,0 +1,427 @@
+[
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "_meta": {
+          "harn": {
+            "artifactId": "artifact-chart-1",
+            "fallback": "Build throughput (bar chart)",
+            "kind": "vega-lite",
+            "metadata": {
+              "unit": "builds"
+            },
+            "mimeType": "application/vnd.vegalite.v5+json",
+            "provenance": {
+              "source": "agent"
+            },
+            "sizeBytes": 153,
+            "spec": {
+              "data": {
+                "values": [
+                  {
+                    "count": 2,
+                    "name": "a"
+                  }
+                ]
+              },
+              "encoding": {
+                "x": {
+                  "field": "name",
+                  "type": "nominal"
+                },
+                "y": {
+                  "field": "count",
+                  "type": "quantitative"
+                }
+              },
+              "mark": "bar"
+            },
+            "title": "Build throughput"
+          }
+        },
+        "sessionUpdate": "artifact"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "_meta": {
+          "harn": {
+            "iteration": 1,
+            "reason": "matched",
+            "skillName": "rust"
+          }
+        },
+        "sessionUpdate": "skill_activated"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "_meta": {
+          "harn": {
+            "iteration": 2,
+            "skillName": "rust"
+          }
+        },
+        "sessionUpdate": "skill_deactivated"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "_meta": {
+          "harn": {
+            "allowedTools": [
+              "read"
+            ],
+            "skillName": "rust"
+          }
+        },
+        "sessionUpdate": "skill_scope_tools"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "_meta": {
+          "harn": {
+            "reason": "unused across 5 turns",
+            "remainingTools": [
+              "read"
+            ],
+            "removedTools": [
+              "write"
+            ]
+          }
+        },
+        "sessionUpdate": "skill_narrow"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "_meta": {
+          "harn": {
+            "allowedTools": [
+              "look",
+              "search",
+              "request_write_access"
+            ],
+            "consent": "express",
+            "escapeTool": "request_write_access",
+            "justification": "User asked me to make the change.",
+            "phase": "write_access_granted",
+            "reason": "The user explicitly asked for the edit."
+          }
+        },
+        "sessionUpdate": "stance_transition"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "_meta": {
+          "harn": {
+            "mode": "client",
+            "name": "tool_search",
+            "query": {
+              "q": "read"
+            },
+            "strategy": "semantic",
+            "toolUseId": "search-1"
+          }
+        },
+        "sessionUpdate": "tool_search_query"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "_meta": {
+          "harn": {
+            "mode": "client",
+            "promoted": [
+              "read"
+            ],
+            "strategy": "semantic",
+            "toolUseId": "search-1"
+          }
+        },
+        "sessionUpdate": "tool_search_result"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "_meta": {
+          "harn": {
+            "archivedMessages": 3,
+            "compactionPolicy": {
+              "instruction_mode": "extend",
+              "instruction_source": "host",
+              "instructions": "Preserve failing tests."
+            },
+            "engineStrategy": "observation_mask",
+            "estimatedTokensAfter": 40,
+            "estimatedTokensBefore": 100,
+            "instructionMode": "extend",
+            "instructionSource": "host",
+            "mode": "auto",
+            "reason": "threshold",
+            "receiptId": "compaction-fixture-1",
+            "schemaVersion": 1,
+            "snapshotAssetId": "asset-1",
+            "strategy": "summary"
+          }
+        },
+        "sessionUpdate": "transcript_compacted"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "_meta": {
+          "harn": {
+            "droppedCount": 2,
+            "keptCount": 3,
+            "policy": "clean_tool_repair",
+            "prefixHash": "sha256:abc",
+            "providerSafetyBlocked": false,
+            "reason": "tool_call_repair_squashed"
+          }
+        },
+        "sessionUpdate": "transcript_projected"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "_meta": {
+          "harn": {
+            "reminder": {
+              "authority": "contract",
+              "body": "Refresh the compacted context before answering.",
+              "reminderId": "reminder-1",
+              "renderedRole": "developer",
+              "roleHint": "developer",
+              "source": "stdlib_provider",
+              "tags": [
+                "token_pressure"
+              ],
+              "ttlTurns": 2
+            }
+          }
+        },
+        "sessionUpdate": "reminder_emitted"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "_meta": {
+          "harn": {
+            "artifactId": "artifact-1",
+            "handoff": {
+              "_type": "handoff_artifact",
+              "allowed_side_effects": [],
+              "blocked_on": [],
+              "budget_remaining": null,
+              "confidence": null,
+              "created_at": "2026-04-28T00:00:00Z",
+              "deadline_checkback": null,
+              "evidence_refs": [],
+              "files_or_entities_touched": [],
+              "id": "handoff-1",
+              "kind": "handoff",
+              "metadata": {},
+              "open_questions": [],
+              "parent_run_id": null,
+              "reason": "Merge queue requires review",
+              "receipt_links": [],
+              "requested_capabilities": [],
+              "route_decision": null,
+              "source_persona": "merge_captain",
+              "target_persona_or_human": {
+                "id": "review_captain",
+                "kind": "persona",
+                "label": "review_captain",
+                "uri": null
+              },
+              "task": "Review the patch"
+            },
+            "handoffId": "handoff-1"
+          }
+        },
+        "sessionUpdate": "handoff"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "_meta": {
+          "harn": {
+            "events": [
+              {
+                "error": null,
+                "kind": "modify",
+                "paths": [
+                  "/tmp/project/src/lib.rs"
+                ],
+                "raw_kind": "Modify(Any)",
+                "relative_paths": [
+                  "src/lib.rs"
+                ]
+              }
+            ],
+            "subscriptionId": "fsw-1"
+          }
+        },
+        "sessionUpdate": "fs_watch"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "_meta": {
+          "harn": {
+            "kind": "staged_writes_pending",
+            "message": "staged writes pending",
+            "pendingCount": 1,
+            "pendingWrites": [
+              {
+                "byteDelta": 3,
+                "kind": "modify",
+                "path": "/tmp/project/src/lib.rs",
+                "snapshotId": "tool-42"
+              }
+            ],
+            "phase": "fs_staging",
+            "progress": 1,
+            "totalBytes": 7
+          }
+        },
+        "sessionUpdate": "progress"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "_meta": {
+          "harn": {
+            "audit": {
+              "run_id": "run_x"
+            },
+            "event": "WorkerWaitingForInput",
+            "metadata": {
+              "child_run_id": "run_x",
+              "child_run_path": ".harn-runs/run_x"
+            },
+            "status": "awaiting_input",
+            "terminal": false,
+            "workerId": "worker-1",
+            "workerMode": "delegated_stage",
+            "workerName": "review",
+            "workerTask": "review pr"
+          }
+        },
+        "sessionUpdate": "worker_update"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "_meta": {
+          "harn": {
+            "kind": "question",
+            "payload": {
+              "prompt": "Approve deploy?"
+            },
+            "requestId": "hitl_question_session-1_1"
+          }
+        },
+        "sessionUpdate": "hitl_request"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "_meta": {
+          "harn": {
+            "kind": "question",
+            "outcome": "answered",
+            "requestId": "hitl_question_session-1_1"
+          }
+        },
+        "sessionUpdate": "hitl_resolved"
+      }
+    }
+  }
+]

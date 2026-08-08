@@ -1,0 +1,25 @@
+/**
+ * Script writes 3 files, deletes 1, and modifies 1 through the fs
+ * overlay. The harness.testing.fs_diff() builtin surfaces the in-memory diff
+ * without touching the underlying filesystem.
+ *
+ * The .fs-overlay/ sidecar directory activates the overlay; the runner
+ * installs a paused clock automatically.
+ */
+pipeline test(harness: Harness, task) {
+  const root = harness.fs.source_dir() + "/testbench_fs_overlay_diff.fs-overlay"
+  harness.fs.write_text(root + "/new_a.txt", "alpha")
+  harness.fs.write_text(root + "/new_b.txt", "beta")
+  harness.fs.write_text(root + "/new_c.txt", "gamma")
+  harness.fs.write_text(root + "/existing.txt", "updated content")
+  harness.fs.delete(root + "/to_delete.txt")
+  const diff = harness.testing.fs_diff()
+  const added = diff.filter({ e -> e.kind == "added" })
+  const modified = diff.filter({ e -> e.kind == "modified" })
+  const deleted = diff.filter({ e -> e.kind == "deleted" })
+  harness.stdio.println(len(added) == 3)
+  harness.stdio.println(len(modified) == 1)
+  harness.stdio.println(len(deleted) == 1)
+  harness.stdio.println(added.any({ e -> contains(e.path, "new_a.txt") && e.content == "alpha" }))
+  harness.stdio.println(modified[0].content == "updated content")
+}

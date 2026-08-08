@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/wait_command_output.response.json",
+  "title": "tools.wait_command_output response",
+  "type": "object",
+  "properties": {
+    "status": { "type": "string", "enum": ["matched", "exited", "timed_out"] },
+    "handle_id": { "type": "string" },
+    "source": { "type": "string", "enum": ["stdout", "stderr", "combined"] },
+    "pattern": { "type": "string" },
+    "matched": { "type": "boolean" },
+    "timed_out": { "type": "boolean" },
+    "match_start": { "type": ["integer", "null"], "minimum": 0 },
+    "match_end": { "type": ["integer", "null"], "minimum": 0 },
+    "next_offset": { "type": ["integer", "null"], "minimum": 0 },
+    "match": { "type": ["string", "null"] },
+    "result": { "type": "object", "additionalProperties": true }
+  },
+  "required": [
+    "status",
+    "handle_id",
+    "source",
+    "pattern",
+    "matched",
+    "timed_out",
+    "match_start",
+    "match_end",
+    "next_offset",
+    "match",
+    "result"
+  ],
+  "additionalProperties": false
+}

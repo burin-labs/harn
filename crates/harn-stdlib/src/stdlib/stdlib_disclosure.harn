@@ -1,0 +1,682 @@
+// std/disclosure — render surface-native authorship disclosure from ActorChain.
+//
+// Import: import { render } from "std/disclosure"
+import { deep_merge } from "std/collections"
+import { actor_chain_subject_parts, actor_chain_subjects } from "std/identity"
+
+type DisclosureRenderOptions = {project?: bool, project_root?: string, env?: bool, config?: dict}
+
+type DisclosureGitTrailerOptions = {
+  project?: bool,
+  project_root?: string,
+  env?: bool,
+  config?: dict,
+  enabled?: bool,
+  suppress?: bool,
+}
+
+/**
+ * Normalized disclosure config after `__config` overlays the built-in TOML,
+ * project `harn.toml`, env, and `options.config`. The nested tables stay open
+ * dict because they are keyed by arbitrary surface names and actor subjects.
+ */
+type DisclosureConfig = {defaults: dict?, surfaces: dict?, identities: dict?}
+
+/**
+ * Rendering context assembled by `__context` from an ActorChain: the resolved
+ * principal list plus the origin/current/delegated cuts every surface reads.
+ */
+type DisclosureContext = {
+  chain: any,
+  principals: list,
+  subjects: list,
+  current: dict,
+  origin: dict,
+  actors: list,
+  prior_actors: list,
+  delegated: bool,
+}
+
+const __BUILTIN_DISCLOSURE_CONFIG = """
+[defaults]
+email_domain = "actors.harn.invalid"
+
+[surfaces.git]
+kind = "text"
+template = "{{ if delegated }}Co-Authored-By: {{ current.name }} <{{ current.email }}>{{ for actor in prior_actors }}\nAssisted-by: {{ actor.name }} <{{ actor.email }}>{{ end }}{{ end }}"
+
+[surfaces.slack]
+kind = "text"
+template = "AI-assisted by {{ current.label }} for {{ origin.label }}."
+customize_name_template = "{{ current.label }}"
+ai_mark_enabled = true
+ai_mark_event_type = "harn.ai_disclosure.v1"
+ai_mark_standard = "eu_ai_act_article_50"
+
+[surfaces.github]
+kind = "github_author_choice"
+author_mode = "human"
+author = "origin"
+co_author = "current"
+bot_author = "current"
+"""
+
+fn __dict(value) -> dict {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+fn __as_config(value) -> dict {
+  const dict = __dict(value)
+  if contains(dict.keys(), "disclosure") {
+    return __dict(dict.disclosure)
+  }
+  return dict
+}
+
+fn __as_project_config(value) -> dict {
+  const dict = __dict(value)
+  if contains(dict.keys(), "disclosure") {
+    return __dict(dict.disclosure)
+  }
+  return {}
+}
+
+fn __parse_config_toml(text: string, label: string, project: bool = false) -> dict {
+  const parsed = try {
+    toml_parse(text)
+  }
+  if is_ok(parsed) {
+    const data = unwrap(parsed)
+    if project {
+      return __as_project_config(data)
+    }
+    return __as_config(data)
+  }
+  throw "std/disclosure: invalid TOML in " + label
+}
+
+fn __read_config_file(fs: HarnessFs, path: string, project: bool = false) -> dict {
+  if path == "" || !fs.exists(path) {
+    return {}
+  }
+  return __parse_config_toml(fs.read_text(path), path, project)
+}
+
+fn __looks_like_toml(text: string) -> bool {
+  const trimmed = trim(text)
+  return contains(text, "\n") || starts_with(trimmed, "[")
+}
+
+fn __project_config(fs: HarnessFs, options: dict) -> dict {
+  if options?.project == false {
+    return {}
+  }
+  const root = options?.project_root ?? fs.project_root()
+  if root == nil || root == "" {
+    return {}
+  }
+  return __read_config_file(fs, path_join(root, "harn.toml"), true)
+}
+
+fn __env_config(env: HarnessEnv, fs: HarnessFs, options: dict) -> dict {
+  if options?.env == false {
+    return {}
+  }
+  let config = {}
+  const path = env.get("HARN_DISCLOSURE_CONFIG_PATH")
+  if path != nil && path != "" {
+    config = deep_merge(config, __read_config_file(fs, to_string(path)))
+  }
+  const raw = env.get("HARN_DISCLOSURE_CONFIG")
+  if raw == nil || raw == "" {
+    return config
+  }
+  const text = to_string(raw)
+  if __looks_like_toml(text) {
+    return deep_merge(config, __parse_config_toml(text, "HARN_DISCLOSURE_CONFIG"))
+  }
+  if fs.exists(text) {
+    return deep_merge(config, __read_config_file(fs, text))
+  }
+  return deep_merge(config, __parse_config_toml(text, "HARN_DISCLOSURE_CONFIG"))
+}
+
+fn __config(env: HarnessEnv, fs: HarnessFs, options) -> DisclosureConfig {
+  const opts = __dict(options)
+  let config = __parse_config_toml(__BUILTIN_DISCLOSURE_CONFIG, "built-in disclosure config")
+  config = deep_merge(config, __project_config(fs, opts))
+  config = deep_merge(config, __env_config(env, fs, opts))
+  config = deep_merge(config, __as_config(opts?.config))
+  return {defaults: config?.defaults, surfaces: config?.surfaces, identities: config?.identities}
+}
+
+fn __slug(value: string) -> string {
+  const lowered = lowercase(trim(value))
+  const cleaned = regex_replace("[^a-z0-9._+-]+", "-", lowered)
+  const stripped = regex_replace("(^-+|-+$)", "", cleaned)
+  if stripped == "" {
+    return "actor"
+  }
+  return stripped
+}
+
+fn __profile_for(subject: string, config: DisclosureConfig) -> dict {
+  const identities = __dict(config.identities)
+  if contains(identities.keys(), subject) {
+    return __dict(identities[subject])
+  }
+  return {}
+}
+
+fn __principal(subject: string, config: DisclosureConfig, role: string, position: int) -> dict {
+  const profile = __profile_for(subject, config)
+  const parts = actor_chain_subject_parts(subject)
+  const name = to_string(
+    profile?.name ?? profile?.display_name ?? profile?.label ?? parts.id ?? subject,
+  )
+  const label = to_string(profile?.label ?? profile?.slack_label ?? profile?.display_name ?? name)
+  const email_domain = to_string(config.defaults?.email_domain ?? "actors.harn.invalid")
+  const email = to_string(
+    profile?.email ?? (__slug(parts.kind + "+" + parts.id) + "@" + email_domain),
+  )
+  let principal = {
+    subject: subject,
+    kind: parts.kind,
+    id: parts.id,
+    role: role,
+    position: position,
+    name: name,
+    label: label,
+    email: email,
+  }
+  if profile?.github != nil {
+    principal = principal + {github: to_string(profile.github)}
+  }
+  if profile?.github_login != nil {
+    principal = principal + {github: to_string(profile.github_login)}
+  }
+  if profile?.login != nil {
+    principal = principal + {github: to_string(profile.login)}
+  }
+  if profile?.slack != nil {
+    principal = principal + {slack: to_string(profile.slack)}
+  }
+  if profile?.slack_id != nil {
+    principal = principal + {slack: to_string(profile.slack_id)}
+  }
+  if profile?.human != nil {
+    principal = principal + {human: profile.human}
+  }
+  if profile?.is_human != nil {
+    principal = principal + {human: profile.is_human}
+  }
+  return principal
+}
+
+fn __context(chain, config: DisclosureConfig) -> DisclosureContext {
+  const subject_entries = actor_chain_subjects(chain)
+  const origin_index = len(subject_entries) - 1
+  let principals = []
+  let subjects = []
+  for entry in subject_entries {
+    subjects = subjects + [entry.subject]
+    principals = principals + [__principal(entry.subject, config, entry.role, entry.position)]
+  }
+  const origin = principals[origin_index]
+  const actors = if len(principals) > 1 {
+    principals.slice(0, origin_index)
+  } else {
+    []
+  }
+  const current = principals[0]
+  const prior_actors = if len(actors) > 1 {
+    actors.slice(1, len(actors))
+  } else {
+    []
+  }
+  return {
+    chain: chain,
+    principals: principals,
+    subjects: subjects,
+    current: current,
+    origin: origin,
+    actors: actors,
+    prior_actors: prior_actors,
+    delegated: len(actors) > 0,
+  }
+}
+
+fn __surface_config(config: DisclosureConfig, surface: string) -> dict {
+  const surfaces = __dict(config.surfaces)
+  if !contains(surfaces.keys(), surface) {
+    throw "std/disclosure: unknown disclosure surface `" + surface + "`"
+  }
+  const surface_config = __dict(surfaces[surface])
+  if len(surface_config.keys()) == 0 {
+    throw "std/disclosure: disclosure surface `" + surface + "` must be a table"
+  }
+  return surface_config
+}
+
+fn __select_principal(ctx: DisclosureContext, selector) {
+  const name = to_string(selector ?? "")
+  if name == "origin" {
+    return ctx.origin
+  }
+  if name == "current" {
+    return ctx.current
+  }
+  if name == "none" || name == "" {
+    return nil
+  }
+  for principal in ctx.principals {
+    if principal.subject == name || principal.role == name {
+      return principal
+    }
+  }
+  throw "std/disclosure: unknown principal selector `" + name + "`"
+}
+
+fn __render_text(fs: HarnessFs, surface_config: dict, ctx: DisclosureContext) -> string {
+  const template = surface_config?.template
+  require template != nil && template != "",
+    "std/disclosure: text disclosure surfaces require a template"
+  return fs.render_template(to_string(template), ctx)
+}
+
+fn __render_optional_template(fs: HarnessFs, template, ctx: DisclosureContext) {
+  if template == nil || trim(to_string(template)) == "" {
+    return nil
+  }
+  const rendered = trim(fs.render_template(to_string(template), ctx))
+  if rendered == "" {
+    return nil
+  }
+  return rendered
+}
+
+fn __github_author_mode(surface_config: dict) -> string {
+  const mode = lowercase(trim(to_string(surface_config?.author_mode ?? "human")))
+  if mode == "human" || mode == "bot" {
+    return mode
+  }
+  throw "std/disclosure: github.author_mode must be `human` or `bot`, got `" + mode + "`"
+}
+
+fn __github_mode_label(author_mode: string) -> string {
+  if author_mode == "bot" {
+    return "bot_author"
+  }
+  return "human_author_agent_coauthor"
+}
+
+fn __git_identity(principal) {
+  if principal == nil {
+    return nil
+  }
+  return {name: principal.name, email: principal.email}
+}
+
+fn __github_auth_identity(author_mode: string) -> string {
+  if author_mode == "bot" {
+    return "github_app"
+  }
+  return "user"
+}
+
+fn __github_commit_auth_identity(author_mode: string) -> string {
+  if author_mode == "bot" {
+    return "github_app"
+  }
+  return "any"
+}
+
+fn __github_trailers(fs: HarnessFs, config: DisclosureConfig, ctx: DisclosureContext) -> string {
+  const surface_config = __surface_config(config, "git")
+  if !__git_trailers_switch_enabled(surface_config) {
+    return ""
+  }
+  return __safe_git_trailers(__render_text(fs, surface_config, ctx), ctx)
+}
+
+fn __render_github(
+  fs: HarnessFs,
+  surface_config: dict,
+  ctx: DisclosureContext,
+  config: DisclosureConfig,
+) -> dict {
+  const author_mode = __github_author_mode(surface_config)
+  const human_author = __select_principal(ctx, surface_config?.author ?? "origin")
+  const bot_author = __select_principal(ctx, surface_config?.bot_author ?? "current")
+  const selected_author = if author_mode == "bot" {
+    bot_author
+  } else {
+    human_author
+  }
+  let co_author = if author_mode == "bot" {
+    nil
+  } else {
+    __select_principal(ctx, surface_config?.co_author ?? "current")
+  }
+  if selected_author != nil && co_author != nil && selected_author.subject == co_author.subject {
+    co_author = nil
+  }
+  const trailers = if author_mode == "human" {
+    __github_trailers(fs, config, ctx)
+  } else {
+    ""
+  }
+  const custom_commit_author = if author_mode == "human" {
+    __git_identity(human_author)
+  } else {
+    nil
+  }
+  return {
+    surface: "github",
+    kind: "github_author_choice",
+    author_mode: author_mode,
+    mode: __github_mode_label(author_mode),
+    auth_identity: __github_auth_identity(author_mode),
+    required_auth_identity: __github_auth_identity(author_mode),
+    commit_auth_identity: __github_commit_auth_identity(author_mode),
+    pull_request_auth_identity: __github_auth_identity(author_mode),
+    author: selected_author,
+    human_author: human_author,
+    bot_author: bot_author,
+    co_author: co_author,
+    commit_author: custom_commit_author,
+    commit_committer: nil,
+    omit_custom_commit_author: author_mode == "bot",
+    append_git_trailers: author_mode == "human" && trailers != "",
+    trailers: trailers,
+    principals: ctx.principals,
+    actor_chain: ctx.chain,
+  }
+}
+
+fn __public_principals(ctx: DisclosureContext) -> list<dict> {
+  let principals = []
+  for principal in ctx.principals {
+    principals = principals.appending(
+      {
+        subject: principal.subject,
+        kind: principal.kind,
+        role: principal.role,
+        position: principal.position,
+        label: principal.label,
+        human: principal?.human,
+      },
+    )
+  }
+  return principals
+}
+
+fn __slack_customize(fs: HarnessFs, surface_config: dict, ctx: DisclosureContext) -> dict {
+  const username = __render_optional_template(fs, surface_config?.customize_name_template, ctx)
+  let customize = {
+    scope: "chat:write.customize",
+    enabled: surface_config?.customize_enabled != false,
+  }
+  if username != nil {
+    customize["username"] = username
+  }
+  if surface_config?.customize_icon_url != nil
+    && trim(to_string(surface_config.customize_icon_url))
+    != "" {
+    customize["icon_url"] = to_string(surface_config.customize_icon_url)
+  }
+  if surface_config?.customize_icon_emoji != nil
+    && trim(
+    to_string(surface_config.customize_icon_emoji),
+  )
+    != "" {
+    customize["icon_emoji"] = to_string(surface_config.customize_icon_emoji)
+  }
+  return customize
+}
+
+fn __slack_ai_mark(surface_config: dict, ctx: DisclosureContext, byline: string) -> dict {
+  const enabled = surface_config?.ai_mark_enabled != false
+  const standard = to_string(surface_config?.ai_mark_standard ?? "eu_ai_act_article_50")
+  const event_type = to_string(surface_config?.ai_mark_event_type ?? "harn.ai_disclosure.v1")
+  const principals = __public_principals(ctx)
+  return {
+    enabled: enabled,
+    event_type: event_type,
+    event_payload: {
+      kind: "ai_generated",
+      standard: standard,
+      generator: "harn",
+      surface: "slack",
+      disclosure: byline,
+      actor_chain: principals,
+      principals: principals,
+    },
+  }
+}
+
+fn __slack_message_disclosure(
+  fs: HarnessFs,
+  config: DisclosureConfig,
+  ctx: DisclosureContext,
+) -> dict {
+  const surface_config = __surface_config(config, "slack")
+  const byline = __render_text(fs, surface_config, ctx)
+  const principals = __public_principals(ctx)
+  return {
+    surface: "slack",
+    kind: "slack_message_disclosure",
+    byline: byline,
+    text_prefix: byline + "\n\n",
+    customize: __slack_customize(fs, surface_config, ctx),
+    ai_mark: __slack_ai_mark(surface_config, ctx, byline),
+    principals: principals,
+    actor_chain: principals,
+  }
+}
+
+fn __git_trailers_switch_enabled(value: dict) -> bool {
+  return value?.enabled != false && value?.suppress != true
+}
+
+fn __principal_is_human(principal: dict) -> bool {
+  if principal?.human == true {
+    return true
+  }
+  if principal?.human == false {
+    return false
+  }
+  const kind = lowercase(trim(to_string(principal?.kind ?? "")))
+  return kind == "user" || kind == "human" || kind == "person"
+}
+
+fn __email_from_signature(signature: string) -> string {
+  const open = signature.index_of("<")
+  const close = signature.last_index_of(">")
+  if open < 0 || close <= open {
+    return ""
+  }
+  return lowercase(trim(signature.substring(open + 1, close)))
+}
+
+fn __principal_matches_signature(principal: dict, signature: string) -> bool {
+  const normalized = lowercase(trim(signature))
+  const signed_email = __email_from_signature(normalized)
+  const principal_email = lowercase(trim(to_string(principal?.email ?? "")))
+  if signed_email != "" && principal_email != "" {
+    return signed_email == principal_email
+  }
+  const name = lowercase(trim(to_string(principal?.name ?? "")))
+  if principal_email != "" && name != "" && normalized == name + " <" + principal_email + ">" {
+    return true
+  }
+  if signed_email == "" && name != "" && normalized == name {
+    return true
+  }
+  const subject = lowercase(trim(to_string(principal?.subject ?? "")))
+  return signed_email == "" && subject != "" && normalized == subject
+}
+
+fn __signed_off_by_targets_non_human(line: string, ctx: DisclosureContext) -> bool {
+  const trimmed = trim(line)
+  if !starts_with(lowercase(trimmed), "signed-off-by:") {
+    return false
+  }
+  const signature = lowercase(trim(substring(trimmed, len("Signed-off-by:"))))
+  for principal in ctx.principals {
+    if __principal_is_human(principal) {
+      continue
+    }
+    if __principal_matches_signature(principal, signature) {
+      return true
+    }
+  }
+  return false
+}
+
+fn __safe_git_trailers(block: string, ctx: DisclosureContext) -> string {
+  let lines = []
+  for line in split(trim(block), "\n") {
+    const cleaned = trim(line)
+    if cleaned == "" || __signed_off_by_targets_non_human(cleaned, ctx) {
+      continue
+    }
+    if !contains(lines, cleaned) {
+      lines = lines + [cleaned]
+    }
+  }
+  return join(lines, "\n")
+}
+
+fn __message_has_line(message: string, line: string) -> bool {
+  const want = trim(line)
+  for existing in split(message, "\n") {
+    if trim(existing) == want {
+      return true
+    }
+  }
+  return false
+}
+
+fn __append_trailer_block(message: string, block: string) -> string {
+  let lines = []
+  for line in split(trim(block), "\n") {
+    const cleaned = trim(line)
+    if cleaned == "" || __message_has_line(message, cleaned) || contains(lines, cleaned) {
+      continue
+    }
+    lines = lines + [cleaned]
+  }
+  if len(lines) == 0 {
+    return message
+  }
+  const body = message.trim_end()
+  const trailers = join(lines, "\n")
+  if body == "" {
+    return trailers
+  }
+  return body + "\n\n" + trailers
+}
+
+/**
+ * Render a surface-native authorship disclosure artifact from an ActorChain.
+ *
+ * Built-in surface config is overlaid by `[disclosure]` in `harn.toml`, then
+ * `HARN_DISCLOSURE_CONFIG_PATH` / `HARN_DISCLOSURE_CONFIG`, then
+ * `options.config`. Supported built-in surfaces are `git`, `slack`, and
+ * `github`.
+ *
+ * @effects: [fs-read, env-read]
+ * @errors: [TypeError, ValueError]
+ */
+pub fn render(
+  env: HarnessEnv,
+  fs: HarnessFs,
+  chain,
+  surface: string,
+  options: DisclosureRenderOptions = {},
+) -> any {
+  const config = __config(env, fs, options)
+  const surface_config = __surface_config(config, surface)
+  const ctx = __context(chain, config)
+  const kind = to_string(surface_config?.kind ?? "text")
+  if kind == "text" {
+    return __render_text(fs, surface_config, ctx)
+  }
+  if kind == "github_author_choice" {
+    return __render_github(fs, surface_config, ctx, config)
+  }
+  throw "std/disclosure: unsupported disclosure surface kind `" + kind + "`"
+}
+
+/**
+ * Render Slack outbound disclosure metadata for connector calls.
+ *
+ * `render(harness, chain, "slack")` remains the human-readable byline string. This
+ * helper returns the structured payload consumed by Slack connector packages:
+ * textual fallback byline, optional `chat:write.customize` identity hints, and
+ * a default-on machine-readable AI marker.
+ *
+ * @effects: [fs-read, env-read]
+ * @errors: [TypeError, ValueError]
+ */
+pub fn slack_message_disclosure(
+  env: HarnessEnv,
+  fs: HarnessFs,
+  chain,
+  options: DisclosureRenderOptions = {},
+) -> dict {
+  const config = __config(env, fs, options)
+  const ctx = __context(chain, config)
+  return __slack_message_disclosure(fs, config, ctx)
+}
+
+/**
+ * Render the configured Git attribution trailers for an ActorChain.
+ *
+ * The trailer text comes from the `git` disclosure surface. A `Signed-off-by`
+ * line targeting a non-human actor is omitted so DCO sign-off remains
+ * human-only even when callers override the template.
+ *
+ * @effects: [fs-read, env-read]
+ * @errors: [TypeError, ValueError]
+ */
+pub fn git_trailers(
+  env: HarnessEnv,
+  fs: HarnessFs,
+  chain,
+  options: DisclosureGitTrailerOptions = {},
+) -> string {
+  const opts = __dict(options)
+  if !__git_trailers_switch_enabled(opts) {
+    return ""
+  }
+  const config = __config(env, fs, opts)
+  const ctx = __context(chain, config)
+  const surface_config = __surface_config(config, "git")
+  if !__git_trailers_switch_enabled(surface_config) {
+    return ""
+  }
+  return __safe_git_trailers(__render_text(fs, surface_config, ctx), ctx)
+}
+
+/**
+ * Append actor-chain Git attribution trailers to a commit message or PR body.
+ *
+ * Pass `{enabled: false}` or `{suppress: true}` to leave the text unchanged.
+ *
+ * @effects: [fs-read, env-read]
+ * @errors: [TypeError, ValueError]
+ */
+pub fn append_git_trailers(
+  env: HarnessEnv,
+  fs: HarnessFs,
+  message: string,
+  chain,
+  options: DisclosureGitTrailerOptions = {},
+) -> string {
+  return __append_trailer_block(message, git_trailers(env, fs, chain, options))
+}

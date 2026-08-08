@@ -1,0 +1,1498 @@
+import { command_capture_annotate, command_capture_plan_request } from "std/agent/command_capture"
+
+fn __agent_host_options(options) {
+  return options ?? {}
+}
+
+fn __agent_host_root(options) {
+  const opts = __agent_host_options(options)
+  return opts?.root ?? opts?.cwd
+}
+
+fn __agent_host_list_contains(values, needle) {
+  if type_of(values) == "string" {
+    return values == needle
+  }
+  if type_of(values) != "list" {
+    return false
+  }
+  for value in values {
+    if value == needle {
+      return true
+    }
+  }
+  return false
+}
+
+fn __agent_host_string_list(value, label) {
+  if value == nil {
+    return []
+  }
+  if type_of(value) == "string" {
+    return [value]
+  }
+  if type_of(value) == "list" {
+    return value
+  }
+  throw "agent_host_tools: " + label + " must be a string, list of strings, or nil"
+}
+
+fn __agent_host_tool_enabled(options, key, group) {
+  const opts = __agent_host_options(options)
+  const enabled = opts?.enabled_tools ?? opts?.tools
+  if enabled != nil && !__agent_host_list_contains(enabled, "all")
+    && !__agent_host_list_contains(
+    enabled,
+    group,
+  )
+    && !__agent_host_list_contains(enabled, key) {
+    return false
+  }
+  const disabled = opts?.disabled_tools ?? []
+  if __agent_host_list_contains(disabled, group) || __agent_host_list_contains(disabled, key) {
+    return false
+  }
+  return true
+}
+
+fn __agent_host_lifecycle_tool_enabled(options, key) {
+  const opts = __agent_host_options(options)
+  const enabled = opts?.enabled_tools ?? opts?.tools
+  const explicitly_enabled = __agent_host_list_contains(enabled, key)
+    || __agent_host_list_contains(
+    enabled,
+    "command_lifecycle",
+  )
+  const opted_in = opts?.background_commands ?? opts?.enable_background_commands
+    ?? opts
+    ?.command_lifecycle_tools
+    ?? false
+  if !opted_in && !explicitly_enabled {
+    return false
+  }
+  const disabled = opts?.disabled_tools ?? []
+  if __agent_host_list_contains(disabled, "command")
+    || __agent_host_list_contains(
+    disabled,
+    "command_lifecycle",
+  )
+    || __agent_host_list_contains(disabled, key) {
+    return false
+  }
+  if enabled != nil && !explicitly_enabled && !__agent_host_list_contains(enabled, "all")
+    && !__agent_host_list_contains(
+    enabled,
+    "command",
+  ) {
+    return false
+  }
+  return true
+}
+
+fn __agent_host_name(options, key, default_name) {
+  const opts = __agent_host_options(options)
+  return opts?.names?.[key] ?? opts[key + "_name"] ?? default_name
+}
+
+fn __agent_host_description(options, key, default_description) {
+  const opts = __agent_host_options(options)
+  return opts?.descriptions?.[key] ?? default_description
+}
+
+fn __agent_host_annotations(options, key, defaults) {
+  const opts = __agent_host_options(options)
+  const shared = opts?.annotations?.["*"] ?? {}
+  const local = opts?.annotations?.[key] ?? {}
+  return defaults + shared + local
+}
+
+fn __agent_host_file_annotations(options, key, kind) {
+  return __agent_host_annotations(
+    options,
+    key,
+    {kind: kind, side_effect_level: "workspace_write", arg_schema: {path_params: ["path"]}},
+  )
+}
+
+fn __agent_host_config(options, key, config) {
+  const opts = __agent_host_options(options)
+  let out = config
+  if opts?.defer_loading != nil {
+    out = out + {defer_loading: opts.defer_loading}
+  }
+  if opts?.namespace != nil {
+    out = out + {namespace: opts.namespace}
+  }
+  const shared = opts?.tool_config?.["*"] ?? {}
+  const local = opts?.tool_config?.[key] ?? {}
+  out = out + shared + local
+  return out
+}
+
+fn __agent_host_path_has_parent_segment(path) {
+  for segment in split(path, "/") {
+    if segment == ".." {
+      return true
+    }
+  }
+  return false
+}
+
+fn __agent_host_resolve_path(path, options) {
+  const opts = __agent_host_options(options)
+  const raw = trim(path ?? "")
+  if raw == "" {
+    throw "agent_host_tools: path must be a non-empty string"
+  }
+  const normalized = raw.replace("\\", "/")
+  if __agent_host_path_has_parent_segment(normalized) {
+    throw "agent_host_tools: path must not contain '..' segments"
+  }
+  const root = __agent_host_root(opts)
+  if starts_with(normalized, "/") {
+    if root != nil && (normalized == root || starts_with(normalized, root + "/")) {
+      return normalized
+    }
+    if opts?.allow_absolute_paths ?? false {
+      return normalized
+    }
+    throw "agent_host_tools: absolute paths are disabled; pass a path relative to the configured root"
+  }
+  if root != nil && root != "" {
+    return path_join(root, normalized)
+  }
+  return normalized
+}
+
+fn __agent_host_render(value, options, key) {
+  const opts = __agent_host_options(options)
+  const formatter = opts?.formatters?.[key] ?? opts?.result_formatter
+  if formatter != nil {
+    return formatter(value, key)
+  }
+  const format = opts?.output_format ?? "json"
+  if format == "value" {
+    return value
+  }
+  if format == "display" {
+    return to_string(value)
+  }
+  return json_stringify(value)
+}
+
+fn __agent_host_read_file_request(args, options) {
+  let req = {path: __agent_host_resolve_path(args.path, options)}
+  if args?.offset != nil {
+    req = req + {offset: args.offset}
+  }
+  if args?.limit_bytes != nil {
+    req = req + {limit_bytes: args.limit_bytes}
+  }
+  if args?.encoding != nil {
+    req = req + {encoding: args.encoding}
+  }
+  return req
+}
+
+fn __agent_host_list_directory_request(args, options) {
+  const raw_path = trim(args?.path ?? ".")
+  const path = if raw_path == "" {
+    "."
+  } else {
+    raw_path
+  }
+  let req = {path: __agent_host_resolve_path(path, options)}
+  if args?.include_hidden != nil {
+    req = req + {include_hidden: args.include_hidden}
+  }
+  if args?.max_entries != nil {
+    req = req + {max_entries: args.max_entries}
+  }
+  return req
+}
+
+fn __agent_host_file_outline_request(args, options) {
+  let req = {path: __agent_host_resolve_path(args.path, options)}
+  if args?.max_depth != nil {
+    req = req + {max_depth: args.max_depth}
+  }
+  return req
+}
+
+fn __agent_host_search_request(args, options) {
+  let req = {pattern: args.pattern}
+  const raw_path = trim(args?.path ?? ".")
+  const search_path = if raw_path == "" {
+    "."
+  } else {
+    raw_path
+  }
+  req = req + {path: __agent_host_resolve_path(search_path, options)}
+  const default_max_matches = __agent_host_options(options)?.search_max_matches
+    ?? __agent_host_options(
+    options,
+  )?.max_search_matches
+    ?? 50
+  if args?.max_matches == nil && default_max_matches != nil {
+    req = req + {max_matches: default_max_matches}
+  }
+  const default_max_line_bytes = __agent_host_options(options)?.search_max_line_bytes
+    ?? __agent_host_options(
+    options,
+  )?.max_search_line_bytes
+  if args?.max_line_bytes == nil && default_max_line_bytes != nil {
+    req = req + {max_line_bytes: default_max_line_bytes}
+  }
+  const configured_exclude_globs = __agent_host_options(options)?.search_exclude_globs
+    ?? __agent_host_options(
+    options,
+  )?.exclude_globs
+  const exclude_globs = __agent_host_string_list(configured_exclude_globs, "exclude_globs")
+    + __agent_host_string_list(
+    args?.exclude_globs,
+    "exclude_globs",
+  )
+  if len(exclude_globs) > 0 {
+    req = req + {exclude_globs: exclude_globs}
+  }
+  for key in [
+    "glob",
+    "case_insensitive",
+    "fixed_strings",
+    "max_matches",
+    "max_line_bytes",
+    "context_before",
+    "context_after",
+    "include_hidden",
+  ] {
+    if args?.[key] != nil {
+      req = req + {[key]: args[key]}
+    }
+  }
+  return req
+}
+
+fn __agent_host_safe_relative_path(path) {
+  const raw = path ?? ""
+  if raw == "" {
+    return raw
+  }
+  const normalized = raw.replace("\\", "/")
+  if starts_with(normalized, "/") || __agent_host_path_has_parent_segment(normalized) {
+    throw "agent_host_tools: git path must be relative and must not contain '..' segments"
+  }
+  return normalized
+}
+
+fn __agent_host_git_request(args, options) {
+  let req = {operation: args.operation}
+  const repo = args?.repo ?? __agent_host_root(options)
+  if repo != nil && repo != "" {
+    req = req + {repo: __agent_host_resolve_path(repo, options)}
+  }
+  if args?.path != nil {
+    req = req + {path: __agent_host_safe_relative_path(args.path)}
+  }
+  for key in ["rev", "rev_range", "max_count"] {
+    if args?.[key] != nil {
+      req = req + {[key]: args[key]}
+    }
+  }
+  return req
+}
+
+fn __agent_host_prefix_matches(argv, prefix) {
+  if type_of(prefix) == "string" {
+    return len(argv) > 0 && argv[0] == prefix
+  }
+  if type_of(prefix) != "list" {
+    return false
+  }
+  if len(prefix) > len(argv) {
+    return false
+  }
+  let index = 0
+  while index < len(prefix) {
+    if argv[index] != prefix[index] {
+      return false
+    }
+    index = index + 1
+  }
+  return true
+}
+
+fn __agent_host_argv_allowed(argv, options) {
+  const prefixes = __agent_host_options(options)?.allow_argv_prefixes
+  if prefixes == nil || len(prefixes) == 0 {
+    return true
+  }
+  for prefix in prefixes {
+    if __agent_host_prefix_matches(argv, prefix) {
+      return true
+    }
+  }
+  return false
+}
+
+fn __agent_host_blocked_command(argv, options) {
+  return {
+    blocked: true,
+    status: "blocked",
+    reason: "argv does not match any configured allow_argv_prefixes entry",
+    argv: argv,
+    allowed_argv_prefixes: __agent_host_options(options)?.allow_argv_prefixes ?? [],
+  }
+}
+
+fn __agent_host_policy_blocked(reason, request, args, options) {
+  return {
+    blocked: true,
+    status: "blocked",
+    reason: reason,
+    request: request,
+    args: args,
+    allowed_argv_prefixes: __agent_host_options(options)?.allow_argv_prefixes ?? [],
+  }
+}
+
+fn __agent_host_policy_requires_approval(verdict, request, args) {
+  const approval_request = verdict?.request ?? verdict?.rewrite ?? request
+  let out = {
+    requires_approval: true,
+    status: "requires_approval",
+    reason: verdict?.reason ?? "command_policy requires approval",
+    request: approval_request,
+    args: args,
+  }
+  if verdict?.approval_id != nil {
+    out = out + {approval_id: verdict.approval_id}
+  }
+  return out
+}
+
+fn __agent_host_apply_command_policy(request, args, options) {
+  const opts = __agent_host_options(options)
+  const policy = opts?.command_policy ?? opts?.allow_command
+  if policy == nil {
+    return request
+  }
+  const verdict = policy(request, args)
+  if verdict == nil {
+    return request
+  }
+  if type_of(verdict) == "bool" {
+    if verdict {
+      return request
+    }
+    return __agent_host_policy_blocked("command_policy rejected command", request, args, opts)
+  }
+  const kind = type_of(verdict)
+  if kind == "string" {
+    return __agent_host_policy_blocked(verdict, request, args, opts)
+  }
+  if kind == "dict" {
+    const approval_value = verdict?.require_approval ?? verdict?.requires_approval
+    if type_of(approval_value) == "bool" && approval_value {
+      return __agent_host_policy_requires_approval(verdict, request, args)
+    }
+    if verdict?.request != nil {
+      return verdict.request
+    }
+    if verdict?.rewrite != nil {
+      return verdict.rewrite
+    }
+    const allow_value = verdict?.allow
+    const blocked_value = verdict?.blocked
+    if (type_of(allow_value) == "bool" && !allow_value)
+      || (type_of(blocked_value) == "bool"
+      && blocked_value) {
+      return __agent_host_policy_blocked(
+        verdict?.reason ?? "command_policy rejected command",
+        request,
+        args,
+        opts,
+      )
+        + verdict
+    }
+    return request + verdict
+  }
+  throw "agent_host_tools: command_policy must return bool, string, dict, or nil"
+}
+
+fn __agent_host_command_cwd(args, options) {
+  const opts = __agent_host_options(options)
+  const cwd = args?.cwd ?? opts?.cwd ?? opts?.root
+  if cwd == nil || cwd == "" {
+    return nil
+  }
+  return __agent_host_resolve_path(cwd, opts)
+}
+
+fn __agent_host_list_of_strings(value) {
+  if type_of(value) != "list" || len(value) == 0 {
+    return false
+  }
+  for element in value {
+    if type_of(element) != "string" {
+      return false
+    }
+  }
+  return true
+}
+
+fn __agent_host_resolve_argv(args) {
+  // Resolve the effective argv from EITHER the canonical `argv` field OR a
+  // list passed in `command`. The schema declares `argv` as the array and
+  // `command` as a string, but the tool description tells the model to "pass
+  // argv as an array of strings", so models routinely conflate the two and
+  // send the array under `command`. Accept both spellings so the tool works
+  // regardless of which field carries the list; a string `command` still
+  // routes to shell mode below.
+  const argv = args?.argv
+  if type_of(argv) == "list" && len(argv) > 0 {
+    return argv
+  }
+  if (argv == nil || (type_of(argv) == "list" && len(argv) == 0))
+    && type_of(args?.command) == "list" {
+    return args.command
+  }
+  return nil
+}
+
+fn __agent_host_append_unique_string(values, value) {
+  const text = trim(value ?? "")
+  if text == "" {
+    return values
+  }
+  for existing in values {
+    if existing == text {
+      return values
+    }
+  }
+  return values + [text]
+}
+
+fn __agent_host_command_sandbox_roots(request, options) {
+  const opts = __agent_host_options(options)
+  let roots = []
+  const configured_root = __agent_host_root(opts)
+  if configured_root != nil && trim(configured_root) != "" {
+    if starts_with(trim(configured_root).replace("\\", "/"), "/") {
+      roots = __agent_host_append_unique_string(roots, configured_root)
+    } else {
+      roots = __agent_host_append_unique_string(roots, __agent_host_resolve_path(".", opts))
+    }
+  }
+  if request?.cwd != nil && request.cwd != "" {
+    roots = __agent_host_append_unique_string(roots, request.cwd)
+  }
+  return roots
+}
+
+fn __agent_host_command_request(args, options) {
+  const opts = __agent_host_options(options)
+  const resolved_argv = __agent_host_resolve_argv(args)
+  if resolved_argv != nil {
+    if !__agent_host_list_of_strings(resolved_argv) {
+      throw "run_command: argv must be a non-empty list of strings"
+    }
+    const argv = resolved_argv
+    if !__agent_host_argv_allowed(argv, opts) {
+      return __agent_host_blocked_command(argv, opts)
+    }
+    let req = {mode: "argv", argv: argv}
+    const command_cwd = __agent_host_command_cwd(args, opts)
+    if command_cwd != nil && command_cwd != "" {
+      req = req + {cwd: command_cwd}
+    }
+    return __agent_host_apply_command_policy(
+      __agent_host_command_request_common(req, args, opts),
+      args,
+      opts,
+    )
+  }
+  if (opts?.allow_shell ?? false) && type_of(args?.command) == "string"
+    && trim(args.command) != "" {
+    let req = {mode: "shell", command: args.command}
+    const shell_cwd = __agent_host_command_cwd(args, opts)
+    if shell_cwd != nil && shell_cwd != "" {
+      req = req + {cwd: shell_cwd}
+    }
+    const shell_id = args?.shell_id ?? opts?.shell_id
+    if shell_id != nil {
+      req = req + {shell_id: shell_id}
+    }
+    if args?.login != nil {
+      req = req + {login: args.login}
+    }
+    if args?.interactive != nil {
+      req = req + {interactive: args.interactive}
+    }
+    return __agent_host_apply_command_policy(
+      __agent_host_command_request_common(req, args, opts),
+      args,
+      opts,
+    )
+  }
+  if type_of(args?.command) == "string" && trim(args.command) != "" {
+    // A non-empty shell string was supplied, but shell mode is disabled for
+    // this tool. Tell the model exactly how to recover instead of claiming
+    // the (absent) argv is malformed.
+    throw "run_command: shell commands are disabled for this tool; pass argv as a list of strings, e.g. argv: [\"bash\", \"-lc\", \"...\"]"
+  }
+  throw "run_command: argv must be a non-empty list of strings"
+}
+
+fn __agent_host_command_request_common(base_request, args, options) {
+  const opts = __agent_host_options(options)
+  const behavior = opts?.command_behavior ?? opts?.run_command_behavior ?? {}
+  let req = base_request
+  const timeout = args?.timeout_ms ?? opts?.timeout_ms
+  if timeout != nil {
+    req = req + {timeout_ms: timeout}
+  }
+  if args?.stdin != nil {
+    req = req + {stdin: args.stdin}
+  }
+  if args?.env != nil {
+    req = req + {env: args.env}
+  }
+  if args?.env_remove != nil {
+    req = req + {env_remove: args.env_remove}
+  }
+  if args?.env_mode != nil {
+    req = req + {env_mode: args.env_mode}
+  }
+  let capture = args?.capture ?? {}
+  const requested_max_inline = capture?.max_inline_bytes ?? args?.max_inline_bytes
+  const configured_max_inline = opts?.max_inline_bytes
+  const max_inline = if requested_max_inline != nil && configured_max_inline != nil {
+    if requested_max_inline < configured_max_inline {
+      requested_max_inline
+    } else {
+      configured_max_inline
+    }
+  } else {
+    requested_max_inline ?? configured_max_inline
+  }
+  if max_inline != nil {
+    capture = capture + {max_inline_bytes: max_inline}
+  }
+  if len(capture.keys()) > 0 {
+    req = req + {capture: capture}
+  }
+  for key in [
+    "background",
+    "background_after_ms",
+    "progress_interval_ms",
+    "progress_max_inline_bytes",
+  ] {
+    const value = args?.[key] ?? behavior[key]
+    if value != nil {
+      req = req + {[key]: value}
+    }
+  }
+  const sandbox_roots = __agent_host_command_sandbox_roots(req, opts)
+  if len(sandbox_roots) > 0 {
+    req = req + {sandbox: {workspace_roots: sandbox_roots}}
+  }
+  return req
+}
+
+fn __agent_host_reader_locator(args) {
+  let req = {}
+  if args?.command_id != nil {
+    req = req + {command_id: args.command_id}
+  }
+  if args?.handle_id != nil {
+    req = req + {handle_id: args.handle_id}
+  }
+  if args?.path != nil {
+    req = req + {path: args.path}
+  }
+  if len(req.keys()) == 0 {
+    throw "read_command_output: pass command_id, handle_id, or path"
+  }
+  return req
+}
+
+fn __agent_host_read_command_request(args, options) {
+  let req = __agent_host_reader_locator(args)
+  req = req
+    + {
+    offset: args?.offset ?? 0,
+    length: args?.length ?? __agent_host_options(options)?.read_bytes ?? 65536,
+  }
+  return req
+}
+
+fn __agent_host_tail_command_request(tool_runtime: HarnessTools, args, options) {
+  const locator = __agent_host_reader_locator(args)
+  const length = args?.length ?? __agent_host_options(options)?.tail_bytes ?? 12000
+  const meta = tool_runtime.read_command_output(locator + {offset: 0, length: 0})
+  const offset = if meta.total_bytes > length {
+    meta.total_bytes - length
+  } else {
+    0
+  }
+  return locator + {offset: offset, length: length}
+}
+
+fn __agent_host_tail_file_request(fs: HarnessFs, args, options) {
+  const path = __agent_host_resolve_path(args.path, options)
+  const length = args?.length ?? __agent_host_options(options)?.tail_bytes ?? 12000
+  const info = fs.stat(path)
+  const offset = if info.size > length {
+    info.size - length
+  } else {
+    0
+  }
+  return {path: path, offset: offset, limit_bytes: length}
+}
+
+fn __agent_host_command_result_readers(options, read_name, tail_name) {
+  let readers = []
+  if __agent_host_tool_enabled(options, "read_command_output", "command") {
+    readers = readers + [read_name]
+  }
+  if __agent_host_tool_enabled(options, "read_command_output_tail", "command") {
+    readers = readers + [tail_name]
+  }
+  return readers
+}
+
+fn __agent_host_command_handle_id(args, tool_name: string) -> string {
+  const handle_id = trim(to_string(args?.handle_id ?? args?.handle ?? ""))
+  if handle_id != "" {
+    return handle_id
+  }
+  throw tool_name + ": pass handle_id from a background run_command result"
+}
+
+fn __agent_host_wait_command_request(args, tool_name: string, timeout_ms) {
+  let req = {handle_id: __agent_host_command_handle_id(args, tool_name)}
+  if timeout_ms != nil {
+    req = req + {timeout_ms: timeout_ms}
+  }
+  if args?.session_id != nil {
+    req = req + {session_id: args.session_id}
+  }
+  return req
+}
+
+fn __agent_host_cancel_command_request(args) {
+  let req = {handle_id: __agent_host_command_handle_id(args, "kill_command")}
+  if args?.wait_result_ms != nil {
+    req = req + {wait_result_ms: args.wait_result_ms}
+  }
+  if args?.timed_out != nil {
+    req = req + {timed_out: args.timed_out}
+  }
+  return req
+}
+
+/**
+ * agent_read_tools adds root-scoped read, directory, outline, search, and git inspection tool_runtime.
+ *
+ * @effects: [agent]
+ * @errors: []
+ * @api_stability: stable
+ */
+pub fn agent_read_tools(fs: HarnessFs, tool_runtime: HarnessTools, registry = nil, options = nil) {
+  const opts = __agent_host_options(options)
+  let tools = registry ?? tool_registry()
+  if __agent_host_tool_enabled(opts, "read_file", "read") {
+    const key = "read_file"
+    tools = tool_define(
+      tools,
+      __agent_host_name(opts, key, "read_file"),
+      __agent_host_description(
+        opts,
+        key,
+        "Read a UTF-8 file under the configured root by path. Use this for known files such as VERSION; use search_files only when you have a content pattern to search for.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {
+            path: {type: "string"},
+            offset: {type: "integer", required: false},
+            limit_bytes: {type: "integer", required: false},
+            encoding: {type: "string", enum: ["utf-8", "binary"], required: false},
+          },
+          returns: {type: "object"},
+          annotations: __agent_host_annotations(
+            opts,
+            key,
+            {kind: "read", side_effect_level: "read_only"},
+          ),
+          handler: { args ->
+            __agent_host_render(
+              tool_runtime.read_file(__agent_host_read_file_request(args, opts)),
+              opts,
+              key,
+            )
+          },
+        },
+      ),
+    )
+  }
+  if __agent_host_tool_enabled(opts, "read_file_tail", "read") {
+    const key = "read_file_tail"
+    tools = tool_define(
+      tools,
+      __agent_host_name(opts, key, "read_file_tail"),
+      __agent_host_description(
+        opts,
+        key,
+        "Read the last bytes of a UTF-8 file under the configured root.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {path: {type: "string"}, length: {type: "integer", required: false}},
+          returns: {type: "object"},
+          annotations: __agent_host_annotations(
+            opts,
+            key,
+            {kind: "read", side_effect_level: "read_only"},
+          ),
+          handler: { args ->
+            __agent_host_render(
+              tool_runtime.read_file(__agent_host_tail_file_request(fs, args, opts)),
+              opts,
+              key,
+            )
+          },
+        },
+      ),
+    )
+  }
+  if __agent_host_tool_enabled(opts, "list_directory", "read") {
+    const key = "list_directory"
+    tools = tool_define(
+      tools,
+      __agent_host_name(opts, key, "list_directory"),
+      __agent_host_description(
+        opts,
+        key,
+        "List entries in a directory under the configured root. Use this before guessing paths; prefer read_file once you know the exact file.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {
+            path: {type: "string", required: false},
+            include_hidden: {type: "boolean", required: false},
+            max_entries: {type: "integer", required: false},
+          },
+          returns: {type: "object"},
+          annotations: __agent_host_annotations(
+            opts,
+            key,
+            {kind: "read", side_effect_level: "read_only"},
+          ),
+          handler: { args ->
+            __agent_host_render(
+              tool_runtime.list_directory(__agent_host_list_directory_request(args, opts)),
+              opts,
+              key,
+            )
+          },
+        },
+      ),
+    )
+  }
+  if __agent_host_tool_enabled(opts, "get_file_outline", "read") {
+    const key = "get_file_outline"
+    tools = tool_define(
+      tools,
+      __agent_host_name(opts, key, "get_file_outline"),
+      __agent_host_description(
+        opts,
+        key,
+        "Return a structural outline of a source file under the configured root. Use this to inspect symbols before reading or editing large files.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {path: {type: "string"}, max_depth: {type: "integer", required: false}},
+          returns: {type: "object"},
+          annotations: __agent_host_annotations(
+            opts,
+            key,
+            {kind: "read", side_effect_level: "read_only"},
+          ),
+          handler: { args ->
+            __agent_host_render(
+              tool_runtime.get_file_outline(__agent_host_file_outline_request(args, opts)),
+              opts,
+              key,
+            )
+          },
+        },
+      ),
+    )
+  }
+  if __agent_host_tool_enabled(opts, "search_files", "read") {
+    const key = "search_files"
+    tools = tool_define(
+      tools,
+      __agent_host_name(opts, key, "search_files"),
+      __agent_host_description(
+        opts,
+        key,
+        "Search file contents under the configured root. Required: pattern. Optional path only scopes where to search; do not call this with path alone. Use read_file to read a known file path.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {
+            pattern: {type: "string"},
+            path: {type: "string", required: false},
+            glob: {type: "string", required: false},
+            case_insensitive: {type: "boolean", required: false},
+            fixed_strings: {type: "boolean", required: false},
+            max_matches: {type: "integer", required: false},
+            max_line_bytes: {type: "integer", required: false},
+            context_before: {type: "integer", required: false},
+            context_after: {type: "integer", required: false},
+            include_hidden: {type: "boolean", required: false},
+            exclude_globs: {type: "array", items: {type: "string"}, required: false},
+          },
+          returns: {type: "object"},
+          annotations: __agent_host_annotations(
+            opts,
+            key,
+            {kind: "search", side_effect_level: "read_only"},
+          ),
+          handler: { args ->
+            __agent_host_render(
+              tool_runtime.search(__agent_host_search_request(args, opts)),
+              opts,
+              key,
+            )
+          },
+        },
+      ),
+    )
+  }
+  if __agent_host_tool_enabled(opts, "git_inspect", "read") {
+    const key = "git_inspect"
+    tools = tool_define(
+      tools,
+      __agent_host_name(opts, key, "git_inspect"),
+      __agent_host_description(
+        opts,
+        key,
+        "Inspect git status, diff, log, show, blame, branches, and remotes without mutating the repo.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {
+            operation: {
+              type: "string",
+              enum: [
+                "status",
+                "diff",
+                "log",
+                "blame",
+                "show",
+                "branch_list",
+                "current_branch",
+                "remote_list",
+              ],
+            },
+            repo: {type: "string", required: false},
+            path: {type: "string", required: false},
+            rev: {type: "string", required: false},
+            rev_range: {type: "string", required: false},
+            max_count: {type: "integer", required: false},
+          },
+          returns: {type: "object"},
+          annotations: __agent_host_annotations(
+            opts,
+            key,
+            {kind: "read", side_effect_level: "read_only"},
+          ),
+          handler: { args ->
+            __agent_host_render(tool_runtime.git(__agent_host_git_request(args, opts)), opts, key)
+          },
+        },
+      ),
+    )
+  }
+  return tools
+}
+
+/**
+ * agent_command_tools adds argv-based run_command plus command-output artifact readers.
+ *
+ * @effects: [agent]
+ * @errors: []
+ * @api_stability: stable
+ */
+pub fn agent_command_tools(harness: Harness, registry = nil, options = nil) {
+  const opts = __agent_host_options(options)
+  let tools = registry ?? tool_registry()
+  const read_name = __agent_host_name(opts, "read_command_output", "read_command_output")
+  const tail_name = __agent_host_name(opts, "read_command_output_tail", "read_command_output_tail")
+  const result_readers = __agent_host_command_result_readers(opts, read_name, tail_name)
+  if __agent_host_tool_enabled(opts, "run_command", "command") {
+    const key = "run_command"
+    tools = tool_define(
+      tools,
+      __agent_host_name(opts, key, "run_command"),
+      __agent_host_description(
+        opts,
+        key,
+        "Run one argv-based command from the configured cwd. Pass argv as an array of strings (an array passed under `command` is also accepted as argv). Output is capped inline; use the returned command_id with the command-output reader tools for full stdout/stderr. Background progress can be enabled per call or through agent_command_tools command_behavior.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {
+            argv: {type: "array", items: {type: "string"}},
+            command: {type: "string", required: false},
+            cwd: {type: "string", required: false},
+            timeout_ms: {type: "integer", required: false},
+            stdin: {type: "string", required: false},
+            env: {type: "object", required: false},
+            env_remove: {type: "array", items: {type: "string"}, required: false},
+            env_mode: {
+              type: "string",
+              enum: ["inherit_clean", "replace", "patch"],
+              required: false,
+            },
+            shell_id: {type: "string", required: false},
+            login: {type: "boolean", required: false},
+            interactive: {type: "boolean", required: false},
+            capture: {type: "object", required: false},
+            max_inline_bytes: {type: "integer", required: false},
+            background: {type: "boolean", required: false},
+            background_after_ms: {type: "integer", required: false},
+            progress_interval_ms: {type: "integer", required: false},
+            progress_max_inline_bytes: {type: "integer", required: false},
+          },
+          returns: {type: "object"},
+          annotations: __agent_host_annotations(
+            opts,
+            key,
+            {
+              kind: "execute",
+              side_effect_level: "process_exec",
+              emits_artifacts: true,
+              result_readers: result_readers,
+            },
+          ),
+          handler: { args ->
+            const req = __agent_host_command_request(args, opts)
+            if (req?.blocked ?? false) || (req?.requires_approval ?? false) {
+              return __agent_host_render(req, opts, key)
+            }
+            const planned = if opts?.preserve_filtered_output ?? true {
+              command_capture_plan_request(harness, req)
+            } else {
+              nil
+            }
+            const run_req = planned?.run_request ?? req
+            const result = harness.tools.run_command(run_req)
+            const final_result = if planned != nil {
+              command_capture_annotate(harness.fs, result, planned.plan)
+            } else {
+              result
+            }
+            return __agent_host_render(final_result, opts, key)
+          },
+        },
+      ),
+    )
+  }
+  if __agent_host_lifecycle_tool_enabled(opts, "poll_command") {
+    const key = "poll_command"
+    tools = tool_define(
+      tools,
+      __agent_host_name(opts, key, "poll_command"),
+      __agent_host_description(
+        opts,
+        key,
+        "Check a background run_command handle without blocking. If the command is still running, returns status and live output artifact metadata; if it completed, returns the final command result.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {
+            handle_id: {type: "string", required: false},
+            handle: {type: "string", required: false},
+            session_id: {type: "string", required: false},
+          },
+          returns: {type: "object"},
+          annotations: __agent_host_annotations(
+            opts,
+            key,
+            {kind: "execute", side_effect_level: "read_only"},
+          ),
+          handler: { args ->
+            __agent_host_render(
+              harness.tools.wait_command(__agent_host_wait_command_request(args, key, 0)),
+              opts,
+              key,
+            )
+          },
+        },
+      ),
+    )
+  }
+  if __agent_host_lifecycle_tool_enabled(opts, "wait_command") {
+    const key = "wait_command"
+    tools = tool_define(
+      tools,
+      __agent_host_name(opts, key, "wait_command"),
+      __agent_host_description(
+        opts,
+        key,
+        "Wait for a background run_command handle and return the final command result, or a running status if the timeout elapses first.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {
+            handle_id: {type: "string", required: false},
+            handle: {type: "string", required: false},
+            timeout_ms: {type: "integer", required: false},
+            session_id: {type: "string", required: false},
+          },
+          returns: {type: "object"},
+          annotations: __agent_host_annotations(
+            opts,
+            key,
+            {kind: "execute", side_effect_level: "read_only"},
+          ),
+          handler: { args ->
+            __agent_host_render(
+              harness.tools.wait_command(
+                __agent_host_wait_command_request(
+                  args,
+                  key,
+                  args?.timeout_ms ?? opts?.wait_command_timeout_ms ?? 60000,
+                ),
+              ),
+              opts,
+              key,
+            )
+          },
+        },
+      ),
+    )
+  }
+  if __agent_host_lifecycle_tool_enabled(opts, "kill_command") {
+    const key = "kill_command"
+    tools = tool_define(
+      tools,
+      __agent_host_name(opts, key, "kill_command"),
+      __agent_host_description(
+        opts,
+        key,
+        "Cancel a background run_command handle when it is no longer useful. Optionally wait briefly for the final killed-result payload.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {
+            handle_id: {type: "string", required: false},
+            handle: {type: "string", required: false},
+            wait_result_ms: {type: "integer", required: false},
+            timed_out: {type: "boolean", required: false},
+          },
+          returns: {type: "object"},
+          annotations: __agent_host_annotations(
+            opts,
+            key,
+            {kind: "execute", side_effect_level: "process_exec"},
+          ),
+          handler: { args ->
+            __agent_host_render(
+              harness.tools.cancel_handle(__agent_host_cancel_command_request(args)),
+              opts,
+              key,
+            )
+          },
+        },
+      ),
+    )
+  }
+  if __agent_host_tool_enabled(opts, "read_command_output", "command") {
+    const key = "read_command_output"
+    tools = tool_define(
+      tools,
+      read_name,
+      __agent_host_description(
+        opts,
+        key,
+        "Read stdout, stderr, or combined output from a prior run_command call by command_id, handle_id, or artifact path. Use command_id from run_command results when available.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {
+            command_id: {type: "string", required: false},
+            handle_id: {type: "string", required: false},
+            path: {type: "string", required: false},
+            offset: {type: "integer", required: false},
+            length: {type: "integer", required: false},
+          },
+          returns: {type: "object"},
+          annotations: __agent_host_annotations(
+            opts,
+            key,
+            {kind: "read", side_effect_level: "read_only"},
+          ),
+          handler: { args ->
+            __agent_host_render(
+              harness.tools.read_command_output(__agent_host_read_command_request(args, opts)),
+              opts,
+              key,
+            )
+          },
+        },
+      ),
+    )
+  }
+  if __agent_host_tool_enabled(opts, "read_command_output_tail", "command") {
+    const key = "read_command_output_tail"
+    tools = tool_define(
+      tools,
+      tail_name,
+      __agent_host_description(
+        opts,
+        key,
+        "Read the last bytes of stdout, stderr, or combined output from a prior run_command call. Use this with command_id when inline command output was truncated.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {
+            command_id: {type: "string", required: false},
+            handle_id: {type: "string", required: false},
+            path: {type: "string", required: false},
+            length: {type: "integer", required: false},
+          },
+          returns: {type: "object"},
+          annotations: __agent_host_annotations(
+            opts,
+            key,
+            {kind: "read", side_effect_level: "read_only"},
+          ),
+          handler: { args ->
+            __agent_host_render(
+              harness.tools.read_command_output(
+                __agent_host_tail_command_request(harness.tools, args, opts),
+              ),
+              opts,
+              key,
+            )
+          },
+        },
+      ),
+    )
+  }
+  return tools
+}
+
+/**
+ * Code mode is default-OFF: only surface it when the caller explicitly opts in
+ * with `code_mode: true` or lists "code_mode" in `enabled_tools`. It is a
+ * powerful composition surface (a script that calls other tools), so it must
+ * never appear by default.
+ */
+fn __agent_host_code_mode_enabled(options) {
+  const opts = __agent_host_options(options)
+  const enabled = opts?.enabled_tools ?? opts?.tools
+  const explicitly_enabled = __agent_host_list_contains(enabled, "code_mode")
+  const opted_in = opts?.code_mode ?? false
+  if !opted_in && !explicitly_enabled {
+    return false
+  }
+  const disabled = opts?.disabled_tools ?? []
+  if __agent_host_list_contains(disabled, "code_mode") {
+    return false
+  }
+  return true
+}
+
+/**
+ * agent_composition_tools adds the default-OFF `code_mode` tool: the model
+ * authors a short Harn script that composes the session's other tools as a
+ * typed API (the CodeAct pattern) instead of emitting N separate tool calls.
+ * The script runs in a restricted sandbox VM whose only egress is `call_tool`,
+ * which routes every call through the same policy + approval + MCP-credential
+ * gate the model's own tool calls use. Intermediate values stay in the sandbox;
+ * only what the script returns re-enters the model context.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: stable
+ */
+pub fn agent_composition_tools(registry = nil, options = nil) {
+  const opts = __agent_host_options(options)
+  let tools = registry ?? tool_registry()
+  if __agent_host_code_mode_enabled(opts) {
+    const key = "code_mode"
+    tools = tool_define(
+      tools,
+      __agent_host_name(opts, key, "code_mode"),
+      __agent_host_description(
+        opts,
+        key,
+        "Run a short Harn script that composes the available tools as a typed API. "
+          + "Call tools from the script with `call_tool(name, args)`; it returns each "
+          + "tool's result for further composition. Keep intermediate data in the script "
+          + "and `return` only the final composed value. Prefer this for connector chains "
+          + "(read from one tool, transform, write to another) to avoid many round-trips "
+          + "and keep large intermediate payloads out of context. Tool calls from the "
+          + "script are still subject to the same permission and approval rules.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {
+            code: {type: "string"},
+            allow_tools: {type: "array", items: {type: "string"}, required: false},
+          },
+          returns: {type: "object"},
+          annotations: __agent_host_annotations(
+            opts,
+            key,
+            {kind: "code_mode", side_effect_level: "workspace"},
+          ),
+          handler: { args ->
+            __agent_host_render(
+              __host_code_mode_run(
+                {code: args.code, allow_tools: args?.allow_tools, tools: tools, options: opts},
+              ),
+              opts,
+              key,
+            )
+          },
+        },
+      ),
+    )
+  }
+  return tools
+}
+
+/**
+ * Apply an exact-string edit to a root-scoped file on top of the existing
+ * read/write hostlib primitives — Harn ships no string-replacement builtin,
+ * so `edit_file` composes read -> replace -> write here. `old_string` must
+ * appear exactly once (unless `replace_all`); a missing or ambiguous match
+ * is a hard error so the model never silently edits the wrong span.
+ */
+fn __agent_host_edit_file_apply(tool_runtime: HarnessTools, args, options) {
+  const opts = __agent_host_options(options)
+  const path = __agent_host_resolve_path(args.path, opts)
+  const old_string = args?.old_string
+  const new_string = args?.new_string ?? ""
+  const replace_all = args?.replace_all ?? false
+  if type_of(old_string) != "string" || old_string == "" {
+    throw "edit_file: old_string must be a non-empty string"
+  }
+  if old_string == new_string {
+    throw "edit_file: old_string and new_string are identical; nothing to change"
+  }
+  const current = tool_runtime.read_file({path: path})
+  const content = current?.content ?? ""
+  const occurrences = len(split(content, old_string)) - 1
+  if occurrences == 0 {
+    throw "edit_file: old_string not found in " + args.path
+  }
+  if occurrences > 1 && !replace_all {
+    throw "edit_file: old_string is not unique in "
+      + args.path
+      + " ("
+      + to_string(occurrences)
+      + " matches); pass replace_all: true or include more surrounding context to disambiguate"
+  }
+  const updated = replace(content, old_string, new_string)
+  const write = tool_runtime.write_file({path: path, content: updated, overwrite: true})
+  return {
+    bytes_written: write?.bytes_written,
+    path: write?.path ?? path,
+    replacements: if replace_all {
+      occurrences
+    } else {
+      1
+    },
+  }
+}
+
+/**
+ * agent_edit_tools adds the canonical root-scoped mutation tools every
+ * embedder otherwise hand-rolls: `write_file`, `edit_file`, `create_directory`,
+ * and `delete_path`. They wrap the existing hostlib primitives
+ * (`harness.tools.write_file` / `harness.tools.delete_file` / `harness.fs.mkdir`)
+ * and reuse the same root resolution, path-scope enforcement, naming,
+ * description, annotation, and rendering plumbing as `agent_read_tools`. Every
+ * tool is annotated honestly as mutating (`kind: edit|delete`,
+ * `side_effect_level: workspace_write`) so the read-only stance hides them and
+ * tool-surface narrowing classifies them correctly. They are plain named tools,
+ * so `std/llm/tool_middleware` (with_consent, with_audit_log, with_dry_run, …)
+ * wraps them without any per-tool support. NOT composed into `agent_host_tools`
+ * — mutation stays opt-in; compose explicitly with
+ * `agent_edit_tools(harness, agent_host_tools(harness, nil, opts), opts)`.
+ *
+ * @effects: [agent]
+ * @errors: []
+ * @api_stability: stable
+ */
+pub fn agent_edit_tools(fs: HarnessFs, tool_runtime: HarnessTools, registry = nil, options = nil) {
+  const opts = __agent_host_options(options)
+  let tools = registry ?? tool_registry()
+  if __agent_host_tool_enabled(opts, "write_file", "edit") {
+    const key = "write_file"
+    tools = tool_define(
+      tools,
+      __agent_host_name(opts, key, "write_file"),
+      __agent_host_description(
+        opts,
+        key,
+        "Create or overwrite a UTF-8 file under the configured root, writing the full content. Missing parent directories are created. Prefer edit_file for a targeted change to an existing file; use this to create a new file or replace one wholesale.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {path: {type: "string"}, content: {type: "string"}},
+          returns: {type: "object"},
+          annotations: __agent_host_file_annotations(opts, key, "edit"),
+          handler: { args ->
+            __agent_host_render(
+              tool_runtime.write_file(
+                {path: __agent_host_resolve_path(args.path, opts), content: args.content},
+              ),
+              opts,
+              key,
+            )
+          },
+        },
+      ),
+    )
+  }
+  if __agent_host_tool_enabled(opts, "edit_file", "edit") {
+    const key = "edit_file"
+    tools = tool_define(
+      tools,
+      __agent_host_name(opts, key, "edit_file"),
+      __agent_host_description(
+        opts,
+        key,
+        "Replace an exact string in a UTF-8 file under the configured root. old_string must match the file's current text exactly. Errors if old_string is absent, or if it occurs more than once unless replace_all is true; include surrounding context to make the match unique. Set replace_all to change every occurrence.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {
+            path: {type: "string"},
+            old_string: {type: "string"},
+            new_string: {type: "string"},
+            replace_all: {type: "boolean", required: false},
+          },
+          returns: {type: "object"},
+          annotations: __agent_host_file_annotations(opts, key, "edit"),
+          handler: { args ->
+            __agent_host_render(__agent_host_edit_file_apply(tool_runtime, args, opts), opts, key)
+          },
+        },
+      ),
+    )
+  }
+  if __agent_host_tool_enabled(opts, "create_directory", "edit") {
+    const key = "create_directory"
+    tools = tool_define(
+      tools,
+      __agent_host_name(opts, key, "create_directory"),
+      __agent_host_description(
+        opts,
+        key,
+        "Create a directory under the configured root, including any missing parent directories (mkdir -p). Succeeds if the directory already exists.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {path: {type: "string"}},
+          returns: {type: "object"},
+          annotations: __agent_host_file_annotations(opts, key, "edit"),
+          handler: { args ->
+            const path = __agent_host_resolve_path(args.path, opts)
+            fs.mkdir(path, true)
+            return __agent_host_render({created: true, path: path}, opts, key)
+          },
+        },
+      ),
+    )
+  }
+  if __agent_host_tool_enabled(opts, "delete_path", "edit") {
+    const key = "delete_path"
+    tools = tool_define(
+      tools,
+      __agent_host_name(opts, key, "delete_path"),
+      __agent_host_description(
+        opts,
+        key,
+        "Delete a file or directory under the configured root. Refuses a non-empty directory unless recursive is true. Deleting a path that does not exist is a no-op.",
+      ),
+      __agent_host_config(
+        opts,
+        key,
+        {
+          parameters: {path: {type: "string"}, recursive: {type: "boolean", required: false}},
+          returns: {type: "object"},
+          annotations: __agent_host_file_annotations(opts, key, "delete"),
+          handler: { args ->
+            __agent_host_render(
+              tool_runtime.delete_file(
+                {
+                  path: __agent_host_resolve_path(args.path, opts),
+                  recursive: args?.recursive ?? false,
+                },
+              ),
+              opts,
+              key,
+            )
+          },
+        },
+      ),
+    )
+  }
+  return tools
+}
+
+/**
+ * agent_host_tools adds read/search/git inspection tools and argv-based command tool_runtime.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: stable
+ */
+pub fn agent_host_tools(harness: Harness, registry = nil, options = nil) {
+  let tools = agent_read_tools(harness.fs, harness.tools, registry, options)
+  tools = agent_command_tools(harness, tools, options)
+  tools = agent_composition_tools(tools, options)
+  return tools
+}

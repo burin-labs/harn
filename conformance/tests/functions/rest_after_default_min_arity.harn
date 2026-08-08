@@ -1,0 +1,7 @@
+pipeline default(harness: Harness) {
+  fn summarize(prefix: string = "items", ...values: int) -> string {
+    return prefix + ":" + to_string(len(values))
+  }
+  harness.stdio.println(summarize())
+  harness.stdio.println(summarize("nums", 1, 2, 3))
+}

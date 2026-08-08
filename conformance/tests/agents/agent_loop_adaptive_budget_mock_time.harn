@@ -1,0 +1,65 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * `iteration_budget` adaptive mode under mock_time. The budget logic
+ * is decoupled from wall-clock — it counts turns and tool progress —
+ * but pinning the test under `mock_time` proves the budget extension
+ * decisions aren't quietly observing real time anywhere on the path
+ * (e.g. a hidden `harness.clock.now_ms()` in stall diagnostics). Mirrors the
+ * `agent_loop_adaptive_budget` shape and exercises the
+ * extend-on-progress path that captain presets rely on.
+ */
+fn lookup_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "lookup",
+    "Read evidence",
+    {
+      handler: { args -> "evidence: " + to_string(args.q) },
+      parameters: {q: {type: "string"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+pipeline default(harness: Harness) {
+  harness.testing.clock_set(1700000000000)
+  const start_ms = harness.clock.now_ms()
+  with_llm_script(
+    harness.llm,
+    [
+      {tool_calls: [{id: "t1", name: "lookup", arguments: {q: "1"}}]},
+      {tool_calls: [{id: "t2", name: "lookup", arguments: {q: "2"}}]},
+      {tool_calls: [{id: "t3", name: "lookup", arguments: {q: "3"}}]},
+      llm_text("<user_response>Done.</user_response>"),
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Inspect everything.",
+        nil,
+        {
+          provider: "mock",
+          tools: lookup_tools(),
+          tool_format: "native",
+          loop_until_done: true,
+          iteration_budget: {mode: "adaptive", initial: 2, max: 8, extend_by: 2},
+        },
+      )
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.adaptive_budget.mode)
+      harness.stdio.println(result.adaptive_budget.initial)
+      harness.stdio.println(result.adaptive_budget.max)
+      harness.stdio.println(result.adaptive_budget.extensions_used >= 1)
+      harness.stdio.println(result.adaptive_budget.decisions[0].action)
+      harness.stdio.println(harness.clock.now_ms() == start_ms)
+      harness.testing.clock_reset()
+    },
+  )
+}
+// Mock time stayed pinned: no opaque wall-clock observation lurks
+// in the budget path.

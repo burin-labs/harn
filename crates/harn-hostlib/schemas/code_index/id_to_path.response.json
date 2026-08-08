@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/id_to_path.response.json",
+  "title": "code_index.id_to_path response",
+  "description": "Workspace-relative path for the file id, or null when unknown.",
+  "type": ["string", "null"]
+}

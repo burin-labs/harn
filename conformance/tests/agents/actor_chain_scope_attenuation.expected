@@ -1,0 +1,10 @@
+true
+true
+false
+scope_attenuation_violation
+non-increasing
+user:owner
+agent:writer
+repo:write
+false
+strict-subset

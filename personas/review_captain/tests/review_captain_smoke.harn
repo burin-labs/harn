@@ -1,0 +1,24 @@
+// Run: harn test personas/review_captain/tests/review_captain_smoke.harn
+//
+// Smoke covers the persona's full pipeline against the bundled fixture
+// in dry_run mode so the LLM step is skipped. Confirms shape stability
+// of the JSON receipt embedders depend on.
+import { default_policy } from "../lib/policy"
+import { review_pr } from "../lib/review"
+
+fn _fixture_request(fs: HarnessFs) {
+  const raw = fs.read_text("../fixtures/pull_request.json")
+  return json_parse(raw)
+}
+
+pipeline test_smoke_dry_run_emits_receipt(harness: Harness, task) {
+  const request = _fixture_request(harness.fs)
+  const receipt = review_pr(harness.agent, request, default_policy(), nil)
+  assert_eq(receipt.persona, "review_captain")
+  assert_eq(receipt.kind, "review_receipt")
+  assert_eq(receipt.schema_version, 1)
+  assert_eq(receipt.repo, "example-org/example-app")
+  assert_eq(receipt.pr_number, 235)
+  assert_eq(receipt.self_review_skipped_reason, "dry_run")
+  assert_eq(receipt.blocking, false)
+}

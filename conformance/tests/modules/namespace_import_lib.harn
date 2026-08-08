@@ -1,0 +1,7 @@
+pub fn greet(name) {
+  return "hello " + name
+}
+
+pub fn answer() {
+  return 42
+}

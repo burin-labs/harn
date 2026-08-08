@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/tools/read_file.response.json",
+  "title": "tools.read_file response",
+  "type": "object",
+  "properties": {
+    "path": { "type": "string" },
+    "encoding": { "type": "string", "enum": ["utf-8", "base64"] },
+    "content": { "type": "string" },
+    "size": { "type": "integer", "minimum": 0 },
+    "truncated": { "type": "boolean" }
+  },
+  "required": ["path", "encoding", "content", "size", "truncated"],
+  "additionalProperties": false
+}

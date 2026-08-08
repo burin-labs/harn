@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/host_lease/acquire.response.json",
+  "title": "host_lease.acquire response",
+  "description": "Typed acquisition or deferral evidence. The opaque resource guard is VM-local and deliberately not serializable.",
+  "type": "object",
+  "properties": {
+    "schema_version": {"type": "integer", "minimum": 1},
+    "status": {"type": "string", "enum": ["acquired", "deferred"]},
+    "observed_at_ms": {"type": "integer"},
+    "waited_ms": {"type": "integer", "minimum": 0},
+    "handle": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/handle"}
+      ]
+    },
+    "defer": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/defer"}
+      ]
+    },
+    "guard": {},
+    "recovered_stale_lease": {"type": "boolean"},
+    "recovered": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/handle"}
+      ]
+    }
+  },
+  "required": ["schema_version", "status", "observed_at_ms", "waited_ms", "handle", "defer", "guard", "recovered_stale_lease", "recovered"],
+  "additionalProperties": false,
+  "$defs": {
+    "handle": {
+      "type": "object",
+      "properties": {
+        "schema_version": {"type": "integer", "minimum": 1},
+        "host": {"type": "string", "minLength": 1},
+        "resource_class": {"type": "string", "enum": ["whole-machine", "rust-heavy"]},
+        "domain": {"type": "string", "minLength": 1},
+        "lease_id": {"type": "string", "minLength": 1},
+        "owner": {"type": "string", "minLength": 1},
+        "priority_class": {"type": "string", "enum": ["interactive", "measurement", "ci-verify", "deferrable"]},
+        "acquired_at_ms": {"type": "integer"},
+        "updated_at_ms": {"type": "integer"},
+        "expires_at_ms": {"type": ["integer", "null"]},
+        "owner_pid": {"type": ["integer", "null"], "minimum": 0},
+        "owner_process_identity": {"type": ["integer", "null"], "minimum": 0},
+        "reason": {"type": ["string", "null"]},
+        "metadata": {"type": "object", "additionalProperties": {"type": "string"}}
+      },
+      "required": ["schema_version", "host", "resource_class", "domain", "lease_id", "owner", "priority_class", "acquired_at_ms", "updated_at_ms", "expires_at_ms", "owner_pid", "owner_process_identity", "reason", "metadata"],
+      "additionalProperties": false
+    },
+    "defer": {
+      "type": "object",
+      "properties": {
+        "host": {"type": "string", "minLength": 1},
+        "resource_class": {"type": "string", "enum": ["whole-machine", "rust-heavy"]},
+        "domain": {"type": "string", "minLength": 1},
+        "deferred_reason": {"type": "string", "minLength": 1},
+        "observed_at_ms": {"type": "integer"},
+        "next_wake_at_ms": {"type": ["integer", "null"]},
+        "deadline_at_ms": {"type": ["integer", "null"]},
+        "active": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/handle"}
+          ]
+        }
+      },
+      "required": ["host", "resource_class", "domain", "deferred_reason", "observed_at_ms", "next_wake_at_ms", "deadline_at_ms", "active"],
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,24 @@
+pipeline default(harness: Harness) {
+  // List spread: combine two lists
+  const a = [1, 2]
+  const b = [3, 4]
+  const combined = [...a, ...b, 5]
+  harness.stdio.println(combined)
+  // Dict spread: merge dicts with override
+  const defaults = {color: "blue", size: "medium"}
+  const overrides = {size: "large", weight: "bold"}
+  const merged = {...defaults, ...overrides, extra: "yes"}
+  harness.stdio.println(merged)
+  // List spread with empty list
+  const empty = []
+  const result = [...empty, 1, 2]
+  harness.stdio.println(result)
+  // Dict spread: single source
+  const base = {x: 1, y: 2}
+  const copy = {...base}
+  harness.stdio.println(copy)
+  // List spread in middle
+  const mid = [2, 3]
+  const full = [1, ...mid, 4]
+  harness.stdio.println(full)
+}

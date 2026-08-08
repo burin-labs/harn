@@ -1,0 +1,25 @@
+pipeline test(harness: Harness, task) {
+  const doc = json_parse(
+    "{\"users\":[{\"name\":\"Ada\",\"email\":\"ada@example.com\",\"active\":true},{\"name\":\"Bob\",\"email\":\"bob@example.com\",\"active\":false}],\"a/b\":{\"~key\":7}}",
+  )
+  harness.stdio.println(json_pointer(doc, ""))
+  harness.stdio.println(json_pointer(doc, "/users/0/name"))
+  harness.stdio.println(json_pointer(doc, "/a~1b/~0key"))
+  harness.stdio.println(json_pointer(doc, "/users/99/name"))
+  const changed = json_pointer_set(doc, "/users/1/active", true)
+  harness.stdio.println(json_pointer(changed, "/users/1/active"))
+  harness.stdio.println(json_pointer(doc, "/users/1/active"))
+  const appended = json_pointer_set(
+    doc,
+    "/users/-",
+    {name: "Cy", email: "cy@example.com", active: true},
+  )
+  harness.stdio.println(json_pointer(appended, "/users/2/name"))
+  const inserted_key = json_pointer_set(doc, "/a~1b/new", "value")
+  harness.stdio.println(json_pointer(inserted_key, "/a~1b/new"))
+  const deleted_key = json_pointer_delete(appended, "/users/0/email")
+  harness.stdio.println(json_pointer(deleted_key, "/users/0/email"))
+  const deleted_item = json_pointer_delete(appended, "/users/1")
+  harness.stdio.println(len(json_pointer(deleted_item, "/users")))
+  harness.stdio.println(json_pointer(deleted_item, "/users/1/name"))
+}

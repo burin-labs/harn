@@ -1,0 +1,13 @@
+// For a chat-sized Gemini request, auto policy resolves to disabled thinking.
+import { pack_for } from "std/llm/defaults"
+
+pipeline test(harness: Harness, task) {
+  const r = pack_for(
+    harness.agent,
+    harness.llm,
+    {model: "gemini-2.5-flash", reasoning_policy: "auto"},
+  )
+  assert_eq(r.provider, "gemini")
+  assert_eq(r.thinking.mode, "disabled")
+  harness.stdio.log("llm_defaults_pack_gemini_flash passed")
+}

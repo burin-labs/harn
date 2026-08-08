@@ -1,0 +1,18 @@
+pipeline default(harness: Harness) {
+  const _ = 1
+  const _ = 2
+  harness.stdio.println("simple")
+  const [_, _, keep_list] = [10, 20, 30]
+  harness.stdio.println(keep_list)
+  const {drop_a: _, drop_b: _, keep_dict} = {drop_a: 1, drop_b: 2, keep_dict: 3}
+  harness.stdio.println(keep_dict)
+  for [_, value] in [[1, "a"], [2, "b"]] {
+    harness.stdio.println(value)
+  }
+  for {drop: _, keep} in [{drop: "x", keep: "dict"}] {
+    harness.stdio.println(keep)
+  }
+  for (_, right) in [pair("left", "pair")] {
+    harness.stdio.println(right)
+  }
+}

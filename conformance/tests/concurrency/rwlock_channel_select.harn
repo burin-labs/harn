@@ -1,0 +1,24 @@
+pipeline test(harness: Harness, task) {
+  const reader_a = harness.runtime.sync_rwlock_acquire("doc", "read", 0)
+  const reader_b = harness.runtime.sync_rwlock_acquire("doc", "read", 0)
+  assert(reader_a != nil)
+  assert(reader_b != nil)
+  assert_eq(harness.runtime.sync_rwlock_acquire("doc", "write", 0), nil)
+  assert_eq(harness.runtime.sync_release(reader_a), true)
+  assert_eq(harness.runtime.sync_release(reader_b), true)
+  const writer = harness.runtime.sync_rwlock_acquire("doc", "write", 0)
+  assert(writer != nil)
+  assert_eq(harness.runtime.sync_release(writer), true)
+  const ch1 = harness.runtime.channel("ch1")
+  const ch2 = harness.runtime.channel("ch2")
+  spawn {
+    harness.clock.sleep_ms(10ms)
+    harness.runtime.send(ch2, "ready")
+  }
+  const selected = harness.runtime.channel_select([ch1, ch2], 100)
+  assert_eq(selected["index"], 1)
+  assert_eq(selected["channel"], "ch2")
+  assert_eq(selected["value"], "ready")
+  assert_eq(harness.runtime.channel_select([ch1], 0), nil)
+  harness.stdio.log("rwlock/select ok")
+}

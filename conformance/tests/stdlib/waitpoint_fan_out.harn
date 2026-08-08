@@ -1,0 +1,24 @@
+import "std/waitpoint"
+
+pipeline test(harness: Harness, task) {
+  const p0: Waitpoint = create(harness.runtime, "fan-out-1")
+  const p1: Waitpoint = create(harness.runtime, "fan-out-2")
+  const p2: Waitpoint = create(harness.runtime, "fan-out-3")
+  const p3: Waitpoint = create(harness.runtime, "fan-out-4")
+  const p4: Waitpoint = create(harness.runtime, "fan-out-5")
+  const points: list<Waitpoint> = [p0, p1, p2, p3, p4]
+  const waiter = spawn {
+    let resolved = wait(harness.runtime, points)
+    return {count: len(resolved), first: resolved[0].value, last: resolved[4].value}
+  }
+  harness.clock.sleep_ms(10ms)
+  complete(harness.runtime, p0, "a")
+  complete(harness.runtime, p1, "b")
+  complete(harness.runtime, p2, "c")
+  complete(harness.runtime, p3, "d")
+  complete(harness.runtime, p4, "e")
+  const result = await(waiter)
+  harness.stdio.println(result.count)
+  harness.stdio.println(result.first)
+  harness.stdio.println(result.last)
+}

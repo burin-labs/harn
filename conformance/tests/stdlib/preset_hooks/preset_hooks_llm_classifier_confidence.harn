@@ -1,0 +1,58 @@
+import { llm_text, with_llm_script } from "std/testing"
+import { preset_run_command } from "std/tool_hooks"
+
+/**
+ * preset_hooks_llm_classifier_confidence (TH-07 #1900).
+ *
+ * Synthetic classifier responses driven by `llm_mock`. Threshold
+ * gating: a high-confidence verdict above the configured threshold
+ * dispatches via the requested mode (rewrite); a verdict with the same
+ * kind but confidence below the threshold falls through to `inner`
+ * with the original command. Both invocations still emit a
+ * `tool_hook_classifier_verdict` audit so the gating decision is
+ * observable.
+ */
+pipeline default(harness: Harness) {
+  harness.obs.pipeline_lifecycle_audit_log_take()
+  harness.tools.classifier_cache_clear()
+  /* Above threshold: classifier asks for a rewrite with confidence 0.95;
+   * threshold is 0.7 so the rewrite mode fires. */
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text(
+        "{\"kind\": \"rewrite\", \"confidence\": 0.95,"
+          + " \"rewritten\": \"echo confident\","
+          + " \"explanation\": \"safe to rewrite\"}",
+      ),
+      llm_text(
+        "{\"kind\": \"rewrite\", \"confidence\": 0.4,"
+          + " \"rewritten\": \"never-applied\","
+          + " \"explanation\": \"low confidence\"}",
+      ),
+    ],
+    { ->
+      const inner = { args -> {ok: true, ran: args.command} }
+      const wrapper = preset_run_command(
+        harness,
+        {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.7}, inner: inner},
+      )
+      const above = wrapper({command: "echo above"})
+      harness.stdio.println(above.action)
+      harness.stdio.println(above.command)
+      harness.stdio.println(above.result.ran)
+      const below = wrapper({command: "echo below"})
+      harness.stdio.println(below.ok)
+      harness.stdio.println(below.ran)
+      const log = harness.obs.pipeline_lifecycle_audit_log_take()
+      harness.stdio.println(log[0].kind)
+      harness.stdio.println(log[0].payload.kind)
+      harness.stdio.println(log[0].payload.action)
+      harness.stdio.println(len(log))
+      const last = log[len(log) - 1]
+      harness.stdio.println(last.kind)
+      harness.stdio.println(last.payload.action)
+      harness.stdio.println(last.payload.kind)
+    },
+  )
+}

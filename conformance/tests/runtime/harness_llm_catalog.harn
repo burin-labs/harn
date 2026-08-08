@@ -1,0 +1,10 @@
+fn main(harness: Harness) {
+  const entries = harness.llm.catalog()
+  harness.stdio.println(len(entries) > 0)
+  const first = entries[0]
+  harness.stdio.println(first.id != nil)
+  harness.stdio.println(first.name != nil)
+  harness.stdio.println(first.provider != nil)
+  harness.stdio.println(first.capabilities != nil)
+  harness.stdio.println(first.context_window >= 0)
+}

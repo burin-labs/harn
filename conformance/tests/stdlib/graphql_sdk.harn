@@ -1,0 +1,84 @@
+import {
+  graphql_execute_operation,
+  graphql_generate_client,
+  graphql_next_page_variables,
+  graphql_normalize_response,
+  graphql_operation,
+  graphql_page_info,
+  graphql_parse_schema,
+  graphql_persisted_query,
+  graphql_schema_from_introspection,
+} from "std/graphql"
+
+pipeline test(harness: Harness, task) {
+  const root = harness.fs.workspace_root()
+  const schema_text = harness.fs.read_text(
+    path_join(root, "conformance/fixtures/graphql/linear_fixture.graphql"),
+  )
+  const parsed = graphql_parse_schema(schema_text)
+  const issue = parsed.types.find({ entry -> return entry.name == "Issue" })
+  const identifier = issue.fields.find({ field -> return field.name == "identifier" })
+  harness.stdio.println(identifier.type)
+  const introspected = graphql_schema_from_introspection(
+    {data: {__schema: {queryType: {name: "Query"}, types: [{kind: "OBJECT", name: "Issue"}]}}},
+  )
+  harness.stdio.println(introspected.query_type)
+  const endpoint = "https://linear.example/graphql"
+  const query = "query Viewer($id: String!) { viewer(id: $id) { id name } }"
+  const operation = graphql_operation(
+    "viewer",
+    query,
+    {
+      root_field: "viewer",
+      variables_schema: {type: "dict", required: ["id"], properties: {id: {type: "string"}}},
+    },
+  )
+  const generated = graphql_generate_client([operation])
+  harness.stdio.println(contains(generated, "pub fn viewer"))
+  harness.testing.http_mock(
+    "POST",
+    endpoint,
+    {
+      status: 200,
+      body: json_stringify({data: {viewer: {id: "user-1", name: "Ada"}}, extensions: {cost: 1}}),
+      headers: {
+        "X-Complexity": "7",
+        "X-RateLimit-Requests-Remaining": "49",
+        "X-Request-Id": "req-1",
+      },
+    },
+  )
+  const envelope = graphql_execute_operation(
+    harness.net,
+    {endpoint: endpoint, auth: {access_token: "linear-token"}},
+    operation,
+    {id: "user-1"},
+  )
+  harness.stdio.println(envelope.ok)
+  harness.stdio.println(envelope.result.name)
+  harness.stdio.println(envelope.meta.rate_limit.requests_remaining)
+  harness.stdio.println(envelope.meta.rate_limit.complexity)
+  harness.stdio.println(envelope.meta.request_id)
+  harness.stdio.println(envelope.result.meta.status)
+  const calls = harness.testing.http_mock_calls({include_sensitive: true})
+  harness.stdio.println(json_parse(calls[0].body).operationName)
+  harness.stdio.println(calls[0].headers.authorization)
+  const page = graphql_page_info(
+    {nodes: [{id: "ISS-1"}], pageInfo: {hasNextPage: true, endCursor: "cursor-1"}},
+  )
+  harness.stdio.println(page.nodes[0].id)
+  harness.stdio.println(
+    graphql_next_page_variables({first: 1}, {pageInfo: {hasNextPage: true, endCursor: "cursor-1"}})
+      .after,
+  )
+  const persisted = graphql_persisted_query(query)
+  harness.stdio.println(len(persisted.sha256_hash))
+  const normalized = graphql_normalize_response(
+    {
+      status: 200,
+      headers: {},
+      body: "{\"data\":{\"ok\":true},\"errors\":[{\"message\":\"partial\"}]}",
+    },
+  )
+  harness.stdio.println(normalized.partial)
+}

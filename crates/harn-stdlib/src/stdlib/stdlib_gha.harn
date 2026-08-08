@@ -1,0 +1,182 @@
+/** std/gha - GitHub Actions output, summary, and annotation helpers. */
+type GhaAnnotationOptions = {
+  file?: string,
+  line?: int,
+  endLine?: int,
+  col?: int,
+  endColumn?: int,
+  title?: string,
+}
+
+fn __gha_escape_data(value) -> string {
+  const text = to_string(value ?? "")
+  return replace(replace(replace(text, "%", "%25"), "\r", "%0D"), "\n", "%0A")
+}
+
+fn __gha_escape_property(value) -> string {
+  return replace(replace(__gha_escape_data(value), ":", "%3A"), ",", "%2C")
+}
+
+fn __gha_kv(key, value) {
+  if value == nil {
+    return nil
+  }
+  return key + "=" + __gha_escape_property(value)
+}
+
+fn __gha_file_path(path, fallback) {
+  const explicit = path ?? fallback
+  if explicit != nil && explicit != "" {
+    return explicit
+  }
+  return nil
+}
+
+/**
+ * Escape text for the data portion of a GitHub Actions workflow command.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn gha_escape_data(value) -> string {
+  return __gha_escape_data(value)
+}
+
+/**
+ * Escape text for a GitHub Actions workflow-command property.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn gha_escape_property(value) -> string {
+  return __gha_escape_property(value)
+}
+
+/**
+ * Build a workflow annotation line (`::warning ...::message`).
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn gha_annotation(kind: string, message: string, options: GhaAnnotationOptions = {}) -> string {
+  const opts = options ?? {}
+  let props = []
+  for pair in [
+    __gha_kv("file", opts.file),
+    __gha_kv("line", opts.line),
+    __gha_kv("endLine", opts.endLine),
+    __gha_kv("col", opts.col),
+    __gha_kv("endColumn", opts.endColumn),
+    __gha_kv("title", opts.title),
+  ] {
+    if pair != nil {
+      props = props.appending(pair)
+    }
+  }
+  const suffix = if len(props) > 0 {
+    " " + join(props, ",")
+  } else {
+    ""
+  }
+  const annotation_kind = kind ?? "notice"
+  return "::" + annotation_kind + suffix + "::" + __gha_escape_data(message)
+}
+
+/**
+ * Print a GitHub Actions notice.
+ *
+ * @effects: [stdio.write]
+ * @errors: []
+ */
+pub fn gha_notice(stdio: HarnessStdio, message: string, options: GhaAnnotationOptions = {}) {
+  stdio.println(gha_annotation("notice", message, options))
+}
+
+/**
+ * Print a GitHub Actions warning.
+ *
+ * @effects: [stdio.write]
+ * @errors: []
+ */
+pub fn gha_warning(stdio: HarnessStdio, message: string, options: GhaAnnotationOptions = {}) {
+  stdio.println(gha_annotation("warning", message, options))
+}
+
+/**
+ * Print a GitHub Actions error annotation.
+ *
+ * @effects: [stdio.write]
+ * @errors: []
+ */
+pub fn gha_error(stdio: HarnessStdio, message: string, options: GhaAnnotationOptions = {}) {
+  stdio.println(gha_annotation("error", message, options))
+}
+
+/**
+ * Build the multiline-safe entry used by `$GITHUB_OUTPUT` and `$GITHUB_ENV`.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn gha_env_block(
+  random: HarnessRandom,
+  name: string,
+  value,
+  delimiter: string? = nil,
+) -> string {
+  const delim = delimiter ?? ("harn_" + random.uuid_v7())
+  return name + "<<" + delim + "\n" + to_string(value ?? "") + "\n" + delim + "\n"
+}
+
+/**
+ * Append an output value to `$GITHUB_OUTPUT`, or to `path` when supplied.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn gha_write_output(harness: Harness, name: string, value, path: string? = nil) -> bool {
+  const target = __gha_file_path(path, harness.env.get("GITHUB_OUTPUT"))
+  if target == nil {
+    return false
+  }
+  harness.fs.append(target, gha_env_block(harness.random, name, value))
+  return true
+}
+
+/**
+ * Append an environment value to `$GITHUB_ENV`, or to `path` when supplied.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn gha_write_env(harness: Harness, name: string, value, path: string? = nil) -> bool {
+  const target = __gha_file_path(path, harness.env.get("GITHUB_ENV"))
+  if target == nil {
+    return false
+  }
+  harness.fs.append(target, gha_env_block(harness.random, name, value))
+  return true
+}
+
+/**
+ * Append Markdown to `$GITHUB_STEP_SUMMARY`, or to `path` when supplied.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn gha_append_summary(
+  env: HarnessEnv,
+  fs: HarnessFs,
+  markdown: string,
+  path: string? = nil,
+) -> bool {
+  const target = __gha_file_path(path, env.get("GITHUB_STEP_SUMMARY"))
+  if target == nil {
+    return false
+  }
+  fs.append(target, markdown ?? "")
+  if !ends_with(markdown ?? "", "\n") {
+    fs.append(target, "\n")
+  }
+  return true
+}

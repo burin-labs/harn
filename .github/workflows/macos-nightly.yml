@@ -1,0 +1,84 @@
+name: macOS nightly
+
+# Runs the full workspace nextest surface on macOS once per night, plus
+# on-demand from the Actions tab. This is the macOS analogue of
+# `windows-nightly.yml`: the per-PR Linux lanes in `ci.yml` build and test on
+# `ubuntu-latest`, but the macOS-only code paths — most notably the Seatbelt
+# sandbox profile generation in `crates/harn-vm/src/stdlib/sandbox/macos.rs`
+# and its `#[cfg(target_os = "macos")]` unit tests — compile and run nowhere
+# in CI today (only on a contributor's local Mac). This nightly closes that
+# gap and, because GitHub's `macos-latest` runner is Apple Silicon, also gives
+# incidental arm64 coverage.
+#
+# Failure is informational, not blocking — the nightly does not gate the
+# `ci-status` job. When something regresses, file an issue and either fix the
+# underlying portability bug or add a per-test `#[cfg(not(target_os = "macos"))]`
+# annotation with rationale.
+#
+# Tracking issue: harn#946 (cross-platform test coverage).
+
+on:
+  schedule:
+    # 07:30 UTC ≈ 23:30 Pacific the previous evening. Offset 30 minutes from
+    # the Windows nightly so the two don't contend for the same cache lookups.
+    - cron: "30 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  nextest:
+    name: Workspace nextest (macos-latest)
+    runs-on: macos-latest
+    # Don't run forks of the repo on a fork's own schedule.
+    if: github.repository == 'burin-labs/harn'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/rust-toolchain
+      - uses: ./.github/actions/rust-cache
+        continue-on-error: true
+        with:
+          # This default-branch nightly is the sole writer for the native
+          # macOS workspace cache. Path-routed PR jobs restore it without
+          # writing. Keep both participants on plain rustc: runner-local
+          # sccache measured 0 hits / 1,097 misses and added setup/teardown
+          # overhead without providing cross-run reuse.
+          shared-key: workspace-macos
+          # Do not restore target artifacts containing embedded Harn sources
+          # across revisions; this is the same safety boundary as Windows.
+          source-key: ${{ hashFiles('Cargo.lock', 'Cargo.toml', 'crates/**', 'spec/**', 'tree-sitter-harn/**') }}
+          cache-on-failure: true
+          cache-bin: false
+          save: true
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
+        with:
+          tool: nextest@0.9.132
+      - name: Run workspace nextest
+        shell: bash
+        # No package filter — the whole workspace runs. Tests gated to
+        # `#![cfg(unix)]` still run here (macOS is Unix); the macOS-specific
+        # surface is exactly what this nightly exists to exercise.
+        run: scripts/ci/run_rust_test_lane.sh cargo nextest run --workspace --profile ci
+      - name: Smoke test harn run
+        shell: bash
+        run: |
+          echo 'fn main(harness: Harness) { harness.stdio.println("ok") }' > smoke.harn
+          ./target/debug/harn run smoke.harn
+      # Release certification dispatches this workflow at an immutable
+      # release-certify/<sha> ref. Keep the wall-clock ratchet on this hosted,
+      # otherwise-idle machine: a contributor workstation can be shared by
+      # unrelated worktrees whose builds make the same measurement meaningless.
+      - name: Verify release test-case performance
+        id: release-test-case-performance
+        shell: bash
+        env:
+          HARN_BIN: ./target/debug/harn
+          HARN_TEST_CASE_PERFORMANCE_PROFILE: macos_hosted_arm64
+        run: make check-test-case-performance

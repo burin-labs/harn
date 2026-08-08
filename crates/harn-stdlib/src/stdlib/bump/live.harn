@@ -1,0 +1,274 @@
+/**
+ * std/bump/live — local effects for the provider-neutral Harn bump runtime.
+ *
+ * This module owns filesystem, git, command, validation, and readiness polling.
+ * Remote repository behavior enters through one typed [`LiveBumpRemote`]
+ * capability. Provider packages implement that capability; stdlib never speaks
+ * REST, GraphQL, or a provider CLI and therefore cannot drift into a second
+ * connector implementation.
+ *
+ * All orchestration decisions remain in `std/bump/runtime`. Tests can replace
+ * the remote capability with a recording fake without a network or subprocess.
+ */
+import {
+  BumpAdapter,
+  BumpAutoMerge,
+  BumpChangeSet,
+  BumpCommitRequest,
+  BumpCommitResult,
+  BumpPrState,
+  BumpPrUpsert,
+} from "std/bump/runtime"
+import { command_run } from "std/command"
+import { poll_until } from "std/poll"
+import { is_v_semver, strip_v } from "std/semver"
+
+/** Everything the local adapter needs for mutation, validation, and polling. */
+pub type LiveBumpConfig = {
+  release_repo: string,
+  repo_dir: string,
+  version_file: string,
+  refresh_command: string,
+  validation_command: string,
+  readiness_max_attempts: int,
+  readiness_interval_ms: int,
+  readiness_timeout_ms: int,
+}
+
+/** Closed release projection needed by the readiness gate. */
+pub type LiveBumpRelease = {found: bool, draft: bool, prerelease: bool, asset_names: list<string>}
+
+/**
+ * Provider package boundary for remote bump effects.
+ *
+ * One constructed instance is already bound to repository, branch, base, and
+ * authentication. The stdlib surface therefore exposes behavior rather than
+ * provider transport or configuration details.
+ */
+pub type LiveBumpRemote = {
+  latest_release_tag: fn() -> string,
+  release_view: fn(string) -> LiveBumpRelease,
+  find_bump_pr: fn() -> BumpPrState?,
+  disable_auto_merge: fn(BumpPrState, string) -> bool,
+  publish_commit: fn(BumpCommitRequest) -> BumpCommitResult,
+  branch_matches_base: fn() -> bool,
+  upsert_pr: fn(BumpPrState?, string) -> BumpPrUpsert,
+  close_pr: fn(int, string) -> bool,
+  enable_auto_merge: fn(int, string) -> BumpAutoMerge,
+}
+
+/** Release finalization sidecars that prove a Harn release is fully published. */
+const REQUIRED_RELEASE_ASSETS = ["SHA256SUMS", "release-assets.json"]
+
+type VersionWriteResult = {ok: bool, detail: string}
+
+type VersionApplyResult = {ok: bool, changed: bool, refreshed: list<string>, detail: string}
+
+/**
+ * Fill a partial config with the reusable workflow defaults.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn live_bump_config(overrides: dict = {}) -> LiveBumpConfig {
+  const o = overrides ?? {}
+  return {
+    release_repo: to_string(o.release_repo ?? "burin-labs/harn"),
+    repo_dir: to_string(o.repo_dir ?? "."),
+    version_file: to_string(o.version_file ?? ".harn-version"),
+    refresh_command: to_string(o.refresh_command ?? "harn install --locked || harn install"),
+    validation_command: to_string(o.validation_command ?? ""),
+    readiness_max_attempts: to_int(o.readiness_max_attempts ?? 1) ?? 1,
+    readiness_interval_ms: to_int(o.readiness_interval_ms ?? 20000) ?? 20000,
+    readiness_timeout_ms: to_int(o.readiness_timeout_ms ?? 20000) ?? 20000,
+  }
+}
+
+fn __git(tools: HarnessTools, repo_dir: string, argv: list<string>) {
+  return command_run(tools, ["git", "-C", repo_dir] + argv)
+}
+
+fn __shell(tools: HarnessTools, repo_dir: string, command: string) {
+  return command_run(tools, {mode: "shell", command: command, cwd: repo_dir})
+}
+
+fn __lines(text) -> list<string> {
+  const value = trim(to_string(text ?? ""))
+  return if value == "" {
+    []
+  } else {
+    split(value, "\n").filter({ line -> trim(line) != "" }).to_list()
+  }
+}
+
+fn __working_changes(tools: HarnessTools, repo_dir: string) -> BumpChangeSet {
+  const tracked_additions = __lines(
+    __git(tools, repo_dir, ["diff", "--name-only", "--diff-filter=ACMRTUXB", "HEAD"]).stdout,
+  )
+  const untracked_additions = __lines(
+    __git(tools, repo_dir, ["ls-files", "--others", "--exclude-standard"]).stdout,
+  )
+  return {
+    additions: tracked_additions
+      + untracked_additions.filter(
+      { name -> !contains(tracked_additions, name) },
+    )
+      .to_list(),
+    deletions: __lines(
+      __git(tools, repo_dir, ["diff", "--name-only", "--diff-filter=D", "HEAD"]).stdout,
+    ),
+  }
+}
+
+/** Update the pin through typed filesystem authority, never shell redirection. */
+fn __write_version(fs: HarnessFs?, path: string, version: string) -> VersionWriteResult {
+  if fs == nil {
+    return {
+      ok: false,
+      detail:
+        "std/bump/live: HarnessFs is required to update ${path}; pass harness.fs to live_bump_adapter",
+    }
+  }
+  const result = try {
+    fs.write_text(path, "${version}\n")
+    nil
+  }
+  return if is_ok(result) {
+    {ok: true, detail: ""}
+  } else {
+    {ok: false, detail: to_string(unwrap_err(result))}
+  }
+}
+
+fn __read_version(fs: HarnessFs?, path: string) -> string {
+  if fs == nil || !fs.exists(path) {
+    return ""
+  }
+  return trim(fs.read_text(path))
+}
+
+fn __apply_version(
+  fs: HarnessFs?,
+  tools: HarnessTools,
+  cfg: LiveBumpConfig,
+  target: string,
+) -> VersionApplyResult {
+  const write = __write_version(fs, cfg.version_file, strip_v(target))
+  const refresh = if write.ok {
+    __shell(tools, cfg.repo_dir, cfg.refresh_command)
+  } else {
+    nil
+  }
+  const refresh_ok = refresh?.success ?? false
+  const changes = __working_changes(tools, cfg.repo_dir)
+  const refreshed = changes.additions + changes.deletions
+  return {
+    ok: write.ok && refresh_ok,
+    changed: len(refreshed) > 0,
+    refreshed: refreshed,
+    detail: if !write.ok {
+      "version-file write failed: " + write.detail
+    } else if refresh_ok {
+      "refresh ok"
+    } else {
+      trim((refresh?.stderr ?? "") + (refresh?.stdout ?? ""))
+    },
+  }
+}
+
+fn __release_finalized(release: LiveBumpRelease) -> bool {
+  const missing = REQUIRED_RELEASE_ASSETS.filter({ name -> !contains(release.asset_names, name) })
+    .to_list()
+  return release.found && !release.draft && !release.prerelease && len(missing) == 0
+}
+
+/**
+ * Build the local adapter around one package-owned remote capability.
+ *
+ * @effects: [fs, process, net]
+ * @errors: [invalid target tags or delegated local/provider failures]
+ */
+pub fn live_bump_adapter(
+  clock: HarnessClock,
+  tools: HarnessTools,
+  remote: LiveBumpRemote,
+  config: dict = {},
+  fs: HarnessFs? = nil,
+) -> BumpAdapter {
+  const cfg = live_bump_config(config)
+  return {
+    resolve_target_tag: fn(tag) {
+      const requested = trim(tag ?? "")
+      const resolved = if requested == "" {
+        trim(remote.latest_release_tag())
+      } else {
+        requested
+      }
+      if !is_v_semver(resolved) {
+        throw "std/bump/live: expected a tag like vX.Y.Z, got '${resolved}'"
+      }
+      return resolved
+    },
+    release_ready: fn(target) {
+      let attempts = 0
+      let lines = []
+      const found = poll_until(
+        clock,
+        { ->
+          attempts = attempts + 1
+          const view = remote.release_view(target)
+          const ready = __release_finalized(view)
+          lines = lines + ["attempt ${attempts}: ${target} finalized=${ready}"]
+          return if ready {
+            view
+          } else {
+            nil
+          }
+        },
+        {
+          max_attempts: cfg.readiness_max_attempts,
+          interval_ms: cfg.readiness_interval_ms,
+          timeout_ms: cfg.readiness_timeout_ms,
+        },
+      )
+      const ready = found != nil
+      return {
+        ready: ready,
+        detail: if ready {
+          "${target} finalized with required assets present"
+        } else {
+          "${target} is not fully published yet in ${cfg.release_repo}"
+        },
+        attempts: attempts,
+        attempt_lines: lines,
+      }
+    },
+    read_current_version: fn() { return __read_version(fs, cfg.version_file) },
+    base_sha: fn() { return trim(__git(tools, cfg.repo_dir, ["rev-parse", "HEAD"]).stdout ?? "") },
+    apply_version: fn(target) { return __apply_version(fs, tools, cfg, target) },
+    run_validation: fn() {
+      if trim(cfg.validation_command) == "" {
+        return {ok: true, steps: [], detail: "no validation command declared"}
+      }
+      const result = __shell(tools, cfg.repo_dir, cfg.validation_command)
+      const ok = result.success ?? false
+      return {
+        ok: ok,
+        steps: [{name: "validation", ok: ok, detail: cfg.validation_command}],
+        detail: if ok {
+          "validation passed"
+        } else {
+          trim((result.stderr ?? "") + (result.stdout ?? ""))
+        },
+      }
+    },
+    working_changes: fn() { return __working_changes(tools, cfg.repo_dir) },
+    find_bump_pr: remote.find_bump_pr,
+    disable_auto_merge: remote.disable_auto_merge,
+    publish_commit: remote.publish_commit,
+    branch_matches_base: remote.branch_matches_base,
+    upsert_pr: remote.upsert_pr,
+    close_pr: remote.close_pr,
+    enable_auto_merge: remote.enable_auto_merge,
+  }
+}

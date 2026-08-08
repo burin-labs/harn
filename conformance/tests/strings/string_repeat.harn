@@ -1,0 +1,7 @@
+pipeline test(harness: Harness, task) {
+  harness.stdio.println("ab" * 3)
+  harness.stdio.println(4 * "xy")
+  harness.stdio.println(len("z" * 100))
+  harness.stdio.println("hi" * 0)
+  harness.stdio.println("hi" * -1)
+}

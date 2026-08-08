@@ -1,0 +1,147 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+
+fn first_event(events, event_type) {
+  for event in events {
+    if event.type == event_type {
+      return event
+    }
+  }
+  return nil
+}
+
+fn wall_clock_case(harness: Harness) {
+  harness.testing.clock_set(0)
+  const caller = { _call ->
+    harness.testing.clock_advance(1500)
+    return {
+      ok: true,
+      value: {
+        text: "still working",
+        provider: "mock",
+        model: "mock",
+        input_tokens: 0,
+        output_tokens: 0,
+      },
+    }
+  }
+  const session = "budget-wall-" + harness.random.uuid()
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    fn() { return agent_loop(
+      harness,
+      "work",
+      nil,
+      {
+        session_id: session,
+        provider: "mock",
+        llm_caller: caller,
+        loop_until_done: true,
+        done_sentinel: "DONE",
+        max_nudges: 5,
+        iteration_budget: {mode: "fixed", max: 5, wall_clock_ms: 1000},
+      },
+    ) },
+  )
+  const budget_event = first_event(captured.events, "budget_exhausted")
+  const iteration_event = first_event(captured.events, "iteration_end")
+  harness.stdio.println("wall_status=" + captured.result.status)
+  harness.stdio.println("wall_reason=" + captured.result.stop_reason)
+  harness.stdio.println("wall_kind=" + budget_event.kind)
+  harness.stdio.println("wall_event_elapsed=" + to_string(budget_event.wall_clock_ms >= 1000))
+  harness.stdio.println(
+    "wall_iteration_elapsed=" + to_string(iteration_event.iteration_info.wall_clock_ms >= 1000),
+  )
+  harness.testing.clock_reset()
+}
+
+fn total_cost_case(harness: Harness) {
+  const caller = { _call ->
+    return {
+      ok: true,
+      value: {
+        text: "still working",
+        provider: "openai",
+        model: "gpt-4o-mini",
+        input_tokens: 100000,
+        output_tokens: 100000,
+      },
+    }
+  }
+  const session = "budget-cost-" + harness.random.uuid()
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    fn() { return agent_loop(
+      harness,
+      "work",
+      nil,
+      {
+        session_id: session,
+        provider: "mock",
+        llm_caller: caller,
+        loop_until_done: true,
+        done_sentinel: "DONE",
+        max_nudges: 5,
+        iteration_budget: {mode: "fixed", max: 5, total_cost_usd: 0.000001},
+      },
+    ) },
+  )
+  const budget_event = first_event(captured.events, "budget_exhausted")
+  const iteration_event = first_event(captured.events, "iteration_end")
+  harness.stdio.println("cost_status=" + captured.result.status)
+  harness.stdio.println("cost_reason=" + captured.result.stop_reason)
+  harness.stdio.println("cost_kind=" + budget_event.kind)
+  harness.stdio.println("cost_event_positive=" + to_string(budget_event.cost_usd > 0.0))
+  harness.stdio.println(
+    "cost_iteration_positive=" + to_string(iteration_event.iteration_info.cost_usd > 0.0),
+  )
+}
+
+fn circuit_case(harness: Harness) {
+  harness.testing.clock_set(0)
+  const caller = { _call ->
+    return {
+      ok: false,
+      status: "provider_error",
+      stop_reason: "provider_error",
+      error: {status: 503, message: "provider unavailable"},
+    }
+  }
+  const session = "budget-circuit-" + harness.random.uuid()
+  const captured = agent_capture_events(
+    harness.agent,
+    session,
+    fn() { return agent_loop(
+      harness,
+      "retry",
+      nil,
+      {
+        session_id: session,
+        provider: "mock",
+        llm_caller: caller,
+        iteration_budget: {
+          mode: "fixed",
+          max: 5,
+          consecutive_failures: {max: 2, paused_for_ms: 2500},
+        },
+      },
+    ) },
+  )
+  const breaker = first_event(captured.events, "budget_circuit_breaker")
+  const budget_event = first_event(captured.events, "budget_exhausted")
+  harness.stdio.println("circuit_status=" + captured.result.status)
+  harness.stdio.println("circuit_reason=" + captured.result.stop_reason)
+  harness.stdio.println("circuit_count=" + to_string(breaker.consecutive_count))
+  harness.stdio.println("circuit_pause=" + to_string(breaker.paused_for_ms))
+  harness.stdio.println("circuit_budget_kind=" + budget_event.kind)
+  harness.stdio.println("circuit_clock=" + to_string(harness.clock.now_ms()))
+  harness.testing.clock_reset()
+}
+
+pipeline default(harness: Harness) {
+  wall_clock_case(harness)
+  total_cost_case(harness)
+  circuit_case(harness)
+}

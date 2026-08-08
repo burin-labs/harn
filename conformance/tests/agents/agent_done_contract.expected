@@ -1,0 +1,9 @@
+done
+2
+4
+2
+add an LRU eviction test | add a dirty flush test | add a pinned-page prevention test
+all five requested cases are named | target suite passes
+true
+true
+true

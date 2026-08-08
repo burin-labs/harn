@@ -1,0 +1,45 @@
+import { agent_capture_events } from "std/agent/events"
+
+pipeline main(harness: Harness, task) {
+  const s = harness.agent.open()
+  require harness.agent.exists(s), "open returns an id that exists"
+  require s == harness.agent.open(s), "open(id) is idempotent"
+  require harness.agent.length(s) == 0, "new session is empty"
+  harness.agent.inject(s, {role: "user", content: "hello"})
+  harness.agent.inject(s, {role: "assistant", content: "hi"})
+  require harness.agent.length(s) == 2, "inject appends"
+  const snap = harness.agent.snapshot(s)
+  require len(snap["messages"]) == 2, "snapshot mirrors transcript"
+  require snap["id"] == s, "snapshot preserves id"
+  harness.agent.reset(s)
+  require harness.agent.length(s) == 0, "reset clears history"
+  require harness.agent.exists(s), "reset preserves id"
+  harness.agent.inject(s, {role: "user", content: "one"})
+  harness.agent.inject(s, {role: "user", content: "two"})
+  harness.agent.inject(s, {role: "user", content: "three"})
+  const kept = harness.agent.trim(s, 2)
+  require kept == 2, "trim returns kept count"
+  const after = harness.agent.snapshot(s)
+  require after["messages"][0]["content"] == "two", "trim drops oldest"
+  require after["messages"][1]["content"] == "three", "trim retains newest"
+  harness.agent.close(s)
+  require !harness.agent.exists(s), "close evicts"
+  const close_session = "close-status-" + harness.random.uuid()
+  const captured = agent_capture_events(
+    harness.agent,
+    close_session,
+    fn() {
+      let _ = harness.agent.open(close_session)
+      harness.agent.close(close_session, {reason: "timeout", status: "idle", source: "test"})
+      return harness.agent.exists(close_session)
+    },
+  )
+  require !captured.result, "close with status evicts"
+  require len(captured.events) == 1, "close emits one terminal event"
+  const event = captured.events[0]
+  require event.type == "session_closed", "close event has stable type"
+  require event.reason == "timeout", "close event carries reason"
+  require event.status == "idle", "close event carries status"
+  require event.metadata.source == "test", "close event carries metadata"
+  harness.stdio.log("agent_sessions basic tests passed")
+}

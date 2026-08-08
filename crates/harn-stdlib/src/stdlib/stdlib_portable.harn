@@ -1,0 +1,195 @@
+/** Run one versioned Harn program in native, browser, or future portable hosts. */
+pub type PortableEntryKind = "function" | "pipeline"
+
+pub type PortableValueShape = "any" \
+  | "nil" \
+  | "bool" \
+  | "int" \
+  | "float" \
+  | "string" \
+  | "bytes" \
+  | "list" \
+  | "record"
+
+pub type PortableDiagnostic = {code: string, message: string, line?: int, column?: int}
+
+pub type PortableProgram = {
+  schema: "harn.portable_program.v1",
+  artifact: bytes,
+  digest: string,
+  entry: string,
+  kind: PortableEntryKind,
+}
+
+pub type PortableGrants = {capabilities: list<string>, snapshot_key?: bytes}
+
+pub type PortableCapabilityRequest = {
+  id: string,
+  capability: string,
+  operation: string,
+  arguments: unknown,
+  expected: PortableValueShape,
+}
+
+pub type PortableCapabilitySuccess = {status: "ok", request_id: string, value: unknown}
+
+pub type PortableCapabilityFailure = {
+  status: "err",
+  request_id: string,
+  code: string,
+  message: string,
+}
+
+pub type PortableCapabilityResult = PortableCapabilitySuccess | PortableCapabilityFailure
+
+pub type PortableCompleted = {status: "completed", value: unknown}
+
+pub type PortableSuspended = {
+  status: "suspended",
+  request: PortableCapabilityRequest,
+  snapshot: bytes,
+}
+
+pub type PortableFailed = {status: "failed", diagnostic: PortableDiagnostic}
+
+pub type PortableExecution = PortableCompleted | PortableSuspended | PortableFailed
+
+pub type PortableCapabilityHandler = fn(PortableCapabilityRequest) -> PortableCapabilityResult
+
+pub type PortableRunOptions = {max_steps?: int}?
+
+/**
+ * Compile one function or pipeline through Harn's canonical frontend.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn compile(
+  source: string,
+  entry: string,
+  kind: PortableEntryKind = "function",
+) -> Result<PortableProgram, list<PortableDiagnostic>> {
+  const raw = __portable_compile(source, entry, kind)
+  if raw.ok {
+    const program: PortableProgram = raw.program
+    return Ok(program)
+  }
+  const diagnostics: list<PortableDiagnostic> = raw.diagnostics
+  return Err(diagnostics)
+}
+
+/**
+ * Build the exact capability ceiling for one portable execution.
+ *
+ * @effects: []
+ * @errors: [invalid_snapshot_key]
+ */
+pub fn grants(capabilities: list<string> = [], snapshot_key: bytes? = nil) -> PortableGrants {
+  if snapshot_key != nil && len(snapshot_key) != 32 {
+    throw "std/portable: snapshot key must contain exactly 32 bytes"
+  }
+  if snapshot_key == nil {
+    return {capabilities: capabilities}
+  }
+  return {capabilities: capabilities, snapshot_key: snapshot_key}
+}
+
+/**
+ * Start one deterministic execution.
+ *
+ * @effects: []
+ * @errors: [invalid_program, invalid_value, invalid_grant]
+ */
+pub fn start(
+  program: PortableProgram,
+  input: unknown,
+  grant_set: PortableGrants = {capabilities: []},
+) -> PortableExecution {
+  const execution: PortableExecution = __portable_start(program.artifact, input, grant_set)
+  return execution
+}
+
+/**
+ * Continue one suspended execution with its matching host result.
+ *
+ * @effects: []
+ * @errors: [invalid_program, invalid_value, invalid_grant]
+ */
+pub fn resume(
+  program: PortableProgram,
+  snapshot: bytes,
+  outcome: PortableCapabilityResult,
+  grant_set: PortableGrants,
+) -> PortableExecution {
+  const execution: PortableExecution = __portable_resume(
+    program.artifact,
+    snapshot,
+    outcome,
+    grant_set,
+  )
+  return execution
+}
+
+/**
+ * Return a successful host answer for one capability request.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn accept(request: PortableCapabilityRequest, value: unknown) -> PortableCapabilitySuccess {
+  return {status: "ok", request_id: request.id, value: value}
+}
+
+/**
+ * Return a rejected or failed host answer for one capability request.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn reject(
+  request: PortableCapabilityRequest,
+  code: string,
+  message: string,
+) -> PortableCapabilityFailure {
+  return {status: "err", request_id: request.id, code: code, message: message}
+}
+
+/**
+ * Run to completion while Harn code services each typed capability request.
+ *
+ * The limit bounds broken handlers that repeatedly resume into another
+ * request. Kernel instruction, value, and snapshot limits still apply inside
+ * each step.
+ *
+ * @effects: []
+ * @errors: [invalid_step_limit, invalid_program, invalid_value, invalid_grant]
+ */
+pub fn run(
+  program: PortableProgram,
+  input: unknown,
+  grant_set: PortableGrants,
+  handle: PortableCapabilityHandler,
+  options: PortableRunOptions = nil,
+) -> PortableExecution {
+  const max_steps = options?.max_steps ?? 64
+  if max_steps < 1 {
+    throw "std/portable: max_steps must be positive"
+  }
+  let execution = start(program, input, grant_set)
+  let steps = 0
+  while execution.status == "suspended" {
+    if steps >= max_steps {
+      return {
+        status: "failed",
+        diagnostic: {
+          code: "capability_steps",
+          message: "portable execution exceeded its capability step limit",
+        },
+      }
+    }
+    const outcome = handle(execution.request)
+    execution = resume(program, execution.snapshot, outcome, grant_set)
+    steps = steps + 1
+  }
+  return execution
+}

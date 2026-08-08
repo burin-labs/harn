@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/skill-gate-receipt.v1.schema.json",
+  "title": "Harn skill gate receipt v1",
+  "type": "object",
+  "required": [
+    "_type",
+    "schema_version",
+    "manifest_id",
+    "target_model_id",
+    "accepted",
+    "decision",
+    "tamper",
+    "pareto_frontier",
+    "excluded_task_ids",
+    "variant_receipts"
+  ],
+  "properties": {
+    "_type": { "const": "harn.skill_gate.receipt.v1" },
+    "schema_version": { "const": 1 },
+    "manifest_id": { "type": "string" },
+    "target_model_id": { "type": "string" },
+    "accepted": { "type": "boolean" },
+    "selected_variant_id": { "type": ["string", "null"] },
+    "decision": { "enum": ["accepted", "rejected"] },
+    "metrics": {
+      "anyOf": [{ "$ref": "#/$defs/metrics" }, { "type": "null" }]
+    },
+    "context": {
+      "anyOf": [{ "$ref": "#/$defs/context" }, { "type": "null" }]
+    },
+    "tamper": { "$ref": "#/$defs/tamper" },
+    "pareto_frontier": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "excluded_task_ids": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "variant_receipts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/variant_receipt" }
+    },
+    "metadata": { "type": "object" }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "metrics": {
+      "type": "object",
+      "required": [
+        "included_task_count",
+        "scored_task_count",
+        "gap_task_count",
+        "mean_score_lift",
+        "mean_gap_recovery",
+        "regression_count",
+        "regression_denominator",
+        "regression_rate"
+      ],
+      "properties": {
+        "included_task_count": { "type": "integer", "minimum": 0 },
+        "scored_task_count": { "type": "integer", "minimum": 0 },
+        "gap_task_count": { "type": "integer", "minimum": 0 },
+        "mean_baseline_score": { "type": "number" },
+        "mean_candidate_score": { "type": "number" },
+        "mean_frontier_score": { "type": "number" },
+        "mean_score_lift": { "type": "number" },
+        "mean_gap_recovery": { "type": "number" },
+        "candidate_win_count": { "type": "integer", "minimum": 0 },
+        "candidate_tie_count": { "type": "integer", "minimum": 0 },
+        "candidate_loss_count": { "type": "integer", "minimum": 0 },
+        "win_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "regression_count": { "type": "integer", "minimum": 0 },
+        "regression_denominator": { "type": "integer", "minimum": 0 },
+        "regression_rate": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": true
+    },
+    "context": {
+      "type": "object",
+      "required": [
+        "baseline_tokens",
+        "candidate_tokens",
+        "delta_tokens",
+        "within_delta_budget",
+        "within_target_budget",
+        "artifact_hashes"
+      ],
+      "properties": {
+        "baseline_tokens": { "type": "integer", "minimum": 0 },
+        "candidate_tokens": { "type": "integer", "minimum": 0 },
+        "delta_tokens": { "type": "integer" },
+        "max_delta_tokens": { "type": ["integer", "null"] },
+        "target_context_budget_tokens": { "type": ["integer", "null"], "minimum": 0 },
+        "within_delta_budget": { "type": "boolean" },
+        "within_target_budget": { "type": "boolean" },
+        "artifact_hashes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["role", "path", "sha256", "tokens", "bytes"],
+            "properties": {
+              "role": { "type": "string" },
+              "path": { "type": "string" },
+              "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+              "tokens": { "type": "integer", "minimum": 0 },
+              "bytes": { "type": "integer", "minimum": 0 }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "tamper": {
+      "type": "object",
+      "required": ["pass", "checks", "failures"],
+      "properties": {
+        "pass": { "type": "boolean" },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path", "expected_sha256", "status"],
+            "properties": {
+              "path": { "type": "string" },
+              "label": { "type": ["string", "null"] },
+              "expected_sha256": { "type": "string" },
+              "actual_sha256": { "type": ["string", "null"] },
+              "status": { "enum": ["pass", "fail"] },
+              "failure": { "type": ["string", "null"] }
+            },
+            "additionalProperties": true
+          }
+        },
+        "failures": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": true
+    },
+    "variant_receipt": {
+      "type": "object",
+      "required": [
+        "variant_id",
+        "accepted",
+        "decision",
+        "metrics",
+        "context_delta_tokens",
+        "failures"
+      ],
+      "properties": {
+        "variant_id": { "type": "string" },
+        "accepted": { "type": "boolean" },
+        "decision": { "enum": ["accepted", "rejected"] },
+        "metrics": { "$ref": "#/$defs/metrics" },
+        "context_delta_tokens": { "type": "integer" },
+        "failures": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

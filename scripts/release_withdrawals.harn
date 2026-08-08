@@ -1,0 +1,130 @@
+import "std/schema"
+import * as semver from "std/semver"
+
+pub type ReleaseWithdrawal = {
+  version: string,
+  tag_commit: string,
+  distribution_version: string,
+  replacement: string,
+  reason: "invalid_tagged_candidate",
+}
+
+type ReleaseWithdrawalDocument = {schema_version: int, releases: list<ReleaseWithdrawal>}
+
+fn release_withdrawal_registry_schema() -> Schema<ReleaseWithdrawalDocument> {
+  const withdrawal = schema_closed_object(
+    {
+      version: schema_string(),
+      tag_commit: schema_string(),
+      distribution_version: schema_string(),
+      replacement: schema_string(),
+      reason: schema_literal("invalid_tagged_candidate"),
+    },
+  )
+  return schema_closed_object(
+    {schema_version: schema_literal(1), releases: schema_list(withdrawal)},
+  )
+}
+
+fn version_is_before(
+  left: {major: int, minor: int, patch: int},
+  right: {major: int, minor: int, patch: int},
+) -> bool {
+  return left.major < right.major
+    || (left.major == right.major && left.minor < right.minor)
+    || (left.major == right.major
+    && left.minor
+    == right
+    .minor
+    && left.patch < right.patch)
+}
+
+/** Parse and validate the closed registry of immutable release withdrawals. */
+pub fn parse_release_withdrawals(text: string) -> list<ReleaseWithdrawal> {
+  const doc: ReleaseWithdrawalDocument = schema_expect(
+    json_parse(text),
+    release_withdrawal_registry_schema(),
+  )
+  let releases: list<ReleaseWithdrawal> = []
+  let seen: list<string> = []
+  for raw in doc.releases {
+    const parsed_version = semver.parse(raw.version)
+    const parsed_distribution = semver.parse(raw.distribution_version)
+    if parsed_version == nil {
+      throw "release withdrawal has invalid version: " + raw.version
+    }
+    if parsed_distribution == nil {
+      throw "release withdrawal v" + raw.version + " has invalid distribution_version"
+    }
+    if regex_captures(r"^[0-9a-f]{40}$", raw.tag_commit).count != 1 {
+      throw "release withdrawal v" + raw.version + " has invalid tag_commit"
+    }
+    if !version_is_before(parsed_distribution, parsed_version) {
+      throw "release withdrawal v" + raw.version
+        + " distribution_version must precede the withdrawn version"
+    }
+    if raw.replacement != semver.next(raw.version, "patch") {
+      throw "release withdrawal v" + raw.version + " replacement must be the next patch version"
+    }
+    if seen.contains(raw.version) {
+      throw "release withdrawal registry contains duplicate version: " + raw.version
+    }
+    seen = seen + [raw.version]
+    releases = releases + [raw]
+  }
+  for withdrawal in releases {
+    if seen.contains(withdrawal.distribution_version) {
+      throw "release withdrawal v" + withdrawal.version
+        + " distribution_version names another withdrawn release: v"
+        + withdrawal.distribution_version
+    }
+    if seen.contains(withdrawal.replacement) {
+      throw "release withdrawal v" + withdrawal.version
+        + " replacement names another withdrawn release: v"
+        + withdrawal.replacement
+    }
+  }
+  return releases
+}
+
+/** Read and validate the one canonical registry file at its owning boundary. */
+pub fn load_release_withdrawals(fs: HarnessFs, path: string) -> list<ReleaseWithdrawal> {
+  if !fs.exists(path) {
+    throw "release withdrawal registry is missing: " + path
+  }
+  return parse_release_withdrawals(fs.read_text(path))
+}
+
+/** Keep install-facing projections on the last published release while withdrawn. */
+pub fn release_distribution_version(
+  withdrawals: list<ReleaseWithdrawal>,
+  version: string,
+) -> string {
+  return release_withdrawal_for_version(withdrawals, version)?.distribution_version ?? version
+}
+
+/** Return the withdrawal for one version, if the registry names it. */
+pub fn release_withdrawal_for_version(
+  withdrawals: list<ReleaseWithdrawal>,
+  version: string,
+) -> ReleaseWithdrawal? {
+  for withdrawal in withdrawals {
+    if withdrawal.version == version {
+      return withdrawal
+    }
+  }
+  return nil
+}
+
+/** Return the withdrawal only when it binds the exact immutable tag commit. */
+pub fn release_withdrawal_for_tag(
+  withdrawals: list<ReleaseWithdrawal>,
+  version: string,
+  tag_commit: string,
+) -> ReleaseWithdrawal? {
+  const withdrawal = release_withdrawal_for_version(withdrawals, version)
+  if withdrawal != nil && withdrawal.tag_commit == lowercase(trim(tag_commit)) {
+    return withdrawal
+  }
+  return nil
+}

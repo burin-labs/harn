@@ -1,0 +1,31 @@
+import "std/postgres"
+
+pipeline default(harness: Harness) {
+  const db = harness.testing.pg_mock_pool(
+    [
+      {
+        sql: "SELECT jsonb_path_query($1::jsonb, $2::jsonpath) AS value",
+        params: [{items: [{id: 1}, {id: 2}]}, "$.items[*].id"],
+        rows: [{value: 1}, {value: 2}],
+      },
+      {
+        sql: "SELECT ($1::jsonb || $2::jsonb) AS value",
+        params: [{a: 1}, {b: 2}],
+        rows: [{value: {a: 1, b: 2}}],
+      },
+      {
+        sql: "SELECT ($1::jsonb @> $2::jsonb) AS contains",
+        params: [{a: 1, b: 2}, {b: 2}],
+        rows: [{contains: true}],
+      },
+    ],
+  )
+  const ids = pg.jsonb.path(db, {items: [{id: 1}, {id: 2}]}, "$.items[*].id")
+  harness.stdio.println(ids[0])
+  harness.stdio.println(ids[1])
+  const merged = pg.jsonb.merge(db, {a: 1}, {b: 2})
+  harness.stdio.println(merged.b)
+  harness.stdio.println(pg.jsonb.contains(db, {a: 1, b: 2}, {b: 2}))
+  const calls = pg_mock_calls(db)
+  harness.stdio.println(calls[0].sql)
+}

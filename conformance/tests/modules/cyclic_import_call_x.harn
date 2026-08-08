@@ -1,0 +1,8 @@
+// Selectively imports `helper` from `b` while `b` is still mid-load (cycle).
+// Calling the imported name from inside a module function is the case that
+// used to fail with `Undefined builtin: helper` in a load-order-dependent way.
+import { helper } from "cyclic_import_call_b"
+
+pub fn x_render() -> string {
+  return "x sees: " + helper()
+}

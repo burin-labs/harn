@@ -1,0 +1,16 @@
+pipeline test(harness: Harness, task) {
+  // `to` creates an inclusive range
+  const r = 1 to 5
+  harness.stdio.log(r)
+  // `to` in a for loop
+  let sum = 0
+  for i in 1 to 4 {
+    sum += i
+  }
+  harness.stdio.log(sum)
+  // compare with the trailing `exclusive` modifier
+  const inc = 1 to 3
+  const exc = 1 to 3 exclusive
+  harness.stdio.log(len(inc))
+  harness.stdio.log(len(exc))
+}

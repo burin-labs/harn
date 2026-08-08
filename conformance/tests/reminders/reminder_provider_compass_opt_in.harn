@@ -1,0 +1,46 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * The burin compass (`compass_ast_edits`) is a canonical reminder
+ * provider that ships opt-in: it stays silent unless a session enables it
+ * via `reminders: {providers: ["compass_ast_edits"]}`, at which point it
+ * injects balanced edit-mechanism guidance at session start.
+ */
+pipeline main(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [llm_text("done")],
+    { ->
+      const opted_in = agent_loop(
+        harness,
+        "compass opt-in",
+        nil,
+        {
+          provider: "mock",
+          model: "mock",
+          session_id: "reminder-compass-opt-in",
+          reminders: {providers: ["compass_ast_edits"]},
+        },
+      )
+      const on = transcript_events_by_kind(opted_in.transcript, "system_reminder").filter(
+        { e -> e.reminder.tags[0] == "compass_ast_edits" },
+      )
+      const default_off = agent_loop(
+        harness,
+        "compass default off",
+        nil,
+        {provider: "mock", model: "mock", session_id: "reminder-compass-default-off"},
+      )
+      const off = transcript_events_by_kind(default_off.transcript, "system_reminder").filter(
+        { e -> e.reminder.tags[0] == "compass_ast_edits" },
+      )
+      harness.stdio.println(len(on))
+      harness.stdio.println(on[0].reminder.tags[0])
+      harness.stdio.println(on[0].reminder.source)
+      harness.stdio.println(on[0].reminder.body.contains("edit_apply_node"))
+      harness.stdio.println(on[0].reminder.preserve_on_compact)
+      harness.stdio.println(len(off))
+    },
+  )
+}

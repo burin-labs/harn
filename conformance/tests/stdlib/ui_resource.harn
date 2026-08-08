@@ -1,0 +1,150 @@
+import "std/ui_resource"
+
+pipeline default(harness: Harness) {
+  const dashboard_html =
+    "<!doctype html><html><head><style>.tile { padding: 12px; }</style></head><body><main><h1>KPIs</h1><pre>signups=42 churn=3</pre><script>const initial = window.openInitialData; const summary = document.getElementById('summary');</script></main></body></html>"
+  const resource_options: UiResourceOptions = {
+    description: "Weekly KPI tiles",
+    permissions: ["tools/call", "context/update"],
+    capabilities: ["tools/call", "context/update", "context/read"],
+    version: "2026-05-11",
+    meta: {owner: "growth-team"},
+  }
+  const resource: UiResource = ui_resource(
+    "ui://harn-dashboard/kpis@v1",
+    "KPIs dashboard",
+    dashboard_html,
+    resource_options,
+  )
+  harness.stdio.println(resource.schema)
+  harness.stdio.println(resource.mime_type)
+  harness.stdio.println(resource.profile)
+  harness.stdio.println(resource.contents_encoding)
+  harness.stdio.println(resource.uri)
+  harness.stdio.println(resource.validation.ok)
+  harness.stdio.println(resource.content_sha256.starts_with("sha256:"))
+  harness.stdio.println(len(resource.permissions))
+  const meta_options: UiToolMetaOptions = {visibility: ["app"]}
+  const meta: UiToolMeta = ui_tool_meta(resource, meta_options)
+  const mcp_meta = ui_tool_meta_to_mcp(meta)
+  harness.stdio.println(meta.schema)
+  harness.stdio.println(mcp_meta.ui.resourceUri)
+  harness.stdio.println(mcp_meta.ui.visibility)
+  const mcp_resource = ui_resource_to_mcp(
+    resource,
+    {
+      connect_domains: ["https://api.example.test"],
+      permissions: {clipboardWrite: {}},
+      prefers_border: true,
+    },
+  )
+  harness.stdio.println(mcp_resource.mime_type)
+  harness.stdio.println(mcp_resource.meta.ui.csp.connectDomains)
+  harness.stdio.println(mcp_resource.meta.ui.permissions.clipboardWrite != nil)
+  harness.stdio.println(mcp_resource.meta.ui.prefersBorder)
+  const csp_header = ui_resource_csp_header(resource.csp)
+  harness.stdio.println(csp_header.contains("default-src 'self'"))
+  harness.stdio.println(csp_header.contains("connect-src 'none'"))
+  const sandbox_attr = ui_resource_sandbox_attr(resource.csp)
+  harness.stdio.println(sandbox_attr)
+  const result_options: UiToolResultOptions = {
+    structured_fallback: ui_structured_fallback(
+      {signups: 42, churn: 3},
+      {text: "signups=42 churn=3"},
+    ),
+  }
+  const result: UiToolResult = ui_tool_result(resource, result_options)
+  harness.stdio.println(result.schema)
+  harness.stdio.println(result.text_fallback.content.contains("KPIs"))
+  harness.stdio.println(result.text_fallback.content.contains("signups=42 churn=3"))
+  harness.stdio.println(result.structured_fallback?.data.signups)
+  harness.stdio.println(result.structured_fallback?.text)
+  const validated = ui_tool_result_validate(result)
+  harness.stdio.println(validated.selected)
+  const supporting = ui_select_for_host(result, {apps: true, profiles: ["mcp-app"]})
+  harness.stdio.println(supporting.selected)
+  harness.stdio.println(supporting.ui_resource?.uri)
+  const plain = ui_select_for_host(result, {apps: false})
+  harness.stdio.println(plain.selected)
+  harness.stdio.println(plain.ui_resource == nil)
+  harness.stdio.println(plain.text_fallback.content.contains("KPIs"))
+  const openai_caps = ui_host_supports_apps({ui: {apps: true, profiles: ["mcp-app"]}})
+  const no_apps = ui_host_supports_apps({apps: false})
+  const mcp_caps = ui_host_supports_apps(
+    {apps: {enabled: true, profiles: ["mcp-app", "openai-app"]}},
+  )
+  const custom_only = ui_host_supports_apps({apps: true, profiles: ["custom-app"]})
+  const null_caps = ui_host_supports_apps(nil)
+  const extension_caps = ui_host_supports_apps(
+    {extensions: {"io.modelcontextprotocol/ui": {mimeTypes: ["text/html;profile=mcp-app"]}}},
+  )
+  const normalized: UiHostCapabilities = ui_host_capabilities(
+    {apps: {enabled: true, profiles: ["mcp-app"], bridges: ["postMessage"]}},
+  )
+  harness.stdio.println(openai_caps)
+  harness.stdio.println(no_apps)
+  harness.stdio.println(mcp_caps)
+  harness.stdio.println(custom_only)
+  harness.stdio.println(null_caps)
+  harness.stdio.println(extension_caps)
+  harness.stdio.println(normalized.profiles)
+  harness.stdio.println(normalized.bridges)
+  const call: UiToolCallEnvelope = ui_tool_call_envelope(
+    "dashboard.refresh",
+    {window: "7d"},
+    {id: "call-1"},
+  )
+  harness.stdio.println(call.jsonrpc)
+  harness.stdio.println(call.method)
+  harness.stdio.println(call.params.name)
+  harness.stdio.println(call.params.arguments.window)
+  const ctx_update: UiContextUpdateEnvelope = ui_context_update_envelope(
+    "selection",
+    {tile: "signups"},
+    {id: "ctx-1"},
+  )
+  harness.stdio.println(ctx_update.method)
+  harness.stdio.println(ctx_update.params.structuredContent.selection.tile)
+  const bad_uri = try {
+    ui_resource("http://example/widget", "Bad", "<html></html>")
+  }
+  harness.stdio.println(is_err(bad_uri))
+  const invalid_html = ui_resource(
+    "ui://harn-dashboard/unsafe@v1",
+    "Unsafe widget",
+    "<html><body><script>fetch('https://evil.example')</script></body></html>",
+  )
+  harness.stdio.println(invalid_html.validation.ok)
+  harness.stdio.println(invalid_html.validation.error_codes.contains("network_call"))
+  const unsafe_result = ui_tool_result(
+    invalid_html,
+    {
+      text_fallback: "Widget blocked: contains an unapproved network call",
+      structured_fallback: ui_structured_fallback(
+        {status: "blocked"},
+        {text: "Widget validation failed"},
+      ),
+    },
+  )
+  harness.stdio.println(unsafe_result.ui_resource == nil)
+  harness.stdio.println(unsafe_result.validation.error_codes.contains("network_call"))
+  const unsafe_selected = ui_select_for_host(unsafe_result, {apps: true, profiles: ["mcp-app"]})
+  harness.stdio.println(unsafe_selected.selected)
+  const allow_invalid = ui_tool_result(
+    invalid_html,
+    {
+      text_fallback: "Preview only — widget failed validation",
+      allow_invalid_resource: true,
+      structured_fallback: ui_structured_fallback({status: "preview"}, {text: "Preview only"}),
+    },
+  )
+  harness.stdio.println(allow_invalid.ui_resource != nil)
+  const validation_should_throw = try {
+    ui_tool_result_validate(allow_invalid)
+  }
+  harness.stdio.println(is_err(validation_should_throw))
+  const empty_fallback = try {
+    ui_tool_result(resource, {text_fallback: ""})
+  }
+  harness.stdio.println(is_err(empty_fallback))
+}

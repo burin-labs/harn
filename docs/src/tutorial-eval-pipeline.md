@@ -1,0 +1,142 @@
+# Tutorial: build an eval pipeline
+
+This tutorial builds a small evaluation loop that runs a set of examples,
+records metrics, and produces an auditable summary. The goal is to make quality
+visible, not to build an elaborate benchmark harness.
+
+Use the companion example as a baseline:
+
+```bash
+cargo run --bin harn -- run examples/data-pipeline.harn
+```
+
+## 1. Define the dataset inline
+
+Start with a tiny set of representative inputs. Keep the examples small enough
+that you can inspect failures by eye:
+
+```harn
+pipeline main(harness: Harness) {
+  const cases = [
+    {id: "case-1", input: "What is 2 + 2?", expected: "4"},
+    {id: "case-2", input: "Capital of France?", expected: "Paris"},
+    {id: "case-3", input: "Color of grass?", expected: "green"},
+  ]
+
+  harness.stdio.log("Loaded ${cases.count} eval cases")
+}
+```
+
+## 2. Run the cases in parallel
+
+If each case is independent, use `parallel each` so the slow parts overlap.
+
+```harn
+pipeline main(harness: Harness) {
+  const cases = [
+    {id: "case-1", input: "What is 2 + 2?", expected: "4"},
+    {id: "case-2", input: "Capital of France?", expected: "Paris"},
+    {id: "case-3", input: "Color of grass?", expected: "green"},
+  ]
+
+  const results = parallel each cases { tc ->
+    const answer = harness.llm.call(tc.input, "Answer in one word or short phrase.", {
+      temperature: 0.0,
+      max_tokens: 64,
+    })
+
+    {
+      id: tc.id,
+      expected: tc.expected,
+      actual: answer.text,
+      correct: answer.text.contains(tc.expected),
+    }
+  }
+
+  harness.stdio.log(json_stringify(results))
+}
+```
+
+For a real eval suite, replace the inline `cases` list with a manifest or a
+dataset file that your pipeline reads with `harness.fs.read_text()`.
+
+## 3. Record metrics
+
+The important part of an eval pipeline is the metric trail. Use
+`eval_metric()` to record per-case and aggregate results.
+
+```harn
+pipeline main(harness: Harness) {
+  const cases = [
+    {id: "case-1", input: "What is 2 + 2?", expected: "4"},
+    {id: "case-2", input: "Capital of France?", expected: "Paris"},
+  ]
+
+  let passed = 0
+  for tc in cases {
+    const answer = harness.llm.call(tc.input, "Answer in one word.", {temperature: 0.0})
+    const correct = answer.text.contains(tc.expected)
+    if correct {
+      passed = passed + 1
+    }
+    eval_metric("case_correct", correct, {case_id: tc.id})
+  }
+
+  const accuracy = passed / cases.count
+  eval_metric("accuracy", accuracy, {passed: passed, total: cases.count})
+  eval_metric("run_id", harness.random.uuid())
+  eval_metric("generated_at", harness.clock.timestamp())
+}
+```
+
+## 4. Export a report
+
+Once the metrics are recorded, write a compact report so a later run can diff
+the results.
+
+```harn
+pipeline main(harness: Harness) {
+  const summary = {
+    run_id: harness.random.uuid(),
+    generated_at: harness.clock.timestamp(),
+    accuracy: 0.83,
+    notes: "Replace the fixed accuracy with real case scoring",
+  }
+
+  harness.fs.write_text("eval-summary.json", json_stringify(summary))
+  harness.stdio.log(json_stringify(summary))
+}
+```
+
+## 5. How to use it
+
+Run the pipeline, inspect the metrics, then compare runs over time:
+
+```bash
+harn run examples/eval-workflow.harn
+harn eval .harn-runs/<run-id>.json
+```
+
+A good eval pipeline answers three questions:
+
+- did the model improve?
+- did latency or token usage regress?
+- which cases failed, and why?
+
+## Skill and guidance gates
+
+Use `harn eval skill-gate` when the artifact under review is a skill or
+guidance edit. The manifest records contamination-safe held-out tasks,
+with-vs-without observations, the frontier score, context-cost inputs, and
+immutable grader checksums:
+
+```bash
+harn eval skill-gate examples/evals/skill-gate/smoke/manifest.json \
+  --output .harn-runs/skill-gate/smoke
+```
+
+The command writes `summary.json`, `per_case.jsonl`, `summary.md`, and a
+machine-readable `receipt.json` using `harn.skill_gate.receipt.v1`. The gate
+excludes static public/pre-cutoff tasks, reports gap recovery per cluster,
+rejects regressions and context bloat, and fails closed when a protected grader
+file or directory hash changes.

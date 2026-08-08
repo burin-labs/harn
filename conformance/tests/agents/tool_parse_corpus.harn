@@ -1,0 +1,197 @@
+// Emission shapes reduced from real cheap-model runs in the mined eval corpus.
+//
+// Every input here is a structural skeleton of something a model actually sent,
+// with the frequency that made it worth fixing: back-to-back wrapper blocks with
+// no separator between them, untagged prose in front of a good call, the
+// edit-action verb used as a tool name, a shell synonym, and a terminal
+// `<user_response>` whose close tag the model never wrote because it had
+// finished talking.
+//
+// The strictness that survives is deliberate and narrow: an unclosed response
+// tag is accepted as its own body only when nothing follows it. The moment
+// another top-level block appears, absorbing to EOF would eat a real call, so
+// the violation stays.
+import { corpus_registry, probe } from "_tool_parse_probe"
+
+pipeline main(harness: Harness) {
+  // The most common single emission: JSON-quoted keys and two heredoc bodies.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "canonical wrapper with json keys and heredocs",
+    """<tool_call>
+edit({
+    "action": "exact_patch",
+    "path": "src/schema.zig",
+    "old_string": <<EOF
+const schema_json =
+    \\{
+    \\  "sections": {
+EOF
+,
+    "new_string": <<EOF2
+const schema_json = "";
+EOF2
+})
+</tool_call>""",
+    corpus_registry(),
+  )
+  // Back-to-back blocks with NO whitespace between them. The second open tag
+  // used to fail the line-start check and be shredded into a stray-text
+  // violation.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "back to back wrapper blocks, same line",
+    """<tool_call>
+edit({ "action": "create", "path": "a.zig", "content": <<EOF
+code
+EOF
+})
+</tool_call><tool_call>
+verify({})
+</tool_call>""",
+    corpus_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "adjacent wrapper blocks with a space",
+    """<tool_call>
+verify({})
+</tool_call> <tool_call>
+run({ command: "zig build test" })
+</tool_call>""",
+    corpus_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "done block adjacent to a wrapper block",
+    """<tool_call>
+verify({})
+</tool_call><done>##DONE##</done>""",
+    corpus_registry(),
+  )
+  // Untagged prose in front of a good call is harmless envelope drift.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "prose before a wrapper block",
+    """We need to create BatteryProvider.swift and wire it into LiveSystemProvider.
+
+<tool_call>
+look({ file: "Sources/SysMonCore/Providers.swift" })
+</tool_call>""",
+    corpus_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "bare call inside stray prose",
+    """Let me inspect the parser first.
+look({ file: "src/parse.zig" })
+Then I will patch it.""",
+    corpus_registry(),
+  )
+  // `<invoke>` markup inside the wrapper and inside a `<function_calls>`
+  // wrapper. The wrapper tags are swallowed silently — they must not raise
+  // unknown-tag violations.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "invoke markup with a string attribute inside the wrapper",
+    """<tool_call>
+<invoke name="look">
+<parameter name="file" string="true">src/root.zig</parameter>
+</invoke>
+</tool_call>""",
+    corpus_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "invoke markup in a function_calls wrapper",
+    """<function_calls>
+<invoke name="look">
+<parameter name="file" string="true">src/main.zig</parameter>
+<parameter name="intent" string="true">read</parameter>
+</invoke>
+</function_calls>""",
+    corpus_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "genuinely unterminated parameter still errors",
+    """<tool_call>
+<invoke name="look">
+<parameter name="file" string="true">src/root.zi""",
+    corpus_registry(),
+  )
+  // An edit-action verb used as the tool name folds to `edit` with the action
+  // injected. The registered enum is the authority for the fold.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "edit action verb as the tool name",
+    """<tool_call>
+replace_range({
+    "path": "src/main.zig",
+    "range_start": 71,
+    "range_end": 84,
+    "content": <<EOF
+    } else {
+        try stderr.print("bad", .{});
+    }
+EOF
+})
+</tool_call>""",
+    corpus_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "shell alias folds to run",
+    "bash({ script: \"zig build test\" })",
+    corpus_registry(),
+  )
+  // The fold only applies when the resolved name is registered.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "genuinely unknown tool name",
+    "frobnicate({ path: \"a.zig\" })",
+    corpus_registry(),
+  )
+  // Terminal answer shapes: the model finished talking and omitted the close.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "unclosed terminal user_response",
+    "<user_response>Implemented the INI schema validation system with a `Schema` definition and a `cmdCheck` command.",
+    corpus_registry(),
+  )
+  probe(
+    harness.agent,
+    harness.stdio,
+    "unclosed terminal assistant_prose",
+    """<assistant_prose>
+Implemented full INI schema validation:
+- Added `src/schema.zig`.
+- Imported the new module in `src/main.zig`.""",
+    corpus_registry(),
+  )
+  // Not terminal: another block follows, so the unclosed tag keeps its
+  // violation and the trailing block still parses.
+  probe(
+    harness.agent,
+    harness.stdio,
+    "unclosed response tag before a call stays strict",
+    """<user_response>Done, verifying now.
+<tool_call>
+verify({})
+</tool_call>""",
+    corpus_registry(),
+  )
+}

@@ -1,0 +1,662 @@
+import { shell_quote } from "std/runtime"
+import "std/schema"
+
+/** TOML and JSON make no distinction the callers care about; both are numbers. */
+fn schema_number() {
+  return schema_union([schema_int(), schema_float()])
+}
+
+/**
+ * What the budgets file has to look like.
+ *
+ * Every field is optional because every one has a documented fallback, so the
+ * schema's job is not presence but type: a `cold_ms` written as a string used
+ * to reach `number_or`, silently take the fallback, and report a budget nobody
+ * set.
+ */
+fn budgets_schema() {
+  const entry = schema_object(
+    {
+      cold_ms: schema_field(schema_number(), false),
+      regression_x: schema_field(schema_number(), false),
+    },
+    {additional_properties: true},
+  )
+  return schema_object(
+    {defaults: schema_field(entry, false), commands: schema_field(schema_dict(entry), false)},
+    {additional_properties: true},
+  )
+}
+
+/** The subset of hyperfine's `--export-json` document this script reads. */
+fn hyperfine_schema() {
+  return schema_object(
+    {
+      results: schema_field(
+        schema_list(
+          schema_object(
+            {
+              median: schema_field(schema_number(), false),
+              times: schema_field(schema_list(schema_number()), false),
+            },
+            {additional_properties: true},
+          ),
+        ),
+      ),
+    },
+    {additional_properties: true},
+  )
+}
+
+const DEFAULT_COLD_MS = 250.0
+
+const DEFAULT_REGRESSION_X = 1.25
+
+/**
+ * Future port tickets can append rows here and add matching
+ * `[commands.<key>]` entries in bench/cli/budgets.toml.
+ */
+pub fn tracked_commands() {
+  return [{key: "version", args: ["version"]}, {key: "try --help", args: ["try", "--help"]}]
+}
+
+fn env_or(env: HarnessEnv, name: string, fallback: string) -> string {
+  const value = env.get(name)
+  if value == nil || value == "" {
+    return fallback
+  }
+  return value ?? ""
+}
+
+fn require_env(harness: Harness, name: string) -> string {
+  const value = harness.env.get(name)
+  if value == nil || value == "" {
+    harness.stdio.eprintln("error: missing required env var ${name}")
+    harness.runtime.exit(2)
+  }
+  return value ?? ""
+}
+
+pub fn parse_positive_int(name: string, raw: string) {
+  const parsed = to_int(raw.trim())
+  if parsed == nil {
+    return {ok: false, value: 0, error: "${name} must be an integer, got '${raw}'"}
+  }
+  const value = parsed ?? 0
+  if value <= 0 {
+    return {ok: false, value: 0, error: "${name} must be positive"}
+  }
+  return {ok: true, value: value, error: ""}
+}
+
+fn is_number(value) -> bool {
+  const kind = type_of(value)
+  return kind == "int" || kind == "float"
+}
+
+fn number_or(value, fallback: float) -> float {
+  if !is_number(value) {
+    return fallback
+  }
+  return to_float(value) ?? fallback
+}
+
+pub fn load_budgets_text(text: string) {
+  const parsed = schema_check(toml_parse(text), budgets_schema())
+  if is_err(parsed) {
+    throw "cold-start budgets file is not usable: " + to_string(unwrap_err(parsed).message)
+  }
+  const raw = unwrap(parsed)
+  const defaults = raw.defaults ?? {}
+  const commands_table = raw.commands ?? {}
+  const default_cold = number_or(defaults?.cold_ms, DEFAULT_COLD_MS)
+  const default_ratio = number_or(defaults?.regression_x, DEFAULT_REGRESSION_X)
+  let resolved = {}
+  for cmd in tracked_commands() {
+    const key = to_string(cmd.key)
+    const entry = commands_table[key] ?? {}
+    resolved = resolved
+      + {
+      [key]: {
+        cold_ms: number_or(entry?.cold_ms, default_cold),
+        regression_x: number_or(entry?.regression_x, default_ratio),
+      },
+    }
+  }
+  return resolved
+}
+
+fn load_budgets(fs: HarnessFs, path: string) {
+  return load_budgets_text(fs.read_text(path))
+}
+
+pub fn load_baseline_text(text: string) {
+  const trimmed = text.trim()
+  if trimmed == "" {
+    return {}
+  }
+  return json_parse(trimmed)
+}
+
+fn load_baseline(fs: HarnessFs, path: string) {
+  return load_baseline_text(fs.read_text(path))
+}
+
+fn save_baseline(fs: HarnessFs, path: string, payload) {
+  fs.write_text(path, json_stringify_pretty(payload) + "\n")
+}
+
+fn command_stdout_or(
+  process: HarnessProcess,
+  cmd: string,
+  args: list<string>,
+  fallback: string,
+) -> string {
+  const res = process.run({program: cmd, args: args})
+  if res.success {
+    return res.stdout.trim()
+  }
+  return fallback
+}
+
+fn current_commit_sha(process: HarnessProcess, repo_root: string) -> string {
+  const res = process.run({program: "git", args: ["rev-parse", "HEAD"], cwd: repo_root})
+  if res.success {
+    return res.stdout.trim()
+  }
+  return "uncommitted"
+}
+
+fn harn_version(process: HarnessProcess, harn_bin: string) -> string {
+  return command_stdout_or(process, harn_bin, ["--version"], "unknown")
+}
+
+fn host_label(process: HarnessProcess) -> string {
+  return command_stdout_or(process, "uname", ["-s"], "unknown") + " "
+    + command_stdout_or(
+    process,
+    "uname",
+    ["-m"],
+    "unknown",
+  )
+}
+
+pub fn most_recent_baseline_for(payload, key: string, exclude_sha: string) {
+  let found = false
+  let best_sha = ""
+  let best_captured = ""
+  let best_cold = 0.0
+  for entry in entries(payload ?? {}) {
+    const sha = entry.key
+    if sha == exclude_sha {
+      continue
+    }
+    const commands = entry.value?.commands ?? {}
+    const command = commands[key]
+    const cold = command?.cold_ms
+    if !is_number(cold) {
+      continue
+    }
+    const captured = to_string(entry.value?.captured_at ?? "")
+    if !found || captured > best_captured {
+      found = true
+      best_sha = sha
+      best_captured = captured
+      best_cold = to_float(cold) ?? 0.0
+    }
+  }
+  if !found {
+    return {sha: nil, cold_ms: nil}
+  }
+  return {sha: best_sha, cold_ms: best_cold}
+}
+
+pub fn build_invocation(
+  fs: HarnessFs,
+  args_template: list<string>,
+  tmpdir: string,
+) -> list<string> {
+  const trace_input = path_join(tmpdir, "trace_input.jsonl")
+  const trace_output = path_join(tmpdir, "trace_output.jsonl")
+  if !fs.exists(trace_input) {
+    fs.write_text(trace_input, "{\"prompt\":\"hi\",\"response\":\"hi\"}\n")
+  }
+  let rendered: list<string> = []
+  for piece in args_template {
+    rendered = rendered
+      + [
+      piece.replace("{trace_input}", trace_input).replace("{trace_output}", trace_output),
+    ]
+  }
+  return rendered
+}
+
+fn path_env(env: HarnessEnv) -> string {
+  const value = env.get("PATH")
+  if value == nil || value == "" {
+    return "/usr/bin:/bin:/usr/sbin:/sbin"
+  }
+  return value ?? ""
+}
+
+pub fn isolated_env_args(env: HarnessEnv, cache_dir: string, home_dir: string) -> list<string> {
+  return [
+    "-i",
+    "PATH=" + path_env(env),
+    "LC_ALL=C",
+    "HARN_BYTECODE_CACHE=0",
+    "HARN_CACHE_DIR=" + cache_dir,
+    "HOME=" + home_dir,
+  ]
+}
+
+fn command_exists(process: HarnessProcess, cmd: string) -> bool {
+  const res = try {
+    process.run({program: "sh", args: ["-c", "command -v " + shell_quote(cmd)]})
+  } catch (err) {
+    return false
+  }
+  return res.success
+}
+
+fn reset_cache_dir(fs: HarnessFs, process: HarnessProcess, cache_dir: string) -> nil {
+  process.run({program: "rm", args: ["-rf", cache_dir]})
+  fs.mkdir(cache_dir)
+  return nil
+}
+
+fn median(values: list<float>) -> float {
+  const sorted = values.sorted()
+  return sorted[sorted.count / 2] ?? 0.0
+}
+
+fn measure_with_hyperfine(
+  harness: Harness,
+  invocation: list<string>,
+  runs: int,
+  cache_dir: string,
+  home_dir: string,
+  result_path: string,
+) -> float {
+  const prepare_cmd = "rm -rf " + shell_quote(cache_dir) + " && mkdir -p " + shell_quote(cache_dir)
+  const args = [
+    "--warmup",
+    "1",
+    "--runs",
+    "${runs}",
+    "--prepare",
+    prepare_cmd,
+    "--export-json",
+    result_path,
+    "--shell",
+    "none",
+    "--",
+    "env",
+  ]
+    + isolated_env_args(harness.env, cache_dir, home_dir)
+    + invocation
+  const res = harness.process.run({program: "hyperfine", args: args})
+  if !res.success {
+    if res.stderr != "" {
+      harness.stdio.eprint(res.stderr)
+    }
+    throw "hyperfine failed (exit ${res.exit_code})"
+  }
+  const payload = schema_check(json_parse(harness.fs.read_text(result_path)), hyperfine_schema())
+  if is_err(payload) {
+    throw "hyperfine wrote an unusable result document: " + to_string(unwrap_err(payload).message)
+  }
+  const results = unwrap(payload).results
+  if results.count == 0 {
+    throw "hyperfine produced no results"
+  }
+  const first = results[0]
+  const seconds = if first?.median != nil {
+    number_or(first.median, 0.0)
+  } else {
+    const times = first?.times ?? []
+    if times.count == 0 {
+      throw "hyperfine result lacks both median and times"
+    }
+    median(times.map({ value -> number_or(value, 0.0) }).to_list())
+  }
+  return seconds * 1000.0
+}
+
+fn measure_with_monotonic(
+  harness: Harness,
+  invocation: list<string>,
+  runs: int,
+  cache_dir: string,
+  home_dir: string,
+) -> float {
+  let samples: list<float> = []
+  for _ in range(0, runs) {
+    reset_cache_dir(harness.fs, harness.process, cache_dir)
+    const start = harness.clock.monotonic_ms()
+    const res = harness.process.run(
+      {program: "env", args: isolated_env_args(harness.env, cache_dir, home_dir) + invocation},
+    )
+    const elapsed = harness.clock.monotonic_ms() - start
+    if !res.success {
+      if res.stderr != "" {
+        harness.stdio.eprint(res.stderr)
+      }
+      throw "invocation failed (exit ${res.exit_code}): " + json_stringify(invocation)
+    }
+    samples = samples + [to_float(elapsed) ?? 0.0]
+  }
+  return median(samples)
+}
+
+fn measure_cold_start(
+  harness: Harness,
+  cmd,
+  tmp_root: string,
+  harn_bin: string,
+  iterations: int,
+  use_hyperfine: bool,
+) -> float {
+  const key = to_string(cmd.key)
+  const per_cmd_root = path_join(tmp_root, key.replace(" ", "_").replace("/", "_"))
+  harness.fs.mkdir(per_cmd_root)
+  const args = build_invocation(harness.fs, cmd.args, per_cmd_root)
+  const cache_dir = path_join(per_cmd_root, "harn_cache")
+  const home_dir = path_join(per_cmd_root, "fake_home")
+  harness.fs.mkdir(home_dir)
+  const invocation = [harn_bin] + args
+  if use_hyperfine {
+    const result_path = path_join(per_cmd_root, "hyperfine.json")
+    return measure_with_hyperfine(harness, invocation, iterations, cache_dir, home_dir, result_path)
+  }
+  return measure_with_monotonic(harness, invocation, iterations, cache_dir, home_dir)
+}
+
+pub fn round_ms(value: float) -> float {
+  const thousandths = to_int(round(value * 1000.0)) ?? 0
+  return (to_float(thousandths) ?? 0.0) / 1000.0
+}
+
+fn fixed(value: float, digits: int) -> string {
+  let scale = 1
+  for _ in range(0, digits) {
+    scale = scale * 10
+  }
+  let scaled = to_int(round(value * (to_float(scale) ?? 1.0))) ?? 0
+  let sign = ""
+  if scaled < 0 {
+    sign = "-"
+    scaled = -scaled
+  }
+  const whole = scaled / scale
+  let frac = to_string(scaled % scale)
+  while frac.len() < digits {
+    frac = "0" + frac
+  }
+  if digits == 0 {
+    return sign + to_string(whole)
+  }
+  return sign + to_string(whole) + "." + frac
+}
+
+fn fixed_signed(value: float, digits: int) -> string {
+  const prefix = if value >= 0.0 {
+    "+"
+  } else {
+    ""
+  }
+  return prefix + fixed(value, digits)
+}
+
+fn repeat_spaces(count: int) -> string {
+  let out = ""
+  for _ in range(0, count) {
+    out = out + " "
+  }
+  return out
+}
+
+fn pad_left(value, width: int) -> string {
+  const text = to_string(value)
+  if text.len() >= width {
+    return text
+  }
+  return repeat_spaces(width - text.len()) + text
+}
+
+fn pad_right(value, width: int) -> string {
+  const text = to_string(value)
+  if text.len() >= width {
+    return text
+  }
+  return text + repeat_spaces(width - text.len())
+}
+
+pub fn failure_reasons(cold_ms: float, budget, baseline) -> list<string> {
+  let reasons: list<string> = []
+  const budget_ms = number_or(budget?.cold_ms, DEFAULT_COLD_MS)
+  const ratio = number_or(budget?.regression_x, DEFAULT_REGRESSION_X)
+  if cold_ms > budget_ms {
+    reasons = reasons + ["exceeds budget " + fixed(budget_ms, 1) + " ms"]
+  }
+  const baseline_ms = baseline?.cold_ms
+  if baseline_ms != nil && cold_ms > number_or(baseline_ms, 0.0) * ratio {
+    const sha = to_string(baseline?.sha ?? "-")
+    const shown_sha = if sha == "-" {
+      "-"
+    } else {
+      sha.substring(
+        0,
+        if sha.len() < 8 {
+          sha.len()
+        } else {
+          8
+        },
+      )
+    }
+    reasons = reasons
+      + [
+      "exceeds "
+        + fixed(ratio, 2)
+        + "x baseline ("
+        + fixed(number_or(baseline_ms, 0.0), 1)
+        + " ms from "
+        + shown_sha
+        + ")",
+    ]
+  }
+  return reasons
+}
+
+fn row_line(key: string, cold_ms: float, budget, baseline, reasons: list<string>) -> string {
+  const baseline_ms = baseline?.cold_ms
+  const baseline_str = if baseline_ms == nil {
+    "-"
+  } else {
+    fixed(number_or(baseline_ms, 0.0), 1)
+  }
+  const delta = if baseline_ms == nil {
+    "-"
+  } else {
+    fixed_signed((cold_ms - number_or(baseline_ms, 0.0)) / number_or(baseline_ms, 1.0) * 100.0, 1)
+      + "%"
+  }
+  const status = if reasons.count > 0 {
+    "FAIL"
+  } else {
+    "ok"
+  }
+  return pad_right(key, 22)
+    + " "
+    + pad_left(fixed(cold_ms, 1), 10)
+    + " "
+    + pad_left(fixed(number_or(budget?.cold_ms, DEFAULT_COLD_MS), 1), 10)
+    + " "
+    + pad_left(baseline_str, 10)
+    + " "
+    + pad_left(delta, 10)
+    + " "
+    + pad_left(status, 10)
+}
+
+pub fn select_commands(filter_raw: string) {
+  const commands = tracked_commands()
+  const trimmed = filter_raw.trim()
+  if trimmed == "" {
+    return {ok: true, commands: commands, missing: []}
+  }
+  let wanted: list<string> = []
+  for raw in split(trimmed, ",") {
+    const name = raw.trim()
+    if name != "" && !wanted.contains(name) {
+      wanted = wanted + [name]
+    }
+  }
+  let selected = []
+  for cmd in commands {
+    if wanted.contains(to_string(cmd.key)) {
+      selected = selected + [cmd]
+    }
+  }
+  let missing = []
+  const keys = selected.map({ cmd -> to_string(cmd.key) }).to_list()
+  for name in wanted {
+    if !keys.contains(name) {
+      missing = missing + [name]
+    }
+  }
+  return {ok: missing.count == 0, commands: selected, missing: missing.sorted()}
+}
+
+pub type MergeBaselineRequest = {
+  payload: any,
+  sha: string,
+  measurements: any,
+  update_baseline: bool,
+  host: string,
+  version: string,
+  captured_at: string,
+}
+
+pub fn merge_baseline(request: MergeBaselineRequest) {
+  const payload = request.payload
+  const sha = request.sha
+  const measurements = request.measurements
+  const update_baseline = request.update_baseline
+  const host = request.host
+  const version = request.version
+  const captured_at = request.captured_at
+  const existing_entry = payload[sha] ?? {}
+  const existing_commands = existing_entry?.commands ?? {}
+  let merged_commands = existing_commands
+  for entry in entries(measurements ?? {}) {
+    if merged_commands[entry.key] != nil && !update_baseline {
+      continue
+    }
+    merged_commands = merged_commands + {[entry.key]: entry.value}
+  }
+  return payload
+    + {
+    [sha]: {
+      host: existing_entry?.host ?? host,
+      harn_version: existing_entry?.harn_version ?? version,
+      captured_at: captured_at,
+      commands: merged_commands,
+    },
+  }
+}
+
+fn main(harness: Harness) -> int {
+  const harn_bin = require_env(harness, "HARN_BIN")
+  const budgets_file = require_env(harness, "HARN_CLI_BUDGETS_FILE")
+  const baseline_file = require_env(harness, "HARN_CLI_BASELINE_FILE")
+  const repo_root = require_env(harness, "HARN_CLI_REPO_ROOT")
+  const iterations_res = parse_positive_int(
+    "HARN_CLI_ITERATIONS",
+    require_env(harness, "HARN_CLI_ITERATIONS"),
+  )
+  if !iterations_res.ok {
+    harness.stdio.eprintln("error: ${iterations_res.error}")
+    return 2
+  }
+  const iterations = iterations_res.value
+  const update_baseline = env_or(harness.env, "HARN_CLI_UPDATE_BASELINE", "0") == "1"
+  const selection = select_commands(env_or(harness.env, "HARN_CLI_COMMANDS_FILTER", ""))
+  if !selection.ok {
+    harness.stdio.eprintln(
+      "error: unknown bench keys in --commands filter: " + json_stringify(selection.missing),
+    )
+    return 2
+  }
+  const budgets = load_budgets(harness.fs, budgets_file)
+  const baseline = load_baseline(harness.fs, baseline_file)
+  const sha = current_commit_sha(harness.process, repo_root)
+  const use_hyperfine = command_exists(harness.process, "hyperfine")
+  const timer_label = if use_hyperfine {
+    "hyperfine"
+  } else {
+    "monotonic fallback"
+  }
+  const version = harn_version(harness.process, harn_bin)
+  const host = host_label(harness.process)
+  harness.stdio.println(
+    "# CLI cold-start benchmark (iterations=${iterations}, timer=${timer_label})",
+  )
+  harness.stdio.println("# harn: ${version}  host: ${host}  commit: ${sha}")
+  harness.stdio.println(
+    pad_right("bench", 22)
+      + " "
+      + pad_left("cold_ms", 10)
+      + " "
+      + pad_left("budget", 10)
+      + " "
+      + pad_left("baseline", 10)
+      + " "
+      + pad_left("delta", 10)
+      + " "
+      + pad_left("status", 10),
+  )
+  let measurements = {}
+  let failures: list<string> = []
+  const tmp_root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-cli-coldstart-" + harness.random.uuid_v7(),
+  )
+  harness.fs.mkdir(tmp_root)
+  defer {
+    harness.process.run({program: "rm", args: ["-rf", tmp_root]})
+  }
+  for cmd in selection.commands {
+    const key = to_string(cmd.key)
+    const cold_ms = measure_cold_start(harness, cmd, tmp_root, harn_bin, iterations, use_hyperfine)
+    measurements = measurements + {[key]: {cold_ms: round_ms(cold_ms)}}
+    const budget = budgets[key]
+    const baseline_ref = most_recent_baseline_for(baseline, key, sha)
+    const reasons = failure_reasons(cold_ms, budget, baseline_ref)
+    if reasons.count > 0 {
+      failures = failures + [key + ": " + join(reasons, "; ")]
+    }
+    harness.stdio.println(row_line(key, cold_ms, budget, baseline_ref, reasons))
+  }
+  if failures.count > 0 {
+    harness.stdio.println("")
+    harness.stdio.println("FAIL: one or more subcommands regressed:")
+    for line in failures {
+      harness.stdio.println("  - " + line)
+    }
+    return 1
+  }
+  const merged = merge_baseline(
+    {
+      payload: baseline,
+      sha: sha,
+      measurements: measurements,
+      update_baseline: update_baseline,
+      host: host,
+      version: version,
+      captured_at: harness.clock.date_iso(),
+    },
+  )
+  save_baseline(harness.fs, baseline_file, merged)
+  return 0
+}

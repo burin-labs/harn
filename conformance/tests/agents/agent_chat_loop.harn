@@ -1,0 +1,66 @@
+import { agent_chat_loop, agent_chat_route_input } from "std/agent/chat"
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline default(harness: Harness) {
+  const routed = agent_chat_route_input(
+    "/help",
+    {},
+    {"/runs": { _req -> {kind: "handled", message: "runs"} }},
+  )
+  harness.stdio.println(routed.kind)
+  harness.stdio.println(contains(routed.message, "/runs"))
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        text: "Need more info.",
+        tool_calls: [{id: "wait-1", name: "wait_for_user", arguments: {question: "Which branch?"}}],
+      },
+      llm_text("Done."),
+    ],
+    { ->
+      const input_count = harness.runtime.atomic(0)
+      const model_count = harness.runtime.atomic(0)
+      const wait_count = harness.runtime.atomic(0)
+      const result = agent_chat_loop(
+        harness,
+        {
+          session_id: "agent-chat-loop-conformance",
+          provider: "mock",
+          tool_format: "native",
+          max_turns: 2,
+          on_user_input: { state ->
+            let n = harness.runtime.atomic_add(input_count, 1)
+            if n == 0 {
+              return {kind: "send", message: "start"}
+            }
+            if n == 1 {
+              return {kind: "handled", state: state + {handled_once: true}}
+            }
+            if n == 2 {
+              return {kind: "send", message: "main"}
+            }
+            return {kind: "exit", reason: "operator_exit"}
+          },
+          on_model_turn: { turn, state ->
+            let _ = harness.runtime.atomic_add(model_count, 1)
+            if turn.stop_reason == "wait_for_user" {
+              let _ = harness.runtime.atomic_add(wait_count, 1)
+            }
+            return {state: state + {last_stop: turn.stop_reason}}
+          },
+        },
+      )
+      harness.stdio.println(result.turns)
+      harness.stdio.println(result.stop_reason)
+      harness.stdio.println(result.last_result?.visible_text)
+      harness.stdio.println(result.state.handled_once)
+      harness.stdio.println(result.state.last_wait_for_user_question)
+      harness.stdio.println(harness.runtime.atomic_get(input_count))
+      harness.stdio.println(harness.runtime.atomic_get(model_count))
+      harness.stdio.println(harness.runtime.atomic_get(wait_count))
+      harness.stdio.println(len(result.transcript.messages))
+      harness.stdio.println(harness.agent.exists("agent-chat-loop-conformance"))
+    },
+  )
+}

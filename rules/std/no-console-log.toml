@@ -1,0 +1,8 @@
+# Flag stray `console.log` calls (a lint: a message, no rewrite).
+id = "no-console-log"
+language = "typescript"
+severity = "warning"
+message = "Remove `console.log` before committing"
+
+[rule]
+pattern = "console.log($ARG)"

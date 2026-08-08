@@ -1,0 +1,12 @@
+[harn] 2
+[harn] user@host
+[harn] [user, host]
+[harn] admin@server
+[harn] [admin, server]
+[harn] foo
+[harn] 42
+[harn] bar
+[harn] 99
+[harn] []
+[harn] hello
+[harn] [hello, nil, nil]

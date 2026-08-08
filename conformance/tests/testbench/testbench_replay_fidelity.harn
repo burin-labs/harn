@@ -1,0 +1,42 @@
+import { with_llm_script } from "std/testing"
+
+/**
+ * Script performs deterministic work under a mocked LLM and paused
+ * clock. The .testbench-tape sidecar contains the golden tape from the
+ * first run; the conformance runner records a fresh tape on every
+ * subsequent run and compares the user-script phase byte-for-byte
+ * against the golden version via the fidelity oracle.
+ *
+ * A passing comparison means: given the same fixture and the same
+ * paused clock, the runtime always produces the same user-script
+ * sequence of host-boundary events. Runtime-finalize records are
+ * checked semantically so internal lifecycle observability can evolve
+ * without regenerating this fixture.
+ *
+ * REGENERATING THE TAPE: when a deliberate script-observable change
+ * adds or removes a host-boundary record, this fixture fails with a
+ * "missing_in_recorded" / "missing_in_replay" divergence. To
+ * regenerate: temporarily edit crates/harn-cli/src/commands/test/conformance.rs to
+ * `std::fs::copy(tape_path, "/tmp/actual.tape")` on divergence, run
+ * the filter, then
+ * `cp /tmp/actual.tape conformance/tests/testbench/testbench_replay_fidelity.testbench-tape`
+ * (normalize the absolute script_path to the relative form first).
+ * Revert the debug edit before committing. The brittleness here is the
+ * point — every regen requires explicit review.
+ */
+pipeline test(harness: Harness, task) {
+  with_llm_script(
+    harness.llm,
+    [{text: "fidelity-response", input_tokens: 5, output_tokens: 3, model: "mock"}],
+    { ->
+      harness.testing.clock_set(1767225600000)
+      const before = harness.clock.now_ms()
+      const resp = harness.llm.call("replay test", nil, {provider: "mock", model: "mock"})
+      harness.testing.clock_advance(1000)
+      const after = harness.clock.now_ms()
+      harness.stdio.println(resp.text == "fidelity-response")
+      harness.stdio.println(after - before == 1000)
+      harness.testing.clock_reset()
+    },
+  )
+}

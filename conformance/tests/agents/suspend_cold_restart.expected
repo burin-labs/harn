@@ -1,0 +1,8 @@
+first_ok=true
+first_suspended=true
+snapshot_exists=true
+snapshot_nonempty=true
+second_ok=true
+event_type=result
+resumed_status=completed
+has_transcript=true

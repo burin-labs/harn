@@ -1,0 +1,241 @@
+import { agent_emit_event, agent_session_inject_feedback } from "std/agent/state"
+
+type AgentRequiredToolRequirement = string | list<string>
+
+type AgentRequiredToolsEnvelope = {
+  schema_version: int,
+  kind: "missing_required_tools",
+  reason: string,
+  missing: list<string>,
+  successful_tool_names: list<string>,
+  iterations: int,
+}
+
+fn __agent_required_tool_satisfied(
+  requirement: AgentRequiredToolRequirement,
+  successful: list,
+) -> bool {
+  if type_of(requirement) == "list" {
+    for candidate in requirement {
+      if contains(successful, candidate) {
+        return true
+      }
+    }
+    return false
+  }
+  return contains(successful, requirement)
+}
+
+fn __agent_required_tool_missing(
+  requirement: AgentRequiredToolRequirement,
+  successful: list,
+) -> bool {
+  return !__agent_required_tool_satisfied(requirement, successful)
+}
+
+fn __agent_required_tool_label(requirement) -> string {
+  if type_of(requirement) == "list" {
+    return join(requirement, "|")
+  }
+  return to_string(requirement)
+}
+
+fn __agent_required_tools_from_options(opts) -> list {
+  const required = opts?.require_successful_tools
+  if required == nil {
+    return []
+  }
+  return required
+}
+
+/**
+ * agent_required_tools_missing_from_result returns missing required tools.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_required_tools_missing_from_result(result: dict, opts) -> list<string> {
+  const required = __agent_required_tools_from_options(opts)
+  if len(required) == 0 {
+    return []
+  }
+  const successful = result?.tools?.successful ?? []
+  let missing = []
+  for requirement in required {
+    if !__agent_required_tool_satisfied(requirement, successful) {
+      missing = missing.appending(__agent_required_tool_label(requirement))
+    }
+  }
+  return missing
+}
+
+/**
+ * agent_required_tools_missing_from_session returns missing accumulated tools.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_required_tools_missing_from_session(
+  opts,
+  successful_tools_seen: list,
+) -> list<string> {
+  const required = __agent_required_tools_from_options(opts)
+  if len(required) == 0 {
+    return []
+  }
+  let missing = []
+  for requirement in required {
+    if __agent_required_tool_missing(requirement, successful_tools_seen) {
+      missing = missing.appending(__agent_required_tool_label(requirement))
+    }
+  }
+  return missing
+}
+
+fn __agent_required_tools_friction_event(result: dict, opts, missing: list<string>) -> dict {
+  const session_id = to_string(result?.session_id ?? "")
+  let recurrence = ["missing_required_tools=" + to_string(len(missing))]
+  if opts?.persona != nil {
+    recurrence = recurrence.appending("persona=" + to_string(opts.persona))
+  }
+  return {
+    kind: "tool_gap",
+    source: "agent_loop.require_successful_tools",
+    actor: opts?.persona,
+    run_id: if session_id == "" {
+      nil
+    } else {
+      session_id
+    },
+    redacted_summary: "agent_loop completed without invoking required tool(s): "
+      + join(missing, ", "),
+    recurrence_hints: recurrence,
+    metadata: {
+      missing_required_tools: missing,
+      successful_tool_names: result?.tools?.successful ?? [],
+      iterations: result?.llm?.iterations ?? 0,
+      preset_kind: opts?._preset_kind,
+    },
+  }
+}
+
+fn __agent_required_tools_envelope(
+  result: dict,
+  missing: list<string>,
+  iterations: int,
+) -> AgentRequiredToolsEnvelope {
+  return {
+    schema_version: 1,
+    kind: "missing_required_tools",
+    reason: "Required tool(s) did not succeed",
+    missing: missing,
+    successful_tool_names: result?.tools?.successful ?? [],
+    iterations: iterations,
+  }
+}
+
+fn __agent_required_tools_emit_friction(
+  agent: HarnessAgent,
+  obs: HarnessObs,
+  result: dict,
+  opts,
+  missing: list<string>,
+) {
+  const event = __agent_required_tools_friction_event(result, opts, missing)
+  const _ = try {
+    obs.friction_record(event)
+  }
+  const session_id = to_string(result?.session_id ?? "")
+  if session_id != "" {
+    const _ = try {
+      agent_emit_event(agent, session_id, "require_successful_tools_violation", event)
+    }
+  }
+}
+
+fn __agent_required_tools_preserve_terminal_error(result: dict) -> bool {
+  if result?.error != nil {
+    return true
+  }
+  const status = to_string(result?.status ?? "")
+  const final_status = to_string(result?.final_status ?? "")
+  const terminal_statuses = [
+    "provider_error",
+    "error",
+    "blocked",
+    "suspended",
+    "cancelled",
+    "scope_alert",
+  ]
+  return contains(terminal_statuses, status) || contains(terminal_statuses, final_status)
+}
+
+/**
+ * agent_required_tools_enforce fails results that missed required tools.
+ *
+ * @effects: [agent]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_required_tools_enforce(
+  agent: HarnessAgent,
+  obs: HarnessObs,
+  result: dict,
+  opts,
+) -> dict {
+  if __agent_required_tools_preserve_terminal_error(result) {
+    return result
+  }
+  const missing = agent_required_tools_missing_from_result(result, opts)
+  if len(missing) == 0 {
+    return result
+  }
+  const iterations = result?.llm?.iterations ?? 0
+  const envelope = __agent_required_tools_envelope(result, missing, iterations)
+  __agent_required_tools_emit_friction(agent, obs, result, opts, missing)
+  return result
+    + {
+    status: "failed",
+    final_status: "failed",
+    stop_reason: "missing_required_tools",
+    missing_required_tools: missing,
+    error: "Required tools did not succeed: " + join(missing, ", "),
+    error_envelope: envelope,
+  }
+}
+
+/**
+ * agent_required_tools_feedback builds feedback for missing required tools.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_required_tools_feedback(["run_tests"])
+ */
+pub fn agent_required_tools_feedback(missing: list<string>) -> string {
+  return "Required tool(s) have not succeeded yet: "
+    + join(missing, ", ")
+    + ". Continue working and call the missing required tool(s) before finalizing."
+}
+
+/**
+ * agent_required_tools_inject_feedback injects missing-tool feedback.
+ *
+ * @effects: [agent]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_required_tools_inject_feedback(
+  agent: HarnessAgent,
+  session_id: string,
+  missing: list<string>,
+) {
+  agent_session_inject_feedback(
+    agent,
+    session_id,
+    "required_tools",
+    agent_required_tools_feedback(missing),
+  )
+}

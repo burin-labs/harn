@@ -1,0 +1,9 @@
+pipeline default(harness: Harness) {
+  fn call_pair(f: fn(int, int) -> int) -> int {
+    return f(2, 99)
+  }
+  const unary = fn(x: int) -> int { return x + 1 }
+  const callback: fn(int, int) -> int = unary
+  harness.stdio.println(call_pair(callback))
+  harness.stdio.println(unary(4, 100))
+}

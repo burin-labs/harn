@@ -1,0 +1,2 @@
+cannot access property `foo` on `nil`; the value is statically known to be nil here
+use the optional access operator `?.foo`, or narrow the value with a `!= nil` guard before reading fields

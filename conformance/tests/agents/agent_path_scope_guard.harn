@@ -1,0 +1,62 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn path_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "Read",
+    "Read a file",
+    {
+      handler: { args -> "read " + args.path },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+    },
+  )
+  return tools
+}
+
+fn run_read(harness: Harness, session, path) {
+  return with_llm_script(
+    harness.llm,
+    [{tool_calls: [{id: "call_Read", name: "Read", arguments: {path: path}}]}, llm_text("done")],
+    { ->
+      return agent_loop(
+        harness,
+        "Use Read",
+        nil,
+        {
+          session_id: session,
+          provider: "mock",
+          tools: path_tools(),
+          tool_format: "native",
+          max_iterations: 2,
+        },
+      )
+    },
+  )
+}
+
+pipeline main(harness: Harness) {
+  harness.tools.clear_hooks()
+  const session = harness.agent.open(
+    "path-scope-guard-conformance",
+    {workspace_anchor: {primary: "/tmp/harn-anchor-a", anchored_at: "2026-05-24T00:00:00Z"}},
+  )
+  harness.runtime.register_path_scope_guard()
+  const denied = run_read(harness, session, "/tmp/harn-anchor-b/file.txt")
+  const rejected = denied?.tools?.rejected ?? []
+  assert(len(rejected) == 1 && rejected[0] == "Read", "out-of-anchor path is denied")
+  const snap = harness.agent.snapshot(session)
+  const reminders = (snap.events ?? []).filter({ ev -> ev?.kind == "system_reminder" })
+  const scope_alerts = reminders.filter(
+    { ev -> ev?.reminder?.tags != nil && ev.reminder.tags.any({ tag -> tag == "scope_alert" }) },
+  )
+  assert(len(scope_alerts) >= 1, "scope_alert reminder is appended on deny")
+  harness.runtime.clear_path_scope_guard()
+  const allowed = run_read(harness, session, "/tmp/harn-anchor-a/file.txt")
+  assert(len(allowed?.tools?.rejected ?? []) == 0, "in-anchor path is allowed")
+  const after_clear = run_read(harness, session, "/tmp/harn-anchor-b/another.txt")
+  assert(len(after_clear?.tools?.rejected ?? []) == 0, "guard removed after clear")
+  harness.stdio.log("agent_path_scope_guard tests passed")
+}

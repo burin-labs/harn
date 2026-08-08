@@ -1,0 +1,34 @@
+/**
+ * R-01: `transcript_reminder_event` applies protocol defaults when the
+ * caller omits fields. Body-only construction is legal; everything else
+ * resolves to the spec-canonical fallbacks.
+ */
+pipeline main(harness: Harness) {
+  const evt = transcript_reminder_event({body: "Reload tools before next turn."})
+  harness.stdio.println(evt?.kind == "system_reminder")
+  // Defaults: propagate=session, role_hint=system, source=in_pipeline,
+  // preserve_on_compact=false, tags=[], dedupe_key=nil, ttl_turns=nil,
+  // fired_at_turn=0.
+  harness.stdio.println(evt?.role == "system")
+  harness.stdio.println(evt?.visibility == "public")
+  harness.stdio.println(evt?.reminder?.propagate == "session")
+  harness.stdio.println(evt?.reminder?.role_hint == "system")
+  harness.stdio.println(evt?.reminder?.source == "in_pipeline")
+  harness.stdio.println(!evt?.reminder?.preserve_on_compact)
+  harness.stdio.println(len(evt?.reminder?.tags) == 0)
+  harness.stdio.println(evt?.reminder?.dedupe_key == nil)
+  harness.stdio.println(evt?.reminder?.ttl_turns == nil)
+  harness.stdio.println(evt?.reminder?.fired_at_turn == 0)
+  harness.stdio.println(evt?.reminder?.body == "Reload tools before next turn.")
+  harness.stdio.println(len(evt?.reminder?.id) > 0)
+  // Filter by `kind` so reminders show up alongside other transcript
+  // events without breaking existing kind-based consumers.
+  const crafted = {
+    _type: "transcript",
+    messages: [],
+    events: [{kind: "message", visibility: "public", text: "hello"}, evt],
+  }
+  const reminders = transcript_events_by_kind(crafted, "system_reminder")
+  harness.stdio.println(len(reminders) == 1)
+  harness.stdio.println(reminders[0]?.reminder?.body == "Reload tools before next turn.")
+}

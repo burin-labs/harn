@@ -1,0 +1,43 @@
+import { with_llm_script } from "std/testing"
+
+/**
+ * A `models:` ladder advances to the next rung ONLY on a transport-class
+ * failure. The cheap rung returns HTTP 429 (rate_limit), so the ladder
+ * escalates and the frontier rung serves the answer. The result envelope
+ * reflects the step-2 model and both attempts show on the routing trace.
+ */
+pipeline test(harness: Harness, task) {
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        error: {category: "rate_limit", message: "HTTP 429 rate limit", retry_after_ms: 10},
+        model: "mock",
+        provider: "mock",
+      },
+      {text: "served by frontier", model: "mock-strong", provider: "mock"},
+    ],
+    { ->
+      const result = harness.llm.call(
+        "hi",
+        nil,
+        {
+          models: [
+            {model: "mock", provider: "mock", label: "cheap"},
+            {model: "mock-strong", provider: "mock", label: "frontier"},
+          ],
+        },
+      )
+      harness.stdio.println(result.text)
+      harness.stdio.println(result.model)
+      const attempts = result.routing.attempts
+      harness.stdio.println(len(attempts))
+      harness.stdio.println(attempts[0].label)
+      harness.stdio.println(attempts[0].status)
+      harness.stdio.println(attempts[0].error.category)
+      harness.stdio.println(attempts[1].label)
+      harness.stdio.println(attempts[1].status)
+      harness.stdio.println(result.routing.selected)
+    },
+  )
+}

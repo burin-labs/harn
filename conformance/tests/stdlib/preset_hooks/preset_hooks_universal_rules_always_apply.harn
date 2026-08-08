@@ -1,0 +1,54 @@
+import { preset_run_command, tool_hooks_mode_deny_with_explanation } from "std/tool_hooks"
+
+/**
+ * preset_hooks_universal_rules_always_apply (TH-07 #1900).
+ *
+ * The universal catalogue (deny-tier rules: force-push to main,
+ * `rm -rf /` and root-adjacent paths) is stackless. `tool_hooks_filter`
+ * keeps stackless catalogues regardless of the `stacks: [...]` opt-in,
+ * so universal denies fire even when the agent only opted into,
+ * say, `["rust"]`. Verified across three different stack opt-ins
+ * (rust, python, an unrecognized stack) plus an empty opt-in.
+ */
+pipeline default(harness: Harness) {
+  const inner = { args -> {ok: true, ran: args.command} }
+  /* rust-only wrapper: rm -rf / and force-push to main both denied. */
+  const rust_wrapper = preset_run_command(
+    harness,
+    {stacks: ["rust"], mode: tool_hooks_mode_deny_with_explanation, inner: inner},
+  )
+  const r1 = rust_wrapper({command: "rm -rf /"})
+  harness.stdio.println(r1.action)
+  harness.stdio.println(r1.rule_id)
+  const r2 = rust_wrapper({command: "git push --force origin main"})
+  harness.stdio.println(r2.action)
+  harness.stdio.println(r2.rule_id)
+  /* python-only wrapper: same universal rules still fire. */
+  const py_wrapper = preset_run_command(
+    harness,
+    {stacks: ["python"], mode: tool_hooks_mode_deny_with_explanation, inner: inner},
+  )
+  const r3 = py_wrapper({command: "rm -rf /"})
+  harness.stdio.println(r3.action)
+  harness.stdio.println(r3.rule_id)
+  /* Unrecognized stack: __cat_for_stack returns nil so only the
+   * universal catalogue ships. Universal denies still apply. */
+  const unknown_wrapper = preset_run_command(
+    harness,
+    {stacks: ["fictional"], mode: tool_hooks_mode_deny_with_explanation, inner: inner},
+  )
+  const r4 = unknown_wrapper({command: "rm -rf /"})
+  harness.stdio.println(r4.action)
+  harness.stdio.println(r4.rule_id)
+  /* Empty stack list: still picks up universal. */
+  const empty_wrapper = preset_run_command(
+    harness,
+    {stacks: [], mode: tool_hooks_mode_deny_with_explanation, inner: inner},
+  )
+  const r5 = empty_wrapper({command: "rm -rf /"})
+  harness.stdio.println(r5.action)
+  harness.stdio.println(r5.rule_id)
+  /* Sanity: a benign command on every wrapper still passes through. */
+  const benign = rust_wrapper({command: "ls -la"})
+  harness.stdio.println(benign?.result?.ran ?? benign?.ran ?? "MISSING")
+}

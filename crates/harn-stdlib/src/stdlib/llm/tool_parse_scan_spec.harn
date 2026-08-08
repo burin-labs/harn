@@ -1,0 +1,67 @@
+/**
+ * Structural-scanner projection of Harn's text-tool dialect registry.
+ *
+ * Rust owns byte-proportional delimiting; Harn owns the vocabulary supplied to
+ * it. Keeping this projection here prevents the composition module from also
+ * becoming a second dialect registry.
+ */
+import {
+  CONTENTLESS_WRAPPER_TAGS,
+  HARMONY_CORRUPTED_OPENERS,
+  HARMONY_FRAME_PREFIX,
+  HARMONY_FRAME_SUFFIX,
+  HARMONY_HEADER_MARKERS,
+  HARMONY_MESSAGE_MARKER,
+  HARMONY_STANDALONE_MARKERS,
+  HARMONY_TOOL_CALL_HEADER_PREFIX,
+  MARKUP_DIALECTS,
+  RESERVED_MALFORMED_CALL_OPENER,
+  TAGGED_DIALECT,
+} from "std/llm/dialects"
+import { registry_names } from "std/llm/tool_parse_result"
+
+fn __tool_parse_tag_spellings(canonical: string) -> list<string> {
+  for dialect in TAGGED_DIALECT {
+    if dialect.canonical == canonical {
+      return dialect.spellings
+    }
+  }
+  return []
+}
+
+/**
+ * Build the scanner's typed vocabulary projection for one tool registry.
+ * @effects: []
+ * @errors: []
+ * @api_stability: internal
+ */
+pub fn tool_parse_scan_spec(tools) -> dict {
+  let block_tags: list<string> = []
+  for canonical in ["assistant_prose", "user_response", "done"] {
+    for spelling in __tool_parse_tag_spellings(canonical) {
+      block_tags = block_tags.appending(spelling)
+    }
+  }
+  let markup_openers: list<dict> = []
+  for dialect in MARKUP_DIALECTS {
+    markup_openers = markup_openers.appending({opener: dialect.opener, close: dialect.close})
+  }
+  return {
+    call_tags: __tool_parse_tag_spellings("tool_call"),
+    block_tags: block_tags,
+    wrapper_tags: CONTENTLESS_WRAPPER_TAGS,
+    markup_openers: markup_openers,
+    reserved_openers: [RESERVED_MALFORMED_CALL_OPENER],
+    harmony: {
+      header_markers: HARMONY_HEADER_MARKERS,
+      standalone_markers: HARMONY_STANDALONE_MARKERS,
+      frame_prefix: HARMONY_FRAME_PREFIX,
+      frame_suffix: HARMONY_FRAME_SUFFIX,
+      message_marker: HARMONY_MESSAGE_MARKER,
+      tool_call_header_prefix: HARMONY_TOOL_CALL_HEADER_PREFIX,
+      corrupted_openers: HARMONY_CORRUPTED_OPENERS,
+    },
+    known_tools: registry_names(tools),
+    strip_thinking: true,
+  }
+}

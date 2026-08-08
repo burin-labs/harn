@@ -1,0 +1,65 @@
+/**
+ * `harn models list` renderer.
+ *
+ * Rust owns only the sandbox-external Ollama discovery and Clap argument
+ * collection. It hands one JSON payload to this script; Harn stdlib owns the
+ * catalog query contract, validation, ordering, and human projection.
+ *
+ * Inputs (from the dispatch shim):
+ *   HARN_MODELS_LIST_QUERY_JSON — {provider?, where, sort?, columns?,
+ *                                  installed_only, installed_ollama}.
+ *   HARN_OUTPUT_JSON            — "1" for complete runtime catalog rows.
+ */
+import { json_mode, safe_list } from "std/cli/render"
+import {
+  catalog_with_installed_ollama_models,
+  model_catalog_query,
+  normalize_model_catalog_query,
+  render_model_catalog_table,
+} from "std/llm/catalog"
+
+const LIST_QUERY_ENV = "HARN_MODELS_LIST_QUERY_JSON"
+
+fn __read_query_payload(env: HarnessEnv) -> dict {
+  const raw = env.get_or(LIST_QUERY_ENV, "")
+  if raw == "" {
+    throw "internal error: " + LIST_QUERY_ENV + " not set"
+  }
+  const parsed = json_parse(raw)
+  if type_of(parsed) != "dict" {
+    throw "internal error: " + LIST_QUERY_ENV + " must be a JSON object"
+  }
+  return parsed
+}
+
+fn main(harness: Harness) -> int {
+  const payload = try {
+    __read_query_payload(harness.env)
+  } catch (e) {
+    harness.stdio.eprintln(to_string(e))
+    return 70
+  }
+  if json_mode(harness.env) && payload?.columns != nil {
+    harness.stdio.eprintln(
+      "error: --columns cannot be combined with --json; JSON always returns complete catalog rows",
+    )
+    return 2
+  }
+  const query = try {
+    normalize_model_catalog_query(payload)
+  } catch (e) {
+    harness.stdio.eprintln("error: " + to_string(e))
+    return 2
+  }
+  const catalog = catalog_with_installed_ollama_models(
+    harness.llm.catalog(),
+    safe_list(payload.installed_ollama),
+  )
+  const result = model_catalog_query(catalog, query)
+  if json_mode(harness.env) {
+    harness.stdio.println(json_stringify_pretty(result))
+    return 0
+  }
+  harness.stdio.println(render_model_catalog_table(result.models, query))
+  return 0
+}

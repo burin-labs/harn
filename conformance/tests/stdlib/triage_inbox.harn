@@ -1,0 +1,70 @@
+import { triage_emit, triage_normalize, triage_start_my_day } from "std/triage"
+
+fn fixture(fs: HarnessFs, name) {
+  const root = fs.workspace_root()
+  return json_parse(fs.read_text(path_join(root, "examples/triage/fixtures/" + name + ".json")))
+}
+
+pipeline default(harness: Harness) {
+  const github = fixture(harness.fs, "github_issue")
+  const slack = fixture(harness.fs, "slack_message")
+  const notion = fixture(harness.fs, "notion_page")
+  const github_retry = github
+    + {
+    dedupe_key: "github-delivery-1507-retry",
+    provider_payload: github.provider_payload + {delivery_id: "github-delivery-1507-retry"},
+  }
+  const github_event = triage_normalize(github)
+  const slack_event = triage_normalize(slack)
+  const notion_event = triage_normalize(notion)
+  const github_retry_event = triage_normalize(github_retry)
+  harness.stdio.println(github_event.schema)
+  harness.stdio.println(github_event.provider + ":" + github_event.source_kind)
+  harness.stdio.println(slack_event.source_url.starts_with("slack://channel"))
+  harness.stdio.println(notion_event.source_url.starts_with("https://www.notion.so/"))
+  harness.stdio.println(github_event.dedupe_key == github_retry_event.dedupe_key)
+  harness.stdio.println(github_event.id == github_retry_event.id)
+  harness.stdio.println(github_event.raw_payload.issue.title)
+  harness.stdio.println(
+    github_event.action_intents.find({ intent -> intent.kind == "convert_to_task" })
+      .requires_approval,
+  )
+  const missing_source = try {
+    triage_normalize(
+      {provider: "slack", kind: "message", provider_payload: {provider: "slack", event: "message"}},
+    )
+  }
+  harness.stdio.println(is_err(missing_source))
+  const ungated_write = try {
+    triage_normalize(
+      github,
+      {
+        action_intents: [
+          {
+            kind: "convert_to_task",
+            label: "Convert to task",
+            target: {},
+            effect: "host_task_write",
+            requires_approval: false,
+          },
+        ],
+      },
+    )
+  }
+  harness.stdio.println(is_err(ungated_write))
+  const feed = triage_start_my_day(
+    harness.obs,
+    [github, slack, notion, github_retry],
+    {emit: true, topic: "triage.inbox.test", generated_at: "fixture"},
+  )
+  harness.stdio.println(len(feed.events))
+  harness.stdio.println(len(feed.receipts))
+  const receipt = triage_emit(harness.obs, github_event, {topic: "triage.inbox.test.single"})
+  const stream = harness.obs.event_log_subscribe(
+    {topic: "triage.inbox.test.single", from_cursor: receipt.event_log_id - 1},
+  )
+  const logged = stream.next().value
+  harness.stdio.println(logged.kind)
+  harness.stdio.println(logged.payload.provider)
+  harness.stdio.println(logged.headers.schema)
+}

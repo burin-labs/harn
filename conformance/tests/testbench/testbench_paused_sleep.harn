@@ -1,0 +1,18 @@
+/**
+ * Under a paused clock sleep_ms returns immediately and advances the
+ * virtual clock by the requested duration.
+ *
+ * Validates the core testbench property: script-perceived time advances
+ * without consuming real wall-clock time.
+ */
+pipeline test(harness: Harness, task) {
+  const start_ms = 1767225600000
+  harness.testing.clock_set(start_ms)
+  const before = harness.clock.now_ms()
+  harness.clock.sleep_ms(86400000)
+  const after = harness.clock.now_ms()
+  harness.stdio.println(before == start_ms)
+  harness.stdio.println(after == start_ms + 86400000)
+  harness.stdio.println(after - before == 86400000)
+  harness.testing.clock_reset()
+}

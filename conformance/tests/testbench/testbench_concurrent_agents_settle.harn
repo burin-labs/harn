@@ -1,0 +1,28 @@
+import { with_llm_script } from "std/testing"
+
+/**
+ * 100 concurrent parallel-each agents each perform a mocked LLM call
+ * and return their index. Validates deterministic settlement: every
+ * agent completes and the total result count equals the input count.
+ *
+ * The LLM mock ensures no real network traffic; running under a paused
+ * clock guarantees same-fixture runs produce byte-identical output.
+ */
+pipeline test(harness: Harness, task) {
+  with_llm_script(
+    harness.llm,
+    [{text: "ok", input_tokens: 1, output_tokens: 1, model: "mock"}],
+    { ->
+      const inputs = range(0, 100).to_list()
+      const results = parallel each inputs with { max_concurrent: 10 } { i ->
+        let _resp = harness.llm.call("task " + to_string(i), nil, {provider: "mock", model: "mock"})
+        return i
+      }
+      const sorted = results.sorted()
+      harness.stdio.println(len(results) == 100)
+      harness.stdio.println(sorted[0] == 0)
+      harness.stdio.println(sorted[99] == 99)
+      harness.stdio.println(len(harness.llm.mock_calls()) == 100)
+    },
+  )
+}

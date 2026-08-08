@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Portable Harn Kernel demo</title>
+    <style>
+      :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #07110f; color: #e8f5ef; }
+      body { min-height: 100vh; margin: 0; display: grid; place-items: center; padding: 2rem; }
+      main { max-width: 42rem; }
+      code { color: #76ddb4; }
+      a { color: #8ebeff; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>The playground now uses the Portable Harn Kernel.</h1>
+      <p>The former page depended on the removed subset interpreter. Build and serve the canonical browser worker instead:</p>
+      <pre><code>make wasm-demo</code></pre>
+      <p>Then open the URL printed by the command. When this repository is already served from its root, <a href="../crates/harn-wasm/">open the canonical demo directly</a>.</p>
+    </main>
+  </body>
+</html>

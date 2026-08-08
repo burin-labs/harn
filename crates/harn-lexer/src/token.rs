@@ -1,0 +1,557 @@
+use std::fmt;
+
+/// A segment of an interpolated string.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub enum StringSegment {
+    Literal(String),
+    /// An interpolated expression with its source position (line, column).
+    Expression(String, usize, usize),
+}
+
+impl fmt::Display for StringSegment {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            StringSegment::Literal(s) => write!(f, "{s}"),
+            StringSegment::Expression(e, _, _) => write!(f, "${{{e}}}"),
+        }
+    }
+}
+
+/// Source location for error reporting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct Span {
+    /// Byte offset from start of source (inclusive).
+    pub start: usize,
+    /// Byte offset from start of source (exclusive).
+    pub end: usize,
+    /// 1-based line number of start position.
+    pub line: usize,
+    /// 1-based column number of start position.
+    pub column: usize,
+    /// 1-based line number of end position (for multiline span detection).
+    pub end_line: usize,
+}
+
+/// Resolve a one-based lexer line/column to an absolute UTF-8 byte offset.
+///
+/// Harn columns count Unicode scalar values, while edit spans use byte offsets.
+/// Keeping this conversion in the lexer prevents diagnostic and repair clients
+/// from maintaining subtly different source-coordinate projections.
+#[must_use]
+pub fn byte_offset_for_position(source: &str, line: usize, column: usize) -> Option<usize> {
+    if line == 0 || column == 0 {
+        return None;
+    }
+
+    let mut current_line = 1usize;
+    let mut current_column = 1usize;
+    for (offset, character) in source.char_indices() {
+        if current_line == line && current_column == column {
+            return Some(offset);
+        }
+        if character == '\n' {
+            current_line += 1;
+            current_column = 1;
+        } else {
+            current_column += 1;
+        }
+    }
+
+    (current_line == line && current_column == column).then_some(source.len())
+}
+
+impl Span {
+    pub fn with_offsets(start: usize, end: usize, line: usize, column: usize) -> Self {
+        Self {
+            start,
+            end,
+            line,
+            column,
+            end_line: line,
+        }
+    }
+
+    /// Create a span covering two spans (from start of `a` to end of `b`).
+    pub fn merge(a: Span, b: Span) -> Span {
+        Span {
+            start: a.start,
+            end: b.end,
+            line: a.line,
+            column: a.column,
+            end_line: b.end_line,
+        }
+    }
+
+    /// A dummy span for synthetic/generated nodes.
+    pub fn dummy() -> Self {
+        Self {
+            start: 0,
+            end: 0,
+            line: 0,
+            column: 0,
+            end_line: 0,
+        }
+    }
+}
+
+impl fmt::Display for Span {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.line, self.column)
+    }
+}
+
+/// A machine-applicable text replacement for autofixing diagnostics.
+#[derive(Debug, Clone)]
+pub struct FixEdit {
+    /// The source span to replace.
+    pub span: Span,
+    /// The replacement text (empty string = deletion).
+    pub replacement: String,
+}
+
+impl FixEdit {
+    /// Sort edits right-to-left by start offset and drop any that overlap an
+    /// already-accepted edit, returning the survivors in descending-start
+    /// order — ready to splice right-to-left without invalidating earlier
+    /// offsets. This is the single source of truth for the "apply all fixes,
+    /// drop conflicts" policy that `harn fmt`, `harn lint --fix`, and the LSP
+    /// on-save fixer must agree on byte-for-byte.
+    pub fn dedupe_overlapping(edits: &[FixEdit]) -> Vec<FixEdit> {
+        let mut sorted = edits.to_vec();
+        // At the same offset, apply a replacement before an insertion. This
+        // makes independently synthesized "project this argument" and
+        // "prepend a new argument" edits compose as
+        // `root, root.capability` instead of overwriting the insertion.
+        sorted.sort_by_key(|edit| {
+            (
+                std::cmp::Reverse(edit.span.start),
+                std::cmp::Reverse(edit.span.end),
+            )
+        });
+        let mut accepted: Vec<FixEdit> = Vec::new();
+        for edit in sorted {
+            let overlaps = accepted
+                .iter()
+                .any(|prev| edit.span.start < prev.span.end && edit.span.end > prev.span.start);
+            if !overlaps {
+                accepted.push(edit);
+            }
+        }
+        accepted
+    }
+
+    /// Apply `edits` to `source`, dropping overlaps via
+    /// [`Self::dedupe_overlapping`] and splicing right-to-left. Callers that
+    /// also need the accepted-edit list (e.g. to build LSP `TextEdit`s) should
+    /// call `dedupe_overlapping` directly.
+    #[expect(
+        clippy::string_slice,
+        reason = "FixEdit spans are lexed token byte offsets, which lie on char boundaries"
+    )]
+    pub fn apply_all(source: &str, edits: &[FixEdit]) -> String {
+        let mut out = source.to_string();
+        for edit in Self::dedupe_overlapping(edits) {
+            let before = &out[..edit.span.start];
+            let after = &out[edit.span.end..];
+            out = format!("{before}{}{after}", edit.replacement);
+        }
+        out
+    }
+}
+
+#[cfg(test)]
+mod fix_edit_tests {
+    use super::*;
+
+    fn edit(start: usize, end: usize, replacement: &str) -> FixEdit {
+        FixEdit {
+            span: Span::with_offsets(start, end, 1, start + 1),
+            replacement: replacement.to_string(),
+        }
+    }
+
+    #[test]
+    fn apply_all_splices_right_to_left() {
+        // Order-independent input; non-overlapping edits both apply.
+        let out = FixEdit::apply_all("0123456789", &[edit(2, 4, "AB"), edit(6, 8, "CD")]);
+        assert_eq!(out, "01AB45CD89");
+    }
+
+    #[test]
+    fn apply_all_drops_overlapping_edits_descending_start_wins() {
+        // Sorted descending by start, edit(4,8) is accepted and edit(2,6)
+        // overlaps it, so it's dropped — matching fmt/lsp/cli semantics.
+        let out = FixEdit::apply_all("0123456789", &[edit(2, 6, "XXXX"), edit(4, 8, "YYYY")]);
+        assert_eq!(out, "0123YYYY89");
+        assert_eq!(
+            FixEdit::dedupe_overlapping(&[edit(2, 6, "x"), edit(4, 8, "y")]).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn apply_all_composes_replacement_then_insertion_at_same_offset() {
+        let source = "call(harness, value)";
+        let start = source.find("harness").unwrap();
+        let out = FixEdit::apply_all(
+            source,
+            &[
+                edit(start, start, "harness, "),
+                edit(start, start + "harness".len(), "harness.fs"),
+            ],
+        );
+        assert_eq!(out, "call(harness, harness.fs, value)");
+    }
+}
+
+macro_rules! define_keyword_vocabulary {
+    (
+        keywords { $( $keyword:literal => $token:ident ),* $(,)? }
+        literals { $( $literal:literal => $literal_token:ident ),* $(,)? }
+    ) => {
+        /// Canonical Harn keyword vocabulary consumed by parser and tooling.
+        pub const KEYWORDS: &[&str] = &[$($keyword,)* $($literal,)*];
+
+        /// Keyword-shaped literal values for syntax-highlighting projections.
+        pub const LITERAL_KEYWORDS: &[&str] = &[$($literal,)*];
+
+        /// Tokenize a canonical keyword with a compile-time match table.
+        ///
+        /// This function and both public vocabulary projections are generated
+        /// by the same declaration, so adding syntax cannot update one surface
+        /// while leaving another stale.
+        pub fn keyword_token_kind(value: &str) -> Option<TokenKind> {
+            match value {
+                $($keyword => Some(TokenKind::$token),)*
+                $($literal => Some(TokenKind::$literal_token),)*
+                _ => None,
+            }
+        }
+    };
+}
+
+define_keyword_vocabulary! {
+    keywords {
+        "break" => Break,
+        "catch" => Catch,
+        "const" => Const,
+        "continue" => Continue,
+        "deadline" => Deadline,
+        "defer" => Defer,
+        "else" => Else,
+        "emit" => Emit,
+        "enum" => Enum,
+        "eval_pack" => EvalPack,
+        "exclusive" => Exclusive,
+        "extends" => Extends,
+        "finally" => Finally,
+        "fn" => Fn,
+        "for" => For,
+        "from" => From,
+        "guard" => Guard,
+        "if" => If,
+        "impl" => Impl,
+        "import" => Import,
+        "in" => In,
+        "interface" => Interface,
+        "let" => Let,
+        "match" => Match,
+        "mutex" => Mutex,
+        "override" => Override,
+        "parallel" => Parallel,
+        "pipeline" => Pipeline,
+        "pub" => Pub,
+        "require" => Require,
+        "retry" => Retry,
+        "return" => Return,
+        "select" => Select,
+        "skill" => Skill,
+        "spawn" => Spawn,
+        "struct" => Struct,
+        "throw" => Throw,
+        "throws" => Throws,
+        "to" => To,
+        "tool" => Tool,
+        "try" => Try,
+        "type" => TypeKw,
+        "var" => Var,
+        "while" => While,
+        "yield" => Yield,
+    }
+    literals {
+        "false" => False,
+        "nil" => Nil,
+        "true" => True,
+    }
+}
+
+/// Token kinds produced by the lexer.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TokenKind {
+    Pipeline,
+    Extends,
+    Override,
+    Let,
+    Const,
+    Var,
+    If,
+    Else,
+    For,
+    In,
+    Match,
+    Retry,
+    Parallel,
+    Return,
+    Import,
+    True,
+    False,
+    Nil,
+    Try,
+    Catch,
+    Throw,
+    /// `throws` — declares a callable's exception channel in its signature
+    /// (`fn f() -> R throws E`). Distinct from `Throw` (the statement).
+    Throws,
+    Finally,
+    Fn,
+    Spawn,
+    While,
+    TypeKw,
+    Enum,
+    EvalPack,
+    Struct,
+    Interface,
+    Emit,
+    Pub,
+    From,
+    To,
+    Tool,
+    Exclusive,
+    Guard,
+    Require,
+    Deadline,
+    Defer,
+    Yield,
+    Mutex,
+    Break,
+    Continue,
+    Select,
+    Impl,
+    Skill,
+    /// First-class HITL primitive: `request_approval(...)`.
+    RequestApproval,
+    /// First-class HITL primitive: `dual_control(...)`.
+    DualControl,
+    /// First-class HITL primitive: `ask_user(...)`.
+    AskUser,
+    /// First-class HITL primitive: `escalate_to(...)`.
+    EscalateTo,
+
+    Identifier(String),
+    StringLiteral(String),
+    InterpolatedString(Vec<StringSegment>),
+    /// Raw string literal `r"..."` — no escape processing, no interpolation.
+    RawStringLiteral(String),
+    IntLiteral(i64),
+    FloatLiteral(f64),
+    /// Duration literal in milliseconds: 500ms, 5s, 30m, 2h, 1d, 1w
+    DurationLiteral(u64),
+
+    Eq,            // ==
+    Neq,           // !=
+    And,           // &&
+    Or,            // ||
+    Pipe,          // |>
+    NilCoal,       // ??
+    Pow,           // **
+    QuestionDot,   // ?.
+    Arrow,         // ->
+    Lte,           // <=
+    Gte,           // >=
+    PlusAssign,    // +=
+    MinusAssign,   // -=
+    StarAssign,    // *=
+    SlashAssign,   // /=
+    PercentAssign, // %=
+
+    Assign,   // =
+    Not,      // !
+    Dot,      // .
+    Plus,     // +
+    Minus,    // -
+    Star,     // *
+    Slash,    // /
+    Percent,  // %
+    Lt,       // <
+    Gt,       // >
+    Question, // ?
+    Bar,      // |  (for union types)
+    Amp,      // &  (for intersection types)
+
+    LBrace,    // {
+    RBrace,    // }
+    LParen,    // (
+    RParen,    // )
+    LBracket,  // [
+    RBracket,  // ]
+    Comma,     // ,
+    Colon,     // :
+    Semicolon, // ;
+    At,        // @ (attribute prefix)
+
+    LineComment {
+        text: String,
+        is_doc: bool,
+    }, // // text or /// text
+    BlockComment {
+        text: String,
+        is_doc: bool,
+    }, // /* text */ or /** text */
+
+    Newline,
+    Eof,
+}
+
+impl fmt::Display for TokenKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TokenKind::Pipeline => write!(f, "pipeline"),
+            TokenKind::Extends => write!(f, "extends"),
+            TokenKind::Override => write!(f, "override"),
+            TokenKind::Let => write!(f, "let"),
+            TokenKind::Const => write!(f, "const"),
+            TokenKind::Var => write!(f, "var"),
+            TokenKind::If => write!(f, "if"),
+            TokenKind::Else => write!(f, "else"),
+            TokenKind::For => write!(f, "for"),
+            TokenKind::In => write!(f, "in"),
+            TokenKind::Match => write!(f, "match"),
+            TokenKind::Retry => write!(f, "retry"),
+            TokenKind::Parallel => write!(f, "parallel"),
+            TokenKind::Return => write!(f, "return"),
+            TokenKind::Import => write!(f, "import"),
+            TokenKind::True => write!(f, "true"),
+            TokenKind::False => write!(f, "false"),
+            TokenKind::Nil => write!(f, "nil"),
+            TokenKind::Try => write!(f, "try"),
+            TokenKind::Catch => write!(f, "catch"),
+            TokenKind::Throw => write!(f, "throw"),
+            TokenKind::Throws => write!(f, "throws"),
+            TokenKind::Finally => write!(f, "finally"),
+            TokenKind::Fn => write!(f, "fn"),
+            TokenKind::Spawn => write!(f, "spawn"),
+            TokenKind::While => write!(f, "while"),
+            TokenKind::TypeKw => write!(f, "type"),
+            TokenKind::Enum => write!(f, "enum"),
+            TokenKind::EvalPack => write!(f, "eval_pack"),
+            TokenKind::Struct => write!(f, "struct"),
+            TokenKind::Interface => write!(f, "interface"),
+            TokenKind::Emit => write!(f, "emit"),
+            TokenKind::Pub => write!(f, "pub"),
+            TokenKind::From => write!(f, "from"),
+            TokenKind::To => write!(f, "to"),
+            TokenKind::Tool => write!(f, "tool"),
+            TokenKind::Exclusive => write!(f, "exclusive"),
+            TokenKind::Guard => write!(f, "guard"),
+            TokenKind::Require => write!(f, "require"),
+            TokenKind::Deadline => write!(f, "deadline"),
+            TokenKind::Defer => write!(f, "defer"),
+            TokenKind::Yield => write!(f, "yield"),
+            TokenKind::Mutex => write!(f, "mutex"),
+            TokenKind::Break => write!(f, "break"),
+            TokenKind::Continue => write!(f, "continue"),
+            TokenKind::Select => write!(f, "select"),
+            TokenKind::Impl => write!(f, "impl"),
+            TokenKind::Skill => write!(f, "skill"),
+            TokenKind::RequestApproval => write!(f, "request_approval"),
+            TokenKind::DualControl => write!(f, "dual_control"),
+            TokenKind::AskUser => write!(f, "ask_user"),
+            TokenKind::EscalateTo => write!(f, "escalate_to"),
+            TokenKind::Identifier(s) => write!(f, "id({s})"),
+            TokenKind::StringLiteral(s) => write!(f, "str({s})"),
+            TokenKind::InterpolatedString(_) => write!(f, "istr(...)"),
+            TokenKind::RawStringLiteral(s) => write!(f, "rstr({s})"),
+            TokenKind::IntLiteral(n) => write!(f, "int({n})"),
+            TokenKind::FloatLiteral(n) => write!(f, "float({n})"),
+            TokenKind::DurationLiteral(ms) => write!(f, "duration({ms}ms)"),
+            TokenKind::Eq => write!(f, "=="),
+            TokenKind::Neq => write!(f, "!="),
+            TokenKind::And => write!(f, "&&"),
+            TokenKind::Or => write!(f, "||"),
+            TokenKind::Pipe => write!(f, "|>"),
+            TokenKind::NilCoal => write!(f, "??"),
+            TokenKind::Pow => write!(f, "**"),
+            TokenKind::QuestionDot => write!(f, "?."),
+            TokenKind::Arrow => write!(f, "->"),
+            TokenKind::Lte => write!(f, "<="),
+            TokenKind::Gte => write!(f, ">="),
+            TokenKind::PlusAssign => write!(f, "+="),
+            TokenKind::MinusAssign => write!(f, "-="),
+            TokenKind::StarAssign => write!(f, "*="),
+            TokenKind::SlashAssign => write!(f, "/="),
+            TokenKind::PercentAssign => write!(f, "%="),
+            TokenKind::Assign => write!(f, "="),
+            TokenKind::Not => write!(f, "!"),
+            TokenKind::Dot => write!(f, "."),
+            TokenKind::Plus => write!(f, "+"),
+            TokenKind::Minus => write!(f, "-"),
+            TokenKind::Star => write!(f, "*"),
+            TokenKind::Slash => write!(f, "/"),
+            TokenKind::Percent => write!(f, "%"),
+            TokenKind::Lt => write!(f, "<"),
+            TokenKind::Gt => write!(f, ">"),
+            TokenKind::Question => write!(f, "?"),
+            TokenKind::Bar => write!(f, "|"),
+            TokenKind::Amp => write!(f, "&"),
+            TokenKind::LBrace => write!(f, "{{"),
+            TokenKind::RBrace => write!(f, "}}"),
+            TokenKind::LParen => write!(f, "("),
+            TokenKind::RParen => write!(f, ")"),
+            TokenKind::LBracket => write!(f, "["),
+            TokenKind::RBracket => write!(f, "]"),
+            TokenKind::Comma => write!(f, ","),
+            TokenKind::Colon => write!(f, ":"),
+            TokenKind::Semicolon => write!(f, ";"),
+            TokenKind::At => write!(f, "@"),
+            TokenKind::LineComment { text, is_doc } => {
+                let prefix = if *is_doc { "///" } else { "//" };
+                write!(f, "{prefix} {text}")
+            }
+            TokenKind::BlockComment { text, is_doc } => {
+                let prefix = if *is_doc { "/**" } else { "/*" };
+                write!(f, "{prefix} {text} */")
+            }
+            TokenKind::Newline => write!(f, "\\n"),
+            TokenKind::Eof => write!(f, "EOF"),
+        }
+    }
+}
+
+/// A token with its kind and source location.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Token {
+    pub kind: TokenKind,
+    pub span: Span,
+}
+
+impl Token {
+    pub fn with_span(kind: TokenKind, span: Span) -> Self {
+        Self { kind, span }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::byte_offset_for_position;
+
+    #[test]
+    fn source_positions_map_unicode_columns_to_byte_offsets() {
+        let source = "αβ\n  call(\"value\")\n";
+        let expected = source.find("\"value\"").expect("first argument");
+
+        assert_eq!(byte_offset_for_position(source, 2, 8), Some(expected));
+        assert_eq!(byte_offset_for_position(source, 3, 1), Some(source.len()));
+        assert_eq!(byte_offset_for_position(source, 0, 1), None);
+        assert_eq!(byte_offset_for_position(source, 2, 99), None);
+    }
+}

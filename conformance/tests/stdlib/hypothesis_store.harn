@@ -1,0 +1,25 @@
+import "std/agent/hypothesis"
+
+/**
+ * Exercises the hypothesis store over the session-store substrate: open with a
+ * default status, open with an explicit status, get, list (+ status filter),
+ * in-place status update, unknown-id handling, and delete.
+ */
+pipeline default(harness: Harness) {
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-hyp-" + harness.random.uuid())
+  const sid = "agent.hypotheses"
+  const o = {root: root}
+  hypothesis_open(harness.agent, sid, {id: "h1", statement: "flaky test is timing"}, o)
+  hypothesis_open(harness.agent, sid, {id: "h2", statement: "cache bug", status: "verifying"}, o)
+  harness.stdio.println(hypothesis_get(harness.agent, sid, "h1", o).status)
+  harness.stdio.println(hypothesis_get(harness.agent, sid, "h2", o).status)
+  harness.stdio.println(len(hypothesis_list(harness.agent, sid, o)))
+  hypothesis_set_status(harness.agent, sid, "h1", "confirmed", o)
+  harness.stdio.println(hypothesis_get(harness.agent, sid, "h1", o).status)
+  harness.stdio.println(len(hypothesis_list(harness.agent, sid, {root: root, status: "confirmed"})))
+  harness.stdio.println(hypothesis_get(harness.agent, sid, "nope", o) == nil)
+  harness.stdio.println(hypothesis_set_status(harness.agent, sid, "nope", "x", o).ok)
+  hypothesis_delete(harness.agent, sid, "h2", o)
+  harness.stdio.println(len(hypothesis_list(harness.agent, sid, o)))
+  harness.fs.delete(root)
+}

@@ -1,0 +1,8 @@
+pipeline default(harness: Harness) {
+  const n: int = 4 |> { x -> x + 3 }
+  const label: string = n |> { x -> x > 5 ? "ok" : "bad" }
+  const placeholder: int = 5 |> _ * 2
+  harness.stdio.println(n)
+  harness.stdio.println(label)
+  harness.stdio.println(placeholder)
+}

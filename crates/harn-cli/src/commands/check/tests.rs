@@ -1,0 +1,1456 @@
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use harn_lexer::Lexer;
+use harn_modules::resolve_import_path;
+use harn_parser::{Parser, SNode};
+
+use crate::package::CheckConfig;
+
+use super::check_cmd::{check_file_inner, check_file_report};
+use super::collect_preflight_diagnostics_with_module_graph;
+use super::config::{
+    build_module_graph, build_module_graph_and_seed_analysis, collect_cross_file_imports,
+};
+use super::config::{collect_harn_targets, HarnLintConfig};
+use super::lint::lint_file_inner;
+use super::lint_report::lint_file_report;
+use super::preflight::{is_preflight_allowed, PreflightDiagnostic};
+
+mod bundle_manifest;
+mod host_capability_discriminators;
+mod lint_option_parity;
+mod output_channel;
+mod prompt_lint;
+mod target_discovery;
+
+/// Single-file preflight, for tests that have one file and no graph.
+///
+/// Production has no such caller: everything that walks a set of files already
+/// holds a graph over the whole set and passes it. Building a graph per file
+/// re-walks that file's import closure and re-lexes and re-parses all of it, so
+/// this convenience lives here rather than beside the real entry point where it
+/// was previously easy to reach for by mistake — and was, by `harn fix`.
+fn collect_preflight_diagnostics(
+    path: &std::path::Path,
+    source: &str,
+    program: &[SNode],
+    config: &CheckConfig,
+) -> Vec<PreflightDiagnostic> {
+    let module_graph = harn_modules::build_with_source(path, source);
+    collect_preflight_diagnostics_with_module_graph(path, source, program, config, &module_graph)
+}
+
+fn parse_program(source: &str) -> Vec<SNode> {
+    let mut lexer = Lexer::new(source);
+    let tokens = lexer.tokenize().expect("tokenize");
+    let mut parser = Parser::new(tokens);
+    parser.parse().expect("parse")
+}
+
+fn unique_temp_dir(prefix: &str) -> PathBuf {
+    // Process ID disambiguates across parallel test shards/processes; an
+    // atomic counter disambiguates within a process. Wall-clock-based
+    // uniqueness (SystemTime nanos) collides when two callers land in the
+    // same nanosecond, which has been observed on loaded CI runners.
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let pid = std::process::id();
+    let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!("{prefix}-{pid}-{seq}"))
+}
+
+fn load_replay_oracle_fixture(name: &str) -> Option<serde_json::Value> {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let fixtures_dir = workspace_root.join("conformance/replay-oracle/fixtures");
+    let path = fixtures_dir.join(name);
+    let source = match std::fs::read_to_string(&path) {
+        Ok(source) => source,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound && !fixtures_dir.exists() => {
+            return None;
+        }
+        Err(err) => panic!("failed to read {}: {err}", path.display()),
+    };
+    Some(serde_json::from_str(&source).expect("replay oracle fixture parses"))
+}
+
+#[test]
+fn preflight_reports_template_syntax_error() {
+    let dir = unique_temp_dir("harn-check-tpl");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    // Unterminated `{{ for }}` block.
+    std::fs::write(dir.join("broken.prompt"), "{{ for x in xs }}oops\n").unwrap();
+    let source = r#"
+pipeline main(harness: Harness) {
+  const text = harness.fs.render_prompt("broken.prompt")
+  harness.stdio.println(text)
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics.iter().any(|d| d
+            .message
+            .contains("template 'broken.prompt' has a syntax error")),
+        "expected template-syntax diagnostic, got {} messages",
+        diagnostics.len()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preflight_reports_missing_literal_render_target() {
+    let dir = unique_temp_dir("harn-check");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main(harness: Harness) {
+  const text = harness.fs.render_prompt("missing.txt")
+  harness.stdio.println(text)
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert_eq!(diagnostics.len(), 1);
+    assert!(diagnostics[0].message.contains("render_prompt target"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Acceptance for issue #771: `harness.fs.render_prompt(...)` literal-string targets
+/// must be validated alongside `render(...)`, name the actual builtin
+/// (`render_prompt`), and show the resolved candidate path so authors can
+/// see exactly where lookup was attempted.
+#[test]
+fn preflight_reports_missing_literal_render_prompt_target() {
+    let dir = unique_temp_dir("harn-check-render-prompt");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("chat.harn");
+    let source = r#"
+pub fn chat(fs: HarnessFs) -> string {
+  const trimmed = "hello"
+  return fs.render_prompt("lane-classifier.harn.prompt", {task: trimmed})
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert_eq!(diagnostics.len(), 1);
+    let diag = &diagnostics[0];
+    assert!(
+        diag.message.contains("render_prompt target"),
+        "expected diagnostic to name render_prompt, got: {}",
+        diag.message
+    );
+    assert!(
+        diag.message.contains("lane-classifier.harn.prompt"),
+        "expected diagnostic to include the literal path, got: {}",
+        diag.message
+    );
+    assert!(
+        diag.message.contains(&crate::format::slash_path(
+            &dir.join("lane-classifier.harn.prompt")
+        )),
+        "expected diagnostic to include the resolved candidate path, got: {}",
+        diag.message
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preflight_accepts_embedded_stdlib_prompt_target() {
+    let dir = unique_temp_dir("harn-check-stdlib-render-prompt");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("chat.harn");
+    let source = r#"
+pub fn chat() -> string {
+  return harness.fs.render_prompt("std/agent/prompts/tool_contract_text.harn.prompt", {})
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| !d.message.contains("render_prompt target")),
+        "embedded stdlib prompt should not be treated as a missing file: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Acceptance for issue #771: dynamic first arguments are not statically
+/// checkable, so `harness.fs.render_prompt(some_var, ...)` must be silently
+/// skipped — no false positives on legitimate dynamic dispatch.
+#[test]
+fn preflight_skips_non_literal_render_prompt_target() {
+    let dir = unique_temp_dir("harn-check-render-dynamic");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  const path = "missing.harn.prompt"
+  const prompt = harness.fs.render_prompt(path, {})
+  const key = "1"
+  const interp = harness.fs.render_prompt("missing_${key}.prompt", {})
+  __io_println(prompt + interp)
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| !d.message.contains("render_prompt target")),
+        "dynamic first args must not produce render-target diagnostics, got: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preflight_reports_prompt_tool_reference_outside_literal_surface() {
+    let dir = unique_temp_dir("harn-check-tool-surface-prompt");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    std::fs::write(
+        dir.join("agent.harn.prompt"),
+        "Use run_command({command: \"cargo test\"})",
+    )
+    .unwrap();
+    let source = r#"
+pipeline main() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "read_file",
+    "Read a file",
+    {parameters: {path: "string"}, executor: "host_bridge", host_capability: "workspace.read"},
+  )
+  const system = harness.fs.render_prompt("agent.harn.prompt", {})
+  agent_loop("task", system, {tools: tools})
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("TOOL_SURFACE_UNKNOWN_PROMPT_TOOL")),
+        "expected prompt tool-surface diagnostic, got: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preflight_honors_prompt_tool_surface_suppression() {
+    let dir = unique_temp_dir("harn-check-tool-surface-suppressed");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    std::fs::write(
+        dir.join("agent.harn.prompt"),
+        "<!-- harn-tool-surface: ignore-next-line -->\nrun_command({command: \"old\"})",
+    )
+    .unwrap();
+    let source = r#"
+pipeline main() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "read_file",
+    "Read a file",
+    {parameters: {path: "string"}, executor: "host_bridge", host_capability: "workspace.read"},
+  )
+  const system = harness.fs.render_prompt("agent.harn.prompt", {})
+  agent_loop("task", system, {tools: tools})
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| !d.message.contains("TOOL_SURFACE_UNKNOWN_PROMPT_TOOL")),
+        "suppressed prompt example should not report tool-surface diagnostics: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Acceptance for issue #771: raw string literals (`r"foo"`) are still
+/// statically known and must be validated like ordinary string literals.
+#[test]
+fn preflight_reports_missing_render_prompt_target_for_raw_string() {
+    let dir = unique_temp_dir("harn-check-render-raw");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  const prompt = harness.fs.render_prompt(r"missing.prompt", {})
+  __io_println(prompt)
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("render_prompt target")),
+        "raw string literal must trigger preflight check, got: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Acceptance for issue #771: the diagnostic span must point at the
+/// literal-string argument, not the whole `harness.fs.render_prompt(...)`
+/// expression — this is what enables an editor's quick-fix to jump
+/// straight to the path that needs editing.
+#[test]
+fn preflight_render_prompt_diagnostic_spans_literal_argument() {
+    let dir = unique_temp_dir("harn-check-render-span");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  const prompt = harness.fs.render_prompt("missing.prompt", {})
+  __io_println(prompt)
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    let render_diag = diagnostics
+        .iter()
+        .find(|d| d.message.contains("render_prompt target"))
+        .expect("expected render_prompt target diagnostic");
+    #[expect(clippy::string_slice, reason = "test input is ASCII")]
+    let span_text = &source[render_diag.span.start..render_diag.span.end];
+    assert_eq!(
+        span_text, "\"missing.prompt\"",
+        "expected diagnostic span to cover only the literal-string argument"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Acceptance for issue #771: `@/<rel>` forms must resolve through the
+/// same `harn_modules::asset_paths` logic the runtime uses, so a missing
+/// project-root prompt fails the static check.
+#[test]
+fn preflight_reports_missing_project_root_asset_path() {
+    let dir = unique_temp_dir("harn-check-asset-projroot");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("harn.toml"), "[package]\nname = \"x\"\n").unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  const prompt = harness.fs.render_prompt("@/prompts/missing.harn.prompt", {})
+  __io_println(prompt)
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    let render_diag = diagnostics
+        .iter()
+        .find(|d| d.message.contains("render_prompt target"))
+        .expect("expected render_prompt target diagnostic for missing @/ asset");
+    assert!(
+        render_diag.message.contains(&crate::format::slash_path(
+            &dir.join("prompts/missing.harn.prompt")
+        )),
+        "expected diagnostic to surface the resolved project-root path, got: {}",
+        render_diag.message
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Acceptance for issue #771: `@<alias>/<rel>` with an unknown alias
+/// must surface the asset-resolver's structural error so the user sees
+/// the missing `[asset_roots]` entry, not a generic file-existence
+/// message.
+#[test]
+fn preflight_reports_unknown_asset_alias() {
+    let dir = unique_temp_dir("harn-check-asset-alias");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("harn.toml"), "[package]\nname = \"x\"\n").unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  const prompt = harness.fs.render_prompt("@unknown/foo.harn.prompt", {})
+  __io_println(prompt)
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    let alias_diag = diagnostics
+        .iter()
+        .find(|d| d.message.contains("[asset_roots]"))
+        .expect("expected unknown-alias diagnostic citing [asset_roots]");
+    assert!(
+        alias_diag.message.contains("unknown"),
+        "expected diagnostic to name the missing alias, got: {}",
+        alias_diag.message
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Acceptance for issue #771: a defined `@<alias>/<rel>` resolves
+/// through the same logic the runtime uses, so a missing file under the
+/// alias is still flagged.
+#[test]
+fn preflight_reports_missing_aliased_asset_path() {
+    let dir = unique_temp_dir("harn-check-asset-alias-missing");
+    std::fs::create_dir_all(dir.join("src/prompts")).unwrap();
+    std::fs::write(
+        dir.join("harn.toml"),
+        "[package]\nname = \"x\"\n[asset_roots]\npartials = \"src/prompts\"\n",
+    )
+    .unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  const prompt = harness.fs.render_prompt("@partials/missing.harn.prompt", {})
+  __io_println(prompt)
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    let render_diag = diagnostics
+        .iter()
+        .find(|d| d.message.contains("render_prompt target"))
+        .expect("expected render_prompt target diagnostic for missing aliased asset");
+    assert!(
+        render_diag.message.contains(&crate::format::slash_path(
+            &dir.join("src/prompts/missing.harn.prompt")
+        )),
+        "expected diagnostic to surface the alias-resolved path, got: {}",
+        render_diag.message
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Acceptance for issue #771: when the missing prompt file exists elsewhere
+/// under the same project root, the diagnostic must include a
+/// "did you mean ...?" suggestion pointing at the misfiled location.
+#[test]
+fn preflight_suggests_misfiled_render_prompt_target() {
+    let dir = unique_temp_dir("harn-check-render-suggest");
+    std::fs::create_dir_all(dir.join("lib/runtime")).unwrap();
+    std::fs::create_dir_all(dir.join("lib/mode")).unwrap();
+    std::fs::write(dir.join("harn.toml"), "[package]\nname = \"x\"\n").unwrap();
+    std::fs::write(
+        dir.join("lib/mode/lane-classifier.harn.prompt"),
+        "task: {{task}}\n",
+    )
+    .unwrap();
+    let file = dir.join("lib/runtime/chat.harn");
+    let source = r#"
+pub fn chat() -> string {
+  return harness.fs.render_prompt("lane-classifier.harn.prompt", {task: "hi"})
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    let render_diag = diagnostics
+        .iter()
+        .find(|d| d.message.contains("render_prompt target"))
+        .expect("expected render_prompt target diagnostic");
+    let help = render_diag
+        .help
+        .as_ref()
+        .expect("expected diagnostic help text");
+    assert!(
+        help.contains("did you mean"),
+        "expected help text to include 'did you mean' suggestion, got: {help}",
+    );
+    assert!(
+        help.contains("lib/mode/lane-classifier.harn.prompt"),
+        "expected help text to point at the misfiled location, got: {help}",
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Acceptance for issue #771: when no near-miss exists, the diagnostic
+/// must still emit useful generic guidance instead of the misleading
+/// "did you mean ..." prefix.
+#[test]
+fn preflight_omits_did_you_mean_when_no_near_miss() {
+    let dir = unique_temp_dir("harn-check-render-no-suggest");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("harn.toml"), "[package]\nname = \"x\"\n").unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  const prompt = harness.fs.render_prompt("nowhere.harn.prompt", {})
+  __io_println(prompt)
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    let render_diag = diagnostics
+        .iter()
+        .find(|d| d.message.contains("render_prompt target"))
+        .expect("expected render_prompt target diagnostic");
+    let help = render_diag
+        .help
+        .as_ref()
+        .expect("expected diagnostic help text");
+    assert!(
+        !help.contains("did you mean"),
+        "expected no 'did you mean' when there's no near-miss, got: {help}",
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preflight_resolves_imports_with_implicit_harn_extension() {
+    let dir = unique_temp_dir("harn-check");
+    std::fs::create_dir_all(dir.join("lib")).unwrap();
+    std::fs::write(dir.join("lib").join("helpers.harn"), "pub fn x() { 1 }\n").unwrap();
+    let file = dir.join("main.harn");
+    let resolved = resolve_import_path(&file, "lib/helpers");
+    assert_eq!(resolved, Some(dir.join("lib").join("helpers.harn")));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preflight_reports_missing_worker_execution_repo() {
+    let dir = unique_temp_dir("harn-check-worker");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main(harness: Harness) {
+  spawn_agent(harness.agent, {
+    task: "do it",
+    node: {kind: "stage"},
+    execution: {worktree: {repo: "./missing-repo"}}
+  })
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert_eq!(diagnostics.len(), 1);
+    assert!(diagnostics[0].message.contains("worktree repo"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preflight_detects_import_collision() {
+    let dir = unique_temp_dir("harn-check-collision");
+    std::fs::create_dir_all(dir.join("lib")).unwrap();
+    std::fs::write(dir.join("lib").join("a.harn"), "pub fn helper() { 1 }\n").unwrap();
+    std::fs::write(dir.join("lib").join("b.harn"), "pub fn helper() { 2 }\n").unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+import "lib/a.harn"
+import "lib/b.harn"
+
+pipeline main(harness: Harness) {
+  harness.stdio.log(helper())
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("import collision")),
+        "expected import collision diagnostic, got: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preflight_no_collision_with_selective_imports() {
+    let dir = unique_temp_dir("harn-check-selective");
+    std::fs::create_dir_all(dir.join("lib")).unwrap();
+    std::fs::write(
+        dir.join("lib").join("a.harn"),
+        "pub fn foo() { 1 }\npub fn shared() { 2 }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("lib").join("b.harn"),
+        "pub fn bar() { 3 }\npub fn shared() { 4 }\n",
+    )
+    .unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+import { foo } from "lib/a.harn"
+import { bar } from "lib/b.harn"
+
+pipeline main(harness: Harness) {
+  harness.stdio.log(foo())
+  harness.stdio.log(bar())
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| !d.message.contains("import collision")),
+        "unexpected collision: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preflight_re_export_conflicts_use_supplied_module_graph() {
+    let dir = unique_temp_dir("harn-check-re-export-conflict");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("a.harn"), "pub fn helper() { 1 }\n").unwrap();
+    std::fs::write(dir.join("b.harn"), "pub fn helper() { 2 }\n").unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pub import { helper } from "a.harn"
+pub import { helper } from "b.harn"
+
+pipeline main() {}
+"#;
+    std::fs::write(&file, source).unwrap();
+    let program = parse_program(source);
+    let module_graph = build_module_graph(&[file.clone(), dir.join("a.harn"), dir.join("b.harn")]);
+    let diagnostics = collect_preflight_diagnostics_with_module_graph(
+        &file,
+        source,
+        &program,
+        &CheckConfig::default(),
+        &module_graph,
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("re-export conflict")),
+        "expected re-export conflict diagnostic, got: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preflight_reports_unknown_host_capability() {
+    let dir = unique_temp_dir("harn-check-host");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  host_call("unknown_cap.do_stuff", {})
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("unknown host capability")),
+        "expected unknown host capability diagnostic, got: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preflight_reports_tool_define_unknown_host_capability() {
+    // harn#743: a host_bridge tool's host_capability binding is
+    // validated against the same capability map host_call uses, so
+    // typos surface during `harn check` rather than at first model
+    // call.
+    let dir = unique_temp_dir("harn-check-tool-define-cap");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  const r = tool_registry()
+  tool_define(
+    r,
+    "ask_user",
+    "Ask the user",
+    {
+      parameters: {prompt: "string"},
+      executor: "host_bridge",
+      host_capability: "interaction.unknown_op",
+    },
+  )
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("interaction.unknown_op")
+                && d.message.contains("not declared by the host")),
+        "expected tool_define host_capability diagnostic, got: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preflight_accepts_tool_define_known_host_capability() {
+    let dir = unique_temp_dir("harn-check-tool-define-cap-ok");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  const r = tool_registry()
+  tool_define(
+    r,
+    "ask_user",
+    "Ask the user",
+    {
+      parameters: {prompt: "string"},
+      executor: "host_bridge",
+      host_capability: "interaction.ask",
+    },
+  )
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| !d.message.contains("not declared by the host")),
+        "unexpected diagnostic: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preflight_reports_tool_define_host_bridge_missing_capability() {
+    let dir = unique_temp_dir("harn-check-tool-define-missing");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  const r = tool_registry()
+  tool_define(
+    r,
+    "ask_user",
+    "Ask the user",
+    {parameters: {prompt: "string"}, executor: "host_bridge"},
+  )
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("no `host_capability` binding")),
+        "expected missing-capability diagnostic, got: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preflight_reports_tool_define_unknown_executor_value() {
+    let dir = unique_temp_dir("harn-check-tool-define-executor");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  const r = tool_registry()
+  tool_define(
+    r,
+    "fly",
+    "Fly",
+    {parameters: {distance: "int"}, executor: "rocketship"},
+  )
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("unknown executor \"rocketship\"")),
+        "expected unknown-executor diagnostic, got: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preflight_accepts_known_host_capabilities() {
+    let dir = unique_temp_dir("harn-check-host-ok");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  host_call("project.metadata_get", {dir: ".", namespace: "facts"})
+  host_call("project.metadata_inspect", {dir: ".", namespace: "facts"})
+  host_call("process.exec", {command: "ls"})
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| !d.message.contains("unknown host capability")),
+        "unexpected host cap diagnostic: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preflight_accepts_process_spawn_lifecycle_ops() {
+    // #3252: the non-blocking process lifecycle ops
+    // (spawn/poll/wait/kill/release) are part of the "process" capability
+    // manifest, so `host_call` targets naming them must type-check.
+    let dir = unique_temp_dir("harn-check-process-spawn");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  const h = host_call("process.spawn", {mode: "argv", argv: ["echo", "hi"]})
+  host_call("process.poll", {handle_id: h.handle_id})
+  host_call("process.wait", {handle_id: h.handle_id, timeout_ms: 1000})
+  host_call("process.kill", {handle_id: h.handle_id})
+  host_call("process.release", {handle_id: h.handle_id})
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| !d.message.contains("unknown host capability")),
+        "unexpected host cap diagnostic for process.spawn lifecycle ops: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn check_file_inner_enforces_invariants_when_requested() {
+    let dir = unique_temp_dir("harn-check-invariants");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    std::fs::write(
+        &file,
+        r#"
+@invariant("fs.writes", "src/**")
+fn handler(fs: HarnessFs) {
+  fs.write_text("/tmp/out.txt", "unsafe")
+}
+"#,
+    )
+    .unwrap();
+
+    let files = vec![file.clone()];
+    let module_graph = build_module_graph(&files);
+    let cross_file_imports = collect_cross_file_imports(&module_graph);
+    let mut analysis = harn_parser::analysis::AnalysisDatabase::new();
+    let outcome = check_file_inner(
+        &mut analysis,
+        &file,
+        &CheckConfig::default(),
+        &cross_file_imports,
+        &module_graph,
+        true,
+    );
+
+    assert!(
+        outcome.has_error,
+        "expected invariant violation to fail check"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn check_file_inner_uses_imported_callable_signatures() {
+    let dir = unique_temp_dir("harn-check-imported-callable");
+    std::fs::create_dir_all(&dir).unwrap();
+    let lib = dir.join("lib.harn");
+    let file = dir.join("main.harn");
+    std::fs::write(
+        &lib,
+        r"
+type PickOptions = {drop_nil?: bool}
+
+pub fn pick(options: PickOptions = {}) -> nil {
+  return nil
+}
+",
+    )
+    .unwrap();
+    std::fs::write(
+        &file,
+        r#"
+import { pick } from "lib"
+
+pipeline main() {
+  pick({dropnil: true})
+}
+"#,
+    )
+    .unwrap();
+
+    let files = vec![file.clone()];
+    let module_graph = build_module_graph(&files);
+    let cross_file_imports = collect_cross_file_imports(&module_graph);
+    let mut analysis = harn_parser::analysis::AnalysisDatabase::new();
+    let outcome = check_file_inner(
+        &mut analysis,
+        &file,
+        &CheckConfig::default(),
+        &cross_file_imports,
+        &module_graph,
+        true,
+    );
+
+    assert!(
+        outcome.has_error,
+        "expected imported function option typo to fail check"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn check_file_inner_resolves_stdlib_llm_catalog_routing_routes() {
+    let dir = unique_temp_dir("harn-check-stdlib-llm-catalog");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    std::fs::write(
+        &file,
+        r#"
+import { routing_routes } from "std/llm/catalog"
+
+pipeline main(harness: Harness) {
+  const routes = routing_routes()
+  harness.stdio.println(len(routes) >= 0)
+}
+"#,
+    )
+    .unwrap();
+
+    let files = vec![file.clone()];
+    let module_graph = build_module_graph(&files);
+    let cross_file_imports = collect_cross_file_imports(&module_graph);
+    let mut analysis = harn_parser::analysis::AnalysisDatabase::new();
+    let report = check_file_report(
+        &mut analysis,
+        &file,
+        &CheckConfig::default(),
+        &cross_file_imports,
+        &module_graph,
+        true,
+    );
+
+    assert!(
+        !report.outcome().has_error,
+        "expected std/llm/catalog routing_routes import to type-check, got {:?}",
+        report.diagnostics
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn check_file_inner_skips_invariants_when_disabled() {
+    let dir = unique_temp_dir("harn-check-invariants-off");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    std::fs::write(
+        &file,
+        r#"
+@invariant("fs.writes", "src/**")
+fn handler(fs: HarnessFs) {
+  fs.write_text("/tmp/out.txt", "unsafe")
+}
+"#,
+    )
+    .unwrap();
+
+    let files = vec![file.clone()];
+    let module_graph = build_module_graph(&files);
+    let cross_file_imports = collect_cross_file_imports(&module_graph);
+    let mut analysis = harn_parser::analysis::AnalysisDatabase::new();
+    let outcome = check_file_inner(
+        &mut analysis,
+        &file,
+        &CheckConfig::default(),
+        &cross_file_imports,
+        &module_graph,
+        false,
+    );
+
+    assert!(
+        !outcome.has_error,
+        "invariants should only run behind --invariants"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn check_file_inner_enforces_capability_policy_invariants_when_requested() {
+    let dir = unique_temp_dir("harn-check-capability-policy");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    std::fs::write(
+        &file,
+        r#"
+@invariant("capability.policy", allow: "fs.write")
+fn _handler(client) {
+  mcp_call(client, "github.search", {})
+}
+"#,
+    )
+    .unwrap();
+
+    let files = vec![file.clone()];
+    let module_graph = build_module_graph(&files);
+    let cross_file_imports = collect_cross_file_imports(&module_graph);
+    let mut analysis = harn_parser::analysis::AnalysisDatabase::new();
+    let outcome = check_file_inner(
+        &mut analysis,
+        &file,
+        &CheckConfig::default(),
+        &cross_file_imports,
+        &module_graph,
+        true,
+    );
+
+    assert!(
+        outcome.has_error,
+        "expected undeclared connector capability to fail check"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn capability_policy_approval_matches_replay_oracle_fixture() {
+    let Some(fixture) = load_replay_oracle_fixture("approval_tool_call.valid.json") else {
+        return;
+    };
+    let decisions = fixture["first_run"]["policy_decisions"]
+        .as_array()
+        .expect("fixture has policy decisions");
+    assert!(
+        decisions.iter().any(|decision| {
+            decision["capability"] == "fs.write" && decision["approval_required"] == true
+        }),
+        "fixture should record fs.write as approval-gated"
+    );
+
+    let dir = unique_temp_dir("harn-check-capability-replay");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    std::fs::write(
+        &file,
+        r#"
+@invariant("capability.policy",
+  allow: "fs.write",
+  workspace: "notes/**",
+  require_approval: "fs.write",
+)
+fn _handler(interaction: HarnessInteraction, fs: HarnessFs) {
+  interaction.request_approval("write", {capabilities_requested: ["fs.write"]})
+  fs.write_text("notes/triage.md", "approved")
+}
+"#,
+    )
+    .unwrap();
+
+    let files = vec![file.clone()];
+    let module_graph = build_module_graph(&files);
+    let cross_file_imports = collect_cross_file_imports(&module_graph);
+    let mut analysis = harn_parser::analysis::AnalysisDatabase::new();
+    let outcome = check_file_inner(
+        &mut analysis,
+        &file,
+        &CheckConfig::default(),
+        &cross_file_imports,
+        &module_graph,
+        true,
+    );
+
+    assert!(
+        !outcome.has_error,
+        "static capability policy should accept the approved replay path"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preflight_accepts_extended_host_capabilities_from_config() {
+    let dir = unique_temp_dir("harn-check-host-extended");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  host_call("project.scan", {})
+  host_call("runtime.set_result", {})
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics = collect_preflight_diagnostics(
+        &file,
+        source,
+        &program,
+        &CheckConfig {
+            host_capabilities: HashMap::from([
+                ("project".to_string(), vec!["scan".to_string()]),
+                ("runtime".to_string(), vec!["set_result".to_string()]),
+            ]),
+            ..CheckConfig::default()
+        },
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| !d.message.contains("unknown host capability")),
+        "unexpected host cap diagnostic: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preflight_accepts_runtime_task_and_session_ops() {
+    let dir = unique_temp_dir("harn-check-host-runtime");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  host_call("runtime.task", {})
+  host_call("session.changed_paths", {})
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| !d.message.contains("unknown host capability")),
+        "unexpected host cap diagnostic: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preflight_accepts_host_operations_registered_via_host_mock() {
+    let dir = unique_temp_dir("harn-check-host-mock");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  host_mock("project", "metadata_get", {result: {value: "facts"}})
+  host_call("project.metadata_get", {dir: "pkg"})
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| !d.message.contains("unknown host capability")),
+        "unexpected host cap diagnostic: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preflight_accepts_render_target_from_bundle_root() {
+    let dir = unique_temp_dir("harn-check-bundle-root");
+    std::fs::create_dir_all(dir.join("bundle")).unwrap();
+    std::fs::write(dir.join("bundle").join("shared.prompt"), "hello").unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main(harness: Harness) {
+  const text = harness.fs.render_prompt("shared.prompt")
+  harness.stdio.println(text)
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics = collect_preflight_diagnostics(
+        &file,
+        source,
+        &program,
+        &CheckConfig {
+            bundle_root: Some(dir.join("bundle").display().to_string()),
+            ..CheckConfig::default()
+        },
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| !d.message.contains("render target")),
+        "unexpected render diagnostic: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preflight_validates_render_in_imported_module() {
+    let dir = unique_temp_dir("harn-check-import-render");
+    std::fs::create_dir_all(dir.join("lib")).unwrap();
+    // Module references a template that doesn't exist
+    std::fs::write(
+        dir.join("lib").join("tmpl.harn"),
+        "pub fn load(fs: HarnessFs) { fs.render_prompt(\"missing_template.txt\") }\n",
+    )
+    .unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+import "lib/tmpl.harn"
+
+pipeline main(harness: Harness) {
+  harness.stdio.log(load(harness.fs))
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("render_prompt target")),
+        "expected render target diagnostic for imported module, got: {:?}",
+        diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn unknown_host_capability_diagnostic_carries_tag() {
+    let dir = unique_temp_dir("harn-check-host-tag");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    let source = r#"
+pipeline main() {
+  host_call("custom_cap.do_thing", {})
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics =
+        collect_preflight_diagnostics(&file, source, &program, &CheckConfig::default());
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.tags.as_deref() == Some("custom_cap.do_thing")),
+        "expected tagged diagnostic, got: {:?}",
+        diagnostics
+            .iter()
+            .map(|d| (d.message.clone(), d.tags.clone()))
+            .collect::<Vec<_>>()
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn preflight_allow_matches_exact_wildcard_and_capability_scope() {
+    let exact = Some("project.scan".to_string());
+    let other_op = Some("project.refresh".to_string());
+    let other_cap = Some("editor.get_selection".to_string());
+
+    // Exact match
+    assert!(is_preflight_allowed(&exact, &["project.scan".to_string()]));
+    // `project.*` wildcard matches any op in the project capability
+    assert!(is_preflight_allowed(&other_op, &["project.*".to_string()]));
+    // Bare capability name also matches any op in that capability
+    assert!(is_preflight_allowed(&other_op, &["project".to_string()]));
+    // `*` blanket match
+    assert!(is_preflight_allowed(&exact, &["*".to_string()]));
+    // No match when capability differs
+    assert!(!is_preflight_allowed(
+        &other_cap,
+        &["project.*".to_string()]
+    ));
+    // Untagged diagnostics never match
+    assert!(!is_preflight_allowed(&None, &["*".to_string()]));
+}
+
+#[test]
+fn check_lint_does_not_require_harndoc_by_default() {
+    // `missing-harndoc` is opt-in (`[lint] require_docstrings = true`);
+    // the default check invocation leaves undocumented pub fns alone.
+    let source = r#"
+pub fn exposed() -> string {
+  return "x"
+}
+"#;
+    let program = parse_program(source);
+    let diagnostics = harn_lint::lint_with_config_and_source(
+        &program,
+        &CheckConfig::default().disable_rules,
+        Some(source),
+    );
+    assert!(
+        !diagnostics.iter().any(|d| d.rule == "missing-harndoc"),
+        "missing-harndoc must not fire by default, got: {:?}",
+        diagnostics.iter().map(|d| &d.rule).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn lint_file_inner_reports_type_aware_lint_rules() {
+    let dir = unique_temp_dir("harn-lint-type-aware");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    std::fs::write(
+        &file,
+        r#"
+type User = {name: string}
+pipeline main(task) {
+  const user: User = {name: "Ada"}
+  __io_println(user?.name)
+}
+"#,
+    )
+    .unwrap();
+    let files = vec![file.clone()];
+    let module_graph = build_module_graph(&files);
+    let cross_file_imports = collect_cross_file_imports(&module_graph);
+    let mut analysis = harn_parser::analysis::AnalysisDatabase::new();
+    let outcome = lint_file_inner(
+        &mut analysis,
+        &file,
+        &CheckConfig::default(),
+        &cross_file_imports,
+        &module_graph,
+        &HarnLintConfig::default(),
+        &[],
+    );
+    assert!(
+        outcome.has_warning,
+        "type-aware lint should surface through `harn lint`"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn check_and_lint_json_share_typecheck_cache() {
+    let dir = unique_temp_dir("harn-check-shared-analysis");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    std::fs::write(
+        &file,
+        r"
+pipeline main(harness: Harness) {
+  const x = 1
+  harness.stdio.log(x)
+}
+",
+    )
+    .unwrap();
+
+    let files = vec![file.clone()];
+    let module_graph = build_module_graph(&files);
+    let cross_file_imports = collect_cross_file_imports(&module_graph);
+    let mut analysis = harn_parser::analysis::AnalysisDatabase::new();
+    let config = CheckConfig::default();
+
+    let check_report = check_file_report(
+        &mut analysis,
+        &file,
+        &config,
+        &cross_file_imports,
+        &module_graph,
+        false,
+    );
+    assert!(matches!(
+        check_report.status,
+        super::check_cmd::CheckFileStatus::Ok
+    ));
+    let after_check = analysis.stats();
+
+    let lint_report = lint_file_report(
+        &mut analysis,
+        &file,
+        &config,
+        &cross_file_imports,
+        &module_graph,
+        &HarnLintConfig::default(),
+        &[],
+    );
+    assert!(matches!(
+        lint_report.status,
+        super::check_cmd::CheckFileStatus::Ok
+    ));
+    let after_lint = analysis.stats();
+
+    assert_eq!(after_check.typecheck_runs, 1);
+    assert_eq!(after_lint.typecheck_runs, 1);
+    assert_eq!(after_lint.parse_runs, after_check.parse_runs);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn seeded_module_graph_avoids_reparsing_for_check() {
+    let dir = unique_temp_dir("harn-check-seeded-parse");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    std::fs::write(
+        &file,
+        r#"
+pipeline main(harness: Harness) {
+  harness.stdio.log("ready")
+}
+"#,
+    )
+    .unwrap();
+
+    let files = vec![file.clone()];
+    let mut analysis = harn_parser::analysis::AnalysisDatabase::new();
+    let module_graph = build_module_graph_and_seed_analysis(&files, &mut analysis);
+    let cross_file_imports = collect_cross_file_imports(&module_graph);
+    let config = CheckConfig::default();
+
+    let report = check_file_report(
+        &mut analysis,
+        &file,
+        &config,
+        &cross_file_imports,
+        &module_graph,
+        false,
+    );
+    assert!(matches!(
+        report.status,
+        super::check_cmd::CheckFileStatus::Ok
+    ));
+    let stats = analysis.stats();
+    assert_eq!(stats.lex_runs, 0);
+    assert_eq!(stats.parse_runs, 0);
+    assert_eq!(stats.typecheck_runs, 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+mod effect_inheritance;
+mod llm_composition;

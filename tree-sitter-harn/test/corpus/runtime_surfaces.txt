@@ -1,0 +1,269 @@
+==================
+Transcript And Replay Builtins
+==================
+
+pipeline main(task) {
+  let transcript = transcript_reset({metadata: {source: "corpus"}})
+  let archived = transcript_archive(transcript)
+  let flow = workflow_graph({name: "demo", entry: "act", nodes: {act: {kind: "stage"}}})
+  let report = workflow_policy_report(flow)
+  let eval = run_record_eval({fixture: {workflow_id: "wf"}})
+  return {archived: archived, flow: flow, report: report, eval: eval}
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)))
+    (block
+      (let_binding
+        name: (identifier)
+        value: (call_expression
+          function: (identifier)
+          (argument_list
+            (dict_literal
+              (dict_entry
+                key: (identifier)
+                value: (dict_literal
+                  (dict_entry
+                    key: (identifier)
+                    value: (string_literal
+                      (string_delimiter)
+                      (string_content)
+                      (string_delimiter)))))))))
+      (let_binding
+        name: (identifier)
+        value: (call_expression
+          function: (identifier)
+          (argument_list
+            (identifier))))
+      (let_binding
+        name: (identifier)
+        value: (call_expression
+          function: (identifier)
+          (argument_list
+            (dict_literal
+              (dict_entry
+                key: (identifier)
+                value: (string_literal
+                  (string_delimiter)
+                  (string_content)
+                  (string_delimiter)))
+              (dict_entry
+                key: (identifier)
+                value: (string_literal
+                  (string_delimiter)
+                  (string_content)
+                  (string_delimiter)))
+              (dict_entry
+                key: (identifier)
+                value: (dict_literal
+                  (dict_entry
+                    key: (identifier)
+                    value: (dict_literal
+                      (dict_entry
+                        key: (identifier)
+                        value: (string_literal
+                          (string_delimiter)
+                          (string_content)
+                          (string_delimiter)))))))))))
+      (let_binding
+        name: (identifier)
+        value: (call_expression
+          function: (identifier)
+          (argument_list
+            (identifier))))
+      (let_binding
+        name: (identifier)
+        value: (call_expression
+          function: (identifier)
+          (argument_list
+            (dict_literal
+              (dict_entry
+                key: (identifier)
+                value: (dict_literal
+                  (dict_entry
+                    key: (identifier)
+                    value: (string_literal
+                      (string_delimiter)
+                      (string_content)
+                      (string_delimiter)))))))))
+      (return_statement
+        (dict_literal
+          (dict_entry
+            key: (identifier)
+            value: (identifier))
+          (dict_entry
+            key: (identifier)
+            value: (identifier))
+          (dict_entry
+            key: (identifier)
+            value: (identifier))
+          (dict_entry
+            key: (identifier)
+            value: (identifier)))))))
+
+==================
+HITL Harness Capability Methods
+==================
+
+pipeline test(harness: Harness, task) {
+  let response = harness.interaction.ask_user("Pick a number", {default: 0})
+  let result = harness.interaction.dual_control(2, 3, destructive_step, ["alice", "bob"])
+  let handle = harness.interaction.escalate_to("oncall", "deploy failed")
+  let record = harness.interaction.request_approval("deploy", {quorum: 2, reviewers: ["alice"]})
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)
+        type: (type_annotation
+          (identifier)))
+      (typed_parameter
+        name: (identifier)))
+    (block
+      (let_binding
+        name: (identifier)
+        value: (call_expression
+          function: (property_access
+            object: (property_access
+              object: (identifier)
+              property: (identifier))
+            property: (identifier))
+          (argument_list
+            (string_literal
+              (string_delimiter)
+              (string_content)
+              (string_delimiter))
+            (dict_literal
+              (dict_entry
+                key: (identifier)
+                value: (integer_literal))))))
+      (let_binding
+        name: (identifier)
+        value: (call_expression
+          function: (property_access
+            object: (property_access
+              object: (identifier)
+              property: (identifier))
+            property: (identifier))
+          (argument_list
+            (integer_literal)
+            (integer_literal)
+            (identifier)
+            (list_literal
+              (string_literal
+                (string_delimiter)
+                (string_content)
+                (string_delimiter))
+              (string_literal
+                (string_delimiter)
+                (string_content)
+                (string_delimiter))))))
+      (let_binding
+        name: (identifier)
+        value: (call_expression
+          function: (property_access
+            object: (property_access
+              object: (identifier)
+              property: (identifier))
+            property: (identifier))
+          (argument_list
+            (string_literal
+              (string_delimiter)
+              (string_content)
+              (string_delimiter))
+            (string_literal
+              (string_delimiter)
+              (string_content)
+              (string_delimiter)))))
+      (let_binding
+        name: (identifier)
+        value: (call_expression
+          function: (property_access
+            object: (property_access
+              object: (identifier)
+              property: (identifier))
+            property: (identifier))
+          (argument_list
+            (string_literal
+              (string_delimiter)
+              (string_content)
+              (string_delimiter))
+            (dict_literal
+              (dict_entry
+                key: (identifier)
+                value: (integer_literal))
+              (dict_entry
+                key: (identifier)
+                value: (list_literal
+                  (string_literal
+                    (string_delimiter)
+                    (string_content)
+                    (string_delimiter)))))))))))
+
+==================
+Parallel Each As Stream
+==================
+
+pipeline default() {
+  let results = parallel each [30, 5] with {max_concurrent: 2} { n ->
+    return n
+  } as stream
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (block
+      (let_binding
+        name: (identifier)
+        value: (parallel_each_expression
+          list: (list_literal
+            (integer_literal)
+            (integer_literal))
+          options: (parallel_options
+            key: (identifier)
+            value: (integer_literal))
+          variable: (identifier)
+          (return_statement
+            (identifier))
+          stream_marker: (stream_marker))))))
+
+==================
+Invalid Parallel Each Stream Marker
+==================
+
+pipeline default() {
+  let results = parallel each [30] { n ->
+    return n
+  } as batch
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (block
+      (let_binding
+        name: (identifier)
+        value: (parallel_each_expression
+          list: (list_literal
+            (integer_literal))
+          variable: (identifier)
+          (return_statement
+            (identifier))))
+      (ERROR
+        (identifier)))))

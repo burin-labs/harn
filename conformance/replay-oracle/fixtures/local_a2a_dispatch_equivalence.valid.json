@@ -1,0 +1,116 @@
+{
+  "schema_version": "harn.orchestration.replay_trace.v1",
+  "name": "local_a2a_dispatch_equivalence",
+  "description": "The same trigger handler result remains replay-comparable when the dispatch boundary moves from local process to A2A.",
+  "expect": "match",
+  "allowlist": [
+    {"path": "/run_id", "reason": "run ids are allocated per execution"},
+    {"path": "/event_log_entries/*/event_id", "reason": "EventLog offsets are backend-local"},
+    {"path": "/event_log_entries/*/occurred_at_ms", "reason": "append timestamps are wall-clock observations"},
+    {"path": "/event_log_entries/*/payload/event_id", "reason": "TriggerEvent ids are generated per intake"},
+    {"path": "/event_log_entries/*/payload/handler_kind", "reason": "this fixture intentionally compares local and A2A location metadata"},
+    {"path": "/event_log_entries/*/payload/target_uri", "reason": "this fixture intentionally compares local and A2A location metadata"},
+    {"path": "/event_log_entries/*/payload/dispatch_metadata/trust_boundary", "reason": "the trust boundary is the intentional difference under test"},
+    {"path": "/event_log_entries/*/payload/dispatch_metadata/execution_location", "reason": "the execution location is the intentional difference under test"},
+    {"path": "/event_log_entries/*/payload/dispatch_metadata/remote_identity", "reason": "remote identity only changes when the boundary moves to A2A"},
+    {"path": "/event_log_entries/*/payload/dispatch_metadata/remote_agent_id", "reason": "remote identity only changes when the boundary moves to A2A"},
+    {"path": "/event_log_entries/*/payload/dispatch_metadata/card_url", "reason": "A2A discovery metadata is location-specific"},
+    {"path": "/event_log_entries/*/payload/dispatch_metadata/rpc_url", "reason": "A2A discovery metadata is location-specific"},
+    {"path": "/event_log_entries/*/payload/dispatch_metadata/task_id", "reason": "A2A task ids are remote receipts"},
+    {"path": "/event_log_entries/*/payload/dispatch_metadata/state", "reason": "A2A task state is remote receipt metadata"},
+    {"path": "/trigger_firings/*/event_id", "reason": "TriggerEvent ids are generated per intake"},
+    {"path": "/trigger_firings/*/trace_id", "reason": "trace ids are generated per execution"},
+    {"path": "/trigger_firings/*/handler_kind", "reason": "this fixture intentionally compares local and A2A dispatch modes"},
+    {"path": "/trigger_firings/*/target_uri", "reason": "this fixture intentionally compares local and A2A dispatch modes"},
+    {"path": "/trigger_firings/*/trust_boundary", "reason": "the trust boundary is the intentional difference under test"},
+    {"path": "/trigger_firings/*/remote_identity", "reason": "remote identity only changes when the boundary moves to A2A"}
+  ],
+  "first_run": {
+    "run_id": "run_local_dispatch",
+    "event_log_entries": [
+      {
+        "event_id": 101,
+        "topic": "trigger.outbox",
+        "kind": "dispatch_succeeded",
+        "occurred_at_ms": 1770000000100,
+        "payload": {
+          "event_id": "trigger_evt_local",
+          "binding_id": "issue-triage",
+          "handler_kind": "local",
+          "target_uri": "handlers::triage_issue",
+          "dispatch_metadata": {
+            "trust_boundary": "local_process",
+            "execution_location": "in_process",
+            "remote_identity": null,
+            "remote_agent_id": null,
+            "card_url": null,
+            "rpc_url": null,
+            "task_id": null,
+            "state": null
+          },
+          "result": {
+            "status": "triaged",
+            "labels": ["needs-owner"],
+            "title": "Trust boundary dispatch demo"
+          }
+        }
+      }
+    ],
+    "trigger_firings": [
+      {
+        "binding_id": "issue-triage",
+        "event_id": "trigger_evt_local",
+        "trace_id": "trace_local",
+        "handler_kind": "local",
+        "target_uri": "handlers::triage_issue",
+        "trust_boundary": "local_process",
+        "remote_identity": null,
+        "decision": "dispatched"
+      }
+    ]
+  },
+  "second_run": {
+    "run_id": "run_a2a_dispatch",
+    "event_log_entries": [
+      {
+        "event_id": 201,
+        "topic": "trigger.outbox",
+        "kind": "dispatch_succeeded",
+        "occurred_at_ms": 1770001000100,
+        "payload": {
+          "event_id": "trigger_evt_a2a",
+          "binding_id": "issue-triage",
+          "handler_kind": "a2a",
+          "target_uri": "a2a://reviewer.example/triage",
+          "dispatch_metadata": {
+            "trust_boundary": "federated_a2a",
+            "execution_location": "remote",
+            "remote_identity": "triage",
+            "remote_agent_id": "reviewer.example",
+            "card_url": "https://reviewer.example/.well-known/agent-card.json",
+            "rpc_url": "https://reviewer.example/a2a",
+            "task_id": "task-deterministic",
+            "state": "completed"
+          },
+          "result": {
+            "status": "triaged",
+            "labels": ["needs-owner"],
+            "title": "Trust boundary dispatch demo"
+          }
+        }
+      }
+    ],
+    "trigger_firings": [
+      {
+        "binding_id": "issue-triage",
+        "event_id": "trigger_evt_a2a",
+        "trace_id": "trace_a2a",
+        "handler_kind": "a2a",
+        "target_uri": "a2a://reviewer.example/triage",
+        "trust_boundary": "federated_a2a",
+        "remote_identity": "triage",
+        "decision": "dispatched"
+      }
+    ]
+  }
+}

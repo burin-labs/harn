@@ -1,0 +1,116 @@
+{
+  "artifacts": [],
+  "checkpoints": [],
+  "failure": null,
+  "metadata": {
+    "artifact_count": 0,
+    "checkpoint_count": 0,
+    "child_run_count": 1,
+    "execution": null,
+    "observability_present": false,
+    "planner_round_count": 0,
+    "record_type": "run_record",
+    "replay_fixture_id": null,
+    "stage_count": 1,
+    "tool_recording_count": 0,
+    "transition_count": 0
+  },
+  "pending": {
+    "approvals": [
+      {
+        "agent": "fixture-agent",
+        "asked_at": "2026-01-04T00:00:04Z",
+        "prompt": "Approve the sanitized retry plan?",
+        "request_id": "approval_fixture_1",
+        "trace_id": "trace_fixture_approval"
+      }
+    ],
+    "auth": [],
+    "nodes": [
+      "approval_gate"
+    ]
+  },
+  "producer": {
+    "name": "harn",
+    "version": "fixture"
+  },
+  "projection": {
+    "last_event_id": null,
+    "prefix_hash": null,
+    "projection_hash": "sha256:28391dbb37fa826271393564c5efac71add2999be7c1a91fbb03e8bf4397e9b9",
+    "projection_id": "run_view:run_lineage_root:28391dbb37fa"
+  },
+  "providers": [],
+  "run": {
+    "child_runs": [
+      {
+        "parent_session_id": "session_lineage",
+        "run_id": "run_lineage_child",
+        "run_path": "spec/run-view-fixtures/cases/session-lineage-failure-approval/records/01-child.json",
+        "session_id": "session_lineage",
+        "status": "failed",
+        "task": "Investigate sanitized child failure",
+        "worker_id": "worker_child",
+        "worker_name": "Child worker"
+      }
+    ],
+    "duration_ms": 5000,
+    "finished_at": "2026-01-04T00:00:05Z",
+    "parent_run_id": null,
+    "parent_session_id": "session_parent",
+    "root_run_id": null,
+    "run_id": "run_lineage_root",
+    "run_path": "spec/run-view-fixtures/cases/session-lineage-failure-approval/records/00-root.json",
+    "session_id": "session_lineage",
+    "started_at": "2026-01-04T00:00:00Z",
+    "status": "completed",
+    "task": "Delegate sanitized follow-up work",
+    "workflow_id": "workflow_view_fixture",
+    "workflow_name": "View fixture"
+  },
+  "schema": "harn.run_view.v1",
+  "schema_version": 1,
+  "stages": [
+    {
+      "artifact_refs": [],
+      "attempt_count": 0,
+      "branch": null,
+      "duration_ms": 2000,
+      "error": null,
+      "finished_at": "2026-01-04T00:00:02Z",
+      "id": "stage_delegate",
+      "kind": "worker",
+      "model": null,
+      "node_id": "delegate",
+      "outcome": "ok",
+      "provider": null,
+      "started_at": "2026-01-04T00:00:00Z",
+      "status": "completed",
+      "usage": {
+        "call_count": 0,
+        "input_tokens": 0,
+        "models": [],
+        "output_tokens": 0,
+        "total_cost": 0.0,
+        "total_duration_ms": 0
+      },
+      "visible_text": "Delegated child work."
+    }
+  ],
+  "transcript": {
+    "event_count": 0,
+    "message_count": 0,
+    "present": false,
+    "source": null,
+    "summary": null
+  },
+  "usage": {
+    "call_count": 0,
+    "input_tokens": 0,
+    "models": [],
+    "output_tokens": 0,
+    "total_cost": 0.0,
+    "total_duration_ms": 0
+  },
+  "visible_text": "Delegated child work."
+}

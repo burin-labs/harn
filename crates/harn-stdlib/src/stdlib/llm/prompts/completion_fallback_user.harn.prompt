@@ -1,0 +1,10 @@
+{{ if has_suffix }}PREFIX:
+{{ prefix }}
+
+SUFFIX:
+{{ suffix }}
+
+Return only the missing text between PREFIX and SUFFIX.{{ else }}PREFIX:
+{{ prefix }}
+
+Return only the next continuation text.{{ end }}

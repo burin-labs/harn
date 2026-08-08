@@ -1,0 +1,14 @@
+pipeline test(harness: Harness, task) {
+  const name = "world"
+  const greeting = """
+    hello ${name}!
+    """
+  harness.stdio.log(greeting)
+  const x = 10
+  const y = 20
+  const report = """
+    sum: ${x + y}
+    product: ${x * y}
+    """
+  harness.stdio.log(report)
+}

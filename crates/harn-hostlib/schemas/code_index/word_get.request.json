@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/word_get.request.json",
+  "title": "code_index.word_get request",
+  "description": "Look up every (file, line) hit recorded for an identifier-shaped token.",
+  "type": "object",
+  "properties": {
+    "word": { "type": "string", "minLength": 1 }
+  },
+  "required": ["word"],
+  "additionalProperties": false
+}

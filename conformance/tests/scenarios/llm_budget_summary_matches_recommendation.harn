@@ -1,0 +1,23 @@
+/**
+ * std/llm/budget.budget_summary explains exactly what
+ * recommend_max_output_tokens computes: the same runtime-preferred context
+ * window, the same recommendation, and the documented 8192 fallback (with an
+ * assumption note, not a throw) for a model the catalog does not know.
+ */
+import { budget_summary, context_window_for, recommend_max_output_tokens } from "std/llm/budget"
+
+pipeline default(harness: Harness) {
+  // gemma4:26b ships with context_window 262144 and runtime_context_window
+  // 32768 — the summary must explain the runtime-preferred window the real
+  // recommendation uses, not the model-card ceiling.
+  const opts = {prompt: "small prompt", model: "gemma4:26b", task_kind: "code"}
+  const summary = budget_summary(harness.llm, opts)
+  harness.stdio.println(summary.context_window == 32768)
+  harness.stdio.println(summary.context_window == context_window_for(harness.llm, "gemma4:26b"))
+  harness.stdio.println(
+    summary.recommended_max_output == recommend_max_output_tokens(harness.llm, opts),
+  )
+  const unknown = budget_summary(harness.llm, {prompt: "hi", model: "no-such-model-anywhere"})
+  harness.stdio.println(unknown.context_window == 8192)
+  harness.stdio.println(contains(join(unknown.assumptions, "\n"), "context_window unknown"))
+}

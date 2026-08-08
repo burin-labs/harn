@@ -1,0 +1,836 @@
+// std/agent/transcript — canonical transcript normalization helpers.
+//
+// Agent transcripts are persisted by the Harn runtime, so Harn owns the
+// compatibility layer for reading them. Downstream eval/reporting tools should
+// consume these normalized rows instead of guessing at provider-specific or
+// historical JSONL shapes.
+import { read_jsonl } from "std/jsonl"
+import "std/schema"
+
+const TRANSCRIPT_ROW_SCHEMA = "harn.agent.transcript.row.v1"
+
+const TRANSCRIPT_REPORT_SCHEMA = "harn.agent.transcript.report.v1"
+
+const ERROR_MARKERS = [
+  "\\berror\\b",
+  "\\bfailed\\b",
+  "\\bfailure\\b",
+  "\\bexception\\b",
+  "\\btraceback\\b",
+  "\\bnot found\\b",
+  "\\bno such file\\b",
+  "\\bcannot\\b",
+  "\\bdoes not exist\\b",
+  "\\bcompile error\\b",
+  "\\bcompilation failed\\b",
+  "\\btest failed\\b",
+  "\\bpanic:",
+]
+
+fn __first_text(values: list) -> string {
+  for value in values {
+    if type_of(value) == "string" && value != "" {
+      return value
+    }
+  }
+  return ""
+}
+
+fn __number_schema() {
+  return schema_union([schema_int(), schema_float()])
+}
+
+/**
+ * Schema for canonical transcript tool-call rows.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_transcript_tool_call_schema() {
+  return schema_object(
+    {
+      id: schema_field(schema_string(), false),
+      name: schema_string(),
+      args: schema_dict(schema_any()),
+      raw: schema_field(schema_any(), false),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+fn __agent_transcript_usage_schema() {
+  return schema_object(
+    {
+      input_tokens: __number_schema(),
+      output_tokens: __number_schema(),
+      cache_read_tokens: __number_schema(),
+      cache_write_tokens: __number_schema(),
+      response_ms: __number_schema(),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+fn __agent_transcript_base_row_schema(kind: string, role: string, fields: dict) {
+  return schema_object(
+    {
+      schema: schema_literal(TRANSCRIPT_ROW_SCHEMA),
+      kind: schema_literal(kind),
+      role: schema_literal(role),
+      iteration: schema_int(),
+      index: schema_int(),
+      raw_type: schema_field(schema_any(), false),
+      raw: schema_field(schema_any(), false),
+    }
+      + fields,
+    {additional_properties: schema_any()},
+  )
+}
+
+/**
+ * Schema for canonical transcript rows produced by `agent_transcript_normalize`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_transcript_row_schema() {
+  return schema_union(
+    [
+      __agent_transcript_base_row_schema(
+        "assistant",
+        "assistant",
+        {
+          text: schema_string(),
+          tool_calls: schema_list(agent_transcript_tool_call_schema()),
+          provider: schema_field(schema_any(), false),
+          model: schema_field(schema_any(), false),
+          usage: __agent_transcript_usage_schema(),
+        },
+      ),
+      __agent_transcript_base_row_schema("user", "user", {text: schema_string()}),
+      __agent_transcript_base_row_schema(
+        "tool_result",
+        "tool",
+        {
+          name: schema_string(),
+          tool_call_id: schema_string(),
+          text: schema_string(),
+          is_error: schema_bool(),
+        },
+      ),
+    ],
+  )
+}
+
+/**
+ * Schema for tool-call event rows returned by `agent_transcript_tool_events`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_transcript_tool_event_schema() {
+  return schema_object(
+    {
+      schema: schema_literal("harn.agent.transcript.tool_event.v1"),
+      kind: schema_literal("tool_call"),
+      iteration: schema_int(),
+      row_index: schema_int(),
+      call_index: schema_int(),
+      id: schema_string(),
+      name: schema_string(),
+      args: schema_dict(schema_any()),
+      call: agent_transcript_tool_call_schema(),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+/**
+ * Schema for transcript diagnostic issues.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_transcript_issue_schema() {
+  return schema_object(
+    {
+      code: schema_string(),
+      message: schema_string(),
+      record_index: schema_int(),
+      details: schema_dict(schema_any()),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+/**
+ * Schema for `agent_transcript_normalize_report` results.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_transcript_report_schema() {
+  return schema_object(
+    {
+      schema: schema_literal(TRANSCRIPT_REPORT_SCHEMA),
+      ok: schema_bool(),
+      rows: schema_list(agent_transcript_row_schema()),
+      issues: schema_list(agent_transcript_issue_schema()),
+      errors: schema_list(schema_string()),
+      invalid_count: schema_int(),
+    },
+    {additional_properties: schema_any()},
+  )
+}
+
+/**
+ * Convert message content variants into plain analysis text.
+ *
+ * Supports provider message strings, OpenAI-style content part lists, and
+ * Harn block dicts with `text` or `content`.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_transcript_text(message.content)
+ */
+pub fn agent_transcript_text(value) -> string {
+  const kind = type_of(value)
+  if kind == "string" {
+    return value
+  }
+  if kind == "list" {
+    let parts = []
+    for item in value {
+      const text = if type_of(item) == "dict" {
+        agent_transcript_text(item?.text ?? item?.content ?? "")
+      } else {
+        agent_transcript_text(item)
+      }
+      if text != "" {
+        parts = parts + [text]
+      }
+    }
+    return join(parts, "\n")
+  }
+  if kind == "dict" {
+    return __first_text([value?.text, value?.content, value?.body])
+  }
+  return ""
+}
+
+fn __json_or_raw(raw) {
+  if type_of(raw) != "string" {
+    return raw ?? {}
+  }
+  const parsed = try {
+    json_parse(raw)
+  }
+  if is_ok(parsed) {
+    return unwrap(parsed)
+  }
+  return {_raw: raw}
+}
+
+fn __args_dict_or_raw(raw) {
+  let value = __json_or_raw(raw)
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {_raw: value}
+}
+
+/**
+ * Return the canonical tool name for Harn, OpenAI, or legacy tool-call dicts.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_transcript_tool_call_name(call) -> string {
+  if type_of(call) != "dict" {
+    return ""
+  }
+  return __first_text([call?.name, call?.function?.name, call?.tool_name])
+}
+
+/**
+ * Return canonical tool-call arguments as a dict when possible.
+ *
+ * `arguments` may be an object or a JSON string. Unparseable strings are kept
+ * as `{_raw}` so consumers do not silently lose evidence.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_transcript_tool_call_args(call) {
+  if type_of(call) != "dict" {
+    return {}
+  }
+  if call?.args != nil {
+    return __args_dict_or_raw(call.args)
+  }
+  if call?.arguments != nil {
+    return __args_dict_or_raw(call.arguments)
+  }
+  if call?.function?.arguments != nil {
+    return __args_dict_or_raw(call.function.arguments)
+  }
+  return {}
+}
+
+/**
+ * Normalize one tool-call dict to `{id, name, args, raw}`.
+ *
+ * Unknown fields stay available in `raw` for audit/replay consumers.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_transcript_tool_call(call) {
+  const name = agent_transcript_tool_call_name(call)
+  if name == "" {
+    return nil
+  }
+  return {
+    id: __first_text([call?.id, call?.call_id, call?.tool_call_id]),
+    name: name,
+    args: agent_transcript_tool_call_args(call),
+    raw: call,
+  }
+}
+
+/**
+ * Normalize a list of tool-call dicts, dropping only entries without a name.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_transcript_tool_calls(calls) -> list {
+  let out = []
+  if type_of(calls) != "list" {
+    return out
+  }
+  for call in calls {
+    const normalized = agent_transcript_tool_call(call)
+    if normalized != nil {
+      out = out + [normalized]
+    }
+  }
+  return out
+}
+
+fn __issue(code: string, message: string, record_index: int, details = {}) -> dict {
+  return {code: code, message: message, record_index: record_index, details: details ?? {}}
+}
+
+fn __known_record_shape(record) -> bool {
+  if type_of(record) != "dict" {
+    return false
+  }
+  let record_type = record?.type
+  let role = __role(record)
+  return record_type == "response"
+    || record_type == "request"
+    || role == "assistant"
+    || role == "tool"
+    || role == "tool_result"
+    || role == "user"
+}
+
+fn __tool_call_raw_args(call) {
+  if type_of(call) != "dict" {
+    return nil
+  }
+  if call?.args != nil {
+    return call.args
+  }
+  if call?.arguments != nil {
+    return call.arguments
+  }
+  if call?.function?.arguments != nil {
+    return call.function.arguments
+  }
+  return nil
+}
+
+fn __tool_call_record_issues(record, index: int) -> list {
+  if type_of(record) != "dict" {
+    return []
+  }
+  let role = __role(record)
+  if record?.type != "response" && role != "assistant" {
+    return []
+  }
+  let calls = record?.tool_calls ?? record?.message?.tool_calls
+  if calls == nil {
+    return []
+  }
+  if type_of(calls) != "list" {
+    return [__issue("tool_calls_not_list", "assistant tool_calls must be a list", index)]
+  }
+  let issues = []
+  let call_index = 0
+  for call in calls {
+    if type_of(call) != "dict" {
+      issues = issues
+        + [
+        __issue(
+          "tool_call_not_object",
+          "tool call must be an object",
+          index,
+          {call_index: call_index},
+        ),
+      ]
+      call_index = call_index + 1
+      continue
+    }
+    if agent_transcript_tool_call_name(call) == "" {
+      issues = issues
+        + [
+        __issue(
+          "tool_call_missing_name",
+          "tool call is missing a canonical name",
+          index,
+          {call_index: call_index},
+        ),
+      ]
+    }
+    let raw_args = __tool_call_raw_args(call)
+    let args = agent_transcript_tool_call_args(call)
+    if args?._raw != nil && type_of(raw_args) == "string" {
+      let parsed = try {
+        json_parse(raw_args)
+      }
+      if is_ok(parsed) {
+        issues = issues
+          + [
+          __issue(
+            "tool_call_args_not_object",
+            "tool call arguments did not normalize to an object",
+            index,
+            {call_index: call_index},
+          ),
+        ]
+      } else {
+        issues = issues
+          + [
+          __issue(
+            "tool_call_args_unparsed",
+            "tool call arguments are not valid JSON",
+            index,
+            {call_index: call_index},
+          ),
+        ]
+      }
+    } else if args?._raw != nil {
+      issues = issues
+        + [
+        __issue(
+          "tool_call_args_not_object",
+          "tool call arguments did not normalize to an object",
+          index,
+          {call_index: call_index},
+        ),
+      ]
+    }
+    call_index = call_index + 1
+  }
+  return issues
+}
+
+fn __role(record) -> string {
+  return __first_text([record?.role, record?.message?.role])
+}
+
+fn __assistant_row(record, index: int, iteration: int) -> dict {
+  return {
+    schema: TRANSCRIPT_ROW_SCHEMA,
+    kind: "assistant",
+    role: "assistant",
+    iteration: iteration,
+    index: index,
+    text: agent_transcript_text(record?.text ?? record?.content ?? record?.message?.content),
+    tool_calls: agent_transcript_tool_calls(
+      record?.tool_calls ?? record?.message?.tool_calls ?? [],
+    ),
+    provider: record?.provider ?? record?.llm?.provider,
+    model: record?.model ?? record?.llm?.model ?? record?.message?.model,
+    usage: {
+      input_tokens: record?.input_tokens ?? record?.usage?.input_tokens
+        ?? record?.llm?.input_tokens
+        ?? 0,
+      output_tokens: record?.output_tokens ?? record?.usage?.output_tokens
+        ?? record?.llm
+        ?.output_tokens
+        ?? 0,
+      cache_read_tokens: record?.cache_read_tokens ?? record?.usage?.cache_read_tokens ?? 0,
+      cache_write_tokens: record?.cache_write_tokens ?? record?.usage?.cache_write_tokens ?? 0,
+      response_ms: record?.response_ms ?? record?.latency_ms ?? 0,
+    },
+    raw_type: record?.type,
+    raw: record,
+  }
+}
+
+fn __user_row(record, index: int, iteration: int) -> dict {
+  return {
+    schema: TRANSCRIPT_ROW_SCHEMA,
+    kind: "user",
+    role: "user",
+    iteration: iteration,
+    index: index,
+    text: agent_transcript_text(record?.content ?? record?.message?.content),
+    raw_type: record?.type,
+    raw: record,
+  }
+}
+
+fn __tool_result_is_error(text: string) -> bool {
+  for pattern in ERROR_MARKERS {
+    if regex_match(pattern, text ?? "", "i") != nil {
+      return true
+    }
+  }
+  return false
+}
+
+fn __tool_result_row(
+  name: string,
+  text: string,
+  call_id: string,
+  record,
+  index: int,
+  iteration: int,
+) -> dict {
+  return {
+    schema: TRANSCRIPT_ROW_SCHEMA,
+    kind: "tool_result",
+    role: "tool",
+    iteration: iteration,
+    index: index,
+    name: if name == "" {
+      "unknown"
+    } else {
+      name
+    },
+    tool_call_id: call_id,
+    text: text,
+    is_error: __tool_result_is_error(text),
+    raw_type: record?.type,
+    raw: record,
+  }
+}
+
+fn __tool_message_row(record, index: int, iteration: int) -> dict {
+  return __tool_result_row(
+    __first_text([record?.name, record?.message?.name, record?.tool_name]),
+    agent_transcript_text(record?.content ?? record?.message?.content),
+    __first_text([record?.tool_call_id, record?.message?.tool_call_id, record?.id]),
+    record,
+    index,
+    iteration,
+  )
+}
+
+fn __parse_tool_result_attrs(attrs: string) -> dict {
+  const captures = regex_captures(
+    "([a-zA-Z_][a-zA-Z0-9_]*)\\s*=\\s*[\"']?([^\"'\\s>]+)",
+    attrs ?? "",
+  )
+    ?? []
+  let out = {}
+  for capture in captures {
+    const groups = capture?.groups ?? []
+    if len(groups) >= 2 {
+      out = out + {[groups[0]]: groups[1]}
+    }
+  }
+  return out
+}
+
+/**
+ * Parse textual `<tool_result ...>...</tool_result>` blocks into rows.
+ *
+ * This keeps older/cumulative request-envelope transcripts analyzable without
+ * requiring downstream consumers to parse rendered transcript text.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_transcript_tool_result_blocks(text: string) -> list {
+  let out = []
+  for capture in regex_captures("(?i)<tool_result\\b([^>]*)>([\\s\\S]*?)</tool_result>", text ?? "")
+    ?? [] {
+    const groups = capture?.groups ?? []
+    const attrs = if len(groups) > 0 {
+      __parse_tool_result_attrs(groups[0])
+    } else {
+      {}
+    }
+    const body = if len(groups) > 1 {
+      trim(groups[1])
+    } else {
+      ""
+    }
+    out = out
+      + [
+      {
+        name: attrs?.name ?? "unknown",
+        tool_call_id: attrs?.id ?? attrs?.tool_call_id ?? "",
+        text: body,
+      },
+    ]
+  }
+  return out
+}
+
+fn __legacy_request_tool_result_rows(record, index: int, previous_count: int) -> dict {
+  let all = []
+  for message in record?.messages ?? [] {
+    if message?.role == "user" {
+      all = all + agent_transcript_tool_result_blocks(agent_transcript_text(message?.content))
+    }
+  }
+  const fresh = if len(all) > previous_count {
+    all[previous_count:]
+  } else {
+    all
+  }
+  let rows = []
+  for result in fresh {
+    rows = rows
+      + [
+      __tool_result_row(
+        result?.name ?? "unknown",
+        result?.text ?? "",
+        result?.tool_call_id ?? "",
+        record,
+        index,
+        max(0, (to_int(record?.iteration) ?? 0) - 1),
+      ),
+    ]
+  }
+  return {rows: rows, count: len(all)}
+}
+
+/**
+ * Normalize JSONL transcript records to canonical analysis rows.
+ *
+ * Accepted inputs include:
+ * - modern Harn message rows: `{type:"message", role, message?, content?}`
+ * - older scorer rows: `{type:"response", tool_calls, text, ...}`
+ * - older request rows with cumulative `<tool_result>` blocks
+ * - plain provider/session messages with only `role` and `content`
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_transcript_normalize(records) -> list {
+  let rows = []
+  let next_iteration = 0
+  let last_assistant_iteration = -1
+  let previous_legacy_result_count = 0
+  let index = 0
+  for record in records ?? [] {
+    const record_type = record?.type
+    const role = __role(record)
+    if record_type == "response" || role == "assistant" {
+      const iteration = if record?.iteration != nil {
+        to_int(record.iteration) ?? next_iteration
+      } else {
+        next_iteration
+      }
+      rows = rows + [__assistant_row(record, index, iteration)]
+      next_iteration = max(next_iteration, iteration + 1)
+      last_assistant_iteration = iteration
+    } else if role == "tool" || role == "tool_result" {
+      rows = rows + [__tool_message_row(record, index, max(0, last_assistant_iteration))]
+    } else if record_type == "request" {
+      const extracted = __legacy_request_tool_result_rows(
+        record,
+        index,
+        previous_legacy_result_count,
+      )
+      rows = rows + extracted.rows
+      previous_legacy_result_count = extracted.count
+    } else if role == "user" {
+      rows = rows + [__user_row(record, index, max(0, last_assistant_iteration + 1))]
+    }
+    index = index + 1
+  }
+  return rows
+}
+
+/**
+ * Normalize transcript records and return schema-backed validation diagnostics.
+ *
+ * The `rows` field is identical to `agent_transcript_normalize(records)`.
+ * Malformed or unsupported records are reported under `issues` instead of
+ * being lost as silent defaults.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_transcript_normalize_report(records) -> dict {
+  let issues = []
+  let input_records = if type_of(records) == "list" {
+    records
+  } else {
+    if records != nil {
+      issues = issues
+        + [
+        __issue(
+          "input_not_list",
+          "transcript records must be a list",
+          -1,
+          {actual_type: type_of(records)},
+        ),
+      ]
+    }
+    []
+  }
+  let record_index = 0
+  for record in input_records {
+    if type_of(record) != "dict" {
+      issues = issues
+        + [
+        __issue(
+          "record_not_object",
+          "transcript record must be an object",
+          record_index,
+          {actual_type: type_of(record)},
+        ),
+      ]
+      record_index = record_index + 1
+      continue
+    }
+    if !__known_record_shape(record) {
+      issues = issues
+        + [
+        __issue(
+          "unrecognized_record",
+          "transcript record shape is not recognized",
+          record_index,
+          {record_type: record?.type, role: __role(record)},
+        ),
+      ]
+    }
+    issues = issues + __tool_call_record_issues(record, record_index)
+    record_index = record_index + 1
+  }
+  let rows = agent_transcript_normalize(input_records)
+  let errors = []
+  let row_index = 0
+  for row in rows {
+    let report = get_typed_report(row, agent_transcript_row_schema())
+    if !(report?.ok ?? false) {
+      issues = issues
+        + [
+        __issue(
+          "row_schema_invalid",
+          report?.message ?? "normalized transcript row failed schema validation",
+          row?.index ?? row_index,
+          {row_index: row_index, schema_issues: report?.issues ?? []},
+        ),
+      ]
+      errors = errors + (report?.errors ?? [])
+    }
+    row_index = row_index + 1
+  }
+  return {
+    schema: TRANSCRIPT_REPORT_SCHEMA,
+    ok: len(issues) == 0,
+    rows: rows,
+    issues: issues,
+    errors: errors,
+    invalid_count: len(issues),
+  }
+}
+
+/**
+ * Read a transcript JSONL file and normalize it to canonical rows.
+ *
+ * @effects: ["fs.read"]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_transcript_read(fs: HarnessFs, path: string, options = {}) -> list {
+  return agent_transcript_normalize(read_jsonl(fs, path, options ?? {}))
+}
+
+/**
+ * Read a transcript JSONL file and return normalized rows plus diagnostics.
+ *
+ * @effects: ["fs.read"]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_transcript_read_report(fs: HarnessFs, path: string, options = {}) -> dict {
+  return agent_transcript_normalize_report(read_jsonl(fs, path, options ?? {}))
+}
+
+/**
+ * Return only assistant tool-call rows from a normalized or raw transcript.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_transcript_tool_events(records) -> list {
+  const rows = agent_transcript_normalize(records)
+  let out = []
+  for row in rows {
+    if row?.kind != "assistant" {
+      continue
+    }
+    let call_index = 0
+    for call in row?.tool_calls ?? [] {
+      out = out
+        + [
+        {
+          schema: "harn.agent.transcript.tool_event.v1",
+          kind: "tool_call",
+          iteration: row.iteration,
+          row_index: row.index,
+          call_index: call_index,
+          id: call?.id ?? "",
+          name: call?.name ?? "",
+          args: call?.args ?? {},
+          call: call,
+        },
+      ]
+      call_index = call_index + 1
+    }
+  }
+  return out
+}
+
+/**
+ * Return only tool-result rows from a normalized or raw transcript.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_transcript_tool_results(records) -> list {
+  const rows = agent_transcript_normalize(records)
+  let out = []
+  for row in rows {
+    if row?.kind == "tool_result" {
+      out = out + [row]
+    }
+  }
+  return out
+}

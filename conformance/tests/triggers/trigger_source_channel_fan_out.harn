@@ -1,0 +1,62 @@
+import "std/triggers"
+
+/**
+ * CH-02 (#1872): two triggers subscribed to the same channel both fire
+ * independently on a single emit.
+ */
+fn handle_a(harness: Harness, event) {
+  harness.channels.append("ch.fanout.fired", {who: "a", repo: event.provider_payload.payload.repo})
+}
+
+fn handle_b(harness: Harness, event) {
+  harness.channels.append("ch.fanout.fired", {who: "b", repo: event.provider_payload.payload.repo})
+}
+
+pipeline test(harness: Harness, task) {
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(
+    harness.random.range(100000, 999999),
+  )
+  const _ = harness.runtime.trigger_register(
+    {
+      id: "channel-fanout-a-" + unique,
+      kind: "channel.emit",
+      provider: "channel",
+      autonomy_tier: "act_auto",
+      handler: handle_a,
+      when: nil,
+      retry: nil,
+      match: {events: ["channel:fanout.input"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  const _ = harness.runtime.trigger_register(
+    {
+      id: "channel-fanout-b-" + unique,
+      kind: "channel.emit",
+      provider: "channel",
+      autonomy_tier: "act_auto",
+      handler: handle_b,
+      when: nil,
+      retry: nil,
+      match: {events: ["channel:fanout.input"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  const _ = harness.channels.append("fanout.input", {repo: "harn"})
+  const fired = harness.channels.events("ch.fanout.fired")
+  harness.stdio.println(len(fired))
+  // Bindings dispatch in id-sorted order: `-a-` before `-b-`.
+  harness.stdio.println(fired[0].payload.who)
+  harness.stdio.println(fired[1].payload.who)
+}

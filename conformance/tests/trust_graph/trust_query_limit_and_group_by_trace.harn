@@ -1,0 +1,51 @@
+import "std/triggers"
+
+pipeline test(harness: Harness, task) {
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(
+    harness.random.range(100000, 999999),
+  )
+  const agent_id = "trust-grouped-" + unique
+  const handle: TriggerHandle = harness.runtime.trigger_register(
+    {
+      id: agent_id,
+      kind: "issue.opened",
+      provider: "webhook",
+      autonomy_tier: "act_auto",
+      handler: { harness, event ->
+        let _ = harness.runtime.trust_record(agent_id, "audit.note", nil, "success", "suggest")
+        return harness.runtime.handler_context()
+      },
+      when: nil,
+      retry: nil,
+      match: {events: ["issue.opened"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      budget: nil,
+      manifest_path: "runtime://trust-graph",
+      package_name: "conformance",
+    },
+  )
+  const first: DispatchHandle = harness.runtime.trigger_fire(
+    handle,
+    {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-a-" + unique}},
+  )
+  const second: DispatchHandle = harness.runtime.trigger_fire(
+    handle,
+    {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-b-" + unique}},
+  )
+  const flat: list<TrustRecord> = harness.runtime.trust_query({agent: agent_id, limit: 2})
+  const grouped: list<TrustTraceGroup> = harness.runtime.trust_query(
+    {agent: agent_id, limit: 2, grouped_by_trace: true},
+  )
+  harness.stdio.println(first.status == "dispatched")
+  harness.stdio.println(second.status == "dispatched")
+  harness.stdio.println(len(flat) == 2)
+  harness.stdio.println(flat[0]?.action == "audit.note")
+  harness.stdio.println(flat[1]?.action == "webhook.issue.opened")
+  harness.stdio.println(len(grouped) == 1)
+  harness.stdio.println(grouped[0]?.trace_id == second.result?.trace_id)
+  harness.stdio.println(len(grouped[0]?.records) == 2)
+  harness.stdio.println(grouped[0]?.records?.[0]?.trace_id == grouped[0]?.records?.[1]?.trace_id)
+}

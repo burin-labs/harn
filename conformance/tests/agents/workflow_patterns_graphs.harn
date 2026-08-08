@@ -1,0 +1,42 @@
+import {
+  workflow_command_verify_graph,
+  workflow_repair_stage_graph,
+  workflow_self_verifying_graph,
+  workflow_verification_only_graph,
+} from "std/workflow/patterns"
+
+pipeline default(harness: Harness) {
+  const command_verify = workflow_command_verify_graph(
+    {
+      name: "edit_verify",
+      model_policy: {provider: "mock", model: "gpt-4o", iteration_budget: {max: 3}},
+      repair_model_policy: {model: "gpt-5.4-preview"},
+      verify: {command: "echo ok", expect_status: 0},
+    },
+  )
+  harness.stdio.println(command_verify.name)
+  harness.stdio.println(command_verify.entry)
+  harness.stdio.println(command_verify.nodes.implement.kind)
+  harness.stdio.println(command_verify.nodes.verify.kind)
+  harness.stdio.println(command_verify.nodes.repair.metadata.repairs)
+  harness.stdio.println(command_verify.nodes.repair.model_policy.model)
+  harness.stdio.println(len(command_verify.edges))
+  harness.stdio.println(command_verify.edges[1].branch)
+  const self_verify = workflow_self_verifying_graph(
+    {act_id: "draft", verify_id: "check", verify: {assert_text: "ok"}},
+  )
+  harness.stdio.println(self_verify.entry)
+  harness.stdio.println(self_verify.edges[0].to)
+  const verify_only = workflow_verification_only_graph(
+    {verify_id: "gate", verify: {assert_text: "ok"}},
+  )
+  harness.stdio.println(verify_only.entry)
+  harness.stdio.println(len(verify_only.edges))
+  const repair_stage = workflow_repair_stage_graph(
+    {verify: {assert_text: "ok"}, retry_policy: {feedback: true}},
+  )
+  harness.stdio.println(repair_stage.entry)
+  harness.stdio.println(repair_stage.nodes.repair.kind)
+  harness.stdio.println(repair_stage.nodes.repair.retry_policy.max_attempts)
+  harness.stdio.println(len(repair_stage.edges))
+}

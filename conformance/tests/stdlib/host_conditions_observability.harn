@@ -1,0 +1,50 @@
+import { host_conditions_sample } from "std/host_conditions"
+
+fn sample_with_injected_host_facts(system: HarnessSystem, testing: HarnessTesting) {
+  const snapshot = host_conditions_sample(system)
+  const calls = testing.calls()
+  require len(calls) == 1
+  require calls[0].capability == "system"
+  require calls[0].method == "host_conditions"
+  return snapshot
+}
+
+pipeline test_host_conditions_observability(harness: Harness, task) {
+  harness.testing.clear()
+  harness.testing.respond(
+    "system",
+    "host_conditions",
+    {
+      schema_version: 1,
+      observed_at_ms: 123,
+      environment: "virtualized",
+      sample_cost_us: 7,
+      questions: [
+        {question: "promised_cpu", status: "observed", contention: 0.0, reason: nil},
+        {
+          question: "nominal_speed",
+          status: "not_observable",
+          contention: nil,
+          reason: "guest cannot see host thermal state",
+        },
+        {
+          question: "accelerator_shared",
+          status: "unavailable",
+          contention: nil,
+          reason: "control-plane allocation read failed",
+        },
+        {question: "memory_or_io_contended", status: "observed", contention: 0.25, reason: nil},
+      ],
+    },
+  )
+  const snapshot = sample_with_injected_host_facts(harness.system, harness.testing)
+  assert_eq(snapshot.questions[0]?.status, "observed")
+  assert_eq(snapshot.questions[0]?.contention, 0.0)
+  assert_eq(snapshot.questions[1]?.status, "not_observable")
+  assert_eq(snapshot.questions[1]?.contention, nil)
+  assert_eq(snapshot.questions[2]?.status, "unavailable")
+  assert_eq(snapshot.questions[2]?.contention, nil)
+  assert_eq(snapshot.questions[3]?.status, "observed")
+  assert_eq(snapshot.questions[3]?.contention, 0.25)
+  harness.stdio.println("ok")
+}

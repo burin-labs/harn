@@ -1,0 +1,253 @@
+#!/usr/bin/env python3
+"""Reference OpenTrustGraph v0 verifier in pure Python.
+
+This script reads an `opentrustgraph-chain/v0` envelope from stdin or a
+file, recomputes every `entry_hash`, and checks the linkage against the
+stored `previous_hash` / `root_hash` values. It exists as a portable
+proof point that the OpenTrustGraph hash contract is interoperable with
+non-Harn runtimes.
+
+Usage:
+    python3 verify_chain.py path/to/chain.json
+    cat chain.json | python3 verify_chain.py
+
+Exit codes:
+    0 - chain verified
+    1 - chain rejected (output explains why)
+    2 - usage / IO error
+
+Only the Python standard library is used.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import sys
+from typing import Any, Iterator, List, Tuple
+
+CHAIN_SCHEMA = "opentrustgraph-chain/v0"
+# v0.1 is the current record discriminator. v0 is accepted for one patch
+# release window (see CONFORMANCE.md §5).
+RECORD_SCHEMA_V0_1 = "opentrustgraph/v0.1"
+RECORD_SCHEMA_V0 = "opentrustgraph/v0"
+RECORD_SCHEMAS = {RECORD_SCHEMA_V0_1, RECORD_SCHEMA_V0}
+
+
+def _canonicalize(value: Any) -> Any:
+    """Recursively sort object keys at every nesting level.
+
+    Arrays preserve element order; only object keys are sorted. This
+    matches the Harn reference impl, which routes records through
+    `serde_json::Value` (a BTreeMap-backed map) before hashing.
+    """
+    if isinstance(value, dict):
+        return {key: _canonicalize(value[key]) for key in sorted(value.keys())}
+    if isinstance(value, list):
+        return [_canonicalize(item) for item in value]
+    return value
+
+
+def canonical_record_bytes(record: dict[str, Any]) -> bytes:
+    """Serialize a record to the canonical JSON used for hashing.
+
+    `entry_hash` is removed before serialization; every other key — at
+    every nesting level — is emitted in lexicographic order with no
+    insignificant whitespace.
+    """
+    without_hash = {key: value for key, value in record.items() if key != "entry_hash"}
+    canonical = _canonicalize(without_hash)
+    return json.dumps(canonical, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+
+def compute_entry_hash(record: dict[str, Any]) -> str:
+    digest = hashlib.sha256(canonical_record_bytes(record)).hexdigest()
+    return f"sha256:{digest}"
+
+
+def actor_chain_parts(value: Any, path: str) -> Tuple[str, List[str]]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{path} must be an object")
+    origin = value.get("sub")
+    if not isinstance(origin, str) or not origin:
+        raise ValueError(f"{path}.sub must be a string")
+    actors: List[str] = []
+    current = value.get("act")
+    current_path = f"{path}.act"
+    while current is not None:
+        if not isinstance(current, dict):
+            raise ValueError(f"{current_path} must be an object")
+        subject = current.get("sub")
+        if not isinstance(subject, str) or not subject:
+            raise ValueError(f"{current_path}.sub must be a string")
+        actors.append(subject)
+        current = current.get("act")
+        current_path = f"{current_path}.act"
+    return origin, actors
+
+
+def actor_chain_extends_parent(
+    child: Tuple[str, List[str]], parent: Tuple[str, List[str]]
+) -> bool:
+    child_origin, child_actors = child
+    parent_origin, parent_actors = parent
+    return (
+        child_origin == parent_origin
+        and len(child_actors) == len(parent_actors) + 1
+        and child_actors[1:] == parent_actors
+    )
+
+
+def verify_chain(envelope: dict[str, Any]) -> List[str]:
+    errors: List[str] = []
+
+    if envelope.get("schema") != CHAIN_SCHEMA:
+        errors.append(f"unsupported chain schema: {envelope.get('schema')!r}")
+    chain = envelope.get("chain") or {}
+    records = envelope.get("records") or []
+
+    declared_total = chain.get("total")
+    if declared_total != len(records):
+        errors.append(
+            f"chain.total mismatch: declared {declared_total!r}, found {len(records)}"
+        )
+
+    # `by_id` lets us check v0.1 effect-inheritance invariants for
+    # records that carry `parent_record_id`. Older v0 chains skip this
+    # block because no record carries the new metadata key.
+    by_id: dict[str, dict[str, Any]] = {}
+    previous_hash: str | None = None
+    for index, record in enumerate(records):
+        label = f"record {index}"
+        if record.get("schema") not in RECORD_SCHEMAS:
+            errors.append(f"{label}: unsupported record schema {record.get('schema')!r}")
+        expected_index = index + 1
+        if record.get("chain_index") != expected_index:
+            errors.append(
+                f"{label}: expected chain_index {expected_index}, found {record.get('chain_index')!r}"
+            )
+        if record.get("previous_hash") != previous_hash:
+            errors.append(
+                f"{label}: previous_hash mismatch; expected {previous_hash!r}, "
+                f"found {record.get('previous_hash')!r}"
+            )
+        recomputed = compute_entry_hash(record)
+        if recomputed != record.get("entry_hash"):
+            errors.append(
+                f"{label}: entry_hash mismatch; recomputed {recomputed!r}, "
+                f"stored {record.get('entry_hash')!r}"
+            )
+        approval = (record.get("metadata") or {}).get("approval") or {}
+        if (
+            record.get("outcome") == "success"
+            and record.get("autonomy_tier") == "act_with_approval"
+            and approval.get("required") is True
+        ):
+            approver = record.get("approver") or ""
+            signatures = approval.get("signatures") or []
+            if not approver.strip():
+                errors.append(f"{label}: approval required but approver is empty")
+            if not signatures:
+                errors.append(f"{label}: approval required but signatures are empty")
+
+        # v0.1 lineage: when a record carries effects or actor-chain
+        # metadata and points at a parent record via `parent_record_id`,
+        # those child claims must stay inside the parent record's lineage.
+        metadata = record.get("metadata") or {}
+        parent_id = metadata.get("parent_record_id")
+        effects_used = metadata.get("effects_used") or []
+        actor_chain = None
+        if metadata.get("actor_chain") is not None:
+            try:
+                actor_chain = actor_chain_parts(metadata["actor_chain"], f"{label}.actor_chain")
+            except ValueError as error:
+                errors.append(f"{label}: actor_chain invalid: {error}")
+        if parent_id and (effects_used or actor_chain is not None):
+            parent_record = by_id.get(parent_id)
+            if parent_record is None:
+                errors.append(
+                    f"{label}: parent_record_id {parent_id!r} not found in chain"
+                )
+            else:
+                parent_metadata = parent_record.get("metadata") or {}
+                if effects_used:
+                    parent_grant = parent_metadata.get("effects_grant") or []
+                    canonical_parent_grant = [_canonicalize(e) for e in parent_grant]
+                    for effect in effects_used:
+                        if _canonicalize(effect) not in canonical_parent_grant:
+                            errors.append(
+                                f"{label}: effects_used escaped grant from parent "
+                                f"{parent_id!r}: {effect!r}"
+                            )
+                if actor_chain is not None:
+                    parent_actor_raw = parent_metadata.get("actor_chain")
+                    if parent_actor_raw is None:
+                        errors.append(
+                            f"{label}: actor_chain parent {parent_id!r} missing actor_chain"
+                        )
+                    else:
+                        try:
+                            parent_actor_chain = actor_chain_parts(
+                                parent_actor_raw,
+                                f"parent {parent_id!r}.actor_chain",
+                            )
+                            if not actor_chain_extends_parent(
+                                actor_chain, parent_actor_chain
+                            ):
+                                errors.append(
+                                    f"{label}: actor_chain escaped parentage from "
+                                    f"parent {parent_id!r}"
+                                )
+                        except ValueError as error:
+                            errors.append(
+                                f"{label}: parent actor_chain invalid: {error}"
+                            )
+
+        record_id = record.get("record_id")
+        if isinstance(record_id, str) and record_id:
+            by_id[record_id] = record
+
+        previous_hash = record.get("entry_hash")
+
+    declared_root = chain.get("root_hash")
+    if declared_root != previous_hash:
+        errors.append(
+            f"chain.root_hash mismatch: declared {declared_root!r}, computed {previous_hash!r}"
+        )
+
+    return errors
+
+
+def _read_envelope(args: Iterator[str]) -> dict[str, Any]:
+    paths = list(args)
+    if not paths:
+        return json.load(sys.stdin)
+    if len(paths) > 1:
+        print("usage: verify_chain.py [chain.json]", file=sys.stderr)
+        sys.exit(2)
+    with open(paths[0], "r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def main(argv: List[str]) -> int:
+    try:
+        envelope = _read_envelope(iter(argv[1:]))
+    except (OSError, json.JSONDecodeError) as error:
+        print(f"failed to read envelope: {error}", file=sys.stderr)
+        return 2
+
+    errors = verify_chain(envelope)
+    if errors:
+        for line in errors:
+            print(line, file=sys.stderr)
+        return 1
+
+    chain = envelope.get("chain") or {}
+    print(
+        f"verified topic={chain.get('topic')} records={chain.get('total')} "
+        f"root_hash={chain.get('root_hash')}"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

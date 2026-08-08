@@ -1,0 +1,458 @@
+use std::sync::Arc;
+
+use crate::value::{VmClosure, VmEnv, VmError, VmValue};
+
+use super::{CallArgs, CallFrame, LocalSlot, Vm};
+
+type PreparedClosureLocals = (Vec<LocalSlot>, Option<Vec<LocalSlot>>, Option<Vec<VmValue>>);
+
+impl Vm {
+    /// Build the call-time env for a closure invocation.
+    ///
+    /// Harn is **lexically scoped for data**: a closure sees exactly the
+    /// data names it captured at creation time, plus its parameters,
+    /// plus names from its originating module's `module_state`, plus
+    /// the module-function registry. The caller's *data* locals are
+    /// intentionally not visible — that would be dynamic scoping, which
+    /// is neither what Harn's TS-flavored surface suggests to users nor
+    /// something real stdlib code relies on.
+    ///
+    /// **Exception: closure-typed bindings.** Function *names* are
+    /// late-bound, Python-`LOAD_GLOBAL`-style. When a local recursive
+    /// fn is declared in a pipeline body (or inside another function),
+    /// the closure is created BEFORE its own name is defined in the
+    /// enclosing scope, so `closure.env` captures a snapshot that is
+    /// missing the self-reference. To make `fn fact(n) { fact(n-1) }`
+    /// work without a letrec trick, we merge closure-typed entries
+    /// from the caller's scope stack — but only closure-typed ones.
+    /// Data locals are never leaked across call boundaries, so the
+    /// surprising "caller's variable magically visible in callee"
+    /// semantic is ruled out.
+    ///
+    /// Imported module closures have `module_state` set, at which
+    /// point the full lexical environment is already available via
+    /// `closure.env` + `module_state`, and we skip the closure merge
+    /// entirely as a fast path for context-builder workloads.
+    pub(crate) fn closure_call_env(caller_env: &VmEnv, closure: &VmClosure) -> VmEnv {
+        if closure.module_state().is_some() {
+            return closure.env.cloned_for_call();
+        }
+        let call_env = closure.env.cloned_for_call();
+        // Compile-time guard: the late-bind walk only matters when the
+        // callee body actually reads a name through the runtime env
+        // (GetVar / SetVar / CallBuiltin / ...). For pure-arithmetic
+        // collection callbacks (`x -> x * 2`, `x -> x % 2 == 0`) no
+        // such op is emitted, so the walk would inject closure-typed
+        // names the callee can never reach. Skipping it preserves
+        // observable semantics while collapsing the per-invocation
+        // caller-scope iteration on the hot `.map`/`.filter`/`.each`
+        // path.
+        if !closure.func.chunk.references_outer_names {
+            return call_env;
+        }
+        let mut call_env = call_env;
+        // Late-bind only closure-typed names from the caller — enough
+        // for local recursive / mutually-recursive fns to self-reference
+        // without leaking caller-local data into the callee.
+        for scope in &caller_env.scopes {
+            for (name, binding) in scope.vars.iter() {
+                let val = binding.read();
+                if matches!(val, VmValue::Closure(_)) && !call_env.contains(name) {
+                    let _ = call_env.define(name, val, binding.mutable());
+                }
+            }
+        }
+        call_env
+    }
+
+    pub(crate) fn resolve_named_closure(&self, name: &str) -> Option<Arc<VmClosure>> {
+        if let Some(value) = self.resolve_lexical_named_value(name) {
+            return match value {
+                VmValue::Closure(closure) => Some(closure),
+                _ => None,
+            };
+        }
+        if let Some(closure) = self
+            .frames
+            .last()
+            .and_then(|frame| frame.module_functions.as_ref())
+            .and_then(|registry| registry.lock().get(name).cloned())
+        {
+            return Some(closure);
+        }
+        None
+    }
+
+    /// Resolve an exact lexical value without falling through to VM globals.
+    ///
+    /// Call sites use this before by-name builtin/tool dispatch so shadowing is
+    /// determined by binding presence, not by whether the bound value happens
+    /// to be a closure. A captured `BuiltinRef` or non-callable must therefore
+    /// win over a same-named builtin just as a captured closure does.
+    pub(crate) fn resolve_lexical_named_value(&self, name: &str) -> Option<VmValue> {
+        if let Some(value) = self.env.get(name) {
+            return Some(value);
+        }
+        if let Some(value) = self.active_local_slot_value(name) {
+            return Some(value);
+        }
+        if let Some(value) = self
+            .frames
+            .last()
+            .and_then(|frame| frame.module_state.as_ref())
+            .and_then(|state| state.lock().get(name))
+        {
+            return Some(value);
+        }
+        None
+    }
+
+    pub(crate) fn resolve_named_value(&self, name: &str) -> Option<VmValue> {
+        if let Some(value) = self.resolve_lexical_named_value(name) {
+            return Some(value);
+        }
+        if let Some(value) = self.globals.get(name) {
+            return Some(value.clone());
+        }
+        None
+    }
+
+    fn prepare_closure_local_slots(
+        &self,
+        closure: &VmClosure,
+        args: &[VmValue],
+    ) -> Result<PreparedClosureLocals, VmError> {
+        self.prepare_closure_local_slots_args(closure, &CallArgs::Slice(args))
+    }
+
+    fn prepare_closure_local_slots_args(
+        &self,
+        closure: &VmClosure,
+        args: &CallArgs<'_>,
+    ) -> Result<PreparedClosureLocals, VmError> {
+        let legacy_args = self.legacy_ambient_call_args(closure, args)?;
+        let adapted_args = legacy_args.as_deref().map(CallArgs::Slice);
+        let effective_args = adapted_args.as_ref().unwrap_or(args);
+        crate::typecheck::validate_user_call_args(&closure.func, effective_args, None)?;
+        let mut local_slots = Self::fresh_local_slots(&closure.func.chunk);
+        Self::bind_param_slots_args(&mut local_slots, &closure.func, effective_args, false);
+        let initial_local_slots = if self.debugger_attached() {
+            Some(local_slots.clone())
+        } else {
+            None
+        };
+        Ok((local_slots, initial_local_slots, legacy_args))
+    }
+
+    pub(crate) fn legacy_ambient_call_args(
+        &self,
+        closure: &VmClosure,
+        args: &CallArgs<'_>,
+    ) -> Result<Option<Vec<VmValue>>, VmError> {
+        if self.global("harness").is_none() {
+            return Ok(None);
+        }
+        let capability_types: Vec<&str> = closure
+            .func
+            .params
+            .iter()
+            .map_while(|param| match param.type_expr.as_ref() {
+                Some(harn_parser::TypeExpr::Named(name))
+                    if name == "Harness"
+                        || harn_builtin_meta::CapabilityId::from_type_name(name).is_some() =>
+                {
+                    Some(name.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        if capability_types.is_empty() {
+            return Ok(None);
+        }
+        let first_type = capability_types[0];
+        if args.get(0).is_some_and(
+            |value| matches!(value, VmValue::Harness(handle) if handle.type_name() == first_type),
+        ) {
+            return Ok(None);
+        }
+        if !closure.func.has_rest_param
+            && args.len() + capability_types.len() > closure.func.params.len()
+        {
+            return Ok(None);
+        }
+
+        let root = self.root_harness_value().ok_or_else(|| {
+            VmError::Runtime(format!(
+                "legacy call to `{}` requires typed Harness capabilities, but no root Harness is installed",
+                closure.func.name
+            ))
+        })?;
+        let mut adapted = Vec::with_capacity(args.len() + capability_types.len());
+        for type_name in capability_types {
+            let authority = if type_name == "Harness" {
+                root.clone()
+            } else {
+                let capability = harn_builtin_meta::CapabilityId::from_type_name(type_name)
+                    .expect("capability prefix was validated above");
+                let VmValue::Harness(root) = &root else {
+                    unreachable!("root_harness_value returned a non-Harness value")
+                };
+                root.sub_handle(capability.field_name())
+                    .map(VmValue::harness)
+                    .ok_or_else(|| {
+                        VmError::Runtime(format!(
+                            "legacy call to `{}` requires unavailable `{type_name}`",
+                            closure.func.name
+                        ))
+                    })?
+            };
+            adapted.push(authority);
+        }
+        adapted.extend(args.iter().cloned());
+        Ok(Some(adapted))
+    }
+
+    fn enter_closure_frame(
+        &mut self,
+        closure: &VmClosure,
+        argc: usize,
+        local_slots: Vec<LocalSlot>,
+        initial_local_slots: Option<Vec<LocalSlot>>,
+        step_args: &[VmValue],
+    ) {
+        // If this closure originated from an imported module, switch
+        // the thread-local source dir so that render() and other
+        // source-relative builtins resolve relative to the module.
+        let saved_source_dir =
+            crate::stdlib::process::enter_frame_source_dir(closure.source_dir.as_deref());
+
+        // `closure_call_env_for_current_frame` still reads the caller's
+        // `self.env`, so build the callee env first, then *move* the caller
+        // env into the frame. `self.env` is about to be overwritten anyway —
+        // it only needs to survive in `saved_env` for restore-on-return — so a
+        // clone here would allocate a whole scope-stack copy on every call for
+        // nothing.
+        let mut call_env = self.closure_call_env_for_current_frame(closure);
+        call_env.push_scope();
+
+        let initial_env = if self.debugger_attached() {
+            Some(call_env.clone())
+        } else {
+            None
+        };
+        let saved_env = std::mem::replace(&mut self.env, call_env);
+
+        // Function-name breakpoint latch: record the name so the step
+        // loop can raise a single "function breakpoint" stop on the
+        // next cycle. We latch instead of stopping inline because
+        // push_closure_frame is called from deep inside the call
+        // dispatcher — the cleanest place for the debugger to observe
+        // a consistent state is at the next line-change check.
+        if self.function_breakpoints.contains(&closure.func.name) {
+            self.pending_function_bp = Some(closure.func.name.clone());
+        }
+
+        let chunk = Arc::clone(&closure.func.chunk);
+        let inline_cache_set = self.inline_cache_set_index_for_chunk(&chunk);
+        self.frames.push(CallFrame {
+            chunk,
+            inline_cache_set,
+            ip: 0,
+            stack_base: self.stack.len(),
+            saved_env,
+            initial_env,
+            initial_local_slots,
+            saved_iterator_depth: self.iterators.len(),
+            fn_name: closure.func.name.clone(),
+            argc,
+            saved_source_dir,
+            module_functions: closure.module_functions(),
+            module_state: closure.module_state(),
+            local_slots,
+            local_scope_base: self.env.scope_depth().saturating_sub(1),
+            local_scope_depth: 0,
+        });
+
+        // If this fn is `@step`-decorated, push an active-step entry so
+        // `llm_call` and the error-boundary unwind path can attribute
+        // tokens, cost, and budget exhaustion to it. The push is keyed
+        // off the function name registered by compiler-emitted
+        // `__register_step` calls.
+        crate::step_runtime::maybe_push_active_persona(&closure.func.name, self.frames.len());
+        crate::step_runtime::maybe_push_active_step(
+            &closure.func.name,
+            self.frames.len(),
+            step_args,
+        );
+    }
+
+    /// Push a new call frame for a closure invocation.
+    pub(crate) fn push_closure_frame(
+        &mut self,
+        closure: &VmClosure,
+        args: &[VmValue],
+    ) -> Result<(), VmError> {
+        self.push_closure_frame_args(closure, &CallArgs::Slice(args))
+    }
+
+    pub(crate) fn push_closure_frame_args(
+        &mut self,
+        closure: &VmClosure,
+        args: &CallArgs<'_>,
+    ) -> Result<(), VmError> {
+        if self.frames.len() >= self.runtime_limits.max_vm_frames {
+            return Err(VmError::StackOverflow);
+        }
+        let (local_slots, initial_local_slots, legacy_args) =
+            self.prepare_closure_local_slots_args(closure, args)?;
+        let callee_argc = closure
+            .func
+            .callee_arg_count(legacy_args.as_ref().map_or_else(|| args.len(), Vec::len));
+        let step_args =
+            if crate::step_runtime::step_definition_for_function(&closure.func.name).is_some() {
+                args.to_vec_from(0)
+            } else {
+                Vec::new()
+            };
+        self.enter_closure_frame(
+            closure,
+            callee_argc,
+            local_slots,
+            initial_local_slots,
+            &step_args,
+        );
+        Ok(())
+    }
+
+    pub(crate) fn push_closure_frame_from_stack_args(
+        &mut self,
+        closure: &VmClosure,
+        args_start: usize,
+        stack_truncate_to: usize,
+    ) -> Result<(), VmError> {
+        if stack_truncate_to > args_start || args_start > self.stack.len() {
+            return Err(VmError::Runtime(
+                "invalid call argument stack range".to_string(),
+            ));
+        }
+        if self.frames.len() >= self.runtime_limits.max_vm_frames {
+            self.stack.truncate(stack_truncate_to);
+            return Err(VmError::StackOverflow);
+        }
+        let supplied_args_len = self.stack.len() - args_start;
+        let (local_slots, initial_local_slots, legacy_args) =
+            match self.prepare_closure_local_slots(closure, &self.stack[args_start..]) {
+                Ok(prepared) => prepared,
+                Err(error) => {
+                    self.stack.truncate(stack_truncate_to);
+                    return Err(error);
+                }
+            };
+        let step_args =
+            if crate::step_runtime::step_definition_for_function(&closure.func.name).is_some() {
+                self.stack[args_start..].to_vec()
+            } else {
+                Vec::new()
+            };
+        let callee_argc = closure
+            .func
+            .callee_arg_count(legacy_args.as_ref().map_or(supplied_args_len, Vec::len));
+        self.stack.truncate(stack_truncate_to);
+        self.enter_closure_frame(
+            closure,
+            callee_argc,
+            local_slots,
+            initial_local_slots,
+            &step_args,
+        );
+        Ok(())
+    }
+
+    /// Create a generator value by spawning the closure body as an async task.
+    /// The generator body communicates yielded values through an mpsc channel.
+    pub(crate) fn create_generator(&self, closure: &VmClosure, args: &[VmValue]) -> VmValue {
+        use crate::value::{VmGenerator, VmStream};
+
+        // Buffer size of 1: the generator produces one value at a time.
+        let (tx, rx) = tokio::sync::mpsc::channel::<Result<VmValue, VmError>>(1);
+
+        let original_args = CallArgs::Slice(args);
+        let legacy_args = match self.legacy_ambient_call_args(closure, &original_args) {
+            Ok(args) => args,
+            Err(error) => {
+                let _ = tx.try_send(Err(error));
+                return VmValue::generator(VmGenerator {
+                    done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                    receiver: Arc::new(tokio::sync::Mutex::new(rx)),
+                });
+            }
+        };
+        let args = legacy_args.as_deref().unwrap_or(args);
+        if let Err(error) = crate::typecheck::validate_user_call(&closure.func, args, None) {
+            let _ = tx.try_send(Err(error));
+            return VmValue::generator(VmGenerator {
+                done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                receiver: Arc::new(tokio::sync::Mutex::new(rx)),
+            });
+        }
+
+        let mut child = self.child_vm();
+        child.yield_sender = Some(tx);
+
+        let mut call_env = self.closure_call_env_for_current_frame(closure);
+        call_env.push_scope();
+
+        child.env = call_env;
+        let mut local_slots = Self::fresh_local_slots(&closure.func.chunk);
+        Self::bind_param_slots(&mut local_slots, &closure.func, args, false);
+
+        let chunk = Arc::clone(&closure.func.chunk);
+        let module_functions = closure.module_functions();
+        let module_state = closure.module_state();
+        let argc = closure.func.callee_arg_count(args.len());
+        // Spawn the generator body as an async task. It carries its own ambient
+        // scope, anchored on the module that defined the closure, instead of
+        // writing the creator's thread-local source dir and unwinding it when
+        // the body's frame pops — those happen on different tasks. See
+        // `scope_spawned_source_dir`.
+        // The task will execute until return, sending yielded values through the channel.
+        let body_source_dir = closure.source_dir.clone();
+        let tx_for_error = child.yield_sender.clone();
+        tokio::task::spawn_local(crate::orchestration::scope_spawned_source_dir(
+            body_source_dir,
+            async move {
+                let result = child
+                    .run_chunk_ref(
+                        chunk,
+                        argc,
+                        None,
+                        module_functions,
+                        module_state,
+                        Some(local_slots),
+                    )
+                    .await;
+                if let Err(error) = result {
+                    if let Some(sender) = tx_for_error {
+                        let _ = sender.send(Err(error)).await;
+                    }
+                }
+                // When the generator body finishes (return or fall-through),
+                // the sender is dropped, signaling completion to the receiver.
+            },
+        ));
+
+        let receiver = Arc::new(tokio::sync::Mutex::new(rx));
+        if closure.func.is_stream {
+            return VmValue::stream(VmStream {
+                done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                receiver,
+                cancel: None,
+            });
+        }
+
+        VmValue::generator(VmGenerator {
+            done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            receiver,
+        })
+    }
+}

@@ -1,0 +1,8 @@
+{
+  "mode": "null",
+  "expect_deny_events": [
+    {"sub_handle": "system", "method": "cpu", "args": []},
+    {"sub_handle": "system", "method": "memory", "args": []},
+    {"sub_handle": "system", "method": "processes", "args": []}
+  ]
+}

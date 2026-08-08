@@ -1,0 +1,52 @@
+import "std/triggers"
+
+/**
+ * Verifies the ReminderInject (#1876) handler injects into only the
+ * specified target session: when multiple sessions are registered,
+ * other sessions' transcripts remain untouched. Guards against
+ * cross-session leakage of reminders fired from a single dispatch.
+ */
+pipeline test(harness: Harness, task) {
+  const target = harness.agent.open("trigger-reminder-inject-router-target")
+  const bystander = harness.agent.open("trigger-reminder-inject-router-bystander")
+  harness.agent.reset(target)
+  harness.agent.reset(bystander)
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(
+    harness.random.range(100000, 999999),
+  )
+  const handle: TriggerHandle = harness.runtime.trigger_register(
+    {
+      id: "trigger-reminder-inject-router-" + unique,
+      kind: "issue.opened",
+      provider: "webhook",
+      handler: ReminderInject({target: target, body: "Targeted only."}),
+      when: nil,
+      retry: nil,
+      match: {events: ["issue.opened"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  const dispatch = harness.runtime.trigger_fire(
+    handle,
+    {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-" + unique}},
+  )
+  harness.stdio.println(dispatch.status == "dispatched")
+  harness.stdio.println(dispatch.result?.target_session_id == target)
+  const target_reminders = transcript_events_by_kind(
+    harness.agent.snapshot(target),
+    "system_reminder",
+  )
+  const bystander_reminders = transcript_events_by_kind(
+    harness.agent.snapshot(bystander),
+    "system_reminder",
+  )
+  harness.stdio.println(len(target_reminders))
+  harness.stdio.println(len(bystander_reminders))
+  harness.stdio.println(target_reminders[0].reminder.body)
+}

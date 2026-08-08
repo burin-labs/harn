@@ -1,0 +1,7 @@
+pipeline test(harness: Harness, task) {
+  try {
+    harness.stdio.log("body")
+  }; catch {
+    harness.stdio.log("catch")
+  }
+}

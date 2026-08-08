@@ -1,0 +1,58 @@
+import { agent_loop_options } from "std/agent/options"
+import { agent_preset } from "std/agent/presets"
+
+pipeline default(harness: Harness) {
+  // Presets install a small automatic reasoning policy; agent_loop_options
+  // lowers that through the shared provider-aware policy implementation.
+  const audit_anthropic = agent_loop_options(
+    harness,
+    agent_preset(harness, "audit", {provider: "anthropic", model: "claude-opus-4-7"}),
+  )
+  harness.stdio.println(audit_anthropic.thinking.mode)
+  harness.stdio.println(audit_anthropic.thinking.level)
+  harness.stdio.println(audit_anthropic._agent_reasoning_policy_applied.policy)
+  harness.stdio.println(audit_anthropic._agent_reasoning_policy_applied.scale)
+  harness.stdio.println(audit_anthropic._agent_reasoning_policy_applied.task)
+  // Caller-set thinking always wins.
+  const audit_explicit = agent_loop_options(
+    harness,
+    agent_preset(
+      harness,
+      "audit",
+      {provider: "anthropic", model: "claude-opus-4-7", thinking: {mode: "disabled"}},
+    ),
+  )
+  harness.stdio.println(audit_explicit.thinking.mode)
+  // OpenAI o3 supports reasoning_effort; presets keep the default effort low.
+  const audit_openai = agent_loop_options(
+    harness,
+    agent_preset(harness, "audit", {provider: "openai", model: "o3"}),
+  )
+  harness.stdio.println(audit_openai.thinking.mode)
+  harness.stdio.println(audit_openai.thinking.level)
+  // verify preset prefers low effort on effort-capable providers.
+  const verify_openai = agent_loop_options(
+    harness,
+    agent_preset(harness, "verify", {provider: "openai", model: "o3"}),
+  )
+  harness.stdio.println(verify_openai.thinking.mode)
+  harness.stdio.println(verify_openai.thinking.level)
+  // Model with no advertised thinking modes leaves thinking unset.
+  const audit_unknown = agent_loop_options(
+    harness,
+    agent_preset(
+      harness,
+      "audit",
+      {provider: "ollama", model: "ollama-something-without-thinking"},
+    ),
+  )
+  harness.stdio.println(audit_unknown?.thinking == nil)
+  // summary preset prefers disabled mode when supported, else nothing.
+  const summary_anthropic = agent_loop_options(
+    harness,
+    agent_preset(harness, "summary", {provider: "anthropic", model: "claude-opus-4-7"}),
+  )
+  harness.stdio.println(
+    summary_anthropic?.thinking == nil || summary_anthropic.thinking.mode == "disabled",
+  )
+}
