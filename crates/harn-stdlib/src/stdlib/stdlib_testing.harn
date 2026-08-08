@@ -306,7 +306,9 @@ pub type CapabilityFixture = {
  * use `method` for the operation name. Unknown targets fail before the behavior
  * under test runs, and fixtures never leak to another `Harness`. A lone stable
  * read repeats by default; volatile reads, mutations, and multi-response scripts
- * remain one-shot. Explicit `repeat` overrides the contract-owned default.
+ * remain one-shot. Registered legacy host operations preserve reusable singleton
+ * behavior while they migrate to typed effects. Explicit `repeat` overrides the
+ * inferred default.
  *
  * @effects: [state.mutate]
  * @errors: [invalid_capability, invalid_method]

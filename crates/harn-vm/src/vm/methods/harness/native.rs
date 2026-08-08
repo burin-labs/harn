@@ -1165,13 +1165,19 @@ impl crate::vm::Vm {
 /// and channels) remain one-shot unless the fixture explicitly opts in.
 fn capability_fixture_is_stable_read(capability: &str, method: &str) -> bool {
     let Some(capability) = harn_builtin_meta::CapabilityId::from_field_name(capability) else {
-        return false;
+        return crate::stdlib::host::host_operation_is_registered(capability, method);
     };
     if crate::harness::is_capability_driver_fixture(capability, method) {
         return false;
     }
     let Some(entry) = crate::stdlib::capability_method_manifest_entry(capability, method) else {
-        return false;
+        // Registered legacy host operations predate effect contracts and were
+        // reusable under host mocks. Preserve that migration contract for a
+        // singleton; response scripts and explicit repeat still take priority.
+        return crate::stdlib::host::host_operation_is_registered(
+            capability.field_name(),
+            method,
+        );
     };
     entry.contract.effects.iter().all(|effect| {
         matches!(
