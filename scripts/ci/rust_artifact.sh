@@ -15,8 +15,8 @@ usage() {
   cat <<'EOF'
 usage:
   scripts/ci/rust_artifact.sh build-tests <bundle.tar.zst> <commit-sha>
-  scripts/ci/rust_artifact.sh build-check-inputs <cli-bundle.tar.zst> <security-bundle.tar.zst> <commit-sha>
   scripts/ci/rust_artifact.sh build-cli <cli-bundle.tar.zst> <commit-sha>
+  scripts/ci/rust_artifact.sh build-security <security-bundle.tar.zst> <commit-sha>
   scripts/ci/rust_artifact.sh restore-tests <bundle.tar.zst> <directory> <commit-sha> [github-env]
   scripts/ci/rust_artifact.sh restore-cli <cli-bundle.tar.zst> <directory> <commit-sha> [github-env]
   scripts/ci/rust_artifact.sh restore-security <security-bundle.tar.zst> <directory> <commit-sha>
@@ -284,43 +284,6 @@ build_test_bundle() {
   report_timing build-tests "$((SECONDS - started))" "$bytes"
 }
 
-build_check_input_bundles() {
-  local cli_output=$1
-  local security_output=$2
-  local commit=$3
-  local output_dir target_dir staging started bytes
-  started=$SECONDS
-
-  validate_commit "$commit"
-  require_source_commit "$commit"
-  require_nextest_version
-  require_build_contract
-  mkdir -p "$(dirname "$cli_output")" "$(dirname "$security_output")"
-  output_dir="$(cd "$(dirname "$cli_output")" && pwd -P)"
-  cli_output="${output_dir}/$(basename "$cli_output")"
-  security_output="$(cd "$(dirname "$security_output")" && pwd -P)/$(basename "$security_output")"
-  target_dir="$(cargo metadata --format-version 1 --no-deps | jq -er '.target_directory')"
-  staging="$(mktemp -d "${output_dir}/rust-check-inputs.XXXXXX")"
-  cleanup_dir="$staging"
-  mkdir -p "$staging/security"
-
-  prepare_harn_cli "$staging" "$commit" "$target_dir"
-  cargo nextest archive --locked -p harn-vm -p harn-hostlib --profile ci \
-    -E "$SECURITY_FILTER" \
-    --archive-file "$staging/security/harn-security-tests.tar.zst"
-  write_security_manifest "$staging/security" "$commit" "$(rustc_identity_sha256)"
-  pack_cli_bundle "$staging" "$cli_output"
-  (
-    cd "$staging/security"
-    sha256sum harn-security-tests.tar.zst manifest > SHA256SUMS
-    tar --zstd -cf "$security_output.tmp" harn-security-tests.tar.zst manifest SHA256SUMS
-  )
-  require_security_size_budget "$security_output.tmp"
-  mv "$security_output.tmp" "$security_output"
-  bytes="$(($(wc -c < "$cli_output") + $(wc -c < "$security_output")))"
-  report_timing build-check-inputs "$((SECONDS - started))" "$bytes"
-}
-
 restore_cli_bundle() {
   local bundle=$1
   local destination=$2
@@ -422,6 +385,37 @@ build_cli_bundle() {
   report_timing build "$((SECONDS - started))" "$bytes"
 }
 
+build_security_bundle() {
+  local security_output=$1
+  local commit=$2
+  local output_dir staging started bytes
+  started=$SECONDS
+
+  validate_commit "$commit"
+  require_source_commit "$commit"
+  require_nextest_version
+  require_build_contract
+  mkdir -p "$(dirname "$security_output")"
+  output_dir="$(cd "$(dirname "$security_output")" && pwd -P)"
+  security_output="${output_dir}/$(basename "$security_output")"
+  staging="$(mktemp -d "${output_dir}/rust-security-artifact.XXXXXX")"
+  cleanup_dir="$staging"
+
+  cargo nextest archive --locked -p harn-vm -p harn-hostlib --profile ci \
+    -E "$SECURITY_FILTER" \
+    --archive-file "$staging/harn-security-tests.tar.zst"
+  write_security_manifest "$staging" "$commit" "$(rustc_identity_sha256)"
+  (
+    cd "$staging"
+    sha256sum harn-security-tests.tar.zst manifest > SHA256SUMS
+    tar --zstd -cf "$security_output.tmp" harn-security-tests.tar.zst manifest SHA256SUMS
+  )
+  require_security_size_budget "$security_output.tmp"
+  mv "$security_output.tmp" "$security_output"
+  bytes="$(wc -c < "$security_output" | tr -d ' ')"
+  report_timing build-security "$((SECONDS - started))" "$bytes"
+}
+
 restore_security_bundle() {
   local bundle=$1
   local destination=$2
@@ -467,13 +461,13 @@ case "$command" in
     [[ $# -eq 2 ]] || { usage >&2; exit 2; }
     build_test_bundle "$@"
     ;;
-  build-check-inputs)
-    [[ $# -eq 3 ]] || { usage >&2; exit 2; }
-    build_check_input_bundles "$@"
-    ;;
   build-cli)
     [[ $# -eq 2 ]] || { usage >&2; exit 2; }
     build_cli_bundle "$@"
+    ;;
+  build-security)
+    [[ $# -eq 2 ]] || { usage >&2; exit 2; }
+    build_security_bundle "$@"
     ;;
   restore-tests)
     [[ $# -ge 3 && $# -le 4 ]] || { usage >&2; exit 2; }

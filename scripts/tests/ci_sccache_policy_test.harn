@@ -11,16 +11,18 @@ fn persistent_lane(
   write_cache: bool = false,
 ) {
   const cache_inputs = {"shared-key": rust_cache_key, "cache-workspace-crates": "true"}
+  const paid_event =
+    "(github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))"
   let lane = {
     "runs-on": gha_expression(
-      "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || (github.event_name == 'merge_group' && '${runner}' || 'ubuntu-latest')",
+      "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || (${paid_event} && '${runner}' || 'ubuntu-latest')",
     ),
     "timeout-minutes": gha_expression(
-      "github.event_name == 'merge_group' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' && 10 || 25",
+      "${paid_event} && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' && 10 || 25",
     ),
     env: {
       HARN_RUNNER_TIER: gha_expression(
-        "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'github-hosted' || (github.event_name == 'merge_group' && 'blacksmith' || 'github-hosted')",
+        "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'github-hosted' || (${paid_event} && 'blacksmith' || 'github-hosted')",
       ),
       SCCACHE_CACHE_SIZE: "15G",
     },
@@ -108,6 +110,9 @@ fn workflow() {
       },
     ],
   }
+  const artifact_consumer_if =
+    "needs.changes.outputs.rust == 'true' && needs.rust-artifacts-ready.result == 'success'"
+  const artifact_consumer_needs = ["changes", "rust-artifacts-ready"]
   return {
     jobs: {
       "package-audit": package_audit,
@@ -116,6 +121,16 @@ fn workflow() {
         env: {...producer.env, RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"},
         steps: producer.steps
           + [
+          {
+            name: "Build portable Harn CLI",
+            run: "./scripts/ci/rust_artifact.sh build-cli cli-bundle sha",
+          },
+          {name: "Upload portable Harn CLI", uses: "actions/upload-artifact@pinned"},
+          {
+            name: "Build security test archive",
+            run: "./scripts/ci/rust_artifact.sh build-security security-bundle sha",
+          },
+          {name: "Upload security test archive", uses: "actions/upload-artifact@pinned"},
           {
             name: "Build portable workspace test archive",
             if: "vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'",
@@ -129,6 +144,18 @@ fn workflow() {
             env: {HARN_LLM_CALLS_DISABLED: "1"},
             run:
               "scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --profile ci -E 'not (${host_bound_filter})'",
+          },
+        ],
+      },
+      "rust-artifacts-ready": {
+        "runs-on": "ubuntu-latest",
+        "timeout-minutes": 12,
+        needs: ["changes"],
+        permissions: {actions: "read", contents: "read"},
+        steps: [
+          {
+            name: "Wait for immutable Rust artifacts",
+            run: "./scripts/ci/wait_for_run_artifacts.sh harn-cli.tar.zst",
           },
         ],
       },
@@ -181,6 +208,8 @@ fn workflow() {
       "rust-test": rust_test,
       "rust-security": {
         "runs-on": "ubuntu-latest",
+        needs: ["changes", "rust-check-inputs"],
+        if: "needs.changes.outputs.rust == 'true' && needs.rust-check-inputs.result == 'success'",
         steps: [
           {
             name: "Run OS sandbox proofs on GitHub Ubuntu",
@@ -190,13 +219,36 @@ fn workflow() {
           },
         ],
       },
+      "harn-audit": {
+        "runs-on": "ubuntu-latest",
+        needs: artifact_consumer_needs,
+        if: artifact_consumer_if,
+        steps: [
+          {
+            name: "Summarize rolling merge-group wall time",
+            run:
+              "./scripts/ci/write_ci_walltime_report.sh \"$RUNNER_TEMP/ci-walltime-report.json\"",
+          },
+          {name: "Upload rolling merge-group wall time", with: {"if-no-files-found": "error"}},
+        ],
+      },
+      "audit-scripts": {
+        "runs-on": "ubuntu-latest",
+        needs: artifact_consumer_needs,
+        if: artifact_consumer_if,
+        steps: [],
+      },
       "ci-status": {
+        needs: ["rust-artifacts-ready"],
         steps: [
           {
             name: "Verify required CI jobs",
             env: {COLOCATED_TESTS_DISABLED: gha_expression("vars.HARN_CI_DISABLE_COLOCATED_TESTS")},
-            run:
-              "if [ \"$rust_test_result\" = skipped ] && [ \"$COLOCATED_TESTS_DISABLED\" != true ]; then :; fi",
+            run: "rust_artifacts_ready_result=\""
+              + gha_expression(
+              "needs['rust-artifacts-ready'].result",
+            )
+              + "\"\nif [ \"$rust_artifacts_ready_result\" != success ]; then echo 'Rust artifact handoff failed or skipped'; fi\nif [ \"$rust_test_result\" = skipped ] && [ \"$COLOCATED_TESTS_DISABLED\" != true ]; then :; fi",
           },
         ],
       },
@@ -417,6 +469,56 @@ pipeline test_rejects_co_location_without_fail_closed_fallback(harness: Harness,
 }
 
 @test
+pipeline test_rejects_serialized_live_artifact_handoff(harness: Harness, task) {
+  const valid = workflow()
+  const producer = valid.jobs["rust-check-inputs"]
+  const harn_audit = valid.jobs["harn-audit"]
+  const invalid = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "rust-check-inputs": {
+        ...producer,
+        steps: producer.steps.filter({ step -> step?.name != "Upload portable Harn CLI" }).to_list()
+          + [
+          producer.steps[4],
+        ],
+      },
+      "rust-security": {
+        ...valid.jobs["rust-security"],
+        needs: ["changes", "rust-artifacts-ready"],
+        if:
+          "needs.changes.outputs.rust == 'true' && needs.rust-artifacts-ready.result == 'success'",
+      },
+      "harn-audit": {
+        ...harn_audit,
+        steps: harn_audit.steps.map(
+          { step ->
+            if step.name != "Upload rolling merge-group wall time" {
+              return step
+            }
+            return {...step, "continue-on-error": true, with: {"if-no-files-found": "warn"}}
+          },
+        )
+          .to_list(),
+      },
+    },
+  }
+  const errors = ci_linux_lane_policy_errors(invalid)
+  assert(
+    errors.contains(
+      "ci.yml:rust-check-inputs must publish the CLI before building security inputs, then publish security before co-located tests",
+    ),
+  )
+  assert(
+    errors.contains(
+      "ci.yml:rust-security must wait for the producer-owned security archive without delaying CLI consumers",
+    ),
+  )
+  assert(errors.contains("ci.yml:harn-audit must publish a non-empty fail-closed wall-time report"))
+}
+
+@test
 pipeline test_rejects_strict_clippy_cache_safety_bypass(harness: Harness, task) {
   const valid = workflow()
   const rust_job = valid.jobs["rust-checks"]
@@ -475,7 +577,7 @@ pipeline test_rejects_unowned_runner_routing(harness: Harness, task) {
 }
 
 @test
-pipeline test_rejects_paid_producer_outside_merge_group_or_without_fuse(harness: Harness, task) {
+pipeline test_rejects_paid_producer_outside_trusted_events_or_without_fuse(harness: Harness, task) {
   const valid = workflow()
   const producer = valid.jobs["rust-check-inputs"]
   const invalid = {
@@ -500,7 +602,7 @@ pipeline test_rejects_paid_producer_outside_merge_group_or_without_fuse(harness:
   const errors = ci_linux_lane_policy_errors(invalid)
   assert(
     errors.contains(
-      "ci.yml:rust-check-inputs must route only merge_group to blacksmith-8vcpu-ubuntu-2404 with a hosted fallback",
+      "ci.yml:rust-check-inputs must route only merge_group and same-repository pull_request to blacksmith-8vcpu-ubuntu-2404 with a hosted fallback",
     ),
   )
   assert(errors.contains("ci.yml:rust-check-inputs must mirror its Blacksmith/hosted runner tier"))

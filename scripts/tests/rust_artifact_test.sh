@@ -108,9 +108,10 @@ run_artifact build-tests "$bundle" "$commit"
 test -f "$tmpdir/receipts/build"
 test -f "$tmpdir/receipts/nextest-tests"
 rm -f "$tmpdir/receipts/build" "$tmpdir/receipts/nextest-tests"
-run_artifact build-check-inputs "$cli_bundle" "$security_bundle" "$commit"
+run_artifact build-cli "$cli_bundle" "$commit"
 test -f "$tmpdir/receipts/build"
 test ! -f "$tmpdir/receipts/nextest-tests"
+run_artifact build-security "$security_bundle" "$commit"
 test -f "$tmpdir/receipts/nextest-security"
 
 github_env="$tmpdir/github-env"
@@ -152,17 +153,13 @@ expect_failure "security restore accepted an altered manifest" \
   run_artifact restore-security "$tmpdir/out/altered-security-manifest.tar.zst" \
   "$tmpdir/altered-security-manifest" "$commit"
 
-# CLI-only producer mode: builds just the harn binary bundle, restorable by
-# the same restore-cli consumers.
-cli_only_bundle="$tmpdir/out/cli-only.tar.zst"
-run_artifact build-cli "$cli_only_bundle" "$commit"
-run_artifact restore-cli "$cli_only_bundle" "$tmpdir/restored-cli-only" "$commit"
-"$tmpdir/restored-cli-only/harn" | grep -Fxq harn
-tar --zstd -tf "$cli_only_bundle" | sort | diff -u - <(printf '%s\n' \
-  CLI_SHA256SUMS harn manifest | sort)
+# The producer publishes the split CLI and security bundles independently.
 FAKE_COMMIT_OVERRIDE=fedcba9876543210fedcba9876543210fedcba98 \
   expect_failure "build-cli accepted a commit that did not match checkout HEAD" \
   run_artifact build-cli "$tmpdir/out/cli-only-wrong.tar.zst" "$commit"
+FAKE_COMMIT_OVERRIDE=fedcba9876543210fedcba9876543210fedcba98 \
+  expect_failure "build-security accepted a commit that did not match checkout HEAD" \
+  run_artifact build-security "$tmpdir/out/split-security-wrong.tar.zst" "$commit"
 
 expect_failure "restore accepted a bundle for the wrong commit" \
   run_artifact restore-tests "$bundle" "$tmpdir/wrong-commit" fedcba9876543210fedcba9876543210fedcba98

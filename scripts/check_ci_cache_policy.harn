@@ -147,6 +147,10 @@ const HOSTED_BUILD_JOBS = "4"
 // the single owner of the value — ci.yml carries the same number.
 const EXECUTION_ONLY_TIMEOUT_MINUTES = "35"
 
+const ARTIFACT_READY_JOB = "rust-artifacts-ready"
+
+const LIVE_ARTIFACT_CONSUMERS = ["harn-audit", "audit-scripts"]
+
 const WORKFLOW_GLOB = ".github/workflows/*.yml"
 
 const UPSTREAM_CACHE_PREFIX = "Swatinem/rust-cache@"
@@ -887,6 +891,15 @@ fn step_by_name(steps: list, name: string) {
   return matches[0]
 }
 
+fn step_index_by_name(steps: list, name: string) -> int {
+  for {index, value: step} in steps.enumerate() {
+    if trim(step?.name ?? "") == name {
+      return index
+    }
+  }
+  return -1
+}
+
 fn cli_cold_start_budget_errors(workflows: dict) -> list<string> {
   const workflow = workflows[CLI_COLD_START_WORKFLOW]
   if workflow == nil {
@@ -1116,18 +1129,24 @@ pub fn macos_shared_cache_errors(ci_workflow, nightly_workflow) -> list<string> 
 }
 
 fn blacksmith_runner_expression(runner: string) -> string {
+  const paid_event =
+    "(github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))"
   return "$"
-    + "{{ vars.${BLACKSMITH_DISABLE_VAR} == 'true' && '${HOSTED_LINUX_RUNNER}' || (github.event_name == 'merge_group' && '${runner}' || '${HOSTED_LINUX_RUNNER}') }}"
+    + "{{ vars.${BLACKSMITH_DISABLE_VAR} == 'true' && '${HOSTED_LINUX_RUNNER}' || (${paid_event} && '${runner}' || '${HOSTED_LINUX_RUNNER}') }}"
 }
 
 fn blacksmith_tier_expression() -> string {
+  const paid_event =
+    "(github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))"
   return "$"
-    + "{{ vars.${BLACKSMITH_DISABLE_VAR} == 'true' && '${HOSTED_RUNNER_TIER}' || (github.event_name == 'merge_group' && '${BLACKSMITH_RUNNER_TIER}' || '${HOSTED_RUNNER_TIER}') }}"
+    + "{{ vars.${BLACKSMITH_DISABLE_VAR} == 'true' && '${HOSTED_RUNNER_TIER}' || (${paid_event} && '${BLACKSMITH_RUNNER_TIER}' || '${HOSTED_RUNNER_TIER}') }}"
 }
 
 fn blacksmith_timeout_expression() -> string {
+  const paid_event =
+    "(github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))"
   return "$"
-    + "{{ github.event_name == 'merge_group' && vars.${BLACKSMITH_DISABLE_VAR} != 'true' && 10 || 25 }}"
+    + "{{ ${paid_event} && vars.${BLACKSMITH_DISABLE_VAR} != 'true' && 10 || 25 }}"
 }
 
 /** Keep a compile lane on free hosted capacity with one complete coarse cache. */
@@ -1188,7 +1207,7 @@ fn persistent_compile_lane_errors(
   if trim(job?.["runs-on"] ?? "") != blacksmith_runner_expression(runner) {
     errors = errors
       + [
-      "ci.yml:${job_name} must route only merge_group to ${runner} with a hosted fallback",
+      "ci.yml:${job_name} must route only merge_group and same-repository pull_request to ${runner} with a hosted fallback",
     ]
   }
   if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != blacksmith_tier_expression() {
@@ -1418,6 +1437,148 @@ fn archived_workspace_test_consumer_errors(workflow, job_name: string) -> list<s
   return errors
 }
 
+fn producer_artifact_order_errors(workflow) -> list<string> {
+  const rust_job = workflow?.jobs?.["rust-check-inputs"]
+  const producer_steps = rust_job?.steps ?? []
+  const cli_build_step = step_by_name(producer_steps, "Build portable Harn CLI")
+  const security_build_step = step_by_name(producer_steps, "Build security test archive")
+  const cli_build_index = step_index_by_name(producer_steps, "Build portable Harn CLI")
+  const cli_upload_index = step_index_by_name(producer_steps, "Upload portable Harn CLI")
+  const security_build_index = step_index_by_name(producer_steps, "Build security test archive")
+  const security_upload_index = step_index_by_name(producer_steps, "Upload security test archive")
+  const colocated_index = step_index_by_name(producer_steps, "Run Rust workspace tests")
+  if cli_build_index < 0
+    || cli_upload_index < 0
+    || security_build_index < 0
+    || security_upload_index < 0
+    || colocated_index < 0
+    || cli_build_index >= cli_upload_index
+    || cli_upload_index >= security_build_index
+    || security_build_index >= security_upload_index
+    || cli_upload_index >= colocated_index
+    || security_upload_index >= colocated_index
+    || !contains(
+    trim(cli_build_step?.run ?? ""),
+    "rust_artifact.sh build-cli",
+  )
+    || !contains(trim(security_build_step?.run ?? ""), "rust_artifact.sh build-security") {
+    return [
+      "ci.yml:rust-check-inputs must publish the CLI before building security inputs, then publish security before co-located tests",
+    ]
+  }
+  return []
+}
+
+fn artifact_ready_barrier_errors(workflow) -> list<string> {
+  const ready_job = workflow?.jobs?.[ARTIFACT_READY_JOB]
+  const ready_needs = ready_job?.needs ?? []
+  const ready_step = step_by_name(ready_job?.steps ?? [], "Wait for immutable Rust artifacts")
+  const ready_command = trim(ready_step?.run ?? "")
+  if trim(ready_job?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER
+    || trim(
+    to_string(ready_job?.["timeout-minutes"] ?? ""),
+  )
+    != "12"
+    || ready_needs != ["changes"]
+    || trim(ready_job?.permissions?.actions ?? "")
+    != "read"
+    || trim(ready_job?.permissions?.contents ?? "")
+    != "read"
+    || !contains(ready_command, "./scripts/ci/wait_for_run_artifacts.sh")
+    || !contains(
+    ready_command,
+    "harn-cli.tar.zst",
+  )
+    || contains(ready_command, "harn-security.tar.zst")
+    || len(
+    matching_steps(ready_job, PERSISTENT_SCCACHE_ACTION),
+  )
+    > 0
+    || len(matching_steps(ready_job, RUST_CACHE_ACTION)) > 0 {
+    return [
+      "ci.yml:rust-artifacts-ready must be the bounded free-hosted immutable artifact barrier",
+    ]
+  }
+  return []
+}
+
+fn artifact_consumer_handoff_errors(workflow) -> list<string> {
+  let errors: list<string> = []
+  const rust_security = workflow?.jobs?.["rust-security"]
+  const rust_security_needs = rust_security?.needs ?? []
+  const rust_security_if = trim(rust_security?.if ?? "")
+  if !rust_security_needs.contains("rust-check-inputs")
+    || rust_security_needs.contains(
+    ARTIFACT_READY_JOB,
+  )
+    || !contains(rust_security_if, "needs.rust-check-inputs.result == 'success'") {
+    errors = errors
+      + [
+      "ci.yml:rust-security must wait for the producer-owned security archive without delaying CLI consumers",
+    ]
+  }
+  for consumer_name in LIVE_ARTIFACT_CONSUMERS {
+    const consumer = workflow?.jobs?.[consumer_name]
+    const consumer_needs = consumer?.needs ?? []
+    const consumer_if = trim(consumer?.if ?? "")
+    if !consumer_needs.contains(ARTIFACT_READY_JOB)
+      || consumer_needs.contains("rust-check-inputs")
+      || !contains(
+      consumer_if,
+      "needs.rust-artifacts-ready.result == 'success'",
+    ) {
+      errors = errors
+        + [
+        "ci.yml:${consumer_name} must consume live artifacts through rust-artifacts-ready, not producer completion",
+      ]
+    }
+  }
+  const status_step = step_by_name(
+    workflow?.jobs?.["ci-status"]?.steps ?? [],
+    "Verify required CI jobs",
+  )
+  const status_command = trim(status_step?.run ?? "")
+  const status_needs = workflow?.jobs?.["ci-status"]?.needs ?? []
+  if !status_needs.contains(ARTIFACT_READY_JOB)
+    || !contains(
+    status_command,
+    "needs['rust-artifacts-ready'].result",
+  )
+    || !contains(status_command, "Rust artifact handoff failed or skipped") {
+    errors = errors + ["ci.yml:ci-status must fail closed on live artifact handoff"]
+  }
+  return errors
+}
+
+fn live_artifact_handoff_errors(workflow) -> list<string> {
+  return producer_artifact_order_errors(workflow)
+    + artifact_ready_barrier_errors(workflow)
+    + artifact_consumer_handoff_errors(workflow)
+}
+
+fn walltime_report_errors(workflow) -> list<string> {
+  const harn_audit = workflow?.jobs?.["harn-audit"]
+  const report_step = step_by_name(
+    harn_audit?.steps ?? [],
+    "Summarize rolling merge-group wall time",
+  )
+  const upload_report_step = step_by_name(
+    harn_audit?.steps ?? [],
+    "Upload rolling merge-group wall time",
+  )
+  if trim(report_step?.run ?? "")
+    != "./scripts/ci/write_ci_walltime_report.sh \"$RUNNER_TEMP/ci-walltime-report.json\""
+    || report_step?.["continue-on-error"]
+    != nil
+    || upload_report_step?.["continue-on-error"]
+    != nil
+    || trim(upload_report_step?.with?.["if-no-files-found"] ?? "")
+    != "error" {
+    return ["ci.yml:harn-audit must publish a non-empty fail-closed wall-time report"]
+  }
+  return []
+}
+
 fn colocated_rust_proof_errors(workflow) -> list<string> {
   let errors: list<string> = []
   const rust_job = workflow?.jobs?.["rust-check-inputs"]
@@ -1545,6 +1706,8 @@ pub fn ci_linux_lane_policy_errors(workflow) -> list<string> {
   }
   errors = errors + archived_workspace_test_consumer_errors(workflow, "rust-test")
   errors = errors + colocated_rust_proof_errors(workflow)
+  errors = errors + live_artifact_handoff_errors(workflow)
+  errors = errors + walltime_report_errors(workflow)
   errors = errors + rust_cache_refresh_errors(workflow)
   for {key: job_name, value: job} in workflow?.jobs ?? {} {
     if len(matching_steps(job, PERSISTENT_SCCACHE_ACTION)) > 0
