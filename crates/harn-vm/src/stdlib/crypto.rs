@@ -1737,28 +1737,18 @@ C/edCMRM78P8eQTBCDUTK1ywSYaszvQZvneiW6gNtWEJndSreEcyyUdVvg==\n\
     }
 
     #[test]
-    fn url_decode_multibyte_after_percent_does_not_panic() {
-        // A `%` directly followed by a multi-byte character used to slice the
-        // string at a non-boundary byte offset and panic.
+    fn url_decode_is_byte_based_and_boundary_safe() {
         let mut vm = vm();
-        let result = call(&mut vm, "url_decode", vec![s("%日x")]).unwrap();
-        assert_eq!(result.display(), "%日x");
-    }
-
-    #[test]
-    fn url_decode_multibyte_percent_sequences() {
-        let mut vm = vm();
-        let result = call(&mut vm, "url_decode", vec![s("%E6%97%A5+%F0%9F%99%82")]).unwrap();
-        assert_eq!(result.display(), "日 🙂");
-    }
-
-    #[test]
-    fn url_decode_rejects_signed_hex_escapes() {
+        // A `%` followed by a multi-byte character used to slice the string
+        // at a non-boundary byte offset and panic.
+        let raw = call(&mut vm, "url_decode", vec![s("%日x")]).unwrap();
+        assert_eq!(raw.display(), "%日x");
+        let multi = call(&mut vm, "url_decode", vec![s("%E6%97%A5+%F0%9F%99%82")]).unwrap();
+        assert_eq!(multi.display(), "日 🙂");
         // `u8::from_str_radix` accepts a leading sign, so the old decoder
         // treated `%+A` as byte 0x0A; a malformed escape must pass through.
-        let mut vm = vm();
-        let result = call(&mut vm, "url_decode", vec![s("a%+Ab")]).unwrap();
-        assert_eq!(result.display(), "a% Ab");
+        let signed = call(&mut vm, "url_decode", vec![s("a%+Ab")]).unwrap();
+        assert_eq!(signed.display(), "a% Ab");
     }
 
     #[test]
