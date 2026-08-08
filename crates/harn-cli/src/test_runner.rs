@@ -560,6 +560,15 @@ fn resolve_workers(options: &RunOptions) -> usize {
     if !options.parallel {
         return 1;
     }
+    // Per-case timing budgets are measurement assertions, not safety
+    // timeouts. Running measured cases beside other VMs makes the verdict a
+    // function of scheduler contention and turns an otherwise-correct test
+    // red on a busy host. Keep the measurement lane serial even when a caller
+    // also supplies --parallel/--jobs; the ordinary per-case timeout remains
+    // available for bounded parallel correctness runs.
+    if options.max_test_ms.is_some() || options.max_execute_ms.is_some() {
+        return 1;
+    }
     if let Some(jobs) = options.jobs {
         return jobs.max(1);
     }
