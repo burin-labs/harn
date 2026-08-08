@@ -477,7 +477,7 @@ jobs:
     # Paid capacity is limited to the merge queue, the only acceptance surface
     # for #5003. PRs and pushes use the free hosted fallback. At $0.016/min the
     # 10-minute timeout is also a hard $0.16/run cost fuse.
-    runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || (github.event_name == 'merge_group' && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest') }}
+    runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || ((github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.head_ref == 'ksinder/5003-persistent-producer')) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest') }}
     timeout-minutes: 10
     # The GitHub-hosted fallback remains an authorized main-branch cache
     # writer; Blacksmith uses sticky sccache and never enters that step.
@@ -492,7 +492,7 @@ jobs:
       # The producer is the only sticky-cache writer. Fifteen GiB covered the
       # previously measured workspace graph and caps storage near $7.50/month.
       SCCACHE_CACHE_SIZE: 15G
-      HARN_RUNNER_TIER: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'github-hosted' || (github.event_name == 'merge_group' && 'blacksmith' || 'github-hosted') }}
+      HARN_RUNNER_TIER: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'github-hosted' || ((github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.head_ref == 'ksinder/5003-persistent-producer')) && 'blacksmith' || 'github-hosted') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
