@@ -299,6 +299,7 @@ mod fixture_dispatch_tests {
             "exec",
             Ok(VmValue::String(arcstr::ArcStr::from("legacy-fixture"))),
             None,
+            None,
             false,
         );
 
@@ -330,12 +331,14 @@ mod fixture_dispatch_tests {
             "exec",
             Ok(VmValue::String(arcstr::ArcStr::from("legacy"))),
             None,
+            None,
             false,
         );
         fixtures.respond(
             "tools",
             "run_command",
             Ok(VmValue::String(arcstr::ArcStr::from("direct"))),
+            None,
             None,
             false,
         );

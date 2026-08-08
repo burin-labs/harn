@@ -20,7 +20,8 @@ fn accepting_elicit_fixtures(answer: &str) -> Arc<crate::harness::CapabilityFixt
             "content": {"answer": answer},
         }))),
         None,
-        true,
+        Some(true),
+        false,
     );
     fixtures
 }
