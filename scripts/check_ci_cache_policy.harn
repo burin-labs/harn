@@ -81,7 +81,7 @@ const NODE_ACTION_PATH = ".github/actions/node-cache/action.yml"
 const SETUP_HARN_ACTION_PATH = ".github/actions/setup-harn/action.yml"
 
 // One owned entry point for the persistent Blacksmith compiler cache. The
-// workflow may use it only on the three allowlisted compile-bearing lanes.
+// workflow may use it only on the single allowlisted compile producer.
 const PERSISTENT_SCCACHE_ACTION = "./.github/actions/sccache"
 
 // Single pinned entry point for installing sccache. Everything else must route
