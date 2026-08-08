@@ -208,12 +208,8 @@ fn __retry_after_ms(clock: HarnessClock, envelope) {
     if type_of(headers) == "dict" {
       for k in headers.keys() {
         if lowercase(to_string(k)) == "retry-after" {
-          // Shared RFC 9110 parser: providers send both delay-seconds and
-          // HTTP-date forms; assuming the numeric form crashed the loop.
-          const parsed = http_retry_after_ms(clock, headers[k])
-          if parsed != nil {
-            return parsed
-          }
+          // Shared RFC 9110 parser: date-form headers used to crash the loop.
+          return http_retry_after_ms(clock, headers[k]) ?? 0
         }
       }
     }
