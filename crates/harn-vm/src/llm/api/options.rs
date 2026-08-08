@@ -432,6 +432,12 @@ pub(crate) struct LlmCallOptions {
     pub seed: Option<i64>,
     pub frequency_penalty: Option<f64>,
     pub presence_penalty: Option<f64>,
+    /// Portable generation options selected by a caller, context, preset, or
+    /// routing step. Catalog-owned model defaults are intentionally absent:
+    /// they may mirror a provider's fixed server value without requiring a
+    /// wire field. Runtime admission checks this set for every resolved route.
+    pub(crate) portable_option_intent:
+        std::collections::BTreeSet<crate::llm::capabilities::PortableOption>,
 
     // --- Serving tier ---
     /// Opt into the model's accelerated-serving ("fast mode") tier. Maps to
@@ -575,6 +581,7 @@ impl Default for LlmCallOptions {
             seed: None,
             frequency_penalty: None,
             presence_penalty: None,
+            portable_option_intent: std::collections::BTreeSet::new(),
             fast: false,
             output_format: OutputFormat::default(),
             response_format: None,

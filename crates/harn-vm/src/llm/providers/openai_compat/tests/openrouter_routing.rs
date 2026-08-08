@@ -41,7 +41,7 @@ fn openrouter_require_parameters_preserves_provider_preferences() {
 }
 
 #[test]
-fn openrouter_emits_top_k_only_when_capability_allows() {
+fn openrouter_builder_projects_top_k_after_admission() {
     let mut payload = base_request_payload();
     payload.model = "google/gemma-4-26b-a4b-it".to_string();
     payload.top_k = Some(64);
@@ -51,7 +51,8 @@ fn openrouter_emits_top_k_only_when_capability_allows() {
 
     payload.model = "mistralai/devstral-small".to_string();
     let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
-    assert!(body.get("top_k").is_none());
+    assert_eq!(body["top_k"].as_i64(), Some(64));
+    assert_eq!(body["provider"]["require_parameters"], true);
 }
 
 #[test]

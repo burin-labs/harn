@@ -270,6 +270,70 @@ fn install_openai_stub_provider(provider: &str, addr: std::net::SocketAddr) {
     crate::llm_config::set_user_overrides(Some(overlay));
 }
 
+#[test]
+fn capability_admission_rejects_before_transport_egress() {
+    let _guard = env_guard();
+    let _allow_llm_transport = allow_stubbed_llm_transport();
+    let request_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed_count = request_count.clone();
+    let server = spawn_llm_stub("capability-admission sentinel", move |_| {
+        observed_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    });
+    install_openai_stub_provider("admission-sentinel", server.addr());
+    crate::llm::capabilities::set_user_overrides_toml(
+        r#"
+[[provider.admission-sentinel]]
+model_match = "unsupported-temperature"
+temperature_supported = false
+"#,
+    )
+    .expect("capability overlay");
+
+    let mut opts = base_opts("admission-sentinel");
+    opts.model = "unsupported-temperature".to_string();
+    opts.temperature = Some(0.2);
+    opts.portable_option_intent
+        .insert(crate::llm::capabilities::PortableOption::Temperature);
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let error = runtime
+        .block_on(crate::llm::agent_observe::observed_llm_call(
+            &opts, None, None, None, false, false, None, None,
+        ))
+        .expect_err("authored capability denial must reject");
+    let crate::value::VmError::Thrown(crate::value::VmValue::Dict(fields)) = error else {
+        panic!("capability denial must use the canonical structured envelope");
+    };
+    assert_eq!(
+        fields.get("kind").map(crate::value::VmValue::display),
+        Some("terminal".to_string())
+    );
+    assert_eq!(
+        fields.get("reason").map(crate::value::VmValue::display),
+        Some("invalid_request".to_string())
+    );
+    assert_eq!(
+        fields.get("provider").map(crate::value::VmValue::display),
+        Some("admission-sentinel".to_string())
+    );
+    assert_eq!(
+        fields.get("model").map(crate::value::VmValue::display),
+        Some("unsupported-temperature".to_string())
+    );
+    assert_eq!(
+        request_count.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "the provider sentinel must observe no request"
+    );
+
+    crate::llm::capabilities::clear_user_overrides();
+    crate::llm_config::clear_user_overrides();
+    drop(server);
+}
+
 fn spawn_ollama_stub_with_body_capture(
     captured: std::sync::Arc<std::sync::Mutex<Option<String>>>,
 ) -> LlmStub {

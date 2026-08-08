@@ -57,7 +57,6 @@ impl GeminiInteractions {
     /// `stream` is left to the transport so the dry-run request audit and the
     /// live call share one builder.
     pub(crate) fn build_request_body(opts: &LlmRequestPayload) -> Value {
-        let caps = crate::llm::capabilities::lookup(&opts.provider, &opts.model);
         let wire_model = crate::llm_config::wire_model_id(&opts.model);
         let model = wire_model.strip_prefix("models/").unwrap_or(&wire_model);
 
@@ -82,7 +81,7 @@ impl GeminiInteractions {
         if let Some(tools) = interactions_tools(opts) {
             body["tools"] = tools;
         }
-        if let Some(generation_config) = generation_config(opts, &caps) {
+        if let Some(generation_config) = generation_config(opts) {
             body["generation_config"] = Value::Object(generation_config);
         }
         if let Some(response_format) = response_format(opts) {
@@ -493,10 +492,7 @@ fn interactions_tools(opts: &LlmRequestPayload) -> Option<Value> {
     (!tools.is_empty()).then_some(Value::Array(tools))
 }
 
-fn generation_config(
-    opts: &LlmRequestPayload,
-    caps: &crate::llm::capabilities::Capabilities,
-) -> Option<Map<String, Value>> {
+fn generation_config(opts: &LlmRequestPayload) -> Option<Map<String, Value>> {
     let mut config = Map::new();
     if opts.max_tokens > 0 {
         config.insert("max_output_tokens".to_string(), json!(opts.max_tokens));
@@ -513,7 +509,7 @@ fn generation_config(
     if let Some(stop) = &opts.stop {
         config.insert("stop_sequences".to_string(), json!(stop));
     }
-    if let Some(seed) = opts.seed.filter(|_| caps.seed_supported) {
+    if let Some(seed) = opts.seed {
         config.insert("seed".to_string(), json!(seed));
     }
     if opts.logprobs {

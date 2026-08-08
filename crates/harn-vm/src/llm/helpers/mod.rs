@@ -16,7 +16,7 @@ pub(crate) use options::{
     expects_structured_output, extract_json, extract_llm_options, pending_reminders_from_session,
     project_llm_options, render_pending_reminders, resolve_catalog_thinking_config,
     resolve_thinking_config, system_prompt_event_metadata, system_prompt_metadata,
-    validate_llm_option_keys,
+    validate_llm_option_keys, validate_options,
 };
 pub(crate) use provider::{vm_resolve_model, vm_resolve_provider, ResolvedProvider};
 #[cfg(test)]

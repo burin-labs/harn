@@ -35,6 +35,11 @@ Pair it with [[harn-orchestration]] for workflow behavior and [[harn-testing]] f
 - Use `effort` and `speed` for provider-neutral intent.
 - Use `timeout_ms` and `idle_timeout_ms`; both are milliseconds.
 - Put wire-specific fields below `provider_options.<provider>`.
+- Treat portable generation options as required caller intent. An authored
+  capability denial is a terminal `invalid_request`; adapters must not drop it.
+- Unknown custom generation routes remain open-world. Explicit `cache: true`
+  and `prompt_cache_ttl` require authored support because cache lowering is
+  provider-specific; TTL values must be listed in `prompt_cache_ttls`.
 - Keep provider tool execution distinct with `provider_tools`.
 - Preserve tool-call format negotiation and cost controls.
 - Preserve mock-provider determinism.
@@ -54,6 +59,8 @@ Pair it with [[harn-orchestration]] for workflow behavior and [[harn-testing]] f
 - Assistant prefill support may differ by provider.
 - Developer-role support may differ by provider.
 - When routing changes, update the matrix tests or docs that expose it.
+- Check every routed attempt after its link-specific model and option overrides
+  resolve; admission belongs before rate limiting and provider transport.
 
 ## Connector providers
 
@@ -105,7 +112,7 @@ Pair it with [[harn-orchestration]] for workflow behavior and [[harn-testing]] f
 
 ## Verify
 
-- Provider config: `cargo test -p harn-vm config`.
+- Provider config: targeted `make test-one` checks in `harn-vm`.
 - LLM behavior: targeted VM provider tests.
 - Provider matrix: `harn provider catalog matrix --check`.
 - Connector manifests: package validation tests.

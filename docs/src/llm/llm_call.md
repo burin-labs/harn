@@ -281,6 +281,17 @@ preserving tools and ordinary conversation history.
 | `frequency_penalty` | float | Frequency penalty where supported. |
 | `presence_penalty` | float | Presence penalty where supported. |
 
+Harn admits caller-selected `temperature`, `top_p`, `top_k`, `seed`,
+`frequency_penalty`, `presence_penalty`, and `stop` against the resolved
+provider/model route before transport. An explicit catalog denial throws a
+terminal `invalid_request` error; the option is never silently removed from the
+wire request. Unknown custom generation routes remain open-world. Catalog or
+provider defaults are not caller intent and do not trigger admission.
+
+Routing applies the same check to every attempted link after that link's model
+and option overrides are resolved. Run `harn provider catalog matrix` to inspect
+the declared route surface before choosing portable options.
+
 #### Output contract and recovery
 
 | Key | Type | Meaning |
@@ -352,8 +363,11 @@ Harn executes, approves, and audits `tools`. The provider executes
 
 `speed: "fast"` is admitted only when the selected route advertises a usable
 fast tier. Premium pricing applies only when provider telemetry confirms that
-tier. `cache` does not memoize full responses; use `with_cache` from
-`std/llm/handlers` for Harn-owned response caching.
+tier. Explicit `cache: true` and `prompt_cache_ttl` require authored capability
+support because Harn must lower them to a provider-specific wire shape. A TTL
+must also appear in the route's `prompt_cache_ttls` list. `cache: false` is an
+opt-out, not capability intent. `cache` does not memoize full responses; use
+`with_cache` from `std/llm/handlers` for Harn-owned response caching.
 
 Streaming applies three independent limits on every SSE and NDJSON provider:
 `timeout_ms` bounds the whole request, `HARN_LLM_FIRST_TOKEN_TIMEOUT` bounds
@@ -390,7 +404,9 @@ These keys require `provider: "openai"` and `api_mode: "responses"`.
 | `structural_experiment` | any | Final prompt-structure transform. |
 
 Provider-specific fields are legal only below `provider_options`. They are
-never accepted as top-level provider names:
+never accepted as top-level provider names. Use this escape hatch for a native
+control that is not part of Harn's portable option contract; Harn does not
+reinterpret such fields as portable generation intent:
 
 ```harn
 const result = harness.llm.call("hello", nil, {

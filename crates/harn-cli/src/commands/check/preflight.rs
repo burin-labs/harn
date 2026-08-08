@@ -78,7 +78,7 @@ pub(super) fn collect_preflight_diagnostics_with_host_capabilities(
     scan_selective_import_visibility(&canonical, source, module_graph, &mut diagnostics);
     scan_re_export_conflicts(&canonical, source, program, module_graph, &mut diagnostics);
     scan_static_tool_surface_preflight(&canonical, source, program, config, &mut diagnostics);
-    llm_composition::scan_llm_tool_format_composition_preflight(
+    llm_composition::scan_llm_capability_composition_preflight(
         &canonical,
         source,
         program,

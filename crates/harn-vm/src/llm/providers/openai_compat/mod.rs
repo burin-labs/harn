@@ -222,13 +222,13 @@ impl OpenAiCompatibleProvider {
             };
             body[token_limit_field] = serde_json::json!(opts.max_tokens);
         }
-        if let Some(temp) = opts.temperature.filter(|_| caps.temperature_supported) {
+        if let Some(temp) = opts.temperature {
             body["temperature"] = serde_json::json!(clamp_temperature(temp));
         }
-        if let Some(top_p) = opts.top_p.filter(|_| caps.top_p_supported) {
+        if let Some(top_p) = opts.top_p {
             body["top_p"] = serde_json::json!(clamp_probability(top_p));
         }
-        if let Some(top_k) = opts.top_k.filter(|_| caps.top_k_supported) {
+        if let Some(top_k) = opts.top_k {
             body["top_k"] = serde_json::json!(top_k);
         }
         if opts.logprobs {
@@ -237,22 +237,16 @@ impl OpenAiCompatibleProvider {
                 body["top_logprobs"] = serde_json::json!(top_logprobs);
             }
         }
-        if let Some(stop) = opts.stop.as_ref().filter(|_| caps.stop_supported) {
+        if let Some(stop) = opts.stop.as_ref() {
             body["stop"] = serde_json::json!(stop);
         }
-        if let Some(seed) = opts.seed.filter(|_| caps.seed_supported) {
+        if let Some(seed) = opts.seed {
             body["seed"] = serde_json::json!(seed);
         }
-        if let Some(fp) = opts
-            .frequency_penalty
-            .filter(|_| caps.frequency_penalty_supported)
-        {
+        if let Some(fp) = opts.frequency_penalty {
             body["frequency_penalty"] = serde_json::json!(fp);
         }
-        if let Some(pp) = opts
-            .presence_penalty
-            .filter(|_| caps.presence_penalty_supported)
-        {
+        if let Some(pp) = opts.presence_penalty {
             body["presence_penalty"] = serde_json::json!(pp);
         }
         match caps.reasoning_wire_format.as_deref() {

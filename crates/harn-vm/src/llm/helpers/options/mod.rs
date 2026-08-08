@@ -27,6 +27,8 @@ pub(crate) use reminders::{
 pub(crate) use validate::{project_llm_options, validate_llm_option_keys};
 
 #[cfg(test)]
+mod capability_admission_tests;
+#[cfg(test)]
 mod logical_defaults_tests;
 #[cfg(test)]
 mod output_format_tests;
@@ -54,7 +56,7 @@ pub(super) use super::{
 };
 
 // Public surface consumed by `super` (llm::helpers::mod).
-pub(crate) use extract::extract_llm_options;
+pub(crate) use extract::{extract_llm_options, validate_options};
 pub(crate) use json::{expects_structured_output, extract_json};
 pub(crate) use system_prompt::{
     assemble_system_prompt, compose_system_prompt, system_prompt_event_metadata,

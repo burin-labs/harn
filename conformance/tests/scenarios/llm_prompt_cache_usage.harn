@@ -1,4 +1,7 @@
 pipeline default(harness: Harness) {
+  harness.llm.provider_capabilities_install(
+    "[[provider.mock]]\nmodel_match = \"claude-sonnet-4-20250514\"\nprompt_caching = true\n",
+  )
   let prompt = ""
   for i in range(0, 80) {
     prompt += "stable cacheable prefix line " + to_string(i)
@@ -15,4 +18,5 @@ pipeline default(harness: Harness) {
   harness.stdio.println(second.usage.cache_savings_usd > 0.0)
   // usage is the single owner of cache accounting: no top-level duplicate.
   harness.stdio.println(second.cache_read_tokens == nil)
+  harness.llm.provider_capabilities_clear()
 }

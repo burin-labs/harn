@@ -925,6 +925,55 @@ fn resolve_rule_chain(
     (resolution, effective_defaults)
 }
 
+/// Return the authored support fact for one caller-portable option without
+/// collapsing an unknown custom route into the permissive defaults used by
+/// adapter projections. Generation admission rejects an explicit `false`;
+/// cache admission also requires an authored `true` because cache lowering is
+/// provider-specific. The TTL value list accompanies its prompt-cache fact.
+pub(super) fn declared_portable_option_support(
+    user: Option<&CapabilitiesFile>,
+    builtin: &CapabilitiesFile,
+    provider: &str,
+    model: &str,
+    option: super::PortableOption,
+) -> (Option<bool>, Option<Vec<String>>) {
+    let model = crate::llm_config::capability_model_id(provider, model);
+    let (resolution, defaults) = resolve_rule_chain(user, builtin, provider, &model);
+    let rule = resolution.merged.as_ref();
+    let supported = match option {
+        super::PortableOption::Temperature => rule
+            .and_then(|rule| rule.temperature_supported)
+            .or(defaults.temperature_supported),
+        super::PortableOption::TopP => rule
+            .and_then(|rule| rule.top_p_supported)
+            .or(defaults.top_p_supported),
+        super::PortableOption::TopK => rule
+            .and_then(|rule| rule.top_k_supported)
+            .or(defaults.top_k_supported),
+        super::PortableOption::Seed => rule
+            .and_then(|rule| rule.seed_supported)
+            .or(defaults.seed_supported),
+        super::PortableOption::FrequencyPenalty => rule
+            .and_then(|rule| rule.frequency_penalty_supported)
+            .or(defaults.frequency_penalty_supported),
+        super::PortableOption::PresencePenalty => rule
+            .and_then(|rule| rule.presence_penalty_supported)
+            .or(defaults.presence_penalty_supported),
+        super::PortableOption::Stop => rule
+            .and_then(|rule| rule.stop_supported)
+            .or(defaults.stop_supported),
+        super::PortableOption::Cache | super::PortableOption::PromptCacheTtl => {
+            rule.and_then(|rule| rule.prompt_caching)
+        }
+    };
+    let supported_values = (option == super::PortableOption::PromptCacheTtl).then(|| {
+        rule.and_then(|rule| rule.prompt_cache_ttls.clone())
+            .or_else(|| defaults.prompt_cache_ttls.clone())
+            .unwrap_or_default()
+    });
+    (supported, supported_values)
+}
+
 pub(super) fn first_matching_rule(
     user: Option<&CapabilitiesFile>,
     builtin: &CapabilitiesFile,

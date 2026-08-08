@@ -1308,6 +1308,14 @@ Provider-specific request fields live only below
 `speed: "fast"` for accelerated serving, and millisecond integers in
 `timeout_ms` / `idle_timeout_ms`.
 
+Caller-selected `temperature`, `top_p`, `top_k`, `seed`,
+`frequency_penalty`, `presence_penalty`, and `stop` are admitted against each
+resolved route before transport. A catalog denial throws terminal
+`invalid_request`; Harn never silently drops the option. Unknown custom
+generation routes remain open-world. Explicit `cache: true` and
+`prompt_cache_ttl` instead require authored support because their wire lowering
+is provider-specific, and a TTL must be listed in `prompt_cache_ttls`.
+
 See the [complete option reference](../src/llm/llm_call.md#options-dict) and
 the [0.10 migration table](../src/migrations/v0.10.md#llm-call-options).
 

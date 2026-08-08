@@ -1218,13 +1218,11 @@ fn assert_unsupported_local_option(option: &str, extra: Vec<(&str, VmValue)>) {
     crate::llm_config::clear_user_overrides();
 
     let err = unsupported_local_options(extra);
-
-    assert!(
-            err.to_string().contains(&format!(
-                "option `{option}` is not supported by `unsupported-model` (provider `local`). See `harn provider catalog matrix` for compatibility."
-            )),
-            "unexpected error for {option}: {err}"
-        );
+    let message = err.to_string();
+    let expected =
+        format!("option `{option}` is not supported by `unsupported-model` (provider `local`).");
+    assert!(message.contains(&expected), "unexpected error: {err}");
+    assert!(message.contains("harn provider catalog matrix"));
 }
 
 fn one_tool_list() -> VmValue {

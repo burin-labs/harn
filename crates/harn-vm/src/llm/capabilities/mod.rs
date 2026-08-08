@@ -30,6 +30,7 @@ pub(super) const BUILTIN_TOML: &str = include_str!("../capabilities.toml");
 /// Generated provider/model snapshot built from catalog_sources/**/*.toml.
 pub(super) const BUILTIN_PROVIDERS_TOML: &str = include_str!("../providers.toml");
 
+mod admission;
 mod audit;
 mod lookup;
 #[cfg(test)]
@@ -56,6 +57,9 @@ mod tool_format;
 pub(crate) use lookup::should_use_responses_transport;
 pub(crate) use overrides::swap_user_overrides;
 
+pub use admission::{
+    admit_portable_option, admit_prompt_cache_ttl, CapabilityAdmissionError, PortableOption,
+};
 pub use audit::{
     audit_builtin_catalogued_chat_model_tool_capabilities,
     audit_catalogued_chat_model_tool_capabilities, matrix_rows, ProviderCapabilityMatrixRow,

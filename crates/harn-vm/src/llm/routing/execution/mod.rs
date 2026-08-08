@@ -197,8 +197,9 @@ fn budget_overrun_snapshot(
 /// Apply a validated per-step override dict over an already-cloned base
 /// [`LlmCallOptions`]. Keys were checked against
 /// [`LADDER_STEP_OVERRIDE_KEYS`] at build time, so a present value here is
-/// known-supported; type-mismatched values are ignored (the base value
-/// stands) rather than erroring mid-dispatch.
+/// known to be part of the step schema; route capability admission happens
+/// after these overrides resolve. Type-mismatched values are ignored (the base
+/// value stands) rather than erroring mid-dispatch.
 pub(super) fn apply_ladder_step_overrides(
     opts: &mut LlmCallOptions,
     overrides: &crate::value::DictMap,
@@ -212,24 +213,36 @@ pub(super) fn apply_ladder_step_overrides(
     };
     if let Some(v) = overrides.get("temperature").and_then(as_f64) {
         opts.temperature = Some(v);
+        opts.portable_option_intent
+            .insert(crate::llm::capabilities::PortableOption::Temperature);
     }
     if let Some(v) = overrides.get("max_tokens").and_then(VmValue::as_int) {
         opts.max_tokens = v;
     }
     if let Some(v) = overrides.get("top_p").and_then(as_f64) {
         opts.top_p = Some(v);
+        opts.portable_option_intent
+            .insert(crate::llm::capabilities::PortableOption::TopP);
     }
     if let Some(v) = overrides.get("top_k").and_then(VmValue::as_int) {
         opts.top_k = Some(v);
+        opts.portable_option_intent
+            .insert(crate::llm::capabilities::PortableOption::TopK);
     }
     if let Some(v) = overrides.get("seed").and_then(VmValue::as_int) {
         opts.seed = Some(v);
+        opts.portable_option_intent
+            .insert(crate::llm::capabilities::PortableOption::Seed);
     }
     if let Some(v) = overrides.get("frequency_penalty").and_then(as_f64) {
         opts.frequency_penalty = Some(v);
+        opts.portable_option_intent
+            .insert(crate::llm::capabilities::PortableOption::FrequencyPenalty);
     }
     if let Some(v) = overrides.get("presence_penalty").and_then(as_f64) {
         opts.presence_penalty = Some(v);
+        opts.portable_option_intent
+            .insert(crate::llm::capabilities::PortableOption::PresencePenalty);
     }
     if let Some(v) = overrides.get("timeout_ms").and_then(VmValue::as_int) {
         if v > 0 {
