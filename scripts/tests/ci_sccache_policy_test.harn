@@ -79,7 +79,7 @@ fn hosted_lane(cache_key: string, write_cache: bool = false) {
 
 fn workflow() {
   const host_bound_filter =
-    "test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration)"
+    "test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline)"
   const package_audit = hosted_lane("package-audit", true)
   const lint = hosted_lane("workspace-tests")
   const producer = persistent_lane(

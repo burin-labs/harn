@@ -3,7 +3,7 @@ set -euo pipefail
 
 readonly NEXTEST_VERSION="0.9.132"
 readonly NEUTRAL_FILTER='all()'
-readonly SECURITY_FILTER='package(harn-vm) and binary(harn_vm)'
+readonly SECURITY_FILTER='(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and (test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline)))'
 readonly EXPECTED_RUSTFLAGS='-D warnings -Clink-arg=-fuse-ld=mold'
 readonly EXPECTED_DEV_DEBUG='line-tables-only'
 readonly DEFAULT_MAX_BUNDLE_BYTES=9663676416  # 9 GiB: workspace nextest archive is ~8.4 GiB today
@@ -305,7 +305,7 @@ build_check_input_bundles() {
   mkdir -p "$staging/security"
 
   prepare_harn_cli "$staging" "$commit" "$target_dir"
-  cargo nextest archive --locked -p harn-vm --profile ci \
+  cargo nextest archive --locked -p harn-vm -p harn-hostlib --profile ci \
     -E "$SECURITY_FILTER" \
     --archive-file "$staging/security/harn-security-tests.tar.zst"
   write_security_manifest "$staging/security" "$commit" "$(rustc_identity_sha256)"

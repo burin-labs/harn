@@ -551,7 +551,7 @@ jobs:
         run: >-
           scripts/ci/run_rust_test_lane.sh
           cargo nextest run --locked --workspace --profile ci
-          -E 'not (test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration))'
+          -E 'not (test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline))'
       - name: Upload portable Harn CLI
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -765,7 +765,7 @@ jobs:
           cargo nextest run --profile ci
           --archive-file "$RUNNER_TEMP/harn-workspace-tests/harn-tests.tar.zst"
           --workspace-remap "$GITHUB_WORKSPACE"
-          -E 'not (test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration))'
+          -E 'not (test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline))'
 
   rust-security:
     name: Rust security proof
@@ -816,7 +816,7 @@ jobs:
           cargo nextest run --profile ci
           --archive-file "$RUNNER_TEMP/harn-security/harn-security-tests.tar.zst"
           --workspace-remap "$GITHUB_WORKSPACE"
-          -E 'test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration)'
+          -E 'test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline)'
 
   harn-audit:
     name: ${{ matrix.name }}

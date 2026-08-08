@@ -124,7 +124,7 @@ const BLACKSMITH_TIMEOUT_EXPRESSION = "$"
 // tests whose assertions require OS-enforced process isolation on GitHub Ubuntu
 // and prove that the producer and fallback exclude exactly the same set.
 const HOST_BOUND_RUST_TEST_FILTER =
-  "test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration)"
+  "test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline)"
 
 const NEUTRAL_RUST_TEST_FILTER_FLAG = "-E 'not (${HOST_BOUND_RUST_TEST_FILTER})'"
 
