@@ -163,3 +163,43 @@ pipeline test_git_fast_path_includes_untracked_source(harness: Harness, task) {
     },
   )
 }
+
+@test
+pipeline test_llm_policy_guard_uses_syntax_and_owns_only_policy_files(harness: Harness, task) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      write_text(
+        harness.fs,
+        root,
+        "scripts/rules/llm_policy_model_identity.toml",
+        harness.fs.read_text(
+          path_join(harness.fs.source_dir(), "../rules/llm_policy_model_identity.toml"),
+        ),
+      )
+      write_text(
+        harness.fs,
+        root,
+        "crates/harn-stdlib/src/stdlib/llm/defaults.harn",
+        "fn policy(model) { if model == \"gpt-next\" { return {} } }\n",
+      )
+      write_text(
+        harness.fs,
+        root,
+        "crates/harn-stdlib/src/stdlib/agent/presets.harn",
+        "// model example: \"claude-future\"\nfn clean() { return \"agent_frontier\" }\n",
+      )
+      write_text(
+        harness.fs,
+        root,
+        "crates/harn-stdlib/src/stdlib/agent/sitrep.harn",
+        "fn clean() { return \"sitrep\" }\n",
+      )
+      const findings = llm_policy_identity_findings(harness.fs, harness.rules, root)
+      assert_eq(len(findings), 1)
+      assert_eq(findings[0].path, "crates/harn-stdlib/src/stdlib/llm/defaults.harn")
+      assert_eq(findings[0].line, 1)
+      assert_eq(findings[0].kind, "llm-policy-model-identity")
+    },
+  )
+}

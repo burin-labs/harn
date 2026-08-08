@@ -3,10 +3,10 @@ import { llm_text, with_llm_script } from "std/testing"
 
 pipeline test(harness: Harness, task) {
   // Default route list is non-empty and contains anthropic+haiku at the head.
-  const routes = agent_sitrep_preferred_routes()
+  const routes = agent_sitrep_preferred_routes(harness.llm)
   harness.stdio.println(len(routes) > 0)
-  harness.stdio.println(routes[0].provider == "anthropic")
-  harness.stdio.println(routes[0].model == "claude-haiku-4-5-20251001")
+  harness.stdio.println(routes[0]?.provider == "anthropic")
+  harness.stdio.println(routes[0]?.model == "claude-haiku-4-5-20251001")
   // Mock provider is always available — pin opts.routes to it so the
   // test does not depend on which env keys are present in CI.
   const messages = [

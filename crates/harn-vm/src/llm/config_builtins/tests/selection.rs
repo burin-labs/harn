@@ -1,7 +1,8 @@
 //! Selector resolution and per-call option merging.
 
 use super::super::selection_builtins::{
-    llm_model_defaults_builtin, llm_reasoning_effort_budget_builtin, llm_resolved_options_builtin,
+    llm_model_defaults_builtin, llm_model_ladder_builtin, llm_reasoning_effort_budget_builtin,
+    llm_resolved_options_builtin,
 };
 use super::fixtures::build_dict;
 use crate::llm_config;
@@ -40,6 +41,28 @@ fn test_llm_reasoning_effort_budget_matches_canonical_mapping() {
         ));
         assert_eq!(got, expected, "budget mismatch for level {level:?}");
     }
+}
+
+#[test]
+fn test_llm_model_ladder_projects_catalog_owned_steps() {
+    llm_config::clear_user_overrides();
+    let mut out = String::new();
+    let args = vec![VmValue::String(arcstr::ArcStr::from("agent_frontier"))];
+    let result = llm_model_ladder_builtin(&args, &mut out).expect("catalog ladder");
+    let ladder = result.as_dict().expect("ladder dict");
+    let steps = match ladder.get("steps") {
+        Some(VmValue::List(steps)) => steps,
+        other => panic!("expected ladder steps, got {other:?}"),
+    };
+    assert_eq!(steps.len(), 2);
+    assert_eq!(
+        steps[0]
+            .as_dict()
+            .and_then(|step| step.get("provider"))
+            .map(VmValue::display)
+            .as_deref(),
+        Some("anthropic")
+    );
 }
 
 #[test]

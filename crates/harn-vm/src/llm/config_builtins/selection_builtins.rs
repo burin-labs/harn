@@ -96,6 +96,34 @@ fn llm_qc_default_model_builtin(args: &[VmValue], _out: &mut String) -> Result<V
         .unwrap_or(VmValue::Nil))
 }
 
+/// Return one named catalog model ladder, including its ordered route steps.
+#[harn_builtin(
+    exposure = "harness.llm.model_ladder",
+    effects = ["llm.read@arg0"],
+    sig = "llm_model_ladder(name: string) -> dict|nil",
+    category = "llm.config"
+)]
+pub(super) fn llm_model_ladder_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let name = args.first().map(VmValue::display).unwrap_or_default();
+    if name.trim().is_empty() {
+        return Err(VmError::Runtime(
+            "llm_model_ladder: ladder name is required".to_string(),
+        ));
+    }
+    let Some(ladder) = llm_config::model_ladder(&name) else {
+        return Ok(VmValue::Nil);
+    };
+    let value = serde_json::to_value(ladder).map_err(|error| {
+        VmError::Runtime(format!(
+            "llm_model_ladder: failed to project catalog row: {error}"
+        ))
+    })?;
+    Ok(crate::stdlib::json_to_vm_value(&value))
+}
+
 /// Return logical- and route-merged model defaults for `model_id`.
 #[harn_builtin(
     exposure = "harness.llm.model_defaults",

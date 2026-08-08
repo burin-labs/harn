@@ -1,10 +1,11 @@
-// pack_for(gpt-5, reasoning_policy="high") translates to effort: "high".
+// pack_for returns the provider-neutral thinking contract. The transport
+// adapter owns conversion to OpenAI's wire-level effort field.
 import { pack_for } from "std/llm/defaults"
 
 pipeline test(harness: Harness, task) {
   const r = pack_for(harness.agent, harness.llm, {model: "gpt-5", reasoning_policy: "high"})
   assert_eq(r.provider, "openai")
-  // The policy patch overrides medium scale calibration.
-  assert_eq(r.effort, "high")
+  assert_eq(r.thinking.mode, "effort")
+  assert_eq(r.thinking.level, "high")
   harness.stdio.log("llm_defaults_pack_gpt5 passed")
 }

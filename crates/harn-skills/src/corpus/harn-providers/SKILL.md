@@ -48,6 +48,12 @@ Pair it with [[harn-orchestration]] for workflow behavior and [[harn-testing]] f
 
 - Model capabilities should be data-driven.
 - Avoid hardcoding provider quirks in caller code.
+- Put route-specific reasoning behavior in capability rows and resolve it with
+  `harness.llm.apply_reasoning_policy`; do not branch on model IDs, providers,
+  families, or lineages in stdlib policy.
+- Put reusable ordered routes in catalog `[model_ladders.<name>]` rows. Use
+  `ladder: "<name>"` for calls and `harness.llm.model_ladder(name)` when policy
+  or tooling needs to inspect the steps.
 - Capability checks should describe both positive and negative support.
 - JSON schema support is not the same as native JSON support.
 - Keep capability-field names such as `reasoning_effort_supported` distinct
