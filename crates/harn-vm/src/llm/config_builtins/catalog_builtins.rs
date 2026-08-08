@@ -12,7 +12,7 @@ use super::provider_projection::{provider_catalog_to_vm_value, provider_def_to_v
 /// Return provider/model capability metadata from the loaded capability matrix.
 #[harn_builtin(
     exposure = "harness.llm.provider_capabilities",
-    effects = ["state.read@arg0"],
+    effects = ["llm.read@arg0"],
     sig = "provider_capabilities(provider: string, model?: string|nil) -> dict",
     category = "llm.config"
 )]
@@ -71,7 +71,7 @@ fn provider_capabilities_clear_builtin(
 /// List providers usable in the current environment.
 #[harn_builtin(
     exposure = "harness.llm.available_providers",
-    effects = ["state.read@const=provider-catalog"],
+    effects = ["llm.read@const=provider-catalog"],
     sig = "llm_available_providers() -> list", category = "llm.config"
 )]
 fn llm_available_providers_builtin(
@@ -86,7 +86,7 @@ fn llm_available_providers_builtin(
 /// Return the loaded provider, alias, model, pricing, and availability catalog.
 #[harn_builtin(
     exposure = "harness.llm.provider_catalog",
-    effects = ["state.read@const=provider-catalog"],
+    effects = ["llm.read@const=provider-catalog"],
     sig = "llm_provider_catalog() -> dict", category = "llm.config"
 )]
 fn llm_provider_catalog_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

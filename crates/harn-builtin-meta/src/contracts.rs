@@ -437,6 +437,28 @@ pub struct EffectSpec {
     pub resources: &'static [ResourceSelector],
 }
 
+/// An explicit capability grant that may authorize a builtin's declared
+/// read-only effects.
+///
+/// This is deliberately part of the builtin contract rather than a policy
+/// exception keyed by method or resource name. It lets runtime-owned helper
+/// reads travel with the operation they support while keeping the effects
+/// themselves visible to receipts and audit tooling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EffectAuthorization {
+    pub capability: CapabilityId,
+    pub operation: &'static str,
+}
+
+impl EffectAuthorization {
+    pub const fn new(capability: CapabilityId, operation: &'static str) -> Self {
+        Self {
+            capability,
+            operation,
+        }
+    }
+}
+
 impl EffectSpec {
     pub const fn new(
         kind: EffectKind,
@@ -457,22 +479,26 @@ impl EffectSpec {
 pub struct BuiltinContract {
     pub exposure: BuiltinExposure,
     pub effects: &'static [EffectSpec],
+    pub effects_authorized_by: Option<EffectAuthorization>,
 }
 
 impl BuiltinContract {
     pub const UNDECLARED: Self = Self {
         exposure: BuiltinExposure::Undeclared,
         effects: &[],
+        effects_authorized_by: None,
     };
 
     pub const PURE: Self = Self {
         exposure: BuiltinExposure::PureGlobal,
         effects: &[],
+        effects_authorized_by: None,
     };
 
     pub const RUNTIME_INTERNAL: Self = Self {
         exposure: BuiltinExposure::RuntimeInternal,
         effects: &[],
+        effects_authorized_by: None,
     };
 
     pub const fn harness(
@@ -483,6 +509,32 @@ impl BuiltinContract {
         Self {
             exposure: BuiltinExposure::HarnessMethod { capability, method },
             effects,
+            effects_authorized_by: None,
+        }
+    }
+
+    pub const fn harness_with_effect_authorization(
+        capability: CapabilityId,
+        method: &'static str,
+        effects: &'static [EffectSpec],
+        effects_authorized_by: EffectAuthorization,
+    ) -> Self {
+        assert!(!effects.is_empty(), "effect authorization requires effects");
+        let mut index = 0;
+        while index < effects.len() {
+            assert!(
+                matches!(
+                    effects[index].access,
+                    EffectAccess::Read | EffectAccess::Observe
+                ),
+                "effect authorization is limited to read-only effects"
+            );
+            index += 1;
+        }
+        Self {
+            exposure: BuiltinExposure::HarnessMethod { capability, method },
+            effects,
+            effects_authorized_by: Some(effects_authorized_by),
         }
     }
 
@@ -493,6 +545,7 @@ impl BuiltinContract {
         Self {
             exposure: BuiltinExposure::CapabilityFunction { authority_argument },
             effects,
+            effects_authorized_by: None,
         }
     }
 
@@ -500,6 +553,7 @@ impl BuiltinContract {
         Self {
             exposure: BuiltinExposure::PrivilegedWire,
             effects,
+            effects_authorized_by: None,
         }
     }
 
@@ -509,5 +563,27 @@ impl BuiltinContract {
 
     pub const fn is_pure(self) -> bool {
         self.effects.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    static WRITE_EFFECTS: &[EffectSpec] = &[EffectSpec::new(
+        EffectKind::State,
+        EffectAccess::Write,
+        &[ResourceSelector::Dynamic],
+    )];
+
+    #[test]
+    #[should_panic(expected = "effect authorization is limited to read-only effects")]
+    fn effect_authorization_rejects_write_effects() {
+        let _ = BuiltinContract::harness_with_effect_authorization(
+            CapabilityId::Runtime,
+            "test_write",
+            WRITE_EFFECTS,
+            EffectAuthorization::new(CapabilityId::Llm, "call"),
+        );
     }
 }

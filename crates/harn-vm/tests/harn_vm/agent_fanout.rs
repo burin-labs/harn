@@ -125,6 +125,7 @@ fn run_with_bridge_in_parent_workspace(
                                 "state".to_string(),
                                 vec!["read".to_string(), "write".to_string()],
                             ),
+                            ("llm".to_string(), vec!["call".to_string()]),
                             ("worker".to_string(), vec!["dispatch".to_string()]),
                             ("stdio".to_string(), vec!["write".to_string()]),
                         ]),

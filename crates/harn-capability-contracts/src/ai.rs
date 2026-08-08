@@ -1167,7 +1167,8 @@ capability_method!(
     "harness.agent.current_id",
     ["state.read@const=current-agent-session"],
     "__cap_agent_current_id() -> string?",
-    "Read the current agent session identifier."
+    "Read the current agent session identifier.",
+    "llm.call"
 );
 capability_method!(
     agent_record_changed_path,

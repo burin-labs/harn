@@ -593,7 +593,8 @@ capability_method!(
     "harness.runtime.context",
     ["state.read@const=runtime-context"],
     "__cap_runtime_context() -> dict",
-    "Read the current logical task and orchestration context."
+    "Read the current logical task and orchestration context.",
+    "llm.call"
 );
 capability_method!(
     runtime_context_values,

@@ -1,9 +1,8 @@
 //! Builtins for first-class sessions.
 //!
-//! Sessions are the north-star replacement for the `transcript_policy`
-//! config dict. Each builtin is an explicit verb over the session
-//! store in `crate::agent_sessions`. There is no policy-as-verb
-//! pattern; unknown inputs are hard errors.
+//! Sessions replace the `transcript_policy` config dict. Each builtin is an
+//! explicit verb over the store in `crate::agent_sessions`; there is no
+//! policy-as-verb pattern, and unknown inputs are hard errors.
 
 use crate::value::VmDictExt;
 use std::path::PathBuf;
@@ -623,6 +622,7 @@ fn agent_session_ancestry_builtin(args: &[VmValue], _out: &mut String) -> Result
 #[harn_builtin(
     exposure = "harness.agent.current_id",
     effects = ["state.read@const=current-agent-session"],
+    effects_authorized_by = "llm.call",
     sig = "__cap_agent_current_id() -> string?",
     aliases = ["agent_session_current_id"],
     category = "agent.session",

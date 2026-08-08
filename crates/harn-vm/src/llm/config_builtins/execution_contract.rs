@@ -8,7 +8,7 @@ use crate::value::{VmDictExt, VmError, VmValue};
 /// replay, eval, and audit receipts.
 #[harn_builtin(
     exposure = "harness.llm.execution_contract",
-    effects = ["state.read@dynamic"],
+    effects = ["llm.read@dynamic"],
     sig = "llm_execution_contract(selector: string) -> dict",
     category = "llm.config"
 )]

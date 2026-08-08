@@ -91,7 +91,13 @@ pub fn connector_export_denied_harness_method_reason(
     let entry = crate::stdlib::capability_method_manifest_entry(capability, method)?;
     let denied = crate::orchestration::runtime_effects_from_contract(entry.contract.effects, &[])
         .into_iter()
-        .find(|effect| !crate::orchestration::effect_allowed_by_ceiling(effect, &policy))?;
+        .find(|effect| {
+            !crate::orchestration::contract_effect_allowed_by_ceiling(
+                effect,
+                entry.contract,
+                &policy,
+            )
+        })?;
     Some(format!(
         "{} is outside the `{export}` default effect ceiling",
         crate::orchestration::effect_record_summary(&denied)

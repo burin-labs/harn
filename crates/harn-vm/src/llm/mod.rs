@@ -569,7 +569,7 @@ fn host_tool_search_score_builtin(args: &[VmValue], _out: &mut String) -> Result
 /// <dispatch>.{decision,attempt,race_started,race_won,race_lost,budget_exceeded,exhausted}.
 #[harn_builtin(
     exposure = "harness.llm.routing_policy",
-    effects = ["state.read@dynamic"],
+    effects = ["llm.read@dynamic"],
     sig = "routing_policy(config: dict) -> dict", category = "llm.host"
 )]
 fn routing_policy_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
