@@ -3,6 +3,16 @@ use super::*;
 use crate::llm_config::ModelEligibilityMeasurementKind;
 
 #[test]
+fn schema_id_tracks_schema_version() {
+    assert_eq!(
+        PROVIDER_CATALOG_SCHEMA_ID,
+        format!(
+            "https://harnlang.com/schemas/provider-catalog.v{PROVIDER_CATALOG_SCHEMA_VERSION}.json"
+        )
+    );
+}
+
+#[test]
 fn downstream_bindings_include_automatic_eligibility_shape() {
     let typescript = typescript_declarations();
     assert!(typescript.contains("automatic_eligibility?: HarnAutomaticModelEligibility"));

@@ -16,7 +16,7 @@ use chrono::{NaiveDate, Utc};
 
 pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 8;
 pub const PROVIDER_CATALOG_SCHEMA_ID: &str =
-    "https://harnlang.com/schemas/provider-catalog.v7.json";
+    "https://harnlang.com/schemas/provider-catalog.v8.json";
 pub const PROVIDER_CATALOG_GENERATOR: &str = "harn provider catalog generate";
 pub const HARN_DISABLE_CATALOG_REFRESH_ENV: &str = "HARN_DISABLE_CATALOG_REFRESH";
 pub const HARN_PROVIDER_CATALOG_URL_ENV: &str = "HARN_PROVIDER_CATALOG_URL";
