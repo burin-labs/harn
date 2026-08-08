@@ -110,9 +110,21 @@ fn __betting_fractions(values: list<float>, delta: float) -> list<float> {
  * averaged into one two-sided test martingale.
  */
 fn __hedged_capital(values: list<float>, fractions: list<float>, candidate: float) -> float {
-  const mean = min(max(candidate, 0.0005), 0.9995)
-  const plus_cap = 0.5 / mean
-  const minus_cap = 0.5 / (1.0 - mean)
+  const mean = candidate
+  // At an endpoint, the bet in the feasible direction needs no reciprocal
+  // cap: the predictable fractions are already bounded by 0.75. Perturbing an
+  // endpoint tests a different null and eventually makes a constant endpoint
+  // stream erase its own evidence.
+  const plus_cap = if mean == 0.0 {
+    0.75
+  } else {
+    0.5 / mean
+  }
+  const minus_cap = if mean == 1.0 {
+    0.75
+  } else {
+    0.5 / (1.0 - mean)
+  }
   let plus = 1.0
   let minus = 1.0
   let index = 0
@@ -138,7 +150,7 @@ fn __unit_cs(values: list<float>, delta: float) -> {lo: float, hi: float} {
   }
   const threshold = 1.0 / delta
   const fractions = __betting_fractions(values, delta)
-  const center = min(max(__mean(values), 0.0005), 0.9995)
+  const center = __mean(values)
   if !(__hedged_capital(values, fractions, center) < threshold) {
     return {lo: 0.0, hi: 1.0}
   }

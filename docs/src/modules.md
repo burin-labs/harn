@@ -698,6 +698,14 @@ minimum-trial floor. Its terminal outcomes distinguish a candidate `WINNER`, a
 proven `BASELINE` win, a precisely measured `TIED_CONFIRMED`, and an
 underpowered `UNRESOLVED` result.
 
+`bounded_cs` evaluates support endpoints exactly; it never perturbs an endpoint
+to an interior candidate mean. Exact evaluation keeps the endpoint-null capital
+process valid, while retaining the endpoint in the returned interval is the
+coverage behavior. Avoiding a later reset to the full support preserves the
+information accumulated from an all-lower-bound or all-upper-bound stream. The
+reported interval can eventually stop narrowing at its search and outward-pad
+resolution.
+
 Sequential inputs must be append-only observations. At each look, prior values
 remain byte-for-byte identical and only newly observed units are appended.
 Mutable per-case aggregates do not meet that contract: project each immutable
