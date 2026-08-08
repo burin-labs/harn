@@ -883,11 +883,12 @@ fn accumulate_llm_usage(
 }
 
 pub(crate) fn record_llm_usage(result: &crate::llm::api::LlmResult) -> Result<(), VmError> {
+    let usage = result.usage();
     accumulate_llm_usage(
         &result.model,
-        result.input_tokens,
-        result.output_tokens,
-        result.priced_cost_usd().unwrap_or(0.0),
+        usage.input_tokens,
+        usage.output_tokens,
+        usage.cost_usd.unwrap_or(0.0),
     )
 }
 

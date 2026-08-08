@@ -9,17 +9,10 @@ pub struct LlmTraceEntry {
     /// summary that priced by model alone would silently misprice every model
     /// served by more than one provider.
     pub provider: String,
-    pub input_tokens: i64,
-    pub output_tokens: i64,
-    /// The price of this exact call, as computed by the one owner of per-call
-    /// cost (`LlmResult::priced_cost_usd`). Carried rather than recomputed
-    /// because re-pricing from `(provider, model, input, output)` alone cannot
-    /// see prompt-cache accounting or the accelerated-serving tier, so a
-    /// summary that re-priced would disagree with the run's own total.
-    ///
-    /// `None` means the catalog prices no rate for this pair — which is not
-    /// the same as a call that cost nothing.
-    pub cost_usd: Option<f64>,
+    /// Canonical per-call accounting. Traces carry the ledger rather than a
+    /// second token/cost shape so cache and accelerated-tier pricing cannot be
+    /// lost or recomputed differently by reporting consumers.
+    pub usage: super::usage::LlmUsage,
     pub duration_ms: u64,
 }
 
@@ -52,8 +45,8 @@ pub fn peek_trace_summary() -> (i64, i64, i64, i64) {
         let mut duration = 0i64;
         let count = entries.len() as i64;
         for e in entries.iter() {
-            input += e.input_tokens;
-            output += e.output_tokens;
+            input += e.usage.input_tokens;
+            output += e.usage.output_tokens;
             duration += e.duration_ms as i64;
         }
         (input, output, duration, count)
@@ -112,9 +105,8 @@ pub enum AgentTraceEvent {
     LlmCall {
         call_id: String,
         model: String,
-        input_tokens: i64,
-        output_tokens: i64,
-        cache_tokens: i64,
+        #[serde(flatten)]
+        usage: super::usage::LlmUsage,
         duration_ms: u64,
         iteration: usize,
     },
@@ -260,14 +252,11 @@ fn agent_trace_summary_inner(facts: Option<&AgentLoopFacts>) -> serde_json::Valu
         for event in events.iter() {
             match event {
                 AgentTraceEvent::LlmCall {
-                    input_tokens,
-                    output_tokens,
-                    duration_ms,
-                    ..
+                    usage, duration_ms, ..
                 } => {
                     llm_calls += 1;
-                    total_input_tokens += input_tokens;
-                    total_output_tokens += output_tokens;
+                    total_input_tokens += usage.input_tokens;
+                    total_output_tokens += usage.output_tokens;
                     total_llm_duration_ms += duration_ms;
                 }
                 AgentTraceEvent::ContextCompaction { .. } => {

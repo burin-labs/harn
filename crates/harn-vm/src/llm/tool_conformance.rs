@@ -18,8 +18,8 @@ mod request_contract;
 mod text_parse;
 #[path = "tool_conformance_types.rs"]
 mod types;
-use super::usage_normalization::extract_probe_usage;
-pub use super::usage_normalization::ToolProbeUsage;
+use super::usage::extract_probe_usage;
+pub use super::usage::ToolProbeUsage;
 pub(super) use helpers::{aggregate_stream_text, probe_tool_registry};
 #[cfg(test)]
 use request::validate_probe_request_body;

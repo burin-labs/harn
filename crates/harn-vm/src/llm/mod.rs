@@ -90,7 +90,7 @@ mod tool_search_score;
 mod trace_builtins;
 pub(crate) mod transcript_seed;
 mod transcript_stats;
-pub(crate) mod usage_normalization;
+pub mod usage;
 
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
@@ -855,12 +855,11 @@ async fn llm_completion_builtin(
 
     let start = std::time::Instant::now();
     let result = vm_call_completion_full(&opts, &prefix, suffix.as_deref()).await?;
+    let usage = result.usage();
     trace_llm_call(LlmTraceEntry {
         model: result.model.clone(),
         provider: result.provider.clone(),
-        input_tokens: result.input_tokens,
-        output_tokens: result.output_tokens,
-        cost_usd: result.priced_cost_usd(),
+        usage: usage.clone(),
         duration_ms: start.elapsed().as_millis() as u64,
     });
     if let Some(span_id) = crate::tracing::current_span_id() {
@@ -868,12 +867,12 @@ async fn llm_completion_builtin(
         crate::tracing::span_set_metadata(
             span_id,
             "input_tokens",
-            serde_json::json!(result.input_tokens),
+            serde_json::json!(usage.input_tokens),
         );
         crate::tracing::span_set_metadata(
             span_id,
             "output_tokens",
-            serde_json::json!(result.output_tokens),
+            serde_json::json!(usage.output_tokens),
         );
     }
     let projection = crate::llm::api::build_llm_text_projection(Some(&_ctx), &result, None).await?;

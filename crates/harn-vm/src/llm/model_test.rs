@@ -83,15 +83,16 @@ pub async fn run_model_smoke_test(
     let latency_ms = duration_ms(started.elapsed());
     let first_token_ms = first_delta.await.ok().flatten().map(duration_ms);
     let result = result?;
+    let usage = result.usage();
 
     Ok(ModelSmokeTestResult {
-        model_id: result.model.clone(),
-        provider: result.provider.clone(),
+        model_id: result.model,
+        provider: result.provider,
         latency_ms,
         first_token_ms,
-        input_tokens: result.input_tokens,
-        output_tokens: result.output_tokens,
-        estimated_cost_usd: result.priced_cost_usd().unwrap_or(0.0),
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        estimated_cost_usd: usage.cost_usd.unwrap_or(0.0),
     })
 }
 

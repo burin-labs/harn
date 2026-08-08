@@ -87,6 +87,7 @@ pub(crate) fn agent_loop_result_from_llm(
     ));
     let transcript_metadata = system_prompt_transcript_metadata(opts.system.as_ref());
     let prefix_events = system_prompt_transcript_events(opts.system.as_ref());
+    let usage = result.usage();
     let mut events = Vec::new();
     events.push(transcript_event(
         "provider_payload",
@@ -95,13 +96,13 @@ pub(crate) fn agent_loop_result_from_llm(
         "",
         Some(serde_json::json!({
             "model": result.model.clone(),
-            "input_tokens": result.input_tokens,
-            "output_tokens": result.output_tokens,
+            "input_tokens": usage.input_tokens,
+            "output_tokens": usage.output_tokens,
             "tool_calls": result.tool_calls.clone(),
             "blocks": result.blocks.clone(),
             "provider_response_id": result.telemetry.request_id.clone(),
             "thinking_summary": result.thinking_summary,
-            "cost_usd": result.priced_cost_usd(),
+            "cost_usd": usage.cost_usd,
             "route_policy": opts.route_policy.as_label(),
             "routing_decision": opts.routing_decision.as_ref(),
             "structural_experiment": opts.applied_structural_experiment.as_ref(),
