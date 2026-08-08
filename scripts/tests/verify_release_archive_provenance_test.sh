@@ -333,6 +333,9 @@ require_workflow_text "Release recovery must be dispatched from the main branch"
 require_workflow_text "make_latest: \${{ needs.setup.outputs.make_latest }}"
 require_workflow_text "is_prerelease: \${{ steps.resolve.outputs.is_prerelease }}"
 require_workflow_text "source scripts/lib/release_version.sh"
+require_workflow_text 'policy_dir="$RUNNER_TEMP/release-provenance-policy"'
+require_workflow_text 'cp scripts/lib/release_version.sh "$policy_dir/lib/release_version.sh"'
+require_workflow_text 'bash "$RUNNER_TEMP/release-provenance-policy/verify_release_archive_provenance.sh"'
 require_workflow_text "prerelease: \${{ needs.setup.outputs.is_prerelease }}"
 require_workflow_text "enable=\${{ needs.setup.outputs.make_latest == 'true' }}"
 require_workflow_text "needs.build.result == 'success' || needs.build.result == 'skipped'"
