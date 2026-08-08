@@ -13,12 +13,12 @@ fn persistent_lane(
   const cache_inputs = {"shared-key": rust_cache_key, "cache-workspace-crates": "true"}
   let lane = {
     "runs-on": gha_expression(
-      "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || ((github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.head_ref == 'ksinder/5003-persistent-producer')) && '${runner}' || 'ubuntu-latest')",
+      "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || (github.event_name == 'merge_group' && '${runner}' || 'ubuntu-latest')",
     ),
     "timeout-minutes": 10,
     env: {
       HARN_RUNNER_TIER: gha_expression(
-        "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'github-hosted' || ((github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.head_ref == 'ksinder/5003-persistent-producer')) && 'blacksmith' || 'github-hosted')",
+        "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'github-hosted' || (github.event_name == 'merge_group' && 'blacksmith' || 'github-hosted')",
       ),
       SCCACHE_CACHE_SIZE: "15G",
     },
