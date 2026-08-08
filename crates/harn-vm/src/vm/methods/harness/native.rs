@@ -982,8 +982,8 @@ impl crate::vm::Vm {
                     }
                 };
                 let repeat = match args.get(4) {
-                    None | Some(VmValue::Nil) => false,
-                    Some(VmValue::Bool(repeat)) => *repeat,
+                    None | Some(VmValue::Nil) => None,
+                    Some(VmValue::Bool(repeat)) => Some(*repeat),
                     Some(other) => {
                         return Err(VmError::TypeError(format!(
                             "HarnessTesting.{method}: repeat must be a bool, got {}",
@@ -991,7 +991,14 @@ impl crate::vm::Vm {
                         )))
                     }
                 };
-                fixtures.respond(capability_name, target_method, response, when, repeat);
+                fixtures.respond(
+                    capability_name,
+                    target_method,
+                    response,
+                    when,
+                    repeat,
+                    capability_fixture_is_stable_read(capability_name, target_method),
+                );
                 Ok(VmValue::Nil)
             }
             "calls" => {
@@ -1151,4 +1158,32 @@ impl crate::vm::Vm {
             _ => Err(method_unsupported(handle, method)),
         }
     }
+}
+
+/// Stable read fixtures model snapshot-like host state and can safely answer
+/// repeated reads. Volatile reads (clock, randomness, network, process, worker,
+/// and channels) remain one-shot unless the fixture explicitly opts in.
+fn capability_fixture_is_stable_read(capability: &str, method: &str) -> bool {
+    let Some(capability) = harn_builtin_meta::CapabilityId::from_field_name(capability) else {
+        return false;
+    };
+    if crate::harness::is_capability_driver_fixture(capability, method) {
+        return false;
+    }
+    let Some(entry) = crate::stdlib::capability_method_manifest_entry(capability, method) else {
+        return false;
+    };
+    entry.contract.effects.iter().all(|effect| {
+        matches!(
+            effect.access,
+            harn_builtin_meta::EffectAccess::Read | harn_builtin_meta::EffectAccess::Observe
+        ) && matches!(
+            effect.kind,
+            harn_builtin_meta::EffectKind::Fs
+                | harn_builtin_meta::EffectKind::Env
+                | harn_builtin_meta::EffectKind::Host
+                | harn_builtin_meta::EffectKind::Secret
+                | harn_builtin_meta::EffectKind::State
+        )
+    })
 }

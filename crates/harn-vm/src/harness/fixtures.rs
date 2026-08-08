@@ -27,7 +27,8 @@ struct CapabilityFixtureInner {
 #[derive(Debug, Clone)]
 struct CapabilityFixtureResponse {
     when: Option<crate::value::DictMap>,
-    repeat: bool,
+    repeat: Option<bool>,
+    inferred_repeat: bool,
     result: Result<crate::VmValue, String>,
 }
 
@@ -131,7 +132,8 @@ impl CapabilityFixtureState {
         member: &str,
         response: Result<crate::VmValue, String>,
         when: Option<crate::value::DictMap>,
-        repeat: bool,
+        repeat: Option<bool>,
+        stable_by_default: bool,
     ) {
         let mut scopes = self.inner.lock().expect("capability fixtures poisoned");
         scopes.current.enabled = true;
@@ -139,16 +141,26 @@ impl CapabilityFixtureState {
         // that gate their host call on the capability manifest skip the call
         // and never reach the fixture.
         crate::stdlib::host::fixtured_operations::record_fixtured_host_operation(capability, member);
-        scopes
+        let queue = scopes
             .current
             .responses
             .entry((capability.to_string(), member.to_string()))
-            .or_default()
-            .push_back(CapabilityFixtureResponse {
-                when,
-                repeat,
-                result: response,
-            });
+            .or_default();
+        // Inference only applies to a lone stable read. As soon as another
+        // response targets the same method, every inferred response is an
+        // ordered one-shot script entry; explicit repeat values stay intact.
+        if !queue.is_empty() {
+            for fixture in queue.iter_mut().filter(|fixture| fixture.repeat.is_none()) {
+                fixture.inferred_repeat = false;
+            }
+        }
+        let inferred_repeat = repeat.is_none() && stable_by_default && queue.is_empty();
+        queue.push_back(CapabilityFixtureResponse {
+            when,
+            repeat,
+            inferred_repeat,
+            result: response,
+        });
     }
 
     pub(crate) fn dispatch(
@@ -219,7 +231,8 @@ impl CapabilityFixtureState {
             .or_else(|| queue.iter().position(|fixture| fixture.when.is_none()));
         match matched {
             Some(index) => {
-                let fixture = if queue[index].repeat {
+                let repeats = queue[index].repeat.unwrap_or(queue[index].inferred_repeat);
+                let fixture = if repeats {
                     Some(queue[index].clone())
                 } else {
                     queue.remove(index)
