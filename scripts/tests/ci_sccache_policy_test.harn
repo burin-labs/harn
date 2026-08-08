@@ -4,10 +4,60 @@ fn gha_expression(body: string) -> string {
   return "$" + "{{ " + body + " }}"
 }
 
-/**
- * A Linux compile lane as #6017 leaves it: one runner, one unconditional
- * cache, and no trace of the retired sccache daemon.
- */
+fn persistent_lane(
+  runner: string,
+  sccache_key: string,
+  rust_cache_key: string,
+  write_cache: bool = false,
+) {
+  const cache_inputs = {"shared-key": rust_cache_key, "cache-workspace-crates": "true"}
+  let lane = {
+    "runs-on": gha_expression(
+      "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || (github.event_name == 'merge_group' && '${runner}' || 'ubuntu-latest')",
+    ),
+    "timeout-minutes": 10,
+    env: {
+      HARN_RUNNER_TIER: gha_expression(
+        "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'github-hosted' || (github.event_name == 'merge_group' && 'blacksmith' || 'github-hosted')",
+      ),
+      SCCACHE_CACHE_SIZE: "15G",
+    },
+    steps: [
+      {
+        uses: "./.github/actions/sccache",
+        if: "env.HARN_RUNNER_TIER == 'blacksmith'",
+        with: {"cache-key": sccache_key, sticky: "true"},
+      },
+      {
+        uses: "./.github/actions/rust-cache",
+        if: "env.HARN_RUNNER_TIER == 'github-hosted'",
+        with: cache_inputs,
+      },
+      {
+        name: "Summarize and stop sccache",
+        if: "always() && env.HARN_RUNNER_TIER == 'blacksmith'",
+        run: "./scripts/ci/finalize_sccache.sh",
+      },
+    ],
+  }
+  if write_cache {
+    lane = {
+      ...lane,
+      permissions: {contents: "read", actions: "write"},
+      steps: lane.steps.map(
+        { step ->
+          if step?.uses != "./.github/actions/rust-cache" {
+            return step
+          }
+          return {...step, with: {...cache_inputs, save: "true"}}
+        },
+      )
+        .to_list(),
+    }
+  }
+  return lane
+}
+
 fn hosted_lane(cache_key: string, write_cache: bool = false) {
   const cache_inputs = {"shared-key": cache_key, "cache-workspace-crates": "true"}
   let lane = {
@@ -26,17 +76,20 @@ fn hosted_lane(cache_key: string, write_cache: bool = false) {
 }
 
 fn workflow() {
-  const rust = hosted_lane(gha_expression("matrix.cache_key"))
-  const rust_with_flags = {
-    ...rust,
-    env: {...rust.env, RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"},
-  }
+  const package_audit = hosted_lane("package-audit", true)
+  const lint = hosted_lane("workspace-tests")
+  const producer = persistent_lane(
+    "blacksmith-8vcpu-ubuntu-2404",
+    "workspace-tests",
+    "workspace-tests",
+    true,
+  )
   const rust_test = {
     env: {RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"},
     "runs-on": "ubuntu-latest",
-    needs: ["changes", "rust-checks"],
+    needs: ["changes", "rust-check-inputs"],
     if:
-      "needs.changes.outputs.rust == 'true' && needs.rust-checks.result == 'success' && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'",
+      "needs.changes.outputs.rust == 'true' && needs.rust-check-inputs.result == 'success' && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'",
     "timeout-minutes": 35,
     steps: [
       {
@@ -53,43 +106,33 @@ fn workflow() {
   }
   return {
     jobs: {
-      "package-audit": hosted_lane("package-audit", true),
-      "rust-check-inputs": hosted_lane("rust-check-inputs"),
-      "rust-checks": {
-        ...rust_with_flags,
-        permissions: {contents: "read", actions: "write"},
-        strategy: {
-          matrix: {
-            include: [
-              {kind: "lint", cache_key: "workspace-lint"},
-              {kind: "workspace-tests", cache_key: "workspace-tests"},
-            ],
-          },
-        },
-        steps: rust_with_flags.steps
+      "package-audit": package_audit,
+      "rust-check-inputs": {
+        ...producer,
+        env: {...producer.env, RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"},
+        steps: producer.steps
           + [
           {
-            name: "Run Rust lint",
-            if: "matrix.kind == 'lint'",
-            run: "./scripts/ci/run_rust_lint_lane.sh",
-          },
-          {
             name: "Build portable workspace test archive",
-            if:
-              "matrix.kind == 'workspace-tests' && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'",
+            if: "vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'",
             env: {CARGO_BUILD_JOBS: "4"},
             run: "./scripts/ci/rust_artifact.sh build-tests bundle sha",
           },
           {
             name: "Run Rust workspace tests",
             id: "release-audit-rust-test",
-            if:
-              "matrix.kind == 'workspace-tests' && vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'",
+            if: "vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'",
             env: {HARN_LLM_CALLS_DISABLED: "1"},
             run:
               "scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --profile ci -E 'not test(landlock)'",
           },
         ],
+      },
+      "rust-checks": {
+        ...lint,
+        env: {...lint.env, RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"},
+        steps: lint.steps
+          + [{name: "Run Rust lint", run: "./scripts/ci/run_rust_lint_lane.sh"}],
       },
       "rust-cache-refresh": {
         "runs-on": "ubuntu-latest",
@@ -183,7 +226,7 @@ fn windows_cache_pair() {
 }
 
 @test
-pipeline test_accepts_single_rung_hosted_linux_lanes(harness: Harness, task) {
+pipeline test_accepts_persistent_compile_lanes_with_hosted_fallback(harness: Harness, task) {
   assert_eq(ci_linux_lane_policy_errors(workflow()), [])
 }
 
@@ -249,20 +292,19 @@ pipeline test_rejects_unbounded_or_unconditional_cache_generation_save(harness: 
 pipeline test_rejects_incomplete_workspace_cache_generation(harness: Harness, task) {
   const valid = workflow()
   const audit = valid.jobs["package-audit"]
-  const cache = audit.steps[0]
-  const invalid = {
-    ...valid,
-    jobs: {
-      ...valid.jobs,
-      "package-audit": {
-        ...audit,
-        steps: [{...cache, with: {...cache?.with ?? {}, "cache-workspace-crates": "false"}}],
-      },
+  const steps = audit.steps.map(
+    { step ->
+      if step?.uses != "./.github/actions/rust-cache" {
+        return step
+      }
+      return {...step, with: {...step?.with ?? {}, "cache-workspace-crates": "false"}}
     },
-  }
+  )
+    .to_list()
+  const invalid = {...valid, jobs: {...valid.jobs, "package-audit": {...audit, steps: steps}}}
   assert(
     ci_linux_lane_policy_errors(invalid).contains(
-      "ci.yml:package-audit must use the workspace-crate cache generation for complete Rust restores",
+      "ci.yml:package-audit must keep complete hosted cache package-audit",
     ),
   )
 }
@@ -313,19 +355,19 @@ pipeline test_rejects_recompiling_workspace_test_consumer(harness: Harness, task
 @test
 pipeline test_rejects_co_location_without_fail_closed_fallback(harness: Harness, task) {
   const valid = workflow()
-  const rust_job = valid.jobs["rust-checks"]
+  const rust_job = valid.jobs["rust-check-inputs"]
   const invalid = {
     ...valid,
     jobs: {
       ...valid.jobs,
-      "rust-checks": {
+      "rust-check-inputs": {
         ...rust_job,
         steps: rust_job.steps.filter({ step -> step?.name != "Run Rust workspace tests" }).map(
           { step ->
             if step?.name != "Build portable workspace test archive" {
               return step
             }
-            return {...step, if: "matrix.kind == 'workspace-tests'", run: "cargo build"}
+            return {...step, if: "true", run: "cargo build"}
           },
         )
           .to_list(),
@@ -345,12 +387,12 @@ pipeline test_rejects_co_location_without_fail_closed_fallback(harness: Harness,
   const errors = ci_linux_lane_policy_errors(invalid)
   assert(
     errors.contains(
-      "ci.yml:rust-checks must build the workspace test archive only for the standalone fallback",
+      "ci.yml:rust-check-inputs must build the workspace test archive only for the standalone fallback",
     ),
   )
   assert(
     errors.contains(
-      "ci.yml:rust-checks must own the exact co-located environment-neutral Rust proof",
+      "ci.yml:rust-check-inputs must own the exact co-located environment-neutral Rust proof",
     ),
   )
   assert(errors.contains("ci.yml:rust-test must run only as the co-location kill-switch fallback"))
@@ -389,16 +431,10 @@ pipeline test_rejects_strict_clippy_cache_safety_bypass(harness: Harness, task) 
   )
 }
 
-/**
- * The ladder is gone, so a lane that names any other runner is not choosing a
- * faster rung — it is routing work at machines this repository no longer
- * operates.
- */
 @test
-pipeline test_rejects_runner_routing_growing_back(harness: Harness, task) {
+pipeline test_rejects_unowned_runner_routing(harness: Harness, task) {
   const valid = workflow()
   const rust_job = valid.jobs["rust-checks"]
-  const matrix = rust_job.strategy.matrix.include
   const invalid = {
     ...valid,
     jobs: {
@@ -412,13 +448,36 @@ pipeline test_rejects_runner_routing_growing_back(harness: Harness, task) {
       },
       "rust-checks": {
         ...rust_job,
-        strategy: {
-          matrix: {
-            include: [
-              matrix[0],
-              {...matrix[1], runner: "blacksmith-8vcpu-ubuntu-2404", selfhosted: "big"},
-            ],
-          },
+        strategy: {matrix: {include: [{kind: "lint"}, {kind: "workspace-tests"}]}},
+      },
+    },
+  }
+  const errors = ci_linux_lane_policy_errors(invalid)
+  assert(errors.contains("ci.yml:package-audit must run on ubuntu-latest"))
+  assert(
+    errors.contains("ci.yml:rust-checks must remain one fixed lint lane, not a compile matrix"),
+  )
+}
+
+@test
+pipeline test_rejects_paid_producer_outside_merge_group_or_without_fuse(harness: Harness, task) {
+  const valid = workflow()
+  const producer = valid.jobs["rust-check-inputs"]
+  const invalid = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "rust-check-inputs": {
+        ...producer,
+        "runs-on": gha_expression(
+          "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || 'blacksmith-8vcpu-ubuntu-2404'",
+        ),
+        "timeout-minutes": 25,
+        env: {
+          ...producer.env,
+          HARN_RUNNER_TIER: gha_expression(
+            "vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'github-hosted' || 'blacksmith'",
+          ),
         },
       },
     },
@@ -426,69 +485,58 @@ pipeline test_rejects_runner_routing_growing_back(harness: Harness, task) {
   const errors = ci_linux_lane_policy_errors(invalid)
   assert(
     errors.contains(
-      "ci.yml:package-audit must run on ubuntu-latest with no runner-selection expression",
+      "ci.yml:rust-check-inputs must route only merge_group to blacksmith-8vcpu-ubuntu-2404 with a hosted fallback",
     ),
   )
-  assert(errors.contains("ci.yml:rust-checks matrix must not reintroduce per-row runner routing"))
+  assert(errors.contains("ci.yml:rust-check-inputs must mirror its Blacksmith/hosted runner tier"))
+  assert(errors.contains("ci.yml:rust-check-inputs must keep the 10-minute paid-runner cost fuse"))
 }
 
-/**
- * A `rust-cache` step left behind a runner-tier condition would evaluate false
- * on the only rung that exists, silently turning caching off on every lane —
- * the exact failure the old three-rung layout could not express.
- */
 @test
-pipeline test_rejects_cache_left_behind_a_retired_tier_condition(harness: Harness, task) {
+pipeline test_rejects_unbounded_or_wrong_tier_cache(harness: Harness, task) {
   const valid = workflow()
   const audit = valid.jobs["package-audit"]
+  const steps = audit.steps.map(
+    { step ->
+      if step?.uses != "./.github/actions/rust-cache" {
+        return step
+      }
+      return {...step, if: "always()"}
+    },
+  )
+    .to_list()
   const invalid = {
     ...valid,
     jobs: {
       ...valid.jobs,
       "package-audit": {
         ...audit,
-        env: {...audit.env, SCCACHE_CACHE_SIZE: "40G", SCCACHE_SERVER_PORT: "4227"},
-        steps: [
-          {uses: "./.github/actions/rust-cache", if: "env.HARN_RUNNER_TIER == 'github-hosted'"},
-        ],
+        env: {...audit.env, SCCACHE_CACHE_SIZE: "unbounded"},
+        steps: steps,
       },
     },
   }
   const errors = ci_linux_lane_policy_errors(invalid)
-  assert(
-    errors.contains(
-      "ci.yml:package-audit must restore rust-cache unconditionally, not behind a runner tier",
-    ),
-  )
-  assert(
-    errors.contains(
-      "ci.yml:package-audit must not carry SCCACHE_CACHE_SIZE; no hosted lane starts an sccache daemon",
-    ),
-  )
-  assert(
-    errors.contains(
-      "ci.yml:package-audit must not carry SCCACHE_SERVER_PORT; no hosted lane starts an sccache daemon",
-    ),
-  )
+  assert(errors.contains("ci.yml:package-audit must restore its hosted rust-cache unconditionally"))
+  assert(errors.contains("ci.yml:package-audit must not spend persistent compiler-cache capacity"))
 }
 
-/** The Blacksmith sticky-disk lane was deleted; no job may mount it again. */
 @test
-pipeline test_rejects_remounting_the_retired_sccache_lane(harness: Harness, task) {
+pipeline test_rejects_persistent_sccache_outside_owned_lanes(harness: Harness, task) {
   const valid = workflow()
   const invalid = {
     ...valid,
     jobs: {...valid.jobs, surprise: {steps: [{uses: "./.github/actions/sccache"}]}},
   }
   const errors = ci_linux_lane_policy_errors(invalid)
-  assert(errors.contains("ci.yml:surprise must not mount the retired persistent sccache lane"))
+  assert(errors.contains("ci.yml:surprise is not an authorized persistent sccache lane"))
 }
 
 /** Every compile lane must be present; a missing one is not a silent pass. */
 @test
 pipeline test_rejects_a_missing_compile_lane(harness: Harness, task) {
   const errors = ci_linux_lane_policy_errors({jobs: {}})
-  assert(errors.contains("ci.yml:rust-check-inputs must define the hosted Linux compile lane"))
+  assert(errors.contains("ci.yml:rust-check-inputs must define the persistent Linux compile lane"))
   assert(errors.contains("ci.yml:package-audit must define the hosted Linux compile lane"))
 }
 

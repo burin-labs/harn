@@ -32,25 +32,25 @@
     {
       "name": "Rust lint",
       "job_id": "rust-checks",
-      "matrix_kind": "lint",
+      "matrix_kind": "",
       "proofs": ["rust-audit"],
       "steps": [
         {
           "id": "release-audit-rust-lint",
-          "condition": "matrix.kind == 'lint'",
+          "condition": "",
           "run": "./scripts/ci/run_rust_lint_lane.sh"
         }
       ]
     },
     {
       "name": "Rust workspace tests",
-      "job_id": "rust-checks",
-      "matrix_kind": "workspace-tests",
+      "job_id": "rust-check-inputs",
+      "matrix_kind": "",
       "proofs": ["rust-audit"],
       "steps": [
         {
           "id": "release-audit-rust-test",
-          "condition": "matrix.kind == 'workspace-tests' && vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'",
+          "condition": "vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'",
           "required_env": {"HARN_LLM_CALLS_DISABLED": "1"},
           "run": "scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --profile ci -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'"
         }
