@@ -117,9 +117,6 @@ const BLACKSMITH_DISABLE_VAR = "HARN_CI_DISABLE_BLACKSMITH_LINUX"
 
 const BLACKSMITH_8CPU_RUNNER = "blacksmith-8vcpu-ubuntu-2404"
 
-const BLACKSMITH_TIMEOUT_EXPRESSION = "$"
-  + "{{ github.event_name == 'pull_request' && github.head_ref == 'ksinder/5003-persistent-producer' && 15 || 10 }}"
-
 // Blacksmith's Ubuntu image does not expose Landlock. Keep the complete set of
 // tests whose assertions require OS-enforced process isolation on GitHub Ubuntu
 // and prove that the producer and fallback exclude exactly the same set.
@@ -1196,11 +1193,8 @@ fn persistent_compile_lane_errors(
   if trim(to_string(job?.env?.SCCACHE_CACHE_SIZE ?? "")) != "15G" {
     errors = errors + ["ci.yml:${job_name} must bound persistent sccache at 15G"]
   }
-  if trim(to_string(job?.["timeout-minutes"] ?? "")) != BLACKSMITH_TIMEOUT_EXPRESSION {
-    errors = errors
-      + [
-      "ci.yml:${job_name} must keep the 10-minute merge-group cost fuse and 15-minute seed ceiling",
-    ]
+  if trim(to_string(job?.["timeout-minutes"] ?? "")) != "10" {
+    errors = errors + ["ci.yml:${job_name} must keep the 10-minute paid-runner cost fuse"]
   }
   const persistent = matching_steps(job, PERSISTENT_SCCACHE_ACTION)
   if len(persistent) != 1 {

@@ -475,11 +475,10 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.rust == 'true'
     # Paid capacity is limited to the merge queue, the only acceptance surface
-    # for #5003. PRs and pushes use the free hosted fallback except this branch's
-    # one bounded cache seed. Production stays capped at $0.16/run; the cold
-    # seed gets five extra minutes and cannot exceed $0.24.
+    # for #5003. PRs and pushes use the free hosted fallback. At $0.016/min the
+    # 10-minute timeout is also a hard $0.16/run cost fuse.
     runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || ((github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.head_ref == 'ksinder/5003-persistent-producer')) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest') }}
-    timeout-minutes: ${{ github.event_name == 'pull_request' && github.head_ref == 'ksinder/5003-persistent-producer' && 15 || 10 }}
+    timeout-minutes: 10
     # The GitHub-hosted fallback remains an authorized main-branch cache
     # writer; Blacksmith uses sticky sccache and never enters that step.
     permissions:
