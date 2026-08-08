@@ -1,3 +1,4 @@
+import { ModelLadderStep } from "std/llm/options"
 // @harn-entrypoint-category llm.stdlib
 //
 // std/llm/catalog — thin Harn wrappers over the runtime model catalog.
@@ -7,6 +8,8 @@
 // names (`llm_model_info`, `llm_resolved_options`) so that wrapping
 // does not shadow the builtin and recurse infinitely.
 import { render_table } from "std/table"
+
+pub type NamedModelLadder = {label?: string, steps: list<ModelLadderStep>}
 
 /**
  * Wraps the harness.llm.model_info(selector) Rust builtin. The runtime always
@@ -47,6 +50,19 @@ pub fn resolved_options(llm: HarnessLlm, opts) {
     throw "resolved_options: opts.model is required"
   }
   return llm.resolved_options(opts)
+}
+
+/**
+ * Return a named `[model_ladders.<name>]` catalog row as
+ * `{label?, steps: [{model, provider?, label?, ...}]}`, or nil when the name
+ * is not declared. Route consumers should keep stable ladder names in policy
+ * code and leave volatile provider/model identity in catalog source data.
+ *
+ * @effects: []
+ * @errors: ["llm_model_ladder: ladder name is required"]
+ */
+pub fn named_model_ladder(llm: HarnessLlm, name: string) -> NamedModelLadder? {
+  return llm.model_ladder(name)
 }
 
 fn __capability_field(caps, capability) {

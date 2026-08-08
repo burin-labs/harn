@@ -200,6 +200,7 @@ pub(super) const HARNESS_MIGRATIONS: &[(&str, &str)] = &[
     ("llm_mock_snapshot", "harness.llm.mock_snapshot"),
     ("llm_model_defaults", "harness.llm.model_defaults"),
     ("llm_model_info", "harness.llm.model_info"),
+    ("llm_model_ladder", "harness.llm.model_ladder"),
     ("llm_model_tier", "harness.llm.model_tier"),
     ("llm_pick_model", "harness.llm.pick_model"),
     ("llm_provider_catalog", "harness.llm.provider_catalog"),

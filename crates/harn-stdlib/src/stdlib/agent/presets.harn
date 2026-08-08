@@ -51,6 +51,7 @@ const __PRESET_PACK_KEYS = [
   "budget",
   "completion_gate",
   "fallback_chain",
+  "ladder",
   "lane_policy",
   "models",
   "overlay_policy",
@@ -141,40 +142,29 @@ fn __validate_pin_policy(kind, pin_policy) {
  * promoted to fill-nil data rows. Captains carry longer timeouts and larger
  * budgets by design.
  *
- * `models` is normalized to canonical ladder-step records so each rung owns
- * its provider. The named `[model_ladders.*]` catalog rows (providers.toml + catalog_sources/
- * 62-ladders) have since landed, resolved via a `ladder: "<name>"` option on
- * `llm_call`; packs intentionally do NOT reference them by name so a pack row
- * stays self-contained and takes no hard dependency on catalog ladder names.
- * Callers who want a named catalog ladder pass `ladder:` on their own options.
+ * Built-in routing defaults name catalog-owned `[model_ladders.*]` rows.
+ * User-registered presets may use the same `ladder` key or inline `models`;
+ * both lower through the canonical `llm_call` routing policy.
  * Budgets are session-cumulative (`total_budget_usd`), NOT per-call ceilings:
  * `budget.max_cost_usd` is pre-flight-checked against the worst-case
  * projection (full `max_tokens` as output), so a tight per-call default would
  * preemptively kill legitimate calls.
  */
 fn __builtin_preset_specs() {
-  const frontier_ladder = ["claude-opus-5", "claude-sonnet-5"]
-  const cheap_ladder = ["gpt-4o-mini"]
   // Long-running captains pin their binding context (goal, constraints, key
   // decisions) so it survives compaction by construction (see std/agent/pins).
   const captain_pins = {kinds: ["constraint", "decision", "goal"], preserve_on_compact: true}
   return {
     audit: {
       family: "generic",
-      pack: {
-        budget: {total_budget_usd: 5.0},
-        models: frontier_ladder,
-        provider: "anthropic",
-        timeout_ms: 120000,
-      },
+      pack: {budget: {total_budget_usd: 5.0}, ladder: "agent_frontier", timeout_ms: 120000},
     },
     merge_captain: {
       family: "captain",
       pack: {
         budget: {total_budget_usd: 25.0},
-        models: frontier_ladder,
+        ladder: "agent_frontier",
         pin_policy: captain_pins,
-        provider: "anthropic",
         timeout_ms: 300000,
       },
     },
@@ -182,9 +172,8 @@ fn __builtin_preset_specs() {
       family: "captain",
       pack: {
         budget: {total_budget_usd: 15.0},
-        models: frontier_ladder,
+        ladder: "agent_frontier",
         pin_policy: captain_pins,
-        provider: "anthropic",
         timeout_ms: 180000,
       },
     },
@@ -192,9 +181,8 @@ fn __builtin_preset_specs() {
       family: "captain",
       pack: {
         budget: {total_budget_usd: 25.0},
-        models: frontier_ladder,
+        ladder: "agent_frontier",
         pin_policy: captain_pins,
-        provider: "anthropic",
         timeout_ms: 300000,
       },
     },
@@ -226,8 +214,7 @@ fn __builtin_preset_specs() {
             {default: true, name: "general"},
           ],
         },
-        models: frontier_ladder,
-        provider: "anthropic",
+        ladder: "agent_frontier",
         timeout_ms: 180000,
       },
     },
@@ -235,7 +222,7 @@ fn __builtin_preset_specs() {
       family: "captain",
       pack: {
         budget: {total_budget_usd: 15.0},
-        models: frontier_ladder,
+        ladder: "agent_frontier",
         // Mirrors `std/agent/overlays::default_overlay_rows()`'s `agent` row
         // inline (see the lane_policy comment above on why presets.harn
         // avoids importing the sibling module).
@@ -252,27 +239,16 @@ fn __builtin_preset_specs() {
           ],
         },
         pin_policy: captain_pins,
-        provider: "anthropic",
         timeout_ms: 240000,
       },
     },
     summary: {
       family: "generic",
-      pack: {
-        budget: {total_budget_usd: 1.0},
-        models: cheap_ladder,
-        provider: "openai",
-        timeout_ms: 60000,
-      },
+      pack: {budget: {total_budget_usd: 1.0}, ladder: "agent_cheap", timeout_ms: 60000},
     },
     verify: {
       family: "generic",
-      pack: {
-        budget: {total_budget_usd: 1.0},
-        models: cheap_ladder,
-        provider: "openai",
-        timeout_ms: 60000,
-      },
+      pack: {budget: {total_budget_usd: 1.0}, ladder: "agent_cheap", timeout_ms: 60000},
     },
   }
 }
@@ -763,7 +739,7 @@ fn __preset_route_keys() {
 }
 
 fn __preset_pack_route_keys() {
-  return ["fallback_chain", "models", "provider"]
+  return ["fallback_chain", "ladder", "models", "provider"]
 }
 
 fn __preset_has_route_owner(opts) {
@@ -805,6 +781,9 @@ fn __apply_preset_route_pack(opts, pack) {
   let resolved = opts
   if pack?.fallback_chain != nil {
     resolved = resolved + {fallback_chain: pack.fallback_chain}
+  }
+  if pack?.ladder != nil {
+    return resolved + {ladder: pack.ladder}
   }
   if pack?.models != nil {
     return resolved + {models: __preset_model_steps(pack.models, pack?.provider)}

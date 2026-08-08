@@ -243,6 +243,10 @@ replacement. Keys beginning with `_` are reserved for internal host plumbing.
 `models`, `ladder`, explicit `model`/`provider`, and `routing` are competing
 route owners. Do not combine them.
 
+Use `harness.llm.model_ladder(name)` to inspect the label and ordered steps of
+a named ladder without starting a call. Keep reusable provider/model lists in
+catalog source data and pass only the stable ladder name from policy code.
+
 #### Conversation
 
 | Key | Type | Meaning |

@@ -438,23 +438,22 @@ if !fits_in_context(long_text, "gpt-4o") {
 
 ## `std/llm/defaults` — model-aware option packs
 
-`pack_for(opts)` returns a complete `llm_call`-ready options dict,
-calibrated for the model's provider/family and pinned to a task. User
-opts always win.
+`pack_for(opts)` returns a complete `llm_call`-ready options dict resolved
+through the runtime catalog and capability matrix, then pinned to a task. User
+options always win.
 
 Layering (low → high):
 
 1. `resolved_options(opts)` — runtime catalog defaults
-2. reasoning-scale calibration (per family)
-3. reasoning-policy lowering, skipped when `thinking` or `effort` is pinned
-4. task overlay (only fills unset fields)
-5. `recommend_max_output_tokens(...)` when a prompt has no output limit
-6. canonical user options — highest precedence
+2. task overlay (only fills unset fields)
+3. `harness.llm.apply_reasoning_policy(...)` — capability-owned lowering
+4. `recommend_max_output_tokens(...)` when a prompt has no output limit
+5. canonical user options — highest precedence
 
 | Function | Signature | Description |
 |---|---|---|
-| `pack_for(opts)` | `(dict) -> dict` | Requires `model`; accepts the canonical `llm_call` surface. `reasoning_policy`, `reasoning_scale`, and `reasoning_task` control provider-neutral calibration. Direct `thinking` or `effort` pins the low-level setting and bypasses policy lowering. |
-| `harness.llm.apply_reasoning_policy(opts)` | `(dict) -> dict` | Applies Harn's provider-aware `reasoning_policy` to an option dict. Used by `agent_loop`; direct callers can use it before `llm_call` when they want the same calibration. Explicit `thinking` and `effort` win. |
+| `pack_for(opts)` | `(dict) -> dict` | Requires `model`; accepts the canonical `llm_call` surface. `reasoning_policy`, `reasoning_scale`, and `reasoning_task` feed the capability-owned reasoning resolver. Direct `thinking` or `effort` bypasses policy lowering. |
+| `harness.llm.apply_reasoning_policy(opts)` | `(dict) -> dict` | Resolves provider-neutral reasoning intent through the model's capability row. Used by `agent_loop`; direct callers can use it before `llm_call`. Explicit `thinking` and `effort` win. |
 | `pack_chat(model, opts?)` | `(string, dict?) -> dict` | Convenience wrapper for `reasoning_task: "chat"`. |
 | `pack_agent(model, opts?)` | `(string, dict?) -> dict` | `reasoning_task: "agent"`. |
 | `pack_refine(model, opts?)` | `(string, dict?) -> dict` | `reasoning_task: "refine"`. |
@@ -463,13 +462,10 @@ Layering (low → high):
 | `pack_code(model, opts?)` | `(string, dict?) -> dict` | `reasoning_task: "code"`. |
 | `pack_json(model, opts?)` | `(string, dict?) -> dict` | `reasoning_task: "json"` (sets `output: "json"`). |
 
-Calibrated families: Anthropic Sonnet/Opus/Haiku 4.x, OpenAI
-GPT-5/5.5/5.6/4o/4.1, Gemini 2.5 Pro/Flash, Ollama Qwen3/Llama 3.x.
-
 ### Edge cases
 
-- **Opus 4.7 + explicit policy**: the pack omits a manual budget; capability
-  lowering selects adaptive thinking. A direct `thinking` pin bypasses the pack.
+- **Routes with only adaptive thinking**: capability lowering selects the
+  adaptive wire shape instead of inventing a manual token budget.
 - **Ollama Qwen3 + `reasoning_policy: "off"`**: the runtime performs the
   capability-driven `/no_think` lowering; the pack does not duplicate it.
 - **`provider: "auto"` unresolvable**: minimal pack.
@@ -549,22 +545,23 @@ shadow the builtins.
 | `model_info(selector)` | `(string) -> dict` | Wraps `llm_model_info`. Always returns a dict; `catalog` field is nil for unknown models. |
 | `execution_contract(selector)` | `(string) -> dict` | Wraps `llm_execution_contract`. Returns the resolved route facts safe for durable receipts; `generation_defaults` includes only Harn-validated fields, never arbitrary operator overlays. |
 | `resolved_options(opts)` | `(dict) -> dict` | Wraps `llm_resolved_options`. Required: `opts.model`. |
+| `named_model_ladder(name)` | `(string) -> dict?` | Returns one catalog-owned `[model_ladders.<name>]` row, including its ordered `steps`; unknown names return `nil`. |
 | `has_capability(model, capability)` | `(string, string) -> bool` | Capability ∈ `{"thinking", "tool_search", "interleaved_thinking", "prompt_caching", "vision", "audio", "pdf", "files_api", "reasoning_effort", "native_tools"}`. |
 | `family_of(model_id)` | `(string) -> string` | Returns the normalized review-diversity family such as `"anthropic-claude"`, `"openai-gpt"`, `"google-gemini"`, or `"qwen"`. Hosted aliases keep the underlying model family. |
-| `lineage_of(model_id)` | `(string) -> string` | Returns the narrower calibration lineage such as `"claude-opus-adaptive"`, `"openai-gpt5"`, `"gemini-flash"`, or `"qwen3"`. Drives `pack_for` defaults. |
+| `lineage_of(model_id)` | `(string) -> string` | Returns the narrower catalog lineage token. Use it for inspection and grouping; runtime capability data, not stdlib branches, owns route policy. |
 | `complementary_reviewer(opts)` | `(dict) -> dict` | Wraps `llm_complementary_reviewer`. Required: `opts.author_model`; optional: `author_provider`, `intent`, `max_price_multiplier`. |
 
 ### Example
 
 ```harn,ignore
-import {complementary_reviewer, family_of, has_capability, lineage_of} from "std/llm/catalog"
+import {complementary_reviewer, family_of, has_capability, named_model_ladder} from "std/llm/catalog"
 
 if has_capability(model, "thinking") {
   // This route can honor a provider-neutral reasoning policy.
 }
 
 const fam = family_of(model)       // e.g. "anthropic-claude"
-const lineage = lineage_of(model)  // e.g. "claude-opus-adaptive"
+const routes = named_model_ladder("agent_frontier").steps
 const reviewer = complementary_reviewer({author_model: model, intent: "plan_review"})
 ```
 
