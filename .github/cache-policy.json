@@ -28,7 +28,7 @@
     },
     {
       "workflow": "ci.yml",
-      "job": "rust-checks",
+      "job": "rust-check-inputs",
       "shared_key": "workspace-tests"
     },
     {

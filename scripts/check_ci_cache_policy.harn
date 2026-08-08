@@ -80,9 +80,9 @@ const NODE_ACTION_PATH = ".github/actions/node-cache/action.yml"
 
 const SETUP_HARN_ACTION_PATH = ".github/actions/setup-harn/action.yml"
 
-// The retired Blacksmith sticky-disk sccache lane. Deleted with the runner
-// ladder in #6017; named here only so nothing can quietly re-mount it.
-const RETIRED_SCCACHE_ACTION = "./.github/actions/sccache"
+// One owned entry point for the persistent Blacksmith compiler cache. The
+// workflow may use it only on the single allowlisted compile producer.
+const PERSISTENT_SCCACHE_ACTION = "./.github/actions/sccache"
 
 // Single pinned entry point for installing sccache. Everything else must route
 // through it: sccache allows one server per user and a client whose version
@@ -107,38 +107,36 @@ const COLOCATED_TESTS_DISABLE_VAR = "HARN_CI_DISABLE_COLOCATED_TESTS"
 // with it.
 const RUNNER_TIER_ENV = "HARN_RUNNER_TIER"
 
-// Harn is public, so GitHub-hosted Linux minutes are free. #6017 retired the
-// residential self-hosted and Blacksmith rungs — both permanently disabled by
-// repository variables long before they were removed — leaving exactly one
-// runner for every Linux compile lane.
 const HOSTED_LINUX_RUNNER = "ubuntu-latest"
 
 const HOSTED_RUNNER_TIER = "github-hosted"
 
-const RUST_CACHE_ACTION = "./.github/actions/rust-cache"
+const BLACKSMITH_RUNNER_TIER = "blacksmith"
 
-// The Linux lanes that compile Rust. Each restores the coarse rust-cache and
-// nothing else.
-const HOSTED_COMPILE_LANES = [
-  "package-audit",
-  "rust-checks",
-  "rust-check-inputs",
-  "rust-cache-refresh",
-]
+const BLACKSMITH_DISABLE_VAR = "HARN_CI_DISABLE_BLACKSMITH_LINUX"
+
+const BLACKSMITH_8CPU_RUNNER = "blacksmith-8vcpu-ubuntu-2404"
+
+// Blacksmith's Ubuntu image does not expose Landlock. Keep the complete set of
+// tests whose assertions require OS-enforced process isolation on GitHub Ubuntu
+// and prove that the producer and fallback exclude exactly the same set.
+const HOST_BOUND_RUST_TEST_FILTER =
+  "test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline)"
+
+const NEUTRAL_RUST_TEST_FILTER_FLAG = "-E 'not (${HOST_BOUND_RUST_TEST_FILTER})'"
+
+const HOST_BOUND_RUST_TEST_FILTER_FLAG = "-E '${HOST_BOUND_RUST_TEST_FILTER}'"
+
+const RUST_CACHE_ACTION = "./.github/actions/rust-cache"
 
 // Authorized ci.yml cache writers must grant actions: write. The workflow
 // top-level token is contents/read-only; without a job-level grant, Swatinem
 // save fails under continue-on-error and the Linux workspace-tests cache stays
 // empty (#5003).
-const CI_CACHE_WRITE_JOBS = ["package-audit", "rust-checks", "rust-cache-refresh"]
+const CI_CACHE_WRITE_JOBS = ["package-audit", "rust-check-inputs", "rust-cache-refresh"]
 
-// Sizing and port for the host-owned sccache daemon the retired rungs ran.
-// A hosted runner starts no daemon, so carrying these would configure nothing.
-const RETIRED_SCCACHE_ENV = ["SCCACHE_CACHE_SIZE", "SCCACHE_SERVER_PORT", "SCCACHE_BASEDIRS"]
-
-// Compile fan-out for the workspace test archive. One rung means one value:
-// 4 rustc jobs on the 8-vCPU hosted runner, sized so a link-heavy crate cannot
-// exhaust its memory.
+// Compile fan-out remains four even on the 8-vCPU producer so a link-heavy
+// crate cannot exhaust its memory.
 const HOSTED_BUILD_JOBS = "4"
 
 // Hang backstop for the archived workspace-test consumer lanes. These lanes never
@@ -1117,60 +1115,161 @@ pub fn macos_shared_cache_errors(ci_workflow, nightly_workflow) -> list<string> 
   return errors
 }
 
-/**
- * Hold one Linux compile lane to the single GitHub-hosted runner policy.
- *
- * Before #6017 each of these lanes carried a three-rung `runs-on` expression
- * (residential self-hosted, then Blacksmith, then hosted) and split its cache
- * accordingly: a host-owned persistent sccache daemon on the upper rungs, the
- * coarse `rust-cache` only as the hosted fallback. Repository variables had
- * disabled both upper rungs permanently, so the fallback was the only path
- * anything ever took. With one rung left, `rust-cache` is not a fallback
- * guarded by a tier condition — it IS the cache policy, and a surviving
- * condition would silently disable caching outright.
- */
-fn hosted_compile_lane_errors(workflow, job_name: string) -> list<string> {
+fn blacksmith_runner_expression(runner: string) -> string {
+  return "$"
+    + "{{ vars.${BLACKSMITH_DISABLE_VAR} == 'true' && '${HOSTED_LINUX_RUNNER}' || (github.event_name == 'merge_group' && '${runner}' || '${HOSTED_LINUX_RUNNER}') }}"
+}
+
+fn blacksmith_tier_expression() -> string {
+  return "$"
+    + "{{ vars.${BLACKSMITH_DISABLE_VAR} == 'true' && '${HOSTED_RUNNER_TIER}' || (github.event_name == 'merge_group' && '${BLACKSMITH_RUNNER_TIER}' || '${HOSTED_RUNNER_TIER}') }}"
+}
+
+fn blacksmith_timeout_expression() -> string {
+  return "$"
+    + "{{ github.event_name == 'merge_group' && vars.${BLACKSMITH_DISABLE_VAR} != 'true' && 10 || 25 }}"
+}
+
+/** Keep a compile lane on free hosted capacity with one complete coarse cache. */
+fn hosted_compile_lane_errors(workflow, job_name: string, rust_cache_key: string) -> list<string> {
   const job = workflow?.jobs?.[job_name]
   if job == nil {
     return ["ci.yml:${job_name} must define the hosted Linux compile lane"]
   }
   let errors: list<string> = []
   if trim(job?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER {
-    errors = errors
-      + [
-      "ci.yml:${job_name} must run on ${HOSTED_LINUX_RUNNER} with no runner-selection expression",
-    ]
+    errors = errors + ["ci.yml:${job_name} must run on ${HOSTED_LINUX_RUNNER}"]
   }
   if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != HOSTED_RUNNER_TIER {
     errors = errors
       + ["ci.yml:${job_name} must declare ${RUNNER_TIER_ENV}: ${HOSTED_RUNNER_TIER}"]
   }
-  for name in RETIRED_SCCACHE_ENV {
-    if trim(to_string(job?.env?.[name] ?? "")) != "" {
-      errors = errors
-        + [
-        "ci.yml:${job_name} must not carry ${name}; no hosted lane starts an sccache daemon",
-      ]
-    }
+  if trim(to_string(job?.env?.SCCACHE_CACHE_SIZE ?? "")) != ""
+    || len(
+    matching_steps(job, PERSISTENT_SCCACHE_ACTION),
+  )
+    > 0 {
+    errors = errors + ["ci.yml:${job_name} must not spend persistent compiler-cache capacity"]
   }
   const caches = matching_steps(job, RUST_CACHE_ACTION)
   if len(caches) != 1 {
     errors = errors + ["ci.yml:${job_name} must configure ${RUST_CACHE_ACTION} exactly once"]
   } else if trim(caches[0]?.if ?? "") != "" {
+    errors = errors + ["ci.yml:${job_name} must restore its hosted rust-cache unconditionally"]
+  } else if trim(to_string(caches[0]?.with?.["shared-key"] ?? "")) != rust_cache_key
+    || trim(
+    to_string(caches[0]?.with?.[WORKSPACE_CACHE_INPUT] ?? ""),
+  )
+    != "true" {
     errors = errors
-      + [
-      "ci.yml:${job_name} must restore rust-cache unconditionally, not behind a runner tier",
-    ]
-  } else if trim(to_string(caches[0]?.with?.[WORKSPACE_CACHE_INPUT] ?? "")) != "true" {
-    errors = errors
-      + [
-      "ci.yml:${job_name} must use the workspace-crate cache generation for complete Rust restores",
-    ]
+      + ["ci.yml:${job_name} must keep complete hosted cache ${rust_cache_key}"]
   }
   if CI_CACHE_WRITE_JOBS.contains(job_name)
     && trim(job?.permissions?.actions ?? "")
     != "write" {
     errors = errors + ["ci.yml:${job_name} must grant actions: write to persist rust-cache"]
+  }
+  return errors
+}
+
+/** Hold a compile lane to one Blacksmith tier with a cold-safe hosted fallback. */
+fn persistent_compile_lane_errors(
+  workflow,
+  job_name: string,
+  runner: string,
+  sccache_key: string,
+  rust_cache_key: string,
+) -> list<string> {
+  const job = workflow?.jobs?.[job_name]
+  if job == nil {
+    return ["ci.yml:${job_name} must define the persistent Linux compile lane"]
+  }
+  let errors: list<string> = []
+  if trim(job?.["runs-on"] ?? "") != blacksmith_runner_expression(runner) {
+    errors = errors
+      + [
+      "ci.yml:${job_name} must route only merge_group to ${runner} with a hosted fallback",
+    ]
+  }
+  if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != blacksmith_tier_expression() {
+    errors = errors
+      + ["ci.yml:${job_name} must mirror its Blacksmith/hosted runner tier"]
+  }
+  if trim(to_string(job?.env?.SCCACHE_CACHE_SIZE ?? "")) != "15G" {
+    errors = errors + ["ci.yml:${job_name} must bound persistent sccache at 15G"]
+  }
+  if trim(to_string(job?.["timeout-minutes"] ?? "")) != blacksmith_timeout_expression() {
+    errors = errors
+      + [
+      "ci.yml:${job_name} must keep the 10-minute paid-runner fuse and 25-minute hosted fallback",
+    ]
+  }
+  const persistent = matching_steps(job, PERSISTENT_SCCACHE_ACTION)
+  if len(persistent) != 1 {
+    errors = errors + ["ci.yml:${job_name} must configure persistent sccache exactly once"]
+  } else {
+    if trim(persistent[0]?.if ?? "") != "env.${RUNNER_TIER_ENV} == '${BLACKSMITH_RUNNER_TIER}'" {
+      errors = errors + ["ci.yml:${job_name} must mount persistent sccache only on Blacksmith"]
+    }
+    if trim(to_string(persistent[0]?.with?.["cache-key"] ?? "")) != sccache_key
+      || trim(
+      to_string(persistent[0]?.with?.sticky ?? ""),
+    )
+      != "true" {
+      errors = errors + ["ci.yml:${job_name} must mount sticky sccache key ${sccache_key}"]
+    }
+  }
+  const caches = matching_steps(job, RUST_CACHE_ACTION)
+  if len(caches) != 1 {
+    errors = errors + ["ci.yml:${job_name} must configure ${RUST_CACHE_ACTION} exactly once"]
+  } else if trim(caches[0]?.if ?? "")
+    != "env.${RUNNER_TIER_ENV} == '${HOSTED_RUNNER_TIER}'" {
+    errors = errors
+      + ["ci.yml:${job_name} must use rust-cache only on the GitHub-hosted fallback"]
+  } else if trim(to_string(caches[0]?.with?.["shared-key"] ?? "")) != rust_cache_key
+    || trim(
+    to_string(caches[0]?.with?.[WORKSPACE_CACHE_INPUT] ?? ""),
+  )
+    != "true" {
+    errors = errors
+      + ["ci.yml:${job_name} must keep complete hosted fallback cache ${rust_cache_key}"]
+  }
+  if CI_CACHE_WRITE_JOBS.contains(job_name)
+    && trim(job?.permissions?.actions ?? "")
+    != "write" {
+    errors = errors + ["ci.yml:${job_name} must grant actions: write to persist rust-cache"]
+  }
+  const finalize = step_by_name(job?.steps ?? [], "Summarize and stop sccache")
+  if trim(finalize?.if ?? "")
+    != "always() && env.${RUNNER_TIER_ENV} == '${BLACKSMITH_RUNNER_TIER}'"
+    || trim(finalize?.run ?? "")
+    != "./scripts/ci/finalize_sccache.sh" {
+    errors = errors + ["ci.yml:${job_name} must finalize its job-owned sccache daemon"]
+  }
+  return errors
+}
+
+/** The main-scoped coarse-cache writer stays on GitHub-hosted infrastructure. */
+fn hosted_refresh_lane_errors(workflow) -> list<string> {
+  const job = workflow?.jobs?.["rust-cache-refresh"]
+  if job == nil {
+    return ["ci.yml:rust-cache-refresh must define the hosted Linux compile lane"]
+  }
+  let errors: list<string> = []
+  if trim(job?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER {
+    errors = errors + ["ci.yml:rust-cache-refresh must run on ${HOSTED_LINUX_RUNNER}"]
+  }
+  if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != HOSTED_RUNNER_TIER {
+    errors = errors
+      + [
+      "ci.yml:rust-cache-refresh must declare ${RUNNER_TIER_ENV}: ${HOSTED_RUNNER_TIER}",
+    ]
+  }
+  if len(matching_steps(job, PERSISTENT_SCCACHE_ACTION)) > 0 {
+    errors = errors + ["ci.yml:rust-cache-refresh must not mount persistent sccache"]
+  }
+  if trim(job?.permissions?.actions ?? "") != "write" {
+    errors = errors + ["ci.yml:rust-cache-refresh must grant actions: write to persist rust-cache"]
   }
   return errors
 }
@@ -1257,7 +1356,7 @@ fn rust_cache_refresh_errors(workflow) -> list<string> {
 }
 
 fn archived_workspace_test_consumer_errors(workflow, job_name: string) -> list<string> {
-  const producer = workflow?.jobs?.["rust-checks"]
+  const producer = workflow?.jobs?.["rust-check-inputs"]
   const consumer = workflow?.jobs?.[job_name]
   if consumer == nil {
     return ["ci.yml:${job_name} must define the archived workspace-test consumer"]
@@ -1271,11 +1370,11 @@ fn archived_workspace_test_consumer_errors(workflow, job_name: string) -> list<s
       + ["ci.yml:${job_name} must run on ${HOSTED_LINUX_RUNNER}"]
   }
   const needs = consumer?.needs ?? []
-  if !needs.contains("rust-checks") {
+  if !needs.contains("rust-check-inputs") {
     errors = errors + ["ci.yml:${job_name} must wait for the workspace test archive producer"]
   }
   if trim(consumer?.env?.RUSTFLAGS ?? "") != trim(producer?.env?.RUSTFLAGS ?? "") {
-    errors = errors + ["ci.yml:${job_name} must match rust-checks RUSTFLAGS"]
+    errors = errors + ["ci.yml:${job_name} must match rust-check-inputs RUSTFLAGS"]
   }
   if trim(to_string(consumer?.["timeout-minutes"] ?? "")) != EXECUTION_ONLY_TIMEOUT_MINUTES {
     errors = errors
@@ -1283,7 +1382,7 @@ fn archived_workspace_test_consumer_errors(workflow, job_name: string) -> list<s
       "ci.yml:${job_name} must keep the execution-only ${EXECUTION_ONLY_TIMEOUT_MINUTES}-minute timeout",
     ]
   }
-  if len(matching_steps(consumer, RETIRED_SCCACHE_ACTION)) > 0
+  if len(matching_steps(consumer, PERSISTENT_SCCACHE_ACTION)) > 0
     || len(
     matching_steps(consumer, RUST_CACHE_ACTION),
   )
@@ -1305,10 +1404,11 @@ fn archived_workspace_test_consumer_errors(workflow, job_name: string) -> list<s
   if !contains(test_command, "--archive-file")
     || !contains(test_command, "harn-tests.tar.zst")
     || !contains(test_command, "--workspace-remap")
-    || regex_match(
-    "(^|[ ])--workspace(harness, [ ]|$)",
+    || !contains(
     test_command,
+    NEUTRAL_RUST_TEST_FILTER_FLAG,
   )
+    || regex_match("(^|[ ])--workspace(harness, [ ]|$)", test_command)
     != nil {
     errors = errors + ["ci.yml:${job_name} must execute only the remapped nextest archive"]
   }
@@ -1320,36 +1420,56 @@ fn archived_workspace_test_consumer_errors(workflow, job_name: string) -> list<s
 
 fn colocated_rust_proof_errors(workflow) -> list<string> {
   let errors: list<string> = []
-  const rust_job = workflow?.jobs?.["rust-checks"]
+  const rust_job = workflow?.jobs?.["rust-check-inputs"]
   const archive_step = step_by_name(rust_job?.steps ?? [], "Build portable workspace test archive")
   if trim(archive_step?.if ?? "")
-    != "matrix.kind == 'workspace-tests' && vars.${COLOCATED_TESTS_DISABLE_VAR} == 'true'"
+    != "vars.${COLOCATED_TESTS_DISABLE_VAR} == 'true'"
     || !contains(
     trim(archive_step?.run ?? ""),
     "rust_artifact.sh build-tests",
   ) {
     errors = errors
       + [
-      "ci.yml:rust-checks must build the workspace test archive only for the standalone fallback",
+      "ci.yml:rust-check-inputs must build the workspace test archive only for the standalone fallback",
     ]
   }
   const colocated_step = step_by_name(rust_job?.steps ?? [], "Run Rust workspace tests")
   const colocated_command = trim(colocated_step?.run ?? "")
   if trim(colocated_step?.id ?? "") != "release-audit-rust-test"
     || trim(colocated_step?.if ?? "")
-    != "matrix.kind == 'workspace-tests' && vars.${COLOCATED_TESTS_DISABLE_VAR} != 'true'"
+    != "vars.${COLOCATED_TESTS_DISABLE_VAR} != 'true'"
     || trim(
     colocated_step?.env?.HARN_LLM_CALLS_DISABLED ?? "",
   )
     != "1"
     || !contains(colocated_command, "cargo nextest run --locked --workspace --profile ci")
-    || contains(
+    || !contains(
     colocated_command,
-    "--archive-file",
+    NEUTRAL_RUST_TEST_FILTER_FLAG,
+  )
+    || contains(colocated_command, "--archive-file") {
+    errors = errors
+      + [
+      "ci.yml:rust-check-inputs must own the exact co-located environment-neutral Rust proof",
+    ]
+  }
+  const security_job = workflow?.jobs?.["rust-security"]
+  const security_step = step_by_name(
+    security_job?.steps ?? [],
+    "Run OS sandbox proofs on GitHub Ubuntu",
+  )
+  const security_command = trim(security_step?.run ?? "")
+  if trim(security_job?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER
+    || trim(security_step?.id ?? "")
+    != "release-audit-rust-security"
+    || !contains(security_command, "--archive-file")
+    || !contains(
+    security_command,
+    HOST_BOUND_RUST_TEST_FILTER_FLAG,
   ) {
     errors = errors
       + [
-      "ci.yml:rust-checks must own the exact co-located environment-neutral Rust proof",
+      "ci.yml:rust-security must own every host-bound Linux sandbox proof on GitHub Ubuntu",
     ]
   }
   const rust_test_if = trim(workflow?.jobs?.["rust-test"]?.if ?? "")
@@ -1380,7 +1500,7 @@ fn colocated_rust_proof_errors(workflow) -> list<string> {
 
 fn strict_clippy_entrypoint_errors(rust_job) -> list<string> {
   const lint_step = step_by_name(rust_job?.steps ?? [], "Run Rust lint")
-  if trim(lint_step?.if ?? "") == "matrix.kind == 'lint'"
+  if trim(lint_step?.if ?? "") == ""
     && trim(lint_step?.run ?? "")
     == "./scripts/ci/run_rust_lint_lane.sh" {
     return []
@@ -1388,52 +1508,49 @@ fn strict_clippy_entrypoint_errors(rust_job) -> list<string> {
   return ["ci.yml:rust-checks must route strict Clippy through the cache-safe Rust lint entrypoint"]
 }
 
-/** Hold every Linux CI lane to the single GitHub-hosted runner policy (#6017). */
+/** Keep one persistent producer, one lint lane, and one package lane. */
 pub fn ci_linux_lane_policy_errors(workflow) -> list<string> {
-  let errors: list<string> = []
-  for job_name in HOSTED_COMPILE_LANES {
-    errors = errors + hosted_compile_lane_errors(workflow, job_name)
-  }
+  let errors = hosted_compile_lane_errors(workflow, "package-audit", "package-audit")
+    + hosted_compile_lane_errors(
+    workflow,
+    "rust-checks",
+    "workspace-tests",
+  )
+    + persistent_compile_lane_errors(
+    workflow,
+    "rust-check-inputs",
+    BLACKSMITH_8CPU_RUNNER,
+    "workspace-tests",
+    "workspace-tests",
+  )
+    + hosted_refresh_lane_errors(workflow)
   const rust_job = workflow?.jobs?.["rust-checks"]
-  const matrix = rust_job?.strategy?.matrix?.include ?? []
-  const kinds = matrix.map({ row -> trim(row?.kind ?? "") }).to_list()
-  const cache_keys = matrix.map({ row -> trim(row?.cache_key ?? "") }).to_list()
-  // The two legs still need separate cache keys: the lint leg's target dir and
-  // the workspace-test leg's are different build graphs, and one shared key
-  // would have each evict the other's objects on every run.
-  if kinds != ["lint", "workspace-tests"]
-    || cache_keys != ["workspace-lint", "workspace-tests"] {
+  if rust_job?.strategy != nil {
     errors = errors
-      + ["ci.yml:rust-checks must keep compile lanes on distinct persistent caches"]
-  }
-  // With one rung the matrix describes work shape only. A `runner:` or
-  // `selfhosted:` column would be the retired ladder growing back.
-  const routing_rows = matrix.filter({ row -> row?.runner != nil || row?.selfhosted != nil })
-    .to_list()
-  if len(routing_rows) > 0 {
-    errors = errors
-      + ["ci.yml:rust-checks matrix must not reintroduce per-row runner routing"]
+      + ["ci.yml:rust-checks must remain one fixed lint lane, not a compile matrix"]
   }
   errors = errors + strict_clippy_entrypoint_errors(rust_job)
-  const build_step = step_by_name(rust_job?.steps ?? [], "Build portable workspace test archive")
+  const producer = workflow?.jobs?.["rust-check-inputs"]
+  const build_step = step_by_name(producer?.steps ?? [], "Build portable workspace test archive")
   if trim(build_step?.if ?? "")
-    != "matrix.kind == 'workspace-tests' && vars.${COLOCATED_TESTS_DISABLE_VAR} == 'true'"
+    != "vars.${COLOCATED_TESTS_DISABLE_VAR} == 'true'"
     || trim(
     to_string(build_step?.env?.CARGO_BUILD_JOBS ?? ""),
   )
     != HOSTED_BUILD_JOBS {
     errors = errors
       + [
-      "ci.yml:rust-checks workspace test archive must keep memory-bounded compile fan-out",
+      "ci.yml:rust-check-inputs workspace test archive must keep memory-bounded compile fan-out",
     ]
   }
   errors = errors + archived_workspace_test_consumer_errors(workflow, "rust-test")
   errors = errors + colocated_rust_proof_errors(workflow)
   errors = errors + rust_cache_refresh_errors(workflow)
   for {key: job_name, value: job} in workflow?.jobs ?? {} {
-    if len(matching_steps(job, RETIRED_SCCACHE_ACTION)) > 0 {
-      errors = errors
-        + ["ci.yml:${job_name} must not mount the retired persistent sccache lane"]
+    if len(matching_steps(job, PERSISTENT_SCCACHE_ACTION)) > 0
+      && to_string(job_name)
+      != "rust-check-inputs" {
+      errors = errors + ["ci.yml:${job_name} is not an authorized persistent sccache lane"]
     }
   }
   return errors

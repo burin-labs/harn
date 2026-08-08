@@ -355,14 +355,6 @@ jobs:
       # Supplying a warmed HARN_BIN selects the narrow release-gate path and
       # forfeits feature unification across the shared cold dependency graph.
       HARN_BIN: ""
-      # Which runner this lane landed on. One rung, so this is a constant.
-      #
-      # Kept as an explicit value rather than read from `runner.environment`,
-      # which cannot answer the question: Blacksmith runners register as
-      # ordinary self-hosted runners, so `runner.environment` reports
-      # `self-hosted` on them exactly as it does on a residential box
-      # (burin-code#5423). `scripts/check_runner_tier.harn` fails the build if
-      # `runner.environment` reappears here.
       HARN_RUNNER_TIER: github-hosted
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -400,25 +392,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: DavidAnson/markdownlint-cli2-action@6bf21b07787794f89a243495939cd651942aeabe # v24.1.0
 
-  # The compile-bearing Linux Rust lanes share one matrix job but must complete
-  # independently: canceling the lint sibling on a workspace-test failure would
-  # discard its distinct required proof. The workspace-test row normally
-  # executes the suite in its warm workspace. A repository-variable kill-switch
-  # can instead publish an exact-SHA nextest archive for the standalone
-  # consumer.
+  # Strict Clippy is an independent compile proof. Its warm hosted-cache time is
+  # already below the SLO; the full test graph is owned by rust-check-inputs so the
+  # repository pays for one behavior build rather than two competing builds.
   rust-checks:
-    name: ${{ matrix.name }}
+    name: Rust lint
     needs: [changes]
     # Heavy Linux Rust lanes. Skipped on a docs/website/markdown-only PR; forced
     # on for merge_group and non-metadata pushes (see the `changes` job).
     # ci-status treats a skip here as PASS so branch protection isn't deadlocked.
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
-    # Workflow-level permissions are read-only; the workspace-tests leg saves
-    # the shared Linux rust-cache and needs actions: write to persist it.
-    permissions:
-      contents: read
-      actions: write
     # Linux-only: emit line-tables-only debuginfo for dev builds. Trims link
     # time and disk on these link-bound lanes while keeping panic line numbers
     # for nextest backtraces. NOT applied to the Windows/macOS jobs — #2127/
@@ -435,34 +419,13 @@ jobs:
       # link-arg appended. Linux-only: the windows/macos jobs never see this and
       # keep the workflow-level `-D warnings`.
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
-      # See the HARN_RUNNER_TIER comment on `package-audit`.
       HARN_RUNNER_TIER: github-hosted
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - kind: lint
-            name: Rust lint
-            cache_key: workspace-lint
-            fetch_depth: 1
-            rust_components: clippy
-          - kind: workspace-tests
-            name: Rust workspace tests
-            cache_key: workspace-tests
-            fetch_depth: 1
-            rust_components: ""
     outputs:
-      # Success markers set only by the leg that ran them; the lint leg never
-      # touches workspace_tests_ok and vice versa, so the matrix legs cannot clobber
-      # each other. ci-status keys on these to tell
-      # "the workspace-test leg itself succeeded" apart from "the job group failed
-      # because of the sibling leg".
       lint_ok: ${{ steps.lint-ok.outputs.ok }}
-      workspace_tests_ok: ${{ steps.workspace-tests-ok.outputs.ok }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: ${{ matrix.fetch_depth }}
+          fetch-depth: 1
       # Hosted-image SDK reclaim.
       - uses: ./.github/actions/free-disk-space
       # Install mold and steer rustc at it via RUSTFLAGS above. apt's `mold`
@@ -477,31 +440,17 @@ jobs:
           packages: mold
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
-        if: matrix.rust_components == ''
-      - uses: ./.github/actions/rust-toolchain
-        if: matrix.rust_components != ''
         with:
-          components: ${{ matrix.rust_components }}
+          components: clippy
       - uses: ./.github/actions/rust-cache
         continue-on-error: true
         with:
-          # Both legs restore the workspace-test cache and only the workspace-test leg
-          # writes it (on main pushes). The lint leg needs no writer of its
-          # own: `cargo clippy` compiles dependency crates with plain rustc,
-          # so the workspace-test cache's dep artifacts are directly reusable and
-          # a separate workspace-lint key would only spend cache quota.
           shared-key: workspace-tests
           cache-on-failure: true
           cache-bin: false
           # Keep workspace artifacts so merge_group does not rebuild every
           # harn-* crate after an exact rust-cache hit (#5003).
           cache-workspace-crates: "true"
-          save: ${{ matrix.kind == 'workspace-tests' }}
-      - name: Install cargo-nextest
-        if: matrix.kind == 'workspace-tests'
-        uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
-        with:
-          tool: nextest@0.9.132
       # `make lint` also runs `lint-no-xfail-regression`, which compiles
       # `harn-cli` via `cargo run` just to walk conformance/ and count
       # `@xfail:` markers. That ~1-2 min cost is paid by the harn-audit lane
@@ -510,91 +459,41 @@ jobs:
       # prompt-prose ratchet (only when protected files changed) plus clippy.
       - name: Run Rust lint
         id: release-audit-rust-lint
-        if: matrix.kind == 'lint'
         env:
           RUN_PROMPT_PROSE_RATCHET: ${{ needs.changes.outputs.prompt_prose }}
         run: ./scripts/ci/run_rust_lint_lane.sh
-      # The normal path runs the suite in this warm workspace and creates no
-      # artifact. This archive exists only for the repository-variable
-      # kill-switch that restores the standalone hosted consumer.
-      - name: Build portable workspace test archive
-        if: matrix.kind == 'workspace-tests' && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
-        env:
-          # 4 rustc jobs bound peak memory on the 8-vCPU hosted runner. This
-          # was a tier-keyed expression while larger rungs existed; #6017 left
-          # one runner, so it is a constant. scripts/check_ci_cache_policy.harn
-          # owns the value.
-          CARGO_BUILD_JOBS: "4"
-        run: >-
-          ./scripts/ci/rust_artifact.sh build-tests
-          "$RUNNER_TEMP/harn-workspace-tests.tar.zst"
-          "$GITHUB_SHA"
-      # The workspace test binaries are already compiled and sitting on this
-      # runner's disk; executing them here removes the archive-compress →
-      # artifact-upload → artifact-download → extract round trip (measured
-      # 1.5-16.5 m of pure transfer variance per run) that the standalone
-      # archive-mode test lane pays. The Landlock escape proof stays excluded —
-      # it is environment-specific and owned by rust-security on GitHub Ubuntu.
-      - name: Run Rust workspace tests
-        id: release-audit-rust-test
-        if: matrix.kind == 'workspace-tests' && vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'
-        env:
-          CARGO_BUILD_JOBS: "4"
-          HARN_LLM_CALLS_DISABLED: "1"
-        run: >-
-          scripts/ci/run_rust_test_lane.sh
-          cargo nextest run --locked --workspace --profile ci
-          -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'
-      - name: Start workspace test archive upload timer
-        if: matrix.kind == 'workspace-tests' && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
-        run: echo "HARN_WORKSPACE_TEST_UPLOAD_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
-      - name: Upload workspace test archive
-        if: matrix.kind == 'workspace-tests' && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: harn-workspace-tests.tar.zst
-          path: ${{ runner.temp }}/harn-workspace-tests.tar.zst
-          archive: false
-          if-no-files-found: error
-          retention-days: 1
-      # The portable CLI and security artifacts are owned by
-      # rust-check-inputs, so this compute-heavy lane uploads only the one
-      # archive its kill-switch consumer needs.
-      - name: Report workspace test archive upload
-        if: matrix.kind == 'workspace-tests' && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
-        run: |
-          duration=$(($(date +%s) - HARN_WORKSPACE_TEST_UPLOAD_STARTED_AT))
-          bytes=$(wc -c < "$RUNNER_TEMP/harn-workspace-tests.tar.zst" | tr -d ' ')
-          {
-            echo "### Workspace test archive upload"
-            echo
-            echo "- Duration: ${duration}s"
-            echo "- Compressed bytes: ${bytes}"
-          } >> "$GITHUB_STEP_SUMMARY"
-      # Success markers: reached only when every prior step of the leg
-      # succeeded. See the job-level `outputs` comment.
       - name: Mark lint leg success
         id: lint-ok
-        if: matrix.kind == 'lint'
-        run: echo "ok=true" >> "$GITHUB_OUTPUT"
-      - name: Mark workspace test success
-        id: workspace-tests-ok
-        if: matrix.kind == 'workspace-tests'
         run: echo "ok=true" >> "$GITHUB_OUTPUT"
 
-  # Build the portable Harn CLI and security tests once for the checks below.
-  # One warm build graph feeds all checks in parallel with the workspace-test
-  # leg's full suite.
+  # One persistent producer owns the complete environment-neutral Rust graph.
+  # It builds the exact CLI/security artifacts consumed by GitHub Ubuntu, then
+  # executes every compatible workspace test without recompiling on another
+  # runner. Host-bound Linux sandbox proofs remain explicitly GitHub-owned below.
   rust-check-inputs:
-    name: Build shared Rust check inputs
+    name: Rust workspace tests
     needs: [changes]
     if: needs.changes.outputs.rust == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # Paid capacity is limited to the merge queue, the only acceptance surface
+    # for #5003. PRs and pushes use the free hosted fallback. At $0.016/min the
+    # paid path has a hard 10-minute/$0.16 fuse. Free hosted and kill-switch
+    # fallbacks retain enough time to finish from a cold coarse cache.
+    runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || (github.event_name == 'merge_group' && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest') }}
+    timeout-minutes: ${{ github.event_name == 'merge_group' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' && 10 || 25 }}
+    # The GitHub-hosted fallback remains an authorized main-branch cache
+    # writer; Blacksmith uses sticky sccache and never enters that step.
+    permissions:
+      contents: read
+      actions: write
+    outputs:
+      workspace_tests_ok: ${{ steps.workspace-tests-ok.outputs.ok }}
     env:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
-      HARN_RUNNER_TIER: github-hosted
+      # The producer is the only sticky-cache writer. Fifteen GiB covered the
+      # previously measured workspace graph and caps storage near $7.50/month.
+      SCCACHE_CACHE_SIZE: 15G
+      HARN_RUNNER_TIER: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'github-hosted' || (github.event_name == 'merge_group' && 'blacksmith' || 'github-hosted') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -607,13 +506,20 @@ jobs:
           packages: mold
           check-command: mold
       - uses: ./.github/actions/rust-toolchain
+      - uses: ./.github/actions/sccache
+        if: env.HARN_RUNNER_TIER == 'blacksmith'
+        with:
+          cache-key: workspace-tests
+          sticky: "true"
       - uses: ./.github/actions/rust-cache
+        if: env.HARN_RUNNER_TIER == 'github-hosted'
         continue-on-error: true
         with:
           shared-key: workspace-tests
           cache-on-failure: true
           cache-bin: false
           cache-workspace-crates: "true"
+          save: "true"
       - name: Install cargo-nextest
         uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
         with:
@@ -626,6 +532,26 @@ jobs:
           "$RUNNER_TEMP/harn-cli.tar.zst"
           "$RUNNER_TEMP/harn-security.tar.zst"
           "$GITHUB_SHA"
+      # The kill switch retains the archive-mode fallback, but the normal path
+      # executes the already-compiled suite directly in this warm workspace.
+      - name: Build portable workspace test archive
+        if: vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
+        env:
+          CARGO_BUILD_JOBS: "4"
+        run: >-
+          ./scripts/ci/rust_artifact.sh build-tests
+          "$RUNNER_TEMP/harn-workspace-tests.tar.zst"
+          "$GITHUB_SHA"
+      - name: Run Rust workspace tests
+        id: release-audit-rust-test
+        if: vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'
+        env:
+          CARGO_BUILD_JOBS: "4"
+          HARN_LLM_CALLS_DISABLED: "1"
+        run: >-
+          scripts/ci/run_rust_test_lane.sh
+          cargo nextest run --locked --workspace --profile ci
+          -E 'not (test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline))'
       - name: Upload portable Harn CLI
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -642,6 +568,21 @@ jobs:
           archive: false
           if-no-files-found: error
           retention-days: 1
+      - name: Upload workspace test archive
+        if: vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: harn-workspace-tests.tar.zst
+          path: ${{ runner.temp }}/harn-workspace-tests.tar.zst
+          archive: false
+          if-no-files-found: error
+          retention-days: 1
+      - name: Mark workspace test success
+        id: workspace-tests-ok
+        run: echo "ok=true" >> "$GITHUB_OUTPUT"
+      - name: Summarize and stop sccache
+        if: always() && env.HARN_RUNNER_TIER == 'blacksmith'
+        run: ./scripts/ci/finalize_sccache.sh
 
   # Post-merge main-scoped cache writer. merge_group builds are the required
   # proofs but cannot populate a cache other refs can read; main push would
@@ -731,16 +672,16 @@ jobs:
         run: ${{ matrix.warm_script }}
 
   # FALLBACK-ONLY consumer. By default the environment-neutral suite executes
-  # inside the warm Rust workspace tests leg (see rust-checks), so this job skips and
+  # inside the warm Rust producer (see rust-check-inputs), so this job skips and
   # no multi-gigabyte archive crosses Actions artifact storage. Setting the
   # repo variable HARN_CI_DISABLE_COLOCATED_TESTS='true' restores this
-  # standalone consumer exactly as it ran before co-location: rust-checks
+  # standalone consumer exactly as it ran before co-location: rust-check-inputs
   # resumes producing the workspace-test archive and this job verifies and executes
   # it on a fresh hosted runner. ci-status enforces the pairing: a rust-test
   # skip only passes while co-location is active.
   rust-test:
     name: Rust workspace tests (archive mode)
-    needs: [changes, rust-checks]
+    needs: [changes, rust-check-inputs]
     # `always()` so this consumer is not auto-skipped by a sibling's result;
     # the explicit proof condition below decides whether it runs.
     if: >-
@@ -748,7 +689,7 @@ jobs:
       && needs.changes.result == 'success'
       && needs.changes.outputs.rust == 'true'
       && vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
-      && needs.rust-checks.outputs.workspace_tests_ok == 'true'
+      && needs.rust-check-inputs.outputs.workspace_tests_ok == 'true'
     # Never self-hosted: this lane downloads the ~8.6 GB workspace test archive from
     # Actions ARTIFACT storage, which measured <4 MB/s to the residential boxes
     # (a routed attempt stalled past the 35 m timeout still mid-download) even
@@ -762,7 +703,7 @@ jobs:
     timeout-minutes: 35
     env:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
-      # Match rust-checks RUSTFLAGS. Nested cargo fixtures (hostlib verdict tests)
+      # Match rust-check-inputs RUSTFLAGS. Nested cargo fixtures (hostlib verdict tests)
       # inherit this and must be able to link; mold is not on the image by default.
       RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"
     steps:
@@ -812,8 +753,9 @@ jobs:
       # moment the checksummed restore no longer needs it.
       - name: Drop compressed archive after restore
         run: rm -f "$RUNNER_TEMP/harn-workspace-tests.tar.zst"
-      # Landlock is the one environment-specific proof owned by rust-security;
-      # every other default-suite test remains required here.
+      # Linux process-sandbox tests require the GitHub Ubuntu kernel's Landlock
+      # support and are owned by rust-security; every environment-neutral test
+      # remains required here.
       - name: Run Rust workspace tests
         id: release-audit-rust-test
         env:
@@ -823,7 +765,7 @@ jobs:
           cargo nextest run --profile ci
           --archive-file "$RUNNER_TEMP/harn-workspace-tests/harn-tests.tar.zst"
           --workspace-remap "$GITHUB_WORKSPACE"
-          -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'
+          -E 'not (test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline))'
 
   rust-security:
     name: Rust security proof
@@ -867,14 +809,14 @@ jobs:
           "$RUNNER_TEMP/harn-security.tar.zst"
           "$RUNNER_TEMP/harn-security"
           "$GITHUB_SHA"
-      - name: Run Landlock escape proof on GitHub Ubuntu
+      - name: Run OS sandbox proofs on GitHub Ubuntu
         id: release-audit-rust-security
         run: >-
           scripts/ci/run_rust_test_lane.sh
           cargo nextest run --profile ci
           --archive-file "$RUNNER_TEMP/harn-security/harn-security-tests.tar.zst"
           --workspace-remap "$GITHUB_WORKSPACE"
-          -E 'test(test_linux_process_sandbox_catches_ten_process_escapes)'
+          -E 'test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline)'
 
   harn-audit:
     name: ${{ matrix.name }}
@@ -1801,35 +1743,19 @@ jobs:
           # a hard required-success above, so a filter-job failure still blocks.)
           rust_checks_result="${{ needs['rust-checks'].result }}"
           lint_ok="${{ needs['rust-checks'].outputs.lint_ok }}"
-          workspace_tests_ok="${{ needs['rust-checks'].outputs.workspace_tests_ok }}"
-          echo "Rust checks: $rust_checks_result (lint_ok=$lint_ok workspace_tests_ok=$workspace_tests_ok)"
-
-          # Both proofs now come from the leg itself. The old tolerance existed
-          # only for the hosted-fallback rerun, which covered a residential box
-          # dying mid-run; on hosted runners a failed leg is a real failure and
-          # rerunning it would just fail again at double the cost (#6017).
-          workspace_tests_proven=false
-          if [ "$workspace_tests_ok" = "true" ]; then
-            workspace_tests_proven=true
-          fi
+          echo "Rust lint: $rust_checks_result (lint_ok=$lint_ok)"
           if [ "$rust_checks_result" != "success" ] && [ "$rust_checks_result" != "skipped" ]; then
-            echo "::error::Rust checks failed."
+            echo "::error::Rust lint failed."
             exit 1
           fi
-
-          # With co-location active the environment-neutral suite proof lives
-          # INSIDE the Rust workspace tests leg, so a Rust-lane-relevant run
-          # must carry the workspace-test proof — a skip would silently drop
-          # the suite proof that rust-test no longer provides.
-          if [ "$COLOCATED_TESTS_DISABLED" != "true" ] \
-            && [ "${{ needs.changes.outputs.rust }}" = "true" ] \
-            && [ "$workspace_tests_proven" != "true" ]; then
-            echo "::error::Rust workspace test proof is missing."
+          if [ "${{ needs.changes.outputs.rust }}" = "true" ] && [ "$lint_ok" != "true" ]; then
+            echo "::error::Rust lint proof is missing."
             exit 1
           fi
 
           rust_check_inputs_result="${{ needs['rust-check-inputs'].result }}"
-          echo "Shared Rust check inputs: $rust_check_inputs_result"
+          workspace_tests_ok="${{ needs['rust-check-inputs'].outputs.workspace_tests_ok }}"
+          echo "Rust producer: $rust_check_inputs_result (workspace_tests_ok=$workspace_tests_ok)"
           if [ "$rust_check_inputs_result" != "success" ]; then
             if [ "$rust_check_inputs_result" = "skipped" ] \
               && [ "${{ needs.changes.outputs.rust }}" != "true" ]; then
@@ -1838,6 +1764,15 @@ jobs:
               echo "::error::Rust audit artifact build failed or skipped while Rust proof was required."
               exit 1
             fi
+          fi
+          # With co-location active the environment-neutral suite proof lives
+          # inside the single persistent producer. A successful artifact build
+          # without the explicit test marker must fail closed.
+          if [ "$COLOCATED_TESTS_DISABLED" != "true" ] \
+            && [ "${{ needs.changes.outputs.rust }}" = "true" ] \
+            && [ "$workspace_tests_ok" != "true" ]; then
+            echo "::error::Rust workspace test proof is missing."
+            exit 1
           fi
 
           # Post-merge cache refresh is not a behavior proof, but when the

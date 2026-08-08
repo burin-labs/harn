@@ -14,9 +14,9 @@ set -euo pipefail
 
 cargo build --locked --bin harn
 cargo nextest run --locked --workspace --profile ci --no-run \
-  -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'
-# Match rust-check-inputs' security archive compile shape (harn-vm filter).
-cargo nextest run --locked -p harn-vm --profile ci --no-run \
-  -E 'test(test_linux_process_sandbox_catches_ten_process_escapes)'
+  -E 'not (test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline))'
+# Match rust-check-inputs' exact GitHub-owned security archive compile shape.
+cargo nextest run --locked --workspace --profile ci --no-run \
+  -E '(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and binary(harn_hostlib))'
 
 # Workspace-crate cache canary touch for #5003 hosted wall-time sampling.
