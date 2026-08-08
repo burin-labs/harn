@@ -77,6 +77,16 @@ cache delete 10 --repo burin-labs/harn
 EXPECTED
 diff -u "$tmp/expected-family-prune-gh.log" "$tmp/family-prune-gh.log"
 
+PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/clear-linux-family-gh.log" \
+  GITHUB_REPOSITORY=burin-labs/harn \
+  "$repo_root/scripts/prune_ci_cache_generations.sh" \
+  --clear-family-prefix v0-rust-workspace-tests-
+cat >"$tmp/expected-clear-linux-family-gh.log" <<'EXPECTED'
+api --paginate repos/burin-labs/harn/actions/caches?ref=refs/heads/main&per_page=100 --slurp
+cache delete 30 --repo burin-labs/harn
+EXPECTED
+diff -u "$tmp/expected-clear-linux-family-gh.log" "$tmp/clear-linux-family-gh.log"
+
 PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/all-prune-gh.log" \
   GITHUB_REPOSITORY=burin-labs/harn \
   "$repo_root/scripts/prune_ci_cache_generations.sh" --all-release-families
@@ -152,7 +162,9 @@ printf '%s\n' "$args" >>"$MOCK_GH_LOG"
 if [[ "$args" == *'/actions/cache/usage'* ]]; then
   printf '{"full_name":"burin-labs/harn","active_caches_size_in_bytes":2000,"active_caches_count":3}\n'
 elif [[ "$args" == *'/actions/caches?per_page=100'* ]]; then
-  if grep -q '^cache delete 202 --repo burin-labs/harn$' "$MOCK_GH_LOG"; then
+  if [[ "${MOCK_RELEASE_YIELDS:-0}" == "1" ]]; then
+    printf '%s\n' '[{"actions_caches":[{"id":201,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-current","size_in_bytes":2147483648},{"id":203,"ref":"refs/heads/main","key":"v0-rust-workspace-tests-Linux-x64-current","size_in_bytes":1610612736}]}]'
+  elif grep -q '^cache delete 202 --repo burin-labs/harn$' "$MOCK_GH_LOG"; then
     printf '%s\n' '[{"actions_caches":[{"id":201,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-current","size_in_bytes":1610612736},{"id":203,"ref":"refs/heads/main","key":"v0-rust-workspace-tests-Linux-x64-current","size_in_bytes":1610612736}]}]'
   else
     printf '%s\n' '[{"actions_caches":[{"id":201,"ref":"refs/heads/main","key":"v0-rust-release-x86_64-unknown-linux-gnu-current","size_in_bytes":1610612736},{"id":202,"ref":"refs/heads/main","key":"v0-rust-workspace-windows-current","size_in_bytes":3758096384},{"id":203,"ref":"refs/heads/main","key":"v0-rust-workspace-tests-Linux-x64-current","size_in_bytes":1610612736}]}]'
@@ -194,6 +206,24 @@ jq -e '
   .listed_ceiling_bytes == 3758096384 and
   (.deleted | map(.id)) == [202]
 ' "$tmp/headroom.json" >/dev/null
+
+# Save headroom protects the Linux merge gate but allows a release compile
+# cache to yield when it is the only entry that can cover the new generation.
+PATH="$tmp/bin:$PATH" MOCK_GH_LOG="$tmp/release-yields-gh.log" \
+  MOCK_RELEASE_YIELDS=1 HARN_CACHE_POLICY_PATH="$tmp/protect-policy.json" \
+  GITHUB_REPOSITORY=burin-labs/harn \
+  "$repo_root/scripts/prune_ci_cache_generations.sh" --ensure-headroom 2147483648 \
+  >"$tmp/release-yields.json"
+jq -e '
+  .mode == "ensure_headroom" and
+  (.deleted | map(.id)) == [201]
+' "$tmp/release-yields.json" >/dev/null
+grep -Fxq 'cache delete 201 --repo burin-labs/harn' "$tmp/release-yields-gh.log"
+if grep -Fq 'cache delete 203 ' "$tmp/release-yields-gh.log"; then
+  echo "save headroom must preserve the Linux merge-gate cache" >&2
+  cat "$tmp/release-yields-gh.log" >&2
+  exit 1
+fi
 
 # Restore the baseline mock for the remaining authorization-failure case.
 cat >"$tmp/bin/gh" <<'MOCK'

@@ -1191,7 +1191,21 @@ fn rust_cache_refresh_errors(workflow) -> list<string> {
   // Matrix legs write each Linux merge-gate key with that lane's env fingerprint.
   let matrix_keys: list<string> = []
   for entry in job?.strategy?.matrix?.include ?? [] {
-    matrix_keys = matrix_keys + [trim(entry?.cache_key ?? "")]
+    const cache_key = trim(entry?.cache_key ?? "")
+    matrix_keys = matrix_keys + [cache_key]
+    const expected_headroom = if cache_key == "workspace-tests" {
+      "4294967296"
+    } else if cache_key == "package-audit" {
+      "2147483648"
+    } else {
+      ""
+    }
+    if trim(to_string(entry?.save_headroom_bytes ?? "")) != expected_headroom {
+      errors = errors
+        + [
+        "ci.yml:rust-cache-refresh matrix legs must reserve their measured save envelope",
+      ]
+    }
   }
   if !matrix_keys.contains("workspace-tests") || !matrix_keys.contains("package-audit") {
     errors = errors
@@ -1206,6 +1220,11 @@ fn rust_cache_refresh_errors(workflow) -> list<string> {
   } else if !contains(trim(caches[0]?.with?.["shared-key"] ?? ""), "matrix.cache_key") {
     errors = errors
       + ["ci.yml:rust-cache-refresh must bind rust-cache shared-key to matrix.cache_key"]
+  } else if trim(caches[0]?.id ?? "") != "rust-cache" {
+    errors = errors
+      + [
+      "ci.yml:rust-cache-refresh must expose the rust-cache hit result as steps.rust-cache",
+    ]
   }
   if contains(to_string(job?.env ?? {}), "CARGO_BUILD_JOBS") {
     errors = errors
@@ -1213,10 +1232,21 @@ fn rust_cache_refresh_errors(workflow) -> list<string> {
       "ci.yml:rust-cache-refresh must not set job-level CARGO_BUILD_JOBS (breaks Swatinem key parity)",
     ]
   }
-  const headroom = step_by_name(job?.steps ?? [], "Reserve cache headroom for Linux CI")
-  if !contains(trim(headroom?.run ?? ""), "prune_ci_cache_generations.sh --ensure-headroom") {
+  const headroom = step_by_name(job?.steps ?? [], "Prepare Linux cache generation save")
+  if trim(headroom?.if ?? "") != "steps.rust-cache.outputs.cache-hit != 'true'" {
     errors = errors
-      + ["ci.yml:rust-cache-refresh must reserve Actions cache headroom before saving"]
+      + ["ci.yml:rust-cache-refresh must prepare a generation only after a cache miss"]
+  }
+  const headroom_run = trim(headroom?.run ?? "")
+  if !contains(headroom_run, "prune_ci_cache_generations.sh --clear-family-prefix")
+    || !contains(
+    headroom_run,
+    "prune_ci_cache_generations.sh --ensure-headroom",
+  ) {
+    errors = errors
+      + [
+      "ci.yml:rust-cache-refresh must replace stale generations with bounded save headroom",
+    ]
   }
   const warm = step_by_name(job?.steps ?? [], "Warm Cargo graph")
   if !contains(trim(warm?.run ?? ""), "matrix.warm_script") {
