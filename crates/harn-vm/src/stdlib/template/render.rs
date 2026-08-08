@@ -6,6 +6,11 @@ use super::error::TemplateError;
 use super::filters::apply_filter;
 use super::{BranchDecision, BranchKind, PromptSourceSpan, PromptSpanKind, TemplateAsset};
 
+/// Cap a rendered value's preview so span records don't carry kilobyte prompt
+/// chunks. The IDE can fetch the full text by reading the rendered string at
+/// `output_start..output_end`.
+const PREVIEW_MAX_CHARS: usize = 80;
+
 #[derive(Default, Debug, Clone)]
 pub(super) struct Scope<'a> {
     /// Root bindings passed by the caller.
@@ -130,7 +135,7 @@ fn render_node(
                     kind: PromptSpanKind::Expr,
                     parent_span: rc.current_include_parent.clone(),
                     template_uri: current_template_uri(rc),
-                    bound_value: Some(truncate_for_preview(&rendered)),
+                    bound_value: Some(crate::text::truncate_end(&rendered, PREVIEW_MAX_CHARS)),
                 });
             }
         }
@@ -138,7 +143,10 @@ fn render_node(
             let (rendered, preview) = match scope.lookup(ident) {
                 Some(v) => {
                     let s = display_value(&v);
-                    (s.clone(), Some(truncate_for_preview(&s)))
+                    (
+                        s.clone(),
+                        Some(crate::text::truncate_end(&s, PREVIEW_MAX_CHARS)),
+                    )
                 }
                 None => (format!("{{{{{ident}}}}}"), None),
             };
@@ -510,18 +518,6 @@ fn format_path(segs: &[PathSeg]) -> String {
         }
     }
     out
-}
-
-/// Cap a rendered value's preview at 80 chars so span records don't
-/// carry kilobyte prompt chunks. The IDE can fetch the full text by
-/// reading the rendered string at `output_start..output_end`.
-fn truncate_for_preview(s: &str) -> String {
-    const MAX: usize = 80;
-    if s.chars().count() <= MAX {
-        return s.to_string();
-    }
-    let truncated: String = s.chars().take(MAX - 1).collect();
-    format!("{truncated}…")
 }
 
 fn eval_expr(

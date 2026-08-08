@@ -7,6 +7,7 @@ mod arg_constraints;
 mod artifacts;
 mod compaction;
 mod hooks;
+mod payload_errors;
 mod policy;
 mod registered_closures;
 mod replay_eval;

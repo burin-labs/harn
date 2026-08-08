@@ -1315,20 +1315,12 @@ fn default_output_dir() -> PathBuf {
 }
 
 fn excerpt(text: &str) -> Option<String> {
+    const MAX_BYTES: usize = 4000;
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return None;
     }
-    let max = 4000;
-    if trimmed.len() <= max {
-        return Some(trimmed.to_string());
-    }
-    let mut truncated = String::new();
-    for ch in trimmed.chars().take(max) {
-        truncated.push(ch);
-    }
-    truncated.push_str("...");
-    Some(truncated)
+    Some(harn_vm::text::truncate_end_bytes(trimmed, MAX_BYTES))
 }
 
 fn load_env_files(paths: &[PathBuf]) -> Result<(EnvOverlay, Vec<LoadedEnvKey>), String> {

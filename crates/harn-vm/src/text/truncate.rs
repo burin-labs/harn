@@ -1,9 +1,19 @@
 //! Budget-respecting truncation with an ellipsis marker.
 //!
+//! This module is the single owner of "shorten text for display and mark that
+//! it was shortened" across the workspace — VM builtins, hostlib scanners, and
+//! CLI reporters all route through it rather than hand-rolling a copy.
+//!
 //! Every helper here treats `max` as a hard ceiling: the ellipsis is charged
 //! against the budget rather than appended on top of it, so the result is
 //! never longer than the caller asked for. Callers that used to append the
 //! marker after taking `max` units silently exceeded their own stated limit.
+//!
+//! Pick [`truncate_end_bytes`] when the caller's ceiling is a byte count and
+//! [`truncate_end`] / [`truncate_start`] when it counts characters. Both cut on
+//! character boundaries; hand-rolled copies that indexed a `&str` by a fixed
+//! byte offset panicked on any multi-byte character straddling the limit, which
+//! is why the byte-budget variant lives here too.
 
 /// The single ellipsis marker used by every truncating surface. Keeping one
 /// constant is what makes the "ellipsis counts toward the budget" arithmetic

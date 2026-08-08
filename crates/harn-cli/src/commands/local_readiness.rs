@@ -467,12 +467,7 @@ fn evidence_for_run(run: &JsonValue, class: LocalOutcomeClass) -> String {
 fn compact_detail(value: &str) -> String {
     const MAX: usize = 240;
     let one_line = value.split_whitespace().collect::<Vec<_>>().join(" ");
-    if one_line.len() <= MAX {
-        return one_line;
-    }
-    let mut out = one_line.chars().take(MAX).collect::<String>();
-    out.push_str("...");
-    out
+    harn_vm::text::truncate_end_bytes(&one_line, MAX)
 }
 
 fn report_from_outcomes(

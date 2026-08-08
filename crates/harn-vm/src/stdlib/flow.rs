@@ -1214,13 +1214,7 @@ fn json_str(value: &serde_json::Value) -> Option<&str> {
 
 fn feedback_compact(value: &str, max_chars: usize) -> String {
     let compact = value.split_whitespace().collect::<Vec<_>>().join(" ");
-    if compact.chars().count() <= max_chars {
-        return compact;
-    }
-    let keep = max_chars.saturating_sub(3).max(1);
-    let mut out = compact.chars().take(keep).collect::<String>();
-    out.push_str("...");
-    out
+    crate::text::truncate_end(&compact, max_chars)
 }
 
 fn decode_evidence_item(value: &VmValue) -> Result<EvidenceItem, VmError> {
