@@ -98,6 +98,7 @@ mod tests {
             dependencies: Vec::new(),
             sub_projects: Vec::new(),
             repo_map: String::new(),
+            codebase_fingerprint: String::new(),
         }
     }
 

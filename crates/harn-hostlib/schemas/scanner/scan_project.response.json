@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/scanner/scan_project.response.json",
   "title": "scanner.scan_project response",
-  "description": "Harn hostlib `ScanResult`: project metadata, folder/file/symbol records, dependency edges, and a text repo map. Times are ISO-8601 UTC strings. Paths are repo-relative POSIX paths.",
+  "description": "Harn hostlib `ScanResult`: project metadata, folder/file/symbol records, dependency edges, a text repo map, and a deterministic codebase fingerprint. Times are ISO-8601 UTC strings. Paths are repo-relative POSIX paths.",
   "type": "object",
   "properties": {
     "snapshot_token": {
@@ -16,7 +16,11 @@
     "symbols": { "type": "array", "items": { "$ref": "#/$defs/SymbolRecord" } },
     "dependencies": { "type": "array", "items": { "$ref": "#/$defs/DependencyEdge" } },
     "sub_projects": { "type": "array", "items": { "$ref": "#/$defs/SubProject" } },
-    "repo_map": { "type": "string" }
+    "repo_map": { "type": "string" },
+    "codebase_fingerprint": {
+      "type": "string",
+      "description": "Deterministic Markdown context synthesized from the scanner-owned project, file, symbol, dependency, command, and instruction facts."
+    }
   },
   "required": [
     "snapshot_token",
@@ -27,7 +31,8 @@
     "symbols",
     "dependencies",
     "sub_projects",
-    "repo_map"
+    "repo_map",
+    "codebase_fingerprint"
   ],
   "additionalProperties": false,
   "$defs": {

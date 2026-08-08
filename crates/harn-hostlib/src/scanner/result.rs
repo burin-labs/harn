@@ -256,4 +256,7 @@ pub struct ScanResult {
     pub sub_projects: Vec<SubProject>,
     /// Token-budgeted text repo map.
     pub repo_map: String,
+    /// Deterministic, model-oriented summary synthesized from scanner facts.
+    #[serde(default)]
+    pub codebase_fingerprint: String,
 }

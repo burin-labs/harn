@@ -218,8 +218,11 @@ boundary.
 ## Scanner host capability
 
 `scanner/` emits the Harn `ScanResult` contract: project metadata,
-file/folder/symbol records, dependency edges, sub-project boundaries, and
-a token-budgeted text repo map. Two builtins:
+file/folder/symbol records, dependency edges, sub-project boundaries, a
+token-budgeted text repo map, and `codebase_fingerprint`. The fingerprint is a
+deterministic Markdown projection of naming, error, test, signature, import,
+command, dependency, and agent-instruction facts; hosts should persist or
+inject that field instead of rebuilding scanner heuristics. Two builtins:
 
 Every hostlib builtin that enumerates or watches files takes `ignore_policy`
 (`none` | `builtin` | `project`) with the same meaning as the in-VM fs

@@ -48,9 +48,15 @@ edition = "2024"
     "test": "vitest run",
     "lint": "eslint .",
     "build": "tsc -b"
-  }
+  },
+  "devDependencies": { "vitest": "latest" }
 }
 "#,
+    );
+    write(
+        root,
+        "AGENTS.md",
+        "Use scanner-owned context projections.\n",
     );
     write(
         root,
@@ -86,6 +92,11 @@ impl AccountsService {
     );
     write(
         root,
+        "src/routes/errors.ts",
+        "export function reject(res: any, message: string) { res.status(400).json({ error: message }); }\n",
+    );
+    write(
+        root,
         "src/lib/helpers.ts",
         r"export function paginatedResponse<T>(items: T[], total: number) {
   return { items, total, page: 1 };
@@ -97,7 +108,13 @@ export function asyncHandler(fn: any) { return fn; }
     write(
         root,
         "src/lib/__tests__/helpers.test.ts",
-        r#"import { paginatedResponse } from "../helpers";
+        r#"import { expect } from "vitest";
+import { paginatedResponse } from "../helpers";
+
+beforeEach(() => createTestUser());
+expect(paginatedResponse([], 0).total).toBe(0);
+
+export function createTestUser(name: string = "Ada") { return { name }; }
 "#,
     );
     write(root, "prisma/schema.prisma", "model User { id Int @id }\n");
@@ -232,6 +249,26 @@ fn scan_project_emits_full_result_shape() {
     // Repo map renders symbols.
     assert!(result.repo_map.contains("src/main.rs"));
     assert!(result.repo_map.contains("App"));
+
+    // Scanner-owned context projection: the canonical scan path reached the
+    // fingerprint implementation and exposed its result on the public shape.
+    let fingerprint = &result.codebase_fingerprint;
+    for expected in [
+        "# Codebase fingerprint",
+        "## Naming conventions",
+        "## Error handling",
+        "## Test recipe",
+        "## Test commands",
+        "## Code patterns",
+        "## Test helpers",
+        "## Dependencies\n- `vitest`",
+        "## Agent instructions\nUse scanner-owned context projections.",
+    ] {
+        assert!(
+            fingerprint.contains(expected),
+            "missing {expected:?} in:\n{fingerprint}"
+        );
+    }
 
     // Output is deterministic — files sorted alphabetically.
     let sorted: Vec<_> = result
