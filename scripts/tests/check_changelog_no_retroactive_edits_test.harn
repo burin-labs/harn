@@ -9,6 +9,7 @@ import { flag_value } from "../git_base.harn"
 @test
 pipeline test_heading_version_basic(harness: Harness, task) {
   assert_eq(heading_version("## v0.8.72"), "0.8.72")
+  assert_eq(heading_version("## v0.9.0-rc.1"), "0.9.0-rc.1")
 }
 
 @test
@@ -29,6 +30,7 @@ pipeline test_heading_version_rejects_suffix(harness: Harness, task) {
   assert_eq(heading_version("## v1.2.3 (beta)"), nil)
   assert_eq(heading_version("## v1.2"), nil)
   assert_eq(heading_version("## v1.2.3.4"), nil)
+  assert_eq(heading_version("## v1.2.3+build.1"), nil)
 }
 
 @test

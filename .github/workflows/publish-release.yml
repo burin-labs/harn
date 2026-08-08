@@ -128,8 +128,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # shellcheck source=scripts/lib/release_version.sh
+          source scripts/lib/release_version.sh
           CARGO_VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
-          LATEST_TAG="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)"
+          LATEST_TAG="$(
+            git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+              | sed -n '1p'
+          )"
           LATEST_VERSION="${LATEST_TAG#v}"
           HEAD_SHA="$(git rev-parse HEAD)"
           MATCHING_TAG="v$CARGO_VERSION"
@@ -222,8 +228,8 @@ jobs:
           # Skip drift detection — we know what we're publishing — and
           # check out the tag in the publish job.
           if [[ "$EVENT_NAME" == "push" && "$REF_TYPE" == "tag" ]]; then
-            if [[ ! "$REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              echo "::error::Tag push for non-vX.Y.Z tag: $REF_NAME"
+            if ! release_tag_is_canonical "$REF_NAME"; then
+              echo "::error::Tag push for non-release tag: $REF_NAME"
               exit 1
             fi
             PUBLISH_REF="$REF_NAME"
@@ -242,6 +248,15 @@ jobs:
             guard_tag_first_or_skip
             DRIFT=true
             echo "::notice::No vX.Y.Z tags exist yet; treating Cargo.toml=$CARGO_VERSION as drift (first release)."
+          elif release_version_is_prerelease "$CARGO_VERSION"; then
+            matching_tag_commit="$(resolve_tag_commit "$MATCHING_TAG")"
+            if [[ -z "$matching_tag_commit" ]]; then
+              guard_tag_first_or_skip
+              echo "::error::Prerelease workspace version $CARGO_VERSION has no matching immutable tag"
+              exit 1
+            fi
+            DRIFT=false
+            echo "::notice::Prerelease $MATCHING_TAG already owns publication; the main-push path is a no-op."
           elif version_gt "$CARGO_VERSION" "$LATEST_VERSION"; then
             guard_tag_first_or_skip
             DRIFT=true

@@ -1,6 +1,7 @@
 import { help_requested, parse, parser } from "std/cli/argparse"
 import "std/schema"
 import * as semver from "std/semver"
+import { BumpKind } from "std/semver"
 import { load_release_withdrawals, release_distribution_version } from "./release_withdrawals.harn"
 
 const RELEASE_WITHDRAWALS_PATH = ".github/release-withdrawals.json"
@@ -77,8 +78,8 @@ pub fn workspace_version_from_doc(doc) -> string {
     throw "missing workspace version"
   }
   const version = to_string(value)
-  if regex_captures(r"^\d+\.\d+\.\d+$", version).count != 1 {
-    throw "workspace version is not MAJOR.MINOR.PATCH: " + version
+  if semver.parse_release(version) == nil {
+    throw "workspace version is not release SemVer: " + version
   }
   return version
 }
@@ -252,7 +253,11 @@ fn rewrite_embedding_tags(fs: HarnessFs, root: string, next: string) -> nil {
     return nil
   }
   const text = fs.read_text(path)
-  const updated = regex_replace(r#"tag = "v\d+\.\d+\.\d+""#, "tag = \"v" + next + "\"", text)
+  const updated = regex_replace(
+    r#"tag = "v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?""#,
+    "tag = \"v" + next + "\"",
+    text,
+  )
   if updated != text {
     fs.write_text(path, updated)
   }
@@ -262,28 +267,43 @@ fn rewrite_embedding_tags(fs: HarnessFs, root: string, next: string) -> nil {
 pub fn release_metadata_plan(
   fs: HarnessFs,
   root: string,
-  bump: "major" | "minor" | "patch",
+  bump: BumpKind,
+  prerelease_identifier: string = "",
 ) -> ReleaseMetadataPlan {
   const current = current_version(fs, root)
   const manifests = workspace_package_manifests(fs, root)
   const names = package_names_for_manifests(fs, manifests)
   return {
     current_version: current,
-    next_version: semver.next(current, bump),
+    next_version: semver.next(current, bump, prerelease_identifier),
     manifests: manifests.map({ path -> normalized_rel(path, root) }).to_list(),
     package_names: names,
   }
 }
 
-pub fn apply_release_metadata(fs: HarnessFs, root: string, version: string) -> ReleaseMetadataPlan {
+pub fn apply_release_metadata(
+  fs: HarnessFs,
+  root: string,
+  version: string,
+  bump: BumpKind? = nil,
+  prerelease_identifier: string = "",
+) -> ReleaseMetadataPlan {
   const current = current_version(fs, root)
-  const plan = release_metadata_plan(fs, root, "patch")
-    + {next_version: version}
-  if regex_captures(r"^\d+\.\d+\.\d+$", version).count != 1 {
-    throw "release version is not MAJOR.MINOR.PATCH: " + version
+  const plan = release_metadata_plan(fs, root, bump ?? "patch", prerelease_identifier)
+    + {
+    next_version: version,
   }
-  if !["major", "minor", "patch"].any({ bump -> semver.next(current, bump) == version }) {
-    throw "release version is not a single major, minor, or patch bump from " + current
+  if semver.parse_release(version) == nil {
+    throw "release version is not release SemVer: " + version
+  }
+  const matches_requested_bump = if bump == nil {
+    ["major", "minor", "patch"].any({ stable -> semver.next(current, stable) == version })
+  } else {
+    semver.next(current, bump, prerelease_identifier) == version
+  }
+  if !matches_requested_bump {
+    const requested = bump ?? "single stable"
+    throw "release version does not match the requested ${requested} bump from " + current
   }
   const root_manifest = cargo_path(root)
   const all_manifests = [root_manifest]
@@ -313,7 +333,7 @@ pub fn verify_changelog_top(text: string, expected: string) -> nil {
   if top == "v" + expected {
     return nil
   }
-  if regex_captures(r"^v\d+\.\d+\.\d+$", top).count == 1 {
+  if semver.is_v_release_semver(top) {
     throw "CHANGELOG.md top heading is "
       + top
       + " but --bump implies v"
@@ -339,6 +359,7 @@ fn arg_spec() {
         {kind: "positional", name: "action", required: true},
         {kind: "flag", name: "root", long: "--root", parse: "string", default: ""},
         {kind: "flag", name: "bump", long: "--bump", parse: "string", default: ""},
+        {kind: "flag", name: "preid", long: "--preid", parse: "string", default: ""},
         {kind: "flag", name: "version", long: "--version", parse: "string", default: ""},
       ],
     },
@@ -348,7 +369,7 @@ fn arg_spec() {
 fn main(harness: Harness) -> int {
   if help_requested(argv) {
     harness.stdio.println(
-      "usage: harn run scripts/release_metadata.harn -- ACTION [--root PATH] [--bump KIND] [--version X.Y.Z]",
+      "usage: harn run scripts/release_metadata.harn -- ACTION [--root PATH] [--bump KIND] [--preid ID] [--version VERSION]",
     )
     return 0
   }
@@ -366,17 +387,31 @@ fn main(harness: Harness) -> int {
       harness.stdio.println(current_version(harness.fs, root))
     } else if action == "next" {
       const bump = to_string(parsed.options?.bump ?? "")
-      if bump != "major" && bump != "minor" && bump != "patch" {
-        throw "--bump must be major, minor, or patch"
+      const preid = to_string(parsed.options?.preid ?? "")
+      if !["major", "minor", "patch", "premajor", "preminor", "prepatch", "prerelease"].contains(
+        bump,
+      ) {
+        throw "--bump must be major, minor, patch, premajor, preminor, prepatch, or prerelease"
       }
-      harness.stdio.println(semver.next(current_version(harness.fs, root), bump))
+      harness.stdio.println(semver.next(current_version(harness.fs, root), bump, preid))
     } else if action == "manifests" {
       for path in workspace_package_manifests(harness.fs, root) {
         harness.stdio.println(normalized_rel(path, root))
       }
     } else if action == "apply" {
       const version = to_string(parsed.options?.version ?? "")
-      apply_release_metadata(harness.fs, root, version)
+      const bump = to_string(parsed.options?.bump ?? "")
+      const preid = to_string(parsed.options?.preid ?? "")
+      if bump != ""
+        && !["major", "minor", "patch", "premajor", "preminor", "prepatch", "prerelease"]
+        .contains(bump) {
+        throw "--bump must name a supported release bump"
+      }
+      if bump == "" {
+        apply_release_metadata(harness.fs, root, version)
+      } else {
+        apply_release_metadata(harness.fs, root, version, bump, preid)
+      }
     } else if action == "verify-changelog" {
       const version = to_string(parsed.options?.version ?? "")
       verify_changelog_top(harness.fs.read_text(path_join(root, "CHANGELOG.md")), version)

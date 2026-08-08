@@ -202,6 +202,40 @@ pipeline test_release_plan_preserves_members_and_excludes(harness: Harness, task
 }
 
 @test
+pipeline test_prerelease_plan_and_apply_preserve_full_release_identity(harness: Harness, task) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      workspace(harness.fs, root)
+      const plan = release_metadata_plan(harness.fs, root, "preminor", "rc")
+      assert_eq(plan.current_version, "1.2.3")
+      assert_eq(plan.next_version, "1.3.0-rc.0")
+      apply_release_metadata(harness.fs, root, plan.next_version, "preminor", "rc")
+      assert_eq(current_version(harness.fs, root), "1.3.0-rc.0")
+      const root_manifest = root_manifest_projection(
+        harness.fs.read_text(path_join(root, "Cargo.toml")),
+      )
+      assert_eq(
+        root_manifest.workspace.dependencies.get("member-a"),
+        {path: "crates/member-a", version: "=1.3.0-rc.0"},
+      )
+      const agent = agent_projection(
+        harness.fs.read_text(path_join(root, "spec/acp-registry/harn/agent.json")),
+      )
+      assert_eq(agent.version, "1.3.0-rc.0")
+      assert_eq(
+        agent.distribution.binary.linux.archive,
+        "https://example.test/releases/download/v1.3.0-rc.0/harn.tar.gz",
+      )
+      assert_eq(
+        harness.fs.read_text(path_join(root, "docs/src/embedding-rust.md")),
+        "tag = \"v1.3.0-rc.0\"\n",
+      )
+    },
+  )
+}
+
+@test
 pipeline test_apply_normalizes_every_owned_release_surface(harness: Harness, task) {
   with_temp_dir(
     harness.fs,
@@ -352,7 +386,7 @@ pipeline test_malformed_missing_and_duplicate_metadata_fail_closed(harness: Harn
       )
       assert_throws_eq(
         { -> current_version(harness.fs, root) },
-        "workspace version is not MAJOR.MINOR.PATCH: bad",
+        "workspace version is not release SemVer: bad",
       )
     },
   )
@@ -414,6 +448,7 @@ pipeline test_versionless_unpublished_dependency_is_preserved(harness: Harness, 
 @test
 pipeline test_changelog_top_validation(harness: Harness, task) {
   verify_changelog_top("# Changelog\n\n## v1.2.4\n\n- notes\n", "1.2.4")
+  verify_changelog_top("# Changelog\n\n## v1.2.4-rc.0\n\n- notes\n", "1.2.4-rc.0")
   assert_throws_eq(
     { -> verify_changelog_top("# Changelog\n\n## v1.2.3\n", "1.2.4") },
     "CHANGELOG.md top heading is v1.2.3 but --bump implies v1.2.4\nhint: edit CHANGELOG.md to add '## v1.2.4' as the new top entry, then re-run",

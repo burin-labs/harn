@@ -52,6 +52,15 @@ case "${1:-}" in
     "headBranch": "main",
     "url": "https://example.test/333",
     "createdAt": "2026-07-20T04:54:00Z"
+  },
+  {
+    "databaseId": 444,
+    "conclusion": "success",
+    "event": "workflow_run",
+    "displayTitle": "Release smoke (v0.11.0-rc.0)",
+    "headBranch": "v0.11.0-rc.0",
+    "url": "https://example.test/444",
+    "createdAt": "2026-07-21T04:54:00Z"
   }
 ]
 JSON
@@ -94,6 +103,11 @@ if ! out="$("$script" v0.10.29 --gh-bin "$tmp_root/bin/gh")"; then
   fail "expected success via log-marker fallback for legacy run titles"
 fi
 grep -q "covered by run 333" <<<"$out" || fail "log fallback missed run 333: $out"
+
+if ! out="$("$script" v0.11.0-rc.0 --gh-bin "$tmp_root/bin/gh")"; then
+  fail "expected success for prerelease tag"
+fi
+grep -q "covered by run 444" <<<"$out" || fail "prerelease match missed run 444: $out"
 
 if "$script" v0.10.99 --gh-bin "$tmp_root/bin/gh" 2>"$tmp_root/missing.err"; then
   fail "expected failure when no covering run exists"

@@ -74,7 +74,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$EVENT" = "pull_request" ]; then
-            if [[ "$PR_HEAD_REF" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            if [[ "$PR_HEAD_REF" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
               jq -nc \
                 --arg ref "$PR_HEAD_REF" \
                 --arg sha "$PR_HEAD_SHA" \
@@ -117,7 +117,7 @@ jobs:
                 --json number,headRefName,headRefOid \
                 --jq '[
                   .[]
-                  | select(.headRefName | test("^release/v[0-9]+\\.[0-9]+\\.[0-9]+$"))
+                  | select(.headRefName | test("^release/v[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$"))
                   | {ref:.headRefName, sha:.headRefOid, pr:(.number|tostring)}
                 ]' > targets.json; then
                 break

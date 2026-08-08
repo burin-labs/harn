@@ -406,7 +406,11 @@ BIN
     if [[ "${INJECT_HIDDEN_INDEX_CHANGE:-0}" == "1" ]]; then
       git update-index --assume-unchanged Cargo.toml
     fi
-    sed 's/version = "1.2.3"/version = "1.2.4"/' Cargo.toml > Cargo.toml.next
+    next_version="1.2.4"
+    if [[ " $* " == *" --preid rc "* ]]; then
+      next_version="1.2.4-rc.0"
+    fi
+    sed "s/version = \"1.2.3\"/version = \"$next_version\"/" Cargo.toml > Cargo.toml.next
     mv Cargo.toml.next Cargo.toml
     printf '# touched\n' >> Cargo.lock
     ;;
@@ -521,6 +525,32 @@ git -C "$release_root" diff --binary HEAD -- > "$materialized_candidate_diff"
 if ! cmp -s "$full_candidate_diff" "$materialized_candidate_diff"; then
   echo "materialize-candidate and canonical prepare produced different candidate trees" >&2
   diff -u "$full_candidate_diff" "$materialized_candidate_diff" >&2 || true
+  exit 1
+fi
+
+# Prerelease intent must reach the owning metadata/gate boundary as two typed
+# values: bump kind plus identifier. The full prerelease string remains the
+# derived release identity used by changelog validation.
+git -C "$release_root" reset --hard --quiet HEAD
+sed 's/## v1.2.4/## v1.2.4-rc.0/' "$release_root/CHANGELOG.md" \
+  > "$release_root/CHANGELOG.md.next"
+mv "$release_root/CHANGELOG.md.next" "$release_root/CHANGELOG.md"
+: > "$record_make"
+: > "$record_ship"
+env -u HARN_BIN \
+HARN_RELEASE_ROOT="$release_root" \
+HARN_RELEASE_HARNESS=1 \
+HARN_RELEASE_GATE_SCRIPT="$ship_gate" \
+CARGO_TARGET_DIR="$target_dir" \
+SHIP_GATE_RECORD="$record_ship" \
+FAKE_MAKE_RECORD="$record_make" \
+PATH="$fake_bin:$PATH" \
+  "$repo_root/scripts/release_ship.sh" \
+    --prepare --materialize-candidate --bump prepatch --preid rc \
+    > "$tmp_root/ship-prerelease.txt" 2>&1
+if ! grep -Fxq "gate=prepare --bump prepatch --preid rc --allow-dirty" "$record_ship"; then
+  echo "release_ship did not preserve prerelease bump kind and identifier" >&2
+  cat "$record_ship" "$tmp_root/ship-prerelease.txt" >&2
   exit 1
 fi
 

@@ -23,7 +23,14 @@ pipeline test_escape_regex(harness: Harness, task) {
 @test
 pipeline test_changelog_versions(harness: Harness, task) {
   assert_eq(changelog_versions(SAMPLE), ["0.8.71", "0.8.70", "0.8.69"])
+  assert_eq(changelog_versions("## v0.9.0-rc.0\n\nbody\n"), ["0.9.0-rc.0"])
   assert_eq(changelog_versions("no versions here"), [])
+}
+
+@test
+pipeline test_extract_prerelease_section(harness: Harness, task) {
+  const changelog = "## v0.9.0-rc.0\n\ncandidate body\n\n## v0.8.71\n\nstable body\n"
+  assert_eq(extract_section(changelog, "0.9.0-rc.0"), "candidate body")
 }
 
 @test

@@ -321,10 +321,10 @@ usage() {
   cat <<'EOF'
 Usage:
   ./scripts/release_gate.sh audit [--receipt path] [--source-only] [--validate-only]
-  ./scripts/release_gate.sh prepare --bump patch|minor|major
+  ./scripts/release_gate.sh prepare --bump KIND [--preid ID]
   ./scripts/release_gate.sh publish [--dry-run]
   ./scripts/release_gate.sh notes [--version vX.Y.Z] [--output file]
-  ./scripts/release_gate.sh full --bump patch|minor|major [--dry-run]
+  ./scripts/release_gate.sh full --bump KIND [--preid ID] [--dry-run]
 
 Commands:
   audit    Run the full audit, source-only lanes, or receipt-authorized residual lanes.
@@ -359,12 +359,23 @@ release_metadata() {
 
 next_version() {
   local bump="$1"
-  release_metadata next --bump "$bump"
+  local preid="${2:-}"
+  if [[ -n "$preid" ]]; then
+    release_metadata next --bump "$bump" --preid "$preid"
+  else
+    release_metadata next --bump "$bump"
+  fi
 }
 
 bump_version() {
   local next="$1"
-  release_metadata apply --version "$next"
+  local bump="$2"
+  local preid="${3:-}"
+  if [[ -n "$preid" ]]; then
+    release_metadata apply --version "$next" --bump "$bump" --preid "$preid"
+  else
+    release_metadata apply --version "$next" --bump "$bump"
+  fi
 }
 
 reconcile_cargo_lock() {
@@ -1025,11 +1036,16 @@ cmd_audit() {
 
 cmd_prepare() {
   local bump=""
+  local preid=""
   local allow_dirty=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --bump)
         bump="${2:-}"
+        shift 2
+        ;;
+      --preid)
+        preid="${2:-}"
         shift 2
         ;;
       --allow-dirty)
@@ -1048,9 +1064,14 @@ cmd_prepare() {
     esac
   done
   if [[ -z "$bump" ]]; then
-    echo "error: prepare requires --bump patch|minor|major"
+    echo "error: prepare requires --bump KIND"
     exit 1
   fi
+  case "$bump" in
+    patch|minor|major) [[ -z "$preid" ]] || { echo "error: --preid is only valid for prerelease bumps"; exit 1; } ;;
+    premajor|preminor|prepatch|prerelease) [[ -n "$preid" ]] || { echo "error: --preid is required for prerelease bumps"; exit 1; } ;;
+    *) echo "error: unsupported release bump: $bump"; exit 1 ;;
+  esac
   if [[ "$allow_dirty" -eq 0 ]]; then
     require_clean_tree
   fi
@@ -1076,8 +1097,8 @@ cmd_prepare() {
     release_gate_snapshot_prepare_tools_cli "$stable_tool_dir"
     unset HARN_RELEASE_TOOLS_BIN
     current="$(current_version)"
-    next="$(next_version "$bump")"
-    bump_version "$next"
+    next="$(next_version "$bump" "$preid")"
+    bump_version "$next" "$bump" "$preid"
     # The prepare-time tools now run on the snapshot above, so nothing here
     # resolves a binary through Cargo. These stay set for any Cargo work the
     # steps below still reach (`reconcile_cargo_lock`, `make gen-cli-aot`),
@@ -1182,6 +1203,7 @@ cmd_notes() {
 cmd_full() {
   local dry_run=""
   local bump=""
+  local preid=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --dry-run)
@@ -1190,6 +1212,10 @@ cmd_full() {
         ;;
       --bump)
         bump="${2:-}"
+        shift 2
+        ;;
+      --preid)
+        preid="${2:-}"
         shift 2
         ;;
       *)
@@ -1202,7 +1228,11 @@ cmd_full() {
   PRESERVE_AUDIT_TMP=1
   trap cleanup_preserved_audit_tmp EXIT
   cmd_audit
-  cmd_prepare --bump "${bump:-patch}"
+  local prepare_args=(--bump "${bump:-patch}")
+  if [[ -n "$preid" ]]; then
+    prepare_args+=(--preid "$preid")
+  fi
+  cmd_prepare "${prepare_args[@]}"
   cmd_publish ${dry_run}
   cleanup_preserved_audit_tmp
   trap - EXIT

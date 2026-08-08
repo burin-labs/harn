@@ -8,6 +8,8 @@
 //
 // Usage: harn run scripts/render_release_notes.harn -- \
 //          --version X.Y.Z [--output PATH] [--repo owner/name]
+import { parse_release } from "std/semver"
+
 const CHANGELOG = "CHANGELOG.md"
 
 /** Drop a leading `v` so `v0.8.71` and `0.8.71` are equivalent. */
@@ -35,10 +37,18 @@ pub fn escape_regex(text: string) -> string {
     .join("")
 }
 
-/** Collect every `## vX.Y.Z` heading version, top to bottom. */
+/** Collect every canonical stable or prerelease heading version, top to bottom. */
 pub fn changelog_versions(changelog: string) -> list<string> {
-  const caps = regex_captures(r"(?m)^## v(\d+\.\d+\.\d+)$", changelog)
-  return caps.map(fn(c) { c.groups[0] }).to_list()
+  let versions: list<string> = []
+  for line in changelog.lines() {
+    if line.starts_with("## v") {
+      const version = line.substring(4, line.len())
+      if parse_release(version) != nil {
+        versions = versions + [version]
+      }
+    }
+  }
+  return versions
 }
 
 /**

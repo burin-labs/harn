@@ -37,6 +37,12 @@ permissions:
 
 jobs:
   publish:
+    # The Marketplace accepts only major.minor.patch manifest versions; its
+    # prerelease channel is a separate flag and cannot preserve Harn's full
+    # X.Y.Z-identifiers identity. The CLI prerelease therefore skips this
+    # independently versioned projection instead of publishing the wrong one.
+    # https://code.visualstudio.com/api/working-with-extensions/publishing-extension#pre-release-extensions
+    if: github.ref_type != 'tag' || !contains(github.ref_name, '-')
     runs-on: ubuntu-latest
     # Lift the secrets to job-level env so the publish steps can gate on
     # them: the `secrets` context is not available in a step-level `if:`,
