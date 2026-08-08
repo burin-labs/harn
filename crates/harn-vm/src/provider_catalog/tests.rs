@@ -589,7 +589,7 @@ fn remote_catalog_rejects_stale_v2_schema() {
         Err(error) => error,
     };
     assert!(
-        error.contains("schema_version must be 7, got 2"),
+        error.contains("schema_version must be 8, got 2"),
         "unexpected stale-catalog rejection: {error}"
     );
     assert!(
