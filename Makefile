@@ -572,6 +572,8 @@ test-pr-gate-scripts:
 	./scripts/tests/ci_rust_test_lane_test.sh
 	./scripts/tests/macos_nightly_test_env_test.sh
 	./scripts/tests/ci_finalize_sccache_test.sh
+	./scripts/tests/ci_wait_for_run_artifacts_test.sh
+	./scripts/tests/ci_write_walltime_report_test.sh
 	./scripts/tests/ci_preemption_recover_test.sh
 	./scripts/tests/update_queued_pr_test.sh
 	./scripts/tests/cancel_superseded_merge_groups_test.sh

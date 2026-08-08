@@ -474,12 +474,12 @@ jobs:
     name: Rust workspace tests
     needs: [changes]
     if: needs.changes.outputs.rust == 'true'
-    # Paid capacity is limited to the merge queue, the only acceptance surface
-    # for #5003. PRs and pushes use the free hosted fallback. At $0.016/min the
-    # paid path has a hard 10-minute/$0.16 fuse. Free hosted and kill-switch
-    # fallbacks retain enough time to finish from a cold coarse cache.
-    runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || (github.event_name == 'merge_group' && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest') }}
-    timeout-minutes: ${{ github.event_name == 'merge_group' && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' && 10 || 25 }}
+    # Paid capacity covers the merge queue and trusted same-repository PRs; fork
+    # PRs and pushes retain the free hosted fallback. At $0.016/min every paid
+    # run has a hard 10-minute/$0.16 fuse, while hosted and kill-switch paths
+    # keep enough time to finish from a cold coarse cache.
+    runs-on: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'ubuntu-latest' || ((github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-latest') }}
+    timeout-minutes: ${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && vars.HARN_CI_DISABLE_BLACKSMITH_LINUX != 'true' && 10 || 25 }}
     # The GitHub-hosted fallback remains an authorized main-branch cache
     # writer; Blacksmith uses sticky sccache and never enters that step.
     permissions:
@@ -493,7 +493,7 @@ jobs:
       # The producer is the only sticky-cache writer. Fifteen GiB covered the
       # previously measured workspace graph and caps storage near $7.50/month.
       SCCACHE_CACHE_SIZE: 15G
-      HARN_RUNNER_TIER: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'github-hosted' || (github.event_name == 'merge_group' && 'blacksmith' || 'github-hosted') }}
+      HARN_RUNNER_TIER: ${{ vars.HARN_CI_DISABLE_BLACKSMITH_LINUX == 'true' && 'github-hosted' || ((github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'blacksmith' || 'github-hosted') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -524,14 +524,43 @@ jobs:
         uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
         with:
           tool: nextest@0.9.132
-      - name: Build Harn CLI and security tests
+      - name: Build portable Harn CLI
         env:
           CARGO_BUILD_JOBS: "4"
         run: >-
-          ./scripts/ci/rust_artifact.sh build-check-inputs
+          ./scripts/ci/rust_artifact.sh build-cli
           "$RUNNER_TEMP/harn-cli.tar.zst"
+          "$GITHUB_SHA"
+      # upload-artifact v4 artifacts are immutable and REST-visible as soon as
+      # this step completes. Publish the execution inputs before the producer
+      # runs tests so free hosted consumers can overlap that test phase. The
+      # producer remains independently required and fail-closed in ci-status.
+      - name: Upload portable Harn CLI
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: harn-cli.tar.zst
+          path: ${{ runner.temp }}/harn-cli.tar.zst
+          archive: false
+          if-no-files-found: error
+          retention-days: 1
+      # The Harn consumers can now start while this independent test-profile
+      # archive is compiled. Keeping it in the same producer preserves the warm
+      # target graph without putting it on the Harn critical path.
+      - name: Build security test archive
+        env:
+          CARGO_BUILD_JOBS: "4"
+        run: >-
+          ./scripts/ci/rust_artifact.sh build-security
           "$RUNNER_TEMP/harn-security.tar.zst"
           "$GITHUB_SHA"
+      - name: Upload security test archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: harn-security.tar.zst
+          path: ${{ runner.temp }}/harn-security.tar.zst
+          archive: false
+          if-no-files-found: error
+          retention-days: 1
       # The kill switch retains the archive-mode fallback, but the normal path
       # executes the already-compiled suite directly in this warm workspace.
       - name: Build portable workspace test archive
@@ -552,22 +581,6 @@ jobs:
           scripts/ci/run_rust_test_lane.sh
           cargo nextest run --locked --workspace --profile ci
           -E 'not (test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration) or test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline))'
-      - name: Upload portable Harn CLI
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: harn-cli.tar.zst
-          path: ${{ runner.temp }}/harn-cli.tar.zst
-          archive: false
-          if-no-files-found: error
-          retention-days: 1
-      - name: Upload security test archive
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: harn-security.tar.zst
-          path: ${{ runner.temp }}/harn-security.tar.zst
-          archive: false
-          if-no-files-found: error
-          retention-days: 1
       - name: Upload workspace test archive
         if: vars.HARN_CI_DISABLE_COLOCATED_TESTS == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -583,6 +596,30 @@ jobs:
       - name: Summarize and stop sccache
         if: always() && env.HARN_RUNNER_TIER == 'blacksmith'
         run: ./scripts/ci/finalize_sccache.sh
+
+  # GitHub job dependencies wait for terminal producer state, even when an
+  # immutable v4 artifact is already available. This single free-hosted barrier
+  # turns CLI visibility into the dependency contract and lets Harn consumers
+  # overlap both the security build and the producer's test phase.
+  rust-artifacts-ready:
+    name: Rust artifacts ready
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+      - name: Wait for immutable Rust artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          ./scripts/ci/wait_for_run_artifacts.sh
+          harn-cli.tar.zst
 
   # Post-merge main-scoped cache writer. merge_group builds are the required
   # proofs but cannot populate a cache other refs can read; main push would
@@ -769,6 +806,9 @@ jobs:
 
   rust-security:
     name: Rust security proof
+    # The security archive is intentionally built after the CLI handoff. This
+    # short host-bound proof starts at producer completion and remains well off
+    # the Harn-audit critical path.
     needs: [changes, rust-check-inputs]
     if: >-
       needs.changes.outputs.rust == 'true'
@@ -820,13 +860,12 @@ jobs:
 
   harn-audit:
     name: ${{ matrix.name }}
-    # Consumes only the small portable CLI bundle, so it hangs off the fast
-    # dedicated rust-check-inputs producer instead of the full workspace
-    # compile+suite.
-    needs: [changes, rust-check-inputs]
+    # Consume the immutable CLI as soon as it is published, while the producer
+    # continues the independently required workspace test proof.
+    needs: [changes, rust-artifacts-ready]
     if: >-
       needs.changes.outputs.rust == 'true'
-      && needs.rust-check-inputs.result == 'success'
+      && needs.rust-artifacts-ready.result == 'success'
     runs-on: ubuntu-latest
     # The immutable CLI producer is shared, but conformance and the independent
     # source/grammar/generated audits use separate free hosted workers. Putting
@@ -904,35 +943,29 @@ jobs:
           matrix.kind == 'conformance'
           && github.event_name == 'merge_group'
           && steps.release-audit-harn.outcome == 'success'
-        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          report="${RUNNER_TEMP}/ci-walltime-report.json"
-          "$HARN_BIN" run scripts/ci_walltime_report.harn -- --limit 50 --json > "$report"
-          "$HARN_BIN" run scripts/ci_walltime_report.harn -- --limit 50 >> "$GITHUB_STEP_SUMMARY"
+        run: ./scripts/ci/write_ci_walltime_report.sh "$RUNNER_TEMP/ci-walltime-report.json"
       - name: Upload rolling merge-group wall time
         if: >-
           matrix.kind == 'conformance'
           && github.event_name == 'merge_group'
           && steps.release-audit-harn.outcome == 'success'
-        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ci-walltime-report
           path: ${{ runner.temp }}/ci-walltime-report.json
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 14
 
   audit-scripts:
     name: Audit scripts
-    # Consumes only the small portable CLI bundle from rust-check-inputs (see
-    # harn-audit).
-    needs: [changes, rust-check-inputs]
+    # Consumes only the small portable CLI bundle through the same live
+    # artifact barrier as harn-audit.
+    needs: [changes, rust-artifacts-ready]
     if: >-
       needs.changes.outputs.rust == 'true'
-      && needs.rust-check-inputs.result == 'success'
+      && needs.rust-artifacts-ready.result == 'success'
     # Keep this execution-only lane on elastic capacity. It gains no compiler
     # cache benefit from a persistent worker, and merge-queue bursts otherwise
     # leave it waiting behind compile-bearing jobs on the scarce stable pool.
@@ -1672,6 +1705,7 @@ jobs:
         lint-md,
         rust-checks,
         rust-check-inputs,
+        rust-artifacts-ready,
         rust-cache-refresh,
         rust-test,
         rust-security,
@@ -1762,6 +1796,18 @@ jobs:
               :
             else
               echo "::error::Rust audit artifact build failed or skipped while Rust proof was required."
+              exit 1
+            fi
+          fi
+
+          rust_artifacts_ready_result="${{ needs['rust-artifacts-ready'].result }}"
+          echo "Rust artifacts ready: $rust_artifacts_ready_result"
+          if [ "$rust_artifacts_ready_result" != "success" ]; then
+            if [ "$rust_artifacts_ready_result" = "skipped" ] \
+              && [ "${{ needs.changes.outputs.rust }}" != "true" ]; then
+              :
+            else
+              echo "::error::Rust artifact handoff failed or skipped while Rust proof was required."
               exit 1
             fi
           fi
