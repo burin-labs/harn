@@ -131,6 +131,7 @@ pub(crate) fn read_pid_record(
     Ok(Some(record))
 }
 
+#[cfg(any(unix, test))]
 pub(crate) fn clear_pid_record(base_dir: &Path, provider: &str) -> Result<(), String> {
     let path = pid_file(base_dir, provider);
     if !path.exists() {

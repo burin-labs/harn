@@ -38,9 +38,9 @@ use crate::commands::hardware::collect_hardware_snapshot;
 use super::profile::{defaults_for, runtime_profile_host};
 use super::runtime::{
     local_provider_ids, local_runtime_lifecycle_for_provider, normalize_local_provider_id,
-    ollama_unload_model, resolve_provider_def, snapshot_provider, terminate_pid,
+    ollama_unload_model, resolve_provider_def, snapshot_provider, terminate_managed_pid,
 };
-use super::state::{clear_pid_record, read_pid_record, write_selection, LocalSelection};
+use super::state::{write_selection, LocalSelection};
 
 #[derive(Debug, Serialize)]
 struct SwitchResult {
@@ -226,18 +226,21 @@ pub(crate) async fn evict_siblings(
         if provider == active_provider || lifecycle.stop != LocalRuntimeStop::Pid {
             continue;
         }
-        if let Ok(Some(record)) = read_pid_record(base_dir, &provider) {
-            // Only Harn-launched managed-process runtimes can be evicted.
-            let outcome = match terminate_pid(record.pid) {
-                Ok(()) => "stopped".to_string(),
-                Err(error) => format!("error: {error}"),
-            };
-            let _ = clear_pid_record(base_dir, &provider);
-            evicted.push(EvictionRecord {
+        match terminate_managed_pid(&provider, base_dir) {
+            Ok(Some(stopped)) => {
+                let (target, outcome) = stopped.into_action();
+                evicted.push(EvictionRecord {
+                    provider: provider.clone(),
+                    target,
+                    outcome,
+                });
+            }
+            Ok(None) => {}
+            Err(error) => evicted.push(EvictionRecord {
                 provider: provider.clone(),
-                target: format!("pid {}", record.pid),
-                outcome,
-            });
+                target: "pid".to_string(),
+                outcome: format!("error: {error}"),
+            }),
         }
     }
     evicted

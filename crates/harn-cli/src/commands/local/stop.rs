@@ -14,9 +14,9 @@ use crate::cli::LocalStopArgs;
 
 use super::runtime::{
     local_provider_ids, local_runtime_lifecycle_for_provider, normalize_local_provider_id,
-    ollama_unload_model, snapshot_provider, terminate_pid,
+    ollama_unload_model, snapshot_provider, terminate_managed_pid,
 };
-use super::state::{clear_pid_record, read_pid_record, read_selection};
+use super::state::read_selection;
 
 #[derive(Debug, Serialize)]
 struct StopResult {
@@ -124,8 +124,8 @@ async fn stop_ollama(provider: &str, base_dir: &Path, actions: &mut Vec<StopActi
 }
 
 fn stop_managed_pid(provider: &str, base_dir: &Path, actions: &mut Vec<StopAction>) {
-    let record = match read_pid_record(base_dir, provider) {
-        Ok(Some(record)) => record,
+    let stopped = match terminate_managed_pid(provider, base_dir) {
+        Ok(Some(stopped)) => stopped,
         Ok(None) => return,
         Err(error) => {
             actions.push(StopAction {
@@ -135,13 +135,42 @@ fn stop_managed_pid(provider: &str, base_dir: &Path, actions: &mut Vec<StopActio
             return;
         }
     };
-    let outcome = match terminate_pid(record.pid) {
-        Ok(()) => "stopped".to_string(),
-        Err(error) => format!("error: {error}"),
-    };
-    let _ = clear_pid_record(base_dir, provider);
-    actions.push(StopAction {
-        target: format!("pid {}", record.pid),
-        outcome,
-    });
+    let (target, outcome) = stopped.into_action();
+    actions.push(StopAction { target, outcome });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::local::state::{read_pid_record, write_pid_record, PidRecord};
+
+    #[test]
+    fn failed_managed_stop_preserves_pid_record_for_retry() {
+        let dir = tempfile::tempdir().expect("state directory");
+        let record = PidRecord {
+            provider: "llamacpp".to_string(),
+            pid: u32::MAX,
+            model: "test-model".to_string(),
+            base_url: "http://127.0.0.1:8001".to_string(),
+            command: "llama-server".to_string(),
+            args: Vec::new(),
+            started_at: "2026-08-07T00:00:00Z".to_string(),
+        };
+        write_pid_record(dir.path(), &record).expect("write PID record");
+
+        let mut actions = Vec::new();
+        stop_managed_pid(&record.provider, dir.path(), &mut actions);
+
+        assert!(
+            actions
+                .iter()
+                .any(|action| action.outcome.starts_with("error:")),
+            "the invalid PID must exercise the failed-termination path"
+        );
+        assert_eq!(
+            read_pid_record(dir.path(), &record.provider).expect("read PID record after failure"),
+            Some(record),
+            "a failed termination must retain ownership state for a retry"
+        );
+    }
 }

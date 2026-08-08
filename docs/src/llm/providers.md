@@ -138,6 +138,10 @@ harn local profile local-qwen3.6 --provider llamacpp --json
 harn local stop --all
 ```
 
+For Harn-launched processes, a failed SIGTERM leaves the PID record intact so
+the stop can be retried. A record is cleared only after SIGTERM succeeds or the
+operating system reports that the tracked process has already exited.
+
 `--ctx` / `--keep-alive` default to a machine profile derived from
 RAM and accelerator presence — a 48 GB Apple Silicon laptop picks a
 wider context window than a low-RAM Linux box. Override either by
