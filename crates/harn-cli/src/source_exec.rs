@@ -240,16 +240,14 @@ pub(crate) async fn execute_with_skill_dirs_and_options(
             // still refuses it at runtime unless the same authority is enabled
             // here. This must happen before the first import, which is why it
             // sits immediately after stdlib registration.
-            if source_path
-                .map(crate::compiler_context::trusted_host_dispatch_for_source)
-                .unwrap_or(false)
-            {
-                vm.enable_trusted_host_dispatch().map_err(|error| {
-                    ExecError::new(
-                        ExecStage::Runtime,
-                        format!("failed to enable trusted host dispatch: {error}"),
-                    )
-                })?;
+            if let Some(path) = source_path {
+                crate::compiler_context::enable_trusted_host_dispatch_for_source(&mut vm, path)
+                    .map_err(|error| {
+                        ExecError::new(
+                            ExecStage::Runtime,
+                            format!("failed to enable trusted host dispatch: {error}"),
+                        )
+                    })?;
             }
             let source_parent = source_path
                 .and_then(|p| p.parent())
