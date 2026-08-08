@@ -51,6 +51,23 @@ pub(crate) fn trusted_host_dispatch_for_source(path: &Path) -> bool {
     crate::package::load_check_config(Some(&absolute)).trusted_host_dispatch
 }
 
+/// Apply the source project's trusted host-dispatch declaration to a fresh VM.
+///
+/// File-backed CLI entry points must call this before loading any module. Keeping
+/// the manifest lookup and VM transition together prevents `run`, source
+/// execution, and ACP from silently assigning different authority to the same
+/// project.
+pub(crate) fn enable_trusted_host_dispatch_for_source(
+    vm: &mut harn_vm::Vm,
+    path: &Path,
+) -> Result<(), harn_vm::VmError> {
+    if !trusted_host_dispatch_for_source(path) {
+        return Ok(());
+    }
+    vm.enable_trusted_host_dispatch()?;
+    Ok(())
+}
+
 pub(crate) fn imported_enum_candidates_for_source(path: &Path, source: &str) -> Vec<String> {
     let mut candidates = harn_modules::build_with_source(path, source)
         .imported_names_by_kind_for_file(path, harn_modules::DefKind::Enum)

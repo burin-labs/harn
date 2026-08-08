@@ -62,11 +62,11 @@ workspace = ["read_text", "write_text"]
 - `strict_types` enables boundary-value type checks persistently. Its one-shot
   equivalent is `--strict-types`; combine it with `--strict` for a zero-warning
   type-safety gate.
-- `trusted_host_dispatch` exposes privileged host builtins only while checking
-  an embedder-owned route module graph. Its one-shot equivalent is
-  `--trusted-host-dispatch`. Enable it only when a Rust host selects and loads
-  the graph through the trusted-dispatch VM boundary; ordinary modules remain
-  unprivileged.
+- `trusted_host_dispatch` exposes privileged host builtins while checking,
+  testing, or executing an embedder-owned route module graph, including through
+  ACP. Its check-only flag equivalent is `--trusted-host-dispatch`. Enable it
+  only when a Rust host selects and loads the graph through the trusted-dispatch
+  VM boundary; ordinary modules remain unprivileged.
 - `preflight_severity` downgrades preflight diagnostics to warnings or
   suppresses them entirely. Type-checker and lint diagnostics are
   unaffected — preflight failures are reported under the `preflight`

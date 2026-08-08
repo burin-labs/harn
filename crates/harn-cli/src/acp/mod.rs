@@ -43,6 +43,12 @@ impl AcpRuntimeConfigurator for CliAcpRuntimeConfigurator {
             return Ok(());
         };
 
+        // ACP is another execution transport for the same file-backed project,
+        // so its VM must receive the same manifest-declared authority as `run`
+        // and source execution before trigger or hook modules are loaded.
+        crate::compiler_context::enable_trusted_host_dispatch_for_source(vm, path)
+            .map_err(|error| format!("failed to enable trusted host dispatch: {error}"))?;
+
         let extensions = crate::package::load_runtime_extensions(path);
         crate::package::install_runtime_extensions(&extensions);
         crate::package::install_manifest_triggers(vm, &extensions)
@@ -112,4 +118,48 @@ pub(crate) async fn run_acp_channel_server(
         response_tx,
     )
     .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn configure_fixture(declared: bool) -> Result<(), String> {
+        harn_vm::reset_thread_local_state();
+        crate::compiler_context::ensure_builtin_signatures_installed();
+        let project = tempfile::tempdir().expect("temp project");
+        let script =
+            crate::tests::common::host_dispatch_project::write_host_dispatch_trigger_project(
+                project.path(),
+                declared,
+                r#"
+pub fn on_tick(_event) -> nil {
+  const _ = host_call("runtime.pipeline_input", {})
+  return nil
+}
+"#,
+            );
+        let mut vm = harn_vm::Vm::new();
+        harn_vm::register_vm_stdlib(&mut vm);
+        let result = CliAcpRuntimeConfigurator
+            .configure(&mut vm, Some(&script))
+            .await;
+        harn_vm::reset_thread_local_state();
+        result
+    }
+
+    #[tokio::test]
+    async fn acp_honors_manifest_trusted_host_dispatch_before_installing_triggers() {
+        configure_fixture(true)
+            .await
+            .expect("declared ACP project accepts privileged trigger import graph");
+
+        let error = configure_fixture(false)
+            .await
+            .expect_err("undeclared ACP project remains unprivileged");
+        assert!(
+            error.contains("host_call") && error.contains("not callable source API"),
+            "unexpected refusal: {error}"
+        );
+    }
 }

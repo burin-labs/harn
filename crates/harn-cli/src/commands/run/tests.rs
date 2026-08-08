@@ -1403,35 +1403,6 @@ pipeline main(harness: Harness) {
 /// compile-time one raised while the manifest installs its triggers, which
 /// happens before any script body runs.
 fn write_host_dispatch_trigger_project(root: &Path, declared: bool) -> PathBuf {
-    // Stop `load_check_config`'s walk-up at this project, so an ancestor
-    // manifest above the temp dir cannot decide the outcome.
-    std::fs::create_dir_all(root.join(".git")).expect("project boundary");
-    let check_section = if declared {
-        "\n[check]\ntrusted_host_dispatch = true\n"
-    } else {
-        ""
-    };
-    std::fs::write(
-        root.join("harn.toml"),
-        format!(
-            r#"
-[package]
-name = "host-dispatch-run-fixture"
-
-[exports]
-trigger_handlers = "trigger_handlers.harn"
-
-[[triggers]]
-id = "cron-handler"
-kind = "cron"
-provider = "cron"
-schedule = "* * * * *"
-match = {{ events = ["cron.tick"] }}
-handler = "trigger_handlers::on_tick"
-{check_section}"#
-        ),
-    )
-    .expect("write manifest");
     // The `host_call` lives one import away from the handler, matching a real
     // host-adapter layout. Trigger installation compiles the handler's whole
     // import closure, so this is where the refusal actually lands.
@@ -1444,8 +1415,9 @@ pub fn unreachable_host_read() -> any {
 "#,
     )
     .expect("write host adapter");
-    std::fs::write(
-        root.join("trigger_handlers.harn"),
+    crate::tests::common::host_dispatch_project::write_host_dispatch_trigger_project(
+        root,
+        declared,
         r#"
 import { unreachable_host_read } from "./host_adapter"
 
@@ -1455,18 +1427,6 @@ pub fn on_tick(_event) -> nil {
 }
 "#,
     )
-    .expect("write trigger handler");
-    let script = root.join("main.harn");
-    std::fs::write(
-        &script,
-        r#"
-pipeline main(harness: Harness) {
-  harness.stdio.println("target-ran")
-}
-"#,
-    )
-    .expect("write script");
-    script
 }
 
 async fn run_host_dispatch_fixture(declared: bool) -> crate::commands::run::RunOutcome {

@@ -869,12 +869,13 @@ async fn execute_run_inner_scoped(
     // own trigger handlers were compiled without the authority and refused
     // every `host_call` before the script body ever ran. Enable it here, ahead
     // of the first import, so one declaration means one thing everywhere.
-    if crate::compiler_context::trusted_host_dispatch_for_source(std::path::Path::new(path)) {
-        if let Err(error) = vm.enable_trusted_host_dispatch() {
-            stderr.push_str(&format!(
-                "warning: failed to enable trusted host dispatch: {error}\n"
-            ));
-        }
+    if let Err(error) = crate::compiler_context::enable_trusted_host_dispatch_for_source(
+        &mut vm,
+        std::path::Path::new(path),
+    ) {
+        stderr.push_str(&format!(
+            "warning: failed to enable trusted host dispatch: {error}\n"
+        ));
     }
     let source_parent = std::path::Path::new(path)
         .parent()
