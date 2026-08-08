@@ -1003,13 +1003,23 @@ impl crate::vm::Vm {
                         let mut record = crate::value::DictMap::new();
                         record.put_str("capability", call.capability);
                         if call.host_operation {
+                            record.put_str("operation", call.member.clone());
+                            record.put_str("method", call.member);
+                            record.insert(
+                                crate::value::intern_key("params"),
+                                call.args.first().cloned().unwrap_or(VmValue::Nil),
+                            );
+                            record.insert(
+                                crate::value::intern_key("args"),
+                                VmValue::List(std::sync::Arc::new(call.args)),
+                            );
+                        } else {
+                            record.put_str("method", call.member.clone());
                             record.put_str("operation", call.member);
                             record.insert(
                                 crate::value::intern_key("params"),
-                                call.args.into_iter().next().unwrap_or(VmValue::Nil),
+                                call.args.first().cloned().unwrap_or(VmValue::Nil),
                             );
-                        } else {
-                            record.put_str("method", call.member);
                             record.insert(
                                 crate::value::intern_key("args"),
                                 VmValue::List(std::sync::Arc::new(call.args)),

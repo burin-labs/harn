@@ -300,6 +300,24 @@ pub type CapabilityFixture = {
 }
 
 /**
+ * A lone capability fixture describes stable host state and is reusable by
+ * default. Multiple fixtures for the same target remain an ordered response
+ * script. Callers can set `repeat` explicitly to override either default.
+ */
+fn capability_fixture_repeats_by_default(
+  fixtures: list<CapabilityFixture>,
+  fixture: CapabilityFixture,
+) -> bool {
+  let target_count = 0
+  for candidate in fixtures {
+    if candidate.capability == fixture.capability && candidate.method == fixture.method {
+      target_count = target_count + 1
+    }
+  }
+  return target_count == 1
+}
+
+/**
  * Run `body` with an isolated fixture scope owned by this exact `Harness`.
  * A target must be either a method in the generated capability contract or a
  * registered host-protocol operation such as `mcp.elicit`; protocol fixtures
@@ -323,7 +341,7 @@ pub fn with_capability_fixtures(
           fixture.method,
           fixture.error,
           fixture?.when,
-          fixture?.repeat,
+          fixture?.repeat ?? capability_fixture_repeats_by_default(fixtures, fixture),
           fixture?.unregistered_ok,
         )
       } else {
@@ -332,7 +350,7 @@ pub fn with_capability_fixtures(
           fixture.method,
           fixture?.result,
           fixture?.when,
-          fixture?.repeat,
+          fixture?.repeat ?? capability_fixture_repeats_by_default(fixtures, fixture),
           fixture?.unregistered_ok,
         )
       }
