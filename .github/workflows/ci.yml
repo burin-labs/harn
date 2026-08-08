@@ -469,7 +469,7 @@ jobs:
   # One persistent producer owns the complete environment-neutral Rust graph.
   # It builds the exact CLI/security artifacts consumed by GitHub Ubuntu, then
   # executes every compatible workspace test without recompiling on another
-  # runner. Landlock remains an explicit GitHub-owned proof below.
+  # runner. Host-bound Linux sandbox proofs remain explicitly GitHub-owned below.
   rust-check-inputs:
     name: Rust workspace tests
     needs: [changes]
@@ -550,7 +550,7 @@ jobs:
         run: >-
           scripts/ci/run_rust_test_lane.sh
           cargo nextest run --locked --workspace --profile ci
-          -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'
+          -E 'not (test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration))'
       - name: Upload portable Harn CLI
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -752,8 +752,9 @@ jobs:
       # moment the checksummed restore no longer needs it.
       - name: Drop compressed archive after restore
         run: rm -f "$RUNNER_TEMP/harn-workspace-tests.tar.zst"
-      # Landlock is the one environment-specific proof owned by rust-security;
-      # every other default-suite test remains required here.
+      # Linux process-sandbox tests require the GitHub Ubuntu kernel's Landlock
+      # support and are owned by rust-security; every environment-neutral test
+      # remains required here.
       - name: Run Rust workspace tests
         id: release-audit-rust-test
         env:
@@ -763,7 +764,7 @@ jobs:
           cargo nextest run --profile ci
           --archive-file "$RUNNER_TEMP/harn-workspace-tests/harn-tests.tar.zst"
           --workspace-remap "$GITHUB_WORKSPACE"
-          -E 'not test(test_linux_process_sandbox_catches_ten_process_escapes)'
+          -E 'not (test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration))'
 
   rust-security:
     name: Rust security proof
@@ -807,14 +808,14 @@ jobs:
           "$RUNNER_TEMP/harn-security.tar.zst"
           "$RUNNER_TEMP/harn-security"
           "$GITHUB_SHA"
-      - name: Run Landlock escape proof on GitHub Ubuntu
+      - name: Run OS sandbox proofs on GitHub Ubuntu
         id: release-audit-rust-security
         run: >-
           scripts/ci/run_rust_test_lane.sh
           cargo nextest run --profile ci
           --archive-file "$RUNNER_TEMP/harn-security/harn-security-tests.tar.zst"
           --workspace-remap "$GITHUB_WORKSPACE"
-          -E 'test(test_linux_process_sandbox_catches_ten_process_escapes)'
+          -E 'test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration)'
 
   harn-audit:
     name: ${{ matrix.name }}

@@ -117,6 +117,16 @@ const BLACKSMITH_DISABLE_VAR = "HARN_CI_DISABLE_BLACKSMITH_LINUX"
 
 const BLACKSMITH_8CPU_RUNNER = "blacksmith-8vcpu-ubuntu-2404"
 
+// Blacksmith's Ubuntu image does not expose Landlock. Keep the complete set of
+// tests whose assertions require OS-enforced process isolation on GitHub Ubuntu
+// and prove that the producer and fallback exclude exactly the same set.
+const HOST_BOUND_RUST_TEST_FILTER =
+  "test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration)"
+
+const NEUTRAL_RUST_TEST_FILTER_FLAG = "-E 'not (${HOST_BOUND_RUST_TEST_FILTER})'"
+
+const HOST_BOUND_RUST_TEST_FILTER_FLAG = "-E '${HOST_BOUND_RUST_TEST_FILTER}'"
+
 const RUST_CACHE_ACTION = "./.github/actions/rust-cache"
 
 // Authorized ci.yml cache writers must grant actions: write. The workflow
@@ -1386,10 +1396,11 @@ fn archived_workspace_test_consumer_errors(workflow, job_name: string) -> list<s
   if !contains(test_command, "--archive-file")
     || !contains(test_command, "harn-tests.tar.zst")
     || !contains(test_command, "--workspace-remap")
-    || regex_match(
-    "(^|[ ])--workspace(harness, [ ]|$)",
+    || !contains(
     test_command,
+    NEUTRAL_RUST_TEST_FILTER_FLAG,
   )
+    || regex_match("(^|[ ])--workspace(harness, [ ]|$)", test_command)
     != nil {
     errors = errors + ["ci.yml:${job_name} must execute only the remapped nextest archive"]
   }
@@ -1424,13 +1435,33 @@ fn colocated_rust_proof_errors(workflow) -> list<string> {
   )
     != "1"
     || !contains(colocated_command, "cargo nextest run --locked --workspace --profile ci")
-    || contains(
+    || !contains(
     colocated_command,
-    "--archive-file",
-  ) {
+    NEUTRAL_RUST_TEST_FILTER_FLAG,
+  )
+    || contains(colocated_command, "--archive-file") {
     errors = errors
       + [
       "ci.yml:rust-check-inputs must own the exact co-located environment-neutral Rust proof",
+    ]
+  }
+  const security_job = workflow?.jobs?.["rust-security"]
+  const security_step = step_by_name(
+    security_job?.steps ?? [],
+    "Run OS sandbox proofs on GitHub Ubuntu",
+  )
+  const security_command = trim(security_step?.run ?? "")
+  if trim(security_job?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER
+    || trim(security_step?.id ?? "")
+    != "release-audit-rust-security"
+    || !contains(security_command, "--archive-file")
+    || !contains(
+    security_command,
+    HOST_BOUND_RUST_TEST_FILTER_FLAG,
+  ) {
+    errors = errors
+      + [
+      "ci.yml:rust-security must own every host-bound Linux sandbox proof on GitHub Ubuntu",
     ]
   }
   const rust_test_if = trim(workflow?.jobs?.["rust-test"]?.if ?? "")

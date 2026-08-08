@@ -76,6 +76,8 @@ fn hosted_lane(cache_key: string, write_cache: bool = false) {
 }
 
 fn workflow() {
+  const host_bound_filter =
+    "test(test_linux_process_sandbox_catches_ten_process_escapes) or test(workspace_env_integration)"
   const package_audit = hosted_lane("package-audit", true)
   const lint = hosted_lane("workspace-tests")
   const producer = persistent_lane(
@@ -100,7 +102,7 @@ fn workflow() {
       {
         name: "Run Rust workspace tests",
         run:
-          "scripts/ci/run_rust_test_lane.sh cargo nextest run --profile ci --archive-file harn-tests.tar.zst --workspace-remap workspace",
+          "scripts/ci/run_rust_test_lane.sh cargo nextest run --profile ci --archive-file harn-tests.tar.zst --workspace-remap workspace -E 'not (${host_bound_filter})'",
       },
     ],
   }
@@ -124,7 +126,7 @@ fn workflow() {
             if: "vars.HARN_CI_DISABLE_COLOCATED_TESTS != 'true'",
             env: {HARN_LLM_CALLS_DISABLED: "1"},
             run:
-              "scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --profile ci -E 'not test(landlock)'",
+              "scripts/ci/run_rust_test_lane.sh cargo nextest run --locked --workspace --profile ci -E 'not (${host_bound_filter})'",
           },
         ],
       },
@@ -175,6 +177,17 @@ fn workflow() {
         ],
       },
       "rust-test": rust_test,
+      "rust-security": {
+        "runs-on": "ubuntu-latest",
+        steps: [
+          {
+            name: "Run OS sandbox proofs on GitHub Ubuntu",
+            id: "release-audit-rust-security",
+            run:
+              "scripts/ci/run_rust_test_lane.sh cargo nextest run --profile ci --archive-file harn-security-tests.tar.zst --workspace-remap workspace -E '${host_bound_filter}'",
+          },
+        ],
+      },
       "ci-status": {
         steps: [
           {
@@ -490,6 +503,50 @@ pipeline test_rejects_paid_producer_outside_merge_group_or_without_fuse(harness:
   )
   assert(errors.contains("ci.yml:rust-check-inputs must mirror its Blacksmith/hosted runner tier"))
   assert(errors.contains("ci.yml:rust-check-inputs must keep the 10-minute paid-runner cost fuse"))
+}
+
+@test
+pipeline test_rejects_host_bound_sandbox_coverage_drift(harness: Harness, task) {
+  const valid = workflow()
+  const producer = valid.jobs["rust-check-inputs"]
+  const security = valid.jobs["rust-security"]
+  const invalid = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "rust-check-inputs": {
+        ...producer,
+        steps: producer.steps.map(
+          { step ->
+            if step?.name != "Run Rust workspace tests" {
+              return step
+            }
+            return {...step, run: "cargo nextest run --locked --workspace --profile ci"}
+          },
+        )
+          .to_list(),
+      },
+      "rust-security": {
+        ...security,
+        "runs-on": "blacksmith-8vcpu-ubuntu-2404",
+        steps: security.steps.map(
+          { step -> return {...step, run: "cargo nextest run -E 'test(only_one_case)'"} },
+        )
+          .to_list(),
+      },
+    },
+  }
+  const errors = ci_linux_lane_policy_errors(invalid)
+  assert(
+    errors.contains(
+      "ci.yml:rust-check-inputs must own the exact co-located environment-neutral Rust proof",
+    ),
+  )
+  assert(
+    errors.contains(
+      "ci.yml:rust-security must own every host-bound Linux sandbox proof on GitHub Ubuntu",
+    ),
+  )
 }
 
 @test
