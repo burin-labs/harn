@@ -5,8 +5,10 @@ import {
   agent_monologue_actuation_observe,
 } from "std/agent/monologue_actuation"
 import {
+  __agent_stall_completed_result,
   __agent_stall_delta_signature,
   __agent_stall_gate_input,
+  __agent_stall_observation_recurrence,
   __agent_stall_process_call,
   __agent_stall_result_ok,
   __agent_stall_result_outcome,
@@ -17,6 +19,7 @@ import {
 import "std/agent/stall_config"
 import { __agent_stall_feedback_text } from "std/agent/stall_feedback"
 import {
+  AgentCompletedObservation,
   AgentStallConfig,
   AgentStallObservation,
   AgentStallState,
@@ -24,6 +27,7 @@ import {
 } from "std/agent/stall_types"
 import { __agent_stall_fold_verify_state } from "std/agent/stall_verification"
 import { agent_emit_event, agent_session_totals } from "std/agent/state"
+import { agent_tool_calls_are_read_only } from "std/agent/tool_annotations"
 
 /**
  * Reset only the action-stream tracking (signatures, observation/error
@@ -799,6 +803,106 @@ pub fn __agent_stall_observe_core(
     }
   }
   return __agent_stall_observation(next_state, emitted_warning, config, feedback_deferred)
+}
+
+/**
+ * Fold a completed dispatch into the cumulative observation model.
+ *
+ * This is deliberately separate from the pre-dispatch action detector: exact
+ * information gain can only be decided after each originating call is joined
+ * to its own result. Recurrence warnings remain advisory-only, while
+ * `no_information_gain` is a structural fact for adaptive budget policy.
+ *
+ * @effects: [agent]
+ * @errors: [agent_loop]
+ * @api_stability: experimental
+ */
+pub fn agent_stall_observe_completed_dispatch(
+  agent: HarnessAgent,
+  session_id: string,
+  tool_calls: list,
+  dispatch,
+  iteration: int,
+  raw_config,
+  state: AgentStallState,
+  registry,
+  policy = nil,
+  defer_feedback: bool = false,
+) -> AgentCompletedObservation {
+  const config = __agent_stall_config(raw_config)
+  let next_state = state
+  let emitted_warning = nil
+  let feedback_was_deferred = false
+  let saw_observation = false
+  let all_repeated = len(tool_calls) > 0
+  for (index, call) in iter(tool_calls).enumerate() {
+    const tool_name = __agent_tool_call_name(call)
+    const read_only = tool_name != ""
+      && !contains(config.exempt_tools, tool_name)
+      && agent_tool_calls_are_read_only(
+      [call],
+      registry,
+      policy,
+    )
+    const result = __agent_stall_completed_result(dispatch, call, index)
+    if !read_only || result == nil || !__agent_stall_result_ok(result) {
+      all_repeated = false
+      continue
+    }
+    saw_observation = true
+    const recurrence = __agent_stall_observation_recurrence(
+      next_state,
+      __agent_tool_call_signature(call),
+      __agent_stall_result_outcome(agent, result).signature,
+      true,
+      "ok",
+    )
+    next_state = next_state + {observation_recurrence_counts: recurrence.counts}
+    all_repeated = all_repeated && recurrence.count > 1
+    if !config.enabled
+      || recurrence.count
+      != config.repeat_same_observation
+      || next_state.same_observation_streak
+      >= config
+      .repeat_same_observation {
+      continue
+    }
+    // Cumulative recurrence is information evidence, never a hard-stop rung.
+    next_state = __agent_stall_register_recovery(next_state)
+    const warning = __agent_stall_warning_record(
+      {
+        iteration: iteration,
+        tool_name: tool_name,
+        args: __agent_tool_call_args(call),
+        signature: __agent_tool_call_signature(call),
+        pattern: "repeated_observation_recurrence",
+        count: recurrence.count,
+        consecutive_trips: next_state.consecutive_trips,
+        hard_stop: false,
+        threshold: config.repeat_same_observation,
+      },
+      config,
+    )
+    const emitted = __agent_stall_maybe_emit(
+      agent,
+      session_id,
+      warning,
+      config,
+      next_state,
+      defer_feedback,
+    )
+    next_state = emitted.state + {warnings: emitted.state.warnings.appending(warning)}
+    if emitted_warning == nil {
+      emitted_warning = warning
+    }
+    feedback_was_deferred = feedback_was_deferred || (emitted.feedback_deferred ?? false)
+  }
+  return {
+    state: next_state,
+    warning: emitted_warning,
+    feedback_deferred: feedback_was_deferred,
+    no_information_gain: saw_observation && all_repeated,
+  }
 }
 
 /**

@@ -713,7 +713,9 @@ loop_control: { state ->
   if state.completion.vetoed {
     return {action: "extend", by: 2, reason: "completion gate vetoed"}
   }
-  if state.turn.tool_call_count > 0 && state.progress.changed {
+  if state.progress.changed
+    && !state.progress.no_net_advance
+    && !state.progress.no_information_gain {
     return {action: "extend", by: 2, reason: "recent turn made progress"}
   }
   return nil
@@ -740,6 +742,8 @@ State snapshot fields:
 | `completion.vetoed` | True when `verify_completion` / `verify_completion_judge` / `done_judge` vetoed |
 | `completion.verdict` / `completion.feedback` | Judge verdict and feedback string when present |
 | `progress.changed` | True if this turn made tool calls, produced new successful tool names, or wrote visible text |
+| `progress.no_net_advance` | True when verify-bearing activity repeats a failing outcome without advancing it |
+| `progress.no_information_gain` | True when every completed, explicitly read-only observation this turn exactly repeats a prior `(tool, arguments, result)` signature |
 | `progress.summary` | Human-readable progress hint (`"executed N tool call(s)"`, `"completion gate vetoed"`, etc.) |
 
 Return value is one of:
@@ -757,7 +761,18 @@ the cap edge:
 
 - the latest verify/done judge vetoed completion,
 - `require_successful_tools` is unsatisfied, or
-- the most recent turn executed at least one tool call (i.e. real progress).
+- the most recent turn has an activity signal that is not vetoed by a measured
+  repeated verification outcome or an all-repeated read-only observation set.
+
+The read-only veto is structural: tool annotations must classify every call as
+read-only, every result must succeed, and every exact result must already have
+been seen for the same tool and arguments. A changed polling result, a mixed
+turn with one novel observation, a failed result, a mutation, or missing tool
+annotations retains normal extension eligibility.
+
+This budget classification remains active when `stall_diagnostics` warning and
+feedback emission is disabled. That switch controls operator-facing diagnosis;
+it does not turn repeated observations back into progress.
 
 All decisions are recorded:
 

@@ -12,9 +12,11 @@ pub import {
 } from "std/agent/stall_detectors"
 pub import {
   agent_stall_inject_feedback,
+  agent_stall_observe_completed_dispatch,
   agent_stall_observe_tool_calls,
 } from "std/agent/stall_observation"
 pub import {
+  AgentCompletedObservation,
   AgentStallConfig,
   AgentStallObservation,
   AgentStallState,

@@ -1176,8 +1176,21 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
         )
         const dispatch = dispatched.dispatch
         const actuation_dispatch_results = __dispatch_results_list(dispatch)
-        // Register any long-running handle this turn spawned (a converted
-        // `run_command` returns `status=="running"` with a `handle_id`).
+        const completed_observation = __agent_loop_completed_dispatch_stall(
+          {
+            harness: harness,
+            session_id: session.session_id,
+            tool_calls: tool_calls,
+            dispatch: dispatch,
+            iteration: iteration_index + 1,
+            stall_config: stall_observation.config,
+            stall_state: stall_state,
+            turn_opts: turn_opts,
+            prior_read_streak: monologue_actuation_prior_read_streak,
+          },
+        )
+        stall_state = completed_observation.state
+        // Register long-running handles (`status=="running"` with a `handle_id`).
         // Awaited rows gate the next no-tool-call boundary into a hold; the
         // loop owns the decision cadence, so the model never polls.
         command_ledger = command_ledger_ingest(
@@ -1186,20 +1199,6 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
           __agent_loop_clock_now_ms(harness.clock),
           command_wait,
         )
-        stall_state = stall_state
-          + {
-          monologue_actuation: agent_monologue_actuation_observe_completed_dispatch(
-            stall_state.monologue_actuation,
-            stall_observation.config.monologue_actuation,
-            monologue_actuation_prior_read_streak,
-            len(actuation_dispatch_results) > 0
-              && len(actuation_dispatch_results) == len(tool_calls)
-              && actuation_dispatch_results.all(
-              { result -> __tool_result_ok(result) },
-            )
-              && agent_tool_calls_are_read_only(tool_calls, turn_opts?.tools, turn_opts?.policy),
-          ),
-        }
         stall_prev_dispatch = dispatch
         audit_background_tasks = __spawn_audit_flushes(
           audit_background_tasks,
@@ -1628,6 +1627,7 @@ pub fn __agent_loop_run(harness: Harness, message, session, initial_opts) {
             completion_proposed: outcome.kind == "break",
             verdict: verdict_record,
             progress_no_net_advance: loop_no_net_progress,
+            progress_no_information_gain: completed_observation.no_information_gain,
           }
             + __agent_loop_state_budget_fields(
             harness.agent,
