@@ -487,6 +487,27 @@ fn install_default_wires_every_module_into_a_vm() {
 }
 
 #[test]
+fn registered_host_conditions_round_trip_through_the_real_typed_system_method() {
+    let result = execute_harn(
+        r#"
+import { host_conditions_sample } from "std/host_conditions"
+
+pipeline default(harness: Harness, task) {
+  return host_conditions_sample(harness.system)
+}
+"#,
+    )
+    .expect("real typed host-condition sample");
+
+    assert_response_schema("host_conditions", "sample", &result);
+    let snapshot = expect_dict(result);
+    let Some(VmValue::List(questions)) = snapshot.get("questions") else {
+        panic!("host-condition snapshot must carry question rows");
+    };
+    assert_eq!(questions.len(), 4);
+}
+
+#[test]
 fn registered_session_capability_round_trips_through_typed_harness_agent() {
     let result = execute_harn(
         r#"

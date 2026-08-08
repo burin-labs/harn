@@ -41,8 +41,12 @@ pub fn capability_binding_for_schema(
         "verdict" => CapabilityId::Verdict,
         _ => return None,
     };
-    let requested_method = if module == "session" {
-        match method {
+    let requested_method = match module {
+        "host_conditions" => match method {
+            "sample" => "host_conditions",
+            _ => return None,
+        },
+        "session" => match method {
             "open" => "session_open",
             "update" => "session_update",
             "append" => "session_append",
@@ -54,9 +58,8 @@ pub fn capability_binding_for_schema(
             "search_semantic" => "session_search_semantic",
             "search_hybrid" => "session_search_hybrid",
             _ => return None,
-        }
-    } else {
-        method
+        },
+        _ => method,
     };
     let capability_method = HOST_CAPABILITY_GROUPS
         .iter()
@@ -322,7 +325,7 @@ pub const HOST_CAPABILITY_GROUPS: &[HostCapabilityGroup] = &[
     },
     HostCapabilityGroup {
         capability: CapabilityId::System,
-        methods: &["sample"],
+        methods: &["host_conditions"],
         effects: HOST_READ,
     },
     HostCapabilityGroup {
@@ -686,6 +689,19 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn host_conditions_schema_binds_to_the_typed_system_method() {
+        assert_eq!(
+            capability_binding_for_schema("host_conditions", "sample"),
+            Some((CapabilityId::System, "host_conditions"))
+        );
+        assert!(is_host_capability_method(
+            CapabilityId::System,
+            "host_conditions"
+        ));
+        assert!(!is_host_capability_method(CapabilityId::System, "sample"));
     }
 
     #[test]
