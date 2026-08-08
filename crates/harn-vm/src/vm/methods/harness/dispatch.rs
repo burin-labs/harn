@@ -249,15 +249,6 @@ impl crate::vm::Vm {
             HarnessKind::Stdio => self.call_harness_stdio_method(handle, method, args),
             HarnessKind::Term => self.call_harness_term_method(handle, method, args),
             HarnessKind::Clock => self.call_harness_clock_method(handle, method, args).await,
-            HarnessKind::System if method == "host_conditions" => {
-                let mut options = crate::value::DictMap::new();
-                options.insert(crate::value::intern_key("schema_version"), VmValue::Int(1));
-                self.call_capability_builtin(
-                    "hostlib_host_conditions_sample",
-                    vec![VmValue::dict(options)],
-                )
-                .await
-            }
             HarnessKind::System
                 if matches!(
                     method,

@@ -54,5 +54,5 @@ pub type HostConditionsSnapshot = {
  * @errors: [backend_error, invalid_parameter, missing_parameter]
  */
 pub fn host_conditions_sample(system: HarnessSystem) -> HostConditionsSnapshot {
-  return system.host_conditions()
+  return system.host_conditions({schema_version: 1})
 }
