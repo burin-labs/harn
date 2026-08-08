@@ -1,0 +1,55 @@
+/**
+ * std/llm/handlers.with_retry honors both RFC 9110 Retry-After forms without
+ * violating its never-throws contract: an HTTP-date header (which providers
+ * legally send) and a non-numeric retry_after_ms hint must not crash the
+ * loop. Past-dated headers contribute zero delay, so this test never sleeps
+ * beyond the 1ms backoff.
+ */
+import { with_retry } from "std/llm/handlers"
+
+pipeline default(harness: Harness) {
+  const counter = harness.runtime.atomic(0)
+  const date_header = { _call ->
+    const n = harness.runtime.atomic_add(counter, 1)
+    if n < 2 {
+      return {
+        ok: false,
+        status: "rate_limited",
+        retryable: true,
+        error: {message: "slow down", headers: {"Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT"}},
+      }
+    }
+    return {
+      ok: true,
+      value: {text: "ok", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0},
+    }
+  }
+  const caller = with_retry(harness, date_header, {max_attempts: 3, base_ms: 1})
+  const env = caller(
+    {prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
+  )
+  harness.stdio.println(env.ok)
+  harness.stdio.println(env.retries_attempted)
+  const hint_counter = harness.runtime.atomic(0)
+  const garbage_hint = { _call ->
+    const n = harness.runtime.atomic_add(hint_counter, 1)
+    if n < 2 {
+      return {
+        ok: false,
+        status: "rate_limited",
+        retryable: true,
+        error: {message: "slow down", retry_after_ms: "not-a-number"},
+      }
+    }
+    return {
+      ok: true,
+      value: {text: "ok", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0},
+    }
+  }
+  const hint_caller = with_retry(harness, garbage_hint, {max_attempts: 3, base_ms: 1})
+  const hint_env = hint_caller(
+    {prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}},
+  )
+  harness.stdio.println(hint_env.ok)
+  harness.stdio.println(hint_env.retries_attempted)
+}

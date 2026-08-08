@@ -21,6 +21,7 @@ import { llm_call_options, llm_clear_one_shot_prefill } from "std/llm/options"
 import { parse_first_json, repair_min_max_tokens, with_case_insensitive_keys } from "std/llm/safe"
 import { cosine_similarity } from "std/math"
 import { embed } from "std/memory"
+import { http_retry_after_ms } from "std/net"
 import { get_typed_issues } from "std/schema"
 
 // The caller stack itself (default_llm_caller, llm_caller) lives in
@@ -193,23 +194,25 @@ fn __retry_default_predicate(envelope) {
   return false
 }
 
-fn __retry_after_ms(envelope) {
+fn __retry_after_ms(clock: HarnessClock, envelope) {
   if type_of(envelope) != "dict" {
     return 0
   }
   const err = envelope?.error
   if type_of(err) == "dict" {
-    const ra = err?.retry_after_ms
+    const ra = to_int(err?.retry_after_ms)
     if ra != nil {
-      return to_int(ra)
+      return ra
     }
     const headers = err?.headers
     if type_of(headers) == "dict" {
       for k in headers.keys() {
         if lowercase(to_string(k)) == "retry-after" {
-          const v = to_string(headers[k])
-          if v != "" {
-            return to_int(v) * 1000
+          // Shared RFC 9110 parser: providers send both delay-seconds and
+          // HTTP-date forms; assuming the numeric form crashed the loop.
+          const parsed = http_retry_after_ms(clock, headers[k])
+          if parsed != nil {
+            return parsed
           }
         }
       }
@@ -318,7 +321,7 @@ pub fn with_retry(harness: Harness, next, opts = nil) {
         return envelope + {retries_attempted: attempt - 1}
       }
       const header_delay = if honor_retry_after {
-        __retry_after_ms(envelope)
+        __retry_after_ms(harness.clock, envelope)
       } else {
         0
       }

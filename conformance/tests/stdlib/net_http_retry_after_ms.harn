@@ -1,0 +1,18 @@
+/**
+ * std/net.http_retry_after_ms parses both RFC 9110 Retry-After forms: delay
+ * seconds and HTTP-date. Past values clamp to 0, unparseable values are nil.
+ */
+import { http_retry_after_ms } from "std/net"
+
+pipeline default(harness: Harness) {
+  harness.stdio.println(http_retry_after_ms(harness.clock, "2") == 2000)
+  harness.stdio.println(http_retry_after_ms(harness.clock, "0.5") == 500)
+  harness.stdio.println(http_retry_after_ms(harness.clock, "0") == 0)
+  harness.stdio.println(http_retry_after_ms(harness.clock, 3) == 3000)
+  harness.stdio.println(http_retry_after_ms(harness.clock, "Wed, 21 Oct 2015 07:28:00 GMT") == 0)
+  const far_future = http_retry_after_ms(harness.clock, "Fri, 01 Jan 2999 00:00:00 GMT")
+  harness.stdio.println(far_future != nil && far_future > 0)
+  harness.stdio.println(http_retry_after_ms(harness.clock, "not-a-delay") == nil)
+  harness.stdio.println(http_retry_after_ms(harness.clock, "") == nil)
+  harness.stdio.println(http_retry_after_ms(harness.clock, nil) == nil)
+}
