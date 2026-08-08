@@ -18,3 +18,5 @@ cargo nextest run --locked --workspace --profile ci --no-run \
 # Match rust-check-inputs' security archive compile shape (harn-vm filter).
 cargo nextest run --locked -p harn-vm --profile ci --no-run \
   -E 'test(test_linux_process_sandbox_catches_ten_process_escapes)'
+
+# Workspace-crate cache canary touch for #5003 hosted wall-time sampling.
