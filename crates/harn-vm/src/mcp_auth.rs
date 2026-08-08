@@ -946,6 +946,10 @@ pub struct BearerChallengeError<'a> {
     pub description: Option<&'a str>,
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "start/index are char_indices offsets of the ASCII ',' separator"
+)]
 fn split_challenge_segments(header: &str) -> Vec<&str> {
     let mut segments = Vec::new();
     let mut start = 0;
@@ -973,7 +977,7 @@ fn split_challenge_segments(header: &str) -> Vec<&str> {
 fn split_first_token(segment: &str) -> (&str, &str) {
     let trimmed = segment.trim_start();
     match trimmed.find(char::is_whitespace) {
-        Some(index) => (&trimmed[..index], &trimmed[index..]),
+        Some(index) => trimmed.split_at(index),
         None => (trimmed, ""),
     }
 }

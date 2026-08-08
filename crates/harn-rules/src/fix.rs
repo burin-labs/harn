@@ -13,6 +13,11 @@ use crate::engine::Span;
 /// Interpolate `$VAR` / `${VAR}` references in `template` from `vars`.
 /// An unknown reference is left verbatim (so a literal `$` survives), and
 /// `$$` is an escaped literal dollar sign.
+#[expect(
+    clippy::string_slice,
+    reason = "cursor offsets advance by len_utf8 or across ASCII bytes and find results, \
+              so every offset is a char boundary"
+)]
 pub fn interpolate(template: &str, vars: &BTreeMap<String, String>) -> String {
     let bytes = template.as_bytes();
     let mut out = String::with_capacity(template.len());

@@ -1187,6 +1187,7 @@ fn unescape_json_pointer_segment(segment: &str) -> String {
     segment.replace("~1", "/").replace("~0", "~")
 }
 
+#[expect(clippy::string_slice, reason = "a blake3 hex digest is ASCII")]
 fn seeded_id(seed: u64, call_number: u64, prefix: &str) -> String {
     let digest = blake3::hash(format!("{seed}:{call_number}:{prefix}").as_bytes());
     format!("{prefix}_{}", &digest.to_hex().to_string()[..12])

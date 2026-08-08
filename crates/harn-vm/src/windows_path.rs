@@ -154,7 +154,9 @@ mod tests {
         let deep = format!(r"\\?\C:\{}", "segment\\".repeat(40));
         let stripped = strip_windows_verbatim_prefix(&deep);
         assert!(stripped.len() > 260, "test path must exceed MAX_PATH");
-        assert_eq!(stripped, &deep[r"\\?\".len()..]);
+        #[expect(clippy::string_slice, reason = "test input is ASCII")]
+        let expected = &deep[r"\\?\".len()..];
+        assert_eq!(stripped, expected);
         assert!(!stripped.starts_with(r"\\?\"));
     }
 }

@@ -467,9 +467,14 @@ pub(super) fn extract_retry_after_ms(err: &VmError) -> Option<u64> {
 ///
 /// Exposed for unit tests; the public entry point is
 /// `extract_retry_after_ms`.
+#[expect(
+    clippy::string_slice,
+    reason = "pos comes from find() on the byte-length-preserving ASCII-lowercased copy of \
+              msg and end from find() on the sliced tail, so both are char boundaries"
+)]
 pub(crate) fn parse_retry_after(msg: &str) -> Option<u64> {
     const MAX_MS: u64 = 60_000;
-    let lower = msg.to_lowercase();
+    let lower = msg.to_ascii_lowercase();
     let pos = lower.find("retry-after:")?;
     let after = &msg[pos + "retry-after:".len()..];
     // End at CRLF so we don't grab a neighboring header.

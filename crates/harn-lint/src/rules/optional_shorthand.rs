@@ -507,16 +507,23 @@ impl<'a, 'd> State<'a, 'd> {
                 best = Some((abs_start, abs_start + len));
             }
         };
-        let mut search_at = 0;
-        while let Some(pos) = region[search_at..].find(needle_after) {
-            consider(search_at + pos, needle_after.len());
-            search_at += pos + 1;
-        }
-        let mut search_at = 0;
-        while let Some(pos) = region[search_at..].find(needle_before) {
-            consider(search_at + pos, needle_before.len());
-            search_at += pos + 1;
-        }
+        // Advance past the match's first char, not one byte: the needle can
+        // start with a multibyte type name, and a byte-sized step would land
+        // inside it and panic the next slice.
+        #[expect(
+            clippy::string_slice,
+            reason = "search_at advances by find offsets plus a whole char, a char boundary"
+        )]
+        let mut scan = |needle: &str| {
+            let step = needle.chars().next().map_or(1, char::len_utf8);
+            let mut search_at = 0;
+            while let Some(pos) = region[search_at..].find(needle) {
+                consider(search_at + pos, needle.len());
+                search_at += pos + step;
+            }
+        };
+        scan(needle_after);
+        scan(needle_before);
         best
     }
 
@@ -616,6 +623,10 @@ fn optional_inner(types: &[TypeExpr]) -> Option<&TypeExpr> {
     Some(inner)
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "offset is a find-derived match offset anchored at a token span, a char boundary"
+)]
 fn line_for(source: &str, offset: usize) -> usize {
     source[..offset.min(source.len())]
         .bytes()
@@ -624,6 +635,11 @@ fn line_for(source: &str, offset: usize) -> usize {
         + 1
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "offset is a find-derived match offset anchored at a token span, and line_start \
+              is rfind-derived, so both are char boundaries"
+)]
 fn column_for(source: &str, offset: usize) -> usize {
     // 1-based *character* column: byte arithmetic would overshoot on any
     // line containing multibyte characters before the offset.

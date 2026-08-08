@@ -803,8 +803,8 @@ pub(crate) fn format_float(f: f64) -> String {
 /// positions for wrap decisions when a sub-expression was rendered onto
 /// multiple physical lines and the next token tails its last line.
 pub(crate) fn last_line_width(s: &str) -> usize {
-    match s.rfind('\n') {
-        Some(idx) => text_width(&s[idx + 1..]),
+    match s.rsplit_once('\n') {
+        Some((_, last)) => text_width(last),
         None => text_width(s),
     }
 }

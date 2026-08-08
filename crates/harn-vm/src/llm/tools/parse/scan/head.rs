@@ -11,6 +11,10 @@ use super::unit::CallHead;
 /// identifier that no separator follows, because a bare word is narration, not
 /// a call head. Whether `name` is a registered tool is deliberately not
 /// answered here; that is policy, and policy lives in Harn.
+#[expect(
+    clippy::string_slice,
+    reason = "name_len is an ASCII ident length, a char boundary"
+)]
 pub(crate) fn call_head(text: &str) -> Option<CallHead> {
     let trimmed = text.trim_start();
     let bytes = trimmed.as_bytes();

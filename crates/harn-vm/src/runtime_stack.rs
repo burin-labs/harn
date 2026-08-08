@@ -54,6 +54,10 @@ mod tests {
     ///
     /// Without the cut, a one-line spawn reads the runtime built by the
     /// *following* function and reports a thread that does no VM work.
+    #[expect(
+        clippy::string_slice,
+        reason = "len is a sum of whole split_inclusive line lengths"
+    )]
     fn spawn_body(window: &str) -> &str {
         match window
             .split_inclusive('\n')
@@ -121,6 +125,10 @@ mod tests {
                     };
                     let window = spawn_body(window);
                     if window.contains(DRIVES_VM) && !window.contains(HONORS_CONTRACT) {
+                        #[expect(
+                            clippy::string_slice,
+                            reason = "offset is a match_indices offset on source"
+                        )]
                         let line = 1 + source[..offset].matches('\n').count();
                         offenders.push(format!("{}:{line}", entry.path().display()));
                     }

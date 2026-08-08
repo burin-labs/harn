@@ -138,6 +138,10 @@ struct Ctx<'a> {
 }
 
 impl Ctx<'_> {
+    #[expect(
+        clippy::string_slice,
+        reason = "tree-sitter node ranges are char-aligned byte offsets into the parsed source"
+    )]
     fn text(&self, node: Node<'_>) -> String {
         self.source[node.start_byte()..node.end_byte()].to_string()
     }

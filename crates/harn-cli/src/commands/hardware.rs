@@ -247,10 +247,9 @@ fn parse_macos_vm_stat(text: &str) -> Option<u64> {
 #[cfg(any(target_os = "macos", test))]
 fn parse_page_size(text: &str) -> Option<u64> {
     let first = text.lines().next()?;
-    let start = first.find("page size of ")? + "page size of ".len();
-    let tail = &first[start..];
-    let end = tail.find(" bytes")?;
-    tail[..end].trim().parse().ok()
+    let (_, tail) = first.split_once("page size of ")?;
+    let (size, _) = tail.split_once(" bytes")?;
+    size.trim().parse().ok()
 }
 
 #[cfg(any(target_os = "macos", test))]

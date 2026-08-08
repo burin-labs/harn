@@ -5,6 +5,11 @@
 //! means, which ladder recovers it) is tested as conformance against the Harn
 //! composition, not here.
 
+#![expect(
+    clippy::string_slice,
+    reason = "unit offsets come from the scanner's char-boundary cursor and inputs are ASCII"
+)]
+
 use super::spec::ScanSpec;
 use super::{scan_units, Unit, UnitPayload};
 

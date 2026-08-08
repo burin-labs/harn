@@ -144,6 +144,10 @@ impl FixEdit {
     /// [`Self::dedupe_overlapping`] and splicing right-to-left. Callers that
     /// also need the accepted-edit list (e.g. to build LSP `TextEdit`s) should
     /// call `dedupe_overlapping` directly.
+    #[expect(
+        clippy::string_slice,
+        reason = "FixEdit spans are lexed token byte offsets, which lie on char boundaries"
+    )]
     pub fn apply_all(source: &str, edits: &[FixEdit]) -> String {
         let mut out = source.to_string();
         for edit in Self::dedupe_overlapping(edits) {

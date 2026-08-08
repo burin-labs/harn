@@ -879,6 +879,10 @@ fn strip_common_indent(text: &str) -> String {
         return text.strip_suffix('\n').unwrap_or(text).to_string();
     }
 
+    #[expect(
+        clippy::string_slice,
+        reason = "skip counts leading ASCII space/tab chars, so it is a char-boundary byte offset"
+    )]
     let stripped: String = lines
         .iter()
         .map(|line| {
@@ -907,6 +911,10 @@ fn common_indent(text: &str) -> usize {
 /// Strip up to `n` leading whitespace characters from each line and remove trailing newline.
 fn strip_indent(text: &str, n: usize) -> String {
     let lines: Vec<&str> = text.split('\n').collect();
+    #[expect(
+        clippy::string_slice,
+        reason = "skip counts leading ASCII space/tab chars, so it is a char-boundary byte offset"
+    )]
     let stripped: String = lines
         .iter()
         .map(|line| {

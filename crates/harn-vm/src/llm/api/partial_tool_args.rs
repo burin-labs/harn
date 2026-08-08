@@ -109,6 +109,11 @@ pub(super) fn project_partial(bytes: &str) -> PartialToolArgs {
 /// the prefix is recoverable. Returns `None` for inputs that are
 /// outright malformed (mismatched closers, bare colon, etc.) so the
 /// caller falls through to the `raw_input_partial` path.
+#[expect(
+    clippy::string_slice,
+    reason = "clean_end and i only mark positions at ASCII structural bytes (non-ASCII outside \
+              strings aborts with None), so every cut is a char boundary"
+)]
 fn close_dangling_json(text: &str) -> Option<String> {
     #[derive(Clone, Copy, Eq, PartialEq)]
     enum State {

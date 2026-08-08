@@ -463,6 +463,11 @@ fn scoped_walk_refuses_junction_intermediate_component() {
 // under a new name) would need its spelling added here.
 // ----------------------------------------------------------------------
 #[test]
+#[expect(
+    clippy::string_slice,
+    reason = "offsets are find/match_indices results, ASCII brace positions, \
+              or snapped to a char boundary"
+)]
 fn scoped_walk_forbids_raw_path_filesystem_calls() {
     let src = include_str!("mod.rs");
     let locked_append_src = include_str!("locked_append.rs");
@@ -563,7 +568,11 @@ fn scoped_walk_forbids_raw_path_filesystem_calls() {
             if haystack[..idx].ends_with("fn ") {
                 continue;
             }
-            let window = &haystack[idx..(idx + 300).min(haystack.len())];
+            let mut end = (idx + 300).min(haystack.len());
+            while !haystack.is_char_boundary(end) {
+                end -= 1;
+            }
+            let window = &haystack[idx..end];
             assert!(
                 window.contains("O_NOFOLLOW"),
                 "openat_file call site near byte {idx} must pass O_NOFOLLOW"

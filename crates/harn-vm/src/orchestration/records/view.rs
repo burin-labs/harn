@@ -1123,6 +1123,10 @@ fn redact_bounded(text: &str, policy: &RedactionPolicy, limit: usize) -> String 
     bounded_text(redacted.as_ref(), limit)
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "boundary comes from char_indices of the same text"
+)]
 fn bounded_text(text: &str, limit: usize) -> String {
     if text.len() <= limit {
         return text.to_string();

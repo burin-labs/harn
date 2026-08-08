@@ -553,6 +553,7 @@ interface Repository<T> {
     }
 
     #[test]
+    #[expect(clippy::string_slice, reason = "test input is ASCII")]
     fn parses_typed_and_legacy_pipeline_parameters() {
         let source = "pub pipeline deploy(config: DeployConfig, dry_run: bool) -> string {\n  return \"ok\"\n}\npipeline legacy(task) {}\n";
         let program = parse_source(source).expect("typed pipeline parameters should parse");
@@ -986,6 +987,7 @@ pipeline p(task) {
     }
 
     #[test]
+    #[expect(clippy::string_slice, reason = "test input is ASCII")]
     fn records_each_braced_control_flow_block_span() {
         let source = r"fn h() -> int {
   if a {

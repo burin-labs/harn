@@ -364,6 +364,10 @@ fn relative_path_escapes(path: &str) -> bool {
     false
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "end sits before an ASCII '/' byte or at value.len()"
+)]
 fn strip_trailing_slashes(value: &str) -> &str {
     let mut end = value.len();
     while end > 1 && value.as_bytes()[end - 1] == b'/' {

@@ -231,6 +231,10 @@ pub fn chunk_text(text: &str, target_tokens: usize) -> Vec<String> {
                         if !inner.is_empty() {
                             chunks.push(std::mem::take(&mut inner));
                         }
+                        #[expect(
+                            clippy::string_slice,
+                            reason = "end skips continuation bytes, so i/end are char boundaries"
+                        )]
                         chunks.push(line[i..end].to_string());
                         i = end;
                     }
@@ -252,6 +256,10 @@ pub fn chunk_text(text: &str, target_tokens: usize) -> Vec<String> {
     chunks
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "start and i index ASCII newline bytes found by the byte scan"
+)]
 fn split_paragraphs(text: &str) -> Vec<&str> {
     let mut out = Vec::new();
     let mut start = 0;

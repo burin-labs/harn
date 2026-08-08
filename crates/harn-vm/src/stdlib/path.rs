@@ -40,6 +40,10 @@ fn is_absolute_str(p: &str) -> bool {
 }
 
 /// Split a path into segments, preserving whether it was absolute.
+#[expect(
+    clippy::string_slice,
+    reason = "the drive prefix split at 2 is guarded to be two ASCII bytes"
+)]
 fn split_segments(p: &str) -> (bool, Option<String>, Vec<String>) {
     let posix = to_posix(p);
     let mut drive: Option<String> = None;
@@ -128,6 +132,7 @@ fn parent(p: &str) -> String {
 }
 
 /// Extract the extension including the leading dot, or empty string if none.
+#[expect(clippy::string_slice, reason = "idx is an rfind('.') char boundary")]
 fn extension(p: &str) -> String {
     let name = basename(p);
     if let Some(idx) = name.rfind('.') {
@@ -141,6 +146,7 @@ fn extension(p: &str) -> String {
 }
 
 /// Extract the file stem (basename minus extension).
+#[expect(clippy::string_slice, reason = "idx is an rfind('.') char boundary")]
 fn stem(p: &str) -> String {
     let name = basename(p);
     if let Some(idx) = name.rfind('.') {

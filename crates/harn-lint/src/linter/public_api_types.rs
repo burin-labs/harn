@@ -7,6 +7,10 @@ use crate::diagnostic::{LintDiagnostic, LintSeverity};
 impl Linter<'_> {
     /// Narrow a declaration span to its keyword and name for focused lint
     /// rendering. Synthetic nodes fall back to their original span.
+    #[expect(
+        clippy::string_slice,
+        reason = "search offsets come from find results and whole-char advances over haystack"
+    )]
     pub(super) fn name_anchored_span(&self, name: &str, span: Span) -> Span {
         let Some(source) = self.source else {
             return span;
@@ -14,12 +18,10 @@ impl Linter<'_> {
         if name.is_empty() || span.start >= span.end {
             return span;
         }
-        let scan_end = source[span.start..span.end]
-            .find('\n')
-            .map_or(span.end, |newline| span.start + newline);
-        let Some(haystack) = source.get(span.start..scan_end) else {
+        let Some(region) = source.get(span.start..span.end) else {
             return span;
         };
+        let haystack = region.split('\n').next().unwrap_or(region);
         let mut search_from = 0;
         while let Some(relative) = haystack[search_from..].find(name) {
             let match_start = search_from + relative;
@@ -41,7 +43,7 @@ impl Linter<'_> {
                     span.column,
                 );
             }
-            search_from = match_start + 1;
+            search_from = match_start + name.chars().next().map_or(1, char::len_utf8);
         }
         span
     }

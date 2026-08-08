@@ -36,7 +36,9 @@ pub fn normalize_plan_tool_call(tool_name: &str, args: &serde_json::Value) -> se
 
     let digest_input = crate::canonical_json::to_vec(&plan);
     let digest = hex::encode(Sha256::digest(digest_input));
-    plan["id"] = serde_json::Value::String(format!("plan_{}", &digest[..12]));
+    #[expect(clippy::string_slice, reason = "hex digest is ASCII")]
+    let id = format!("plan_{}", &digest[..12]);
+    plan["id"] = serde_json::Value::String(id);
     plan
 }
 

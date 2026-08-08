@@ -506,7 +506,7 @@ fn normalize_partial_version(raw: &str) -> String {
     }
     let (core, suffix) = trimmed
         .find(['-', '+'])
-        .map(|index| (&trimmed[..index], &trimmed[index..]))
+        .map(|index| trimmed.split_at(index))
         .unwrap_or((trimmed, ""));
     let mut parts = core.split('.').collect::<Vec<_>>();
     if (1..=2).contains(&parts.len())

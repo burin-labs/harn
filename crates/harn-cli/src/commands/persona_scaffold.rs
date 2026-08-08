@@ -809,6 +809,10 @@ fn rewrite_persona_annotation(
             );
         }
         found = true;
+        #[expect(
+            clippy::string_slice,
+            reason = "trimmed is body.trim_start(), so the length difference is a char boundary"
+        )]
         let indentation = &body[..body.len() - trimmed.len()];
         let (_, after_description) = trimmed
             .split_once(", description: ")

@@ -270,6 +270,10 @@ fn normalize_path_token(token: &str) -> Option<String> {
     }
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "idx is a match_indices offset of the ASCII ':' separator"
+)]
 fn trim_diagnostic_suffix(token: &str) -> &str {
     let mut end = token.len();
     for (idx, _) in token.match_indices(':') {

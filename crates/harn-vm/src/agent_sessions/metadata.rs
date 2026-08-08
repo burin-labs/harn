@@ -117,6 +117,10 @@ pub fn system_prompt(id: &str) -> Option<String> {
 pub(super) fn forbidden_workspace_prompt_token(system_prompt: &str) -> Option<&'static str> {
     let mut remaining = system_prompt;
     while let Some(index) = remaining.find("{{") {
+        #[expect(
+            clippy::string_slice,
+            reason = "index is a find(\"{{\") offset; +2 spans the ASCII braces"
+        )]
         let candidate = remaining[index + 2..].trim_start();
         if candidate.starts_with("workspace_") {
             return Some("workspace_");

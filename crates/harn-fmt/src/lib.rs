@@ -89,6 +89,10 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
 pub fn format_source_opts(source: &str, opts: &FmtOptions) -> Result<String, FormatError> {
     // Preserve a shebang line (`#!...`) at offset 0 — the lexer skips it
     // entirely, so without explicit reattachment the formatter would drop it.
+    #[expect(
+        clippy::string_slice,
+        reason = "str::find of an ASCII char returns char boundaries"
+    )]
     let (shebang, source_for_lex) = if source.starts_with("#!") {
         match source.find('\n') {
             Some(i) => (Some(&source[..=i]), &source[i + 1..]),

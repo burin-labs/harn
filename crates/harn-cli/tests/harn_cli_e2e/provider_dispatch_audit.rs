@@ -91,6 +91,7 @@ fn provider_dispatch_audit_explains_selected_route_variants_in_process() {
 }
 
 #[test]
+#[expect(clippy::string_slice, reason = "plan command ids are ASCII hex")]
 fn provider_dispatch_audit_can_emit_structured_tool_probe_plan() {
     let harn = run(
         &[
@@ -268,6 +269,7 @@ fn provider_dispatch_audit_can_emit_structured_tool_probe_plan() {
 }
 
 #[test]
+#[expect(clippy::string_slice, reason = "plan command ids are ASCII hex")]
 fn provider_dispatch_audit_tool_probe_plan_honors_custom_output_dir() {
     let harn = run(
         &[

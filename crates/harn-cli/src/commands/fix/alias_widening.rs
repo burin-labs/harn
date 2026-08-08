@@ -247,6 +247,10 @@ fn alias_widening_edit(source: &str, decl: &AliasDecl) -> Option<FixEdit> {
     let region = source.get(decl.span.start..decl.span.end)?;
     let fn_at = region.find("fn(")?;
     let open_paren = decl.span.start + fn_at + 3;
+    #[expect(
+        clippy::string_slice,
+        reason = "fn_at is from find(\"fn(\"), so fn_at + 3 is a char boundary"
+    )]
     let close_paren = region[fn_at + 3..].find(')')? + fn_at + 3 + decl.span.start;
     let has_params = !source.get(open_paren..close_paren)?.trim().is_empty();
     Some(FixEdit {

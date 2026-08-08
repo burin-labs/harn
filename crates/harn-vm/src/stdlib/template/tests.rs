@@ -1,3 +1,5 @@
+#![expect(clippy::string_slice, reason = "test input is ASCII")]
+
 use super::*;
 use crate::value::VmValue;
 
@@ -22,6 +24,16 @@ fn render_with_spans(tpl: &str, b: &crate::value::DictMap) -> (String, Vec<Promp
 
 fn list(items: Vec<VmValue>) -> VmValue {
     VmValue::List(std::sync::Arc::new(items))
+}
+
+#[test]
+fn multibyte_template_bodies_do_not_panic() {
+    // Regression: the lexer read fixed byte windows after "{{" (keyword and
+    // close-marker probes), which panicked mid-character on non-ASCII input.
+    let b = dict(&[]);
+    for tpl in ["{{ éé }}", "{{ 😀 }}", "{{ raw😀", "{{éé"] {
+        let _ = render_template_result(tpl, Some(&b), None, None);
+    }
 }
 
 #[test]

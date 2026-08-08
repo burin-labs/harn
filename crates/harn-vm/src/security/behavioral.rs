@@ -314,6 +314,10 @@ mod tests {
 
     #[async_trait]
     impl BehavioralModel for AlwaysObeys {
+        #[expect(
+            clippy::string_slice,
+            reason = "start/end come from find on the same string"
+        )]
         async fn respond(&self, _system: &str, user: &str) -> Result<String, String> {
             // A compromised model would follow the injected directive and emit
             // the canary. Recover it by its stable `HARN-INJECTED-` prefix

@@ -56,6 +56,10 @@ pub(crate) use self::openrouter::{
 /// capabilities regardless of which OpenAI-compatible provider is routing.
 ///
 /// Returns `None` for non-GPT shapes (`claude-opus-4-7`, `llama-3.1`, …).
+#[expect(
+    clippy::string_slice,
+    reason = "idx comes from find() of the ASCII needle on the sliced string"
+)]
 pub(crate) fn gpt_generation(model: &str) -> Option<(u32, u32)> {
     let lower = model.to_lowercase();
     let stripped = match lower.rsplit_once('/') {

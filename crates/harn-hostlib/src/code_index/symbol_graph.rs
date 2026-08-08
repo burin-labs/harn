@@ -614,6 +614,10 @@ fn call_callee_name(node: TsNode<'_>, source: &str) -> Option<String> {
         .or_else(|| node.child_by_field_name("name"))
         .or_else(|| node.child_by_field_name("method"))
         .or_else(|| node.child(0u32))?;
+    #[expect(
+        clippy::string_slice,
+        reason = "tree-sitter node byte ranges lie on char boundaries of the parsed source"
+    )]
     let text = &source[callee.start_byte()..callee.end_byte()];
     let last = text.rsplit_once(['.', ':', '!']);
     let raw = last.map(|(_, name)| name).unwrap_or(text);

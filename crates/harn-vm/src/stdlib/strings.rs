@@ -142,6 +142,10 @@ pub(crate) fn register_string_builtins(vm: &mut Vm) {
     sig = "format(template: string, ...rest: any) -> string",
     category = "strings"
 )]
+#[expect(
+    clippy::string_slice,
+    reason = "offsets are find() results for 1-byte ASCII braces"
+)]
 fn format_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let template = args.first().map(|a| a.display()).unwrap_or_default();
 
@@ -378,6 +382,10 @@ fn contains_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError
     sig = "index_of(haystack: string?, needle: string, from?: int) -> int",
     category = "strings"
 )]
+#[expect(
+    clippy::string_slice,
+    reason = "char_to_byte_offset returns a clamped char-boundary offset"
+)]
 fn index_of_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     // The missing sibling of `starts_with`/`ends_with`/`contains`. Char-indexed
     // to pair with `substring`/`slice`: `from` is a char offset and the result
@@ -436,6 +444,10 @@ fn join_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
 /// (after clamping) yields the empty string. Omitting `end` runs to the end
 /// of the string. This matches the documented spec `substring(start, end?)`,
 /// the `s[a:b]` slice operator, `list.slice`, and `bytes_slice`.
+#[expect(
+    clippy::string_slice,
+    reason = "char_range_to_byte_range returns clamped char-boundary offsets"
+)]
 pub(crate) fn char_substring(s: &str, start: i64, end: Option<i64>) -> String {
     let len = string_char_count(s) as i64;
     let start = start.clamp(0, len);
@@ -914,6 +926,10 @@ fn dedent_str(text: &str) -> String {
             continue;
         }
         let leading_len = visible.len() - visible.trim_start().len();
+        #[expect(
+            clippy::string_slice,
+            reason = "leading_len is the byte length of the whole-char whitespace prefix"
+        )]
         let leading = &visible[..leading_len];
         shortest = Some(match shortest {
             None => leading,
@@ -941,6 +957,10 @@ fn dedent_str(text: &str) -> String {
     out
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "end is walked back to a char boundary before slicing"
+)]
 fn common_prefix<'a>(a: &'a str, b: &str) -> &'a str {
     let end = a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count();
     // Walk back to a char boundary so multibyte content stays intact.

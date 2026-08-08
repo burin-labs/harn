@@ -94,6 +94,7 @@ fn cache_key(
     }
 }
 
+#[expect(clippy::string_slice, reason = "hex digest is ASCII")]
 fn mock_file_id(provider: &str, media_type: &str, bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(provider.as_bytes());

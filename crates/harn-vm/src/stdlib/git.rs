@@ -1070,6 +1070,10 @@ fn identity_context() -> IdentityContext {
     }
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "inline_end is a char start offset from char_indices"
+)]
 fn output_ref(kind: &str, text: &str) -> JsonValue {
     const INLINE_LIMIT: usize = 8192;
     let inline_end = if text.len() > INLINE_LIMIT {
@@ -1148,6 +1152,10 @@ struct PorcelainStatus<'a> {
     entries: Vec<PorcelainStatusEntry<'a>>,
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "porcelain -z records start with two ASCII status bytes and a space"
+)]
 fn parse_porcelain_status(stdout: &str) -> PorcelainStatus<'_> {
     let mut branch = None;
     let mut entries = Vec::new();
@@ -1175,6 +1183,10 @@ fn parse_porcelain_status(stdout: &str) -> PorcelainStatus<'_> {
     PorcelainStatus { branch, entries }
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "xy is the two ASCII status bytes of a porcelain record"
+)]
 fn parse_status(stdout: &str) -> JsonValue {
     let parsed = parse_porcelain_status(stdout);
     let entries = parsed

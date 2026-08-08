@@ -220,8 +220,9 @@ fn split_segments(path: &str) -> (bool, Option<String>, Vec<String>) {
     let mut rest = posix.as_str();
     let bytes = posix.as_bytes();
     if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
-        drive = Some(posix[..2].to_string());
-        rest = &posix[2..];
+        let (drive_prefix, remainder) = posix.split_at(2);
+        drive = Some(drive_prefix.to_string());
+        rest = remainder;
     }
     let absolute = rest.starts_with('/');
     let segments = rest

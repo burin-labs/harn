@@ -617,9 +617,8 @@ fn extract_node_imports(path: &str, source: &str) -> Vec<ImportRef> {
 }
 
 fn node_import_symbols(prefix: &str) -> Vec<Option<String>> {
-    if let Some(start) = prefix.find('{') {
-        if let Some(end) = prefix[start + 1..].find('}') {
-            let body = &prefix[start + 1..start + 1 + end];
+    if let Some((_, rest)) = prefix.split_once('{') {
+        if let Some((body, _)) = rest.split_once('}') {
             let symbols = body
                 .split(',')
                 .filter_map(|part| {
@@ -700,9 +699,8 @@ fn extract_rust_imports(path: &str, source: &str) -> Vec<ImportRef> {
 }
 
 fn rust_symbols(import_path: &str) -> Vec<Option<String>> {
-    if let Some(start) = import_path.find('{') {
-        if let Some(end) = import_path[start + 1..].find('}') {
-            let body = &import_path[start + 1..start + 1 + end];
+    if let Some((_, rest)) = import_path.split_once('{') {
+        if let Some((body, _)) = rest.split_once('}') {
             let symbols = body
                 .split(',')
                 .filter_map(|part| {

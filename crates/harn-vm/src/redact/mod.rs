@@ -286,6 +286,10 @@ impl RedactionPolicy {
     /// from [`Self::redact_string`]: broad text tokenization is useful for
     /// transport errors that include URLs inside prose, while normal string
     /// redaction keeps its lower-perturbation standalone-URL behavior.
+    #[expect(
+        clippy::string_slice,
+        reason = "cursors are find offsets or char_indices token ends on the same text"
+    )]
     pub fn redact_urls_in_text<'a>(&self, value: &'a str) -> Cow<'a, str> {
         let mut scan_cursor = 0;
         let mut emit_cursor = 0;
@@ -417,6 +421,10 @@ fn find_http_url_start(value: &str) -> Option<usize> {
     }
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "start is a find offset of an ASCII scheme prefix"
+)]
 fn http_url_token_end(value: &str, start: usize) -> usize {
     value[start..]
         .char_indices()
@@ -430,6 +438,10 @@ fn is_url_text_delimiter(character: char) -> bool {
     character.is_whitespace() || matches!(character, '"' | '\'' | '<' | '>' | '`')
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "prose_end/end retreat from token.len() by whole trailing chars"
+)]
 fn split_url_token(token: &str) -> Option<(&str, &str)> {
     let mut prose_end = token.len();
     while prose_end > 0 {

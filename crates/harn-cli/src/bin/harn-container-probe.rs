@@ -75,7 +75,7 @@ fn derive_healthcheck_url() -> Option<String> {
 fn parse_http_url(url: &str) -> Option<(&str, &str)> {
     let remainder = url.strip_prefix("http://")?;
     let (authority, path) = match remainder.find('/') {
-        Some(index) => (&remainder[..index], &remainder[index..]),
+        Some(index) => remainder.split_at(index),
         None => (remainder, "/"),
     };
     if authority.is_empty() {

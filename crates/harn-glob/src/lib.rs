@@ -204,8 +204,8 @@ pub fn match_prose(pattern: &str, text: &str) -> bool {
         } else if index == last {
             return remaining.ends_with(segment);
         } else {
-            match remaining.find(segment) {
-                Some(at) => remaining = &remaining[at + segment.len()..],
+            match remaining.split_once(segment) {
+                Some((_, rest)) => remaining = rest,
                 None => return false,
             }
         }

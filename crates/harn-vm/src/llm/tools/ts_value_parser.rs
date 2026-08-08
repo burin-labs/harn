@@ -4,6 +4,14 @@
 //! the limited set of keywords (`true` / `false` / `null` / `undefined`)
 //! that models emit when transcribing tool calls.
 
+#![expect(
+    clippy::string_slice,
+    reason = "parser positions only advance across ASCII bytes or whole UTF-8 scalars \
+              (push_scalar-style len_utf8 resync), keyword/ident/number slices start at \
+              guarded ASCII bytes, and heredoc spans come from scan_heredoc's newline \
+              scanning — every slice bound is a char boundary"
+)]
+
 use super::parse::{ident_length, scan_heredoc, unescape_heredoc_body, HeredocError};
 
 /// Minimal recursive-descent parser for a TypeScript value expression. Handles
@@ -345,9 +353,18 @@ impl<'a> TsValueParser<'a> {
                     // Unknown escape: keep the backslash AND the char. See the
                     // `parse_string_literal` arm for the rationale — preserving
                     // `\d`/`\w`/`\b` (regex), `\begin` (LaTeX), `\section`, etc.
-                    other => {
+                    // Non-ASCII lead bytes decode the whole scalar and resync
+                    // `pos`, mirroring `push_scalar`.
+                    other if other < 0x80 => {
                         out.push('\\');
                         out.push(other as char);
+                    }
+                    _ => {
+                        out.push('\\');
+                        let start = pos - 1;
+                        let ch = self.text[start..].chars().next().unwrap_or('\u{FFFD}');
+                        out.push(ch);
+                        pos = start + ch.len_utf8();
                     }
                 }
             } else if b == quote {
@@ -528,7 +545,7 @@ impl<'a> TsValueParser<'a> {
                         b'\n' => { /* line continuation — drop */ }
                         other => {
                             out.push('\\');
-                            out.push(other as char);
+                            self.push_scalar(&mut out, other);
                         }
                     }
                 }

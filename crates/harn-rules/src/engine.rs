@@ -550,6 +550,10 @@ impl<'a> RowColCursor<'a> {
     /// Advance to `target` (which must be `>=` the current position and a char
     /// boundary) and return the row/col there. `row` counts preceding newlines;
     /// `col` counts characters since the last newline.
+    #[expect(
+        clippy::string_slice,
+        reason = "byte and target are regex match offsets on source, so both are char boundaries"
+    )]
     fn advance_to(&mut self, target: usize) -> (usize, usize) {
         for ch in self.source[self.byte..target].chars() {
             if ch == '\n' {

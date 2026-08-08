@@ -614,13 +614,12 @@ fn resolve_template_body(
 fn estimate_template_markup_tokens(body: &str) -> u64 {
     let mut markup_chars = 0usize;
     let mut rest = body;
-    while let Some(start) = rest.find("{{") {
-        let after_start = &rest[start + 2..];
-        let Some(end) = after_start.find("}}") else {
+    while let Some((_, after_start)) = rest.split_once("{{") {
+        let Some((inner, after)) = after_start.split_once("}}") else {
             break;
         };
-        markup_chars = markup_chars.saturating_add(end + 4);
-        rest = &after_start[end + 2..];
+        markup_chars = markup_chars.saturating_add(inner.len() + 4);
+        rest = after;
     }
     if markup_chars == 0 {
         0

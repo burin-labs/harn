@@ -457,6 +457,10 @@ fn project_evidence_array(
     })
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "prefix_end/suffix_start are snapped to char boundaries above the slices"
+)]
 fn project_evidence_string(
     text: &str,
     report_pointer: &str,

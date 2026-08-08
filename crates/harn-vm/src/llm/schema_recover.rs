@@ -425,12 +425,12 @@ fn parse_bool_token(s: &str) -> Option<bool> {
 }
 
 fn strip_surrounding_quotes(s: &str) -> String {
-    let bytes = s.as_bytes();
-    if bytes.len() >= 2 {
-        let first = bytes[0];
-        let last = bytes[bytes.len() - 1];
-        if (first == b'"' && last == b'"') || (first == b'\'' && last == b'\'') {
-            return s[1..s.len() - 1].to_string();
+    for quote in ['"', '\''] {
+        if let Some(inner) = s
+            .strip_prefix(quote)
+            .and_then(|rest| rest.strip_suffix(quote))
+        {
+            return inner.to_string();
         }
     }
     s.to_string()

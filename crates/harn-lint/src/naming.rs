@@ -115,9 +115,9 @@ pub(crate) fn build_line_starts(source: &str) -> Vec<usize> {
 pub fn simplify_bool_comparison(expr: &str) -> Option<String> {
     let trimmed = expr.trim();
     for op in &["==", "!="] {
-        if let Some(idx) = trimmed.find(op) {
-            let lhs = trimmed[..idx].trim();
-            let rhs = trimmed[idx + op.len()..].trim();
+        if let Some((lhs, rhs)) = trimmed.split_once(op) {
+            let lhs = lhs.trim();
+            let rhs = rhs.trim();
             let (bool_val, other) = if rhs == "true" || rhs == "false" {
                 (rhs, lhs)
             } else if lhs == "true" || lhs == "false" {

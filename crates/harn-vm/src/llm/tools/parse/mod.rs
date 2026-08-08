@@ -42,6 +42,11 @@ pub(crate) fn stamp_synthetic_tool_call_ids(
 /// or even `edit({ ... })`. Recover those complete text-format payloads
 /// without requiring a registered tool schema; callers still own normalizing
 /// the final `(name, arguments)` pair.
+#[expect(
+    clippy::string_slice,
+    reason = "consumed is a TsValueParser byte count and name_len an ASCII ident length; \
+              both are char boundaries in trimmed"
+)]
 pub(crate) fn parse_text_tool_argument_payload(
     text: &str,
     name: &str,
@@ -123,9 +128,7 @@ fn repair_malformed_wrapper_provider_suffixes(text: &str) -> std::borrow::Cow<'_
     ];
 
     let trimmed_start = text.trim_start();
-    let trimmed_end_len = text.trim_end().len();
-    let trailing = &text[trimmed_end_len..];
-    let without_trailing = &text[..trimmed_end_len];
+    let (without_trailing, trailing) = text.split_at(text.trim_end().len());
 
     for (open, malformed_close, repaired_close) in WRAPPER_SUFFIX_REPAIRS {
         if trimmed_start.starts_with(open) {
@@ -150,6 +153,11 @@ fn repair_malformed_wrapper_provider_suffixes(text: &str) -> std::borrow::Cow<'_
 /// `arguments` empty, e.g. `look({ file: "a.rs" })</arg_value>`. Treat complete
 /// calls as the structured call they meant, and fail closed on partial calls so
 /// the runtime does not dispatch a bogus tool named `edit({ ...`.
+#[expect(
+    clippy::string_slice,
+    reason = "name_len is an ASCII ident length and consumed a TsValueParser byte count; \
+              both are char boundaries in trimmed"
+)]
 pub(crate) fn parse_text_tool_call_from_native_name(text: &str) -> NativeToolNameTextCall {
     let trimmed = strip_native_name_provider_suffixes(text);
     let Some(name_len) = syntax::ident_length(trimmed.as_bytes()) else {

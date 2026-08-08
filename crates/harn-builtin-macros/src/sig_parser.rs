@@ -67,6 +67,10 @@ enum Tok {
     DotDotDot, // "..."
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "each slice covers a run of ASCII bytes, so both ends are char boundaries"
+)]
 fn tokenize(s: &str, span: Span) -> syn::Result<Vec<Tok>> {
     let mut out = Vec::new();
     let bytes = s.as_bytes();

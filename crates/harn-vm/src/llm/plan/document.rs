@@ -1086,6 +1086,7 @@ fn resolution_receipt_id(
     )
 }
 
+#[expect(clippy::string_slice, reason = "hex digest is ASCII")]
 fn stable_id(prefix: &str, value: &serde_json::Value) -> Result<String, PlanDocumentError> {
     let canonical = crate::canonical_json::to_vec(value);
     let digest = hex::encode(Sha256::digest(canonical));

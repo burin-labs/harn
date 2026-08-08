@@ -599,6 +599,10 @@ mod tests {
         );
     }
 
+    #[expect(
+        clippy::string_slice,
+        reason = "start/end bound an ASCII HARN_* token found by match_indices"
+    )]
     fn harn_name_tokens(source: &str) -> impl Iterator<Item = &str> {
         source.match_indices("\"HARN_").filter_map(|(quote, _)| {
             let start = quote + 1;

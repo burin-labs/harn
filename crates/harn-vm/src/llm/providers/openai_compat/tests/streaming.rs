@@ -26,6 +26,10 @@ fn delta_canonicalizer_reassembles_split_wire_delimiters() {
 }
 
 #[test]
+#[expect(
+    clippy::string_slice,
+    reason = "chunk bounds are advanced to char boundaries with is_char_boundary"
+)]
 fn delta_canonicalizer_matches_whole_string_remap_on_real_response() {
     // Streaming/non-streaming parity at the live-delta boundary: feeding the
     // real captured wire-form completion through the streaming

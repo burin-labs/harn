@@ -358,18 +358,15 @@ fn gradle_dependencies(content: &str) -> BTreeSet<String> {
 fn maven_pom(content: &str) -> BTreeSet<String> {
     let mut deps = BTreeSet::new();
     let mut remainder = content;
-    while let Some(open) = remainder.find("<artifactId>") {
-        let after_open = open + "<artifactId>".len();
-        let rest = &remainder[after_open..];
-        let close = match rest.find("</artifactId>") {
-            Some(c) => c,
-            None => break,
+    while let Some((_, rest)) = remainder.split_once("<artifactId>") {
+        let Some((name, tail)) = rest.split_once("</artifactId>") else {
+            break;
         };
-        let name = rest[..close].trim();
+        let name = name.trim();
         if !name.is_empty() {
             deps.insert(name.to_string());
         }
-        remainder = &rest[close + "</artifactId>".len()..];
+        remainder = tail;
     }
     deps
 }
@@ -384,8 +381,7 @@ fn swift_package(content: &str) -> BTreeSet<String> {
         if !trimmed.contains(".package(") {
             continue;
         }
-        if let Some(idx) = trimmed.find("name:") {
-            let after = &trimmed[idx + "name:".len()..];
+        if let Some((_, after)) = trimmed.split_once("name:") {
             if let Some(name) = quoted_name(after) {
                 deps.insert(name);
                 continue;

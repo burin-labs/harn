@@ -39,6 +39,11 @@ pub(super) fn parse_route_policy_text(
     use crate::llm::api::LlmRoutePolicy;
     let text = text.trim();
     let lower = text.to_ascii_lowercase();
+    #[expect(
+        clippy::string_slice,
+        reason = "lower is the byte-length-preserving ASCII lowercase of text, and the bounds \
+                  flank the ASCII name/parens the strip chain just verified"
+    )]
     let arg = |name: &str| -> Option<String> {
         lower
             .strip_prefix(name)

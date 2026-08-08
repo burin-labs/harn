@@ -363,18 +363,18 @@ pub(super) fn url_matches(pattern: &str, url: &str) -> bool {
             continue;
         }
         if i == 0 {
-            if !remaining.starts_with(part) {
-                return false;
+            match remaining.strip_prefix(*part) {
+                Some(rest) => remaining = rest,
+                None => return false,
             }
-            remaining = &remaining[part.len()..];
         } else if i == parts.len() - 1 {
             if !remaining.ends_with(part) {
                 return false;
             }
             remaining = "";
         } else {
-            match remaining.find(part) {
-                Some(pos) => remaining = &remaining[pos + part.len()..],
+            match remaining.split_once(*part) {
+                Some((_, rest)) => remaining = rest,
                 None => return false,
             }
         }

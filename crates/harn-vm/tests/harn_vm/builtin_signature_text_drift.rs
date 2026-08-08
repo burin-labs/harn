@@ -44,6 +44,7 @@ fn at_type_pos(prev: u8) -> bool {
 /// Normalize a sig string so equivalent grammatical forms compare equal:
 /// strip whitespace, then rewrite `T|nil` → `T?` and `int|float` → `number`
 /// in type positions.
+#[expect(clippy::string_slice, reason = "builtin signature text is ASCII")]
 fn canonical(s: &str) -> String {
     let squashed: String = s.chars().filter(|c| !c.is_whitespace()).collect();
     let bytes = squashed.as_bytes();

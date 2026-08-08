@@ -119,6 +119,10 @@ fn parse_structural_experiment_dict(
     build_builtin_experiment(&name, label, args_value)
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "open_idx/close_idx come from find/rfind of the ASCII parens on spec itself"
+)]
 fn parse_structural_experiment_spec(
     spec: &str,
 ) -> Result<Option<StructuralExperimentConfig>, VmError> {
@@ -195,18 +199,18 @@ fn parse_named_args(input: &str) -> Result<serde_json::Map<String, serde_json::V
         if item.is_empty() {
             continue;
         }
-        let Some(colon_idx) = item.find(':') else {
+        let Some((key, value_text)) = item.split_once(':') else {
             return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 format!("structural_experiment: expected `name: value`, got `{item}`"),
             ))));
         };
-        let key = item[..colon_idx].trim();
+        let key = key.trim();
         if key.is_empty() {
             return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 "structural_experiment: empty argument name",
             ))));
         }
-        let value = parse_scalar_value(item[colon_idx + 1..].trim())?;
+        let value = parse_scalar_value(value_text.trim())?;
         out.insert(key.to_string(), value);
     }
     Ok(out)

@@ -426,10 +426,9 @@ fn validate_serving_probe(receipt: &Value, route_role: &str, evidence: &Value) -
             errors.push("serving probe adapter identity or path is missing".to_string());
         }
         if adapter_sha256.len() != 71
-            || !adapter_sha256.starts_with("sha256:")
-            || !adapter_sha256[7..]
-                .bytes()
-                .all(|byte| byte.is_ascii_hexdigit())
+            || !adapter_sha256
+                .strip_prefix("sha256:")
+                .is_some_and(|digest| digest.bytes().all(|byte| byte.is_ascii_hexdigit()))
         {
             errors.push("serving probe adapter artifact digest is invalid".to_string());
         }

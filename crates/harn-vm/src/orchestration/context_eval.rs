@@ -599,7 +599,11 @@ fn evaluate_task_mode(
         },
         cache: ContextEvalCacheReport {
             namespace: cache_namespace.clone(),
-            key: format!("{}:{}", cache_namespace, &stable_input_hash[..32]),
+            key: {
+                #[expect(clippy::string_slice, reason = "stable_hash yields 64 ASCII hex chars")]
+                let prefix = &stable_input_hash[..32];
+                format!("{cache_namespace}:{prefix}")
+            },
             stable_input_hash,
             deterministic_order: true,
             hit: mode.expected_cache_hit.or(observed.cache_hit),
