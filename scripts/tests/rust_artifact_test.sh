@@ -33,7 +33,7 @@ case "$1" in
     elif [[ "$#" -eq 13 && "$2" == "archive" && "$3" == "--locked" && \
       "$4" == "-p" && "$5" == "harn-vm" && "$6" == "-p" && "$7" == "harn-hostlib" && \
       "$8" == "--profile" && "$9" == "ci" && "${10}" == "-E" && \
-      "${11}" == '(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and (test(local_backend_execs_inside_session_outputs) or test(local_backend_timeout_is_enforced_without_shell_timeout_binary) or test(sandboxed_npm_install_resolves_file_tarball_dependency_offline)))' && \
+      "${11}" == '(package(harn-vm) and binary(harn_vm)) or (package(harn-hostlib) and (binary(harn_hostlib) or binary(sandbox_npm_offline_install)))' && \
       "${12}" == "--archive-file" && -n "${13}" ]]; then
       printf 'security tests archive\n' > "${13}"
       : > "${CARGO_RECEIPTS:?}/nextest-security"
