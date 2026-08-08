@@ -2,7 +2,8 @@
 //!
 //! Runtime routing does not consume these records. They let hosts render
 //! recommendation presets and one- or two-dimensional model families without
-//! hardcoding provider/model names in each UI.
+//! hardcoding provider/model names in each UI. A recommendation may also carry
+//! the reviewed measurement receipts that make it eligible as a host default.
 
 use std::collections::BTreeMap;
 
@@ -31,6 +32,49 @@ pub struct PresentationVariantDef {
     pub label: String,
     pub description: String,
     pub selector: PresentationVariantSelector,
+    /// Reviewed evidence authorizing this concrete route as the automatic host
+    /// default. Absence means the variant is picker-only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub automatic_eligibility: Option<AutomaticModelEligibility>,
+}
+
+/// Catalog-owned decision that a measured route may be selected automatically.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct AutomaticModelEligibility {
+    pub schema: AutomaticModelEligibilitySchema,
+    pub decision: AutomaticModelEligibilityDecision,
+    pub receipts: Vec<ModelEligibilityMeasurement>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+pub enum AutomaticModelEligibilitySchema {
+    #[serde(rename = "harn.automatic_model_eligibility.v1")]
+    V1,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AutomaticModelEligibilityDecision {
+    Eligible,
+}
+
+/// One exact, reproducible measured input to an automatic-eligibility review.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ModelEligibilityMeasurement {
+    pub kind: ModelEligibilityMeasurementKind,
+    pub source: String,
+    pub observed_at: String,
+    pub harn_version: String,
+    pub passed: u32,
+    pub trials: u32,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelEligibilityMeasurementKind {
+    MeterHoldout,
+    ToolCallFidelity,
+    ProviderHealth,
 }
 
 /// Small, deliberately closed selector vocabulary for global recommendations.

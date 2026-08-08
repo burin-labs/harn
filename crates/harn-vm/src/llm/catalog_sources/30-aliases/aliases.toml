@@ -59,6 +59,12 @@ provider = "openrouter"
 id = "qwen/qwen3-coder-next"
 provider = "openrouter"
 
+# Meter-measured interim automatic route for Burin hosts. Keep the generic
+# `mid` tier independent: this alias names the exact provider/model receipt.
+[aliases."fw-gpt-oss-120b"]
+id = "accounts/fireworks/models/gpt-oss-120b"
+provider = "fireworks"
+
 [aliases."openai/mid"]
 id = "gpt-5.6-terra"
 provider = "openai"

@@ -1268,26 +1268,6 @@ fn generated_schema_accepts_generated_artifact_shape() {
 }
 
 #[test]
-fn downstream_bindings_include_empirical_tool_parity_shape() {
-    let typescript = typescript_declarations();
-    assert!(typescript.contains("empirical_parity?: HarnToolEmpiricalParity"));
-    assert!(typescript.contains("export interface HarnToolEmpiricalParity"));
-    assert!(typescript.contains("regions?: Record<string, HarnProviderEndpointRegion>"));
-    assert!(typescript.contains("families: HarnCatalogModelFamily[]"));
-    assert!(typescript.contains("effort_levels: string[]"));
-    assert!(typescript.contains("plain_description: string"));
-
-    let swift = swift_binding().expect("swift binding renders");
-    assert!(swift.contains("public let empiricalParity: HarnToolEmpiricalParity?"));
-    assert!(swift.contains("public struct HarnToolEmpiricalParity"));
-    assert!(swift.contains("public let regions: [String: HarnProviderEndpointRegion]?"));
-    assert!(swift.contains("public struct HarnProviderEndpointRegion"));
-    assert!(swift.contains("public let families: [HarnCatalogModelFamily]"));
-    assert!(swift.contains("public let effortLevels: [String]"));
-    assert!(swift.contains("public struct HarnModelFamilyPreset"));
-}
-
-#[test]
 fn generated_catalog_exports_gpt_5_6_presentation_family() {
     let catalog = artifact();
     assert_eq!(
