@@ -120,6 +120,7 @@ jobs:
               - 'scripts/build_docs_site.sh'
               - 'website/**'
             prompt_prose:
+              - '.github/workflows/ci.yml'
               - 'crates/harn-vm/src/llm/**'
               - 'crates/harn-vm/src/orchestration/workflow.rs'
               - 'crates/harn-vm/src/orchestration/artifacts.rs'
@@ -397,7 +398,7 @@ jobs:
   # already below the SLO; the full test graph is owned by rust-check-inputs so the
   # repository pays for one behavior build rather than two competing builds.
   rust-checks:
-    name: Rust lint
+    name: Check Rust code
     needs: [changes]
     # Heavy Linux Rust lanes. Skipped on a docs/website/markdown-only PR; forced
     # on for merge_group and non-metadata pushes (see the `changes` job).
@@ -452,16 +453,10 @@ jobs:
           # Keep workspace artifacts so merge_group does not rebuild every
           # harn-* crate after an exact rust-cache hit (#5003).
           cache-workspace-crates: "true"
-      # `make lint` also runs `lint-no-xfail-regression`, which compiles
-      # `harn-cli` via `cargo run` just to walk conformance/ and count
-      # `@xfail:` markers. That ~1-2 min cost is paid by the harn-audit lane
-      # for free (it already has harn-cli warm from `make conformance`), so
-      # the CI invocation here drops the prereq and runs just the cheap
-      # prompt-prose ratchet (only when protected files changed) plus clippy.
-      - name: Run Rust lint
+      # Keep this lane compilation-only. Harn-backed repository policy checks
+      # use the shared CLI in audit-scripts rather than rebuilding it here.
+      - name: Check Rust code with Clippy
         id: release-audit-rust-lint
-        env:
-          RUN_PROMPT_PROSE_RATCHET: ${{ needs.changes.outputs.prompt_prose }}
         run: ./scripts/ci/run_rust_lint_lane.sh
       - name: Mark lint leg success
         id: lint-ok
@@ -1036,6 +1031,12 @@ jobs:
           "$RUNNER_TEMP/harn-cli"
           "$GITHUB_SHA"
           "$GITHUB_ENV"
+      # This policy is implemented in Harn, so run it with the already-verified
+      # shared CLI. Running it in the Clippy lane rebuilt harn-cli from source
+      # and added more than four minutes whenever protected prompts changed.
+      - name: Check prompts are not embedded in Rust
+        if: needs.changes.outputs.prompt_prose == 'true'
+        run: make lint-no-rust-prompt-prose
       # `make spec-lint` must run the repository's declared Redocly CLI, not
       # let npx fall back to an unrelated registry package. Keep this install
       # in the already-required audit lane, where the snapshot check can reuse
