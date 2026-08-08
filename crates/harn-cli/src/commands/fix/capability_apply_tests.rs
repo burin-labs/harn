@@ -963,6 +963,57 @@ fn capability_apply_rejects_non_ast_authority_at_flow_predicate_boundary() {
 }
 
 #[test]
+fn capability_apply_ignores_ambient_builtin_names_shadowed_by_local_callables() {
+    // A same-file helper named like a retired ambient builtin (`scan` →
+    // project) must not seed Flow-predicate authority demand. harn-canon
+    // packs hit this through local `fn scan` helpers (#6303).
+    let temp = tempfile::TempDir::new().unwrap();
+    let script = temp.path().join("predicate.harn");
+    fs::write(
+        &script,
+        "fn scan(slice, pattern) {\n  return []\n}\n\nfn block_on_match(slice, rule, pattern, remediation) {\n  const findings = scan(slice, pattern)\n  return {verdict: \"Allow\", rule: rule, findings: findings, remediation: remediation}\n}\n\n@invariant\n@deterministic\n@archivist(evidence: [\"https://example.com/a\", \"https://example.com/b\"], confidence: 0.9, source_date: \"2026-08-01\")\npub fn no_source_heredocs(slice, _ctx, _repo_at_base) {\n  return block_on_match(slice, \"no_source_heredocs\", r\"abc\", \"msg\")\n}\n",
+    )
+    .unwrap();
+
+    let result = apply_repairs_with_options_at(
+        &script,
+        RepairSafety::SurfaceChanging,
+        false,
+        FixOptions::capability_migrations(),
+    )
+    .unwrap_or_else(|error| {
+        panic!("local scan must not fail closed for project authority: {error}")
+    });
+    let updated = fs::read_to_string(&script).unwrap();
+    assert_eq!(
+        result.post_apply_diagnostics_count, 0,
+        "{result:#?}\n{updated}"
+    );
+    assert!(
+        !updated.contains("HarnessProject") && !updated.contains("harness.project"),
+        "local scan must not migrate onto project:\n{updated}"
+    );
+    assert!(
+        updated.contains("fn scan(") && updated.contains("scan(slice, pattern)"),
+        "local scan helper and call must remain:\n{updated}"
+    );
+}
+
+#[test]
+fn capability_apply_still_migrates_unshadowed_ambient_builtins() {
+    let (result, updated) = apply_single("fn main() {\n  scan(\".\")\n}\n");
+
+    assert_eq!(
+        result.post_apply_diagnostics_count, 0,
+        "{result:#?}\n{updated}"
+    );
+    assert!(
+        updated.contains("harness.project.scan(\".\")"),
+        "unshadowed scan must still migrate onto project:\n{updated}"
+    );
+}
+
+#[test]
 fn capability_apply_does_not_apply_flow_authority_rules_to_handler_invariants() {
     let (result, updated) = apply_single(
         "@invariant(\"capability.policy\", allow: \"fs.read\")\nfn inspect() -> string {\n  return read_file(\"manifest.json\")\n}\n\nfn main(harness: Harness) {\n  inspect()\n}\n",
