@@ -384,6 +384,10 @@ impl<'src> HarnSemanticIndex<'src> {
         self.text(node).trim().to_string()
     }
 
+    #[expect(
+        clippy::string_slice,
+        reason = "tree-sitter node ranges are char-aligned byte offsets into the parsed source"
+    )]
     fn text(&self, node: Node<'_>) -> &'src str {
         &self.source[node.start_byte()..node.end_byte()]
     }

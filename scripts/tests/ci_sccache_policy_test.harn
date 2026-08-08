@@ -163,7 +163,9 @@ fn workflow() {
         ...lint,
         env: {...lint.env, RUSTFLAGS: "-D warnings -Clink-arg=-fuse-ld=mold"},
         steps: lint.steps
-          + [{name: "Run Rust lint", run: "./scripts/ci/run_rust_lint_lane.sh"}],
+          + [
+          {name: "Check Rust code with Clippy", run: "./scripts/ci/run_rust_lint_lane.sh"},
+        ],
       },
       "rust-cache-refresh": {
         "runs-on": "ubuntu-latest",
@@ -242,7 +244,14 @@ fn workflow() {
         "runs-on": "ubuntu-latest",
         needs: artifact_consumer_needs,
         if: artifact_consumer_if,
-        steps: [],
+        steps: [
+          {name: "Verify portable Harn CLI"},
+          {
+            name: "Check prompts are not embedded in Rust",
+            if: "needs.changes.outputs.prompt_prose == 'true'",
+            run: "make lint-no-rust-prompt-prose",
+          },
+        ],
       },
       "ci-status": {
         needs: ["rust-artifacts-ready", "ci-walltime-report"],
@@ -544,7 +553,7 @@ pipeline test_rejects_strict_clippy_cache_safety_bypass(harness: Harness, task) 
         ...rust_job,
         steps: rust_job.steps.map(
           { step ->
-            if step?.name != "Run Rust lint" {
+            if step?.name != "Check Rust code with Clippy" {
               return step
             }
             return {...step, run: "cargo clippy --workspace --all-targets -- -D warnings"}
@@ -558,6 +567,42 @@ pipeline test_rejects_strict_clippy_cache_safety_bypass(harness: Harness, task) 
   assert(
     errors.contains(
       "ci.yml:rust-checks must route strict Clippy through the cache-safe Rust lint entrypoint",
+    ),
+  )
+}
+
+@test
+pipeline test_rejects_prompt_prose_check_in_compile_lane(harness: Harness, task) {
+  const valid = workflow()
+  const rust_job = valid.jobs["rust-checks"]
+  const invalid = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "rust-checks": {
+        ...rust_job,
+        steps: rust_job.steps.map(
+          { step ->
+            if step?.name != "Check Rust code with Clippy" {
+              return step
+            }
+            return {...step, env: {RUN_PROMPT_PROSE_RATCHET: "true"}}
+          },
+        )
+          .to_list(),
+      },
+      "audit-scripts": {...valid.jobs["audit-scripts"], steps: []},
+    },
+  }
+  const errors = ci_linux_lane_policy_errors(invalid)
+  assert(
+    errors.contains(
+      "ci.yml:rust-checks must route strict Clippy through the cache-safe Rust lint entrypoint",
+    ),
+  )
+  assert(
+    errors.contains(
+      "ci.yml:audit-scripts must run the prompt-prose policy with the shared Harn binary",
     ),
   )
 }

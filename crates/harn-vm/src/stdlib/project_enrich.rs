@@ -346,7 +346,7 @@ fn collect_relevant_files(root: &Path, base_evidence: &VmValue) -> Vec<RelevantF
             continue;
         };
         let truncated = content.chars().count() > MAX_FILE_CHARS;
-        let trimmed = truncate_chars(&content, MAX_FILE_CHARS);
+        let trimmed = crate::text::clip_end(&content, MAX_FILE_CHARS);
         if total_chars >= MAX_TOTAL_CONTEXT_CHARS {
             break;
         }
@@ -1723,13 +1723,6 @@ fn relative_posix(base: &Path, path: &Path) -> String {
 
 fn estimate_tokens(text: &str) -> i64 {
     ((text.chars().count() as i64) + 3) / 4
-}
-
-fn truncate_chars(text: &str, max_chars: usize) -> String {
-    if text.chars().count() <= max_chars {
-        return text.to_string();
-    }
-    text.chars().take(max_chars).collect()
 }
 
 fn push_unique_str<'a>(items: &mut Vec<&'a str>, value: &'a str) {

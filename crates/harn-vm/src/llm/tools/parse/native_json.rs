@@ -99,6 +99,10 @@ pub(crate) fn parse_native_json_tool_calls(
 /// value's structural end, so trailing prose — including multi-byte UTF-8
 /// (emoji/accents/CJK) — is ignored without the old O(n^2) backward byte scan
 /// that panicked on mid-codepoint slicing.
+#[expect(
+    clippy::string_slice,
+    reason = "offset sits on an ASCII `[` or `{` byte, which is a char boundary"
+)]
 fn find_native_json_items(text: &str) -> Option<Vec<serde_json::Value>> {
     let bytes = text.as_bytes();
     for (offset, &byte) in bytes.iter().enumerate() {

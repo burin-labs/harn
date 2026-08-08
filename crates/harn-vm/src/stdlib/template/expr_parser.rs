@@ -190,6 +190,10 @@ fn tokenize_expr(src: &str, line: usize, col: usize) -> Result<Vec<EToken>, Temp
                     }
                     i += 1;
                 }
+                #[expect(
+                    clippy::string_slice,
+                    reason = "start sits on an ASCII byte and i advanced over ASCII only"
+                )]
                 let lex = &src[start..i];
                 if is_float {
                     let v: f64 = lex.parse().map_err(|_| {
@@ -208,6 +212,10 @@ fn tokenize_expr(src: &str, line: usize, col: usize) -> Result<Vec<EToken>, Temp
                 while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
                     i += 1;
                 }
+                #[expect(
+                    clippy::string_slice,
+                    reason = "start sits on an ASCII byte and i advanced over ASCII only"
+                )]
                 let word = &src[start..i];
                 match word {
                     "true" => toks.push(EToken::True),

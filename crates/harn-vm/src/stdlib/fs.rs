@@ -1213,6 +1213,7 @@ fn unique_temp_dir_name(args: &[VmValue], default_prefix: &str) -> String {
         .filter(|c| !matches!(c, '/' | '\\'))
         .collect();
     let suffix = uuid::Uuid::now_v7().simple().to_string();
+    #[expect(clippy::string_slice, reason = "simple uuid encoding is ASCII hex")]
     let short_suffix = &suffix[suffix.len().saturating_sub(12)..];
     format!("{sanitized_prefix}{short_suffix}")
 }

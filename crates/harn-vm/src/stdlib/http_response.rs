@@ -795,8 +795,7 @@ fn infer_preload_as(path: &str) -> Option<&'static str> {
     // Strip any query string / fragment before extension lookup. Paths
     // like `/main.js?v=42` should still infer `script`.
     let pre_query = path.split(['?', '#']).next().unwrap_or(path);
-    let dot = pre_query.rfind('.')?;
-    let ext = &pre_query[dot + 1..];
+    let (_, ext) = pre_query.rsplit_once('.')?;
     Some(match ext.to_ascii_lowercase().as_str() {
         "css" => "style",
         "js" | "mjs" => "script",

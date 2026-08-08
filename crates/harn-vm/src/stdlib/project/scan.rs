@@ -1828,6 +1828,10 @@ fn parse_dockerfile_commands(dockerfile: &str) -> Vec<String> {
         let upper = pending.to_ascii_uppercase();
         for keyword in ["RUN ", "CMD ", "ENTRYPOINT "] {
             if upper.starts_with(keyword) {
+                #[expect(
+                    clippy::string_slice,
+                    reason = "keyword is ASCII and to_ascii_uppercase preserves byte offsets"
+                )]
                 push_unique(&mut commands, pending[keyword.len()..].trim().to_string());
                 break;
             }

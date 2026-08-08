@@ -358,6 +358,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::string_slice, reason = "test input is ASCII")]
     fn references_to_fn_param_refine_to_identifier_tokens() {
         let source = "fn process(data) {\n  return data\n}\n";
         let program = parse(source);
@@ -373,6 +374,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::string_slice, reason = "test input is ASCII")]
     fn references_to_let_binding_refine_to_identifier_tokens() {
         let source = "pipeline t(task) {\n  const total = 1\n  log(total)\n}\n";
         let program = parse(source);

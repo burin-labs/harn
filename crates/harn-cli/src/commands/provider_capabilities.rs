@@ -162,7 +162,9 @@ fn upsert_field(block_lines: &mut Vec<String>, key: &str, rendered: String, afte
 fn field_index(lines: &[String], key: &str) -> Option<usize> {
     lines.iter().position(|line| {
         let trimmed = line.trim();
-        trimmed.starts_with(key) && trimmed[key.len()..].trim_start().starts_with('=')
+        trimmed
+            .strip_prefix(key)
+            .is_some_and(|rest| rest.trim_start().starts_with('='))
     })
 }
 

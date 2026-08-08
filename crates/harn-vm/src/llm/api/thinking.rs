@@ -7,6 +7,11 @@
 /// text. Returns `(visible_text, thinking_text)`. Handles multiple thinking
 /// blocks, malformed/unclosed tags (best-effort), and preserves original
 /// whitespace in the visible portion.
+#[expect(
+    clippy::string_slice,
+    reason = "every offset comes from find() of an ASCII tag on the sliced string, plus the \
+              ASCII tag length — always a char boundary"
+)]
 pub(crate) fn split_openai_thinking_blocks(raw: &str) -> (String, String) {
     if !raw.contains("<think>") {
         return (raw.to_string(), String::new());
@@ -59,6 +64,11 @@ impl ThinkingStreamSplitter {
     /// Feed a new delta chunk. Returns the visible portion to forward
     /// downstream (may be empty if the entire chunk was part of a thinking
     /// block or got held back as carry).
+    #[expect(
+        clippy::string_slice,
+        reason = "cursor advances by find() of ASCII tags plus their ASCII lengths, and the \
+                  carry split is explicitly floored to a char boundary with is_char_boundary"
+    )]
     pub fn push(&mut self, delta: &str) -> String {
         let combined = {
             let mut s = std::mem::take(&mut self.carry);

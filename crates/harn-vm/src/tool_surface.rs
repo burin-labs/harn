@@ -930,6 +930,10 @@ struct PromptToolCall<'a> {
     text: &'a str,
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "every slice index sits on an ASCII tag/ident/paren byte or at text.len()"
+)]
 fn prompt_tool_calls(text: &str) -> Vec<PromptToolCall<'_>> {
     let mut calls = Vec::new();
     let bytes = text.as_bytes();

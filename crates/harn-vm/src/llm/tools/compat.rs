@@ -19,6 +19,10 @@ const HARMONY_CHANNEL_MARKERS: &[&str] =
 const TOOL_NAMESPACE_PREFIXES: &[&str] = &["tool.", "tools.", "functions.", "function."];
 
 /// Strip provider protocol tokens that were appended to a function name.
+#[expect(
+    clippy::string_slice,
+    reason = "pos comes from find() of an ASCII marker on the sliced string"
+)]
 pub(crate) fn normalize_tool_name(name: &str) -> String {
     let trimmed = name.trim();
     for marker in HARMONY_CHANNEL_MARKERS {
@@ -107,6 +111,10 @@ pub(crate) fn normalize_tool_call_shape(
 /// Remove every `<|...|>` provider template token span from a tool name.
 /// An unterminated `<|` swallows the rest of the name (it is all marker
 /// residue). Returns the trimmed remainder, which may be empty.
+#[expect(
+    clippy::string_slice,
+    reason = "offsets come from find() of the ASCII `<|` / `|>` markers plus their lengths"
+)]
 fn strip_marker_tokens(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
     let mut rest = name;

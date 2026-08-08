@@ -720,6 +720,10 @@ pub(super) fn is_failure_signal_line(line: &str) -> bool {
             saw_digit && rest.trim_start().starts_with('|')
         };
 
+    #[expect(
+        clippy::string_slice,
+        reason = "digits is an ASCII-digit prefix of rest, so its len is a boundary"
+    )]
     let failing_line_marker = {
         if let Some(rest) = trimmed.strip_prefix('L') {
             let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
@@ -740,6 +744,10 @@ pub(super) fn is_failure_signal_line(line: &str) -> bool {
 /// Snap a byte offset to the nearest preceding line boundary (end of a complete line).
 /// Returns the substring from the start up to and including the last complete line
 /// that fits within `max_bytes`. Never cuts mid-line.
+#[expect(
+    clippy::string_slice,
+    reason = "search_end is a floor_char_boundary; pos indexes an ASCII newline"
+)]
 fn snap_to_line_end(s: &str, max_bytes: usize) -> &str {
     if max_bytes >= s.len() {
         return s;
@@ -754,6 +762,10 @@ fn snap_to_line_end(s: &str, max_bytes: usize) -> &str {
 /// Snap a byte offset to the nearest following line boundary (start of a complete line).
 /// Returns the substring from the first complete line at or after `start_byte`.
 /// Never cuts mid-line.
+#[expect(
+    clippy::string_slice,
+    reason = "search_start is a ceil_char_boundary; line_start follows an ASCII newline"
+)]
 fn snap_to_line_start(s: &str, start_byte: usize) -> &str {
     if start_byte == 0 {
         return s;
@@ -815,6 +827,10 @@ fn truncate_compaction_summary_with_context(
             if content.is_empty() {
                 return None;
             }
+            #[expect(
+                clippy::string_slice,
+                reason = "floor_char_boundary returns a char boundary"
+            )]
             let truncated = if content.len() > per_msg_limit {
                 format!(
                     "{}... [truncated from {} chars]",
@@ -1080,6 +1096,10 @@ fn default_mask_tool_result(role: &str, content: &str) -> String {
     if line_count <= 3 {
         return format!("[{role}] {content}");
     }
+    #[expect(
+        clippy::string_slice,
+        reason = "floor_char_boundary returns a char boundary"
+    )]
     let preview = &first_line[..first_line.floor_char_boundary(120)];
     // Preserve failure-signal lines (bounded so a huge log can't defeat the
     // mask). Skip the first line itself — it is already in the preview.
@@ -1159,6 +1179,10 @@ fn collapse_repeats(lines: Vec<String>) -> Vec<String> {
     out
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "idx is an rfind offset on the same line"
+)]
 fn strip_repeat_suffix(line: &str) -> &str {
     line.rfind(" (x")
         .filter(|_| line.ends_with(')'))

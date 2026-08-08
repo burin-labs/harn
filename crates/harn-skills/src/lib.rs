@@ -342,11 +342,7 @@ fn split_closing_frontmatter<'a>(
     line_ending: &str,
 ) -> Option<(&'a str, &'a str)> {
     let close = format!("{line_ending}---{line_ending}");
-    let close_offset = after_open.find(&close)?;
-    Some((
-        &after_open[..close_offset],
-        &after_open[close_offset + close.len()..],
-    ))
+    after_open.split_once(&close)
 }
 
 fn parse_frontmatter(frontmatter: &'static str) -> SkillFrontmatter {
@@ -664,13 +660,12 @@ mod tests {
     fn bracketed_skill_references(body: &str) -> Vec<&str> {
         let mut references = Vec::new();
         let mut rest = body;
-        while let Some(start) = rest.find("[[") {
-            rest = &rest[start + 2..];
-            let Some(end) = rest.find("]]") else {
+        while let Some((_, after_open)) = rest.split_once("[[") {
+            let Some((reference, tail)) = after_open.split_once("]]") else {
                 break;
             };
-            references.push(&rest[..end]);
-            rest = &rest[end + 2..];
+            references.push(reference);
+            rest = tail;
         }
         references
     }

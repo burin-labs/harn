@@ -335,7 +335,7 @@ fn key_signatures(symbols: &[SymbolRecord]) -> Vec<String> {
     let mut file_counts = HashMap::<String, usize>::new();
     let mut seen = BTreeSet::new();
     for (symbol, _) in candidates {
-        let signature_key = truncate_chars(&symbol.signature, 80);
+        let signature_key = harn_vm::text::clip_end(&symbol.signature, 80);
         if !seen.insert(signature_key) {
             continue;
         }
@@ -358,7 +358,7 @@ fn key_signatures(symbols: &[SymbolRecord]) -> Vec<String> {
         };
         rows.push(format!(
             "{kind} {} [{file_name}, refs:{}]",
-            truncate_chars(&symbol.signature, 100),
+            harn_vm::text::clip_end(&symbol.signature, 100),
             symbol.reference_count
         ));
         if rows.len() >= 15 {
@@ -480,7 +480,7 @@ fn collect_signature(lines: &[&str], start: usize) -> String {
         signature.truncate(brace);
         signature = signature.trim().to_string();
     }
-    truncate_chars(&signature, 150)
+    harn_vm::text::clip_end(&signature, 150)
 }
 
 fn paren_delta(value: &str) -> i32 {
@@ -495,7 +495,9 @@ fn agent_instructions(root: &Path) -> Option<String> {
     ["AGENTS.md", "CLAUDE.md"]
         .into_iter()
         .find_map(|name| fs::read_to_string(root.join(name)).ok())
-        .map(|instructions| truncate_chars(instructions.trim(), MAX_AGENT_INSTRUCTIONS_CHARS))
+        .map(|instructions| {
+            harn_vm::text::clip_end(instructions.trim(), MAX_AGENT_INSTRUCTIONS_CHARS)
+        })
         .filter(|instructions| !instructions.is_empty())
 }
 
@@ -516,10 +518,6 @@ fn is_test_file(path: &str) -> bool {
         || lower.contains(".spec.")
         || file_name.starts_with("test_")
         || file_name.ends_with("_test.py")
-}
-
-fn truncate_chars(value: &str, max: usize) -> String {
-    value.chars().take(max).collect()
 }
 
 #[cfg(test)]

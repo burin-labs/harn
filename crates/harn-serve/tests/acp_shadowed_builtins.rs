@@ -110,14 +110,13 @@ fn registered_builtin_names() -> Vec<String> {
         {
             continue;
         }
-        let Some(open) = trimmed.find('"') else {
+        let Some((_, rest)) = trimmed.split_once('"') else {
             continue;
         };
-        let rest = &trimmed[open + 1..];
-        let Some(close) = rest.find('"') else {
+        let Some((name, _)) = rest.split_once('"') else {
             continue;
         };
-        let name = rest[..close].to_string();
+        let name = name.to_string();
         if !out.contains(&name) {
             out.push(name);
         }

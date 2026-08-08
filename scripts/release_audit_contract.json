@@ -30,7 +30,7 @@
       ]
     },
     {
-      "name": "Rust lint",
+      "name": "Check Rust code",
       "job_id": "rust-checks",
       "matrix_kind": "",
       "proofs": ["rust-audit"],

@@ -242,7 +242,12 @@ fn run_blame(
         if let Some(rest) = line.strip_prefix("author ") {
             current_author = rest.to_string();
         } else if line.len() >= 40 && line.chars().take(40).all(|c| c.is_ascii_hexdigit()) {
-            current_sha = line[..40].to_string();
+            #[expect(
+                clippy::string_slice,
+                reason = "the first 40 chars are checked ASCII hex, so byte 40 is a char boundary"
+            )]
+            let sha = &line[..40];
+            current_sha = sha.to_string();
         } else if let Some(stripped) = line.strip_prefix('\t') {
             line_no += 1;
             blame_entries.push(build_dict([

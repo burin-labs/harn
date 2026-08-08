@@ -1215,6 +1215,7 @@ fn dedupe_review_findings(findings: Vec<GroundedReviewFinding>) -> Vec<GroundedR
     deduped
 }
 
+#[expect(clippy::string_slice, reason = "hex digest is ASCII")]
 fn grounded_review_dedupe_key(event: HookEvent, findings: &[GroundedReviewFinding]) -> String {
     use sha2::Digest as _;
 

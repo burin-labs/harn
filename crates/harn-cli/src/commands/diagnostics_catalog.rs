@@ -473,6 +473,10 @@ fn code_anchor(identifier: &str) -> String {
 /// trailing blank line, so embedding the file under our own heading
 /// does not produce a duplicate title. Returns the original source
 /// untouched when the first non-blank line is not a heading.
+#[expect(
+    clippy::string_slice,
+    reason = "offsets come from char_indices plus len_utf8 or follow an ASCII newline check"
+)]
 fn strip_leading_heading(source: &str) -> &str {
     for (idx, ch) in source.char_indices() {
         if ch == '\n' || ch == '\r' {
@@ -501,6 +505,10 @@ fn strip_leading_heading(source: &str) -> &str {
 /// Demote every `#`-prefixed heading in a markdown chunk by `levels` so
 /// embedding it under an outer heading stays well-formed. Lines inside
 /// fenced code blocks are passed through untouched.
+#[expect(
+    clippy::string_slice,
+    reason = "prefix_len is trim_start's boundary; hashes counts leading ASCII '#' bytes"
+)]
 fn demote_markdown_headings(source: &str, levels: usize) -> String {
     let mut out = String::with_capacity(source.len() + 16);
     let mut in_fence = false;

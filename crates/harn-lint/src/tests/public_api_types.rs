@@ -54,6 +54,7 @@ tool internal_tool(value) { return value }
 }
 
 #[test]
+#[expect(clippy::string_slice, reason = "test input is ASCII")]
 fn reports_every_missing_public_parameter_and_return_without_023_duplication() {
     let source =
         "pub fn run(first, second: int) {}\npub pipeline test_publish(task, count: int) {}\n";
@@ -103,6 +104,11 @@ fn conventional_entry_and_test_pipelines_are_not_exempt() {
 }
 
 #[test]
+#[expect(
+    clippy::string_slice,
+    reason = "diagnostic spans are lexer byte offsets, char boundaries even after the \
+              multibyte comment in the fixture"
+)]
 fn parameter_spans_remain_byte_exact_with_nested_types_and_defaults() {
     let source = "// π\npub fn collect(first: list<{left: int, right: list<string>}>, fallback, final = {value: 1}) -> nil { return nil }\n";
     let diagnostics = public_api_diagnostics(source);

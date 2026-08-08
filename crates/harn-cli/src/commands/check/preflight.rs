@@ -169,6 +169,10 @@ fn scan_effect_inheritance_in_decl(
     }
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "lexer spans over this source are char-boundary offsets; source.len() clamp is too"
+)]
 fn source_excluding_spawn_agents(source: &str, body: &[SNode]) -> String {
     let mut spawn_spans: Vec<harn_lexer::Span> = Vec::new();
     for node in body {
@@ -219,6 +223,10 @@ fn collect_spawn_agent_spans(node: &SNode, out: &mut Vec<harn_lexer::Span>) {
     }
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "lexer spans over this source are char-boundary offsets; source.len() clamp is too"
+)]
 fn collect_spawn_agent_sites(
     node: &SNode,
     source: &str,

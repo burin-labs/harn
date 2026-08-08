@@ -265,11 +265,18 @@ pub(crate) fn build_code_actions(
         if msg.contains("[unused-variable]") || msg.contains("[unused-parameter]") {
             if let Some(name) = extract_backtick_name(msg) {
                 let offset = source.offset(diag.range.start);
-                let end_offset = source
-                    .offset(diag.range.end)
-                    .max(offset + 1)
-                    .min(source.len());
-                let search_region = &source[offset..end_offset];
+                #[expect(
+                    clippy::string_slice,
+                    reason = "offsets come from SourceText::offset or a whole-char advance"
+                )]
+                let search_region = {
+                    // A degenerate range still gets a region covering the
+                    // first char; `offset + 1` could split a multi-byte char.
+                    let min_end =
+                        offset + source[offset..].chars().next().map_or(0, char::len_utf8);
+                    let end_offset = source.offset(diag.range.end).clamp(min_end, source.len());
+                    &source[offset..end_offset]
+                };
                 if let Some(name_pos) = find_word_in_region(search_region, &name) {
                     let abs_pos = offset + name_pos;
                     let start = source.position(abs_pos);
@@ -487,6 +494,10 @@ fn fix_all_requested(only: Option<&[CodeActionKind]>) -> bool {
 /// `match` expression (e.g. the closing `}` isn't at the expected
 /// byte position) — in that case the code-action is silently skipped
 /// rather than emitting a broken edit.
+#[expect(
+    clippy::string_slice,
+    reason = "close_brace_byte holds an ASCII `}` and line_start follows a newline"
+)]
 pub(super) fn build_missing_arms_edit(
     source: &SourceText,
     match_span: &harn_lexer::Span,
@@ -670,6 +681,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::string_slice, reason = "test input is ASCII")]
     fn missing_arms_edit_inserts_each_variant_before_close_brace() {
         let source = "pipeline default() {\n  match v {\n    \"pass\" -> { }\n  }\n}\n";
         // Byte range covering `match v { ... }`.

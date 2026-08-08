@@ -211,8 +211,7 @@ fn parse_from_doc_lines(lines: &[&str]) -> StdlibMetadata {
 
 fn parse_key_line(line: &str) -> Option<(&'static str, &str)> {
     let rest = line.strip_prefix('@')?;
-    let colon = rest.find(':')?;
-    let (key, after) = rest.split_at(colon);
+    let (key, after) = rest.split_once(':')?;
     let key = match key.trim() {
         "effects" => "effects",
         "errors" => "errors",
@@ -220,7 +219,7 @@ fn parse_key_line(line: &str) -> Option<(&'static str, &str)> {
         "example" => "example",
         _ => return None,
     };
-    Some((key, &after[1..]))
+    Some((key, after))
 }
 
 fn assign_field(meta: &mut StdlibMetadata, key: &str, value: &str) {
@@ -269,8 +268,10 @@ fn extract_doc_body(source: &str, span: &Span) -> Option<String> {
 
     // Single-line `/** ... */` form.
     let above_trim = above.trim_start();
-    if above_trim.starts_with("/**") && above_trim.ends_with("*/") && above_trim.len() >= 5 {
-        let inner = &above_trim[3..above_trim.len() - 2];
+    if let Some(inner) = above_trim
+        .strip_prefix("/**")
+        .and_then(|s| s.strip_suffix("*/"))
+    {
         return Some(inner.trim().to_string());
     }
 

@@ -6,6 +6,12 @@
 //! offsets, so the conversion lives here once for every template
 //! diagnostic rather than once per rule.
 
+#![expect(
+    clippy::string_slice,
+    reason = "every offset is a char boundary: derived via find/char_indices/split_inclusive \
+              on the sliced string, or a template-lexer byte offset supplied by the caller"
+)]
+
 use harn_lexer::Span;
 
 /// Span an exact byte range in a prompt template.

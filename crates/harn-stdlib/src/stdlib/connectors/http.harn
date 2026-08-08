@@ -1,4 +1,5 @@
 import { filter_nil } from "std/collections"
+import { http_retry_after_ms } from "std/net"
 
 const CONNECTOR_HTTP_ERROR_BODY_MAX_CHARS = 1024
 
@@ -55,91 +56,6 @@ pub type ConnectorHttpFailure = {
 
 pub type ConnectorHttpResponse = ConnectorHttpSuccess | ConnectorHttpFailure
 
-fn __connector_http_pad2(value) {
-  const text = to_string(to_int(value) ?? 0)
-  if len(text) == 1 {
-    return "0" + text
-  }
-  return text
-}
-
-fn __connector_http_month_number(name) {
-  const months = {
-    apr: "04",
-    aug: "08",
-    dec: "12",
-    feb: "02",
-    jan: "01",
-    jul: "07",
-    jun: "06",
-    mar: "03",
-    may: "05",
-    nov: "11",
-    oct: "10",
-    sep: "09",
-  }
-  return months[lowercase(name)]
-}
-
-fn __connector_http_parse_http_date_ms(clock: HarnessClock, raw) {
-  const matches = regex_captures(
-    "^[A-Za-z]{3},\\s+(\\d{1,2})\\s+([A-Za-z]{3})\\s+(\\d{4})\\s+(\\d{2}):(\\d{2}):(\\d{2})\\s+GMT$",
-    raw,
-  )
-  if len(matches) == 0 {
-    return nil
-  }
-  const parts = matches[0].groups
-  const month = __connector_http_month_number(parts[1])
-  if month == nil {
-    return nil
-  }
-  const iso = parts[2] + "-" + month + "-" + __connector_http_pad2(parts[0])
-    + "T"
-    + parts[3]
-    + ":"
-    + parts[4]
-    + ":"
-    + parts[5]
-    + "Z"
-  const parsed = try {
-    date_parse(iso)
-  }
-  if is_err(parsed) {
-    return nil
-  }
-  const delta_seconds = to_float(unwrap(parsed)) - clock.timestamp()
-  if delta_seconds <= 0.0 {
-    return 0
-  }
-  return to_int(delta_seconds * 1000.0)
-}
-
-fn __connector_http_parse_retry_after_ms(clock: HarnessClock, value) {
-  const raw = trim(to_string(value ?? ""))
-  if raw == "" {
-    return nil
-  }
-  const seconds = to_float(raw)
-  if seconds != nil {
-    if seconds <= 0.0 {
-      return 0
-    }
-    return to_int(seconds * 1000.0)
-  }
-  const parsed = try {
-    date_parse(raw)
-  }
-  if is_ok(parsed) {
-    const delta_seconds = to_float(unwrap(parsed)) - clock.timestamp()
-    if delta_seconds <= 0.0 {
-      return 0
-    }
-    return to_int(delta_seconds * 1000.0)
-  }
-  return __connector_http_parse_http_date_ms(clock, raw)
-}
-
 fn __connector_http_retry_options(options) {
   const opts = options ?? {}
   const policy = opts.retry_policy ?? opts.retry ?? {}
@@ -169,8 +85,8 @@ fn __connector_http_retry_options(options) {
     max_attempts: max_attempts,
     base_ms: base_ms,
     cap_ms: cap_ms,
-    respect_retry_after: opts?.respect_retry_after ?? true,
-    retry_on: opts?.retry_on ?? policy?.retry_on ?? [408, 429, 500, 502, 503, 504],
+    respect_retry_after: policy?.respect_retry_after ?? opts?.respect_retry_after ?? true,
+    retry_on: policy?.retry_on ?? opts?.retry_on ?? [408, 429, 500, 502, 503, 504],
   }
 }
 
@@ -483,7 +399,7 @@ pub fn connector_http_rate_limit(
   return filter_nil(
     {
       retry_after: retry_after,
-      retry_after_ms: __connector_http_parse_retry_after_ms(clock, retry_after),
+      retry_after_ms: http_retry_after_ms(clock, retry_after),
       limit: limit ?? x_limit,
       remaining: remaining ?? x_remaining,
       reset: reset ?? x_reset,

@@ -40,6 +40,10 @@ thread_local! {
 ///
 /// Returns `None` if the ID isn't a known Claude shape (e.g. `gpt-4o`),
 /// including non-numeric tails like `claude-mythos-preview`.
+#[expect(
+    clippy::string_slice,
+    reason = "idx comes from find() of the ASCII needle on the sliced string"
+)]
 pub(crate) fn claude_generation(model: &str) -> Option<(u32, u32)> {
     let lower = model.to_lowercase();
     if !is_claude_model_id(&lower) {

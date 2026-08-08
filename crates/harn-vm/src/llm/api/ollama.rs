@@ -1359,6 +1359,10 @@ mod tests {
             data.extend_from_slice(&buf[..n]);
             let text = String::from_utf8_lossy(&data);
             if let Some(header_end) = text.find("\r\n\r\n") {
+                #[expect(
+                    clippy::string_slice,
+                    reason = "header_end comes from find() on the same string"
+                )]
                 let headers = &text[..header_end];
                 let content_length = match http_content_length_from_header_lines(
                     headers.lines(),

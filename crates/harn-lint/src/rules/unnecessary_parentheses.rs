@@ -138,6 +138,10 @@ fn trim_ascii_whitespace_backward(source: &str, start: usize, end: usize) -> usi
     pos
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "start is a lexer token offset moved only across ASCII whitespace, a char boundary"
+)]
 fn span_from_offsets(source: &str, start: usize, end: usize) -> Span {
     let line = source[..start].bytes().filter(|b| *b == b'\n').count() + 1;
     let line_start = source[..start].rfind('\n').map(|idx| idx + 1).unwrap_or(0);

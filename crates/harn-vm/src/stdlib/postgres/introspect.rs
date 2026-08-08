@@ -920,14 +920,13 @@ fn sql_literal(value: &VmValue, label: &'static str) -> Result<String, VmError> 
 /// compare correctly under bytewise ordering, which is the only literal
 /// shape this function currently understands.
 fn partition_bound_strictly_before(bound: &str, before: &str) -> bool {
-    let Some(to_idx) = bound.find(" TO (") else {
+    let Some((_, after)) = bound.split_once(" TO (") else {
         return false;
     };
-    let after = &bound[to_idx + 5..];
-    let Some(end_idx) = after.rfind(')') else {
+    let Some((before_paren, _)) = after.rsplit_once(')') else {
         return false;
     };
-    let to_literal = after[..end_idx]
+    let to_literal = before_paren
         .trim()
         .trim_start_matches('\'')
         .trim_end_matches('\'');

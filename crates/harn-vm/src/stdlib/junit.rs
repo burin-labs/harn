@@ -129,6 +129,10 @@ fn record_to_value(record: TestRecord) -> VmValue {
     VmValue::dict(map)
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "cursor and bounds come from find() results plus ASCII token lengths"
+)]
 fn parse_junit_xml(bytes: &[u8]) -> Vec<TestRecord> {
     let Ok(text) = std::str::from_utf8(bytes) else {
         return Vec::new();
@@ -193,6 +197,10 @@ fn apply_body(record: &mut TestRecord, body: &str) {
     }
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "offsets come from find() results plus the 1-byte '>' they matched"
+)]
 fn first_child_with_message(body: &str, tag: &str) -> Option<(Option<String>, String)> {
     let open = format!("<{tag}");
     let close_open = format!("</{tag}>");
@@ -212,6 +220,10 @@ fn first_child_with_message(body: &str, tag: &str) -> Option<(Option<String>, St
     Some((message, body_text))
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "offsets come from find() results plus the 1-byte '>' they matched"
+)]
 fn first_child_text(body: &str, tag: &str) -> Option<String> {
     let open = format!("<{tag}");
     let close = format!("</{tag}>");
@@ -250,7 +262,10 @@ fn attr(header: &str, key: &str) -> Option<String> {
         {
             idx += 1;
         }
-        let name = &header[name_start..idx];
+        // Compare as bytes: the byte-wise recovery walk below can leave
+        // `name_start`/`idx` inside a multi-byte char, where even an empty
+        // `&str` range slice would panic.
+        let name = &bytes[name_start..idx];
         while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
             idx += 1;
         }
@@ -276,7 +291,11 @@ fn attr(header: &str, key: &str) -> Option<String> {
         if idx >= bytes.len() {
             break;
         }
-        if name == key {
+        if name == key.as_bytes() {
+            #[expect(
+                clippy::string_slice,
+                reason = "value bounds are adjacent to ASCII quote bytes"
+            )]
             return Some(unescape_xml(&header[value_start..idx]));
         }
         idx += 1;

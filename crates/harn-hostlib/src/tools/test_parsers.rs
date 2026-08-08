@@ -67,6 +67,10 @@ impl TestRecord {
 /// Parse a JUnit XML byte stream into [`TestRecord`]s. Returns `Err(())` if
 /// the XML is malformed enough that we can't extract anything — the
 /// caller falls back to other parsers.
+#[expect(
+    clippy::string_slice,
+    reason = "offsets come from find results plus ASCII literal widths, all char boundaries"
+)]
 pub(crate) fn parse_junit_xml(bytes: &[u8]) -> Result<Vec<TestRecord>, ()> {
     let text = std::str::from_utf8(bytes).map_err(|_| ())?;
     let mut out = Vec::new();
@@ -131,6 +135,10 @@ fn apply_body(record: &mut TestRecord, body: &str) {
     }
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "offsets come from find results and one past the ASCII '>', all char boundaries"
+)]
 fn first_child_with_message<'a>(
     body: &'a str,
     tag: &'a str,
@@ -156,10 +164,10 @@ fn first_child_with_message<'a>(
 fn first_child_text(body: &str, tag: &str) -> Option<String> {
     let open = format!("<{tag}");
     let close = format!("</{tag}>");
-    let pos = body.find(open.as_str())?;
-    let header_end = body[pos..].find('>').map(|i| pos + i)?;
-    let close_pos = body[header_end..].find(&close).map(|i| header_end + i)?;
-    Some(unescape_xml(body[header_end + 1..close_pos].trim()))
+    let (_, rest) = body.split_once(open.as_str())?;
+    let (_, rest) = rest.split_once('>')?;
+    let (text, _) = rest.split_once(close.as_str())?;
+    Some(unescape_xml(text.trim()))
 }
 
 fn combined_message(message: Option<String>, body_text: String) -> String {
@@ -170,6 +178,10 @@ fn combined_message(message: Option<String>, body_text: String) -> String {
     }
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "slice bounds sit at ASCII delimiter bytes or boundary-realigned scan indices"
+)]
 fn attr(header: &str, key: &str) -> Option<String> {
     let bytes = header.as_bytes();
     let mut idx = 0;
@@ -198,6 +210,11 @@ fn attr(header: &str, key: &str) -> Option<String> {
         if idx >= bytes.len() || bytes[idx] != b'=' {
             if idx == name_start || idx >= bytes.len() || matches!(bytes[idx], b'>' | b'/') {
                 idx += 1;
+                // The skipped byte may start a multi-byte char; realign so
+                // slice indices below stay on char boundaries.
+                while idx < bytes.len() && !header.is_char_boundary(idx) {
+                    idx += 1;
+                }
             }
             continue;
         }
@@ -249,14 +266,13 @@ pub(crate) fn parse_cargo_libtest(stdout: &str) -> Vec<TestRecord> {
     let mut out: Vec<TestRecord> = Vec::new();
     for line in stdout.lines() {
         let trimmed = line.trim_start();
-        if !trimmed.starts_with("test ") {
+        let Some(body) = trimmed.strip_prefix("test ") else {
             continue;
-        }
+        };
         // skip aggregate "test result: ..." line
-        if trimmed.starts_with("test result:") {
+        if body.starts_with("result:") {
             continue;
         }
-        let body = &trimmed[5..];
         let Some((name, tail)) = body.split_once(" ... ") else {
             continue;
         };
@@ -275,10 +291,9 @@ pub(crate) fn parse_cargo_libtest(stdout: &str) -> Vec<TestRecord> {
 }
 
 fn attach_libtest_failure_bodies(records: &mut [TestRecord], stdout: &str) {
-    let Some(idx) = stdout.find("\nfailures:\n\n") else {
+    let Some((_, body)) = stdout.split_once("\nfailures:\n\n") else {
         return;
     };
-    let body = &stdout[idx + "\nfailures:\n\n".len()..];
     let blocks = body.split("\n\n");
     for block in blocks {
         let Some(first_line) = block.lines().next() else {

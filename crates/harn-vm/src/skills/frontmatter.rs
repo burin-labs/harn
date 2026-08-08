@@ -141,6 +141,10 @@ const KNOWN_CANONICAL_KEYS: &[&str] = &[
 /// closing `---` line, with everything before the opener discarded
 /// (usually nothing, but a UTF-8 BOM is tolerated). If no frontmatter
 /// is present, returns `("", full_source)`.
+#[expect(
+    clippy::string_slice,
+    reason = "line offsets come from find('\\n') on trimmed, so they are char boundaries"
+)]
 pub fn split_frontmatter(source: &str) -> (&str, &str) {
     let trimmed = source.strip_prefix('\u{feff}').unwrap_or(source);
     let mut line_start = 0usize;

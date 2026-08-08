@@ -168,6 +168,10 @@ fn malformed_json_error(error: serde_json::Error) -> VmError {
     ))
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "offset is snapped back to a char boundary; line_start follows a 1-byte '\\n'"
+)]
 fn byte_offset_location(text: &str, byte_offset: usize) -> (usize, usize) {
     let mut offset = byte_offset.min(text.len());
     while !text.is_char_boundary(offset) {
@@ -730,13 +734,12 @@ fn json_pointer_tokens(ptr: &str, builtin: &str) -> Result<Vec<String>, VmError>
     if ptr.is_empty() {
         return Ok(Vec::new());
     }
-    if !ptr.starts_with('/') {
+    let Some(rest) = ptr.strip_prefix('/') else {
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
             format!("{builtin}: pointer must be empty or start with '/'"),
         ))));
-    }
-    ptr[1..]
-        .split('/')
+    };
+    rest.split('/')
         .map(|segment| {
             let mut decoded = String::with_capacity(segment.len());
             let mut chars = segment.chars();
@@ -1059,16 +1062,12 @@ fn write_vm_value_to_json(val: &VmValue, out: &mut String) {
 pub(crate) fn extract_json_from_text(text: &str) -> String {
     let trimmed = text.trim();
 
-    if let Some(start) = trimmed.find("```") {
-        let after_backticks = &trimmed[start + 3..];
-        let content_start = if let Some(nl) = after_backticks.find('\n') {
-            nl + 1
-        } else {
-            0
-        };
-        let content = &after_backticks[content_start..];
-        if let Some(end) = content.find("```") {
-            return content[..end].trim().to_string();
+    if let Some((_, after_backticks)) = trimmed.split_once("```") {
+        let content = after_backticks
+            .split_once('\n')
+            .map_or(after_backticks, |(_, rest)| rest);
+        if let Some((body, _)) = content.split_once("```") {
+            return body.trim().to_string();
         }
     }
 
@@ -1115,6 +1114,10 @@ fn find_balanced_json(text: &str, open: u8, close: u8) -> Option<String> {
             } else if b == close {
                 depth -= 1;
                 if depth == 0 {
+                    #[expect(
+                        clippy::string_slice,
+                        reason = "start and i hold ASCII bytes, so both bounds are char boundaries"
+                    )]
                     return Some(text[start..=i].to_string());
                 }
             }

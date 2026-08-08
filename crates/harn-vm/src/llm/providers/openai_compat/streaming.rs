@@ -19,6 +19,11 @@ pub(super) struct DeltaCanonicalizer {
 }
 
 impl DeltaCanonicalizer {
+    #[expect(
+        clippy::string_slice,
+        reason = "the held tail is a prefix of an ASCII wire delimiter, so safe_end is a char \
+                  boundary"
+    )]
     pub(super) fn push(&mut self, chunk: &str) -> String {
         use crate::llm::tool_delimiter::{
             wire_to_canonical, WIRE_TOOL_CALL_CLOSE, WIRE_TOOL_CALL_OPEN,

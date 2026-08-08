@@ -19,8 +19,8 @@ use crate::protocol::*;
 /// filter behaviour for backward compat with legacy throws).
 fn extract_exception_kind(msg: &str) -> Option<String> {
     let tail = msg.strip_prefix("kind:")?;
-    let end = tail.find(':')?;
-    Some(tail[..end].to_string())
+    let (kind, _) = tail.split_once(':')?;
+    Some(kind.to_string())
 }
 
 impl Debugger {

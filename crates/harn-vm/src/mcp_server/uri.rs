@@ -2,6 +2,12 @@
 ///
 /// Matches a URI against a template like `file:///{path}` and extracts named
 /// variables. Returns `None` if the URI doesn't match the template structure.
+#[expect(
+    clippy::string_slice,
+    reason = "t_pos only reaches slice sites on ASCII '{' bytes (char boundaries), u_pos is a \
+              boundary because it advances past find() matches or byte runs identical to \
+              whole-char template literals, and find() results are boundaries"
+)]
 pub(super) fn match_uri_template(
     template: &str,
     uri: &str,
@@ -56,6 +62,10 @@ pub(super) fn match_uri_template(
     }
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "offsets come from find() of the ASCII braces on the sliced string"
+)]
 pub(super) fn uri_template_variables(template: &str) -> Vec<String> {
     let mut variables = Vec::new();
     let mut cursor = template;

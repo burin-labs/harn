@@ -564,6 +564,10 @@ fn group_by_identity(facts: Vec<SymbolFact>) -> BTreeMap<Identity, Vec<SymbolFac
     grouped
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "start and start + name.len() bound a match_indices hit, so both are char boundaries"
+)]
 fn normalized_renamed_signature(fact: &SymbolFact) -> Option<String> {
     let is_identifier = |ch: char| ch.is_alphanumeric() || matches!(ch, '_' | '$');
     let start = fact

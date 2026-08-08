@@ -131,7 +131,10 @@ replay form of a tagged-protocol response.
 #### Usage
 
 `usage` is the single owner of all call accounting; no accounting field
-is duplicated at the envelope's top level.
+is duplicated at the envelope's top level. The VM response, provider-response
+event, and LLM trace are mechanical projections of the same normalized Rust
+ledger. Consumers should read the recorded fields rather than re-price tokens
+or derive cache behavior independently.
 
 | Field | Type | Description |
 |---|---|---|
@@ -140,12 +143,18 @@ is duplicated at the envelope's top level.
 | `cost_usd` | float \| nil | Cache- and serving-tier-adjusted catalog price for this response; `nil` (not `0`) when pricing is unknown |
 | `cache_read_tokens` | int | Prompt tokens served from provider-side cache |
 | `cache_write_tokens` | int | Prompt tokens written into provider-side cache |
+| `cache_supported` | bool | Whether the provider reports prompt-cache accounting |
 | `cache_hit_ratio` | float \| nil | Fraction of prompt tokens served from cache; `nil` when the provider reports no cache accounting |
 | `cache_visibility` | string | `"unsupported"` when the provider exposes no cache accounting (e.g. native Ollama), so a local model is never scored as a 100% cache miss |
 | `cache_savings_usd` | float | Estimated prompt-cache savings versus full input-token price; negative when cache writes cost more than normal input |
 | `served_fast` | bool | `true` when the provider confirmed it served this request at the accelerated ("fast mode") tier; drives premium-tier billing |
 | `provider_telemetry` | dict | Raw provider-reported usage/telemetry, passed through when present |
 | `provider_attempts` | dict | How many provider requests this one logical call took, and why the extra ones happened (see below) |
+
+Flat `provider_call_response` and LLM-trace records use the same canonical
+names (`input_tokens`, `output_tokens`, `cache_read_tokens`, and
+`cache_write_tokens`). The former trace-only `cache_tokens` mirror is not a
+separate accounting field.
 
 #### Provider attempts
 

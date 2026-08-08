@@ -186,6 +186,11 @@ struct Substituted {
     metavar_constraints: HashMap<String, String>,
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "cursor offsets advance by len_utf8 or across ASCII bytes, so every offset \
+              is a char boundary"
+)]
 fn substitute(snippet: &str) -> Result<Substituted, String> {
     let mut text = String::with_capacity(snippet.len());
     let mut placeholder_to_metavar = HashMap::new();
@@ -442,6 +447,10 @@ mod tests {
 
     /// Compile `snippet`, run the query against `code`, and return the
     /// captured text for each requested metavar from the first match.
+    #[expect(
+        clippy::string_slice,
+        reason = "tree-sitter capture ranges are char-aligned byte offsets into code"
+    )]
     fn run(snippet: &str, language: Language, code: &str) -> Vec<(String, Vec<String>)> {
         let compiled = compile_pattern(snippet, language).expect("compiles");
         let ts_language = language.ts_language().expect("grammar");

@@ -10,6 +10,12 @@
 //! composition lanes cut over; the difference here is that every marker,
 //! prefix, and corrupted opener arrives as data.
 
+#![expect(
+    clippy::string_slice,
+    reason = "all offsets are caller char boundaries advanced by find results and \
+              starts_with-matched vocab token lengths in the same string"
+)]
+
 use super::spec::HarmonyVocab;
 
 /// A `<|message|>` that closes a `tool_call to=…` header the caller already

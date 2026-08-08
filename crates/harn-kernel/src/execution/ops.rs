@@ -218,6 +218,7 @@ pub(super) fn handle_throw(frames: &mut Vec<Frame>, value: RuntimeValue) -> bool
     false
 }
 
+#[expect(clippy::string_slice, reason = "blake3 to_hex output is ASCII hex")]
 pub(super) fn request_id(
     digest: [u8; 32],
     ordinal: u64,

@@ -560,6 +560,7 @@ fn file_refresh_lock_path(handle: &crate::value::DictMap, key: &str) -> Result<P
     let digest = hex::encode(Sha256::digest(
         format!("{}\0{key}", path.display()).as_bytes(),
     ));
+    #[expect(clippy::string_slice, reason = "hex digest is ASCII")]
     let short = &digest[..24];
     let file_name = path
         .file_name()

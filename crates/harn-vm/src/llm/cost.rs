@@ -883,11 +883,12 @@ fn accumulate_llm_usage(
 }
 
 pub(crate) fn record_llm_usage(result: &crate::llm::api::LlmResult) -> Result<(), VmError> {
+    let usage = result.usage();
     accumulate_llm_usage(
         &result.model,
-        result.input_tokens,
-        result.output_tokens,
-        result.priced_cost_usd().unwrap_or(0.0),
+        usage.input_tokens,
+        usage.output_tokens,
+        usage.cost_usd.unwrap_or(0.0),
     )
 }
 
@@ -1123,6 +1124,10 @@ fn format_usd_amount(amount: f64, precision: Option<usize>, sign_always: bool) -
     // Defer rounding to the libc formatter so that values like 81.0 that
     // arrive as 80.999… don't split into "$80." + "1.0000".
     let rounded = format!("{:.*}", precision, amount.abs());
+    #[expect(
+        clippy::string_slice,
+        reason = "idx comes from find('.') on the ASCII-formatted number"
+    )]
     let (whole_str, frac_part) = match rounded.find('.') {
         Some(idx) => (&rounded[..idx], &rounded[idx + 1..]),
         None => (rounded.as_str(), ""),

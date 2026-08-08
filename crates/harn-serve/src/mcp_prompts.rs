@@ -429,12 +429,10 @@ fn split_front_matter(text: &str) -> (Option<String>, &str) {
     let Some(rest) = text.strip_prefix("---\n") else {
         return (None, text);
     };
-    let Some(index) = rest.find("\n---\n") else {
+    let Some((meta, body)) = rest.split_once("\n---\n") else {
         return (None, text);
     };
-    let meta = rest[..index].to_string();
-    let body = &rest[index + "\n---\n".len()..];
-    (Some(meta), body)
+    (Some(meta.to_string()), body)
 }
 
 fn relative_prompt_stem(root: &Path, path: &Path) -> String {

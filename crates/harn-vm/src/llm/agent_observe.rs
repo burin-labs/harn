@@ -467,9 +467,14 @@ pub(super) fn extract_retry_after_ms(err: &VmError) -> Option<u64> {
 ///
 /// Exposed for unit tests; the public entry point is
 /// `extract_retry_after_ms`.
+#[expect(
+    clippy::string_slice,
+    reason = "pos comes from find() on the byte-length-preserving ASCII-lowercased copy of \
+              msg and end from find() on the sliced tail, so both are char boundaries"
+)]
 pub(crate) fn parse_retry_after(msg: &str) -> Option<u64> {
     const MAX_MS: u64 = 60_000;
-    let lower = msg.to_lowercase();
+    let lower = msg.to_ascii_lowercase();
     let pos = lower.find("retry-after:")?;
     let after = &msg[pos + "retry-after:".len()..];
     // End at CRLF so we don't grab a neighboring header.
@@ -996,26 +1001,19 @@ pub(crate) async fn observed_llm_call(
                         );
                     }
                     if let Some(metrics) = crate::active_metrics_registry() {
+                        let usage = result.usage();
                         metrics.record_llm_call(
                             &result.provider,
                             &result.model,
                             status,
-                            result.priced_cost_usd().unwrap_or(0.0),
+                            usage.cost_usd.unwrap_or(0.0),
                         );
                     }
                     return Err(error);
                 }
-                let usage = crate::tracing::LlmCallUsage {
-                    model: result.model.clone(),
-                    provider: result.provider.clone(),
-                    input_tokens: result.input_tokens,
-                    output_tokens: result.output_tokens,
-                    cache_read_tokens: result.cache_read_tokens,
-                    cache_write_tokens: result.cache_write_tokens,
-                    cost_usd: result.priced_cost_usd(),
-                };
+                let usage = result.usage();
                 annotate_current_span(&[("status", serde_json::json!("ok"))]);
-                annotate_current_span(&usage.metadata_pairs());
+                annotate_current_span(&usage.metadata_pairs(&result.provider, &result.model));
                 dump_llm_response(
                     iteration.unwrap_or(0),
                     &call_id,
@@ -1051,8 +1049,8 @@ pub(crate) async fn observed_llm_call(
                         "ok",
                         serde_json::json!({
                             "model": result.model,
-                            "input_tokens": result.input_tokens,
-                            "output_tokens": result.output_tokens,
+                            "input_tokens": usage.input_tokens,
+                            "output_tokens": usage.output_tokens,
                             "user_visible": user_visible,
                             "structural_experiment": opts.applied_structural_experiment.as_ref(),
                         }),
@@ -1061,9 +1059,7 @@ pub(crate) async fn observed_llm_call(
                 trace_llm_call(LlmTraceEntry {
                     model: result.model.clone(),
                     provider: result.provider.clone(),
-                    input_tokens: result.input_tokens,
-                    output_tokens: result.output_tokens,
-                    cost_usd: result.priced_cost_usd(),
+                    usage: usage.clone(),
                     duration_ms,
                 });
                 if let Some(metrics) = crate::active_metrics_registry() {
@@ -1071,18 +1067,16 @@ pub(crate) async fn observed_llm_call(
                         &result.provider,
                         &result.model,
                         "succeeded",
-                        result.priced_cost_usd().unwrap_or(0.0),
+                        usage.cost_usd.unwrap_or(0.0),
                     );
-                    if result.cache_read_tokens > 0 {
+                    if usage.cache_hit {
                         metrics.record_llm_cache_hit(&result.provider);
                     }
                 }
                 super::trace::emit_agent_event(super::trace::AgentTraceEvent::LlmCall {
                     call_id: call_id.clone(),
                     model: result.model.clone(),
-                    input_tokens: result.input_tokens,
-                    output_tokens: result.output_tokens,
-                    cache_tokens: result.cache_read_tokens,
+                    usage,
                     duration_ms,
                     iteration: iteration.unwrap_or(0),
                 });

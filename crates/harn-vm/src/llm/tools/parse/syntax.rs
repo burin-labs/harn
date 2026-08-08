@@ -1,3 +1,10 @@
+#![expect(
+    clippy::string_slice,
+    reason = "every offset sliced here is advanced over checked ASCII bytes, matched by \
+              find/starts_with, stepped by char len_utf8, or returned by scan_heredoc or \
+              TsValueParser on success — all char boundaries in the same string"
+)]
+
 use std::collections::BTreeSet;
 use std::sync::OnceLock;
 
@@ -408,8 +415,7 @@ pub(super) fn parse_object_literal_from(
 pub(super) fn unwrap_exact_code_wrapper(text: &str) -> Option<&str> {
     let trimmed = text.trim();
     if let Some(rest) = trimmed.strip_prefix("```") {
-        let newline = rest.find('\n')?;
-        let after_opener = &rest[newline + 1..];
+        let (_opener_line, after_opener) = rest.split_once('\n')?;
         let inner = after_opener.strip_suffix("```")?;
         return Some(inner.trim());
     }

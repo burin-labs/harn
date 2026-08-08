@@ -1569,7 +1569,7 @@
       "type": "object"
     }
   },
-  "$id": "https://harnlang.com/schemas/provider-catalog.v7.json",
+  "$id": "https://harnlang.com/schemas/provider-catalog.v8.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
@@ -1613,7 +1613,7 @@
       "type": "array"
     },
     "schema": {
-      "const": "https://harnlang.com/schemas/provider-catalog.v7.json"
+      "const": "https://harnlang.com/schemas/provider-catalog.v8.json"
     },
     "schema_version": {
       "const": 8

@@ -150,6 +150,11 @@ fn extract_status_code(error: &VmError) -> Option<u16> {
     extract_status_from_text(&message)
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "idx comes from find() of ASCII needles on the byte-length-preserving \
+              ASCII-lowercased copy of message, so it is a char boundary in message"
+)]
 fn extract_status_from_text(message: &str) -> Option<u16> {
     let lowered = message.to_ascii_lowercase();
     let needles = ["http ", "status_code: ", "status: ", "status "];
@@ -345,7 +350,7 @@ fn check_link_budget(
 }
 
 fn project_link_cost_usd(result: &crate::llm::api::LlmResult) -> Option<f64> {
-    result.priced_cost_usd()
+    result.usage().cost_usd
 }
 
 pub(super) fn duration_ms(elapsed: Duration) -> u64 {

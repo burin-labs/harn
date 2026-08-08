@@ -238,6 +238,10 @@ pub(crate) fn escape_xml_text(text: &str) -> String {
     out
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "span bounds sit adjacent to the ASCII bytes `&`/`<`/`>`"
+)]
 fn escape_text(out: &mut String, text: &str) {
     // Span-copy: the typical case is "lots of text, few escapables",
     // so push longest unescaped runs at once and only spell out the
@@ -552,6 +556,10 @@ fn find_byte(hay: &[u8], byte: u8) -> Option<usize> {
     hay.iter().position(|b| *b == byte)
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "offsets are char_indices/find results or ASCII prefix lengths"
+)]
 fn unescape_into(text: &str, out: &mut String) -> Result<(), VmError> {
     let mut chars = text.char_indices();
     while let Some((idx, ch)) = chars.next() {

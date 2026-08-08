@@ -16,7 +16,7 @@ use chrono::{NaiveDate, Utc};
 
 pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 8;
 pub const PROVIDER_CATALOG_SCHEMA_ID: &str =
-    "https://harnlang.com/schemas/provider-catalog.v7.json";
+    "https://harnlang.com/schemas/provider-catalog.v8.json";
 pub const PROVIDER_CATALOG_GENERATOR: &str = "harn provider catalog generate";
 pub const HARN_DISABLE_CATALOG_REFRESH_ENV: &str = "HARN_DISABLE_CATALOG_REFRESH";
 pub const HARN_PROVIDER_CATALOG_URL_ENV: &str = "HARN_PROVIDER_CATALOG_URL";
@@ -674,13 +674,11 @@ fn catalog_model(
 
 fn compact_model_display_name(name: &str) -> String {
     let trimmed = name.trim();
-    let Some(open) = trimmed.find('(') else {
+    let Some((base, details)) = trimmed.split_once('(') else {
         return trimmed.to_string();
     };
-    let base = trimmed[..open].trim_end();
-    let details = trimmed[open + 1..]
-        .strip_suffix(')')
-        .unwrap_or(&trimmed[open + 1..]);
+    let base = base.trim_end();
+    let details = details.strip_suffix(')').unwrap_or(details);
     let quant = details
         .split(|character: char| character == ',' || character.is_whitespace())
         .map(|part| {

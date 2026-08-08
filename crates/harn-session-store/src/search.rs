@@ -292,6 +292,10 @@ pub fn snippet(text: &str, query: &str, max_chars: usize) -> String {
     while original_byte_anchor > 0 && !text.is_char_boundary(original_byte_anchor) {
         original_byte_anchor -= 1;
     }
+    #[expect(
+        clippy::string_slice,
+        reason = "original_byte_anchor is walked back to a char boundary by the loop above"
+    )]
     let char_anchor = text[..original_byte_anchor].chars().count();
     let start = char_anchor.saturating_sub(max_chars / 3);
     let excerpt = text.chars().skip(start).take(max_chars).collect::<String>();

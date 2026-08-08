@@ -190,12 +190,13 @@ pub(crate) fn note_result(request: &LlmRequestPayload, result: &LlmResult) {
         if let Ok(mut cache) = request_cache().lock() {
             cache.insert(hash, result.clone());
         }
-        let call_tokens = result
+        let usage = result.usage();
+        let call_tokens = usage
             .input_tokens
-            .saturating_add(result.output_tokens)
+            .saturating_add(usage.output_tokens)
             .max(0) as u64;
         state.total_tokens = state.total_tokens.saturating_add(call_tokens);
-        state.total_cost_usd += result.priced_cost_usd().unwrap_or(0.0);
+        state.total_cost_usd += usage.cost_usd.unwrap_or(0.0);
         if state
             .budget
             .tokens_max

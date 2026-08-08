@@ -10,11 +10,16 @@ struct HarnCompleter {
 }
 
 impl reedline::Completer for HarnCompleter {
+    #[expect(
+        clippy::string_slice,
+        reason = "pos is reedline's char-boundary cursor; word_start is a char start plus len_utf8"
+    )]
     fn complete(&mut self, line: &str, pos: usize) -> Vec<reedline::Suggestion> {
         let text = &line[..pos];
         let word_start = text
-            .rfind(|c: char| !c.is_alphanumeric() && c != '_')
-            .map(|i| i + 1)
+            .char_indices()
+            .rfind(|&(_, c)| !c.is_alphanumeric() && c != '_')
+            .map(|(i, c)| i + c.len_utf8())
             .unwrap_or(0);
         let prefix = &text[word_start..];
         if prefix.is_empty() {
@@ -43,6 +48,10 @@ struct HarnHighlighter {
 }
 
 impl reedline::Highlighter for HarnHighlighter {
+    #[expect(
+        clippy::string_slice,
+        reason = "all offsets come from find/ceil_char_boundary on `remaining`, so char boundaries"
+    )]
     fn highlight(&self, line: &str, _cursor: usize) -> reedline::StyledText {
         let mut styled = reedline::StyledText::new();
         let mut remaining = line;
@@ -330,11 +339,7 @@ impl ReplSession {
             Ok(output) => {
                 // Skip the prior prefix so replayed side effects
                 // from earlier lines don't print again.
-                let new_portion = if output.len() > self.prior_output_len {
-                    &output[self.prior_output_len..]
-                } else {
-                    ""
-                };
+                let new_portion = output.get(self.prior_output_len..).unwrap_or("");
                 if !new_portion.is_empty() {
                     io::stdout().write_all(new_portion.as_bytes()).ok();
                 }

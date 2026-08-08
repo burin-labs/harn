@@ -86,6 +86,12 @@ codegen-units = 16
 pedantic = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
 
+# Restriction lints promoted individually — each denies a whole defect class.
+# `&str[a..b]` panics when an offset lands mid-character; every legitimate
+# boundary-checked slice carries a scoped #[expect] naming its invariant, so
+# a new bare slice fails the build instead of becoming a latent crash.
+string_slice = "deny"
+
 # Volume / style / context-dependent — kept off to avoid PR churn.
 assigning_clones = "allow"           # auto-fix is correct but disruptive in lock-heavy code
 branches_sharing_code = "allow"      # frequently flags clearer code

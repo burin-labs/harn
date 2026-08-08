@@ -186,7 +186,11 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 ## Release
 
 - Use the release harness from `harn-bump-fleet`:
-  `harn run --no-sandbox release_harn.harn -- --repo <harn-checkout> --mode ship-pr --agent --yes-live-release`.
+  `scripts/with_env.sh harn run --no-sandbox release_harn.harn -- --repo <harn-checkout> --mode ship-pr --agent --yes-live-release`.
+- Resume post-tag proof from `harn-bump-fleet` with
+  `scripts/watch_harn_release.sh --tag vX.Y.Z --repo <harn-checkout> --yes-live-release`.
+- Run both commands from the `harn-bump-fleet` checkout so its pinned runtime,
+  environment loader, release lease, and cleanup authority stay canonical.
 - Do not invoke `scripts/release_ship.sh --prepare` directly for normal
   releases.
 - Dry-run the full release gate with

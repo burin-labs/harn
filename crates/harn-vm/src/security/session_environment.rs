@@ -324,10 +324,13 @@ pub fn command_basename(program: &str) -> &str {
 fn strip_windows_executable_suffix(name: &str) -> &str {
     const SUFFIXES: &[&str] = &[".exe", ".bat", ".cmd", ".com"];
     for suffix in SUFFIXES {
-        if name.len() > suffix.len()
-            && name[name.len() - suffix.len()..].eq_ignore_ascii_case(suffix)
-        {
-            return &name[..name.len() - suffix.len()];
+        let Some(stem_len) = name.len().checked_sub(suffix.len()).filter(|len| *len > 0) else {
+            continue;
+        };
+        if let Some((stem, tail)) = name.split_at_checked(stem_len) {
+            if tail.eq_ignore_ascii_case(suffix) {
+                return stem;
+            }
         }
     }
     name

@@ -586,6 +586,10 @@ fn build_structured_text(
     }
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "char_start was captured as text.len(), a boundary of the grown text"
+)]
 fn finish_line(
     state: &mut Option<OcrLineState>,
     text: &str,
@@ -610,6 +614,10 @@ fn finish_line(
     });
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "char_start was captured as text.len(), a boundary of the grown text"
+)]
 fn finish_block(
     state: &mut Option<OcrBlockState>,
     text: &str,

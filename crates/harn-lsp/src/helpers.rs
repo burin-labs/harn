@@ -185,6 +185,10 @@ pub(crate) fn word_at_position(source: &SourceText, position: Position) -> Optio
 /// rather than what precedes the cursor. `char_before_position` answers the
 /// latter, which is the wrong question for hover: a hover cursor lands *inside*
 /// a word (`ex|it`), so the character before it is just the previous letter.
+#[expect(
+    clippy::string_slice,
+    reason = "offsets come from line_range and previous_char_boundary/len_utf8 walks"
+)]
 pub(crate) fn word_span_at_position(
     source: &SourceText,
     position: Position,
@@ -237,12 +241,20 @@ pub(crate) fn word_span_at_position(
 /// .map(...)`) still reads as a member access. `..` is excluded because a range
 /// bound (`arr[0..len]`) is not a receiver, and treating it as one would hide
 /// the genuine builtin behind it.
+#[expect(
+    clippy::string_slice,
+    reason = "word_start is the word's byte start from word_span_at_position, a char boundary"
+)]
 pub(crate) fn is_member_access(source: &str, word_start: usize) -> bool {
     let before = source[..word_start].trim_end_matches([' ', '\t', '\r', '\n']);
     before.ends_with('.') && !before.ends_with("..")
 }
 
 /// Check if cursor is right after a `.` (for method completion).
+#[expect(
+    clippy::string_slice,
+    reason = "SourceText::offset returns char boundaries"
+)]
 pub(crate) fn char_before_position(source: &SourceText, position: Position) -> Option<char> {
     let offset = source.offset(position);
     let (line_start, _) = source.line_range(position.line)?;
@@ -252,6 +264,10 @@ pub(crate) fn char_before_position(source: &SourceText, position: Position) -> O
     source[..offset].chars().next_back()
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "offsets come from line_range and previous_char_boundary/len_utf8 walks"
+)]
 fn dot_receiver_identifier(source: &SourceText, position: Position) -> Option<String> {
     let offset = source.offset(position);
     let (line_start, line_end) = source.line_range(position.line)?;
@@ -294,6 +310,10 @@ fn dot_receiver_identifier(source: &SourceText, position: Position) -> Option<St
     Some(line[id_start..id_end].to_string())
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "i is lowered until is_char_boundary holds"
+)]
 fn previous_char_boundary(text: &str, index: usize) -> usize {
     let mut i = index.min(text.len());
     while i > 0 && !text.is_char_boundary(i) {
@@ -313,6 +333,10 @@ pub(crate) fn infer_dot_receiver_name(source: &SourceText, position: Position) -
 }
 
 /// Try to figure out what type the expression before `.` is.
+#[expect(
+    clippy::string_slice,
+    reason = "offsets come from line_range and previous_char_boundary/len_utf8 walks"
+)]
 pub(crate) fn infer_dot_receiver_type(
     source: &SourceText,
     position: Position,
@@ -443,14 +467,18 @@ pub(crate) fn parser_error_to_diagnostic(err: &ParserError) -> Diagnostic {
 /// Extract the first backtick-quoted name from a diagnostic message.
 /// E.g., "variable `foo` is declared but never used" -> Some("foo")
 pub(crate) fn extract_backtick_name(msg: &str) -> Option<String> {
-    let start = msg.find('`')? + 1;
-    let rest = &msg[start..];
-    let end = rest.find('`')?;
-    Some(rest[..end].to_string())
+    let (_, rest) = msg.split_once('`')?;
+    let (name, _) = rest.split_once('`')?;
+    Some(name.to_string())
 }
 
 /// Find the byte offset of a whole-word occurrence of `word` within `region`.
+#[expect(
+    clippy::string_slice,
+    reason = "search_from advances match starts by the matched word's first char length"
+)]
 pub(crate) fn find_word_in_region(region: &str, word: &str) -> Option<usize> {
+    let first_char_len = word.chars().next()?.len_utf8();
     let mut search_from = 0;
     while let Some(pos) = region[search_from..].find(word) {
         let abs = search_from + pos;
@@ -464,7 +492,7 @@ pub(crate) fn find_word_in_region(region: &str, word: &str) -> Option<usize> {
         if before_ok && after_ok {
             return Some(abs);
         }
-        search_from = abs + 1;
+        search_from = abs + first_char_len;
     }
     None
 }

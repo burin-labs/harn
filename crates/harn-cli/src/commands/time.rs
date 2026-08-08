@@ -219,7 +219,7 @@ pub(crate) async fn run(args: TimeRunArgs) {
         .map(|entry| LlmCallTiming {
             model: entry.model.clone(),
             latency_ms: entry.duration_ms,
-            tokens: entry.input_tokens + entry.output_tokens,
+            tokens: entry.usage.input_tokens + entry.usage.output_tokens,
         })
         .collect();
 

@@ -539,31 +539,7 @@ fn envelope_from_arg_error(err: &VmError) -> VmValue {
 }
 
 fn empty_usage_dict() -> crate::value::DictMap {
-    let mut usage = crate::value::DictMap::new();
-    usage.insert(crate::value::intern_key("input_tokens"), VmValue::Int(0));
-    usage.insert(crate::value::intern_key("output_tokens"), VmValue::Int(0));
-    usage.insert(
-        crate::value::intern_key("cache_read_tokens"),
-        VmValue::Int(0),
-    );
-    usage.insert(
-        crate::value::intern_key("cache_write_tokens"),
-        VmValue::Int(0),
-    );
-    usage.insert(
-        crate::value::intern_key("cache_hit_ratio"),
-        VmValue::Float(0.0),
-    );
-    usage.insert(
-        crate::value::intern_key("cache_savings_usd"),
-        VmValue::Float(0.0),
-    );
-    usage.insert(crate::value::intern_key("cost_usd"), VmValue::Nil);
-    usage.insert(
-        crate::value::intern_key("served_fast"),
-        VmValue::Bool(false),
-    );
-    usage
+    crate::llm::usage::LlmUsage::empty_vm_dict()
 }
 
 fn build_usage_dict(outcome: &SchemaLoopOutcome) -> VmValue {

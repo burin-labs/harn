@@ -359,6 +359,11 @@ fn signal_for(mode: FailMode, reason: String) -> VerifierSignal {
 /// Extract ```harn / ``` (or other named) fenced blocks. Falls back to
 /// the entire text when no fences match — preserves typecheck coverage
 /// for models that emit bare Harn source.
+#[expect(
+    clippy::string_slice,
+    reason = "offsets come from char_indices/find on the same string plus ASCII fence widths, \
+              so every slice bound is a char boundary"
+)]
 fn extract_fenced_blocks(text: &str, langs: &[&str]) -> String {
     let mut out = String::new();
     let mut chars = text.char_indices().peekable();
@@ -367,7 +372,11 @@ fn extract_fenced_blocks(text: &str, langs: &[&str]) -> String {
             continue;
         }
         let after_fence = &text[idx + 3..];
-        let header_end = after_fence.find('\n').unwrap_or(after_fence.len());
+        // No newline after the fence header means there is no body to
+        // extract — an unterminated trailing fence, not a block.
+        let Some(header_end) = after_fence.find('\n') else {
+            break;
+        };
         let lang = after_fence[..header_end].trim();
         let body_start = idx + 3 + header_end + 1;
         let Some(rel_end) = text[body_start..].find("```") else {

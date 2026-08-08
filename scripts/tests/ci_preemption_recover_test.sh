@@ -27,7 +27,7 @@ write_run_json() {
   "workflowName": "CI",
   "jobs": [
     {"databaseId": 101, "name": "Rust test", "conclusion": "failure"},
-    {"databaseId": 102, "name": "Rust lint", "conclusion": "cancelled"},
+    {"databaseId": 102, "name": "Check Rust code", "conclusion": "cancelled"},
     {"databaseId": 103, "name": "CI status", "conclusion": "failure"}
   ]
 }

@@ -645,6 +645,11 @@ fn mine_convention_signals(repo: &Path) -> Vec<Signal> {
                         || trimmed.starts_with('#')
                         || trimmed.starts_with("<!--");
                     if is_comment {
+                        #[expect(
+                            clippy::string_slice,
+                            reason = "to_ascii_lowercase preserves byte offsets, so pos is a \
+                                      char boundary in trimmed"
+                        )]
                         if let Some(pos) = trimmed.to_ascii_lowercase().find("invariant:") {
                             signals.push(Signal {
                                 kind: "inline_invariant",

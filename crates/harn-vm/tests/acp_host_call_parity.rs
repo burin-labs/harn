@@ -167,6 +167,10 @@ pub const NON_BEHAVIOURAL_CALLS: &[&str] = &[
 /// Reading the source rather than the AST keeps the guard dependency-free
 /// and, more importantly, keeps it honest about *textual* additions: a new
 /// branch is caught whether or not it type-checks into something familiar.
+#[expect(
+    clippy::string_slice,
+    reason = "offsets come from find/char_indices of ASCII delimiters in the source"
+)]
 fn dispatch_body() -> String {
     let source = include_str!("../src/stdlib/host.rs");
     let start = source
@@ -201,6 +205,7 @@ fn called_paths(body: &str) -> Vec<String> {
     let without_comments: String = body
         .lines()
         .map(|line| match line.find("//") {
+            #[expect(clippy::string_slice, reason = "idx is a find offset on line")]
             Some(idx) => &line[..idx],
             None => line,
         })

@@ -187,6 +187,10 @@ fn host_tool_json_stream_builtin(args: &[VmValue], _out: &mut String) -> Result<
     Ok(json_to_vm_value(&json_stream(&text)))
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "consumed is serde_json's byte_offset just past a parsed value, a char boundary"
+)]
 fn json_stream(text: &str) -> serde_json::Value {
     let mut stream = serde_json::Deserializer::from_str(text).into_iter::<serde_json::Value>();
     let mut values: Vec<serde_json::Value> = Vec::new();
@@ -318,16 +322,17 @@ fn decode_entities(raw: &str, table: &[(String, String)]) -> String {
     }
     let mut out = String::with_capacity(raw.len());
     let mut rest = raw;
-    while let Some(amp) = rest.find('&') {
-        out.push_str(&rest[..amp]);
-        let after = &rest[amp + 1..];
-        match table
-            .iter()
-            .find(|(token, _)| after.starts_with(token.as_str()))
-        {
-            Some((token, replacement)) => {
+    while let Some((before, after)) = rest.split_once('&') {
+        out.push_str(before);
+        let matched = table.iter().find_map(|(token, replacement)| {
+            after
+                .strip_prefix(token.as_str())
+                .map(|tail| (tail, replacement))
+        });
+        match matched {
+            Some((tail, replacement)) => {
                 out.push_str(replacement);
-                rest = &after[token.len()..];
+                rest = tail;
             }
             // Not a recognized reference: emit the `&` and keep scanning.
             None => {
@@ -594,6 +599,10 @@ fn host_tool_scan_bare_units_builtin(
                         Err(error) => serde_json::json!({"ok": false, "error": error}),
                     }
                 } else {
+                    #[expect(
+                        clippy::string_slice,
+                        reason = "head_name is an ASCII ident prefix of the scanned unit body"
+                    )]
                     let argument = &body[name.len()..];
                     match parse_object_literal_from(argument, name) {
                         Ok((value, consumed)) => {
@@ -690,6 +699,7 @@ mod tests {
     }
 
     #[test]
+    #[expect(clippy::string_slice, reason = "test input is ASCII")]
     fn parse_call_expr_reports_arguments_and_the_bytes_it_consumed() {
         let source = "look({ path: \"a.rs\" }) trailing prose";
         let result = call(

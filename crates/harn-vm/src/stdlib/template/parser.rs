@@ -1,3 +1,9 @@
+#![expect(
+    clippy::string_slice,
+    reason = "every slice bound is a find() offset, a matched ASCII keyword \
+              length, or the position of a matched ASCII byte in the source"
+)]
+
 use super::ast::{Expr, IfBranch, Node};
 use super::error::TemplateError;
 use super::expr_parser::parse_expr;
@@ -558,9 +564,12 @@ fn split_section_arg_chunks(s: &str) -> Vec<&str> {
                 out.push(&s[start..i]);
                 start = i + 1;
             }
-            c if c.is_whitespace() && depth == 0 => {
+            // ASCII-only: `bytes[i] as char` would also report the 0x85/0xA0
+            // continuation bytes of multi-byte chars as whitespace, putting
+            // `i` mid-char and panicking the slices below.
+            c if c.is_ascii_whitespace() && depth == 0 => {
                 let mut j = i;
-                while j < bytes.len() && (bytes[j] as char).is_whitespace() {
+                while j < bytes.len() && bytes[j].is_ascii_whitespace() {
                     j += 1;
                 }
                 if next_token_is_arg(&s[j..]) {
@@ -593,14 +602,13 @@ fn parse_dict_literal(
     col: usize,
 ) -> Result<Vec<(String, Expr)>, TemplateError> {
     let s = src.trim();
-    if !s.starts_with('{') || !s.ends_with('}') {
+    let Some(inner) = s.strip_prefix('{').and_then(|s| s.strip_suffix('}')) else {
         return Err(TemplateError::new(
             line,
             col,
             "expected `{ ... }` after `with`",
         ));
-    }
-    let inner = &s[1..s.len() - 1];
+    };
     let mut pairs = Vec::new();
     for chunk in split_top_level(inner, ',') {
         let chunk = chunk.trim();

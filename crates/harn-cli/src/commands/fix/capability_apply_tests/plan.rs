@@ -314,10 +314,10 @@ fn capability_plan_completes_a_partial_imported_capability_prefix() {
         1,
         "only the missing capability suffix should be inserted: {repairs:#?}"
     );
-    assert_eq!(
-        &fs::read_to_string(&script).unwrap()[edits[0].span.start..edits[0].span.end],
-        ""
-    );
+    let on_disk = fs::read_to_string(&script).unwrap();
+    #[expect(clippy::string_slice, reason = "test input is ASCII")]
+    let inserted_at = &on_disk[edits[0].span.start..edits[0].span.end];
+    assert_eq!(inserted_at, "");
 
     let mut updated = fs::read_to_string(&script).unwrap();
     let mut all_edits = repairs

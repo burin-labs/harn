@@ -653,6 +653,10 @@ fn classify_by_http_status(msg: &str) -> Option<ErrorCategory> {
 }
 
 /// Extract plausible HTTP status codes from an error message.
+#[expect(
+    clippy::string_slice,
+    reason = "i..i + 3 spans bytes verified to be ASCII digits"
+)]
 fn extract_http_status_codes(msg: &str) -> Vec<u16> {
     let mut codes = Vec::new();
     let bytes = msg.as_bytes();

@@ -59,7 +59,7 @@ touch -t 202001010000 "$tmp_root/src/lib.rs"
 set +e
 output="$(
   cd "$tmp_root"
-  RUN_PROMPT_PROSE_RATCHET=false "$repo_root/scripts/ci/run_rust_lint_lane.sh" 2>&1
+  "$repo_root/scripts/ci/run_rust_lint_lane.sh" 2>&1
 )"
 lint_status=$?
 set -e

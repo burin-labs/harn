@@ -22,13 +22,10 @@ pub(crate) struct TextIndex {
 
 impl TextIndex {
     pub(crate) fn build(text: &str) -> Self {
-        let mut fence_markers = Vec::new();
-        let mut cursor = 0;
-        while let Some(relative) = text[cursor..].find("```") {
-            let position = cursor + relative;
-            fence_markers.push(position);
-            cursor = position + 3;
-        }
+        let fence_markers = text
+            .match_indices("```")
+            .map(|(position, _)| position)
+            .collect();
 
         let newlines = text
             .bytes()
@@ -57,6 +54,10 @@ impl TextIndex {
     /// Is everything between the start of `offset`'s line and `offset` blank?
     ///
     /// `text` must be the same text the index was built from.
+    #[expect(
+        clippy::string_slice,
+        reason = "line_start is one past an ASCII newline; offset is a search offset on text"
+    )]
     pub(crate) fn is_line_leading(&self, text: &str, offset: usize) -> bool {
         let line_start = match self.newlines.partition_point(|pos| *pos < offset) {
             0 => 0,
@@ -74,6 +75,10 @@ mod tests {
 
     /// The pre-index spelling of "inside a fence", kept as the reference the
     /// indexed lookup must agree with at every offset.
+    #[expect(
+        clippy::string_slice,
+        reason = "scan advances by find offsets plus the ASCII fence length"
+    )]
     fn reference_inside_fence(text: &str, offset: usize) -> bool {
         let mut open_before_offset = false;
         let mut scan = 0;
@@ -88,6 +93,10 @@ mod tests {
         false
     }
 
+    #[expect(
+        clippy::string_slice,
+        reason = "offset is filtered by is_char_boundary; line_start follows an ASCII newline"
+    )]
     fn reference_line_leading(text: &str, offset: usize) -> bool {
         let line_start = text[..offset].rfind('\n').map(|pos| pos + 1).unwrap_or(0);
         text[line_start..offset]

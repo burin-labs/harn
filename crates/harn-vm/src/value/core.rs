@@ -179,7 +179,12 @@ pub fn byte_offset_to_char_index(text: &str, byte_offset: usize) -> usize {
     if text.is_ascii() {
         return byte_offset.min(text.len());
     }
-    text[..byte_offset.min(text.len())].chars().count()
+    #[expect(
+        clippy::string_slice,
+        reason = "callers pass byte offsets from str searches on the same text"
+    )]
+    let prefix = &text[..byte_offset.min(text.len())];
+    prefix.chars().count()
 }
 
 /// Indexed runtime layout for a Harn struct instance.

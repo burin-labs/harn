@@ -850,6 +850,10 @@ fn tool_define_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     effects = [],
     sig = "tool_parse_call(text: string?) -> list", category = "tools"
 )]
+#[expect(
+    clippy::string_slice,
+    reason = "offsets are find() results plus ASCII tool-call tag lengths"
+)]
 fn tool_parse_call_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
 
@@ -1423,6 +1427,7 @@ fn synthesized_tool_spec_value(spec: &SynthesizedToolSpec) -> VmValue {
     VmValue::dict(value)
 }
 
+#[expect(clippy::string_slice, reason = "blake3 hex digest is ASCII")]
 fn synthesized_tool_hash(spec: &SynthesizedToolSpec) -> String {
     let json = serde_json::json!({
         "name": spec.name,

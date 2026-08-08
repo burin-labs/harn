@@ -29,6 +29,10 @@ pub(super) fn get_fix(diagnostics: &[LintDiagnostic], rule: &str) -> Option<Vec<
         .and_then(|d| d.fix.clone())
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "fix spans are lexer byte offsets, applied high-to-low so offsets stay valid"
+)]
 pub(super) fn apply_fixes(source: &str, diagnostics: &[LintDiagnostic]) -> String {
     let mut edits: Vec<&FixEdit> = diagnostics
         .iter()

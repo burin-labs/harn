@@ -169,7 +169,20 @@ impl CapabilityFixtureState {
         method: &str,
         args: &[crate::VmValue],
     ) -> Option<Result<crate::VmValue, crate::VmError>> {
-        self.dispatch_target(capability.field_name(), method, args, false)
+        if let Some(response) = self.dispatch_target(capability.field_name(), method, args, false)
+        {
+            return Some(response);
+        }
+        // Migration alias: `harness.tools.run_command` consults legacy
+        // `process.exec` fixtures after the hostlib cutover, recording the call
+        // as the host operation so existing call-log filters keep working.
+        // Explicit `tools.run_command` fixtures stay authoritative above.
+        if capability == harn_builtin_meta::CapabilityId::Tools && method == "run_command" {
+            if let Some(params) = args.first().and_then(crate::VmValue::as_dict) {
+                return self.dispatch_host("process", "exec", params);
+            }
+        }
+        None
     }
 
     pub(crate) fn dispatch_host(
@@ -259,5 +272,90 @@ impl CapabilityFixtureState {
             .current
             .calls
             .clone()
+    }
+}
+
+#[cfg(test)]
+mod fixture_dispatch_tests {
+    use super::*;
+    use crate::VmValue;
+
+    fn request_dict(command: &str) -> crate::value::DictMap {
+        let VmValue::Dict(params) = crate::stdlib::json_to_vm_value(&serde_json::json!({
+            "mode": "shell",
+            "command": command,
+        })) else {
+            panic!("request dict");
+        };
+        (*params).clone()
+    }
+
+    #[test]
+    fn tools_run_command_consults_process_exec_fixtures() {
+        let fixtures = CapabilityFixtureState::default();
+        fixtures.push_scope();
+        fixtures.respond(
+            "process",
+            "exec",
+            Ok(VmValue::String(arcstr::ArcStr::from("legacy-fixture"))),
+            None,
+            false,
+        );
+
+        let args = [VmValue::dict(request_dict("echo not-executed"))];
+        let value = fixtures
+            .dispatch(
+                harn_builtin_meta::CapabilityId::Tools,
+                "run_command",
+                &args,
+            )
+            .expect("process.exec fixture should alias tools.run_command")
+            .expect("fixture should succeed");
+        assert_eq!(value.display(), "legacy-fixture");
+
+        let calls = fixtures.calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].capability, "process");
+        assert_eq!(calls[0].member, "exec");
+        assert!(calls[0].host_operation);
+        fixtures.pop_scope().expect("pop fixture scope");
+    }
+
+    #[test]
+    fn tools_run_command_fixture_wins_over_process_exec_alias() {
+        let fixtures = CapabilityFixtureState::default();
+        fixtures.push_scope();
+        fixtures.respond(
+            "process",
+            "exec",
+            Ok(VmValue::String(arcstr::ArcStr::from("legacy"))),
+            None,
+            false,
+        );
+        fixtures.respond(
+            "tools",
+            "run_command",
+            Ok(VmValue::String(arcstr::ArcStr::from("direct"))),
+            None,
+            false,
+        );
+
+        let args = [VmValue::dict(request_dict("npm test"))];
+        let value = fixtures
+            .dispatch(
+                harn_builtin_meta::CapabilityId::Tools,
+                "run_command",
+                &args,
+            )
+            .expect("tools.run_command fixture should hit")
+            .expect("fixture should succeed");
+        assert_eq!(value.display(), "direct");
+
+        let calls = fixtures.calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].capability, "tools");
+        assert_eq!(calls[0].member, "run_command");
+        assert!(!calls[0].host_operation);
+        fixtures.pop_scope().expect("pop fixture scope");
     }
 }

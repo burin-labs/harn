@@ -103,6 +103,10 @@ pub fn precise_exfil_gate_fires(
 }
 
 /// Collect the host of each `http://` / `https://` URL in `text`.
+#[expect(
+    clippy::string_slice,
+    reason = "from/start are find offsets plus ASCII scheme lengths"
+)]
 fn push_url_hosts(text: &str, out: &mut Vec<String>) {
     let lower = text.to_ascii_lowercase();
     for scheme in ["http://", "https://"] {

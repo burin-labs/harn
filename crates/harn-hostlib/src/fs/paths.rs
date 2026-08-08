@@ -42,6 +42,10 @@ pub(super) fn manifest_path(root: &Path, session_id: &str) -> PathBuf {
     session_dir(root, session_id).join("manifest.json")
 }
 
+#[expect(
+    clippy::string_slice,
+    reason = "the sha256 hex digest is ASCII, so byte offset 12 is a char boundary"
+)]
 pub(super) fn sanitize_component(input: &str) -> String {
     use sha2::{Digest, Sha256};
 

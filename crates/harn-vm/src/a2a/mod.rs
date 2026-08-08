@@ -838,8 +838,7 @@ fn split_authority(authority: &str) -> (&str, &str) {
     let (host_raw, port) = if authority.starts_with('[') {
         // IPv6 bracketed form: "[addr]:port" or "[addr]".
         if let Some(end) = authority.rfind(']') {
-            let host = &authority[..=end];
-            let rest = &authority[end + 1..];
+            let (host, rest) = authority.split_at(end + 1);
             let port = rest.strip_prefix(':').unwrap_or("");
             (host, port)
         } else {

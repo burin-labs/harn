@@ -226,6 +226,10 @@ pub(crate) fn build_semantic_tokens(
 
         // Calculate token length from byte offsets
         if token.span.end > token.span.start && token.span.end <= source.len() {
+            #[expect(
+                clippy::string_slice,
+                reason = "lexer token spans are byte ranges on char boundaries of this source"
+            )]
             let segment = &source[token.span.start..token.span.end];
             let lines_in_token: Vec<&str> = segment.split('\n').collect();
 

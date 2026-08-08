@@ -49,6 +49,10 @@ fn every_ambient_shape_thread_local_is_cataloged() {
                         }
                         continue;
                     };
+                    #[expect(
+                        clippy::string_slice,
+                        reason = "index is a find offset plus an ASCII literal length"
+                    )]
                     let after = &line[index + "static ".len()..];
                     let name: String = after
                         .chars()
