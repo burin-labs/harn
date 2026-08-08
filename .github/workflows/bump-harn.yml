@@ -92,6 +92,38 @@ jobs:
         with:
           node-version: ${{ inputs.node-version }}
 
+      - name: Activate caller Node.js package manager
+        if: inputs.node-version != ''
+        working-directory: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          manager_spec="$(node -e 'const value = require("./package.json").packageManager ?? ""; process.stdout.write(value)')"
+          if [ -z "${manager_spec}" ]; then
+            echo "Caller has no packageManager declaration; Node.js alone is ready."
+            exit 0
+          fi
+          manager="${manager_spec%%@*}"
+          expected_version="${manager_spec#*@}"
+          expected_version="${expected_version%%+*}"
+          case "${manager}" in
+            npm|pnpm|yarn) ;;
+            *)
+              echo "Unsupported packageManager '${manager_spec}'; expected npm, pnpm, or yarn." >&2
+              exit 1
+              ;;
+          esac
+          if [[ ! "${expected_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "packageManager must pin an exact version, got '${manager_spec}'." >&2
+            exit 1
+          fi
+          corepack enable "${manager}"
+          actual_version="$("${manager}" --version)"
+          if [ "${actual_version}" != "${expected_version}" ]; then
+            echo "Expected ${manager} ${expected_version}, got ${actual_version}." >&2
+            exit 1
+          fi
+
       # Resolve which Harn to INSTALL *before* checking out the orchestration,
       # so we can pin that checkout to the exact target release tag. This must
       # precede the orchestration checkout — an external caller cannot reference

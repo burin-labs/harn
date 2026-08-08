@@ -55,6 +55,8 @@ jobs:
         ./scripts/regenerate-derived-sources "$HARN_BUMP_TARGET_TAG"
       # Optional, when the repository owner commands require Node. The shared
       # workflow installs this exact version rather than trusting runner state.
+      # If package.json declares an exact npm, pnpm, or yarn `packageManager`,
+      # Corepack activates that exact version before refresh and validation.
       node-version: "22"
       # Repository-owned verification runs after every mutation. A non-zero
       # exit blocks the commit.
@@ -117,6 +119,10 @@ release, so this holds in practice.)
   resolved immutable release tag. The nested driver installs with `--locked`,
   so the connector source and content hash are fixed. `setup-harn` verifies the
   downloaded runtime archive against its published SHA-256 before installing.
+- **Caller package-manager pin.** When `node-version` is configured, the shared
+  workflow activates the exact npm, pnpm, or yarn version declared by the
+  caller's `package.json#packageManager`. Undeclared managers remain a Node-only
+  setup; unsupported or non-exact declarations fail before caller commands run.
 - **No package-domain logic in the shared workflow.** The reusable workflow
   never encodes a package's code-generation or build/test knowledge. Repos
   expose their existing owner commands through `refresh-command` and
