@@ -56,7 +56,7 @@ fn validation_rejects_unmeasured_or_ambiguous_automatic_variants() {
         .iter()
         .find_map(|variant| variant.automatic_eligibility.clone())
         .expect("shipped automatic eligibility");
-    catalog.variants[0].automatic_eligibility = Some(eligibility.clone());
+    catalog.variants[0].automatic_eligibility = Some(eligibility);
     let report = validate_artifact(&catalog);
     assert!(report
         .errors
