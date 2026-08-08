@@ -5020,6 +5020,7 @@ wrappers pick up the same narrowing.
   extracted_json: bool, usage: {input_tokens: int, output_tokens: int,
   cost_usd: float | nil,
   cache_read_tokens: int, cache_write_tokens: int,
+  cache_supported: bool,
   cache_hit_ratio: float | nil, cache_visibility: string | nil,
   cache_savings_usd: float, served_fast: bool,
   provider_telemetry: dict | nil,

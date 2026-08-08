@@ -32,8 +32,8 @@ fn response_event_and_returned_usage_share_priced_cost() {
     let mut uncached = priced.clone();
     uncached.cache_read_tokens = 0;
     assert!(
-        priced.priced_cost_usd().expect("cache-priced result")
-            < uncached.priced_cost_usd().expect("uncached result")
+        priced.usage().cost_usd.expect("cache-priced result")
+            < uncached.usage().cost_usd.expect("uncached result")
     );
 
     let mut unpriced = priced.clone();
@@ -77,17 +77,12 @@ fn response_event_and_returned_usage_share_priced_cost() {
             .cloned()
             .expect("cost_usd")
     };
-    let expected_cost = priced.priced_cost_usd().expect("catalog-priced result");
-    let span_usage = crate::tracing::LlmCallUsage {
-        model: priced.model.clone(),
-        provider: priced.provider.clone(),
-        input_tokens: priced.input_tokens,
-        output_tokens: priced.output_tokens,
-        cache_read_tokens: priced.cache_read_tokens,
-        cache_write_tokens: priced.cache_write_tokens,
-        cost_usd: priced.priced_cost_usd(),
-    };
-    let span_metadata: BTreeMap<_, _> = span_usage.metadata_pairs().into_iter().collect();
+    let expected_cost = priced.usage().cost_usd.expect("catalog-priced result");
+    let span_usage = priced.usage();
+    let span_metadata: BTreeMap<_, _> = span_usage
+        .metadata_pairs(&priced.provider, &priced.model)
+        .into_iter()
+        .collect();
 
     assert_eq!(events[0]["cost_usd"], serde_json::json!(expected_cost));
     assert_eq!(vm_usage_cost(&priced), events[0]["cost_usd"]);

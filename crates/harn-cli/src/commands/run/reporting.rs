@@ -211,7 +211,7 @@ pub(super) fn run_summary_llm_snapshot() -> RunSummaryLlm {
     // an unpriced call in as 0.0 and cannot tell it apart afterwards.
     let unpriced_calls = harn_vm::llm::peek_trace()
         .iter()
-        .filter(|entry| entry.cost_usd.is_none())
+        .filter(|entry| entry.usage.cost_usd.is_none())
         .count() as i64;
     RunSummaryLlm {
         call_count,
@@ -511,7 +511,7 @@ fn render_trace_entries(entries: &[harn_vm::llm::LlmTraceEntry]) -> String {
     let mut priced_cost = 0.0f64;
     let mut unpriced_calls = 0usize;
     for (index, entry) in entries.iter().enumerate() {
-        let cost = entry.cost_usd;
+        let cost = entry.usage.cost_usd;
         match cost {
             Some(cost) => priced_cost += cost,
             None => unpriced_calls += 1,
@@ -521,13 +521,13 @@ fn render_trace_entries(entries: &[harn_vm::llm::LlmTraceEntry]) -> String {
             "  #{}: {} | {} in + {} out tokens | {} ms | {}",
             index + 1,
             entry.model,
-            entry.input_tokens,
-            entry.output_tokens,
+            entry.usage.input_tokens,
+            entry.usage.output_tokens,
             entry.duration_ms,
             cost.map_or_else(|| "unpriced".to_string(), |cost| format!("${cost:.4}")),
         );
-        total_input += entry.input_tokens;
-        total_output += entry.output_tokens;
+        total_input += entry.usage.input_tokens;
+        total_output += entry.usage.output_tokens;
         total_ms += entry.duration_ms;
     }
     let total_tokens = total_input + total_output;
@@ -555,15 +555,24 @@ fn render_trace_entries(entries: &[harn_vm::llm::LlmTraceEntry]) -> String {
 #[cfg(test)]
 mod trace_summary_pricing_tests {
     use super::render_trace_entries;
-    use harn_vm::llm::LlmTraceEntry;
+    use harn_vm::llm::{usage::LlmUsage, LlmTraceEntry};
 
     fn entry(model: &str, cost_usd: Option<f64>) -> LlmTraceEntry {
         LlmTraceEntry {
             model: model.to_string(),
             provider: "anthropic".to_string(),
-            input_tokens: 1_000,
-            output_tokens: 100,
-            cost_usd,
+            usage: LlmUsage {
+                input_tokens: 1_000,
+                output_tokens: 100,
+                cost_usd,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                cache_supported: true,
+                cache_hit_ratio: Some(0.0),
+                cache_savings_usd: 0.0,
+                cache_hit: false,
+                served_fast: false,
+            },
             duration_ms: 5,
         }
     }

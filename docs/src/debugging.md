@@ -70,11 +70,12 @@ JSON body:
 
 ```json
 {"category": "telemetry",
- "output": "{\"call_id\":\"…\",\"model\":\"…\",\"prompt_tokens\":…,\"completion_tokens\":…,\"cache_tokens\":…,\"total_ms\":…,\"iteration\":…}"}
+ "output": "{\"call_id\":\"…\",\"model\":\"…\",\"input_tokens\":…,\"output_tokens\":…,\"cost_usd\":…,\"cache_read_tokens\":…,\"cache_write_tokens\":…,\"duration_ms\":…,\"iteration\":…}"}
 ```
 
 IDEs can parse these to show a live LLM-call ledger alongside the
-debug session.
+debug session. These are the same normalized accounting fields returned by
+`llm_call`; the debugger does not re-price or rename them.
 
 ## Run views
 

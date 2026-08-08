@@ -130,47 +130,6 @@ pub mod meta {
     pub const SCORE: &str = "score";
 }
 
-/// Structured per-LLM-call token and cost attribution for an `llm_call`
-/// span. Built once at the call site and lowered to metadata pairs via
-/// [`LlmCallUsage::metadata_pairs`] so every emission uses the canonical
-/// [`meta`] keys instead of ad-hoc strings. `cost_usd` is `None` when the
-/// (provider, model) pair has no catalog pricing.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct LlmCallUsage {
-    pub model: String,
-    pub provider: String,
-    pub input_tokens: i64,
-    pub output_tokens: i64,
-    pub cache_read_tokens: i64,
-    pub cache_write_tokens: i64,
-    pub cost_usd: Option<f64>,
-}
-
-impl LlmCallUsage {
-    /// Lower to `(key, value)` pairs keyed by the canonical [`meta`]
-    /// constants, suitable for `annotate_current_span` / `span_set_metadata`.
-    pub fn metadata_pairs(&self) -> Vec<(&'static str, serde_json::Value)> {
-        let mut pairs = vec![
-            (meta::MODEL, serde_json::json!(self.model)),
-            (meta::PROVIDER, serde_json::json!(self.provider)),
-            (meta::INPUT_TOKENS, serde_json::json!(self.input_tokens)),
-            (meta::OUTPUT_TOKENS, serde_json::json!(self.output_tokens)),
-            (
-                meta::CACHE_READ_TOKENS,
-                serde_json::json!(self.cache_read_tokens),
-            ),
-            (
-                meta::CACHE_WRITE_TOKENS,
-                serde_json::json!(self.cache_write_tokens),
-            ),
-        ];
-        if let Some(cost) = self.cost_usd {
-            pairs.push((meta::COST_USD, serde_json::json!(cost)));
-        }
-        pairs
-    }
-}
-
 /// Emit a zero-duration marker span of `kind` carrying `metadata`. Marker
 /// spans model point-in-time telemetry events (model routing, tool mounts,
 /// deferred-tool promotions) that have no meaningful duration but need to
@@ -1064,16 +1023,22 @@ mod tests {
 
     #[test]
     fn test_llm_call_usage_metadata_pairs_carry_cache_tokens() {
-        let usage = LlmCallUsage {
-            model: "claude-sonnet-4".into(),
-            provider: "anthropic".into(),
+        let usage = crate::llm::usage::LlmUsage {
             input_tokens: 100,
             output_tokens: 20,
             cache_read_tokens: 40,
             cache_write_tokens: 8,
             cost_usd: Some(0.0123),
+            cache_supported: true,
+            cache_hit_ratio: Some(0.4),
+            cache_savings_usd: 0.0,
+            cache_hit: true,
+            served_fast: false,
         };
-        let pairs: BTreeMap<&str, serde_json::Value> = usage.metadata_pairs().into_iter().collect();
+        let pairs: BTreeMap<&str, serde_json::Value> = usage
+            .metadata_pairs("anthropic", "claude-sonnet-4")
+            .into_iter()
+            .collect();
         assert_eq!(pairs[meta::MODEL], serde_json::json!("claude-sonnet-4"));
         assert_eq!(pairs[meta::PROVIDER], serde_json::json!("anthropic"));
         assert_eq!(pairs[meta::INPUT_TOKENS], serde_json::json!(100));
@@ -1085,15 +1050,22 @@ mod tests {
 
     #[test]
     fn test_llm_call_usage_omits_cost_when_unpriced() {
-        let usage = LlmCallUsage {
-            model: "local-model".into(),
-            provider: "local".into(),
+        let usage = crate::llm::usage::LlmUsage {
             input_tokens: 5,
             output_tokens: 1,
             cost_usd: None,
-            ..LlmCallUsage::default()
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            cache_supported: false,
+            cache_hit_ratio: None,
+            cache_savings_usd: 0.0,
+            cache_hit: false,
+            served_fast: false,
         };
-        let pairs: BTreeMap<&str, serde_json::Value> = usage.metadata_pairs().into_iter().collect();
+        let pairs: BTreeMap<&str, serde_json::Value> = usage
+            .metadata_pairs("local", "local-model")
+            .into_iter()
+            .collect();
         assert!(!pairs.contains_key(meta::COST_USD));
         // Token attribution is still present even when unpriced.
         assert_eq!(pairs[meta::INPUT_TOKENS], serde_json::json!(5));
