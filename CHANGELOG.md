@@ -9,6 +9,35 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.64
+
+### Changed
+
+- Moved built-in reasoning and model-route policy to its canonical data owners.
+  `pack_for` now delegates reasoning lowering to the runtime capability matrix;
+  agent presets name catalog ladders; and sitrep routes come from the catalog's
+  `sitrep` ladder through `harness.llm.model_ladder(name)`. The source drift gate
+  rejects model/provider identity literals in the retired stdlib policy seams.
+
+### Fixed
+
+- Fix live `std/host_conditions` sampling by supplying its versioned request and
+  routing the schema operation through the registered typed
+  `HarnessSystem.host_conditions` method.
+- Bootstrap the exact Corepack-managed package manager declared by reusable
+  runtime-bump callers before running their refresh and validation commands.
+- CI now checks every normalized publishable crate archive in one shared Cargo
+  workspace, starts the timing report outside the conformance critical path, and
+  uses plain-language names for the affected checks.
+- Killed the remaining UTF-8 byte-slicing panics of the class fixed for
+  diagnostic excerpts in #6328: `url_decode` no longer aborts on a `%`
+  followed by a multi-byte character (it now shares the byte-based
+  `percent_decode`, which also stops accepting signed escapes like `%+A`),
+  transcript-compaction tool-result previews cut on character boundaries,
+  and the Ollama NDJSON stream-error and tool-argument parse paths quote
+  malformed frames boundary-safely instead of panicking while reporting
+  them.
+
 ## v0.10.63
 
 ### Breaking
