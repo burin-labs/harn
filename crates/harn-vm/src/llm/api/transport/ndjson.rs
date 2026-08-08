@@ -148,7 +148,7 @@ where
         let json: serde_json::Value = serde_json::from_str(data).map_err(|error| {
             VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "ollama stream parse error: partial or invalid NDJSON frame before done=true: {error}; line={}",
-                &data[..data.len().min(200)]
+                crate::text::truncate_end_bytes(data, 200)
             ))))
         })?;
         liveness.mark_partial_output();

@@ -39,24 +39,6 @@ fn response_content_type(response: &reqwest::Response) -> Option<String> {
         .map(str::to_string)
 }
 
-fn parse_ollama_tool_arguments(arguments: &serde_json::Value) -> serde_json::Value {
-    match arguments {
-        serde_json::Value::Object(_) | serde_json::Value::Array(_) | serde_json::Value::Null => {
-            arguments.clone()
-        }
-        serde_json::Value::String(text) => serde_json::from_str(text).unwrap_or_else(|err| {
-            serde_json::json!({
-                "__parse_error": format!(
-                    "Could not parse tool arguments as JSON: {}. Raw input: {}",
-                    err,
-                    &text[..text.len().min(200)]
-                )
-            })
-        }),
-        other => other.clone(),
-    }
-}
-
 fn append_ollama_tool_calls(
     message: &serde_json::Value,
     tool_calls: &mut Vec<serde_json::Value>,
@@ -76,11 +58,7 @@ fn append_ollama_tool_calls(
         if name.is_empty() {
             continue;
         }
-        let arguments = parse_ollama_tool_arguments(
-            function
-                .get("arguments")
-                .unwrap_or(&serde_json::Value::Object(Default::default())),
-        );
+        let arguments = super::response::parse_tool_arguments(function.get("arguments"));
         let id = call
             .get("id")
             .and_then(|value| value.as_str())

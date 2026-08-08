@@ -1080,7 +1080,7 @@ fn default_mask_tool_result(role: &str, content: &str) -> String {
     if line_count <= 3 {
         return format!("[{role}] {content}");
     }
-    let preview = &first_line[..first_line.len().min(120)];
+    let preview = &first_line[..first_line.floor_char_boundary(120)];
     // Preserve failure-signal lines (bounded so a huge log can't defeat the
     // mask). Skip the first line itself — it is already in the preview.
     let kept: Vec<&str> = content
@@ -1822,6 +1822,22 @@ mod tests {
         assert!(
             !masked.contains("noise line 7"),
             "drops ordinary noise: {masked}"
+        );
+    }
+
+    // A multi-byte character straddling the 120-byte preview budget used to
+    // panic the mask (raw byte slice on a non-boundary offset).
+    #[test]
+    fn default_mask_preview_cuts_multibyte_first_line_on_char_boundary() {
+        let first_line = format!("{}日本語テキスト", "x".repeat(118));
+        let mut lines = vec![first_line];
+        lines.extend((0..10).map(|i| format!("plain line {i}")));
+        let content = lines.join("\n");
+        let masked = default_mask_tool_result("tool", &content);
+        assert!(masked.contains("masked]"), "should mask: {masked}");
+        assert!(
+            masked.starts_with("[tool] "),
+            "keeps the role prefix: {masked}"
         );
     }
 
