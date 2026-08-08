@@ -1,0 +1,855 @@
+use serde::Serialize;
+
+use super::api::apply_auth_headers;
+use super::resolve_api_key;
+use crate::llm_config::{self, ProviderDef};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReadinessStatus {
+    Ok,
+    UnknownProvider,
+    Unsupported,
+    InvalidUrl,
+    Unreachable,
+    BadStatus,
+    BadResponse,
+    ModelMissing,
+    ProviderMismatch,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ProviderReadiness {
+    pub provider: String,
+    pub ok: bool,
+    pub status: ReadinessStatus,
+    pub message: String,
+    pub base_url: Option<String>,
+    pub url: Option<String>,
+    pub model: Option<String>,
+    pub requested_model: Option<String>,
+    pub served_models: Vec<String>,
+    pub http_status: Option<u16>,
+    pub runtime_provider: Option<String>,
+    pub server_header: Option<String>,
+}
+
+impl ProviderReadiness {
+    fn fail(
+        provider: &str,
+        status: ReadinessStatus,
+        message: String,
+        base_url: Option<String>,
+        url: Option<String>,
+        model: Option<String>,
+        requested_model: Option<String>,
+        http_status: Option<u16>,
+    ) -> Self {
+        Self {
+            provider: provider.to_string(),
+            ok: false,
+            status,
+            message,
+            base_url,
+            url,
+            model,
+            requested_model,
+            served_models: Vec::new(),
+            http_status,
+            runtime_provider: None,
+            server_header: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ProviderReadinessOptions<'a> {
+    pub requested_model: Option<&'a str>,
+    pub base_url_override: Option<&'a str>,
+    pub api_key_override: Option<&'a str>,
+}
+
+pub fn supports_model_readiness_probe(def: &ProviderDef) -> bool {
+    let healthcheck_lists_models = def.healthcheck.as_ref().is_some_and(|hc| {
+        hc.method.eq_ignore_ascii_case("GET") && {
+            hc.path.as_deref().is_some_and(is_model_inventory_endpoint)
+                || hc.url.as_deref().is_some_and(is_model_inventory_endpoint)
+        }
+    });
+    healthcheck_lists_models || openai_compatible_models_path(&def.chat_endpoint).is_some()
+}
+
+pub fn selected_model_for_provider(provider: &str) -> Option<String> {
+    configured_model_for_provider(provider).map(|model| {
+        let (resolved, _) = llm_config::resolve_model(model.trim());
+        resolved
+    })
+}
+
+pub fn build_models_url(def: &ProviderDef) -> Result<String, String> {
+    let base_url = llm_config::resolve_base_url(def);
+    models_url(def, &base_url)
+}
+
+pub async fn probe_provider_readiness(
+    provider: &str,
+    requested_model: Option<&str>,
+    base_url_override: Option<&str>,
+) -> ProviderReadiness {
+    probe_provider_readiness_with_options(
+        provider,
+        ProviderReadinessOptions {
+            requested_model,
+            base_url_override,
+            api_key_override: None,
+        },
+    )
+    .await
+}
+
+pub async fn probe_provider_readiness_with_options(
+    provider: &str,
+    options: ProviderReadinessOptions<'_>,
+) -> ProviderReadiness {
+    let Some(def) = llm_config::provider_config(provider) else {
+        return ProviderReadiness::fail(
+            provider,
+            ReadinessStatus::UnknownProvider,
+            format!("Unknown provider: {provider}"),
+            None,
+            None,
+            options.requested_model.map(ToOwned::to_owned),
+            options.requested_model.map(ToOwned::to_owned),
+            None,
+        );
+    };
+
+    let base_url = options
+        .base_url_override
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| value.trim().to_string())
+        .unwrap_or_else(|| llm_config::resolve_base_url(&def));
+    let diagnostic_base_url = crate::egress::redact_diagnostic_text(&base_url);
+    let url = match models_url(&def, &base_url) {
+        Ok(url) => url,
+        Err(message) => {
+            let message = crate::egress::redact_diagnostic_text(&message);
+            let status = if supports_model_readiness_probe(&def) {
+                ReadinessStatus::InvalidUrl
+            } else {
+                ReadinessStatus::Unsupported
+            };
+            return ProviderReadiness::fail(
+                provider,
+                status,
+                message,
+                Some(diagnostic_base_url),
+                None,
+                options.requested_model.map(ToOwned::to_owned),
+                options.requested_model.map(ToOwned::to_owned),
+                None,
+            );
+        }
+    };
+    let diagnostic_url = crate::egress::redact_diagnostic_text(&url);
+
+    let (raw_model, resolved_model) = options
+        .requested_model
+        .filter(|model| !model.trim().is_empty())
+        .map(|model| {
+            let trimmed = model.trim();
+            let (resolved, _) = llm_config::resolve_model(trimmed);
+            (Some(trimmed.to_string()), Some(resolved))
+        })
+        .unwrap_or_else(|| match configured_model_for_provider(provider) {
+            Some(model) => {
+                let (resolved, _) = llm_config::resolve_model(&model);
+                (Some(model), Some(resolved))
+            }
+            None => (None, None),
+        });
+
+    let client = super::utility_client_for_base_url(&base_url);
+    let api_key = options
+        .api_key_override
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| value.trim().to_string())
+        .unwrap_or_else(|| resolve_api_key(provider).unwrap_or_default());
+    let request = client.get(&url).header("Content-Type", "application/json");
+    let request = apply_auth_headers(request, &api_key, Some(&def));
+    let request = def
+        .extra_headers
+        .iter()
+        .fold(request, |request, (name, value)| {
+            request.header(name.as_str(), value.as_str())
+        });
+
+    let response = match request.send().await {
+        Ok(response) => response,
+        Err(error) => {
+            let error = crate::egress::redact_reqwest_error(&error);
+            return ProviderReadiness::fail(
+                provider,
+                ReadinessStatus::Unreachable,
+                format!("{provider} server is not reachable at {diagnostic_base_url}: {error}"),
+                Some(diagnostic_base_url),
+                Some(diagnostic_url),
+                resolved_model,
+                raw_model,
+                None,
+            );
+        }
+    };
+
+    let http_status = response.status().as_u16();
+    let server_header = response
+        .headers()
+        .get(reqwest::header::SERVER)
+        .and_then(|value| value.to_str().ok())
+        .map(ToOwned::to_owned);
+    if !response.status().is_success() {
+        return ProviderReadiness::fail(
+            provider,
+            ReadinessStatus::BadStatus,
+            format!("{provider} returned HTTP {http_status} at {diagnostic_url}"),
+            Some(diagnostic_base_url),
+            Some(diagnostic_url),
+            resolved_model,
+            raw_model,
+            Some(http_status),
+        );
+    }
+
+    let body = match response.text().await {
+        Ok(body) => body,
+        Err(error) => {
+            let error = crate::egress::redact_reqwest_error(&error);
+            return ProviderReadiness::fail(
+                provider,
+                ReadinessStatus::BadResponse,
+                format!("{provider} returned an unreadable /models response: {error}"),
+                Some(diagnostic_base_url),
+                Some(diagnostic_url),
+                resolved_model,
+                raw_model,
+                Some(http_status),
+            );
+        }
+    };
+    let payload = match serde_json::from_str::<serde_json::Value>(&body) {
+        Ok(payload) => payload,
+        Err(error) => {
+            return ProviderReadiness::fail(
+                provider,
+                ReadinessStatus::BadResponse,
+                format!("{provider} returned an unparsable /models response: {error}"),
+                Some(diagnostic_base_url),
+                Some(diagnostic_url),
+                resolved_model,
+                raw_model,
+                Some(http_status),
+            );
+        }
+    };
+    let served_models = parse_model_ids_from_value(&payload);
+    if served_models.is_empty() {
+        return ProviderReadiness::fail(
+            provider,
+            ReadinessStatus::BadResponse,
+            format!("{provider} /models response did not include any model ids"),
+            Some(diagnostic_base_url),
+            Some(diagnostic_url),
+            resolved_model,
+            raw_model,
+            Some(http_status),
+        );
+    }
+    let runtime_provider = runtime_provider_fingerprint(&payload, server_header.as_deref());
+    if let Some(actual_provider) = runtime_provider.as_deref() {
+        if provider_runtime_mismatch(provider, actual_provider) {
+            return ProviderReadiness {
+                provider: provider.to_string(),
+                ok: false,
+                status: ReadinessStatus::ProviderMismatch,
+                message: format!(
+                    concat!(
+                        "{provider} readiness endpoint at {diagnostic_base_url} is serving ",
+                        "`{actual_provider}` runtime metadata; use provider ",
+                        "`{actual_provider}` for this endpoint or move the endpoint ",
+                        "to the real {provider} server",
+                    ),
+                    provider = provider,
+                    diagnostic_base_url = diagnostic_base_url,
+                    actual_provider = actual_provider
+                ),
+                base_url: Some(diagnostic_base_url),
+                url: Some(diagnostic_url),
+                model: resolved_model,
+                requested_model: raw_model,
+                served_models,
+                http_status: Some(http_status),
+                runtime_provider,
+                server_header,
+            };
+        }
+    }
+
+    let readiness_model = resolved_model.as_deref().map(llm_config::wire_model_id);
+
+    if let Some(model) = readiness_model.as_deref() {
+        if !model_is_served(model, &served_models) {
+            let display_model = resolved_model.as_deref().unwrap_or(model);
+            let model_label = if display_model == model {
+                format!("Model '{display_model}'")
+            } else {
+                format!("Model '{display_model}' (wire model '{model}')")
+            };
+            return ProviderReadiness {
+                provider: provider.to_string(),
+                ok: false,
+                status: ReadinessStatus::ModelMissing,
+                message: format!(
+                    "{model_label} is not served by {provider} at {diagnostic_base_url}. Currently served: {}",
+                    served_models.join(", ")
+                ),
+                base_url: Some(diagnostic_base_url),
+                url: Some(diagnostic_url),
+                model: resolved_model,
+                requested_model: raw_model,
+                served_models,
+                http_status: Some(http_status),
+                runtime_provider,
+                server_header,
+            };
+        }
+    }
+
+    let message = match (resolved_model.as_deref(), readiness_model.as_deref()) {
+        (Some(model), Some(wire_model)) if model != wire_model => format!(
+            "{provider} is ready at {diagnostic_base_url}; model '{model}' is served as '{wire_model}'"
+        ),
+        (Some(model), _) => {
+            format!("{provider} is ready at {diagnostic_base_url}; model '{model}' is served")
+        }
+        (None, _) => format!(
+            "{provider} is reachable at {diagnostic_base_url}; served models: {}",
+            served_models.join(", ")
+        ),
+    };
+
+    ProviderReadiness {
+        provider: provider.to_string(),
+        ok: true,
+        status: ReadinessStatus::Ok,
+        message,
+        base_url: Some(diagnostic_base_url),
+        url: Some(diagnostic_url),
+        model: resolved_model,
+        requested_model: raw_model,
+        served_models,
+        http_status: Some(http_status),
+        runtime_provider,
+        server_header,
+    }
+}
+
+pub fn parse_model_ids(body: &str) -> Result<Vec<String>, serde_json::Error> {
+    let payload: serde_json::Value = serde_json::from_str(body)?;
+    Ok(parse_model_ids_from_value(&payload))
+}
+
+pub fn parse_model_ids_from_value(payload: &serde_json::Value) -> Vec<String> {
+    let mut models = Vec::new();
+    if let Some(entries) = payload.as_array() {
+        collect_model_ids(entries, &mut models);
+    }
+    if let Some(entries) = payload.get("data").and_then(|value| value.as_array()) {
+        collect_model_ids(entries, &mut models);
+    }
+    if let Some(entries) = payload.get("models").and_then(|value| value.as_array()) {
+        collect_model_ids(entries, &mut models);
+    }
+    models.sort();
+    models.dedup();
+    models
+}
+
+fn collect_model_ids(entries: &[serde_json::Value], models: &mut Vec<String>) {
+    for entry in entries {
+        if let Some(id) = entry.as_str().or_else(|| {
+            entry
+                .get("id")
+                .or_else(|| entry.get("name"))
+                .and_then(|value| value.as_str())
+        }) {
+            models.push(id.to_string());
+        }
+    }
+}
+
+fn runtime_provider_fingerprint(
+    payload: &serde_json::Value,
+    server_header: Option<&str>,
+) -> Option<String> {
+    let from_server = server_header.and_then(runtime_provider_from_server_token);
+    let from_payload = payload
+        .get("data")
+        .and_then(|value| value.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.get("owned_by").and_then(|value| value.as_str()))
+        .find_map(runtime_provider_from_owner);
+    from_server.or(from_payload)
+}
+
+fn normalize_provider_token(token: &str) -> String {
+    token
+        .trim()
+        .to_ascii_lowercase()
+        .replace(['_', '-', ' ', '.'], "")
+}
+
+fn runtime_provider_from_server_token(token: &str) -> Option<String> {
+    let normalized = normalize_provider_token(token);
+    if normalized.contains("llamacpp") {
+        return Some("llamacpp".to_string());
+    }
+    if normalized.contains("vllm") {
+        return Some("vllm".to_string());
+    }
+    if normalized.contains("ollama") {
+        return Some("ollama".to_string());
+    }
+    if normalized.contains("mlx") {
+        return Some("mlx".to_string());
+    }
+    if normalized.contains("tgi") || normalized.contains("textgenerationinference") {
+        return Some("tgi".to_string());
+    }
+    None
+}
+
+fn runtime_provider_from_owner(token: &str) -> Option<String> {
+    let normalized = normalize_provider_token(token);
+    match normalized.as_str() {
+        "llamacpp" => Some("llamacpp".to_string()),
+        "vllm" => Some("vllm".to_string()),
+        "ollama" => Some("ollama".to_string()),
+        "mlx" => Some("mlx".to_string()),
+        "tgi" | "textgenerationinference" => Some("tgi".to_string()),
+        _ => None,
+    }
+}
+
+fn provider_runtime_mismatch(requested_provider: &str, actual_provider: &str) -> bool {
+    fn specific_local_provider(provider: &str) -> bool {
+        matches!(provider, "llamacpp" | "vllm" | "ollama" | "mlx" | "tgi")
+    }
+    specific_local_provider(requested_provider)
+        && specific_local_provider(actual_provider)
+        && requested_provider != actual_provider
+}
+
+pub fn model_is_served(model: &str, served_models: &[String]) -> bool {
+    served_models.iter().any(|served| {
+        served == model
+            || served
+                .strip_prefix(model)
+                .is_some_and(|suffix| suffix.starts_with(':'))
+    })
+}
+
+pub fn configured_model_for_provider(provider: &str) -> Option<String> {
+    if provider == "mlx" {
+        if let Ok(Some(model)) = crate::stdlib::process::session_env_var("MLX_MODEL_ID") {
+            if !model.trim().is_empty() {
+                return Some(model);
+            }
+        }
+    }
+    if provider == "local" {
+        if let Some(model) = crate::stdlib::process::session_env_value("LOCAL_LLM_MODEL") {
+            if !model.trim().is_empty() {
+                return Some(model);
+            }
+        }
+    }
+    let harn_provider = crate::stdlib::process::session_env_value("HARN_LLM_PROVIDER");
+    let model = crate::stdlib::process::session_env_value("HARN_LLM_MODEL")
+        .filter(|model| !model.trim().is_empty())?;
+    let (_, resolved_provider) = llm_config::resolve_model(&model);
+    if resolved_provider.as_deref() == Some(provider)
+        || (resolved_provider.is_none() && harn_provider.as_deref() == Some(provider))
+    {
+        return Some(model);
+    }
+    None
+}
+
+fn models_url(def: &ProviderDef, base_url: &str) -> Result<String, String> {
+    if let Some(url) = def.healthcheck.as_ref().and_then(|healthcheck| {
+        if healthcheck.method.eq_ignore_ascii_case("GET") {
+            healthcheck
+                .url
+                .as_deref()
+                .filter(|url| is_model_inventory_endpoint(url))
+        } else {
+            None
+        }
+    }) {
+        return reqwest::Url::parse(url)
+            .map(|_| normalize_loopback(url))
+            .map_err(|error| format!("Invalid provider models URL '{url}': {error}"));
+    }
+
+    let path = def
+        .healthcheck
+        .as_ref()
+        .and_then(|healthcheck| {
+            if healthcheck.method.eq_ignore_ascii_case("GET") {
+                healthcheck
+                    .path
+                    .as_deref()
+                    .filter(|path| is_model_inventory_endpoint(path))
+            } else {
+                None
+            }
+        })
+        .map(ToOwned::to_owned);
+    let path = match path.or_else(|| openai_compatible_models_path(&def.chat_endpoint)) {
+        Some(path) => path,
+        None => {
+            return Err(
+                "Provider does not expose a model readiness endpoint; configure a GET healthcheck path/url that lists models or use an OpenAI-compatible /chat/completions endpoint".to_string(),
+            );
+        }
+    };
+    let url = super::healthcheck::join_base_and_path(base_url, &path);
+    reqwest::Url::parse(&url)
+        .map(|_| normalize_loopback(&url))
+        .map_err(|error| format!("Invalid provider models URL '{url}': {error}"))
+}
+
+fn is_model_inventory_endpoint(endpoint: &str) -> bool {
+    let path = reqwest::Url::parse(endpoint)
+        .ok()
+        .map(|url| url.path().to_string())
+        .unwrap_or_else(|| endpoint.split('?').next().unwrap_or(endpoint).to_string());
+    let path = path.trim_end_matches('/');
+    path == "models" || path.ends_with("/models") || path.ends_with("/api/tags")
+}
+
+fn openai_compatible_models_path(chat_endpoint: &str) -> Option<String> {
+    let prefix = chat_endpoint.strip_suffix("/chat/completions")?;
+    Some(if prefix.is_empty() {
+        "/models".to_string()
+    } else {
+        format!("{prefix}/models")
+    })
+}
+
+fn normalize_loopback(url: &str) -> String {
+    url.replace("://localhost:", "://127.0.0.1:")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    #[test]
+    fn parse_model_ids_reads_openai_compatible_data() {
+        let models =
+            parse_model_ids(r#"{"object":"list","data":[{"id":"qwen"},{"id":"mlx-model"}]}"#)
+                .expect("parse models");
+        assert_eq!(models, vec!["mlx-model".to_string(), "qwen".to_string()]);
+    }
+
+    #[test]
+    fn parse_model_ids_reads_together_top_level_array() {
+        let models = parse_model_ids(r#"[{"id":"deepseek-ai/DeepSeek-V4-Pro"},{"name":"qwen"}]"#)
+            .expect("parse models");
+        assert_eq!(
+            models,
+            vec![
+                "deepseek-ai/DeepSeek-V4-Pro".to_string(),
+                "qwen".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn models_url_does_not_duplicate_version_prefix_in_base_url() {
+        let def = ProviderDef {
+            base_url: "https://openrouter.ai/api/v1".to_string(),
+            chat_endpoint: "/chat/completions".to_string(),
+            healthcheck: Some(crate::llm_config::HealthcheckDef {
+                method: "GET".to_string(),
+                path: Some("/auth/key".to_string()),
+                url: None,
+                body: None,
+            }),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            models_url(&def, &def.base_url).expect("models url"),
+            "https://openrouter.ai/api/v1/models"
+        );
+    }
+
+    #[test]
+    fn anthropic_models_url_uses_catalog_healthcheck_path() {
+        let def = llm_config::provider_config("anthropic").expect("anthropic provider");
+
+        assert!(supports_model_readiness_probe(&def));
+        assert_eq!(
+            models_url(&def, &def.base_url).expect("models url"),
+            "https://api.anthropic.com/v1/models"
+        );
+    }
+
+    #[test]
+    fn models_url_uses_catalogued_inventory_path_for_native_endpoint() {
+        let def = ProviderDef {
+            base_url: "http://localhost:11434".to_string(),
+            chat_endpoint: "/api/chat".to_string(),
+            healthcheck: Some(crate::llm_config::HealthcheckDef {
+                method: "GET".to_string(),
+                path: Some("/api/tags".to_string()),
+                url: None,
+                body: None,
+            }),
+            ..Default::default()
+        };
+
+        assert!(supports_model_readiness_probe(&def));
+        assert_eq!(
+            models_url(&def, &def.base_url).expect("models url"),
+            "http://127.0.0.1:11434/api/tags"
+        );
+    }
+
+    #[test]
+    fn models_url_rejects_native_endpoint_without_model_inventory() {
+        let def = ProviderDef {
+            base_url: "https://api.example.com/v1".to_string(),
+            chat_endpoint: "/messages".to_string(),
+            healthcheck: None,
+            ..Default::default()
+        };
+
+        assert!(!supports_model_readiness_probe(&def));
+        assert!(models_url(&def, &def.base_url)
+            .expect_err("unsupported native endpoint")
+            .contains("model readiness endpoint"));
+    }
+
+    #[test]
+    fn model_is_served_accepts_exact_ids_or_tag_boundaries() {
+        let models = vec![
+            "qwen3:8b".to_string(),
+            "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit".to_string(),
+            "gpt-4o".to_string(),
+        ];
+        assert!(model_is_served("qwen3", &models));
+        assert!(model_is_served(
+            "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit",
+            &models
+        ));
+        assert!(!model_is_served("unsloth/Qwen3.6", &models));
+        assert!(!model_is_served("gpt-4", &models));
+    }
+
+    #[test]
+    fn runtime_provider_fingerprint_reads_llamacpp_models_payload() {
+        let payload = serde_json::json!({
+            "data": [{
+                "id": "llama-3.1-8b-instruct",
+                "owned_by": "llamacpp",
+                "meta": {"n_ctx": 16384}
+            }]
+        });
+        assert_eq!(
+            runtime_provider_fingerprint(&payload, Some("llama.cpp")).as_deref(),
+            Some("llamacpp")
+        );
+    }
+
+    #[test]
+    fn runtime_provider_fingerprint_does_not_treat_model_owner_as_runtime() {
+        let payload = serde_json::json!({
+            "data": [{
+                "id": "mlx-community/Qwen3.6-4bit",
+                "owned_by": "mlx-community"
+            }]
+        });
+        assert_eq!(runtime_provider_fingerprint(&payload, None), None);
+    }
+
+    #[tokio::test]
+    async fn probe_provider_readiness_rejects_mislabeled_local_runtime() {
+        let (base_url, handle) = spawn_models_stub_with_response_header(
+            200,
+            r#"{"data":[{"id":"llama-3.1-8b-instruct","owned_by":"llamacpp","meta":{"n_ctx":16384}}]}"#,
+            "server: llama.cpp",
+        );
+        let result =
+            probe_provider_readiness("vllm", Some("llama-3.1-8b-instruct"), Some(&base_url)).await;
+        handle.join().expect("stub joins");
+        assert!(!result.ok);
+        assert_eq!(result.status, ReadinessStatus::ProviderMismatch);
+        assert_eq!(result.runtime_provider.as_deref(), Some("llamacpp"));
+        assert_eq!(result.server_header.as_deref(), Some("llama.cpp"));
+        assert!(result.message.contains("use provider `llamacpp`"));
+    }
+
+    #[tokio::test]
+    async fn probe_provider_readiness_allows_generic_local_runtime_fingerprint() {
+        let (base_url, handle) = spawn_models_stub_with_response_header(
+            200,
+            r#"{"data":[{"id":"llama-3.1-8b-instruct","owned_by":"llamacpp"}]}"#,
+            "server: llama.cpp",
+        );
+        let result =
+            probe_provider_readiness("local", Some("llama-3.1-8b-instruct"), Some(&base_url)).await;
+        handle.join().expect("stub joins");
+        assert!(result.ok, "{}", result.message);
+        assert_eq!(result.status, ReadinessStatus::Ok);
+        assert_eq!(result.runtime_provider.as_deref(), Some("llamacpp"));
+    }
+
+    #[tokio::test]
+    async fn probe_provider_readiness_verifies_served_model() {
+        let (base_url, handle) = spawn_models_stub(
+            200,
+            r#"{"data":[{"id":"unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit"}]}"#,
+        );
+        let result = probe_provider_readiness("mlx", Some("mlx-qwen36-27b"), Some(&base_url)).await;
+        handle.join().expect("stub joins");
+        assert!(result.ok);
+        assert_eq!(result.status, ReadinessStatus::Ok);
+        assert_eq!(
+            result.model.as_deref(),
+            Some("unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit")
+        );
+    }
+
+    #[tokio::test]
+    async fn probe_provider_readiness_verifies_wire_model_for_catalog_key() {
+        let (base_url, handle) = spawn_models_stub(200, r#"{"data":[{"id":"zai-org/GLM-5.2"}]}"#);
+        let result = probe_provider_readiness(
+            "deepinfra",
+            Some("deepinfra/zai-org/GLM-5.2"),
+            Some(&base_url),
+        )
+        .await;
+        handle.join().expect("stub joins");
+        assert!(result.ok, "{}", result.message);
+        assert_eq!(result.status, ReadinessStatus::Ok);
+        assert_eq!(result.model.as_deref(), Some("deepinfra/zai-org/GLM-5.2"));
+        assert!(result.message.contains("served as 'zai-org/GLM-5.2'"));
+    }
+
+    #[tokio::test]
+    async fn probe_provider_readiness_uses_explicit_api_key_override() {
+        let (base_url, handle) = spawn_models_stub_with_expected_header(
+            200,
+            r#"{"data":[{"id":"zai-org/GLM-5.2"}]}"#,
+            Some("authorization: Bearer test-key"),
+        );
+        let result = probe_provider_readiness_with_options(
+            "deepinfra",
+            ProviderReadinessOptions {
+                requested_model: Some("deepinfra/zai-org/GLM-5.2"),
+                base_url_override: Some(&base_url),
+                api_key_override: Some("test-key"),
+            },
+        )
+        .await;
+        handle.join().expect("stub joins");
+        assert!(result.ok, "{}", result.message);
+    }
+
+    #[tokio::test]
+    async fn probe_provider_readiness_reports_missing_model() {
+        let (base_url, handle) = spawn_models_stub(200, r#"{"data":[{"id":"other-model"}]}"#);
+        let result = probe_provider_readiness("mlx", Some("mlx-qwen36-27b"), Some(&base_url)).await;
+        handle.join().expect("stub joins");
+        assert!(!result.ok);
+        assert_eq!(result.status, ReadinessStatus::ModelMissing);
+        assert!(result.message.contains("Currently served: other-model"));
+    }
+
+    fn spawn_models_stub(status: u16, body: &'static str) -> (String, std::thread::JoinHandle<()>) {
+        spawn_models_stub_with_expected_header(status, body, None)
+    }
+
+    fn spawn_models_stub_with_response_header(
+        status: u16,
+        body: &'static str,
+        response_header: &'static str,
+    ) -> (String, std::thread::JoinHandle<()>) {
+        spawn_models_stub_with_headers(status, body, None, Some(response_header))
+    }
+
+    fn spawn_models_stub_with_expected_header(
+        status: u16,
+        body: &'static str,
+        expected_header: Option<&'static str>,
+    ) -> (String, std::thread::JoinHandle<()>) {
+        spawn_models_stub_with_headers(status, body, expected_header, None)
+    }
+
+    fn spawn_models_stub_with_headers(
+        status: u16,
+        body: &'static str,
+        expected_header: Option<&'static str>,
+        response_header: Option<&'static str>,
+    ) -> (String, std::thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind models stub");
+        let addr = listener.local_addr().expect("stub addr");
+        // Block on `accept()` directly rather than polling. The
+        // earlier 3s wall-clock deadline + 20ms polling sleep was
+        // brittle under nextest's flake-detection profile: another
+        // concurrent test could starve this thread of CPU long
+        // enough for the deadline to elapse before the kernel even
+        // delivered the SYN that the client had already sent.
+        // Blocking accept is deterministic; the test invariably
+        // sends a request, so it returns promptly.
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener
+                .accept()
+                .unwrap_or_else(|e| panic!("models stub: accept failed: {e}"));
+            let mut buf = vec![0u8; 4096];
+            let n = stream.read(&mut buf).expect("read request");
+            let request = String::from_utf8_lossy(&buf[..n]);
+            assert!(
+                request.starts_with("GET /v1/models HTTP/1.1\r\n")
+                    || request.starts_with("GET /models HTTP/1.1\r\n")
+                    || request.starts_with("GET /api/tags HTTP/1.1\r\n")
+            );
+            if let Some(header) = expected_header {
+                assert!(
+                    request
+                        .lines()
+                        .any(|line| line.eq_ignore_ascii_case(header)),
+                    "expected request header {header:?}, got:\n{request}"
+                );
+            }
+            let extra = response_header
+                .map(|header| format!("{header}\r\n"))
+                .unwrap_or_default();
+            let response = format!(
+                "HTTP/1.1 {status} OK\r\n{extra}content-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+        });
+        (format!("http://{addr}"), handle)
+    }
+}

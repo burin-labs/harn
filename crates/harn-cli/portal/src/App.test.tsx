@@ -1,0 +1,377 @@
+import { cleanup, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { IntlProvider } from "react-intl"
+import { MemoryRouter } from "react-router"
+import { afterEach, describe, expect, it, vi } from "vitest"
+
+import { App } from "./App"
+import { RunsPage } from "./pages/RunsPage"
+
+const runsPayload = {
+  stats: {
+    total_runs: 2,
+    completed_runs: 1,
+    active_runs: 0,
+    failed_runs: 1,
+    avg_duration_ms: 1200,
+  },
+  filtered_count: 2,
+  pagination: {
+    page: 1,
+    page_size: 25,
+    total_pages: 1,
+    total_runs: 2,
+    has_previous: false,
+    has_next: false,
+  },
+  runs: [
+    {
+      path: "failed.json",
+      id: "run-failed",
+      workflow_name: "demo",
+      status: "failed",
+      last_stage_node_id: "verify",
+      failure_summary: "verify failed: assertion failed",
+      started_at: "2026-04-04T10:00:00Z",
+      finished_at: "2026-04-04T10:00:05Z",
+      duration_ms: 5000,
+      stage_count: 2,
+      child_run_count: 0,
+      call_count: 3,
+      input_tokens: 100,
+      output_tokens: 40,
+      models: ["gpt-5"],
+      updated_at_ms: 1,
+      skills: [],
+    },
+    {
+      path: "ok.json",
+      id: "run-ok",
+      workflow_name: "demo",
+      status: "completed",
+      last_stage_node_id: "finalize",
+      failure_summary: null,
+      started_at: "2026-04-04T09:00:00Z",
+      finished_at: "2026-04-04T09:00:02Z",
+      duration_ms: 2000,
+      stage_count: 1,
+      child_run_count: 0,
+      call_count: 1,
+      input_tokens: 20,
+      output_tokens: 10,
+      models: ["gpt-5"],
+      updated_at_ms: 2,
+      skills: [],
+    },
+  ],
+}
+
+const detailPayload = {
+  summary: runsPayload.runs[0],
+  task: "Fix issue",
+  workflow_id: "wf",
+  parent_run_id: null,
+  root_run_id: null,
+  policy_summary: {
+    tools: [],
+    capabilities: [],
+    workspace_roots: [],
+    side_effect_level: null,
+    recursion_limit: null,
+    tool_arg_constraints: [],
+    validation_valid: true,
+    validation_errors: [],
+    validation_warnings: [],
+    reachable_nodes: ["verify"],
+  },
+  replay_summary: {
+    fixture_id: "fixture-1",
+    source_run_id: "run-failed",
+    created_at: "2026-04-04T10:01:00Z",
+    expected_status: "failed",
+    stage_assertions: [],
+  },
+  execution: null,
+  insights: [],
+  stages: [],
+  spans: [],
+  activities: [],
+  transitions: [],
+  checkpoints: [],
+  artifacts: [],
+  execution_summary: null,
+  transcript_steps: [],
+  template_renders: [],
+  story: [],
+  child_runs: [],
+  observability: {
+    schema_version: 4,
+    planner_rounds: [],
+    research_fact_count: 0,
+    action_graph_nodes: [
+      {
+        id: "trigger:original",
+        label: "github:issue.opened (original trigger_evt_original)",
+        kind: "trigger",
+        status: "historical",
+        outcome: "replayed_from",
+        trace_id: "trace",
+        stage_id: null,
+        node_id: null,
+        worker_id: null,
+        run_id: null,
+        run_path: null,
+        metadata: { provider: "github", event_kind: "issue.opened", event_id: "trigger_evt_original" },
+      },
+      {
+        id: "trigger:current",
+        label: "github:issue.opened",
+        kind: "trigger",
+        status: "received",
+        outcome: "received",
+        trace_id: "trace",
+        stage_id: null,
+        node_id: null,
+        worker_id: null,
+        run_id: null,
+        run_path: null,
+        metadata: { provider: "github", event_kind: "issue.opened", event_id: "trigger_evt_current", signature_status: "verified" },
+      },
+    ],
+    action_graph_edges: [
+      { from_id: "trigger:original", to_id: "trigger:current", kind: "replay_chain", label: "replay chain" },
+    ],
+    worker_lineage: [],
+    verification_outcomes: [],
+    transcript_pointers: [],
+    daemon_events: [
+      {
+        daemon_id: "daemon-1",
+        name: "reviewer",
+        kind: "spawned",
+        timestamp: "1710000000.100",
+        persist_path: "/tmp/reviewer",
+        payload_summary: "always-on reviewer",
+      },
+    ],
+  },
+  skill_timeline: [],
+  skill_match_events: [],
+  tool_load_events: [],
+  active_skills: [],
+}
+
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
+
+describe("App", () => {
+  it("normalizes malformed runs query params before fetching", async () => {
+    const fetchMock = vi.fn(async (input: string) => {
+      if (input.startsWith("/api/runs")) {
+        return { ok: true, json: async () => ({ ...runsPayload, runs: [] }) }
+      }
+      throw new Error(`unexpected fetch ${input}`)
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={["/runs?page=1.5&page_size=37&status=bogus&sort=weird"]}>
+        <IntlProvider locale="en">
+          <RunsPage poll={false} />
+        </IntlProvider>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/runs?status=all&sort=newest&page=1&page_size=25")
+    })
+  })
+
+  it("shows a paginated runs page and navigates into run detail", async () => {
+    const fetchMock = vi.fn(async (input: string) => {
+      if (input.startsWith("/api/runs")) {
+        return { ok: true, json: async () => runsPayload }
+      }
+      if (input === "/api/meta") {
+        return {
+          ok: true,
+          json: async () => ({ workspace_root: "/workspace/harn", run_dir: ".harn-runs/portal-demo" }),
+        }
+      }
+      if (input === "/api/llm/options") {
+        return {
+          ok: true,
+          json: async () => ({
+            preferred_provider: "local",
+            preferred_model: "gpt-4o",
+            providers: [
+              {
+                name: "local",
+                base_url: "http://localhost:8000",
+                base_url_env: "LOCAL_LLM_BASE_URL",
+                auth_style: "none",
+                auth_envs: [],
+                auth_configured: true,
+                viable: true,
+                local: true,
+                models: ["gpt-4o"],
+                aliases: [],
+                default_model: "gpt-4o",
+              },
+            ],
+          }),
+        }
+      }
+      if (input.startsWith("/api/run?path=failed.json")) {
+        return { ok: true, json: async () => detailPayload }
+      }
+      if (input === "/api/trigger/replay") {
+        return {
+          ok: true,
+          json: async () => ({
+            id: "job-1",
+            mode: "trigger_replay",
+            target_label: "trigger replay trigger_evt_current",
+            status: "running",
+            started_at: "2026-04-04T10:01:30Z",
+            finished_at: null,
+            exit_code: null,
+            logs: "",
+            discovered_run_paths: [],
+            workspace_dir: null,
+            transcript_path: null,
+          }),
+        }
+      }
+      if (input === "/api/launch/targets") {
+        return { ok: true, json: async () => ({ targets: [] }) }
+      }
+      if (input === "/api/launch/jobs") {
+        return { ok: true, json: async () => ({ jobs: [] }) }
+      }
+      if (input.startsWith("/api/compare?")) {
+        return {
+          ok: true,
+          json: async () => ({
+            identical: false,
+            left_status: "completed",
+            right_status: "failed",
+            stage_diffs: [],
+            tool_diffs: [],
+            observability_diffs: [],
+            transition_count_delta: 1,
+            artifact_count_delta: 0,
+            checkpoint_count_delta: 0,
+          }),
+        }
+      }
+      throw new Error(`unexpected fetch ${input}`)
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={["/runs"]}>
+        <IntlProvider locale="en">
+          <App />
+        </IntlProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText("Persisted runs")).toBeInTheDocument()
+    expect(await screen.findByText("failed.json")).toBeInTheDocument()
+
+    await userEvent.click(screen.getAllByRole("button", { name: "Inspect" })[0])
+
+    await waitFor(() => {
+      expect(screen.getByText("Inspect persisted run")).toBeInTheDocument()
+    })
+    expect(screen.getByText("harn replay .harn-runs/failed.json")).toBeInTheDocument()
+    expect(screen.getByText(/reviewer • Spawned • 1710000000.100/)).toBeInTheDocument()
+    expect(screen.getByText(/github:issue\.opened \(original trigger_evt_original\) → github:issue\.opened • replay chain • replay_chain/)).toBeInTheDocument()
+    expect(screen.getAllByRole("button", { name: "Replay trigger" }).length).toBeGreaterThan(0)
+
+    const replayButtons = screen.getAllByRole("button", { name: "Replay trigger" })
+    await userEvent.click(replayButtons[replayButtons.length - 1])
+    expect(await screen.findByText("Queued trigger replay trigger_evt_current")).toBeInTheDocument()
+  })
+
+  it("shows DLQ entries and queues replay actions", async () => {
+    vi.stubGlobal("confirm", vi.fn(() => true))
+    const fetchMock = vi.fn(async (input: string) => {
+      if (input.startsWith("/api/runs")) {
+        return { ok: true, json: async () => ({ ...runsPayload, runs: [] }) }
+      }
+      if (input.startsWith("/api/dlq")) {
+        if (input === "/api/dlq/dlq_cake/replay") {
+          return {
+            ok: true,
+            json: async () => ({
+              id: "job-dlq",
+              mode: "trigger_replay",
+              target_label: "trigger replay trigger_evt_cake",
+              status: "running",
+              started_at: "2026-04-24T10:10:00Z",
+              finished_at: null,
+              exit_code: null,
+              logs: "",
+              discovered_run_paths: [],
+              workspace_dir: null,
+              transcript_path: null,
+            }),
+          }
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            total: 1,
+            groups: [{ error_class: "provider_5xx", count: 1, newest_failed_at: "2026-04-24T10:00:00Z" }],
+            alerts: [],
+            alert_configs: [],
+            entries: [
+              {
+                id: "dlq_cake",
+                event_id: "trigger_evt_cake",
+                trigger_id: "cake-classifier",
+                binding_id: "cake-classifier",
+                binding_key: "cake-classifier@v1",
+                binding_version: 1,
+                provider: "github",
+                event_kind: "issues.opened",
+                failed_at: "2026-04-24T10:00:00Z",
+                failed_at_ms: 1777044000000,
+                last_error: "provider returned 503",
+                error_class: "provider_5xx",
+                retry_count: 3,
+                state: "pending",
+                headers: { "x-delivery": "abc" },
+                payload: { issue: { number: 7 } },
+                event: {},
+                attempt_history: [{ attempt: 1, at: "2026-04-24T10:00:00Z", status: "failed", error: "503" }],
+                predicate_trace: [{ kind: "predicate.evaluated" }],
+              },
+            ],
+          }),
+        }
+      }
+      throw new Error(`unexpected fetch ${input}`)
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={["/dlq"]}>
+        <IntlProvider locale="en">
+          <App />
+        </IntlProvider>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText("Dead-letter queue")).toBeInTheDocument()
+    expect(await screen.findByText("cake-classifier")).toBeInTheDocument()
+    expect(screen.getByText("provider_5xx: 1")).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole("button", { name: "Replay" }))
+    expect(await screen.findByText("Queued trigger replay trigger_evt_cake")).toBeInTheDocument()
+  })
+})

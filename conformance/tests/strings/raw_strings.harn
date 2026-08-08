@@ -1,0 +1,14 @@
+pipeline test(harness: Harness, task) {
+  // Raw strings have no escape processing
+  const path = r"C:\Users\name\file.txt"
+  harness.stdio.log(path)
+  // Raw strings preserve backslashes literally
+  const regex = r"\d+\.\d+"
+  harness.stdio.log(regex)
+  // Dollar signs are literal, no interpolation
+  const price = r"costs $100"
+  harness.stdio.log(price)
+  // Empty raw string
+  const empty = r""
+  harness.stdio.log(len(empty))
+}

@@ -1,0 +1,11 @@
+.git
+.github
+.claude
+.codex
+.burin
+.harn
+.harn-runs
+target
+docs/dist
+node_modules
+crates/harn-cli/portal/node_modules

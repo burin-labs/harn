@@ -1,0 +1,48 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn tools() {
+  let registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "lookup",
+    "Lookup evidence",
+    {
+      handler: { _args -> "evidence" },
+      parameters: {query: {type: "string"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return registry
+}
+
+pipeline default(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("```tool\n{\"name\":\"lookup\",\"args\":{\"query\":\"x\"}}\n```"),
+      llm_text("evidence"),
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Use lookup.",
+        nil,
+        {
+          provider: "mock",
+          tools: tools(),
+          tool_format: "json",
+          loop_until_done: true,
+          max_iterations: 3,
+          max_nudges: 1,
+          require_successful_tools: ["lookup"],
+        },
+      )
+      harness.stdio.println(result.status)
+      harness.stdio.println(result.stop_reason)
+      harness.stdio.println(result.visible_text)
+      harness.stdio.println(result.llm.iterations)
+    },
+  )
+}

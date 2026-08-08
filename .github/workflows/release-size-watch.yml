@@ -1,0 +1,79 @@
+name: Release size watch
+
+# The hard binary size budget only runs inside build-release-binaries.yml, so
+# before this workflow existed it was evaluated on tag pushes and on the subset
+# of main pushes that touch a declared release build input. Between two
+# evaluations main typically absorbs dozens of commits, which turns a budget
+# breach into "some commit in this range grew the binary" at exactly the moment
+# a release is trying to go out.
+#
+# This dispatches the existing benchmark path — the same job, the same policy
+# runner, the same gate — for the one target the gate measures. It publishes
+# nothing, signs nothing, and saves no cache; see the `benchmark_only` input.
+# The point is attribution, not alerting: when a release later fails the
+# budget, this workflow's history says which few-hour window grew it.
+on:
+  schedule:
+    # Offset from the :17 and :23 crons already in this repository so a size
+    # measurement never starts in the same minute as a warm-cache build.
+    - cron: '41 */4 * * *'
+  workflow_dispatch:
+
+# Only the dispatch call needs write; nothing here reads repository contents.
+permissions:
+  actions: write
+
+concurrency:
+  group: release-size-watch
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    # A fork's schedule would dispatch against its own release workflow and
+    # burn its runner minutes measuring a binary nobody releases.
+    if: github.repository == 'burin-labs/harn'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Measure the release binary size from current main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_WORKFLOW: build-release-binaries.yml
+          # The only target the size budget is enforced for. Keeping this to
+          # one target is what makes the cadence affordable.
+          SIZE_GATED_TARGET: x86_64-unknown-linux-gnu
+          # Benchmark mode rejects the `policy` profile outright — policy
+          # runners are reserved for builds whose artifacts ship. `standard`
+          # and `fast` resolve this target to the same `ubuntu-latest` runner
+          # (.github/release-runner-policy.json), so `standard` measures the
+          # release binary on release hardware at no cost.
+          RUNNER_PROFILE: standard
+        run: |
+          set -euo pipefail
+
+          # `benchmark_only` dispatches share a single concurrency lane that
+          # does not cancel in progress, so a hung or slow measurement would
+          # otherwise queue every subsequent tick behind it. Releases and
+          # warm-cache runs use different lanes and are deliberately not
+          # treated as a reason to skip.
+          active="$(
+            gh run list \
+              --repo "$GH_REPO" \
+              --workflow "$RELEASE_WORKFLOW" \
+              --limit 40 \
+              --json status,event \
+              --jq '[.[] | select((.status == "queued" or .status == "in_progress") and .event == "workflow_dispatch")] | length'
+          )"
+          if [[ "$active" != "0" ]]; then
+            echo "::notice::${active} benchmark dispatch(es) still running; skipping this tick rather than stacking another."
+            exit 0
+          fi
+
+          gh workflow run "$RELEASE_WORKFLOW" \
+            --repo "$GH_REPO" \
+            --ref main \
+            -f benchmark_only=true \
+            -f "targets=${SIZE_GATED_TARGET}" \
+            -f "runner_profile=${RUNNER_PROFILE}"
+          echo "::notice::Dispatched ${RELEASE_WORKFLOW} (benchmark_only) for ${SIZE_GATED_TARGET} from main."

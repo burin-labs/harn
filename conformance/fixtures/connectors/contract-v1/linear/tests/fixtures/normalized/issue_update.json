@@ -1,0 +1,9 @@
+{
+  "type": "event",
+  "event": {
+    "kind": "linear.issue.update",
+    "dedupe_key": "linear:wh_1",
+    "signature_status": {"state": "verified"},
+    "payload_data_id": "ISS-1"
+  }
+}

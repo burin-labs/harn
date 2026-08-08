@@ -1,0 +1,43 @@
+import "std/triggers"
+
+/**
+ * CH-02 (#1872): register a `channel:`-source trigger and verify it fires
+ * on a matching harness.channels.append(...). The handler echoes the payload to a
+ * separate channel so the test can observe the dispatch synchronously.
+ */
+fn handle_channel(harness: Harness, event) {
+  const payload = event.provider_payload
+  harness.channels.append("ch.basic.fired", {name: payload.name, repo: payload.payload?.repo})
+}
+
+pipeline test(harness: Harness, task) {
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(
+    harness.random.range(100000, 999999),
+  )
+  const handle: TriggerHandle = harness.runtime.trigger_register(
+    {
+      id: "channel-basic-" + unique,
+      kind: "channel.emit",
+      provider: "channel",
+      autonomy_tier: "act_auto",
+      handler: handle_channel,
+      when: nil,
+      retry: nil,
+      match: {events: ["channel:ch.basic.input"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  harness.stdio.println(handle.provider)
+  harness.stdio.println(handle.kind)
+  const _ = harness.channels.append("ch.basic.input", {repo: "harn"})
+  const fired = harness.channels.events("ch.basic.fired")
+  harness.stdio.println(len(fired))
+  harness.stdio.println(fired[0].payload.name)
+  harness.stdio.println(fired[0].payload.repo)
+}

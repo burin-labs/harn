@@ -1,0 +1,41 @@
+pipeline default(harness: Harness) {
+  harness.tools.mcp_server_metadata(
+    {
+      name: "harn-http-elicit-test",
+      version: "1.0.0",
+      instructions: "Use the ask tool to exercise client elicitation.",
+    },
+  )
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "ask",
+    "Ask the client for deployment input",
+    {
+      parameters: {prompt: "string"},
+      handler: { args ->
+        const response = harness.tools.mcp_elicit(
+          {
+            message: args.prompt ?? "Choose environment",
+            requestedSchema: {
+              type: "object",
+              properties: {env: {type: "string", enum: ["staging", "production"]}, confirm: {type: "boolean"}},
+              required: ["env", "confirm"],
+            },
+          },
+        )
+        const content = response.content ?? {}
+        return to_string(response.action ?? "") + ":" + to_string(content.env ?? "") + ":"
+          + to_string(content.confirm ?? "")
+      },
+      annotations: {
+        title: "Ask",
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+    },
+  )
+  harness.tools.mcp_tools(tools)
+}

@@ -1,0 +1,77 @@
+import "std/agents"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * S-18 (#1867): the cooperative suspend path ends the in-flight
+ * lifecycle span and persists its link into the worker snapshot.
+ * The matching resume path opens a fresh `SpanKind::Resume` span that
+ * links — not parents — back to the prior suspension and to the
+ * pipeline span that was active when suspend ran. This is the
+ * Temporal-community-recommended shape: never carry one root span
+ * across a multi-day pause.
+ *
+ * The fixture mirrors the runtime contract:
+ *   1. Suspend produces a closed `suspension` span carrying the
+ *      canonical attribute bag (`handle`, `reason`, `initiator`,
+ *      `pipeline_id`).
+ *   2. Resume produces a closed `resume` span carrying its own
+ *      attribute bag plus outbound links back to the suspension and
+ *      the pipeline.
+ *   3. The resume span is detached (no parent) so future pipelines
+ *      do not become re-children of the original parent on warm
+ *      resume.
+ *
+ * The worker is driven into a suspended state via a model-issued
+ * `agent_await_resumption` tool call, matching the auto-resume
+ * conformance fixture.
+ */
+pipeline main(harness: Harness) {
+  harness.obs.enable_tracing(true)
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        tool_calls: [
+          {
+            id: "park_until_review",
+            name: "agent_await_resumption",
+            arguments: {reason: "waiting on review"},
+          },
+        ],
+        input_tokens: 7,
+        output_tokens: 3,
+      },
+      llm_text("resumed and finished"),
+    ],
+    { ->
+      const handle = sub_agent_run(
+        harness,
+        "Park until review.",
+        {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
+      )
+      const suspended = wait_agent(harness.agent, handle)
+      harness.stdio.println(suspended?.status)
+      const resumed_handle = resume_agent(harness.agent, handle)
+      harness.stdio.println(resumed_handle?.status)
+      const resumed = wait_agent(harness.agent, handle)
+      harness.stdio.println(resumed?.status)
+      const spans = harness.obs.trace_spans()
+      const suspension_spans = spans.filter({ s -> s.kind == "suspension" })
+      const resume_spans = spans.filter({ s -> s.kind == "resume" })
+      harness.stdio.println(len(suspension_spans) >= 1)
+      harness.stdio.println(len(resume_spans) >= 1)
+      const suspension = suspension_spans[0]
+      const resume = resume_spans[0]
+      harness.stdio.println(suspension.metadata?.handle != nil)
+      harness.stdio.println(suspension.metadata?.reason != nil)
+      harness.stdio.println(suspension.metadata?.initiator != nil)
+      harness.stdio.println(resume.metadata?.handle != nil)
+      harness.stdio.println(resume.metadata?.continue_transcript != nil)
+      harness.stdio.println(resume.metadata?.had_resume_input != nil)
+      harness.stdio.println(resume.parent_id == nil)
+      harness.stdio.println(resume.links != nil)
+      harness.stdio.println(len(resume.links) >= 1)
+      harness.obs.enable_tracing(false)
+    },
+  )
+}

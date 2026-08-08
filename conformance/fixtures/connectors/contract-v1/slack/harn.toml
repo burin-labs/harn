@@ -1,0 +1,58 @@
+[package]
+name = "harn-slack-connector"
+version = "0.2.1"
+repository = "https://github.com/burin-labs/harn-slack-connector"
+harn = ">=0.10,<0.11"
+
+[[providers]]
+id = "slack"
+connector = { harn = "./lib.harn" }
+capabilities = ["webhook", "rate_limit", "pagination"]
+
+[providers.setup]
+auth_type = "oauth2"
+flow = "browser"
+required_scopes = ["app_mentions:read", "channels:history", "chat:write"]
+required_secrets = ["slack/signing-secret", "slack/bot-token", "slack/app-token"]
+setup_command = ["harn", "connect", "slack"]
+validation_command = ["harn", "connect", "status", "--connector", "slack", "--json"]
+
+[[providers.setup.health_checks]]
+id = "credentials"
+kind = "command"
+command = ["harn", "connect", "status", "--connector", "slack", "--json"]
+
+[providers.setup.recovery]
+missing_auth = "Run `harn connect slack` with the app client credentials."
+expired_credentials = "Refresh the Slack OAuth token or reconnect the workspace."
+revoked_credentials = "Remove stale Slack credentials with `harn connect --revoke slack`, then reconnect."
+missing_scopes = "Reinstall the Slack app with the scopes listed in required_scopes."
+inaccessible_resource = "Confirm the Slack app is installed in the target workspace and channel."
+transient_provider_outage = "Retry after Slack or the local credential backend is reachable."
+
+[connector_contract]
+version = 1
+
+[[connector_contract.fixtures]]
+provider = "slack"
+name = "url verification ack"
+kind = "webhook"
+headers = { "content-type" = "application/json" }
+body_json = { type = "url_verification", challenge = "challenge-token" }
+expect_type = "immediate_response"
+expect_response_status = 200
+expect_response_body = "challenge-token"
+expect_event_count = 0
+
+[[connector_contract.fixtures]]
+provider = "slack"
+name = "message event"
+kind = "webhook"
+headers = { "content-type" = "application/json" }
+body_json = { type = "event_callback", event_id = "Ev1", team_id = "T1", api_app_id = "A1", event = { type = "message", text = "hello", channel = "C1", channel_type = "channel", user = "U1", ts = "1710000000.000100", event_ts = "1710000000.000100" } }
+expect_type = "event"
+expect_kind = "message.channels"
+expect_dedupe_key = "Ev1"
+expect_signature_state = "verified"
+expect_payload_contains = { provider = "slack", schema_name = "SlackEventPayload", raw = { type = "event_callback", event_id = "Ev1", team_id = "T1", api_app_id = "A1", event = { type = "message", channel = "C1", channel_type = "channel", text = "hello", user = "U1" } } }
+expect_event_count = 1

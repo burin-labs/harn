@@ -1,0 +1,38 @@
+# three objects in one fence
+  calls=3 errors=0 violations=0 stray=0
+  call look {"file":"src/writer.zig"}
+  call look {"file":"src/parser.zig"}
+  call look {"file":"src/document.zig"}
+  prose=""
+  answer=null
+  done=null
+# double tool fence used as a separator
+  calls=2 errors=0 violations=0 stray=0
+  call look {"file":"a.zig"}
+  call look {"file":"b.zig"}
+  prose=""
+  answer=null
+  done=null
+# complete objects before a truncated tail
+  calls=2 errors=1 violations=0 stray=0
+  call look {"file":"a.zig"}
+  call look {"file":"b.zig"}
+  err "Unterminated ```tool fence opened on line 1 (1-based): the block reached end-of-output with an incomplete JSON object. Re-emit the whole call inside a ```tool ... ``` block and close it with a line that is exactly ```."
+  prose=""
+  answer=null
+  done=null
+# three nested xml call tags
+  calls=3 errors=0 violations=1 stray=0
+  call look {"file":"src/writer.zig"}
+  call look {"file":"src/parser.zig"}
+  call look {"file":"src/document.zig"}
+  vio "protocol_violation: a tool call was emitted in a chat-template tool envelope while `tool_format` is `json`; accepted this turn, but emit canonical ```tool JSON blocks next turn."
+  prose=""
+  answer=null
+  done=null
+# a single object is one call
+  calls=1 errors=0 violations=0 stray=0
+  call look {"file":"a.zig"}
+  prose=""
+  answer=null
+  done=null

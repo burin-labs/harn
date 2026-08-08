@@ -1,0 +1,7 @@
+handoff=queued
+partial=1
+to=nightly-drain
+summary=object(keys=work)
+ack=acknowledged
+after=0
+final=finalized

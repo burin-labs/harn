@@ -1,0 +1,18 @@
+[package]
+name = "harn-stdlib"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Embedded Harn standard library source catalog"
+include = [
+    "src/**/*",
+    "Cargo.toml",
+]
+
+[dependencies]
+
+[lints]
+workspace = true

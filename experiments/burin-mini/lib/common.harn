@@ -1,0 +1,838 @@
+import { JsonParseFailure } from "std/json"
+import "std/schema"
+
+/** Resolve the LLM provider for Burin Mini runs. */
+pub fn provider_name(env: HarnessEnv) {
+  return env.get_or("BURIN_MINI_PROVIDER", env.get_or("HARN_LLM_PROVIDER", "mock"))
+}
+
+/** Resolve the generator model for Burin Mini runs. */
+pub fn generator_model(env: HarnessEnv) {
+  return env.get_or("BURIN_MINI_GENERATOR_MODEL", env.get_or("HARN_LLM_MODEL", "mock"))
+}
+
+/** Resolve the evaluator model for Burin Mini runs. */
+pub fn evaluator_model(env: HarnessEnv) {
+  return env.get_or("BURIN_MINI_EVALUATOR_MODEL", generator_model(env))
+}
+
+fn bool_env(value) {
+  const normalized = lowercase((value ?? "").trim())
+  if normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "on" {
+    return true
+  }
+  if normalized == "0" || normalized == "false" || normalized == "no" || normalized == "off" {
+    return false
+  }
+  return nil
+}
+
+fn reasoning_policy_for_model(env: HarnessEnv, _provider, _model) {
+  const legacy = bool_env(env.get_or("BURIN_MINI_THINKING", ""))
+  if legacy != nil && !legacy {
+    return "off"
+  }
+  if legacy {
+    return "manual_on"
+  }
+  return env.get_or("BURIN_MINI_REASONING_POLICY", "auto")
+}
+
+fn reasoning_scale_for_model(env: HarnessEnv, _provider, _model) {
+  return env.get_or("BURIN_MINI_REASONING_SCALE", "medium")
+}
+
+/** Apply the Burin Mini reasoning policy defaults to agent options. */
+pub fn apply_reasoning_policy(env: HarnessEnv, opts, task) {
+  const provider = opts?.provider ?? provider_name(env)
+  const model = opts?.model ?? generator_model(env)
+  const policy = reasoning_policy_for_model(env, provider, model)
+  if policy == "manual_on" {
+    return opts + {thinking: true}
+  }
+  return opts
+    + {
+    reasoning_policy: policy,
+    reasoning_scale: reasoning_scale_for_model(env, provider, model),
+    reasoning_task: task,
+  }
+}
+
+/** Return true when a list contains the given value. */
+pub fn list_contains(items, needle) {
+  for item in items {
+    if item == needle {
+      return true
+    }
+  }
+  return false
+}
+
+fn ensure_string_list(items) {
+  if type_of(items) == "string" {
+    if items == "" {
+      return []
+    }
+    return [items]
+  }
+  if type_of(items) != "list" {
+    return []
+  }
+  let result = []
+  for item in items {
+    if type_of(item) == "string" && item != "" {
+      result = result + [item]
+    }
+  }
+  return result
+}
+
+fn append_unique_strings(items, values) {
+  let result = ensure_string_list(items)
+  for value in ensure_string_list(values) {
+    if !list_contains(result, value) {
+      result = result + [value]
+    }
+  }
+  return result
+}
+
+fn trimmed_string(value) {
+  if type_of(value) != "string" {
+    return ""
+  }
+  return value.trim()
+}
+
+fn generic_action_task(value) {
+  const normalized = trimmed_string(value).lower()
+  return normalized == "" || normalized == "write" || normalized == "edit" || normalized == "run"
+    || normalized
+    == "execute"
+    || normalized == "verify"
+}
+
+fn action_is_verification_like(profile, title, task, command) {
+  if profile?.mode == "read_only" {
+    return false
+  }
+  const verify_command = effective_verify_command(profile)
+  if verify_command == "none" {
+    return false
+  }
+  const haystack = lowercase("${title}\n${task}\n${command}")
+  if command != "" && (command == verify_command || contains(haystack, lowercase(verify_command))) {
+    return true
+  }
+  const mentions_verify = contains(haystack, "verify") || contains(haystack, "verification")
+  const mentions_runner = contains(haystack, "script") || contains(haystack, "command")
+    || contains(
+    haystack,
+    "contract",
+  )
+    || contains(haystack, "success criteria")
+    || contains(haystack, "confirm")
+  return mentions_verify && mentions_runner
+}
+
+/** Return the verifier command string for prompts and runtime configs. */
+pub fn effective_verify_command(profile) {
+  const command = trimmed_string(profile?.verify_command ?? "")
+  if command {
+    return command
+  }
+  return "none"
+}
+
+/** Return the structured verification contract for a profile. */
+pub fn verification_contract(profile) {
+  return profile?.verification_contract ?? {}
+}
+
+/** Render the verification contract as markdown bullets for prompt context. */
+pub fn render_verification_contract(profile) {
+  const contract = verification_contract(profile)
+  let lines = []
+  for value in ensure_string_list(contract?.required_identifiers ?? []) {
+    lines = lines + ["- required identifier: ${value}"]
+  }
+  for value in ensure_string_list(contract?.required_paths ?? []) {
+    lines = lines + ["- required path: ${value}"]
+  }
+  for value in ensure_string_list(contract?.required_text ?? []) {
+    lines = lines + ["- required text: ${value}"]
+  }
+  for value in ensure_string_list(contract?.notes ?? []) {
+    lines = lines + ["- verifier note: ${value}"]
+  }
+  if len(lines) == 0 {
+    return "(none)"
+  }
+  return join(lines, "\n")
+}
+
+fn canonical_tool_name(name) {
+  if name == "read_file" || name == "open_file" || name == "cat_file" {
+    return "read"
+  }
+  if name == "grep" || name == "search_file" || name == "list_directory" || name == "ls" {
+    return "search"
+  }
+  if name == "write_file" || name == "edit_file" || name == "edit" {
+    return "write"
+  }
+  if name == "shell" || name == "exec" || name == "execute" {
+    return "run"
+  }
+  return name
+}
+
+fn normalize_tool_names(requested, fallback) {
+  const allowed = ensure_string_list(fallback)
+  if len(allowed) == 0 {
+    return []
+  }
+  let picked = []
+  for name in ensure_string_list(requested) {
+    const canonical = canonical_tool_name(name)
+    if list_contains(allowed, canonical) && !list_contains(picked, canonical) {
+      picked = picked + [canonical]
+    }
+  }
+  if len(picked) > 0 {
+    return picked
+  }
+  return allowed
+}
+
+fn default_research_tools(profile) {
+  if profile?.mode == "read_only" {
+    return ["search", "read"]
+  }
+  return ["read", "search"]
+}
+
+fn default_action_tools(profile) {
+  if profile?.mode == "read_only" {
+    return ["read", "search"]
+  }
+  return ["read", "write", "run"]
+}
+
+fn tools_fit_within(requested, allowed) {
+  for name in ensure_string_list(requested) {
+    if !list_contains(allowed, name) {
+      return false
+    }
+  }
+  return true
+}
+
+fn infer_target_paths_from_text(profile, task, title) {
+  const haystack = lowercase("${title}\n${task}")
+  let target_paths = []
+  for path in ensure_string_list(profile?.write_paths ?? []) {
+    const normalized = lowercase(path)
+    if contains(haystack, normalized) || contains(haystack, "/${normalized}") {
+      target_paths = append_unique_strings(target_paths, path)
+    }
+  }
+  return target_paths
+}
+
+fn normalize_question_entry(profile, item, index) {
+  if type_of(item) == "string" {
+    return {id: "q${index}", question: item, tools: default_research_tools(profile)}
+  }
+  if type_of(item) != "dict" {
+    return nil
+  }
+  const tools = normalize_tool_names(item?.tools, default_research_tools(profile))
+  return {
+    id: item?.id ?? "q${index}",
+    question: item?.question ?? item?.prompt ?? item?.text ?? "",
+    tools: tools,
+  }
+}
+
+fn normalize_action_entry(profile, item, index) {
+  if type_of(item) != "dict" {
+    return nil
+  }
+  let depends_on = ensure_string_list(item?.depends_on)
+  if len(depends_on) == 0 {
+    depends_on = ensure_string_list(item?.dependencies)
+  }
+  const title = trimmed_string(item?.title ?? item?.summary ?? "Action ${index}")
+  let task = trimmed_string(item?.task ?? item?.description ?? "")
+  const raw_command = trimmed_string(item?.command ?? "")
+  const verification_like = action_is_verification_like(profile, title, task, raw_command)
+  let allowed_tools = if verification_like {
+    ["run"]
+  } else {
+    normalize_tool_names(item?.allowed_tools, default_action_tools(profile))
+  }
+  if list_contains(allowed_tools, "write") && !list_contains(allowed_tools, "read") {
+    allowed_tools = ["read"] + allowed_tools
+  }
+  if list_contains(allowed_tools, "write") {
+    let scoped_tools = []
+    for tool_name in allowed_tools {
+      if tool_name != "run" {
+        scoped_tools = scoped_tools + [tool_name]
+      }
+    }
+    allowed_tools = scoped_tools
+  }
+  let target_paths = []
+  target_paths = append_unique_strings(target_paths, item?.target_paths ?? [])
+  target_paths = append_unique_strings(target_paths, item?.paths ?? [])
+  target_paths = append_unique_strings(target_paths, item?.changed_paths ?? [])
+  target_paths = append_unique_strings(target_paths, item?.required_paths ?? [])
+  target_paths = append_unique_strings(target_paths, item?.path ?? item?.target_file ?? "")
+  if verification_like {
+    target_paths = []
+  }
+  const command = if verification_like {
+    trimmed_string(item?.command ?? profile?.verify_command ?? "")
+  } else if list_contains(allowed_tools, "run") {
+    if list_contains(allowed_tools, "write") {
+      trimmed_string(item?.command ?? "")
+    } else {
+      trimmed_string(item?.command ?? profile?.verify_command ?? "")
+    }
+  } else {
+    ""
+  }
+  if verification_like || generic_action_task(task) {
+    if command {
+      task = "Run `${command}` exactly and report whether it passed."
+    } else if len(target_paths) > 0 {
+      task = "${title}. Scope this work to ${join(target_paths, ", ")}."
+    } else {
+      task = title
+    }
+  }
+  if len(target_paths) == 0 {
+    target_paths = infer_target_paths_from_text(profile, task, title)
+  }
+  if len(target_paths) == 0 && list_contains(allowed_tools, "write") {
+    target_paths = append_unique_strings(target_paths, profile?.write_paths ?? [])
+  }
+  task = append_verifier_hints_to_task(profile, task, target_paths, allowed_tools)
+  return {
+    id: item?.id ?? "action_${index}",
+    title: title,
+    task: task,
+    depends_on: depends_on,
+    allowed_tools: allowed_tools,
+    target_paths: target_paths,
+    command: command,
+  }
+}
+
+fn append_verifier_hints_to_task(profile, task, target_paths, allowed_tools) {
+  if !list_contains(allowed_tools, "write") {
+    return task
+  }
+  const contract = verification_contract(profile)
+  const required_paths = ensure_string_list(contract?.required_paths ?? [])
+  if len(required_paths) != 1 || len(target_paths) != 1 || required_paths[0] != target_paths[0] {
+    return task
+  }
+  let hints = []
+  const required_identifiers = ensure_string_list(contract?.required_identifiers ?? [])
+  const required_text = ensure_string_list(contract?.required_text ?? [])
+  const notes = ensure_string_list(contract?.notes ?? [])
+  if len(required_identifiers) > 0 {
+    hints = hints
+      + [
+      "Use the exact verifier-required identifiers: "
+        + join(required_identifiers, ", ")
+        + ".",
+    ]
+  }
+  if len(required_text) > 0 {
+    hints = hints
+      + [
+      "Include the exact verifier-required text verbatim: "
+        + join(required_text, " ; ")
+        + ".",
+    ]
+  }
+  if len(notes) > 0 {
+    hints = hints + ["Verifier notes: " + join(notes, " ")]
+  }
+  if len(hints) == 0 {
+    return task
+  }
+  return task + " " + join(hints, " ")
+}
+
+fn action_has_tool(action, name) {
+  return list_contains(action?.allowed_tools ?? [], name)
+}
+
+fn action_is_research_like(profile, action) {
+  const tools = action?.allowed_tools ?? []
+  if len(tools) == 0 {
+    return false
+  }
+  return tools_fit_within(tools, default_research_tools(profile))
+}
+
+fn action_as_question(profile, action) {
+  return {
+    id: action?.id ?? "",
+    question: action?.task ?? action?.title ?? "",
+    tools: normalize_tool_names(action?.allowed_tools ?? [], default_research_tools(profile)),
+  }
+}
+
+fn infer_action_dependencies(actions) {
+  let write_ids = []
+  for action in actions {
+    if action_has_tool(action, "write") {
+      write_ids = write_ids + [action?.id ?? ""]
+    }
+  }
+  let normalized = []
+  for action in actions {
+    let depends_on = action?.depends_on ?? []
+    if len(depends_on) == 0 && action_has_tool(action, "run") && len(write_ids) > 0 {
+      let inferred = []
+      for dep in write_ids {
+        if dep != action?.id {
+          inferred = inferred + [dep]
+        }
+      }
+      depends_on = inferred
+    }
+    normalized = normalized
+      + [
+      {
+        id: action?.id ?? "",
+        title: action?.title ?? "",
+        task: action?.task ?? "",
+        depends_on: depends_on,
+        allowed_tools: action?.allowed_tools ?? [],
+        target_paths: action?.target_paths ?? [],
+        command: action?.command ?? "",
+      },
+    ]
+  }
+  return normalized
+}
+
+fn ensure_terminal_verify_action(profile, actions) {
+  const verify_command = effective_verify_command(profile)
+  if profile?.mode == "read_only" || verify_command == "none" || len(actions) == 0 {
+    return actions
+  }
+  for action in actions {
+    if action_has_tool(action, "run") {
+      return actions
+    }
+  }
+  let depends_on = []
+  for action in actions {
+    if (action?.id ?? "") != "" {
+      depends_on = depends_on + [action.id]
+    }
+  }
+  return actions
+    + [
+    {
+      id: "verify_output",
+      title: "Run verification command",
+      task: "Run `${verify_command}` exactly and report whether it passed.",
+      depends_on: depends_on,
+      allowed_tools: ["run"],
+      target_paths: [],
+      command: verify_command,
+    },
+  ]
+}
+
+fn collect_normalized_questions(profile, src) {
+  let questions = []
+  const raw_questions = src?.questions ?? src?.research_questions ?? []
+  if type_of(raw_questions) != "list" {
+    return questions
+  }
+  for (index, item) in iter(raw_questions).enumerate() {
+    const normalized = normalize_question_entry(profile, item, index + 1)
+    if normalized != nil && (normalized.question ?? "") != "" {
+      questions = questions + [normalized]
+    }
+  }
+  return questions
+}
+
+fn collect_normalized_actions(profile, src) {
+  let actions = []
+  const raw_actions = src?.actions ?? src?.action_list ?? []
+  if type_of(raw_actions) != "list" {
+    return actions
+  }
+  for (index, item) in iter(raw_actions).enumerate() {
+    const normalized = normalize_action_entry(profile, item, index + 1)
+    if normalized != nil && (normalized.task ?? "") != "" {
+      actions = actions + [normalized]
+    }
+  }
+  return actions
+}
+
+fn split_actions_for_stage(profile, actions, explicit_ready) {
+  if profile?.mode == "read_only" || len(actions) == 0 {
+    return {actions: actions, questions: []}
+  }
+  let research_like = []
+  let executable = []
+  for action in actions {
+    if action_is_research_like(profile, action) {
+      research_like = research_like + [action]
+    } else {
+      executable = executable + [action]
+    }
+  }
+  if len(executable) == 0 {
+    return {actions: [], questions: research_like}
+  }
+  if explicit_ready {
+    return {actions: executable, questions: []}
+  }
+  return {actions: executable, questions: research_like}
+}
+
+fn actions_are_preparatory(profile, actions, explicit_ready) {
+  if len(actions) == 0 || (explicit_ready ?? true) {
+    return false
+  }
+  for action in actions {
+    if !tools_fit_within(action?.allowed_tools ?? [], default_research_tools(profile)) {
+      return false
+    }
+  }
+  return true
+}
+
+fn actions_as_questions(profile, actions) {
+  let questions = []
+  for action in actions {
+    questions = questions + [action_as_question(profile, action)]
+  }
+  return questions
+}
+
+fn normalize_ready_value(explicit_ready, actions, final_response) {
+  if type_of(explicit_ready) == "bool" {
+    return explicit_ready
+  }
+  if len(actions) > 0 {
+    return true
+  }
+  return type_of(final_response) == "string" && final_response.trim() != ""
+}
+
+/** Normalize planner output from cheap models onto the experiment schema. */
+pub fn normalize_plan(profile, plan) {
+  const src = plan ?? {}
+  let questions = collect_normalized_questions(profile, src)
+  let actions = collect_normalized_actions(profile, src)
+  const explicit_ready = if type_of(src?.ready) == "bool" {
+    src?.ready
+  } else {
+    nil
+  }
+  const stage_split = split_actions_for_stage(profile, actions, explicit_ready)
+  questions = questions + actions_as_questions(profile, stage_split.questions ?? [])
+  actions = stage_split.actions ?? []
+  if actions_are_preparatory(profile, actions, explicit_ready) {
+    questions = questions + actions_as_questions(profile, actions)
+    actions = []
+  }
+  if profile?.mode == "read_only" && len(questions) == 0 && len(actions) > 0 {
+    questions = actions_as_questions(profile, actions)
+    actions = []
+  }
+  actions = ensure_terminal_verify_action(profile, actions)
+  actions = infer_action_dependencies(actions)
+  const final_response = src?.final_response ?? src?.answer ?? ""
+  return {
+    ready: normalize_ready_value(explicit_ready, actions, final_response),
+    plan_summary: src?.plan_summary ?? src?.summary ?? src?.reason ?? "",
+    success_criteria: ensure_string_list(src?.success_criteria ?? profile?.success_criteria ?? []),
+    final_response: final_response,
+    questions: questions,
+    actions: actions,
+  }
+}
+
+fn action_phase(action) {
+  const tools = action?.allowed_tools ?? []
+  if tools_fit_within(tools, default_research_tools({mode: "scoped_write"})) {
+    return "research"
+  }
+  if list_contains(tools, "run") && !list_contains(tools, "write") {
+    return "verify"
+  }
+  return "execute"
+}
+
+fn action_tool_class(action) {
+  const phase = action_phase(action)
+  if phase == "research" {
+    return "read"
+  }
+  if phase == "verify" {
+    return "run"
+  }
+  if list_contains(action?.allowed_tools ?? [], "write") {
+    return "write"
+  }
+  return "generic"
+}
+
+/** Convert a normalized plan into a canonical action graph with rich metadata. */
+pub fn plan_to_action_graph(task, plan) {
+  let actions = []
+  for action in plan?.actions ?? [] {
+    actions = actions
+      + [
+      {
+        _type: "action_item",
+        id: action?.id ?? "",
+        title: action?.title ?? "",
+        instruction: action?.task ?? action?.title ?? "",
+        phase: action_phase(action),
+        depends_on: action?.depends_on ?? [],
+        tools: action?.allowed_tools ?? [],
+        tool_class: action_tool_class(action),
+        target_paths: action?.target_paths ?? [],
+        command: action?.command ?? "",
+        metadata: {target_paths: action?.target_paths ?? [], command: action?.command ?? ""},
+      },
+    ]
+  }
+  return {_type: "action_graph", task: task, summary: plan?.plan_summary ?? "", actions: actions}
+}
+
+/** Return the effective success criteria for evaluator prompts. */
+pub fn plan_success_criteria(profile, plan) {
+  const criteria = ensure_string_list(plan?.success_criteria ?? profile?.success_criteria ?? [])
+  if len(criteria) > 0 {
+    return criteria
+  }
+  return ["Produce a correct, grounded result for the requested task."]
+}
+
+/** Normalize research-worker output onto a stable fact schema. */
+pub fn normalize_research_fact(question, fact) {
+  const src = fact ?? {}
+  return {
+    question: src?.question ?? question?.question ?? "",
+    answer: src?.answer ?? src?.summary ?? src?.fact ?? "",
+    evidence_paths: ensure_string_list(src?.evidence_paths ?? src?.paths ?? []),
+    next_steps: ensure_string_list(src?.next_steps ?? []),
+  }
+}
+
+/** Normalize executor output onto a stable action-result schema. */
+pub fn normalize_action_result(action, result) {
+  const src = result ?? {}
+  return {
+    id: action?.id ?? src?.id ?? "",
+    title: action?.title ?? src?.title ?? "",
+    summary: src?.summary ?? src?.result ?? src?.message ?? "",
+    changed_paths: ensure_string_list(src?.changed_paths ?? src?.paths ?? []),
+    notes: ensure_string_list(src?.notes ?? []),
+  }
+}
+
+/** Render a string list for prompts. */
+pub fn render_list(items) {
+  if len(items) == 0 {
+    return "(none)"
+  }
+  let lines = []
+  for item in items {
+    lines = lines + ["- ${item}"]
+  }
+  return join(lines, "\n")
+}
+
+/** Render a compact comma-separated string list for inline prompt fields. */
+pub fn render_csv(items) {
+  if len(items) == 0 {
+    return "(none)"
+  }
+  return join(items, ", ")
+}
+
+/** Render gathered research facts for planner and evaluator prompts. */
+pub fn render_facts(facts) {
+  if len(facts) == 0 {
+    return "- no research yet"
+  }
+  let lines = []
+  for fact in facts {
+    lines = lines + ["- ${fact?.question}: ${fact?.answer}"]
+    if len(fact?.evidence_paths ?? []) > 0 {
+      lines = lines + ["  evidence: ${render_csv(fact?.evidence_paths ?? [])}"]
+    }
+  }
+  return join(lines, "\n")
+}
+
+/** Render executor outcomes for evaluator prompts and user-facing output. */
+pub fn render_action_results(results) {
+  if len(results) == 0 {
+    return "- no executor actions ran"
+  }
+  let lines = []
+  for result in results {
+    if result?.ok {
+      lines = lines
+        + [
+        "- ${result?.data?.id}: ${result?.data?.summary} (changed: ${render_csv(result?.data?.changed_paths ?? [])})",
+      ]
+    } else {
+      lines = lines + ["- action failed: ${result?.error?.message ?? "unknown failure"}"]
+    }
+  }
+  return join(lines, "\n")
+}
+
+/** Structured planner output schema for `sub_agent_run(harness, ... returns.schema)`. */
+pub fn planner_schema() {
+  return {
+    type: "object",
+    properties: {
+      ready: {type: "boolean"},
+      plan_summary: {type: "string"},
+      final_response: {type: "string"},
+      questions: schema_nullable(
+        {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: {type: "string"},
+              question: {type: "string"},
+              tools: schema_nullable({type: "array", items: {type: "string"}}),
+            },
+          },
+        },
+      ),
+      actions: schema_nullable(
+        {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: {type: "string"},
+              title: {type: "string"},
+              task: {type: "string"},
+              depends_on: schema_nullable({type: "array", items: {type: "string"}}),
+              allowed_tools: schema_nullable({type: "array", items: {type: "string"}}),
+              target_paths: schema_nullable({type: "array", items: {type: "string"}}),
+              command: schema_nullable({type: "string"}),
+            },
+          },
+        },
+      ),
+    },
+  }
+}
+
+/** Structured research output schema for `sub_agent_run(harness, ... returns.schema)`. */
+pub fn research_schema() {
+  return {
+    type: "object",
+    properties: {
+      question: {type: "string"},
+      answer: {type: "string"},
+      evidence_paths: {type: "array", items: {type: "string"}},
+      next_steps: {type: "array", items: {type: "string"}},
+    },
+  }
+}
+
+/** Build common generator sub-agent options. */
+pub fn generator_options(env: HarnessEnv, system, tools, allowed_tools) {
+  const opts = {
+    provider: provider_name(env),
+    model: generator_model(env),
+    system: system,
+    tools: tools,
+    allowed_tools: allowed_tools,
+    output: "json",
+    temperature: 0,
+    max_iterations: 6,
+  }
+  const task = if len(allowed_tools ?? []) > 0 {
+    "agent"
+  } else {
+    "code"
+  }
+  return apply_reasoning_policy(env, opts, task)
+}
+
+/** Build common evaluator sub-agent options. */
+pub fn evaluator_options(env: HarnessEnv, system, tools) {
+  const opts = {
+    provider: provider_name(env),
+    model: evaluator_model(env),
+    system: system,
+    tools: tools,
+    allowed_tools: ["read", "search", "run"],
+    output: "json",
+    temperature: 0,
+    max_iterations: 4,
+  }
+  return apply_reasoning_policy(env, opts, "verify")
+}
+
+/** Safely parse a JSON object from model output. */
+pub fn parse_json_object(text) {
+  const raw = text ?? ""
+  const parsed: Result<unknown, JsonParseFailure> = try {
+    json_parse(raw)
+  }
+  if is_err(parsed) {
+    const trimmed = raw.trim()
+    const unfenced = regex_replace("^```[A-Za-z0-9_-]*\\n", "", trimmed)
+    const unwrapped = regex_replace("\\n```$", "", unfenced)
+    const retried: Result<unknown, JsonParseFailure> = try {
+      json_parse(unwrapped)
+    }
+    if is_err(retried) || type_of(unwrap(retried)) != "dict" {
+      return {}
+    }
+    return unwrap(retried)
+  }
+  const value = unwrap(parsed)
+  if type_of(value) != "dict" {
+    return {}
+  }
+  return value
+}
+
+/** Decode a direct `sub_agent_run` result into `{ok, error, data}`. */
+pub fn decode_sub_agent_result(result) {
+  if !(result?.ok ?? true) {
+    return {
+      ok: false,
+      error: result?.error ?? {message: result?.summary ?? "sub-agent failed"},
+      data: {},
+    }
+  }
+  return {ok: true, error: nil, data: parse_json_object(result?.summary ?? "")}
+}
+
+/** Decode a waited background worker result into `{ok, error, data}`. */
+pub fn decode_worker_result(worker) {
+  return decode_sub_agent_result(worker?.result ?? {})
+}

@@ -1,0 +1,91 @@
+# openai array with string-encoded arguments
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"package main","path":"test.go"}
+  prose=""
+  answer=null
+  done=null
+# pretty printed array with a non-call id
+  calls=1 errors=0 violations=0 stray=1
+  call read {"path":"main.go"}
+  prose=""
+  answer=null
+  done=null
+# flat jsonrpc envelope
+  calls=1 errors=0 violations=0 stray=1
+  call read {"path":"main.go"}
+  prose=""
+  answer=null
+  done=null
+# gpt-oss tool-key dialect after a preamble
+  calls=1 errors=0 violations=0 stray=1
+  call read {"path":"BatteryInfo.swift"}
+  prose=""
+  answer=null
+  done=null
+# flat envelope with string-encoded arguments
+  calls=1 errors=0 violations=0 stray=1
+  call read {"path":"a"}
+  prose=""
+  answer=null
+  done=null
+# flat envelope with a parameters slot
+  calls=1 errors=0 violations=0 stray=1
+  call read {"path":"lib.rs"}
+  prose=""
+  answer=null
+  done=null
+# array entry with object arguments
+  calls=1 errors=0 violations=0 stray=1
+  call read {"path":"main.go"}
+  prose=""
+  answer=null
+  done=null
+# two calls in one array
+  calls=2 errors=0 violations=0 stray=2
+  call edit {"action":"create","content":"pkg a","path":"a.go"}
+  call run {"command":"go test"}
+  prose=""
+  answer=null
+  done=null
+# prose before the array
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"replace_body","function_name":"TestMain","new_body":"t.Fatal(\"fail\")","path":"test.go"}
+  prose=""
+  answer=null
+  done=null
+# non-ascii trailing content after the array
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"pkg","path":"café.go"}
+  prose=""
+  answer=null
+  done=null
+# prose json with a bare name key is not a call
+  calls=0 errors=0 violations=0 stray=0
+  prose="Here is the config: {\"name\":\"my-pkg\",\"version\":\"1.0.0\"}"
+  answer=null
+  done=null
+# plain prose has no native json
+  calls=0 errors=0 violations=0 stray=0
+  prose="Just some prose without any tool calls."
+  answer=null
+  done=null
+# unknown tool in the native lane
+  calls=0 errors=1 violations=1 stray=0
+  err "Unknown tool 'unknown_tool'. Tool calls must be one of: [edit, ledger, load_skill, lookup, read, run, scaffold]."
+  vio "unparsed_tool_syntax: text shaped like a tool call was not recognized as one and did not run. Emit every call as `<tool_call>name({ ... })</tool_call>`. Unrecognized fragment: …\"name\":\"unknown_tool\",\"arguments\":\"{}\"}}]"
+  prose=""
+  answer=null
+  done=null
+# malformed arguments string
+  calls=0 errors=1 violations=1 stray=0
+  err "Could not parse arguments for tool 'edit': expected ident at line 1 column 2. Raw: not valid json {"
+  vio "unparsed_tool_syntax: text shaped like a tool call was not recognized as one and did not run. Emit every call as `<tool_call>name({ ... })</tool_call>`. Unrecognized fragment: …\"name\":\"edit\",\"arguments\":\"not valid json {\"}}]"
+  prose=""
+  answer=null
+  done=null
+# text format takes priority over native json
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"pkg a","path":"a.go"}
+  prose="[{\"id\":\"call_001\",\"type\":\"function\",\"function\":{\"name\":\"run\",\"arguments\":\"{\\\"command\\\":\\\"go test\\\"}\"}}]"
+  answer=null
+  done=null

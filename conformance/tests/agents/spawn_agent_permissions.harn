@@ -1,0 +1,46 @@
+import "std/agents"
+import { with_llm_script } from "std/testing"
+
+fn write_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "write_note",
+    "Write a note",
+    {
+      handler: { args -> "wrote " + args.path },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+    },
+  )
+  return tools
+}
+
+pipeline main(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [{tool_calls: [{id: "write_1", name: "write_note", arguments: {path: "/workspace/a.txt"}}]}],
+    { ->
+      const worker = spawn_agent(
+        harness.agent,
+        {
+          name: "permission-worker",
+          task: "Try to write.",
+          wait: true,
+          permissions: {deny: ["write_note"]},
+          node: {
+            kind: "stage",
+            mode: "agent",
+            model_policy: {provider: "mock", tool_format: "native", max_iterations: 1},
+            tools: write_tools(),
+          },
+        },
+      )
+      harness.stdio.println(worker.status == "completed")
+      harness.stdio.println(worker.result?.result?.tools?.rejected[0] == "write_note")
+      harness.stdio.println(
+        len(transcript_events_by_kind(worker.result?.transcript, "PermissionDeny")) == 1,
+      )
+    },
+  )
+}

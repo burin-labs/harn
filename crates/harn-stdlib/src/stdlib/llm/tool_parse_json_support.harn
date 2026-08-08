@@ -1,0 +1,428 @@
+/**
+ * JSON-fence normalization and counted-verbatim binding for tool parsing.
+ *
+ * Kept separate from std/llm/tool_parse so the public parser remains a small
+ * composition layer over the byte-oriented host scanners.
+ */
+import {
+  ARGUMENT_ALIASES,
+  FENCE_DRIFT_INFOS,
+  FENCE_INFO_SUFFIX_SEPARATORS,
+  FENCE_OPEN_INFO,
+  GENERIC_WRAPPER_NAMES,
+  NAME_ALIASES,
+  NAME_CHANNEL_MARKERS,
+} from "std/llm/dialects"
+import { protocol_violation } from "std/llm/tool_parse_result"
+
+fn __tool_parse_json_name(value: dict) -> string {
+  for key in NAME_ALIASES {
+    const candidate = value[key]
+    if type_of(candidate) == "string" && trim(candidate) != "" {
+      return trim(candidate)
+    }
+  }
+  return ""
+}
+
+fn __tool_parse_json_arguments(value: dict) {
+  for key in ARGUMENT_ALIASES {
+    if value[key] != nil {
+      return value[key]
+    }
+  }
+  return {}
+}
+
+/**
+ * Read canonical name and arguments fields from a decoded tool-call object.
+ * @effects: []
+ * @errors: []
+ */
+pub fn json_fields(value: dict) -> dict {
+  return {name: __tool_parse_json_name(value), arguments: __tool_parse_json_arguments(value)}
+}
+
+/**
+ * Normalize one decoded JSON value into a canonical tool call.
+ * @effects: []
+ * @errors: []
+ */
+pub fn json_call(value, allow_flat_argument_string: bool) -> dict {
+  if type_of(value) != "dict" {
+    return {
+      ok: false,
+      error: "A ```tool block must contain one or more JSON objects `{ \"name\": ..., \"args\": { ... } }`, "
+        + "one per tool call (several calls in a turn may share one block or use several blocks). "
+        + "Arrays, scalars, and other non-object entries are rejected.",
+    }
+  }
+  let name = __tool_parse_json_name(value)
+  for marker in NAME_CHANNEL_MARKERS {
+    const marker_at = name.index_of(marker)
+    if marker_at >= 0 {
+      name = name.slice(0, marker_at)
+    }
+  }
+  let arguments = __tool_parse_json_arguments(value)
+  if GENERIC_WRAPPER_NAMES.contains(name) && type_of(arguments) == "dict" {
+    const nested_name = __tool_parse_json_name(arguments)
+    if nested_name != "" {
+      name = nested_name
+      arguments = __tool_parse_json_arguments(arguments)
+    }
+  }
+  if name == "" {
+    return {
+      ok: false,
+      error: "The ```tool JSON object is missing a non-empty string `name`. "
+        + "Shape: `{ \"name\": \"edit\", \"args\": { ... } }`.",
+    }
+  }
+  if type_of(arguments) == "string"
+    && (allow_flat_argument_string
+    || type_of(value?.function) == "dict") {
+    arguments = try {
+      json_parse(arguments)
+    } catch (error) {
+      return {
+        ok: false,
+        error: "Tool `" + name + "` arguments string is invalid JSON: " + to_string(error),
+      }
+    }
+  }
+  if type_of(arguments) != "dict" {
+    return {
+      ok: false,
+      error: "The `args` field of a ```tool object must be a JSON object (`{ ... }`), "
+        + "or omitted when the tool takes no arguments.",
+    }
+  }
+  return {ok: true, call: {id: "tc_json", name: name, arguments: arguments}}
+}
+
+fn __tool_parse_json_error(detail: string) -> string {
+  return "The ```tool block is not valid JSON: "
+    + detail
+    + ". Pass multi-line or code-bearing fields as ordinary JSON string values "
+    + "(escape newlines as \\n, quotes as \\\", backslashes as \\\\); "
+    + "backticks need no escaping."
+}
+
+/**
+ * Return whether any call declares a counted-verbatim argument body.
+ * @effects: []
+ * @errors: []
+ */
+pub fn has_counted_verbatim(calls: list<dict>) -> bool {
+  for call in calls {
+    const arguments = call?.arguments ?? {}
+    for key in keys(arguments) {
+      const value = arguments[key]
+      if type_of(value) == "string"
+        && len(regex_captures("^<<[A-Za-z_][A-Za-z0-9_.-]*:\\d+$", value))
+        > 0 {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+fn __tool_parse_verbatim_requests(calls: list<dict>) -> list<dict> {
+  let requests: list<dict> = []
+  let call_index = 0
+  while call_index < len(calls) {
+    for key in keys(calls[call_index].arguments) {
+      const value = calls[call_index].arguments[key]
+      if type_of(value) != "string" {
+        continue
+      }
+      const captures = regex_captures("^<<([A-Za-z_][A-Za-z0-9_.-]*):(\\d+)$", value)
+      if len(captures) == 0 {
+        continue
+      }
+      const count = to_int(captures[0].groups[1])
+      requests = requests.appending(
+        {
+          call_index: call_index,
+          key: key,
+          opener: value,
+          tag: to_string(captures[0].groups[0]),
+          count: count,
+          bound: false,
+        },
+      )
+    }
+    call_index = call_index + 1
+  }
+  return requests
+}
+
+fn __tool_parse_verbatim_count_error(requests: list<dict>, lines: list<string>) {
+  for request in requests {
+    let required = 0
+    for candidate in requests {
+      if candidate.opener == request.opener {
+        required = required + 1
+      }
+    }
+    let available = 0
+    for line in lines {
+      if trim(line) == request.opener {
+        available = available + 1
+      }
+    }
+    if available < required {
+      return __tool_parse_json_error(
+        "counted verbatim declaration `"
+          + request.opener
+          + "` has "
+          + to_string(available)
+          + " matching bodies, expected "
+          + to_string(required),
+      )
+    }
+  }
+  return nil
+}
+
+/**
+ * Bind trailing counted-verbatim bodies to their declared call arguments.
+ * @effects: []
+ * @errors: []
+ */
+pub fn bind_verbatim(calls: list<dict>, trailing: string) -> dict {
+  let requests = __tool_parse_verbatim_requests(calls)
+  let next_calls = calls
+  if len(requests) == 0 {
+    const orphan = trim(trailing).split("\n")[0] ?? ""
+    return {
+      ok: false,
+      error: __tool_parse_json_error(
+        "a verbatim heredoc `"
+          + orphan
+          + "` trails the block but no argument's value declared it",
+      ),
+    }
+  }
+  const lines = trailing.split("\n")
+  // Validate declaration/body cardinality before binding. This makes missing,
+  // mismatched, and duplicate bodies deterministic without guessing which
+  // stray body the model intended.
+  const count_error = __tool_parse_verbatim_count_error(requests, lines)
+  if count_error != nil {
+    return {ok: false, error: count_error}
+  }
+  let cursor = 0
+  while cursor < len(lines) && trim(lines[cursor]) == "" {
+    cursor = cursor + 1
+  }
+  while cursor < len(lines) {
+    const opener = trim(lines[cursor])
+    let request_index = -1
+    let idx = 0
+    while idx < len(requests) {
+      if !requests[idx].bound && requests[idx].opener == opener {
+        request_index = idx
+        break
+      }
+      idx = idx + 1
+    }
+    if request_index < 0 {
+      return {
+        ok: false,
+        error: "The ```tool block is not valid JSON: trailing verbatim body `"
+          + opener
+          + "` had no matching argument declaration.",
+      }
+    }
+    const request = requests[request_index] ?? {}
+    const body_start = cursor + 1
+    if request.count == nil {
+      return {
+        ok: false,
+        error: __tool_parse_json_error(
+          "verbatim heredoc `"
+            + request.opener
+            + "` did not close on the line its `:N` count declared; "
+            + "recount the body lines and re-emit the whole call",
+        ),
+      }
+    }
+    const close_at = body_start + request.count
+    if close_at >= len(lines) || trim(lines[close_at]) != request.tag {
+      return {
+        ok: false,
+        error: __tool_parse_json_error(
+          "verbatim heredoc `"
+            + request.opener
+            + "` did not close on the line its `:N` count declared; "
+            + "recount the body lines and re-emit the whole call",
+        ),
+      }
+    }
+    let content = lines.slice(body_start, close_at).join("\n")
+    if request.count > 0 {
+      content = content + "\n"
+    }
+    next_calls[request.call_index].arguments[request.key] = content
+    requests[request_index] = request + {bound: true}
+    cursor = close_at + 1
+    while cursor < len(lines) && trim(lines[cursor]) == "" {
+      cursor = cursor + 1
+    }
+  }
+  for request in requests {
+    if !request.bound {
+      return {
+        ok: false,
+        error: __tool_parse_json_error(
+          "counted verbatim declaration `"
+            + request.opener
+            + "` has 0 matching bodies, expected 1",
+        ),
+      }
+    }
+  }
+  return {ok: true, calls: next_calls}
+}
+
+fn __tool_parse_tool_fence_info(marker: string, info: string) -> dict {
+  const normalized = lowercase(trim(info))
+  if marker == "```" && normalized == FENCE_OPEN_INFO {
+    return {tool: true, warning: nil}
+  }
+  let has_tool_suffix = false
+  for separator in FENCE_INFO_SUFFIX_SEPARATORS {
+    if starts_with(normalized, FENCE_OPEN_INFO + separator) {
+      has_tool_suffix = true
+    }
+  }
+  if FENCE_DRIFT_INFOS.contains(normalized)
+    || normalized == FENCE_OPEN_INFO
+    || has_tool_suffix {
+    return {
+      tool: true,
+      warning: protocol_violation(
+        "fence_dialect",
+        "protocol_violation: a tool call was emitted in a "
+          + marker
+          + normalized
+          + " fence; the contract requires a bare ```tool fence. "
+          + "Accepted this turn, but switch to ```tool.",
+      ),
+    }
+  }
+  return {tool: false, warning: nil}
+}
+
+/**
+ * Split a response into JSON tool-fence bodies, visible prose, and drift warnings.
+ * @effects: []
+ * @errors: []
+ */
+pub fn json_chunks(text: string) -> dict {
+  let bodies: list<string> = []
+  let prose: list<string> = []
+  let violations: list = []
+  let active_marker = ""
+  let active_tool = false
+  let active_body: list<string> = []
+  let verbatim_remaining = 0
+  for line in text.split("\n") {
+    const trimmed = trim(line)
+    const marker = if starts_with(trimmed, "```") {
+      "```"
+    } else if starts_with(trimmed, "~~~") {
+      "~~~"
+    } else {
+      ""
+    }
+    if active_marker != "" {
+      if active_tool && verbatim_remaining > 0 {
+        active_body = active_body.appending(line)
+        verbatim_remaining = verbatim_remaining - 1
+        continue
+      }
+      if active_tool {
+        const counted = regex_captures("^<<[A-Za-z_][A-Za-z0-9_.-]*:(\\d+)$", trimmed)
+        if len(counted) > 0 {
+          const count = to_int(counted[0].groups[0])
+          if count != nil {
+            verbatim_remaining = count + 1
+          }
+          active_body = active_body.appending(line)
+          continue
+        }
+      }
+      if trimmed == active_marker {
+        if active_tool {
+          const candidate = active_body.join("\n")
+          const stream = __host_tool_json_stream(trim(candidate))
+          if stream?.eof ?? false {
+            active_body = active_body.appending(line)
+            continue
+          }
+          bodies = bodies.appending(candidate)
+        } else {
+          prose = prose + active_body + [line]
+        }
+        active_marker = ""
+        active_tool = false
+        active_body = []
+        verbatim_remaining = 0
+      } else if active_tool && starts_with(trimmed, active_marker + FENCE_OPEN_INFO) {
+        bodies = bodies.appending(active_body.join("\n"))
+        const info = trim(trimmed.slice(3, len(trimmed)))
+        const classified = __tool_parse_tool_fence_info(active_marker, info)
+        active_tool = classified.tool
+        active_body = []
+        if classified.warning != nil {
+          violations = violations.appending(classified.warning)
+        }
+      } else {
+        active_body = active_body.appending(line)
+      }
+      continue
+    }
+    if marker != "" {
+      const info = trim(trimmed.slice(3, len(trimmed)))
+      const classified = __tool_parse_tool_fence_info(marker, info)
+      active_marker = marker
+      active_tool = classified.tool
+      active_body = []
+      verbatim_remaining = 0
+      if classified.warning != nil {
+        violations = violations.appending(classified.warning)
+      }
+      if !active_tool {
+        active_body = active_body.appending(line)
+      }
+      continue
+    }
+    prose = prose.appending(line)
+  }
+  if active_marker != "" {
+    if active_tool {
+      bodies = bodies.appending(active_body.join("\n"))
+    } else {
+      prose = prose + active_body
+    }
+  }
+  const outside = trim(prose.join("\n"))
+  if len(bodies) == 0 && (starts_with(outside, "{") || starts_with(outside, "[")) {
+    bodies = bodies.appending(outside)
+    prose = []
+    violations = violations.appending(
+      protocol_violation(
+        "bare_json",
+        "protocol_violation: a tool call was emitted as a bare JSON object; the contract "
+          + "requires wrapping each `{ \"name\": ..., \"args\": { ... } }` object in a "
+          + "```tool fence. Accepted this turn, but switch to ```tool.",
+        outside,
+      ),
+    )
+  }
+  return {bodies: bodies, prose: trim(prose.join("\n")), violations: violations}
+}

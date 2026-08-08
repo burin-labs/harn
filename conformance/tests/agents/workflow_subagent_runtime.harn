@@ -1,0 +1,40 @@
+import { workflow_execute } from "std/workflow/execute"
+
+pipeline main(harness: Harness) {
+  const flow = workflow_graph(
+    {
+      name: "delegated-flow",
+      entry: "delegate",
+      nodes: {
+        delegate: {
+          kind: "subagent",
+          mode: "llm",
+          model_policy: {provider: "mock"},
+          output_contract: {output_kinds: ["summary"]},
+          metadata: {
+            worker_name: "delegate-1",
+            request: {source: "workflow"},
+            workflow_stages: ["delegate"],
+          },
+        },
+      },
+      edges: [],
+    },
+  )
+  const result = workflow_execute(harness, "Write a delegated note", flow, [], {max_steps: 2})
+  harness.stdio.println(result?.status)
+  harness.stdio.println(result?.run?.stages[0]?.kind)
+  harness.stdio.println(result?.run?.stages[0]?.metadata?.worker?.name == "delegate-1")
+  harness.stdio.println(
+    result?.run?.stages[0]?.metadata?.worker?.request?.payload?.source == "workflow",
+  )
+  harness.stdio.println(result?.run?.stages[0]?.artifacts[0]?.metadata?.delegated)
+  harness.stdio.println(result?.run?.stages[0]?.artifacts[1]?.kind == "worker_result")
+  harness.stdio.println(
+    result?.run?.stages[0]?.artifacts[1]?.data?.request?.workflow_stages[0] == "delegate",
+  )
+  const artifact_worker_id = result?.run?.stages[0]?.artifacts[1]?.data?.provenance?.worker_id
+  const stage_worker_id = result?.run?.stages[0]?.metadata?.worker?.id
+  harness.stdio.println(artifact_worker_id == stage_worker_id)
+  harness.stdio.println(result?.run?.stages[0]?.metadata?.worker_id != nil)
+}

@@ -1,0 +1,663 @@
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::path::{Path, PathBuf};
+
+use harn_modules::resolve_import_path;
+use harn_parser::{Node, SNode};
+
+use crate::package::CheckConfig;
+use crate::parse_source_file;
+
+use super::preflight::{
+    dict_literal_field, host_render_path_arg, literal_string, parse_host_call_args,
+    resolve_preflight_target, resolve_source_relative,
+};
+use super::source::parse_resolved_module;
+
+#[derive(Debug, Clone)]
+struct BundleModuleRecord {
+    path: String,
+    role: &'static str,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+struct BundleImportEdge {
+    from: String,
+    to: String,
+}
+
+#[derive(Debug, Clone)]
+struct BundleAssetRecord {
+    declared_in: String,
+    via: String,
+    kind: &'static str,
+    target: String,
+    resolved: String,
+    candidates: Vec<String>,
+    exists: bool,
+}
+
+#[derive(Debug, Default)]
+struct BundleManifestBuilder {
+    modules: BTreeMap<String, BundleModuleRecord>,
+    import_edges: BTreeSet<BundleImportEdge>,
+    assets: BTreeMap<String, BundleAssetRecord>,
+    required_host_capabilities: BTreeMap<String, BTreeSet<String>>,
+    execution_dirs: BTreeSet<String>,
+    worktree_repos: BTreeSet<String>,
+}
+
+impl BundleManifestBuilder {
+    fn add_module(&mut self, path: &Path, role: &'static str) {
+        let key = crate::format::slash_path(path);
+        self.modules
+            .entry(key.clone())
+            .or_insert(BundleModuleRecord { path: key, role });
+    }
+
+    fn add_import_edge(&mut self, from: &Path, to: &Path) {
+        self.import_edges.insert(BundleImportEdge {
+            from: crate::format::slash_path(from),
+            to: crate::format::slash_path(to),
+        });
+    }
+
+    fn add_asset(
+        &mut self,
+        declared_in: &Path,
+        via: &str,
+        target: &str,
+        candidates: &[PathBuf],
+        kind: &'static str,
+    ) {
+        let stdlib_asset = harn_modules::asset_paths::stdlib_prompt_asset_path(target)
+            .map(|rel| format!("std://{rel}"));
+        let resolved = stdlib_asset.clone().unwrap_or_else(|| {
+            candidates
+                .iter()
+                .find(|path| path.exists())
+                .or_else(|| candidates.first())
+                .map(|path| crate::format::slash_path(path))
+                .unwrap_or_else(|| target.to_string())
+        });
+        let candidate_strings = stdlib_asset
+            .iter()
+            .cloned()
+            .chain(
+                candidates
+                    .iter()
+                    .map(|path| crate::format::slash_path(path)),
+            )
+            .collect::<Vec<_>>();
+        let exists = if stdlib_asset.is_some() {
+            harn_vm::stdlib_modules::get_stdlib_prompt_asset(target).is_some()
+        } else {
+            candidates.iter().any(|path| path.exists())
+        };
+        let key = format!(
+            "{}\u{0}{}\u{0}{}",
+            crate::format::slash_path(declared_in),
+            via,
+            resolved
+        );
+        self.assets.entry(key).or_insert(BundleAssetRecord {
+            declared_in: crate::format::slash_path(declared_in),
+            via: via.to_string(),
+            kind,
+            target: target.to_string(),
+            resolved,
+            candidates: candidate_strings,
+            exists,
+        });
+    }
+
+    fn add_host_capability(&mut self, capability: &str, operation: &str) {
+        self.required_host_capabilities
+            .entry(capability.to_string())
+            .or_default()
+            .insert(operation.to_string());
+    }
+
+    fn to_json(&self, targets: &[PathBuf], config: &CheckConfig) -> serde_json::Value {
+        let modules = self.modules.values().collect::<Vec<_>>();
+        let entry_modules = modules
+            .iter()
+            .filter(|module| module.role == "entry")
+            .map(|module| module.path.clone())
+            .collect::<Vec<_>>();
+        let import_modules = modules
+            .iter()
+            .filter(|module| module.role == "import")
+            .map(|module| module.path.clone())
+            .collect::<Vec<_>>();
+        let modules = modules
+            .iter()
+            .map(|module| {
+                serde_json::json!({
+                    "path": module.path,
+                    "role": module.role,
+                })
+            })
+            .collect::<Vec<_>>();
+        let assets = self.assets.values().collect::<Vec<_>>();
+        let prompt_assets = assets
+            .iter()
+            .filter(|asset| asset.kind == "prompt_asset")
+            .map(|asset| asset.resolved.clone())
+            .collect::<Vec<_>>();
+        let template_assets = assets
+            .iter()
+            .filter(|asset| asset.kind == "template_asset")
+            .map(|asset| asset.resolved.clone())
+            .collect::<Vec<_>>();
+        let assets = assets
+            .iter()
+            .map(|asset| {
+                serde_json::json!({
+                    "declared_in": asset.declared_in,
+                    "via": asset.via,
+                    "kind": asset.kind,
+                    "target": asset.target,
+                    "resolved": asset.resolved,
+                    "candidates": asset.candidates,
+                    "exists": asset.exists,
+                })
+            })
+            .collect::<Vec<_>>();
+        let module_dependencies = self
+            .import_edges
+            .iter()
+            .map(|edge| {
+                serde_json::json!({
+                    "from": edge.from,
+                    "to": edge.to,
+                })
+            })
+            .collect::<Vec<_>>();
+        let required_host_capabilities = self
+            .required_host_capabilities
+            .iter()
+            .map(|(capability, ops)| (capability.clone(), ops.iter().cloned().collect::<Vec<_>>()))
+            .collect::<BTreeMap<_, _>>();
+        serde_json::json!({
+            "version": 1,
+            "targets": targets.iter().map(|path| crate::format::slash_path(path)).collect::<Vec<_>>(),
+            "bundle_root": config.bundle_root,
+            "entry_modules": entry_modules,
+            "import_modules": import_modules,
+            "modules": modules,
+            "module_dependencies": module_dependencies,
+            "prompt_assets": prompt_assets,
+            "template_assets": template_assets,
+            "assets": assets,
+            "required_host_capabilities": required_host_capabilities,
+            "execution_dirs": self.execution_dirs.iter().cloned().collect::<Vec<_>>(),
+            "worktree_repos": self.worktree_repos.iter().cloned().collect::<Vec<_>>(),
+            "summary": {
+                "entry_module_count": self.modules.values().filter(|module| module.role == "entry").count(),
+                "import_module_count": self.modules.values().filter(|module| module.role == "import").count(),
+                "module_dependency_count": self.import_edges.len(),
+                "prompt_asset_count": self.assets.values().filter(|asset| asset.kind == "prompt_asset").count(),
+                "template_asset_count": self.assets.values().filter(|asset| asset.kind == "template_asset").count(),
+                "host_capability_count": self.required_host_capabilities.len(),
+                "execution_dir_count": self.execution_dirs.len(),
+                "worktree_repo_count": self.worktree_repos.len(),
+            },
+        })
+    }
+}
+
+fn classify_bundle_asset(target: &str, via: &str) -> &'static str {
+    // Package-root forms address prompt assets by stable name; treat
+    // them as prompt assets even when the file extension is omitted
+    // (e.g. `@partials/tool-examples`).
+    if via == "render_prompt"
+        || target.ends_with(".harn.prompt")
+        || target.ends_with(".prompt")
+        || target.starts_with('@')
+    {
+        "prompt_asset"
+    } else {
+        "template_asset"
+    }
+}
+
+fn scan_program_bundle(
+    file_path: &Path,
+    program: &[SNode],
+    config: &CheckConfig,
+    visited: &mut HashSet<PathBuf>,
+    manifest: &mut BundleManifestBuilder,
+) {
+    let canonical = file_path
+        .canonicalize()
+        .unwrap_or_else(|_| file_path.to_path_buf());
+    if !visited.insert(canonical.clone()) {
+        return;
+    }
+    manifest.add_module(&canonical, "import");
+    for node in program {
+        scan_node_bundle(node, &canonical, config, visited, manifest);
+    }
+}
+
+fn scan_node_bundle(
+    node: &SNode,
+    file_path: &Path,
+    config: &CheckConfig,
+    visited: &mut HashSet<PathBuf>,
+    manifest: &mut BundleManifestBuilder,
+) {
+    match &node.node {
+        Node::ImportDecl { path, .. }
+        | Node::SelectiveImport { path, .. }
+        | Node::NamespaceImport { path, .. } => {
+            if let Some(import_path) = resolve_import_path(file_path, path) {
+                if let Some(parsed) = parse_resolved_module(&import_path) {
+                    manifest.add_module(&import_path, "import");
+                    manifest.add_import_edge(file_path, &import_path);
+                    scan_program_bundle(&import_path, &parsed.1, config, visited, manifest);
+                }
+            }
+        }
+        Node::FunctionCall { name, args, .. } if name == "render" || name == "render_prompt" => {
+            if let Some(template_path) = args.first().and_then(literal_string) {
+                let candidates = resolve_preflight_target(file_path, &template_path, config);
+                manifest.add_asset(
+                    file_path,
+                    name,
+                    &template_path,
+                    &candidates,
+                    classify_bundle_asset(&template_path, name),
+                );
+            }
+            let children = args.iter().collect::<Vec<_>>();
+            scan_children_bundle(&children, file_path, config, visited, manifest);
+        }
+        Node::MethodCall { method, args, .. }
+            if method == "render_prompt" || method == "render_prompt_with_provenance" =>
+        {
+            if let Some(template_path) = args.first().and_then(literal_string) {
+                let candidates = resolve_preflight_target(file_path, &template_path, config);
+                manifest.add_asset(
+                    file_path,
+                    method,
+                    &template_path,
+                    &candidates,
+                    classify_bundle_asset(&template_path, method),
+                );
+            }
+            let children = args.iter().collect::<Vec<_>>();
+            scan_children_bundle(&children, file_path, config, visited, manifest);
+        }
+        Node::FunctionCall { name, args, .. } if name == "host_call" => {
+            if let Some((cap, op, params_arg)) = parse_host_call_args(args) {
+                manifest.add_host_capability(&cap, &op);
+                if cap == "template" && op == "render" {
+                    if let Some(template_path) = host_render_path_arg(params_arg) {
+                        let candidates =
+                            resolve_preflight_target(file_path, &template_path, config);
+                        manifest.add_asset(
+                            file_path,
+                            "host_call(template.render)",
+                            &template_path,
+                            &candidates,
+                            classify_bundle_asset(&template_path, "host_call(template.render)"),
+                        );
+                    }
+                }
+            }
+            let children = args.iter().collect::<Vec<_>>();
+            scan_children_bundle(&children, file_path, config, visited, manifest);
+        }
+        Node::FunctionCall { name, args, .. } if name == "exec_at" || name == "shell_at" => {
+            if let Some(dir) = args.first().and_then(literal_string) {
+                manifest.execution_dirs.insert(crate::format::slash_path(
+                    &resolve_source_relative(file_path, &dir),
+                ));
+            }
+            let children = args.iter().collect::<Vec<_>>();
+            scan_children_bundle(&children, file_path, config, visited, manifest);
+        }
+        Node::MethodCall {
+            object,
+            method,
+            args,
+        } if matches!(method.as_str(), "exec_at" | "shell_at")
+            && harness_handle_field(object) == Some("process") =>
+        {
+            if let Some(dir) = args.first().and_then(literal_string) {
+                manifest.execution_dirs.insert(crate::format::slash_path(
+                    &resolve_source_relative(file_path, &dir),
+                ));
+            }
+            let children = args.iter().collect::<Vec<_>>();
+            scan_children_bundle(&children, file_path, config, visited, manifest);
+        }
+        Node::MethodCall {
+            object,
+            method,
+            args,
+        } if method == "scan" && harness_handle_field(object) == Some("project") => {
+            manifest.add_host_capability("project", "scan");
+            let children = args.iter().collect::<Vec<_>>();
+            scan_children_bundle(&children, file_path, config, visited, manifest);
+        }
+        Node::MethodCall {
+            object,
+            method,
+            args,
+        }
+        | Node::OptionalMethodCall {
+            object,
+            method,
+            args,
+        } if harness_handle_field(object).is_some_and(|field| {
+            harn_parser::builtin_signatures::capability_method_entry(field, method).is_some()
+        }) =>
+        {
+            let field = harness_handle_field(object).expect("guarded capability field");
+            manifest.add_host_capability(field, method);
+            let mut children = vec![object.as_ref()];
+            children.extend(args.iter());
+            scan_children_bundle(&children, file_path, config, visited, manifest);
+        }
+        Node::FunctionCall { name, args, .. } if name == "spawn_agent" => {
+            if let Some(config_node) = args.last() {
+                collect_spawn_agent_bundle(config_node, file_path, manifest);
+            }
+            let children = args.iter().collect::<Vec<_>>();
+            scan_children_bundle(&children, file_path, config, visited, manifest);
+        }
+        _ => {
+            let children = node_children_bundle(node);
+            scan_children_bundle(&children, file_path, config, visited, manifest);
+        }
+    }
+}
+
+fn harness_handle_field(node: &SNode) -> Option<&str> {
+    match &node.node {
+        Node::PropertyAccess { object, property } if matches!(&object.node, Node::Identifier(root) if root == "harness") => {
+            Some(property)
+        }
+        Node::Identifier(name)
+            if harn_builtin_meta::CapabilityId::from_field_name(name).is_some() =>
+        {
+            Some(name)
+        }
+        _ => None,
+    }
+}
+
+fn node_children_bundle(node: &SNode) -> Vec<&SNode> {
+    match &node.node {
+        Node::Pipeline { body, .. }
+        | Node::OverrideDecl { body, .. }
+        | Node::SpawnExpr { body }
+        | Node::ScopeBlock { body }
+        | Node::Block(body)
+        | Node::Closure { body, .. }
+        | Node::TryExpr { body }
+        | Node::MutexBlock { body, .. }
+        | Node::DeferStmt { body } => body.iter().collect(),
+        Node::DeadlineBlock { duration, body } => {
+            let mut children = vec![duration.as_ref()];
+            children.extend(body.iter());
+            children
+        }
+        Node::FnDecl { body, params, .. } | Node::ToolDecl { body, params, .. } => {
+            let mut children = body.iter().collect::<Vec<_>>();
+            for param in params {
+                if let Some(default_value) = param.default_value.as_deref() {
+                    children.push(default_value);
+                }
+            }
+            children
+        }
+        Node::SkillDecl { fields, .. } => fields.iter().map(|(_, v)| v).collect(),
+        Node::EvalPackDecl {
+            fields,
+            body,
+            summarize,
+            ..
+        } => {
+            let mut children = fields.iter().map(|(_, v)| v).collect::<Vec<_>>();
+            children.extend(body.iter());
+            if let Some(summary_body) = summarize {
+                children.extend(summary_body.iter());
+            }
+            children
+        }
+        Node::IfElse {
+            condition,
+            then_body,
+            else_body,
+            ..
+        } => {
+            let mut children = vec![condition.as_ref()];
+            children.extend(then_body.iter());
+            if let Some(else_body) = else_body {
+                children.extend(else_body.iter());
+            }
+            children
+        }
+        Node::ForIn { iterable, body, .. } => {
+            let mut children = vec![iterable.as_ref()];
+            children.extend(body.iter());
+            children
+        }
+        Node::MatchExpr { value, arms } => {
+            let mut children = vec![value.as_ref()];
+            for arm in arms {
+                children.push(&arm.pattern);
+                children.extend(arm.body.iter());
+            }
+            children
+        }
+        Node::WhileLoop { condition, body }
+        | Node::GuardStmt {
+            condition,
+            else_body: body,
+        } => {
+            let mut children = vec![condition.as_ref()];
+            children.extend(body.iter());
+            children
+        }
+        Node::Retry { count, body } => {
+            let mut children = vec![count.as_ref()];
+            children.extend(body.iter());
+            children
+        }
+        Node::CostRoute { options, body } => {
+            let mut children = options.iter().map(|(_, value)| value).collect::<Vec<_>>();
+            children.extend(body.iter());
+            children
+        }
+        Node::ReturnStmt { value } | Node::YieldExpr { value } => {
+            value.iter().map(|value| value.as_ref()).collect()
+        }
+        Node::EmitExpr { value } => vec![value.as_ref()],
+        Node::TryCatch {
+            has_catch: _,
+            body,
+            catch_body,
+            finally_body,
+            ..
+        } => {
+            let mut children = body.iter().collect::<Vec<_>>();
+            children.extend(catch_body.iter());
+            if let Some(finally_body) = finally_body {
+                children.extend(finally_body.iter());
+            }
+            children
+        }
+        Node::RequireStmt { condition, message } => {
+            let mut children = vec![condition.as_ref()];
+            if let Some(message) = message.as_deref() {
+                children.push(message);
+            }
+            children
+        }
+        Node::DictLiteral(fields) | Node::StructConstruct { fields, .. } => {
+            let mut children = Vec::new();
+            for field in fields {
+                children.push(&field.key);
+                children.push(&field.value);
+            }
+            children
+        }
+        Node::Parallel { expr, body, .. } => {
+            let mut children = vec![expr.as_ref()];
+            children.extend(body.iter());
+            children
+        }
+        Node::SelectExpr {
+            cases,
+            timeout,
+            default_body,
+        } => {
+            let mut children = Vec::new();
+            for case in cases {
+                children.push(case.channel.as_ref());
+                children.extend(case.body.iter());
+            }
+            if let Some((duration, body)) = timeout {
+                children.push(duration.as_ref());
+                children.extend(body.iter());
+            }
+            if let Some(default_body) = default_body {
+                children.extend(default_body.iter());
+            }
+            children
+        }
+        Node::FunctionCall { args, .. } => args.iter().collect(),
+        Node::ValueCall { callee, args } => {
+            let mut children = vec![callee.as_ref()];
+            children.extend(args.iter());
+            children
+        }
+        Node::MethodCall { object, args, .. } | Node::OptionalMethodCall { object, args, .. } => {
+            let mut children = vec![object.as_ref()];
+            children.extend(args.iter());
+            children
+        }
+        Node::PropertyAccess { object, .. }
+        | Node::OptionalPropertyAccess { object, .. }
+        | Node::UnaryOp {
+            operand: object, ..
+        }
+        | Node::ThrowStmt { value: object }
+        | Node::Spread(object)
+        | Node::TryOperator { operand: object }
+        | Node::NonNullAssert { operand: object }
+        | Node::TryStar { operand: object } => vec![object.as_ref()],
+        Node::SubscriptAccess { object, index }
+        | Node::OptionalSubscriptAccess { object, index } => {
+            vec![object.as_ref(), index.as_ref()]
+        }
+        Node::SliceAccess { object, start, end } => {
+            let mut children = vec![object.as_ref()];
+            if let Some(start) = start.as_deref() {
+                children.push(start);
+            }
+            if let Some(end) = end.as_deref() {
+                children.push(end);
+            }
+            children
+        }
+        Node::BinaryOp { left, right, .. }
+        | Node::Assignment {
+            target: left,
+            value: right,
+            ..
+        } => {
+            vec![left.as_ref(), right.as_ref()]
+        }
+        Node::Ternary {
+            condition,
+            true_expr,
+            false_expr,
+        } => vec![condition.as_ref(), true_expr.as_ref(), false_expr.as_ref()],
+        Node::EnumConstruct { args, .. } | Node::ListLiteral(args) => args.iter().collect(),
+        Node::LetBinding { value, .. } | Node::ConstBinding { value, .. } => vec![value.as_ref()],
+        Node::RangeExpr { start, end, .. } => vec![start.as_ref(), end.as_ref()],
+        Node::ImplBlock { methods, .. } => methods.iter().collect(),
+        Node::ImportDecl { .. }
+        | Node::SelectiveImport { .. }
+        | Node::NamespaceImport { .. }
+        | Node::EnumDecl { .. }
+        | Node::StructDecl { .. }
+        | Node::InterfaceDecl { .. }
+        | Node::TypeDecl { .. }
+        | Node::InterpolatedString(_)
+        | Node::StringLiteral(_)
+        | Node::RawStringLiteral(_)
+        | Node::IntLiteral(_)
+        | Node::FloatLiteral(_)
+        | Node::BoolLiteral(_)
+        | Node::NilLiteral
+        | Node::Identifier(_)
+        | Node::DurationLiteral(_)
+        | Node::BreakStmt
+        | Node::ContinueStmt => Vec::new(),
+        Node::AttributedDecl { inner, .. } => vec![inner.as_ref()],
+        Node::OrPattern(alternatives) => alternatives.iter().collect(),
+        Node::HitlExpr { args, .. } => args.iter().map(|arg| &arg.value).collect(),
+    }
+}
+
+fn scan_children_bundle(
+    children: &[&SNode],
+    file_path: &Path,
+    config: &CheckConfig,
+    visited: &mut HashSet<PathBuf>,
+    manifest: &mut BundleManifestBuilder,
+) {
+    for child in children {
+        scan_node_bundle(child, file_path, config, visited, manifest);
+    }
+}
+
+fn collect_spawn_agent_bundle(
+    config_node: &SNode,
+    file_path: &Path,
+    manifest: &mut BundleManifestBuilder,
+) {
+    let Some(execution) = dict_literal_field(config_node, "execution") else {
+        return;
+    };
+    if let Some(cwd) = dict_literal_field(execution, "cwd").and_then(literal_string) {
+        manifest
+            .execution_dirs
+            .insert(crate::format::slash_path(&resolve_source_relative(
+                file_path, &cwd,
+            )));
+    }
+    let Some(worktree) = dict_literal_field(execution, "worktree") else {
+        return;
+    };
+    if let Some(repo) = dict_literal_field(worktree, "repo").and_then(literal_string) {
+        manifest
+            .worktree_repos
+            .insert(crate::format::slash_path(&resolve_source_relative(
+                file_path, &repo,
+            )));
+    }
+}
+
+pub(crate) fn build_bundle_manifest(
+    targets: &[PathBuf],
+    config: &CheckConfig,
+) -> serde_json::Value {
+    let mut visited = HashSet::new();
+    let mut manifest = BundleManifestBuilder::default();
+    for target in targets {
+        let canonical = target.canonicalize().unwrap_or_else(|_| target.clone());
+        manifest.add_module(&canonical, "entry");
+        let target_str = canonical.to_string_lossy().into_owned();
+        let (source, program) = parse_source_file(&target_str);
+        let _ = source;
+        scan_program_bundle(&canonical, &program, config, &mut visited, &mut manifest);
+    }
+    manifest.to_json(targets, config)
+}

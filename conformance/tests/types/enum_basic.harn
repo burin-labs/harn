@@ -1,0 +1,11 @@
+pipeline test(harness: Harness, task) {
+  enum Color {
+    Red
+    Green
+    Blue
+  }
+  const c = Color.Red
+  harness.stdio.log(c)
+  harness.stdio.log(c == Color.Red)
+  harness.stdio.log(c == Color.Blue)
+}

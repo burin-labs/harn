@@ -1,0 +1,95 @@
+import "std/triggers"
+
+fn ok_handler(harness: Harness, event: TriggerEvent) -> dict {
+  return {binding: "ok-trigger", kind: event.kind, provider: event.provider}
+}
+
+fn ok_when(_harness: Harness, event: TriggerEvent) -> bool {
+  return event.kind == "issue.opened"
+}
+
+fn fail_handler(harness: Harness, event: TriggerEvent) -> any {
+  throw "dlq:" + event.kind
+}
+
+pipeline test(harness: Harness, task) {
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(
+    harness.random.range(100000, 999999),
+  )
+  const ok_id = "ok-trigger-" + unique
+  const fail_id = "fail-trigger-" + unique
+  const ok_config = {
+    id: ok_id,
+    kind: "issue.opened",
+    provider: "webhook",
+    autonomy_tier: nil,
+    handler: ok_handler,
+    when: ok_when,
+    when_budget: nil,
+    retry: nil,
+    match: {events: ["issue.opened"]},
+    events: nil,
+    budget: {daily_cost_usd: 1.25, max_concurrent: 2},
+    dedupe_key: "event.id",
+    filter: "event.kind == issue.opened",
+    manifest_path: "runtime://trigger-stdlib",
+    package_name: "conformance",
+  }
+  const fail_config = {
+    id: fail_id,
+    kind: "issue.opened",
+    provider: "webhook",
+    autonomy_tier: nil,
+    handler: fail_handler,
+    retry: {max: 1, backoff: "immediate"},
+    events: ["issue.opened"],
+    when: nil,
+    when_budget: nil,
+    match: nil,
+    dedupe_key: nil,
+    filter: nil,
+    budget: nil,
+    manifest_path: nil,
+    package_name: nil,
+  }
+  const ok_handle: TriggerHandle = harness.runtime.trigger_register(ok_config)
+  const fail_handle: TriggerHandle = harness.runtime.trigger_register(fail_config)
+  harness.stdio.println(ok_handle.id == ok_id && ok_handle.state == "active")
+  harness.stdio.println(fail_handle.id == fail_id && fail_handle.handler_kind == "local")
+  const bindings: list<TriggerBinding> = harness.runtime.trigger_list()
+  const listed_ok = bindings.find({ binding -> binding.id == ok_handle.id })
+  harness.stdio.println(len(bindings) == 2 && listed_ok?.provider == "webhook")
+  harness.stdio.println(listed_ok?.metrics?.received == 0)
+  const ok_fire: DispatchHandle = harness.runtime.trigger_fire(
+    ok_handle,
+    {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-success"}},
+  )
+  harness.stdio.println(ok_fire.status == "dispatched" && ok_fire.error == nil)
+  harness.stdio.println(contains(json_stringify(ok_fire.result ?? {}), "\"kind\":\"issue.opened\""))
+  const fail_fire: DispatchHandle = harness.runtime.trigger_fire(
+    fail_handle,
+    {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-dlq"}},
+  )
+  harness.stdio.println(
+    fail_fire.status == "dlq" && contains(fail_fire.error ?? "", "dlq:issue.opened"),
+  )
+  const dlq_before: list<DlqEntry> = harness.runtime.trigger_inspect_dlq()
+  const current_dlq_before = dlq_before.filter({ entry -> entry.binding_id == fail_handle.id })
+  harness.stdio.println(
+    len(current_dlq_before) == 1 && current_dlq_before[0]?.event_id == fail_fire.event_id,
+  )
+  harness.stdio.println(len(current_dlq_before[0]?.retry_history) == 1)
+  harness.stdio.println(current_dlq_before[0]?.event?.provider == "webhook")
+  const replay: DispatchHandle = harness.runtime.trigger_replay(fail_fire.event_id)
+  harness.stdio.println(replay.status == "dlq" && replay.replay_of_event_id == fail_fire.event_id)
+  const dlq_after: list<DlqEntry> = harness.runtime.trigger_inspect_dlq()
+  const current_dlq_after = dlq_after.filter({ entry -> entry.binding_id == fail_handle.id })
+  harness.stdio.println(
+    len(current_dlq_after) == 1 && len(current_dlq_after[0]?.retry_history) == 2,
+  )
+  harness.stdio.println(current_dlq_after[0]?.retry_history?.[1]?.status == "replay_dlq")
+  const bindings_after: list<TriggerBinding> = harness.runtime.trigger_list()
+  const live_fail = bindings_after.find({ binding -> binding.id == fail_handle.id })
+  harness.stdio.println(live_fail?.metrics?.dlq == 2)
+}

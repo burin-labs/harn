@@ -1,0 +1,375 @@
+/** Shared UI contracts for interactive Harn applications. */
+pub type UiElementKind = "column" \
+  | "row" \
+  | "heading" \
+  | "text" \
+  | "button" \
+  | "text_area" \
+  | "field" \
+  | "select" \
+  | "status" \
+  | "canvas" \
+  | "image" \
+  | "divider"
+
+pub type UiPoint = {x: float, y: float}
+
+pub type UiStroke = {id: string, points: list<UiPoint>, color: string, width: float}
+
+pub type UiOption = {value: string, label: string}
+
+/**
+ * A flat element graph keeps the wire format simple. `parent` names an
+ * earlier container element; omitted parents attach to the document root.
+ */
+pub type UiElement = {
+  id: string,
+  kind: UiElementKind,
+  parent?: string,
+  label?: string,
+  text?: string,
+  level?: int,
+  value?: string,
+  options?: list<UiOption>,
+  disabled?: bool,
+  hidden?: bool,
+  variant?: string,
+  placeholder?: string,
+  rows?: int,
+  width?: int,
+  height?: int,
+  strokes?: list<UiStroke>,
+  image_src?: string,
+  image_alt?: string,
+}
+
+pub type UiDocument = {
+  schema: "harn.ui_document.v1",
+  title: string,
+  revision: int,
+  elements: list<UiElement>,
+}
+
+pub type UiEventKind = "ready" | "click" | "input" | "canvas.stroke" | "canvas.snapshot"
+
+pub type UiEvent = {
+  schema: "harn.ui_event.v1",
+  kind: UiEventKind,
+  target: string,
+  value?: string,
+  points?: list<UiPoint>,
+}
+
+pub type UiEffectKind = "send_event" | "capture_canvas" | "download"
+
+pub type UiEffect = {
+  kind: UiEffectKind,
+  after_ms?: int,
+  event?: UiEvent,
+  target?: string,
+  event_target?: string,
+  name?: string,
+  mime_type?: string,
+  data_base64?: string,
+}
+
+pub type UiUpdate = {schema: "harn.ui_update.v1", document: UiDocument, effects: list<UiEffect>}
+
+pub type UiAppOptions = {
+  description?: string,
+  version?: string,
+  prefers_border?: bool,
+  validation?: dict,
+}?
+
+const UI_DOCUMENT_SCHEMA = "harn.ui_document.v1"
+
+const UI_EVENT_SCHEMA = "harn.ui_event.v1"
+
+const UI_UPDATE_SCHEMA = "harn.ui_update.v1"
+
+const UI_MAX_CANVAS_SIDE = 8192
+
+const UI_MAX_STROKE_POINTS = 4096
+
+const UI_MAX_DOCUMENT_POINTS = 65536
+
+fn __ui_app_text(value) -> string {
+  return trim(to_string(value ?? ""))
+}
+
+fn __ui_element_kind(kind: string) -> UiElementKind {
+  if kind == "column" {
+    return "column"
+  }
+  if kind == "row" {
+    return "row"
+  }
+  if kind == "heading" {
+    return "heading"
+  }
+  if kind == "text" {
+    return "text"
+  }
+  if kind == "button" {
+    return "button"
+  }
+  if kind == "text_area" {
+    return "text_area"
+  }
+  if kind == "field" {
+    return "field"
+  }
+  if kind == "select" {
+    return "select"
+  }
+  if kind == "status" {
+    return "status"
+  }
+  if kind == "canvas" {
+    return "canvas"
+  }
+  if kind == "image" {
+    return "image"
+  }
+  if kind == "divider" {
+    return "divider"
+  }
+  throw "std/ui: unsupported element kind " + kind
+}
+
+fn __ui_effect_kind(kind: string) -> UiEffectKind {
+  if kind == "send_event" {
+    return "send_event"
+  }
+  if kind == "capture_canvas" {
+    return "capture_canvas"
+  }
+  if kind == "download" {
+    return "download"
+  }
+  throw "std/ui: unsupported effect kind " + kind
+}
+
+fn __ui_point(raw) -> UiPoint {
+  const x = to_float(raw?.x)
+  const y = to_float(raw?.y)
+  if x == nil
+    || y == nil
+    || is_nan(x)
+    || is_nan(y)
+    || is_infinite(x)
+    || is_infinite(y)
+    || x < 0.0
+    || x > 1.0
+    || y < 0.0
+    || y > 1.0 {
+    throw "std/ui: canvas coordinates must be finite and between 0.0 and 1.0"
+  }
+  return {x: x, y: y}
+}
+
+fn __ui_strokes(raw) -> list<UiStroke> {
+  let checked: list<UiStroke> = []
+  let point_count = 0
+  let ids = []
+  for stroke in raw ?? [] {
+    const id = __ui_app_text(stroke?.id)
+    const points = stroke?.points ?? []
+    const width = to_float(stroke?.width)
+    if id == "" || ids.contains(id) {
+      throw "std/ui: canvas stroke ids must be unique and non-empty"
+    }
+    if len(points) < 2 || len(points) > UI_MAX_STROKE_POINTS {
+      throw "std/ui: canvas stroke must contain 2 to 4096 points"
+    }
+    if width == nil || is_nan(width) || is_infinite(width) || width <= 0.0 || width > 512.0 {
+      throw "std/ui: canvas stroke width must be finite and between 0 and 512"
+    }
+    point_count = point_count + len(points)
+    if point_count > UI_MAX_DOCUMENT_POINTS {
+      throw "std/ui: canvas strokes may contain at most 65,536 points in total"
+    }
+    let checked_points: list<UiPoint> = []
+    for point in points {
+      checked_points = checked_points + [__ui_point(point)]
+    }
+    checked = checked
+      + [
+      {id: id, points: checked_points, color: to_string(stroke?.color ?? ""), width: width},
+    ]
+    ids = ids + [id]
+  }
+  return checked
+}
+
+fn __ui_element(raw) -> UiElement {
+  return {
+    id: __ui_app_text(raw?.id),
+    kind: __ui_element_kind(__ui_app_text(raw?.kind)),
+    parent: raw?.parent,
+    label: raw?.label,
+    text: raw?.text,
+    level: raw?.level,
+    value: raw?.value,
+    options: raw?.options,
+    disabled: raw?.disabled,
+    hidden: raw?.hidden,
+    variant: raw?.variant,
+    placeholder: raw?.placeholder,
+    rows: raw?.rows,
+    width: raw?.width,
+    height: raw?.height,
+    strokes: raw?.strokes,
+    image_src: raw?.image_src,
+    image_alt: raw?.image_alt,
+  }
+}
+
+/**
+ * Check one document and copy its supported fields at the Harn boundary.
+ *
+ * @effects: []
+ * @errors: [invalid_argument]
+ */
+pub fn document(title: string, revision: int, elements) -> UiDocument {
+  if __ui_app_text(title) == "" {
+    throw "std/ui: document title is required"
+  }
+  if revision < 0 {
+    throw "std/ui: document revision must be non-negative"
+  }
+  let ids = []
+  let containers = []
+  let checked: list<UiElement> = []
+  for raw in elements ?? [] {
+    let element = __ui_element(raw)
+    const id = __ui_app_text(element.id)
+    if id == "" {
+      throw "std/ui: every element needs an id"
+    }
+    if ids.contains(id) {
+      throw "std/ui: duplicate element id " + id
+    }
+    if element.parent != nil && !ids.contains(element.parent) {
+      throw "std/ui: parent must appear before child: " + element.parent
+    }
+    if element.parent != nil && !containers.contains(element.parent) {
+      throw "std/ui: parent must be a row or column: " + element.parent
+    }
+    if element.kind == "canvas" && (element.width ?? 0) <= 0 {
+      throw "std/ui: canvas width must be positive"
+    }
+    if element.kind == "canvas" && (element.height ?? 0) <= 0 {
+      throw "std/ui: canvas height must be positive"
+    }
+    if element.kind == "canvas" && (element.width ?? 0) > UI_MAX_CANVAS_SIDE {
+      throw "std/ui: canvas width may not exceed 8,192 pixels"
+    }
+    if element.kind == "canvas" && (element.height ?? 0) > UI_MAX_CANVAS_SIDE {
+      throw "std/ui: canvas height may not exceed 8,192 pixels"
+    }
+    if element.kind == "canvas" {
+      element.strokes = __ui_strokes(element.strokes)
+    }
+    if element.kind == "heading" && (element.level ?? 2) < 1 {
+      throw "std/ui: heading level must be between 1 and 6"
+    }
+    if element.kind == "heading" && (element.level ?? 2) > 6 {
+      throw "std/ui: heading level must be between 1 and 6"
+    }
+    ids = ids + [id]
+    if ["column", "row"].contains(element.kind) {
+      containers = containers + [id]
+    }
+    checked = checked + [element]
+  }
+  return {schema: UI_DOCUMENT_SCHEMA, title: title, revision: revision, elements: checked}
+}
+
+/**
+ * Check an untrusted browser event before application policy sees it.
+ *
+ * @effects: []
+ * @errors: [invalid_argument]
+ */
+pub fn event(raw: dict) -> UiEvent {
+  if raw?.schema != UI_EVENT_SCHEMA {
+    throw "std/ui: unsupported event schema"
+  }
+  const kind = raw?.kind
+  if !["ready", "click", "input", "canvas.stroke", "canvas.snapshot"].contains(kind) {
+    throw "std/ui: unsupported event kind " + to_string(kind)
+  }
+  const target = __ui_app_text(raw?.target)
+  if target == "" {
+    throw "std/ui: event target is required"
+  }
+  let event: UiEvent = {schema: UI_EVENT_SCHEMA, kind: kind, target: target}
+  if raw?.value != nil {
+    event.value = to_string(raw.value)
+  }
+  if kind == "canvas.stroke" {
+    const points = raw?.points ?? []
+    if len(points) < 2 || len(points) > 4096 {
+      throw "std/ui: canvas stroke must contain 2 to 4096 points"
+    }
+    let checked_points: list<UiPoint> = []
+    for point in points {
+      checked_points = checked_points + [__ui_point(point)]
+    }
+    event.points = checked_points
+  }
+  return event
+}
+
+/**
+ * Build the one structured result consumed by every Harn UI renderer.
+ *
+ * @effects: []
+ * @errors: [invalid_argument]
+ */
+pub fn update(document: UiDocument, effects = []) -> UiUpdate {
+  let checked_effects: list<UiEffect> = []
+  for raw in effects ?? [] {
+    let effect: UiEffect = {kind: __ui_effect_kind(__ui_app_text(raw?.kind))}
+    if raw?.after_ms != nil {
+      effect.after_ms = to_int(raw.after_ms)
+      if effect.after_ms == nil || effect.after_ms < 0 {
+        throw "std/ui: effect delay must be a non-negative integer"
+      }
+    }
+    if raw?.event != nil {
+      effect.event = event(raw.event)
+    }
+    if raw?.target != nil {
+      effect.target = to_string(raw.target)
+    }
+    if raw?.event_target != nil {
+      effect.event_target = to_string(raw.event_target)
+    }
+    if raw?.name != nil {
+      effect.name = to_string(raw.name)
+    }
+    if raw?.mime_type != nil {
+      effect.mime_type = to_string(raw.mime_type)
+    }
+    if raw?.data_base64 != nil {
+      effect.data_base64 = to_string(raw.data_base64)
+    }
+    if effect.kind == "send_event" && effect.event == nil {
+      throw "std/ui: send_event effect requires an event"
+    }
+    if effect.kind == "capture_canvas" && __ui_app_text(effect.target) == "" {
+      throw "std/ui: capture_canvas effect requires a target"
+    }
+    if effect.kind == "download"
+      && (__ui_app_text(effect.name) == ""
+      || __ui_app_text(effect.data_base64)
+      == "") {
+      throw "std/ui: download effect requires a name and data"
+    }
+    checked_effects = checked_effects + [effect]
+  }
+  return {schema: UI_UPDATE_SCHEMA, document: document, effects: checked_effects}
+}

@@ -1,0 +1,436 @@
+{
+  "$defs": {
+    "anchor": {
+      "additionalProperties": false,
+      "anyOf": [
+        {
+          "required": [
+            "step_id"
+          ]
+        },
+        {
+          "required": [
+            "quoted_text"
+          ]
+        },
+        {
+          "required": [
+            "range"
+          ]
+        }
+      ],
+      "properties": {
+        "quoted_text": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "range": {
+          "additionalProperties": false,
+          "properties": {
+            "end": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "start": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "start",
+            "end"
+          ],
+          "type": "object"
+        },
+        "step_id": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "approval": {
+      "additionalProperties": false,
+      "properties": {
+        "approved_at": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "reviewer": {
+          "type": "string"
+        },
+        "reviewers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "state": {
+          "enum": [
+            "unrequested",
+            "requested",
+            "approved",
+            "rejected"
+          ]
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "type": "object"
+    },
+    "author": {
+      "additionalProperties": false,
+      "properties": {
+        "display_name": {
+          "type": "string"
+        },
+        "id": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "comment": {
+      "additionalProperties": false,
+      "properties": {
+        "anchor": {
+          "$ref": "#/$defs/anchor"
+        },
+        "author": {
+          "$ref": "#/$defs/author"
+        },
+        "body": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "comment_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "created_at": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "open",
+            "addressed",
+            "resolved",
+            "reopened"
+          ]
+        },
+        "updated_at": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "comment_id",
+        "anchor",
+        "body",
+        "state",
+        "author",
+        "created_at",
+        "updated_at"
+      ],
+      "type": "object"
+    },
+    "plan_artifact": {
+      "additionalProperties": false,
+      "properties": {
+        "_type": {
+          "const": "plan_artifact"
+        },
+        "approval": {
+          "$ref": "#/$defs/approval"
+        },
+        "assumptions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "open_questions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "schema_version": {
+          "const": "harn.plan.v1"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/plan_step"
+          },
+          "type": "array"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "tool": {
+          "type": "string"
+        },
+        "verification_commands": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "_type",
+        "schema_version",
+        "id",
+        "tool",
+        "title",
+        "summary",
+        "steps",
+        "assumptions",
+        "open_questions",
+        "verification_commands",
+        "approval"
+      ],
+      "type": "object"
+    },
+    "plan_step": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "priority": {
+          "type": [
+            "string",
+            "integer",
+            "null"
+          ]
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "in_progress",
+            "completed",
+            "blocked",
+            "cancelled"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "content",
+        "status",
+        "priority"
+      ],
+      "type": "object"
+    },
+    "resolution_receipt": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_run_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "comment_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "created_at": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "event_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "explanation": {
+          "type": "string"
+        },
+        "input_revision_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "output_revision_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "receipt_id": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "receipt_id",
+        "comment_id",
+        "input_revision_id",
+        "output_revision_id",
+        "agent_run_id",
+        "event_id",
+        "created_at"
+      ],
+      "type": "object"
+    },
+    "revision": {
+      "additionalProperties": false,
+      "properties": {
+        "author": {
+          "$ref": "#/$defs/author"
+        },
+        "created_at": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "markdown": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "operation": {
+          "additionalProperties": false,
+          "properties": {
+            "comment_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "event_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "create",
+                "edit",
+                "comment",
+                "comment_state"
+              ]
+            },
+            "state": {
+              "enum": [
+                "open",
+                "addressed",
+                "resolved",
+                "reopened"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "event_id"
+          ],
+          "type": "object"
+        },
+        "parent_revision_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "plan": {
+          "$ref": "#/$defs/plan_artifact"
+        },
+        "revision_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        }
+      },
+      "required": [
+        "revision_id",
+        "markdown",
+        "plan",
+        "author",
+        "source",
+        "created_at",
+        "operation"
+      ],
+      "type": "object"
+    },
+    "source": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "uri": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://harnlang.com/schemas/plan-document-v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "_type": {
+      "const": "plan_document"
+    },
+    "comments": {
+      "items": {
+        "$ref": "#/$defs/comment"
+      },
+      "type": "array"
+    },
+    "created_at": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "current_revision": {
+      "$ref": "#/$defs/revision"
+    },
+    "document_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "resolution_receipts": {
+      "items": {
+        "$ref": "#/$defs/resolution_receipt"
+      },
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "harn.plan_document.v1"
+    },
+    "updated_at": {
+      "minLength": 1,
+      "type": "string"
+    }
+  },
+  "required": [
+    "_type",
+    "schema_version",
+    "document_id",
+    "current_revision",
+    "comments",
+    "resolution_receipts",
+    "created_at",
+    "updated_at"
+  ],
+  "title": "Harn collaborative plan document",
+  "type": "object"
+}

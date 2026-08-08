@@ -1,0 +1,152 @@
+// @harn-entrypoint-category agent.stdlib
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { agent_loop_options } from "std/agent/options"
+import { agent_turn_preamble_prompt } from "std/agent/prompts"
+
+fn __agent_turn_system(fs: HarnessFs, user_system, opts = nil) {
+  const preamble = agent_turn_preamble_prompt(fs, opts)
+  if user_system == nil || user_system == "" {
+    return preamble
+  }
+  if type_of(user_system) != "string" {
+    throw "agent_turn: system must be a string or nil"
+  }
+  return preamble + "\n\n" + user_system
+}
+
+fn __false_or_nil(value) {
+  return value == nil || (type_of(value) == "bool" && !value)
+}
+
+fn __agent_turn_native_natural_completion(opts) {
+  return opts?.tools != nil && opts?.tool_format == "native" && opts?.done_sentinel == nil
+}
+
+fn __agent_turn_options(harness: Harness, options) {
+  let opts = options ?? {}
+  if type_of(opts) != "dict" {
+    throw "agent_turn(harness, prompt, opts?): opts must be a dict or nil"
+  }
+  if contains(opts.keys(), "judge") {
+    opts = opts + {done_judge: opts.judge}
+  }
+  if contains(opts.keys(), "done_judge") && __false_or_nil(opts?.done_judge) {
+    throw "agent_turn: done_judge is mandatory; pass a dict, true, or omit it"
+  }
+  if contains(opts.keys(), "persistent") {
+    throw "agent_turn: `persistent` was removed; use `loop_until_done` for completion looping"
+  }
+  if contains(opts.keys(), "loop_until_done") && __false_or_nil(opts?.loop_until_done) {
+    throw "agent_turn: completion looping is required; pass loop_until_done: true or omit it"
+  }
+  if !contains(opts.keys(), "done_judge") {
+    opts = opts + {done_judge: true}
+  }
+  if !contains(opts.keys(), "loop_until_done") {
+    opts = opts + {loop_until_done: true}
+  }
+  const loop_opts = agent_loop_options(harness, opts)
+  if loop_opts?.done_sentinel == nil && !__agent_turn_native_natural_completion(loop_opts) {
+    throw "agent_turn: done_sentinel is required for non-native loops; pass a non-empty string or omit it"
+  }
+  if contains(loop_opts.keys(), "session_id") {
+    return loop_opts
+  }
+  return loop_opts + {session_id: "agent_turn_session_" + harness.random.uuid_v7()}
+}
+
+fn __agent_turn_judge_decisions(events) {
+  let out = []
+  for event in events {
+    if event?.type == "judge_decision" {
+      out = out.appending(
+        {
+          iteration: event.iteration,
+          verdict: event.verdict,
+          reasoning: event.reasoning,
+          next_step: event.next_step,
+          judge_duration_ms: event.judge_duration_ms,
+          source: event?.source,
+          trigger: event?.trigger,
+          reason: event?.reason,
+          confirm: event?.confirm,
+          converted_from: event?.converted_from,
+          escalation_recommended: event?.escalation_recommended,
+          escalation_target: event?.escalation_target,
+        },
+      )
+    }
+  }
+  return out
+}
+
+fn __agent_turn_iteration_summaries(events) {
+  let iterations = {}
+  let order = []
+  for event in events {
+    if event?.type == "iteration_start" {
+      const key = to_string(event.iteration)
+      if iterations[key] == nil {
+        iterations[key] = {iteration: event.iteration}
+        order = order.appending(key)
+      }
+      let entry = iterations[key]
+      entry["started"] = true
+      iterations[key] = entry
+    }
+    if event?.type == "iteration_end" {
+      const key = to_string(event.iteration)
+      if iterations[key] == nil {
+        iterations[key] = {iteration: event.iteration}
+        order = order.appending(key)
+      }
+      let entry = iterations[key]
+      entry["ended"] = true
+      const info = event?.iteration_info ?? {}
+      if info?.tool_count != nil {
+        entry["tool_count"] = info.tool_count
+      }
+      if info?.text != nil {
+        entry["prose_chars"] = len(info.text)
+      }
+      iterations[key] = entry
+    }
+  }
+  let out = []
+  for key in order {
+    out = out.appending(iterations[key])
+  }
+  return out
+}
+
+/**
+ * agent_turn.
+ *
+ * @effects: [agent]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn agent_turn(harness: Harness, prompt, options = nil) {
+  const opts = options ?? {}
+  const loop_opts = __agent_turn_options(harness, opts)
+  const captured = agent_capture_events(
+    harness.agent,
+    loop_opts.session_id,
+    fn() { return agent_loop(
+      harness,
+      prompt,
+      __agent_turn_system(harness.fs, opts?.system, loop_opts),
+      loop_opts,
+    ) },
+  )
+  const result = captured.result
+  if type_of(result) != "dict" {
+    return result
+  }
+  return result
+    + {
+    iterations: __agent_turn_iteration_summaries(captured.events),
+    judge_decisions: __agent_turn_judge_decisions(captured.events),
+  }
+}

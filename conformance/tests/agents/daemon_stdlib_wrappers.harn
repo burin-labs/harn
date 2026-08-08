@@ -1,0 +1,74 @@
+import { llm_text, with_llm_script } from "std/testing"
+
+fn wait_for_iterations(agent: HarnessAgent, clock: HarnessClock, handle, min_iterations) {
+  let attempts = 0
+  let snap = agent.managed_daemon_snapshot(handle)
+  while attempts < 200 && (snap?.total_iterations ?? 0) < min_iterations {
+    clock.sleep_ms(2ms)
+    snap = agent.managed_daemon_snapshot(handle)
+    attempts = attempts + 1
+  }
+  return snap
+}
+
+pipeline test(harness: Harness, task) {
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(
+    harness.random.range(100000, 999999),
+  )
+  const root = path_join(harness.fs.workspace_temp_dir(), "harn-daemon-stdlib-" + unique)
+  harness.fs.mkdir(root)
+  with_llm_script(
+    harness.llm,
+    [llm_text("daemon ready"), llm_text("handled Foo.swift"), llm_text("handled Bar.swift")],
+    { ->
+      const daemon = harness.agent.daemon_spawn(
+        {
+          name: "reviewer",
+          task: "Wait for daemon trigger messages and acknowledge the latest file path.",
+          system: "You are a daemon reviewer.",
+          provider: "mock",
+          persist_path: root,
+          wake_interval_ms: 5,
+          max_iterations: 200,
+        },
+      )
+      const first = harness.agent.managed_daemon_snapshot(daemon)
+      harness.stdio.println(daemon.status == "running")
+      harness.stdio.println(first.daemon_state == "idle")
+      harness.stdio.println(first.queued_event_count == 0)
+      harness.agent.daemon_trigger(daemon, {kind: "file_changed", path: "Foo.swift"})
+      const second = wait_for_iterations(
+        harness.agent,
+        harness.clock,
+        daemon,
+        (first?.total_iterations ?? 0) + 1,
+      )
+      harness.stdio.println(second?.total_iterations > first?.total_iterations)
+      harness.stdio.println(contains(json_stringify(second?.recorded_messages ?? []), "Foo.swift"))
+      harness.stdio.println(second?.queued_event_count == 0)
+      const stopped = harness.agent.daemon_stop(daemon)
+      harness.stdio.println(stopped.status == "stopped")
+      const resumed = harness.agent.daemon_resume(root)
+      const resumed_snap = harness.agent.managed_daemon_snapshot(resumed)
+      harness.stdio.println(
+        (resumed_snap?.total_iterations ?? 0) >= (second?.total_iterations ?? 0),
+      )
+      harness.stdio.println(resumed_snap.queued_event_count == 0)
+      harness.agent.daemon_trigger(resumed, {kind: "file_changed", path: "Bar.swift"})
+      const final_snap = wait_for_iterations(
+        harness.agent,
+        harness.clock,
+        resumed,
+        (resumed_snap?.total_iterations ?? 0) + 1,
+      )
+      harness.stdio.println(final_snap?.total_iterations > resumed_snap?.total_iterations)
+      const recorded = json_stringify(final_snap?.recorded_messages ?? [])
+      harness.stdio.println(contains(recorded, "Foo.swift"))
+      harness.stdio.println(contains(recorded, "Bar.swift"))
+      harness.stdio.println(final_snap?.queued_event_count == 0)
+      harness.agent.daemon_stop(resumed)
+      harness.fs.delete(root)
+    },
+  )
+}

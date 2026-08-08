@@ -1,0 +1,10 @@
+fast=seed_fast
+fast_audit_count=0
+slow_timed_out=true
+slow_timeout_ms=500
+slow_elapsed_ge=true
+slow_return_value=seed_slow
+slow_audit_kind=lifecycle_callback_timed_out
+slow_audit_timeout=500
+unbounded=seed_slow
+unbounded_audit_count=0

@@ -1,0 +1,112 @@
+# Open-weight executor candidates (<$2/Mtok with function calling). Use
+# these via OpenRouter or Fireworks for fast secondary-model dispatch.
+# Pricing snapshot 2026-05 from OpenRouter / Artificial Analysis.
+[models."qwen/qwen3-coder"]
+name = "Qwen3 Coder 480B A35B"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.22, output_per_mtok = 1.80 }
+availability = "serverless"
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "long_context", "agentic", "tool_use"]
+benchmarks = { swe_bench_verified = 67.0 }
+
+# Qwen3-Coder-Next — 80B/3B MoE non-thinking coder.
+[models."qwen/qwen3-coder-next"]
+name = "Qwen3 Coder Next"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.11, output_per_mtok = 0.80, cache_read_per_mtok = 0.07 }
+availability = "serverless"
+architecture = { parameter_count_b = 80.0, active_parameter_count_b = 3.0, moe = true, license = "Apache-2.0", source_url = "https://huggingface.co/Qwen/Qwen3-Coder-Next", last_verified = "2026-07-02" }
+benchmarks = { swe_bench_verified = 70.6, swe_bench_pro = 44.3 }
+tier = "mid"
+open_weight = true
+strengths = ["coding", "cheap", "long_context", "agentic", "tool_use"]
+
+# Qwen3.5-397B-A17B — the open-tier Qwen flagship (native VLM MoE).
+# OpenRouter serverless rate verified 2026-07-02.
+[models."qwen/qwen3.5-397b-a17b"]
+name = "Qwen3.5 397B A17B"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "vision", "streaming", "thinking"]
+pricing = { input_per_mtok = 0.385, output_per_mtok = 2.45 }
+availability = "serverless"
+architecture = { parameter_count_b = 397.0, active_parameter_count_b = 17.0, moe = true, license = "Apache-2.0", source_url = "https://huggingface.co/Qwen/Qwen3.5-397B-A17B", last_verified = "2026-07-02" }
+benchmarks = { swe_bench_verified = 76.4 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "reasoning", "tool_use", "long_context", "vision"]
+
+# Together lists Qwen3-Coder-Next-FP8 in GET /v1/models alongside its
+# serverless catalog, but normal chat-completion calls fail with
+# `model_not_available` and instruct the caller to create a dedicated
+# endpoint. Carry the catalog row so price/route metadata is preserved,
+# but mark `availability = "dedicated"` so hosts don't surface it as a
+# one-click serverless option.
+[models."Qwen/Qwen3-Coder-Next-FP8"]
+name = "Qwen3 Coder Next FP8 (Together, dedicated)"
+provider = "together"
+context_window = 262144
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.18, output_per_mtok = 0.18 }
+availability = "dedicated"
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "long_context", "agentic"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "deepseek", "kimi"]
+[models."deepseek/deepseek-v3.2"]
+name = "DeepSeek V3.2"
+provider = "openrouter"
+context_window = 131072
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.2288, output_per_mtok = 0.3432 }
+tier = "mid"
+open_weight = true
+strengths = ["coding", "tool_use", "cheap"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "kimi"]
+[models."moonshotai/kimi-k2.6"]
+name = "Kimi K2.6"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.68, output_per_mtok = 3.41, cache_read_per_mtok = 0.34 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
+benchmarks = { swe_bench_pro = 58.6, humanitys_last_exam_with_tools = 54.0 }
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+[models."moonshotai/kimi-k2.7-code"]
+name = "Kimi K2.7 Code"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 0.95, output_per_mtok = 4.00, cache_read_per_mtok = 0.19 }
+tier = "frontier"
+open_weight = true
+strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
+complementary_with = ["anthropic-claude", "openai-gpt", "google-gemini", "qwen", "deepseek"]
+[models."openai/gpt-oss-120b"]
+name = "GPT-OSS 120B"
+provider = "openrouter"
+context_window = 131072
+logical_model = "openai-gpt-oss-120b"
+equivalence_group = "openai-gpt-oss-120b"
+served_variant = "openrouter"
+api_dialect = "openai_chat"
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60 }
+architecture = { parameter_count_b = 117.0, active_parameter_count_b = 5.1, moe = true, license = "Apache-2.0", source_url = "https://developers.openai.com/api/docs/models/gpt-oss-120b", last_verified = "2026-06-05" }
+# Explicit metadata keeps this row self-described across fragment boundaries.
+# GPT-OSS 120B is Apache-2.0 (open weight) and text-only; it is Burin's cheap
+# coding executor.
+# `tier`/`open_weight`/`strengths` match the rest of the openai-gpt-oss-120b
+# equivalence group (the validator requires one tier per logical model — the
+# conservative shared baseline is `frontier`).
+tier = "mid"
+open_weight = true
+strengths = ["cheap", "coding", "tool_use", "reasoning"]

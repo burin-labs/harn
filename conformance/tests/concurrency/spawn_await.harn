@@ -1,0 +1,7 @@
+pipeline test(harness: Harness, task) {
+  const handle = spawn {
+    harness.stdio.log("spawned")
+  }
+  const _result = await(handle)
+  harness.stdio.log("done")
+}

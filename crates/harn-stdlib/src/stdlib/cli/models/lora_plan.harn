@@ -1,0 +1,240 @@
+import {
+  render_peft_save_policy,
+  render_probe_command_templates,
+  render_required_probe_cases,
+  render_tool_catalog_contract,
+  render_trainer_identity_check,
+} from "std/cli/models/lora_render"
+/**
+ * `harn models lora plan` renderer.
+ *
+ * The dispatch shim resolves model aliases, provider capabilities, and catalog
+ * launch facts in Rust. This Harn source owns the portable training/eval
+ * recipe and the human/JSON presentation.
+ *
+ * Inputs (from the dispatch shim):
+ *   HARN_MODELS_LORA_PLAN_PAYLOAD_JSON   - compact report JSON.
+ *   HARN_MODELS_LORA_PLAN_PAYLOAD_PRETTY - pretty report JSON.
+ *   HARN_OUTPUT_JSON                     - "1" for JSON, else human text.
+ */
+import {
+  cli_json_envelope,
+  nonempty_string,
+  print_list,
+  render_command,
+  safe_bool,
+  safe_dict,
+  safe_int_string,
+  safe_list,
+  safe_number_string,
+  safe_string,
+} from "std/cli/render"
+
+fn __render_human(stdio: HarnessStdio, report: dict) {
+  const base = safe_dict(report["base"])
+  const request = safe_dict(report["request"])
+  const tool_calling = safe_dict(report["tool_calling"])
+  const training = safe_dict(report["training"])
+  const training_contract = safe_dict(training["contract"])
+  const peft_save_policy = safe_dict(training_contract["peft_save_policy"])
+  const precision = safe_dict(report["precision"])
+  const template = safe_dict(report["template"])
+  const data = safe_dict(report["data"])
+  const corpus_refresh = safe_dict(report["corpus_refresh"])
+  const evaluation = safe_dict(report["evaluation"])
+  const evidence = safe_dict(evaluation["evidence_contract"])
+  const batch_ready = safe_dict(evidence["batch_ready"])
+  const serving = safe_dict(report["serving"])
+  const launch = safe_dict(report["launch"])
+  const warnings = safe_list(report["warnings"])
+  const base_id = safe_string(base["id"], "")
+  const provider = safe_string(base["provider"], "")
+  stdio.println("LoRA plan for " + base_id + " via " + provider)
+  stdio.println("  base selector: " + safe_string(base["selector"], ""))
+  stdio.println(
+    "  tool format: "
+      + safe_string(request["effective_tool_format"], "")
+      + " (requested "
+      + safe_string(request["requested_tool_format"], "auto")
+      + ")",
+  )
+  const correction = safe_string(request["tool_format_correction"], "")
+  if correction != "" {
+    stdio.println("  tool format correction: " + correction)
+  }
+  const native_tools = if safe_bool(tool_calling["native_tools"], false) {
+    "yes"
+  } else {
+    "no"
+  }
+  stdio.println(
+    "  native tools: "
+      + native_tools
+      + ", preferred: "
+      + nonempty_string(tool_calling["preferred_tool_format"], "unset"),
+  )
+  stdio.println(
+    "  training: "
+      + safe_string(request["method"], "")
+      + " + "
+      + safe_string(training["adapter_type"], ""),
+  )
+  stdio.println("  trainer: " + safe_string(training["trainer"], ""))
+  render_trainer_identity_check(stdio, training["trainer_identity"])
+  stdio.println(
+    "  LoRA hparams: rank="
+      + safe_int_string(training["rank"], "")
+      + " alpha="
+      + safe_int_string(training["alpha"], "")
+      + " dropout="
+      + safe_number_string(training["dropout"], ""),
+  )
+  stdio.println("  quantization: " + safe_string(training["quantization"], ""))
+  stdio.println(
+    "  training base precision: "
+      + safe_string(precision["training_base_precision"], ""),
+  )
+  stdio.println(
+    "  training compute precision: "
+      + safe_string(precision["training_compute_precision"], ""),
+  )
+  stdio.println("  adapter precision: " + safe_string(precision["adapter_weight_precision"], ""))
+  stdio.println("  serving base precision: " + safe_string(precision["serving_base_precision"], ""))
+  stdio.println("  precision policy: " + safe_string(precision["compatibility_policy"], ""))
+  stdio.println("  loss scope: " + safe_string(training["loss_scope"], ""))
+  stdio.println("  packing: " + safe_string(training["packing"], ""))
+  const target_module_contract = safe_dict(training["target_modules"])
+  const target_modules = safe_list(target_module_contract["modules"])
+  if len(target_modules) > 0 {
+    stdio.println(
+      "  target modules: " + join(target_modules.map({ item -> safe_string(item, "") }), ", "),
+    )
+    stdio.println("  target module policy: " + safe_string(target_module_contract["policy"], ""))
+  }
+  stdio.println("  assistant mask: " + safe_string(training_contract["assistant_mask_policy"], ""))
+  render_peft_save_policy(stdio, peft_save_policy)
+  stdio.println("  parser owner: " + safe_string(training_contract["tool_parser_owner"], ""))
+  render_tool_catalog_contract(stdio, safe_dict(training_contract["tool_catalog"]))
+  stdio.println("  split policy: " + safe_string(training_contract["dataset_split_policy"], ""))
+  stdio.println("  template: " + safe_string(template["name"], ""))
+  stdio.println("  template source: " + safe_string(template["source"], ""))
+  stdio.println("  supervised target: " + safe_string(template["supervised_target"], ""))
+  const corpus = safe_string(request["corpus"], "")
+  if corpus != "" {
+    stdio.println("  corpus: " + corpus)
+  }
+  stdio.println(
+    "  corpus strategy: "
+      + safe_string(request["effective_corpus_strategy"], "")
+      + " (requested "
+      + safe_string(request["requested_corpus_strategy"], "auto")
+      + ")",
+  )
+  const teacher = safe_dict(request["teacher"])
+  const teacher_id = safe_string(teacher["id"], "")
+  if teacher_id != "" {
+    stdio.println(
+      "  teacher: "
+        + teacher_id
+        + " via "
+        + safe_string(teacher["provider"], ""),
+    )
+  }
+  stdio.println("  dataset format: " + safe_string(data["dataset_format"], ""))
+  print_list(stdio, "template requirements", safe_list(template["requirements"]))
+  print_list(stdio, "stop sequences", safe_list(template["stop_sequences"]))
+  print_list(stdio, "template notes", safe_list(template["notes"]))
+  print_list(stdio, "required columns", safe_list(data["required_columns"]))
+  print_list(stdio, "data validation", safe_list(data["validation"]))
+  print_list(stdio, "corpus refresh", safe_list(corpus_refresh["generation_notes"]))
+  print_list(stdio, "provenance manifest", safe_list(corpus_refresh["provenance_manifest_fields"]))
+  print_list(stdio, "hard negatives", safe_list(corpus_refresh["hard_negative_slices"]))
+  print_list(stdio, "corpus gates", safe_list(corpus_refresh["acceptance_gates"]))
+  const model_aware = safe_dict(corpus_refresh["model_aware_selection"])
+  const objective = safe_string(model_aware["objective"], "")
+  if objective != "" {
+    stdio.println("  model-aware selection: " + objective)
+  }
+  print_list(stdio, "difficulty signals", safe_list(model_aware["difficulty_signals"]))
+  print_list(stdio, "sampling policy", safe_list(model_aware["sampling_policy"]))
+  print_list(stdio, "refinement loop", safe_list(model_aware["refinement_loop"]))
+  print_list(stdio, "selection stop conditions", safe_list(model_aware["stop_conditions"]))
+  print_list(stdio, "trainer contract", safe_list(training["trainer_contract"]))
+  print_list(stdio, "precision gates", safe_list(precision["promotion_gates"]))
+  print_list(stdio, "training notes", safe_list(training["notes"]))
+  stdio.println("  holdout policy: " + safe_string(evaluation["holdout_policy"], ""))
+  stdio.println("  minimum trials: " + safe_int_string(evaluation["minimum_trials"], "0"))
+  stdio.println("  promotion id: " + safe_string(evidence["promotion_id"], ""))
+  stdio.println("  comparison baseline: " + safe_string(evaluation["comparison_baseline"], ""))
+  print_list(stdio, "required metrics", safe_list(evaluation["required_metrics"]))
+  print_list(stdio, "eval gates", safe_list(evaluation["gates"]))
+  print_list(stdio, "required receipts", safe_list(evidence["required_receipts"]))
+  render_required_probe_cases(stdio, evidence["required_probe_cases"])
+  render_probe_command_templates(stdio, evidence["probe_command_templates"])
+  print_list(stdio, "optional batch receipts", safe_list(evidence["optional_batch_receipts"]))
+  print_list(stdio, "batch group by", safe_list(batch_ready["group_by"]))
+  stdio.println("  adapter binding: " + safe_string(serving["adapter_binding"], ""))
+  stdio.println("  LoRA module format: " + safe_string(serving["lora_module_value_format"], ""))
+  stdio.println("  request model: " + safe_string(serving["request_model"], ""))
+  print_list(stdio, "serving notes", safe_list(serving["runtime_notes"]))
+  print_list(stdio, "promotion gates", safe_list(serving["promotion_gates"]))
+  render_command(stdio, "preflight corpus", safe_list(launch["preflight_command"]))
+  render_command(stdio, "export dataset", safe_list(launch["export_command"]))
+  render_command(stdio, "train adapter", safe_list(launch["train_command"]))
+  render_command(stdio, "eval", safe_list(evaluation["eval_command"]))
+  render_command(stdio, "collect promotion receipt", safe_list(launch["promote_command"]))
+  render_command(stdio, "batch eval manifest", safe_list(batch_ready["manifest_command"]))
+  render_command(stdio, "inspect adapter", safe_list(launch["inspect_command"]))
+  render_command(stdio, "local launch", safe_list(launch["local_launch_command"]))
+  for warning in warnings {
+    const text = safe_string(warning, "")
+    if text != "" {
+      stdio.println("  warning: " + text)
+    }
+  }
+}
+
+fn __render_json(report: dict) -> string {
+  const ok = safe_bool(report["ok"], false)
+  const envelope = if ok {
+    cli_json_envelope({schema_version: 1, ok: true, data: report})
+  } else {
+    cli_json_envelope(
+      {
+        schema_version: 1,
+        ok: false,
+        error: {
+          code: "lora_plan_failed",
+          message: "LoRA plan did not produce a usable training contract.",
+          details: report,
+        },
+      },
+    )
+  }
+  return json_stringify_pretty(envelope)
+}
+
+fn main(harness: Harness) -> int {
+  const raw = harness.env.get_or("HARN_MODELS_LORA_PLAN_PAYLOAD_JSON", "")
+  if raw == "" {
+    harness.stdio.eprintln("internal error: HARN_MODELS_LORA_PLAN_PAYLOAD_JSON not set")
+    return 70
+  }
+  const report = try {
+    json_parse(raw)
+  } catch (e) {
+    harness.stdio.eprintln("internal error: failed to parse LoRA plan payload: " + e.message)
+    return 70
+  }
+  const ok = safe_bool(report["ok"], false)
+  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  if json_mode {
+    harness.stdio.println(__render_json(report))
+  } else {
+    __render_human(harness.stdio, report)
+  }
+  if ok {
+    return 0
+  }
+  return 1
+}

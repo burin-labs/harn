@@ -1,0 +1,45 @@
+import "std/agent_state"
+
+pipeline default(harness: Harness) {
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-agent-state-" + harness.random.uuid(),
+  )
+  const handle = agent_state_init(
+    harness.agent,
+    root,
+    {session_id: "roundtrip-session", writer_id: "writer-a"},
+  )
+  harness.stdio.println(type_of(handle) == "resource")
+  agent_state_write(harness.agent, handle, "ledger.md", "hello state")
+  agent_state_write(harness.agent, handle, "evidence/b.json", "{\"rank\":2}")
+  agent_state_write(harness.agent, handle, "evidence/a.json", "{\"rank\":1}")
+  agent_state_handoff(
+    harness.agent,
+    handle,
+    {
+      source_persona: "merge_captain",
+      target_persona_or_human: {kind: "human", label: "maintainer"},
+      task: "Publish the release note and approve the rollout window",
+      reason: "Human sign-off is required before production side effects",
+      evidence_refs: [{label: "state ledger", path: "ledger.md"}],
+      files_or_entities_touched: ["ledger.md"],
+      open_questions: ["Should the rollout wait for EU business hours?"],
+      blocked_on: ["maintainer approval"],
+      requested_capabilities: ["release_signoff"],
+      allowed_side_effects: ["publish_release_notes"],
+      budget_remaining: {tokens: 400},
+      deadline_checkback: {checkback_at: "2026-04-24T09:00:00Z"},
+      confidence: 0.61,
+    },
+  )
+  harness.stdio.println(agent_state_read(harness.agent, handle, "ledger.md"))
+  harness.stdio.println(json_stringify(agent_state_list(harness.agent, handle)))
+  const handoff = json_parse(agent_state_read(harness.agent, handle, agent_state_handoff_key()))
+  harness.stdio.println(handoff.handoff.target_persona_or_human.kind)
+  harness.stdio.println(handoff.key == agent_state_handoff_key())
+  harness.stdio.println(handoff.handoff.allowed_side_effects[0] == "publish_release_notes")
+  agent_state_delete(harness.agent, handle, "ledger.md")
+  harness.stdio.println(agent_state_read(harness.agent, handle, "ledger.md") == nil)
+  harness.fs.delete(root)
+}

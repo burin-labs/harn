@@ -1,0 +1,249 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { agent_stance_default_consent_check } from "std/agent/stance"
+import { with_llm_script } from "std/testing"
+
+fn has_tool(tools, name) {
+  for item in tools ?? [] {
+    if item?.function?.name == name || item?.name == name {
+      return true
+    }
+  }
+  return false
+}
+
+fn events_of(events, kind) {
+  return events.filter({ event -> event.type == kind })
+}
+
+fn stance_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "look",
+    "read a file",
+    {
+      parameters: {},
+      annotations: {kind: "read", side_effect_level: "read_only"},
+      handler: { _args -> "contents" },
+    },
+  )
+  tools = tool_define(
+    tools,
+    "search",
+    "search the repo",
+    {
+      parameters: {},
+      annotations: {kind: "search", side_effect_level: "read_only"},
+      handler: { _args -> "hits" },
+    },
+  )
+  tools = tool_define(
+    tools,
+    "edit",
+    "edit a file",
+    {
+      parameters: {},
+      annotations: {kind: "edit", side_effect_level: "workspace_write"},
+      handler: { _args -> "edited" },
+    },
+  )
+  tools = tool_define(
+    tools,
+    "run",
+    "run a command",
+    {
+      parameters: {},
+      annotations: {kind: "execute", side_effect_level: "process_exec"},
+      handler: { _args -> "ran" },
+    },
+  )
+  tools = tool_define(
+    tools,
+    "mystery",
+    "unannotated tool",
+    {parameters: {}, handler: { _args -> "?" }},
+  )
+  return tools
+}
+
+fn policy_annotated_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "inspect",
+    "inspect project state",
+    {parameters: {}, handler: { _args -> "state" }},
+  )
+  tools = tool_define(
+    tools,
+    "mutate",
+    "mutate project state",
+    {parameters: {}, handler: { _args -> "mutated" }},
+  )
+  tools = tool_define(
+    tools,
+    "unknown",
+    "unannotated project tool",
+    {parameters: {}, handler: { _args -> "?" }},
+  )
+  return tools
+}
+
+/**
+ * Deterministic consent check: grant only when the justification cites
+ * explicit user consent (stands in for the default LLM verdict).
+ */
+fn scripted_consent(justification, _session_id) {
+  if contains(justification, "user said go ahead") {
+    return {verdict: "grant", consent: "express", reason: "user approved"}
+  }
+  return {verdict: "deny", consent: "none", reason: "no consent found"}
+}
+
+pipeline default(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      {tool_calls: [{id: "look-1", name: "look", arguments: {}}]},
+      {
+        tool_calls: [
+          {
+            id: "esc-1",
+            name: "request_write_access",
+            arguments: {justification: "I want to fix it"},
+          },
+        ],
+      },
+      {
+        tool_calls: [
+          {
+            id: "esc-2",
+            name: "request_write_access",
+            arguments: {justification: "user said go ahead"},
+          },
+        ],
+      },
+      {tool_calls: [{id: "edit-1", name: "edit", arguments: {}}]},
+      {text: "done ##DONE##"},
+    ],
+    { ->
+      const session = "read-only-stance-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "no code changes yet, just research the bug",
+          nil,
+          {
+            provider: "mock",
+            tools: stance_tools(),
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 6,
+            session_id: session,
+            read_only_stance: {enabled: true, armed: true, consent_check: scripted_consent},
+          },
+        ) },
+      )
+      const calls = harness.llm.mock_calls()
+      const first_tools = calls[0].tools
+      harness.stdio.println(has_tool(first_tools, "look"))
+      harness.stdio.println(has_tool(first_tools, "search"))
+      harness.stdio.println(has_tool(first_tools, "request_write_access"))
+      harness.stdio.println(has_tool(first_tools, "edit"))
+      harness.stdio.println(has_tool(first_tools, "run"))
+      harness.stdio.println(has_tool(first_tools, "mystery"))
+      const third_tools = calls[2].tools
+      harness.stdio.println(has_tool(third_tools, "edit"))
+      const fourth_tools = calls[3].tools
+      harness.stdio.println(has_tool(fourth_tools, "edit"))
+      const stance_events = events_of(captured.events, "stance_transition")
+      const phases = stance_events.map({ event -> event.phase })
+      harness.stdio.println(contains(phases, "armed"))
+      harness.stdio.println(contains(phases, "write_access_denied"))
+      harness.stdio.println(contains(phases, "write_access_granted"))
+      harness.stdio.println(contains(phases, "disarmed"))
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        tool_calls: [
+          {
+            id: "policy-esc-1",
+            name: "request_write_access",
+            arguments: {justification: "I want to edit"},
+          },
+        ],
+      },
+      {text: "done ##DONE##"},
+    ],
+    { ->
+      const session = "read-only-stance-policy-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "inspect only",
+          nil,
+          {
+            provider: "mock",
+            tools: policy_annotated_tools(),
+            tool_format: "native",
+            loop_until_done: true,
+            session_id: session,
+            policy: {
+              tools: ["inspect", "mutate", "unknown"],
+              tool_annotations: {
+                inspect: {kind: "read", side_effect_level: "read_only"},
+                mutate: {kind: "edit", side_effect_level: "workspace_write"},
+              },
+            },
+            read_only_stance: {enabled: true, armed: true, consent_check: scripted_consent},
+          },
+        ) },
+      )
+      const first_tools = harness.llm.mock_calls()[0].tools
+      harness.stdio.println(has_tool(first_tools, "inspect"))
+      harness.stdio.println(has_tool(first_tools, "mutate"))
+      harness.stdio.println(has_tool(first_tools, "unknown"))
+      harness.stdio.println(has_tool(first_tools, "request_write_access"))
+      const policy_phases = events_of(captured.events, "stance_transition").map(
+        { event -> event.phase },
+      )
+      harness.stdio.println(contains(policy_phases, "write_access_denied"))
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [{text: "{\"consent\":\"express\",\"reasoning\":\"user approved\"}"}],
+    { ->
+      const session = harness.agent.open(
+        "read-only-stance-default-consent-" + harness.random.uuid(),
+      )
+      harness.agent.reset(session)
+      harness.agent.inject(session, {role: "user", content: "please make the change"})
+      const verdict = agent_stance_default_consent_check(
+        harness.agent,
+        harness.llm,
+        "the user requested an edit",
+        session,
+        {provider: "mock"},
+      )
+      harness.stdio.println(verdict.verdict)
+      harness.stdio.println(verdict.consent)
+    },
+  )
+}
+// Turn 1: armed window — read-only tools + escape hatch only.
+// Turn 3 request denied (no consent) — still narrowed on turn 3's call.
+// Turn 4: grant landed post-turn — edit is back.
+// Events tell the story: one typed stream, distinguished by phase.
+// Policy annotations are honored when registry entries are host/project tools
+// without direct Harn metadata; missing annotations still fail closed.
+// The escape hatch remains policy-admitted even when the host supplied a
+// restrictive policy.tools list.

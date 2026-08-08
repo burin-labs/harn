@@ -1,0 +1,5 @@
+{
+  "mode": "mock",
+  "net_gets": {"https://example.test/anywhere": "open-body"},
+  "expect_stdio": "through=open-body\ncompetitor_blocked=true\n"
+}

@@ -1,0 +1,37 @@
+import { preset_run_command } from "std/tool_hooks"
+
+/**
+ * preset_hooks_basic_rewrite (TH-07 #1900).
+ *
+ * Single-concept fixture: a registered catalogue rule matches a bare
+ * `cargo build`, the default rewrite-with-audit mode rewrites the
+ * command (`--target-dir target-shared`), forwards the rewritten
+ * command to `inner`, and queues a `tool_rewritten` reminder. Auditable
+ * via `pipeline_lifecycle_audit_log_take`.
+ */
+pipeline default(harness: Harness) {
+  harness.obs.pipeline_lifecycle_audit_log_take()
+  const inner = { args -> {ok: true, ran: args.command} }
+  const wrapper = preset_run_command(harness, {stacks: ["rust"], inner: inner})
+  const result = wrapper({command: "cargo build --release"})
+  /* The envelope reports rewrite + rule provenance. */
+  harness.stdio.println(result.action)
+  harness.stdio.println(result.rule_id)
+  harness.stdio.println(result.catalogue_id)
+  harness.stdio.println(result.severity)
+  harness.stdio.println(result.original_command)
+  harness.stdio.println(result.command)
+  /* inner saw the rewritten command, not the original. */
+  harness.stdio.println(result.result.ran)
+  /* Rewrite mode emits exactly two audit entries: tool_rewrite +
+   * tool_hooks.reminder_injected. The reminder body names the rewrite
+   * so an agent can paraphrase it back to the user. */
+  const log = harness.obs.pipeline_lifecycle_audit_log_take()
+  harness.stdio.println(len(log))
+  harness.stdio.println(log[0].kind)
+  harness.stdio.println(log[0].payload.rule_id)
+  harness.stdio.println(log[1].kind)
+  harness.stdio.println(log[1].payload.tags[0])
+  harness.stdio.println(contains(log[1].payload.body, "rewritten"))
+  harness.stdio.println(contains(log[1].payload.body, "target-shared"))
+}

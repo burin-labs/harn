@@ -1,0 +1,1 @@
+set `allow_legacy_sha1: true` to verify HMAC-SHA1 signatures

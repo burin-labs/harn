@@ -1,0 +1,10 @@
+pipeline test(harness: Harness, task) {
+  const result = harness.runtime.trigger_test_harness("orchestrator_circuit_breaker_trips")
+  harness.stdio.println(result.ok)
+  harness.stdio.println(len(result.attempts) == 5)
+  harness.stdio.println(result.dlq[0].attempts == 5)
+  harness.stdio.println(
+    result.details.opened && result.details.fast_failed
+      && result.details.probe_closes_after_success,
+  )
+}

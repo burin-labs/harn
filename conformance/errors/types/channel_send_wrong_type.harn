@@ -1,0 +1,3 @@
+pipeline default(harness: Harness) {
+  harness.runtime.send(42, "value")
+}

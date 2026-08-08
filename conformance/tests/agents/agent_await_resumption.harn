@@ -1,0 +1,61 @@
+import { agent_capture_events } from "std/agent/events"
+import "std/agent/workers"
+import { with_llm_script } from "std/testing"
+
+pipeline main(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        tool_calls: [
+          {
+            id: "park_1",
+            name: "agent_await_resumption",
+            arguments: {
+              reason: "waiting on review",
+              conditions: {timeout: {duration_minutes: 5, on_timeout: "resume_with_summary"}},
+            },
+          },
+        ],
+        input_tokens: 7,
+        output_tokens: 3,
+      },
+    ],
+    { ->
+      const session_id = "await-resumption-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session_id,
+        fn() {
+          let handle = sub_agent_run(
+            harness,
+            "Park until a reviewer responds.",
+            {
+              provider: "mock",
+              background: true,
+              session_id: session_id,
+              tool_format: "native",
+              max_iterations: 3,
+            },
+          )
+          return wait_agent(harness.agent, handle)
+        },
+      )
+      const suspended = captured.result
+      const payload = suspended?.result
+      const audit = captured.events.filter(
+        { event -> event.type == "tool_call_audit" && event.tool_name == "agent_await_resumption" },
+      )
+      harness.stdio.println(suspended?.status)
+      harness.stdio.println(payload?.status)
+      harness.stdio.println(payload?.reason)
+      harness.stdio.println(payload?.initiator)
+      harness.stdio.println(payload?.conditions?.timeout?.duration_minutes)
+      harness.stdio.println(payload?.conditions?.timeout?.on_timeout)
+      harness.stdio.println(payload?.handle?.id == suspended?.id)
+      harness.stdio.println(len(audit) == 1)
+      harness.stdio.println(audit[0]?.audit?.reason)
+      harness.stdio.println(audit[0]?.audit?.initiator)
+    },
+  )
+}

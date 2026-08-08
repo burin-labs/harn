@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/read_range.response.json",
+  "title": "code_index.read_range response",
+  "description": "Read content. `start`/`end` are present only when the request supplied either bound.",
+  "type": "object",
+  "properties": {
+    "content": { "type": "string" },
+    "start": { "type": "integer", "minimum": 0 },
+    "end": { "type": "integer", "minimum": 0 }
+  },
+  "required": ["content"],
+  "additionalProperties": false
+}

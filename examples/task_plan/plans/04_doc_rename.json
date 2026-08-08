@@ -1,0 +1,34 @@
+{
+  "schema_version": "1",
+  "objective": "Propagate a public API rename across docs and examples",
+  "entry": "enumerate",
+  "nodes": {
+    "enumerate": {
+      "kind": "search",
+      "purpose": "Find every reference to the old name",
+      "prompt": "Search docs/, examples/, and README.md for the old symbol name. Emit the list of files and line numbers.",
+      "tools": ["grep", "read"]
+    },
+    "rewrite": {
+      "kind": "workflow_map",
+      "purpose": "Rewrite each match in parallel",
+      "prompt": "Within each file, replace the old symbol with the new one and preserve surrounding prose tone.",
+      "tools": ["read", "edit"],
+      "effects": ["writes_files"],
+      "map": {"item_artifact_kind": "match_file", "max_concurrency": 4}
+    },
+    "verify": {
+      "kind": "verify",
+      "verify": {
+        "command": "scripts/check-docs-snippets.sh",
+        "expect_status": 0,
+        "assert_text": "all snippets compile"
+      }
+    }
+  },
+  "edges": [
+    {"from": "enumerate", "to": "rewrite"},
+    {"from": "rewrite", "to": "verify"}
+  ],
+  "capabilities": {"tools": ["read", "edit", "grep", "run"], "side_effect_level": "writes_files"}
+}

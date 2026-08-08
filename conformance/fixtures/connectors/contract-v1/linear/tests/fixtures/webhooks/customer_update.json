@@ -1,0 +1,1 @@
+{"action":"update","type":"Customer","organizationId":"org_123","webhookTimestamp":1776859200000,"webhookId":"wh_customer","actor":{"id":"usr_1","name":"Ada"},"data":{"id":"CUS-1","name":"Acme"}}

@@ -1,0 +1,10 @@
+{
+  "mode": "mock",
+  "fs_reads": {"/present.txt": "ok"},
+  "expect_calls": [
+    {"sub_handle": "fs", "method": "exists", "args": ["/present.txt"]},
+    {"sub_handle": "stdio", "method": "println", "args": ["true"]},
+    {"sub_handle": "fs", "method": "exists", "args": ["/missing.txt"]},
+    {"sub_handle": "stdio", "method": "println", "args": ["false"]}
+  ]
+}

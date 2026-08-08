@@ -1,0 +1,138 @@
+# simple heredoc body
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"package main\n\nimport \"fmt\"\n\nfunc main() {\n    fmt.Println(\"hello\")\n}","path":"main.go"}
+  prose=""
+  answer=null
+  done=null
+# heredoc body with backticks
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"package manifest\n\nimport \"testing\"\n\nfunc TestYAML(t *testing.T) {\n    yaml := `\nversion: \"1.0\"\nservices:\n  web:\n    image: nginx\n`\n    if yaml == \"\" {\n        t.Fatal(\"empty\")\n    }\n}","path":"parser_test.go"}
+  prose=""
+  answer=null
+  done=null
+# heredoc body with quotes and backslashes
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"def test_escaping():\n    s = \"hello \\\"world\\\"\"\n    path = \"C:\\\\Users\\\\test\"\n    raw = r\"no\\escaping\\here\"\n    assert len(s) > 0","path":"test.py"}
+  prose=""
+  answer=null
+  done=null
+# two heredocs mixed with regular args
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"patch","new_string":"func fixed() {\n    return &Result{}\n}","old_string":"func broken() {\n    return nil\n}","path":"main.go"}
+  prose=""
+  answer=null
+  done=null
+# close line carrying brace and comma
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"ops":[{"function_name":"TestInvalidYaml","new_body":"func TestInvalidYaml(t *testing.T) {\n\tassertParseError(t, \"invalid yaml\")\n}","op":"replace_body"},{"function_name":"TestMissingRequiredFields","new_body":"func TestMissingRequiredFields(t *testing.T) {\n\tassertParseError(t, \"version: 1\")\n}","op":"replace_body"}],"path":"internal/manifest/parser_extra_test.go"}
+  prose=""
+  answer=null
+  done=null
+# close line carrying every remaining closer
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"ops":[{"function_name":"F","new_body":"body","op":"replace_body"}],"path":"a.go"}
+  prose=""
+  answer=null
+  done=null
+# tag prefix of an identifier does not close
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"let EOFunction = 1;\nlet x = 2;","path":"a.rs"}
+  prose=""
+  answer=null
+  done=null
+# near collision tag line does not close
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"line one\nEOFX is not the tag\nline three","path":"a.zig"}
+  prose=""
+  answer=null
+  done=null
+# indented close tag terminates
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"package main","path":"a.go"}
+  prose=""
+  answer=null
+  done=null
+# shift operators in the body
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"const std = @import(\"std\");\npub fn pack(a: u32, b: u32) u32 {\n    return (a << 2) | (b >> 1);\n}\ntest \"shift\" {\n    var x: u32 = 1;\n    x <<= 4;\n    try std.testing.expect(x == 16);\n}","path":"src/writer.zig"}
+  prose=""
+  answer=null
+  done=null
+# body line starting with double angle
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"pub fn f(x: u32) u32 {\n    return x\n        << 2;\n}","path":"src/writer.zig"}
+  prose=""
+  answer=null
+  done=null
+# body containing another heredoc opener
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"create","content":"Example tool call:\ncontent: <<INNER\nsome inner text\nINNER\nend of example","path":"doc.md"}
+  prose=""
+  answer=null
+  done=null
+# top level chunker steps over a shift body
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"create","content":"pub fn f(a: u32) u32 {\n    return a << 3;\n}","path":"src/writer.zig"}
+  prose=""
+  answer=null
+  done=null
+# bare heredoc call with no wrapper
+  calls=1 errors=0 violations=0 stray=1
+  call edit {"action":"replace_range","content":"import pytest\n\ndef test_one():\n    assert 1 == 1","path":"tests/test.py","range_end":4,"range_start":1}
+  prose=""
+  answer=null
+  done=null
+# heredoc inside a tool_call wrapper
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"create","content":"def foo():\n    return 1","path":"a.py"}
+  prose=""
+  answer=null
+  done=null
+# literal close tag inside the heredoc body
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"create","content":"Wrap each call like </tool_call> here.\nMore body lines.","path":"doc.md"}
+  prose=""
+  answer=null
+  done=null
+# bash heredoc inside a string argument
+  calls=1 errors=0 violations=0 stray=0
+  call run {"command":"cat <<EOF\nsome heredoc body\nEOF"}
+  prose=""
+  answer=null
+  done=null
+# literal close tag inside a string argument
+  calls=1 errors=0 violations=0 stray=0
+  call run {"command":"echo </tool_call> done"}
+  prose=""
+  answer=null
+  done=null
+# multiple calls with heredocs
+  calls=2 errors=0 violations=0 stray=2
+  call edit {"action":"create","content":"package main","path":"test.go"}
+  call run {"command":"go test ./..."}
+  prose="I'll create the file and then run the tests."
+  answer=null
+  done=null
+# three edits then a run
+  calls=4 errors=0 violations=0 stray=4
+  call edit {"action":"create","content":"package a","path":"a.go"}
+  call edit {"action":"create","content":"package b","path":"b.go"}
+  call edit {"action":"create","content":"package c","path":"c.go"}
+  call run {"command":"go build ./..."}
+  prose="I'll create all three files."
+  answer=null
+  done=null
+# prose extraction around heredoc calls
+  calls=2 errors=0 violations=0 stray=2
+  call edit {"action":"create","content":"package main","path":"main.go"}
+  call run {"command":"go build"}
+  prose="Here's my plan.\n\nThat should compile. Let me verify."
+  answer=null
+  done=null
+# go table test body with backticks then run
+  calls=2 errors=0 violations=0 stray=2
+  call edit {"action":"create","content":"package manifest\n\nimport (\n\t\"testing\"\n)\n\nfunc TestParseManifest(t *testing.T) {\n\ttests := []struct {\n\t\tname    string\n\t\tinput   string\n\t\twant    string\n\t\twantErr bool\n\t}{\n\t\t{\n\t\t\tname:  \"basic\",\n\t\t\tinput: `{\"name\": \"test\"}`,\n\t\t\twant:  \"test\",\n\t\t},\n\t\t{\n\t\t\tname:    \"empty\",\n\t\t\tinput:   ``,\n\t\t\twantErr: true,\n\t\t},\n\t}\n\tfor _, tt := range tests {\n\t\tt.Run(tt.name, func(t *testing.T) {\n\t\t\tgot, err := Parse(tt.input)\n\t\t\tif (err != nil) != tt.wantErr {\n\t\t\t\tt.Errorf(\"Parse() error = %v, wantErr %v\", err, tt.wantErr)\n\t\t\t\treturn\n\t\t\t}\n\t\t\tif got != tt.want {\n\t\t\t\tt.Errorf(\"Parse() = %v, want %v\", got, tt.want)\n\t\t\t}\n\t\t})\n\t}\n}","path":"internal/manifest/parser_test.go"}
+  call run {"command":"go test ./internal/manifest/ -v"}
+  prose="I'll create the test file with table-driven tests.\n\nNow let me run the tests."
+  answer=null
+  done=null

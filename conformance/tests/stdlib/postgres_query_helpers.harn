@@ -1,0 +1,268 @@
+import "std/postgres"
+import {
+  columns,
+  exec,
+  ident,
+  ident_path,
+  jsonb_object,
+  many,
+  named,
+  named_raw_sql,
+  named_sql,
+  nullable_timestamptz_json,
+  nullable_uuid_text,
+  one,
+  quote_identifier,
+  raw_sql,
+  run,
+  select_clause,
+  sql,
+  sql_and,
+  sql_fragment,
+  sql_not,
+  sql_or,
+  timestamptz_json,
+  uuid_text,
+} from "std/postgres/query"
+
+pipeline default(harness: Harness) {
+  const list_query = named_sql(
+    "list_receipts",
+    "many",
+    """
+{projection}
+FROM {table}
+WHERE tenant_id = {tenant_id}::uuid
+  OR owner_tenant_id = {tenant_id}::uuid
+ORDER BY {created_column} DESC
+LIMIT {limit}
+""",
+    {
+      projection: select_clause(
+        [
+          uuid_text("id"),
+          uuid_text("tenant_id"),
+          "payload",
+          nullable_timestamptz_json("finished_at"),
+          timestamptz_json("created_at"),
+        ],
+      ),
+      table: ident("receipts"),
+      tenant_id: "tenant-a",
+      created_column: ident("created_at"),
+      limit: 25,
+    },
+    {read_only: true},
+  )
+  const get_query = named_sql(
+    "get_receipt",
+    "one",
+    "SELECT {id_projection} FROM {table} WHERE id = {id}::uuid",
+    {id_projection: uuid_text("id"), table: ident("receipts"), id: "r1"},
+  )
+  const update_query = named_sql(
+    "mark_receipt_read",
+    "exec",
+    "UPDATE {table} SET {status_column} = {status} WHERE id = {id}::uuid",
+    {table: ident("receipts"), status_column: ident("status"), status: "read", id: "r1"},
+  )
+  const db = harness.testing.pg_mock_pool(
+    [
+      {sql: get_query.sql, params: get_query.params, rows: [{id: "r1"}]},
+      {
+        sql: list_query.sql,
+        params: list_query.params,
+        rows: [
+          {
+            id: "r1",
+            tenant_id: "tenant-a",
+            payload: {ok: true},
+            finished_at: nil,
+            created_at: "2026-06-05T12:00:00Z",
+          },
+        ],
+      },
+      {sql: update_query.sql, params: update_query.params, rows_affected: 1},
+    ],
+  )
+  const row = one(db, get_query)
+  harness.stdio.println(row.id)
+  const rows = many(db, list_query)
+  harness.stdio.println(rows[0].tenant_id)
+  harness.stdio.println(rows[0].payload.ok)
+  const result = exec(db, update_query)
+  harness.stdio.println(result.rows_affected)
+  const named_rows = run(
+    db,
+    named("list_receipts_named", "many", list_query.sql, list_query.params),
+  )
+  harness.stdio.println(named_rows[0].created_at)
+  const calls = pg_mock_calls(db)
+  harness.stdio.println(len(calls))
+  harness.stdio.println(calls[0].sql)
+  harness.stdio.println(calls[0].params[0])
+  harness.stdio.println(calls[2].execute)
+  harness.stdio.println(len(list_query.params))
+  harness.stdio.println(contains(list_query.sql, "owner_tenant_id = $1::uuid"))
+  const brace_query = sql("SELECT '{{}}' AS empty, {value} AS value", {value: "ok"})
+  harness.stdio.println(brace_query.sql)
+  harness.stdio.println(brace_query.params?.[0])
+  const path_query = sql(
+    "SELECT * FROM {table}",
+    {table: ident_path(["tenant data", "receipts\"live"])},
+  )
+  harness.stdio.println(path_query.sql)
+  harness.stdio.println(quote_identifier("select"))
+  const ordinary_dict = sql(
+    "SELECT {payload}",
+    {payload: {_type: "std/postgres/query.sql_fragment.v1", sql: "danger"}},
+  )
+  harness.stdio.println(ordinary_dict.sql)
+  harness.stdio.println(ordinary_dict.params?.[0]?.sql)
+  const unsafe_ident = try {
+    uuid_text("bad;drop")
+  }
+  harness.stdio.println(is_err(unsafe_ident))
+  const missing_value = try {
+    sql("SELECT {missing}", {})
+  }
+  harness.stdio.println(is_err(missing_value))
+  const invalid_placeholder = try {
+    sql("SELECT {bad-name}", {})
+  }
+  harness.stdio.println(is_err(invalid_placeholder))
+  const unmatched_brace = try {
+    sql("SELECT }", {})
+  }
+  harness.stdio.println(is_err(unmatched_brace))
+  const exec_options = try {
+    exec(db, update_query + {options: {read_only: true}})
+  }
+  harness.stdio.println(is_err(exec_options))
+  harness.stdio.println(regex_match("options", to_string(unwrap_err(exec_options))) != nil)
+  const named_error = try {
+    many(db, {name: "missing_query", sql: "SELECT missing", params: []})
+  }
+  harness.stdio.println(is_err(named_error))
+  harness.stdio.println(regex_match("missing_query", to_string(unwrap_err(named_error))) != nil)
+  const columns_query = sql(
+    "SELECT {projection} FROM receipts WHERE tenant_id = {tenant_id}::uuid",
+    {
+      projection: columns([uuid_text("id"), timestamptz_json("created_at"), "payload"]),
+      tenant_id: "tenant-a",
+    },
+  )
+  harness.stdio.println(columns_query.sql)
+  harness.stdio.println(columns_query.params?.[0])
+  const empty_columns = try {
+    columns([])
+  }
+  harness.stdio.println(is_err(empty_columns))
+  const bad_columns = try {
+    columns([123])
+  }
+  harness.stdio.println(is_err(bad_columns))
+  const qualified = columns(
+    [
+      uuid_text("vaults.id"),
+      nullable_uuid_text("items.owner_id"),
+      timestamptz_json("vaults.created_at"),
+      nullable_timestamptz_json("items.expires_at"),
+    ],
+  )
+  harness.stdio.println(qualified.sql)
+  const bad_qualified = try {
+    timestamptz_json("vaults.bad;drop")
+  }
+  harness.stdio.println(is_err(bad_qualified))
+  const bad_nullable_uuid = try {
+    nullable_uuid_text("items.bad;drop")
+  }
+  harness.stdio.println(is_err(bad_nullable_uuid))
+  // raw_sql: braces are literal, no {name} scanning, positional params.
+  const raw_query = raw_sql(
+    "SELECT data#>>'{}' AS data FROM events WHERE tags && '{a,b}'::text[] AND tenant_id = $1::uuid",
+    ["tenant-a"],
+  )
+  harness.stdio.println(raw_query.sql)
+  harness.stdio.println(raw_query.params?.[0])
+  harness.stdio.println(len(raw_query.params ?? []))
+  // A bare {path} that would be a placeholder in sql(...) is left untouched.
+  const raw_jsonb = raw_sql("UPDATE t SET d = jsonb_set(d, '{path}', $1)", [42])
+  harness.stdio.println(raw_jsonb.sql)
+  harness.stdio.println(raw_jsonb.params?.[0])
+  // named_raw_sql carries name + mode and renders verbatim.
+  const raw_named = named_raw_sql("scan_events", "many", "SELECT '{}'::jsonb AS empty", [])
+  harness.stdio.println(raw_named.sql)
+  harness.stdio.println(raw_named.name)
+  harness.stdio.println(raw_named.mode)
+  const raw_empty = try {
+    raw_sql("   ", [])
+  }
+  harness.stdio.println(is_err(raw_empty))
+  const raw_named_empty = try {
+    named_raw_sql("nope", "one", "", [])
+  }
+  harness.stdio.println(is_err(raw_named_empty))
+  harness.stdio.println(regex_match("nope", to_string(unwrap_err(raw_named_empty))) != nil)
+  const record_projection = jsonb_object(
+    [
+      {key: "id", value: sql_fragment("{id}::text", {id: ident_path(["receipts", "id"])})},
+      {key: "owner's note", value: ident_path(["receipts", "note"])},
+      {
+        key: "created_at",
+        value: sql_fragment(
+          "to_json({created_at})#>>'{{}}'",
+          {created_at: ident_path(["receipts", "created_at"])},
+        ),
+      },
+    ],
+  )
+  const active_scope = sql_and(
+    [
+      sql_or(
+        [
+          sql_fragment("{tenant} IS NULL", {tenant: ident_path(["receipts", "tenant_id"])}),
+          sql_fragment(
+            "{tenant} = {owner}",
+            {
+              tenant: ident_path(["receipts", "tenant_id"]),
+              owner: ident_path(["receipts", "owner_tenant_id"]),
+            },
+          ),
+        ],
+      ),
+      sql_not(sql_fragment("{status} = 'archived'", {status: ident_path(["receipts", "status"])})),
+    ],
+  )
+  const composed_query = sql(
+    "SELECT {record} AS record FROM {table} WHERE {predicate} AND id = {id}::uuid",
+    {record: record_projection, table: ident("receipts"), predicate: active_scope, id: "r1"},
+  )
+  harness.stdio.println(composed_query.sql)
+  harness.stdio.println(composed_query.params?.[0])
+  const fragment_with_bound_value = try {
+    sql_fragment("{column} = {value}", {column: ident("id"), value: "r1"})
+  }
+  harness.stdio.println(is_err(fragment_with_bound_value))
+  const empty_and = try {
+    sql_and([])
+  }
+  harness.stdio.println(is_err(empty_and))
+  const empty_jsonb_object = try {
+    jsonb_object([])
+  }
+  harness.stdio.println(is_err(empty_jsonb_object))
+  const missing_jsonb_value = try {
+    jsonb_object([{key: "id"}])
+  }
+  harness.stdio.println(is_err(missing_jsonb_value))
+  const raw_predicate_string = try {
+    sql_and(["archived = false"])
+  }
+  harness.stdio.println(is_err(raw_predicate_string))
+  const raw_jsonb_value_string = try {
+    jsonb_object([{key: "id", value: "id::text"}])
+  }
+  harness.stdio.println(is_err(raw_jsonb_value_string))
+}

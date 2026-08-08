@@ -1,0 +1,159 @@
+import { llm_text, with_llm_script } from "std/testing"
+
+pipeline test(harness: Harness, task) {
+  const base = transcript_from_messages(
+    [
+      {role: "user", content: "Investigate parser drift."},
+      {role: "assistant", content: "I inspected the lexer and parser entrypoints."},
+      {role: "user", content: "Focus on diagnostics next."},
+      {role: "assistant", content: "I found three likely hotspots."},
+    ],
+  )
+  const truncated = harness.agent.compact_transcript(
+    base,
+    {strategy: "truncate", keep_last: 1, target_tokens: 1},
+  )
+  harness.stdio.println(transcript_summary(truncated)?.contains("auto-compacted"))
+  harness.stdio.println(
+    transcript_events_by_kind(truncated, "compaction")[0].metadata?.strategy == "truncate",
+  )
+  const truncate_assets = transcript_assets(truncated)
+  harness.stdio.println(len(truncate_assets) == 1)
+  harness.stdio.println(len(transcript_messages(truncate_assets[0].data)) == 4)
+  let verbose_lines = ""
+  for i in range(0, 40) {
+    verbose_lines = verbose_lines + "verbose line " + to_string(i) + "\n"
+  }
+  const masked_base = transcript_from_messages(
+    [
+      {role: "assistant", content: "I ran the generator."},
+      {role: "user", content: "error: compile failed\n" + verbose_lines},
+      {role: "assistant", content: "I will inspect the failure."},
+      {role: "user", content: "All right."},
+    ],
+  )
+  const masked = harness.agent.compact_transcript(
+    masked_base,
+    {strategy: "observation_mask", keep_last: 1, target_tokens: 1},
+  )
+  harness.stdio.println(transcript_summary(masked)?.contains("masked"))
+  harness.stdio.println(
+    transcript_events_by_kind(masked, "compaction")[0].metadata?.strategy == "observation_mask",
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text("LLM compact summary"),
+      llm_text("policy extension summary"),
+      llm_text("policy replacement summary"),
+    ],
+    { ->
+      const llm_compacted = harness.agent.compact_transcript(
+        base,
+        {
+          provider: "mock",
+          strategy: "llm",
+          keep_last: 1,
+          summarize_prompt: "compact_transcript_summary.harn.prompt",
+        },
+      )
+      harness.stdio.println(transcript_summary(llm_compacted)?.contains("LLM compact summary"))
+      const llm_calls = harness.llm.mock_calls()
+      const prompt = llm_calls[0].messages[0].content
+      harness.stdio.println(prompt.contains("Compact prompt from asset."))
+      harness.stdio.println(prompt.contains("Archived count: 2"))
+      const policy_extended = harness.agent.compact_transcript(
+        base,
+        {
+          provider: "mock",
+          strategy: "llm",
+          keep_last: 1,
+          instructions: "Preserve parser TODOs.",
+          author: "host",
+        },
+      )
+      const extended_prompt = harness.llm.mock_calls()[1].messages[0].content
+      const extended_event = transcript_events_by_kind(policy_extended, "compaction")[0]
+      harness.stdio.println(extended_prompt.contains("Additional compaction instructions"))
+      harness.stdio.println(extended_event.metadata?.instruction_mode == "extend")
+      harness.stdio.println(extended_event.metadata?.instruction_source == "host")
+      harness.stdio.println(
+        extended_event.metadata?.compaction_policy?.instructions == "Preserve parser TODOs.",
+      )
+      const policy_replaced = harness.agent.compact_transcript(
+        base,
+        {
+          provider: "mock",
+          strategy: "llm",
+          keep_last: 1,
+          instructions: "Only keep failing verification details.",
+          extend_default_instructions: false,
+        },
+      )
+      const replacement_prompt = harness.llm.mock_calls()[2].messages[0].content
+      harness.stdio.println(replacement_prompt.contains("according to these instructions"))
+      harness.stdio.println(!replacement_prompt.contains("Preserve goals, constraints"))
+      harness.stdio.println(
+        transcript_events_by_kind(policy_replaced, "compaction")[0].metadata?.instruction_mode
+          == "replace",
+      )
+      const stream_session = harness.agent.open("compact-stream-session")
+      harness.agent.inject(stream_session, {role: "user", content: "one"})
+      harness.agent.inject(stream_session, {role: "assistant", content: "two"})
+      harness.agent.inject(stream_session, {role: "user", content: "three"})
+      harness.agent.subscribe(
+        stream_session,
+        { ev ->
+          if ev?.type == "transcript_compacted" {
+            harness.agent.inject(
+              stream_session,
+              {role: "assistant", content: "LIVE_COMPACTION_EVENT"},
+            )
+          }
+        },
+      )
+      const session_snapshot = harness.agent.snapshot(stream_session) ?? {}
+      const _ = harness.agent.compact_transcript(
+        session_snapshot,
+        {strategy: "truncate", keep_last: 1, target_tokens: 1},
+      )
+      harness.stdio.println(
+        json_stringify(transcript_messages(harness.agent.snapshot(stream_session) ?? {})).contains(
+          "LIVE_COMPACTION_EVENT",
+        ),
+      )
+      const run = run_record(
+        {
+          _type: "run_record",
+          id: "compact-run",
+          workflow_id: "wf",
+          status: "completed",
+          stages: [
+            {id: "stage-truncate", node_id: "truncate", transcript: truncated},
+            {id: "stage-mask", node_id: "mask", transcript: masked},
+            {id: "stage-llm", node_id: "llm", transcript: llm_compacted},
+          ],
+        },
+      )
+      harness.stdio.println(run.observability?.schema_version == 4)
+      harness.stdio.println(len(run.observability?.compaction_events) == 3)
+      let saw_truncate = false
+      let saw_mask = false
+      let saw_llm = false
+      for ev in run.observability?.compaction_events {
+        if ev.stage_id == "stage-truncate" && ev.strategy == "truncate" && ev.available {
+          saw_truncate = true
+        }
+        if ev.stage_id == "stage-mask" && ev.strategy == "observation_mask" && ev.available {
+          saw_mask = true
+        }
+        if ev.stage_id == "stage-llm" && ev.strategy == "llm" && ev.available {
+          saw_llm = true
+        }
+      }
+      harness.stdio.println(saw_truncate)
+      harness.stdio.println(saw_mask)
+      harness.stdio.println(saw_llm)
+    },
+  )
+}

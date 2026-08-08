@@ -1,0 +1,65 @@
+import { task_plan_compile } from "std/agent/task_plan"
+import { workflow_execute } from "std/workflow/execute"
+
+pipeline main(harness: Harness) {
+  harness.testing.clear()
+  harness.testing.respond(
+    "interaction",
+    "approval_response",
+    {approved: true, reviewer: "lead", reason: "ready"},
+  )
+  const argv = if harness.system.platform().os == "windows" {
+    ["cmd", "/C", "echo|set /p=task-plan-command-ok"]
+  } else {
+    ["printf", "task-plan-command-ok"]
+  }
+  const plan = {
+    schema_version: "1",
+    objective: "Execute static task-plan modes",
+    entry: "gate",
+    nodes: {
+      gate: {
+        kind: "human_gate",
+        purpose: "Require operator approval before running deterministic work",
+        human_gate: {approval_id: "ship_static_modes", prompt: "Approve static task-plan modes"},
+      },
+      cmd: {
+        kind: "deterministic_command",
+        purpose: "Run a deterministic command without an LLM turn",
+        command: {tool: "run", args: argv},
+      },
+      compact: {
+        kind: "compact",
+        purpose: "Compact accumulated artifacts",
+        compact: {threshold_tokens: 1, preserve_recent: 1},
+      },
+    },
+    edges: [{from: "gate", to: "cmd", branch: "approved"}, {from: "cmd", to: "compact"}],
+    capabilities: {tools: ["run"], side_effect_level: "process_exec"},
+  }
+  const compiled = task_plan_compile(plan)
+  harness.stdio.println(compiled.ok)
+  const validation = workflow_validate(compiled.workflow)
+  harness.stdio.println(validation.valid)
+  const result = workflow_execute(
+    harness,
+    "Execute static task-plan modes",
+    compiled.workflow,
+    [{id: "seed", kind: "summary", text: "seed artifact"}],
+    {max_steps: 4},
+  )
+  harness.stdio.println(result.status)
+  harness.stdio.println(len(result.run.stages))
+  const gate = result.run.stages[0]
+  const cmd = result.run.stages[1]
+  const compact = result.run.stages[2]
+  harness.stdio.println(gate.branch)
+  harness.stdio.println(gate.artifacts[0].data.approval_id)
+  harness.stdio.println(cmd.outcome)
+  harness.stdio.println(cmd.artifacts[0].data.ok)
+  harness.stdio.println(contains(cmd.visible_text, "task-plan-command-ok"))
+  harness.stdio.println(compact.branch)
+  harness.stdio.println(compact.artifacts[0].kind)
+  harness.stdio.println(contains(compact.artifacts[0].text, "auto-compacted"))
+  harness.stdio.println(len(harness.llm.mock_calls()))
+}

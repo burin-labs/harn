@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/ast/parse_file.request.json",
+  "title": "ast.parse_file request",
+  "description": "Parse a single source file into a tree-sitter AST. The grammar is selected from the file extension unless `language` is supplied explicitly.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "Absolute or workspace-relative path to the source file."
+    },
+    "language": {
+      "type": "string",
+      "description": "Optional override for the tree-sitter grammar (e.g. \"rust\", \"swift\", \"typescript\")."
+    },
+    "max_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Optional cap on the number of bytes parsed; 0 means unlimited."
+    }
+  },
+  "required": ["path"],
+  "additionalProperties": false
+}

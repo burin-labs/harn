@@ -1,0 +1,33 @@
+pipeline default(harness: Harness) {
+  // Multiline in closure
+  const f = { x ->
+    x + 1
+      + 2
+      + 3
+  }
+  harness.stdio.println(f(10))
+  // Multiline in match arm
+  const val = "hello"
+  match val {
+    "hello" -> {
+      const r = "a"
+        + "b"
+        + "c"
+      harness.stdio.println(r)
+    }
+    _ -> { harness.stdio.println("no") }
+  }
+  // Nested pipes with placeholder
+  const result = [1, 2, 3]
+    |> _.map({ x -> x * 2 })
+    |> _.filter({ x -> x > 2 })
+  harness.stdio.println(result)
+  // Pipe placeholder in method args
+  const doubled = [1, 2, 3] |> _.map({ x -> x * 2 })
+  harness.stdio.println(doubled)
+  // Multiline * and /
+  const calc = 10
+    * 2
+    + 5
+  harness.stdio.println(calc)
+}

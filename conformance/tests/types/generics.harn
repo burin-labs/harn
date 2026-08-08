@@ -1,0 +1,12 @@
+pipeline default(harness: Harness) {
+  fn identity<T>(x: T) -> T {
+    return x
+  }
+  harness.stdio.println(identity(42))
+  harness.stdio.println(identity("hello"))
+  fn first<T>(items: list<T>) -> T? {
+    return items[0]
+  }
+  harness.stdio.println(first([10, 20, 30]))
+  harness.stdio.println(first(["a", "b"]))
+}

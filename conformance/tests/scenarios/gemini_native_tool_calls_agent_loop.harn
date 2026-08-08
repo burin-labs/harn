@@ -1,0 +1,91 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Mocked Gemini-native tool calls should drive normal agent_loop dispatch.
+ *
+ * The mock provider resolves capability rows from the requested model, so
+ * `provider: "mock"` plus a Gemini model exercises Gemini-shaped conversation
+ * history while staying deterministic.
+ */
+fn lookup_tools(runtime: HarnessRuntime, lookups) {
+  const registry = tool_registry()
+  return tool_define(
+    registry,
+    "lookup",
+    "Lookup a deterministic answer",
+    {
+      parameters: {query: {type: "string"}},
+      handler: { args ->
+        runtime.atomic_add(lookups, 1)
+        return {answer: "found:" + to_string(args.query)}
+      },
+    },
+  )
+}
+
+pipeline test(harness: Harness, task) {
+  const lookups = harness.runtime.atomic(0)
+  harness.runtime.atomic_set(lookups, 0)
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        provider: "mock",
+        model: "gemini-2.5-flash",
+        text: "checking",
+        tool_calls: [
+          {
+            id: "gemini_call_1",
+            name: "lookup",
+            arguments: {query: "harn"},
+            thought_signature: "opaque-gemini-signature",
+          },
+        ],
+        blocks: [
+          {type: "output_text", text: "checking", visibility: "public"},
+          {
+            type: "tool_call",
+            id: "gemini_call_1",
+            name: "lookup",
+            arguments: {query: "harn"},
+            thought_signature: "opaque-gemini-signature",
+            visibility: "internal",
+          },
+        ],
+      },
+      llm_text("##DONE##"),
+    ],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Use the lookup tool.",
+        nil,
+        {
+          provider: "mock",
+          model: "gemini-2.5-flash",
+          tools: lookup_tools(harness.runtime, lookups),
+          tool_format: "native",
+          loop_until_done: true,
+          done_sentinel: "##DONE##",
+          max_iterations: 3,
+        },
+      )
+      assert(result.status == "done", "Gemini mock agent loop finishes")
+      assert(harness.runtime.atomic_get(lookups) == 1, "Gemini mock tool call dispatches once")
+      const calls = harness.llm.mock_calls()
+      assert(len(calls) == 2, "agent loop makes a follow-up model turn")
+      const followup = json_stringify(calls[1].messages)
+      assert(contains(followup, "functionCall"), "assistant history preserves Gemini functionCall")
+      assert(
+        contains(followup, "tool_call_id"),
+        "tool result keeps the Gemini call id for adapter lowering",
+      )
+      assert(contains(followup, "thoughtSignature"), "Gemini thought signature is preserved")
+      assert(contains(followup, "opaque-gemini-signature"), "signature bytes are unchanged")
+      harness.stdio.println(result.status)
+      harness.stdio.println(harness.runtime.atomic_get(lookups))
+      harness.stdio.println(contains(followup, "functionCall"))
+    },
+  )
+}

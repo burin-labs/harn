@@ -1,0 +1,25 @@
+import { tool_hooks_seed_registry } from "std/tool_hooks_catalogues"
+
+/**
+ * Swift seed catalogue (TH-04 #1897). The shipped rule warns on bulk
+ * cache wipes (`swift build --clean`, `swift package clean`) and stays
+ * quiet on the targeted forms.
+ */
+fn probe(stdio: HarnessStdio, tools: HarnessTools, reg, cmd) {
+  const m = tools.hooks_match(reg, cmd, {stacks: ["swift"]})
+  if len(m) > 0 {
+    stdio.println(m[0].rule_id + " " + m[0].severity)
+  } else {
+    stdio.println("miss")
+  }
+}
+
+pipeline default(harness: Harness) {
+  const reg = tool_hooks_seed_registry(harness.env, harness.tools, ["swift"])
+  probe(harness.stdio, harness.tools, reg, "swift build --clean")
+  probe(harness.stdio, harness.tools, reg, "swift package clean")
+  /* Targeted build is allowed. */
+  probe(harness.stdio, harness.tools, reg, "swift build --product MyApp")
+  /* `swift test` is a different subcommand entirely. */
+  probe(harness.stdio, harness.tools, reg, "swift test")
+}

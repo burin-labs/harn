@@ -1,0 +1,174 @@
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use crate::value::{VmError, VmValue};
+
+impl crate::vm::Vm {
+    pub(super) fn call_dict_method_sync(
+        map: &Arc<crate::value::DictMap>,
+        method: &str,
+        args: &[VmValue],
+    ) -> Option<Result<VmValue, VmError>> {
+        if matches!(map.get("_namespace"), Some(VmValue::String(_)))
+            && map.get(method).is_some_and(Self::is_callable_value)
+        {
+            return None;
+        }
+
+        let result = match method {
+            "keys" => Ok(VmValue::List(std::sync::Arc::new(
+                map.keys()
+                    .map(|k| VmValue::String(arcstr::ArcStr::from(k.as_str())))
+                    .collect(),
+            ))),
+            "values" => Ok(VmValue::List(std::sync::Arc::new(
+                map.values().cloned().collect(),
+            ))),
+            "entries" => Ok(VmValue::List(std::sync::Arc::new(Self::dict_entries(map)))),
+            "count" => Ok(VmValue::Int(map.len() as i64)),
+            "has" => Ok(VmValue::Bool(
+                map.contains_key(
+                    args.first()
+                        .map(|a| a.display())
+                        .unwrap_or_default()
+                        .as_str(),
+                ),
+            )),
+            "merging" | "merge" => {
+                if let Some(VmValue::Dict(other)) = args.first() {
+                    if map.is_empty() {
+                        return Some(Ok(VmValue::Dict(Arc::clone(other))));
+                    }
+                    if other.is_empty() {
+                        return Some(Ok(VmValue::Dict(Arc::clone(map))));
+                    }
+                    let mut result = (**map).clone();
+                    result.extend(other.iter().map(|(k, v)| (k.clone(), v.clone())));
+                    Ok(VmValue::dict(result))
+                } else {
+                    Ok(VmValue::Dict(Arc::clone(map)))
+                }
+            }
+            "map_values" | "rekeyed" | "rekey" | "map_keys" | "filter" => {
+                if args.first().is_some_and(Self::is_callable_value) {
+                    return None;
+                }
+                Ok(VmValue::Nil)
+            }
+            "removing" | "remove" => {
+                let key = args.first().map(|a| a.display()).unwrap_or_default();
+                let mut result = (**map).clone();
+                result.remove(key.as_str());
+                Ok(VmValue::dict(result))
+            }
+            "get" => {
+                let key = args.first().map(|a| a.display()).unwrap_or_default();
+                let default = args.get(1).cloned().unwrap_or(VmValue::Nil);
+                Ok(map.get(key.as_str()).cloned().unwrap_or(default))
+            }
+            "to_dict" => Ok(VmValue::Dict(Arc::clone(map))),
+            "to_list" => Ok(VmValue::List(std::sync::Arc::new(Self::dict_entries(map)))),
+            _ => {
+                if map.get(method).is_some_and(Self::is_callable_value) {
+                    return None;
+                }
+                if let Some(VmValue::String(module_path)) = map.get("_namespace") {
+                    let mut members: Vec<&str> = map
+                        .keys()
+                        .map(|k| k.as_str())
+                        .filter(|k| *k != "_namespace")
+                        .collect();
+                    members.sort_unstable();
+                    let hint = if members.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" — exported members: {}", members.join(", "))
+                    };
+                    return Some(Err(VmError::Runtime(format!(
+                        "module `{module_path}` has no exported member `{method}`{hint}"
+                    ))));
+                }
+                Err(VmError::Runtime(format!("dict has no method `{method}`")))
+            }
+        };
+        Some(result)
+    }
+
+    pub(super) async fn call_dict_method(
+        &mut self,
+        map: &Arc<crate::value::DictMap>,
+        method: &str,
+        args: &[VmValue],
+    ) -> Result<VmValue, VmError> {
+        if let Some(result) = Self::call_dict_method_sync(map, method, args) {
+            return result;
+        }
+
+        if matches!(map.get("_namespace"), Some(VmValue::String(_))) {
+            if let Some(callable) = map.get(method).filter(|v| Self::is_callable_value(v)) {
+                return self.call_callable_value(callable, args).await;
+            }
+        }
+
+        match method {
+            "map_values" => {
+                let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
+                    return Ok(VmValue::Nil);
+                };
+                let mut result = BTreeMap::new();
+                for (k, v) in map.iter() {
+                    let mapped = self.call_callable_one(callable, v).await?;
+                    result.insert(k.clone(), mapped);
+                }
+                Ok(VmValue::dict(result))
+            }
+            "rekeyed" | "rekey" | "map_keys" => {
+                let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
+                    return Ok(VmValue::Nil);
+                };
+                let mut result = BTreeMap::new();
+                for (k, v) in map.iter() {
+                    let key = VmValue::String(arcstr::ArcStr::from(k.as_str()));
+                    let new_key = self.call_callable_one(callable, &key).await?;
+                    let new_key_str = new_key.display();
+                    result.insert(new_key_str, v.clone());
+                }
+                Ok(VmValue::dict(result))
+            }
+            "filter" => {
+                let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
+                    return Ok(VmValue::Nil);
+                };
+                let mut result = BTreeMap::new();
+                for (k, v) in map.iter() {
+                    let keep = self.call_callable_one(callable, v).await?;
+                    if keep.is_truthy() {
+                        result.insert(k.clone(), v.clone());
+                    }
+                }
+                Ok(VmValue::dict(result))
+            }
+            _ => {
+                if let Some(callable) = map.get(method).filter(|v| Self::is_callable_value(v)) {
+                    self.call_callable_value(callable, args).await
+                } else {
+                    Err(VmError::Runtime(format!("dict has no method `{method}`")))
+                }
+            }
+        }
+    }
+
+    fn dict_entries(map: &crate::value::DictMap) -> Vec<VmValue> {
+        map.iter()
+            .map(|(k, v)| {
+                VmValue::dict(BTreeMap::from([
+                    (
+                        "key".to_string(),
+                        VmValue::String(arcstr::ArcStr::from(k.as_str())),
+                    ),
+                    ("value".to_string(), v.clone()),
+                ]))
+            })
+            .collect()
+    }
+}

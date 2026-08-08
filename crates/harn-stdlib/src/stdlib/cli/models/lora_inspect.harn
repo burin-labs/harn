@@ -1,0 +1,205 @@
+/**
+ * `harn models lora inspect` renderer.
+ *
+ * The dispatch shim reads adapter files, provider catalog metadata, and model
+ * capability tables in Rust because those host surfaces are not script
+ * builtins yet. It hands this script a single JSON report; this Harn source
+ * owns the user-facing text and JSON passthrough.
+ *
+ * Inputs (from the dispatch shim):
+ *   HARN_MODELS_LORA_INSPECT_PAYLOAD_JSON   — compact report JSON.
+ *   HARN_MODELS_LORA_INSPECT_PAYLOAD_PRETTY — pretty report JSON.
+ *   HARN_OUTPUT_JSON                        — "1" for JSON, else human text.
+ */
+import {
+  cli_json_envelope,
+  join_shell_argv,
+  nonempty_string,
+  safe_bool,
+  safe_dict,
+  safe_int_string,
+  safe_list,
+  safe_string,
+} from "std/cli/render"
+
+fn __base_match_label(value: string) -> string {
+  if value == "exact" {
+    return "exact"
+  }
+  if value == "suffix" {
+    return "same basename"
+  }
+  if value == "mismatch" {
+    return "mismatch"
+  }
+  return "unknown"
+}
+
+fn __render_human(stdio: HarnessStdio, report: dict) {
+  const base = safe_dict(report["base"])
+  const adapter = safe_dict(report["adapter"])
+  const compatibility = safe_dict(report["compatibility"])
+  const contract = safe_dict(report["contract"])
+  const launch = safe_dict(report["launch"])
+  const tool_calling = safe_dict(report["tool_calling"])
+  const warnings = safe_list(report["warnings"])
+  const adapter_name = safe_string(adapter["name"], "lora-adapter")
+  const base_id = safe_string(base["id"], "")
+  const provider = safe_string(base["provider"], "")
+  stdio.println(adapter_name + " -> " + base_id + " via " + provider)
+  stdio.println("  adapter: " + safe_string(adapter["input"], ""))
+  stdio.println(
+    "  base match: "
+      + __base_match_label(safe_string(compatibility["base_model_match"], "unknown")),
+  )
+  stdio.println("  tool format: " + safe_string(base["tool_format"], ""))
+  stdio.println("  request model: " + safe_string(launch["request_model"], adapter_name))
+  const native_tools = if safe_bool(tool_calling["native_tools"], false) {
+    "yes"
+  } else {
+    "no"
+  }
+  stdio.println(
+    "  native tools: "
+      + native_tools
+      + ", preferred: "
+      + nonempty_string(tool_calling["preferred_tool_format"], "unset"),
+  )
+  const launch_supported = if safe_bool(compatibility["provider_supports_lora_launch"], false) {
+    "yes"
+  } else {
+    "no"
+  }
+  stdio.println("  catalog LoRA launch flags: " + launch_supported)
+  const module_format = safe_string(compatibility["provider_lora_module_value_format"], "")
+  if module_format != "" {
+    stdio.println("  LoRA module format: " + module_format)
+  }
+  const modules_to_save = safe_list(adapter["modules_to_save"])
+  if len(modules_to_save) > 0 {
+    stdio.println(
+      "  modules to save: " + join(modules_to_save.map({ item -> safe_string(item, "") }), ", "),
+    )
+  } else {
+    stdio.println("  modules to save: none")
+  }
+  const rank_supported = if safe_bool(compatibility["provider_supports_lora_max_rank"], false) {
+    "yes"
+  } else {
+    "no"
+  }
+  stdio.println("  catalog LoRA rank flag: " + rank_supported)
+  const max_rank = safe_int_string(launch["max_lora_rank"], "")
+  if max_rank != "" {
+    stdio.println("  max LoRA rank: " + max_rank)
+  }
+  const contract_id = safe_string(contract["contract_id"], "")
+  const contract_manifest = safe_string(contract["manifest_path"], "")
+  if contract_id != "" || contract_manifest != "" {
+    stdio.println("  contract: " + nonempty_string(contract["contract_id"], "<missing>"))
+    stdio.println("  contract manifest: " + contract_manifest)
+    stdio.println("  contract status: " + safe_string(contract["status"], "unknown"))
+    stdio.println(
+      "  adapter contract id: "
+        + nonempty_string(contract["adapter_contract_id"], "<missing>"),
+    )
+    const provider_match = if safe_bool(contract["provider_matches"], false) {
+      "match"
+    } else {
+      "mismatch"
+    }
+    const tool_format_match = if safe_bool(contract["tool_format_matches"], false) {
+      "match"
+    } else {
+      "mismatch"
+    }
+    const adapter_match_value = contract["adapter_name_matches"]
+    const adapter_match = if adapter_match_value == nil {
+      "not_checked"
+    } else if safe_bool(adapter_match_value, false) {
+      "match"
+    } else {
+      "mismatch"
+    }
+    const save_policy_match_value = contract["modules_to_save_matches"]
+    const save_policy_match = if save_policy_match_value == nil {
+      "not_checked"
+    } else if safe_bool(save_policy_match_value, false) {
+      "match"
+    } else {
+      "mismatch"
+    }
+    stdio.println(
+      "  contract route: base="
+        + __base_match_label(
+        safe_string(contract["base_model_match"], "unknown"),
+      )
+        + " provider="
+        + provider_match
+        + " tool_format="
+        + tool_format_match
+        + " adapter="
+        + adapter_match
+        + " modules_to_save="
+        + save_policy_match,
+    )
+  }
+  for warning in warnings {
+    const text = safe_string(warning, "")
+    if text != "" {
+      stdio.println("  warning: " + text)
+    }
+  }
+  const launch_argv = safe_list(launch["harn_local_launch"])
+  if launch_argv.count != 0 {
+    stdio.println("  launch:")
+    stdio.println("    " + join_shell_argv(launch_argv, " "))
+  }
+}
+
+fn __render_json(report: dict) -> string {
+  const ok = safe_bool(report["ok"], false)
+  const envelope = if ok {
+    cli_json_envelope({schema_version: 1, ok: true, data: report})
+  } else {
+    cli_json_envelope(
+      {
+        schema_version: 1,
+        ok: false,
+        error: {
+          code: "lora_inspect_failed",
+          message: "LoRA adapter inspection found an incompatible or incomplete adapter.",
+          details: report,
+        },
+      },
+    )
+  }
+  return json_stringify_pretty(envelope)
+}
+
+fn main(harness: Harness) -> int {
+  const raw = harness.env.get_or("HARN_MODELS_LORA_INSPECT_PAYLOAD_JSON", "")
+  if raw == "" {
+    harness.stdio.eprintln(
+      "internal error: HARN_MODELS_LORA_INSPECT_PAYLOAD_JSON not set by dispatch shim",
+    )
+    return 70
+  }
+  const report = try {
+    json_parse(raw)
+  } catch (e) {
+    harness.stdio.eprintln("internal error: failed to parse LoRA inspect payload: " + e.message)
+    return 70
+  }
+  const ok = safe_bool(report["ok"], false)
+  const json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  if json_mode {
+    harness.stdio.println(__render_json(report))
+  } else {
+    __render_human(harness.stdio, report)
+  }
+  if ok {
+    return 0
+  }
+  return 1
+}

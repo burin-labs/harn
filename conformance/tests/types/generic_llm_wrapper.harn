@@ -1,0 +1,31 @@
+import { llm_text, with_llm_script } from "std/testing"
+
+type GraderOut = {verdict: "pass" | "fail", summary: string}
+
+/**
+ * A user-defined generic wrapper over llm_call. `Schema<T>` in the
+ * parameter position binds T from the schema passed in, so the
+ * wrapper's return type is narrowed without any schema_is or
+ * schema_expect guard. The inner llm_call picks up the same binding
+ * via its own generic signature.
+ */
+fn grade<T>(llm: HarnessLlm, prompt: string, schema: Schema<T>) -> T {
+  const r = llm.call(
+    prompt,
+    nil,
+    {provider: "mock", output: {schema: schema, strict: true, validation: "error"}},
+  )
+  return r.data
+}
+
+pipeline default(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [llm_text("{\"verdict\": \"pass\", \"summary\": \"ok\"}")],
+    { ->
+      const out: GraderOut = grade(harness.llm, "Grade this", schema_of(GraderOut))
+      harness.stdio.println(out.verdict)
+      harness.stdio.println(out.summary)
+    },
+  )
+}

@@ -1,0 +1,25 @@
+pipeline main(harness: Harness) {
+  const evt = transcript_suspension_event(
+    {
+      handle: "worker://triage/42",
+      initiator: "operator",
+      reason: "waiting for human approval",
+      conditions: {kind: "approval", approval_id: "approval-1"},
+      resume_by_mechanism: "ResumeBy.operator",
+      suspended_at_turn: 5,
+      span_id: "span-1",
+    },
+  )
+  harness.stdio.println(evt?.kind == "suspension")
+  harness.stdio.println(evt?.role == "system")
+  harness.stdio.println(evt?.visibility == "public")
+  harness.stdio.println(evt?.text == "waiting for human approval")
+  harness.stdio.println(evt?.suspension?.handle == "worker://triage/42")
+  harness.stdio.println(evt?.suspension?.initiator == "operator")
+  harness.stdio.println(evt?.suspension?.reason == "waiting for human approval")
+  harness.stdio.println(evt?.suspension?.conditions?.kind == "approval")
+  harness.stdio.println(evt?.suspension?.resume_by_mechanism == "ResumeBy.operator")
+  harness.stdio.println(evt?.suspension?.suspended_at_turn == 5)
+  harness.stdio.println(evt?.suspension?.span_id == "span-1")
+  harness.stdio.println(evt?.metadata?.handle == "worker://triage/42")
+}

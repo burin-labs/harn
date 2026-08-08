@@ -1,0 +1,142 @@
+import { help_requested, parse, parser } from "std/cli/argparse"
+
+type StartupSummary = {min_ms: float, avg_ms: float, max_ms: float}
+
+pub fn parse_positive_int(name: string, raw: string) {
+  const parsed = to_int(raw.trim())
+  if parsed == nil {
+    return {ok: false, value: 0, error: "${name} must be an integer, got '${raw}'"}
+  }
+  const value = parsed ?? 0
+  if value <= 0 {
+    return {ok: false, value: 0, error: "${name} must be positive"}
+  }
+  return {ok: true, value: value, error: ""}
+}
+
+pub fn summarize_samples(samples: list<float>) -> StartupSummary {
+  if samples.count == 0 {
+    throw "summarize_samples: no samples"
+  }
+  let min_ms = samples[0] ?? 0.0
+  let max_ms = samples[0] ?? 0.0
+  let sum_ms = 0.0
+  for sample in samples {
+    if sample < min_ms {
+      min_ms = sample
+    }
+    if sample > max_ms {
+      max_ms = sample
+    }
+    sum_ms = sum_ms + sample
+  }
+  return {min_ms: min_ms, avg_ms: sum_ms / (to_float(samples.count) ?? 1.0), max_ms: max_ms}
+}
+
+fn fixed(value: float, digits: int) -> string {
+  let scale = 1
+  for _ in range(0, digits) {
+    scale = scale * 10
+  }
+  let scaled = to_int(round(value * (to_float(scale) ?? 1.0))) ?? 0
+  let sign = ""
+  if scaled < 0 {
+    sign = "-"
+    scaled = -scaled
+  }
+  const whole = scaled / scale
+  let frac = to_string(scaled % scale)
+  while frac.len() < digits {
+    frac = "0" + frac
+  }
+  if digits == 0 {
+    return sign + to_string(whole)
+  }
+  return sign + to_string(whole) + "." + frac
+}
+
+pub fn summary_row(summary: StartupSummary) -> string {
+  return fixed(summary.min_ms, 3) + " " + fixed(summary.avg_ms, 3) + " " + fixed(summary.max_ms, 3)
+}
+
+fn run_once_ms(harness: Harness, harn_bin: string, fixture: string, cache_dir: string) -> float {
+  const started = harness.clock.monotonic_ms()
+  const result = harness.process.run(
+    {program: harn_bin, args: ["run", fixture], env: {HARN_CACHE_DIR: cache_dir}},
+  )
+  const elapsed = harness.clock.monotonic_ms() - started
+  if !result.success {
+    if result.stderr != "" {
+      harness.stdio.eprint(result.stderr)
+    }
+    harness.runtime.exit(result.exit_code)
+  }
+  return to_float(elapsed) ?? 0.0
+}
+
+fn measure_runs(
+  harness: Harness,
+  harn_bin: string,
+  fixture: string,
+  runs: int,
+  cache_dir: string,
+) -> StartupSummary {
+  let samples: list<float> = []
+  for _ in range(0, runs) {
+    samples = samples + [run_once_ms(harness, harn_bin, fixture, cache_dir)]
+  }
+  return summarize_samples(samples)
+}
+
+fn arg_spec() {
+  return parser(
+    {
+      name: "bench_vm_startup",
+      args: [
+        {kind: "flag", name: "harn_bin", long: "--harn-bin", parse: "string", default: ""},
+        {kind: "flag", name: "fixture", long: "--fixture", parse: "string", default: ""},
+        {kind: "flag", name: "runs", long: "--runs", parse: "string", default: "1"},
+        {kind: "flag", name: "cache_dir", long: "--cache-dir", parse: "string", default: ""},
+      ],
+    },
+  )
+}
+
+fn main(harness: Harness) {
+  if help_requested(argv) {
+    harness.stdio.println(
+      "usage: harn run scripts/bench_vm_startup.harn -- --harn-bin BIN --fixture PATH --runs N --cache-dir DIR",
+    )
+    return nil
+  }
+  const parsed_result = parse(arg_spec(), argv)
+  if is_err(parsed_result) {
+    harness.stdio.eprintln(unwrap_err(parsed_result).message)
+    harness.runtime.exit(2)
+  }
+  const parsed = unwrap(parsed_result).options
+  const harn_bin = to_string(parsed?.harn_bin ?? "")
+  const fixture = to_string(parsed?.fixture ?? "")
+  const cache_dir = to_string(parsed?.cache_dir ?? "")
+  if harn_bin == "" {
+    harness.stdio.eprintln("error: --harn-bin is required")
+    harness.runtime.exit(2)
+  }
+  if fixture == "" {
+    harness.stdio.eprintln("error: --fixture is required")
+    harness.runtime.exit(2)
+  }
+  if cache_dir == "" {
+    harness.stdio.eprintln("error: --cache-dir is required")
+    harness.runtime.exit(2)
+  }
+  const runs_result = parse_positive_int("--runs", to_string(parsed?.runs ?? ""))
+  if !runs_result.ok {
+    harness.stdio.eprintln("error: " + runs_result.error)
+    harness.runtime.exit(2)
+  }
+  harness.stdio.println(
+    summary_row(measure_runs(harness, harn_bin, fixture, runs_result.value, cache_dir)),
+  )
+  return nil
+}

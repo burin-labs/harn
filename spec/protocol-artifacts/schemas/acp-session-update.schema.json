@@ -1,0 +1,770 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/conformance/protocols/acp-session-update.schema.json",
+  "title": "Harn ACP v0.12.2 adapter profile",
+  "description": "Pinned Harn adapter profile derived from agentclientprotocol/agent-client-protocol schema v0.12.2 plus Harn-advertised ACP extensions.",
+  "x-harn-provenance": {
+    "protocol": "acp",
+    "upstream_version": "v0.12.2",
+    "upstream_source_url": "https://raw.githubusercontent.com/agentclientprotocol/agent-client-protocol/v0.12.2/schema/schema.json",
+    "upstream_spec_url": "https://agentclientprotocol.com/protocol/schema",
+    "retrieved_at": "2026-05-08",
+    "refresh_command": "curl -fsSL https://raw.githubusercontent.com/agentclientprotocol/agent-client-protocol/v0.12.2/schema/schema.json",
+    "profile_note": "The profile roots the ACP request, response, session/update notification, and Harn extension notification shapes this adapter emits or accepts."
+  },
+  "oneOf": [
+    { "$ref": "#/$defs/SessionUpdateNotification" },
+    { "$ref": "#/$defs/SessionRequestPermissionRequest" },
+    { "$ref": "#/$defs/HarnAgentEventNotification" },
+    { "$ref": "#/$defs/JsonRpcResultResponse" },
+    { "$ref": "#/$defs/JsonRpcErrorResponse" }
+  ],
+  "$defs": {
+    "SessionUpdateNotification": {
+      "type": "object",
+      "required": ["jsonrpc", "method", "params"],
+      "additionalProperties": true,
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "method": { "const": "session/update" },
+        "params": { "$ref": "#/$defs/SessionUpdateParams" }
+      }
+    },
+    "JsonRpcRequestBase": {
+      "type": "object",
+      "required": ["jsonrpc", "id", "method"],
+      "additionalProperties": true,
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "type": ["string", "integer"] },
+        "params": { "type": "object" }
+      }
+    },
+    "SessionRequestPermissionRequest": {
+      "allOf": [
+        { "$ref": "#/$defs/JsonRpcRequestBase" },
+        {
+          "type": "object",
+          "required": ["params"],
+          "properties": {
+            "method": { "const": "session/request_permission" },
+            "params": {
+              "type": "object",
+              "required": ["sessionId", "toolCall", "options"],
+              "additionalProperties": true,
+              "properties": {
+                "sessionId": { "type": "string", "minLength": 1 },
+                "toolCall": { "$ref": "#/$defs/PermissionToolCall" },
+                "options": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": { "$ref": "#/$defs/PermissionOption" }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "PermissionToolCall": {
+      "type": "object",
+      "required": ["toolCallId"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "tool_call_update" },
+        "toolCallId": { "type": "string", "minLength": 1 },
+        "title": { "type": "string" },
+        "kind": { "type": "string" },
+        "content": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/PermissionToolCallContent" }
+        },
+        "rawInput": {},
+        "_meta": { "$ref": "#/$defs/HarnExtensionMeta" }
+      }
+    },
+    "PermissionToolCallContent": {
+      "oneOf": [
+        { "$ref": "#/$defs/PermissionToolCallDiff" },
+        { "$ref": "#/$defs/PermissionToolCallContentBlock" },
+        { "$ref": "#/$defs/PermissionToolCallTerminal" }
+      ]
+    },
+    "PermissionToolCallDiff": {
+      "type": "object",
+      "required": ["type", "path", "newText"],
+      "additionalProperties": true,
+      "properties": {
+        "type": { "const": "diff" },
+        "path": { "type": "string", "minLength": 1 },
+        "oldText": { "type": ["string", "null"] },
+        "newText": { "type": "string" },
+        "_meta": { "$ref": "#/$defs/HarnExtensionMeta" }
+      }
+    },
+    "PermissionToolCallContentBlock": {
+      "type": "object",
+      "required": ["type", "content"],
+      "additionalProperties": true,
+      "properties": {
+        "type": { "const": "content" },
+        "content": { "$ref": "#/$defs/ContentBlock" },
+        "_meta": { "$ref": "#/$defs/HarnExtensionMeta" }
+      }
+    },
+    "PermissionToolCallTerminal": {
+      "type": "object",
+      "required": ["type", "terminalId"],
+      "additionalProperties": true,
+      "properties": {
+        "type": { "const": "terminal" },
+        "terminalId": { "type": "string", "minLength": 1 },
+        "_meta": { "$ref": "#/$defs/HarnExtensionMeta" }
+      }
+    },
+    "PermissionOption": {
+      "type": "object",
+      "required": ["optionId", "name", "kind"],
+      "additionalProperties": true,
+      "properties": {
+        "optionId": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "kind": {
+          "enum": ["allow_once", "allow_always", "reject_once", "reject_always"]
+        }
+      }
+    },
+    "HarnAgentEventNotification": {
+      "type": "object",
+      "required": ["jsonrpc", "method", "params"],
+      "additionalProperties": true,
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "method": { "const": "_harn/agentEvent" },
+        "params": {
+          "type": "object",
+          "required": ["sessionId", "kind"],
+          "additionalProperties": true,
+          "properties": {
+            "sessionId": { "type": "string", "minLength": 1 },
+            "kind": {
+              "enum": [
+                "boundary_failure",
+                "budget_circuit_breaker",
+                "budget_exhausted",
+                "code_librarian_query_nl_fallback",
+                "composition_child_call",
+                "composition_child_result",
+                "composition_error",
+                "composition_finish",
+                "composition_start",
+                "compass_routing_decision",
+                "control_outcome",
+                "daemon_watchdog_tripped",
+                "feedback_injected",
+                "final_wrapup",
+                "host_attachment",
+                "host_tool_result",
+                "input_guardrail_verdict",
+                "iteration_end",
+                "iteration_start",
+                "judge_decision",
+                "loop_control_decision",
+                "loop_stuck",
+                "mcp_auth_required",
+                "mcp_catalog_changed",
+                "mcp_notification",
+                "model_job",
+                "orchestration_decision",
+                "pack_thinking_stripped",
+                "progress_reported",
+                "require_successful_tools_violation",
+                "reserved_terminal_verify",
+                "scope_classifier_verdict",
+                "self_consistency_tie",
+                "session_closed",
+                "structural_validator_decision",
+                "subagent_join",
+                "subagent_stop",
+                "step_judge_decision",
+                "tool_batch_disposition",
+                "tool_call_audit",
+                "tool_format_override",
+                "typed_checkpoint"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "JsonRpcResultResponse": {
+      "type": "object",
+      "required": ["jsonrpc", "id", "result"],
+      "additionalProperties": true,
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "type": ["string", "integer"] },
+        "result": {
+          "type": "object",
+          "if": { "required": ["stopReason"] },
+          "then": { "$ref": "#/$defs/SessionPromptResult" }
+        }
+      }
+    },
+    "SessionPromptResult": {
+      "type": "object",
+      "required": ["stopReason"],
+      "additionalProperties": true,
+      "properties": {
+        "stopReason": { "type": "string", "minLength": 1 },
+        "_meta": { "$ref": "#/$defs/PromptResultExtensionMeta" }
+      }
+    },
+    "PromptResultExtensionMeta": {
+      "type": "object",
+      "required": ["harn"],
+      "additionalProperties": true,
+      "properties": {
+        "harn": { "$ref": "#/$defs/HarnPromptResultMeta" }
+      }
+    },
+    "HarnPromptResultMeta": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "terminal": { "$ref": "#/$defs/AgentTerminalOutcome" }
+      }
+    },
+    "AgentTerminalOutcome": {
+      "type": "object",
+      "required": ["kind", "reason", "owner"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "natural",
+            "user_cancelled",
+            "policy_budget",
+            "policy_no_progress",
+            "policy_guardrail",
+            "policy_stop",
+            "provider_error",
+            "runtime_error",
+            "suspended",
+            "unknown"
+          ]
+        },
+        "reason": { "type": "string" },
+        "owner": {
+          "enum": ["agent", "user", "policy", "provider", "harness", "unknown"]
+        }
+      }
+    },
+    "JsonRpcErrorResponse": {
+      "type": "object",
+      "required": ["jsonrpc", "id", "error"],
+      "additionalProperties": true,
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "type": ["string", "integer", "null"] },
+        "error": {
+          "type": "object",
+          "required": ["code", "message"],
+          "additionalProperties": true,
+          "properties": {
+            "code": { "type": "integer" },
+            "message": { "type": "string" },
+            "data": {
+              "if": {
+                "type": "object",
+                "required": ["schema"],
+                "properties": {
+                  "schema": { "const": "harn.acp.prompt_error.v1" }
+                }
+              },
+              "then": { "$ref": "#/$defs/HarnPromptErrorData" }
+            }
+          }
+        }
+      }
+    },
+    "HarnPromptErrorData": {
+      "type": "object",
+      "required": ["schema", "terminalClass"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": { "const": "harn.acp.prompt_error.v1" },
+        "terminalClass": {
+          "enum": [
+            "context_overflow",
+            "provider_misconfigured",
+            "provider_unavailable",
+            "rate_limited",
+            "timeout",
+            "resource_busy",
+            "tool_policy_rejected",
+            "host_bridge_unimplemented",
+            "agent_loop_protocol_failure",
+            "parse_dropped",
+            "generic_throw"
+          ]
+        },
+        "category": { "type": "string" },
+        "kind": { "type": "string" },
+        "reason": { "type": "string" },
+        "code": { "type": "string" },
+        "retryable": { "type": "boolean" },
+        "retryAfterMs": { "type": "integer" },
+        "provider": { "type": "string" },
+        "model": { "type": "string" }
+      }
+    },
+    "SessionUpdateParams": {
+      "type": "object",
+      "required": ["sessionId", "update"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionId": { "type": "string", "minLength": 1 },
+        "update": { "$ref": "#/$defs/SessionUpdate" }
+      }
+    },
+    "SessionUpdate": {
+      "oneOf": [
+        { "$ref": "#/$defs/UserMessage" },
+        { "$ref": "#/$defs/UserMessageChunk" },
+        { "$ref": "#/$defs/AgentMessageChunk" },
+        { "$ref": "#/$defs/AgentThoughtChunk" },
+        { "$ref": "#/$defs/ToolCall" },
+        { "$ref": "#/$defs/ToolCallUpdate" },
+        { "$ref": "#/$defs/Plan" },
+        { "$ref": "#/$defs/CurrentModeUpdate" },
+        { "$ref": "#/$defs/ConfigOptionUpdate" },
+        { "$ref": "#/$defs/SessionInfoUpdate" },
+        { "$ref": "#/$defs/SessionTruncated" },
+        { "$ref": "#/$defs/SkillActivated" },
+        { "$ref": "#/$defs/SkillDeactivated" },
+        { "$ref": "#/$defs/SkillScopeTools" },
+        { "$ref": "#/$defs/SkillNarrow" },
+        { "$ref": "#/$defs/ToolSearchQuery" },
+        { "$ref": "#/$defs/ToolSearchResult" },
+        { "$ref": "#/$defs/TranscriptCompacted" },
+        { "$ref": "#/$defs/ReminderEmitted" },
+        { "$ref": "#/$defs/Handoff" },
+        { "$ref": "#/$defs/FsWatch" },
+        { "$ref": "#/$defs/WorkerUpdate" },
+        { "$ref": "#/$defs/HarnExtensionUpdate" }
+      ]
+    },
+    "ContentBlock": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": true,
+      "properties": {
+        "type": { "enum": ["text", "resource_link", "resource", "image", "audio"] },
+        "text": { "type": "string" }
+      }
+    },
+    "UserMessageChunk": {
+      "type": "object",
+      "required": ["sessionUpdate"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "user_message_chunk" },
+        "content": { "$ref": "#/$defs/ContentBlock" }
+      }
+    },
+    "UserMessage": {
+      "type": "object",
+      "required": ["sessionUpdate", "messageId", "content"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "user_message" },
+        "messageId": { "type": "string", "minLength": 1 },
+        "content": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ContentBlock" }
+        }
+      }
+    },
+    "AgentMessageChunk": {
+      "type": "object",
+      "required": ["sessionUpdate", "content"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "agent_message_chunk" },
+        "content": { "$ref": "#/$defs/ContentBlock" }
+      }
+    },
+    "AgentThoughtChunk": {
+      "type": "object",
+      "required": ["sessionUpdate", "content"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "agent_thought_chunk" },
+        "content": { "$ref": "#/$defs/ContentBlock" }
+      }
+    },
+    "ToolCall": {
+      "type": "object",
+      "required": ["sessionUpdate", "toolCallId", "title"],
+      "additionalProperties": false,
+      "properties": {
+        "sessionUpdate": { "const": "tool_call" },
+        "toolCallId": { "type": "string", "minLength": 1 },
+        "title": { "type": "string" },
+        "kind": { "type": "string" },
+        "status": { "$ref": "#/$defs/ToolCallStatus" },
+        "content": { "type": "array" },
+        "locations": { "type": "array" },
+        "rawInput": {},
+        "rawOutput": {},
+        "_meta": { "$ref": "#/$defs/ExtensionMeta" }
+      }
+    },
+    "ToolCallUpdate": {
+      "type": "object",
+      "required": ["sessionUpdate", "toolCallId", "_meta"],
+      "additionalProperties": false,
+      "properties": {
+        "sessionUpdate": { "const": "tool_call_update" },
+        "toolCallId": { "type": "string", "minLength": 1 },
+        "title": { "type": ["string", "null"] },
+        "status": { "$ref": "#/$defs/NullableToolCallStatus" },
+        "kind": { "type": "string" },
+        "content": { "type": "array" },
+        "locations": { "type": "array" },
+        "rawInput": {},
+        "rawOutput": {},
+        "_meta": { "$ref": "#/$defs/ToolCallUpdateExtensionMeta" }
+      }
+    },
+    "ToolCallUpdateExtensionMeta": {
+      "type": "object",
+      "required": ["harn"],
+      "additionalProperties": true,
+      "properties": {
+        "harn": { "$ref": "#/$defs/ToolCallUpdateLifecycleMeta" }
+      }
+    },
+    "ExtensionMeta": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "harn": { "$ref": "#/$defs/HarnToolLifecycleMeta" }
+      }
+    },
+    "HarnExtensionMeta": {
+      "type": "object",
+      "required": ["harn"],
+      "additionalProperties": true,
+      "properties": {
+        "harn": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "HarnToolLifecycleMeta": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "audit": {},
+        "changedPaths": { "type": "array", "items": { "type": "string" } },
+        "durationMs": { "type": "number", "minimum": 0 },
+        "error": { "type": "string" },
+        "errorCategory": { "type": "string" },
+        "executionDurationMs": { "type": "number", "minimum": 0 },
+        "executor": {},
+        "mutationStatus": { "$ref": "#/$defs/ToolMutationStatus" },
+        "parsing": { "type": "boolean" },
+        "rawInputPartial": { "type": "string" }
+      }
+    },
+    "ToolCallUpdateLifecycleMeta": {
+      "allOf": [{ "$ref": "#/$defs/HarnToolLifecycleMeta" }],
+      "required": ["mutationStatus"]
+    },
+    "ToolMutationStatus": {
+      "enum": ["applied", "not_applied", "unknown"]
+    },
+    "ToolCallStatus": {
+      "enum": ["pending", "in_progress", "completed", "failed"]
+    },
+    "NullableToolCallStatus": {
+      "anyOf": [
+        { "$ref": "#/$defs/ToolCallStatus" },
+        { "type": "null" }
+      ]
+    },
+    "Plan": {
+      "type": "object",
+      "required": ["sessionUpdate", "entries"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "plan" },
+        "entries": { "type": "array" }
+      }
+    },
+    "CurrentModeUpdate": {
+      "type": "object",
+      "required": ["sessionUpdate", "modeId"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "current_mode_update" },
+        "modeId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ConfigOptionUpdate": {
+      "type": "object",
+      "required": ["sessionUpdate", "configOptions"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "config_option_update" },
+        "configOptions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ConfigOption" }
+        }
+      }
+    },
+    "ConfigOption": {
+      "type": "object",
+      "required": ["id", "name", "type", "currentValue", "options"],
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "type": { "const": "select" },
+        "currentValue": { "type": "string", "minLength": 1 },
+        "options": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ConfigOptionValue" }
+        }
+      }
+    },
+    "ConfigOptionValue": {
+      "type": "object",
+      "required": ["value", "name"],
+      "additionalProperties": true,
+      "properties": {
+        "value": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" }
+      }
+    },
+    "SessionInfoUpdate": {
+      "type": "object",
+      "required": ["sessionUpdate"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "session_info_update" }
+      }
+    },
+    "SessionTruncated": {
+      "type": "object",
+      "required": ["sessionUpdate", "keptTurnCount", "removedTurnCount"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "session_truncated" },
+        "keptTurnCount": { "type": "integer", "minimum": 0 },
+        "removedTurnCount": { "type": "integer", "minimum": 0 },
+        "newTipTurnId": { "type": ["string", "null"] },
+        "reason": { "type": "string" }
+      }
+    },
+    "SkillActivated": {
+      "type": "object",
+      "required": ["sessionUpdate", "skillName"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "skill_activated" },
+        "skillName": { "type": "string", "minLength": 1 },
+        "iteration": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "SkillDeactivated": {
+      "type": "object",
+      "required": ["sessionUpdate", "skillName"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "skill_deactivated" },
+        "skillName": { "type": "string", "minLength": 1 }
+      }
+    },
+    "SkillScopeTools": {
+      "type": "object",
+      "required": ["sessionUpdate", "skillName", "allowedTools"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "skill_scope_tools" },
+        "skillName": { "type": "string", "minLength": 1 },
+        "allowedTools": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "SkillNarrow": {
+      "type": "object",
+      "required": ["sessionUpdate", "removedTools", "remainingTools"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "skill_narrow" },
+        "reason": { "type": "string" },
+        "removedTools": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "remainingTools": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "ToolSearchQuery": {
+      "type": "object",
+      "required": ["sessionUpdate", "toolUseId", "name", "query"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "tool_search_query" },
+        "toolUseId": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "query": {}
+      }
+    },
+    "ToolSearchResult": {
+      "type": "object",
+      "required": ["sessionUpdate", "toolUseId", "promoted"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "tool_search_result" },
+        "toolUseId": { "type": "string", "minLength": 1 },
+        "promoted": { "type": "array" }
+      }
+    },
+    "TranscriptCompacted": {
+      "type": "object",
+      "required": ["sessionUpdate", "mode", "strategy"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "transcript_compacted" },
+        "mode": { "type": "string" },
+        "strategy": { "type": "string" }
+      }
+    },
+    "ReminderEmitted": {
+      "type": "object",
+      "required": ["sessionUpdate", "_meta"],
+      "additionalProperties": false,
+      "properties": {
+        "sessionUpdate": { "const": "reminder_emitted" },
+        "_meta": {
+          "type": "object",
+          "required": ["harn"],
+          "additionalProperties": true,
+          "properties": {
+            "harn": {
+              "type": "object",
+              "required": ["reminder"],
+              "additionalProperties": true,
+              "properties": {
+                "reminder": {
+                  "type": "object",
+                  "required": [
+                    "reminderId",
+                    "tags",
+                    "body",
+                    "roleHint",
+                    "renderedRole",
+                    "source",
+                    "ttlTurns"
+                  ],
+                  "additionalProperties": true,
+                  "properties": {
+                    "reminderId": { "type": "string", "minLength": 1 },
+                    "tags": {
+                      "type": "array",
+                      "items": { "type": "string" }
+                    },
+                    "body": { "type": "string" },
+                    "roleHint": {
+                      "enum": ["system", "developer", "user_block", "ephemeral_cache"]
+                    },
+                    "renderedRole": { "enum": ["system", "developer", "user"] },
+                    "source": {
+                      "enum": ["stdlib_provider", "hook", "bridge", "in_pipeline", "inherited"]
+                    },
+                    "ttlTurns": { "type": ["integer", "null"] }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Handoff": {
+      "type": "object",
+      "required": ["sessionUpdate", "handoffId", "artifactId", "handoff"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "handoff" },
+        "handoffId": { "type": "string", "minLength": 1 },
+        "artifactId": { "type": "string", "minLength": 1 },
+        "handoff": { "type": "object" }
+      }
+    },
+    "FsWatch": {
+      "type": "object",
+      "required": ["sessionUpdate", "subscriptionId", "events"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "fs_watch" },
+        "subscriptionId": { "type": "string", "minLength": 1 },
+        "events": { "type": "array" }
+      }
+    },
+    "WorkerUpdate": {
+      "type": "object",
+      "required": ["sessionUpdate", "workerId", "event", "status", "terminal"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "worker_update" },
+        "workerId": { "type": "string", "minLength": 1 },
+        "event": { "type": "string", "minLength": 1 },
+        "status": { "type": "string", "minLength": 1 },
+        "terminal": { "type": "boolean" }
+      }
+    },
+    "HarnExtensionUpdate": {
+      "type": "object",
+      "required": ["sessionUpdate", "_meta"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": {
+          "enum": [
+            "artifact",
+            "available_commands_update",
+            "fs_watch",
+            "handoff",
+            "hitl_request",
+            "hitl_resolved",
+            "log",
+            "progress",
+            "skill_activated",
+            "skill_deactivated",
+            "skill_narrow",
+            "skill_scope_tools",
+            "tool_search_query",
+            "tool_search_result",
+            "transcript_compacted",
+            "transcript_projected",
+            "worker_update"
+          ]
+        },
+        "_meta": { "$ref": "#/$defs/HarnExtensionMeta" }
+      }
+    }
+  }
+}

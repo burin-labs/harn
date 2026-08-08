@@ -1,0 +1,913 @@
+// std/web — deterministic HTTP-backed source ingest and extraction helpers.
+import { cache_get, cache_put } from "std/cache"
+import { JsonParseFailure } from "std/json"
+
+fn __web_header(headers, name) {
+  const wanted = lowercase(name)
+  for entry in headers ?? {} {
+    if lowercase(entry.key) == wanted {
+      return entry.value
+    }
+  }
+  return nil
+}
+
+fn __web_store_options(opts) {
+  if opts?.store == nil {
+    return nil
+  }
+  return {store: opts.store}
+}
+
+fn __web_cache_key(method, url, opts) {
+  return opts?.cache_key ?? ("std/web:web_fetch:" + uppercase(method) + ":" + url)
+}
+
+fn __web_effective_url(url, http_opts) {
+  const query = http_opts?.query
+  if query == nil {
+    return url
+  }
+  const parsed = url_parse(url)
+  let pairs = query_parse(parsed?.query ?? "")
+  for entry in query {
+    if entry.value != nil {
+      pairs = pairs + [{key: entry.key, value: to_string(entry.value)}]
+    }
+  }
+  return url_build(
+    {
+      scheme: parsed.scheme,
+      host: parsed.host,
+      port: parsed.port,
+      path: parsed.path ?? "/",
+      query: query_stringify(pairs),
+      fragment: parsed.fragment,
+      username: parsed.username,
+      password: parsed.password,
+    },
+  )
+}
+
+fn __web_base_headers(opts) {
+  const http_headers = opts?.http_options?.headers ?? {}
+  const headers = opts?.headers
+  if headers == nil {
+    return http_headers
+  }
+  return http_headers + headers
+}
+
+fn __web_conditional_headers(headers, previous, enabled) {
+  if !enabled || previous == nil {
+    return headers
+  }
+  let next = headers
+  if __web_header(next, "if-none-match") == nil && previous?.etag != nil {
+    next = next + {"If-None-Match": previous.etag}
+  }
+  if __web_header(next, "if-modified-since") == nil && previous?.last_modified != nil {
+    next = next + {"If-Modified-Since": previous.last_modified}
+  }
+  return next
+}
+
+fn __web_fetch_envelope(source_url, response, fetched_at, cache_status) {
+  const headers = response?.headers ?? {}
+  return {
+    ok: response?.ok ?? false,
+    status: response?.status,
+    body: response?.body ?? "",
+    headers: headers,
+    content_type: __web_header(headers, "content-type"),
+    etag: __web_header(headers, "etag"),
+    last_modified: __web_header(headers, "last-modified"),
+    fetched_at: fetched_at,
+    cache_status: cache_status,
+    source_url: source_url,
+    final_url: response?.final_url ?? source_url,
+    not_modified: false,
+  }
+}
+
+fn __web_not_modified(source_url, response, previous, fetched_at) {
+  const headers = response?.headers ?? {}
+  let next = previous
+  next = next
+    + {
+    ok: true,
+    status: 304,
+    headers: headers,
+    fetched_at: fetched_at,
+    cache_status: "not_modified",
+    source_url: source_url,
+    final_url: response?.final_url ?? previous?.final_url ?? source_url,
+    not_modified: true,
+  }
+  const etag = __web_header(headers, "etag")
+  if etag != nil {
+    next = next + {etag: etag}
+  }
+  const last_modified = __web_header(headers, "last-modified")
+  if last_modified != nil {
+    next = next + {last_modified: last_modified}
+  }
+  const content_type = __web_header(headers, "content-type")
+  if content_type != nil {
+    next = next + {content_type: content_type}
+  }
+  return next
+}
+
+/**
+ * Fetch a web source through Harn's HTTP stack and normalize provenance.
+ *
+ * Options:
+ *   - method, headers, query, body, timeout, retry, session, proxy, tls:
+ *     forwarded to `http_request`.
+ *   - http_options: explicit HTTP option dict when callers want web-specific
+ *     options kept separate.
+ *   - previous: previous `web_fetch` envelope used for conditional headers.
+ *   - store: `std/cache` store. When present, cached ETag / Last-Modified
+ *     values are used for conditional re-fetches and 304 responses reuse the
+ *     cached body.
+ *   - cache_key: override for the cache key.
+ *   - conditional: set false to skip If-None-Match / If-Modified-Since.
+ *   - fetched_at: deterministic timestamp override for fixtures.
+ *
+ * @effects: [net, time]
+ * @errors: []
+ */
+pub fn web_fetch(harness: Harness, url: string, options = nil) -> dict {
+  const opts = options ?? {}
+  const method = uppercase(opts?.method ?? opts?.http_options?.method ?? "GET")
+  let http_opts = opts?.http_options ?? opts
+  const source_url = __web_effective_url(url, http_opts)
+  const store_opts = __web_store_options(opts)
+  const cache_key = __web_cache_key(method, source_url, opts)
+  let previous = opts?.previous
+  let cache_status = if store_opts == nil {
+    "bypass"
+  } else {
+    "miss"
+  }
+  if previous == nil && store_opts != nil {
+    const cached = cache_get(harness.llm, cache_key, store_opts)
+    if cached.hit {
+      previous = cached.value
+      cache_status = "refresh"
+    }
+  }
+  const headers = __web_conditional_headers(
+    __web_base_headers(opts),
+    previous,
+    opts?.conditional ?? true,
+  )
+  http_opts = http_opts + {headers: headers}
+  const response = if method == "GET" {
+    harness.net.get(url, http_opts)
+  } else {
+    harness.net.request(method, url, http_opts)
+  }
+  const fetched_at = opts?.fetched_at ?? harness.clock.timestamp()
+  if response.status == 304 && previous != nil {
+    const not_modified = __web_not_modified(source_url, response, previous, fetched_at)
+    if store_opts != nil {
+      cache_put(harness.llm, cache_key, not_modified, store_opts)
+    }
+    return not_modified
+  }
+  const envelope = __web_fetch_envelope(source_url, response, fetched_at, cache_status)
+  if store_opts != nil && envelope.ok {
+    cache_put(harness.llm, cache_key, envelope, store_opts)
+  }
+  return envelope
+}
+
+fn __web_search_tokens(query) {
+  const normalized = regex_replace("[^A-Za-z0-9_./@:-]+", " ", lowercase(query ?? ""))
+  let out = []
+  for token in split(trim(normalized), " ") {
+    if token != "" && len(token) > 1 && !out.contains(token) {
+      out = out.appending(token)
+    }
+  }
+  return out
+}
+
+fn __web_search_text(entry) {
+  return lowercase(
+    to_string(entry?.title ?? "")
+      + " "
+      + to_string(entry?.name ?? "")
+      + " "
+      + to_string(entry?.url ?? entry?.href ?? entry?.source_url ?? "")
+      + " "
+      + to_string(entry?.snippet ?? entry?.description ?? entry?.text ?? "")
+      + " "
+      + join(entry?.tags ?? [], " ")
+      + " "
+      + to_string(entry?.package ?? ""),
+  )
+}
+
+fn __web_search_score(entry, query, tokens) {
+  const haystack = __web_search_text(entry)
+  let score = 0
+  const phrase = lowercase(trim(query ?? ""))
+  if phrase != "" && contains(haystack, phrase) {
+    score = score + 25
+  }
+  const title = lowercase(to_string(entry?.title ?? entry?.name ?? ""))
+  const url = lowercase(to_string(entry?.url ?? entry?.href ?? entry?.source_url ?? ""))
+  for token in tokens {
+    if contains(title, token) {
+      score = score + 8
+    } else if contains(url, token) {
+      score = score + 5
+    } else if contains(haystack, token) {
+      score = score + 2
+    }
+  }
+  const source_type = entry?.source_type ?? entry?.kind
+  if ["docs", "pinned_docs", "package_registry", "registry"].contains(source_type) {
+    score = score + 6
+  }
+  if entry?.authority || entry?.authoritative {
+    score = score + 8
+  }
+  if entry?.version != nil || entry?.pinned_version != nil {
+    score = score + 2
+  }
+  return score
+}
+
+fn __web_search_take(items, limit) {
+  let out = []
+  for item in items {
+    if len(out) >= limit {
+      return out
+    }
+    out = out.appending(item)
+  }
+  return out
+}
+
+fn __web_search_path_get(value, path, fallback = nil) {
+  if path == nil {
+    return fallback
+  }
+  const parts = if type_of(path) == "list" {
+    path
+  } else {
+    split(to_string(path), ".").filter({ part -> part != "" })
+  }
+  let current = value
+  for part in parts {
+    if current == nil {
+      return fallback
+    }
+    current = current[part]
+  }
+  return current ?? fallback
+}
+
+fn __web_search_merge_headers(left, right) {
+  const merged = left ?? {}
+  const extra = right ?? {}
+  return merged + extra
+}
+
+fn __web_search_tool_options(base, args) {
+  const merged = base ?? {}
+  const extra = args?.options ?? args ?? {}
+  return merged + extra
+}
+
+fn __web_search_backend(env: HarnessEnv, opts) {
+  const explicit = opts?.backend
+  if type_of(explicit) == "dict" {
+    return explicit
+      + {
+      kind: explicit?.kind ?? explicit?.type ?? "curated_index",
+      id: explicit?.id ?? explicit?.name ?? explicit?.kind ?? "configured",
+      deterministic: true,
+    }
+  }
+  if type_of(explicit) == "string" {
+    return {kind: explicit, id: explicit, deterministic: true}
+  }
+  if opts?.provider_results != nil {
+    return {
+      kind: "provider_hosted",
+      id: "provider_results",
+      deterministic: true,
+      evidence: "provider_results",
+    }
+  }
+  if opts?.api != nil {
+    const api = opts.api
+    return {
+      kind: "api",
+      id: api?.id ?? api?.name ?? api?.url ?? "configured_search_api",
+      deterministic: true,
+      evidence: "search_api",
+      api: api,
+    }
+  }
+  const env_url = env.get("HARN_WEB_SEARCH_URL")
+  if env_url != nil && env_url != "" {
+    let headers = {}
+    const bearer = env.get("HARN_WEB_SEARCH_BEARER_TOKEN")
+    if bearer != nil && bearer != "" {
+      headers = {Authorization: "Bearer " + bearer}
+    }
+    return {
+      kind: "api",
+      id: "env:HARN_WEB_SEARCH_URL",
+      deterministic: true,
+      evidence: "search_api",
+      api: {
+        url: env_url,
+        query_param: env.get_or("HARN_WEB_SEARCH_QUERY_PARAM", "q"),
+        headers: headers,
+      },
+    }
+  }
+  return {
+    kind: "curated_index",
+    id: opts?.index_id ?? "inline",
+    deterministic: true,
+    evidence: "curated_index",
+  }
+}
+
+fn __web_search_public_backend(backend) {
+  let public = {
+    kind: backend.kind,
+    id: backend.id,
+    deterministic: backend?.deterministic ?? true,
+    evidence: backend?.evidence ?? backend.kind,
+  }
+  if backend?.source_url != nil {
+    public = public + {source_url: backend.source_url}
+  }
+  if backend?.final_url != nil {
+    public = public + {final_url: backend.final_url}
+  }
+  return public
+}
+
+fn __web_search_normalize(entry, rank, backend, score = nil) {
+  const url = entry?.url ?? entry?.href ?? entry?.source_url ?? entry?.docs_url
+  return {
+    rank: rank,
+    title: to_string(entry?.title ?? entry?.name ?? url ?? ""),
+    url: url,
+    snippet: to_string(entry?.snippet ?? entry?.description ?? entry?.text ?? ""),
+    source_url: entry?.source_url ?? url,
+    final_url: entry?.final_url ?? url,
+    source_type: entry?.source_type ?? entry?.kind ?? "web",
+    authority: entry?.authority ?? entry?.authoritative ?? false,
+    package: entry?.package ?? entry?.name,
+    registry: entry?.registry ?? entry?.ecosystem,
+    version: entry?.version ?? entry?.pinned_version,
+    provenance: {
+      backend_kind: backend.kind,
+      backend_id: backend.id,
+      evidence: backend?.evidence ?? backend.kind,
+      score: score,
+      source_url: entry?.source_url ?? url,
+      trust_score: entry?.trust_score,
+      first_seen: entry?.first_seen,
+      fetched_at: backend?.fetched_at,
+    },
+  }
+}
+
+fn __web_search_curated(query, opts, backend) {
+  const tokens = __web_search_tokens(query)
+  const limit = opts?.limit ?? 10
+  let scored = []
+  for entry in opts?.index ?? opts?.results ?? backend?.index ?? [] {
+    const score = __web_search_score(entry, query, tokens)
+    if score > 0 || opts?.include_zero_score {
+      scored = scored.appending({entry: entry, score: score})
+    }
+  }
+  const ordered = scored.sorted_by({ item -> 0 - item.score })
+  let results = []
+  let rank = 1
+  for item in __web_search_take(ordered, limit) {
+    results = results.appending(__web_search_normalize(item.entry, rank, backend, item.score))
+    rank = rank + 1
+  }
+  return {
+    ok: true,
+    query: query,
+    backend: __web_search_public_backend(backend),
+    results: results,
+    provenance: {resolver: "std/web", result_count: len(results), authoritative_first: true},
+  }
+}
+
+fn __web_search_provider_results(query, opts, backend) {
+  let results = []
+  let rank = 1
+  for entry in __web_search_take(opts.provider_results ?? [], opts?.limit ?? 10) {
+    results = results.appending(__web_search_normalize(entry, rank, backend))
+    rank = rank + 1
+  }
+  return {
+    ok: true,
+    query: query,
+    backend: __web_search_public_backend(backend),
+    results: results,
+    provenance: {resolver: "std/web", result_count: len(results), authoritative_first: false},
+  }
+}
+
+fn __web_search_api_item(item, api) {
+  if type_of(item) != "dict" {
+    return {title: to_string(item), snippet: to_string(item)}
+  }
+  return item
+    + {
+    title: __web_search_path_get(item, api?.title_path ?? "title", item?.title ?? item?.name),
+    url: __web_search_path_get(item, api?.url_path ?? "url", item?.url ?? item?.href),
+    snippet: __web_search_path_get(
+      item,
+      api?.snippet_path ?? "snippet",
+      item?.snippet ?? item?.description ?? item?.text,
+    ),
+    source_url: __web_search_path_get(item, api?.source_url_path ?? "source_url", item?.source_url),
+  }
+}
+
+fn __web_search_api(harness: Harness, query, opts, backend) {
+  const api = backend.api ?? opts.api
+  const limit = opts?.limit ?? api?.limit ?? 10
+  let fetch_options = api?.fetch_options ?? {}
+  const method = uppercase(api?.method ?? fetch_options?.method ?? "GET")
+  if method == "GET" {
+    const query_param = api?.query_param ?? "q"
+    const existing_query = fetch_options?.query ?? {}
+    fetch_options = fetch_options + {method: method, query: existing_query + {[query_param]: query}}
+  } else {
+    const headers = __web_search_merge_headers(fetch_options?.headers, api?.headers)
+    fetch_options = fetch_options
+      + {
+      method: method,
+      headers: headers,
+      body: api?.body ?? json_stringify({query: query, limit: limit}),
+    }
+  }
+  if api?.headers != nil && method == "GET" {
+    fetch_options = fetch_options
+      + {
+      headers: __web_search_merge_headers(fetch_options?.headers, api.headers),
+    }
+  }
+  const fetched = web_fetch(harness, api.url, fetch_options)
+  const parsed_result: Result<unknown, JsonParseFailure> = try {
+    json_parse(fetched.body)
+  }
+  const parsed = if is_ok(parsed_result) {
+    unwrap(parsed_result)
+  } else {
+    nil
+  }
+  const items = __web_search_path_get(parsed, api?.results_path ?? "results", [])
+  const raw_results = if type_of(items) == "list" {
+    items
+  } else {
+    []
+  }
+  let results = []
+  let rank = 1
+  for item in __web_search_take(raw_results, limit) {
+    const normalized = __web_search_api_item(item, api)
+    results = results.appending(
+      __web_search_normalize(
+        normalized,
+        rank,
+        backend + {fetched_at: fetched.fetched_at},
+        normalized?.score,
+      ),
+    )
+    rank = rank + 1
+  }
+  const fetch_ok = fetched.ok ?? false
+  const parsed_ok = parsed != nil
+  return {
+    ok: fetch_ok && parsed_ok,
+    query: query,
+    backend: __web_search_public_backend(
+      backend + {source_url: fetched.source_url, final_url: fetched.final_url},
+    ),
+    results: results,
+    provenance: {
+      resolver: "std/web",
+      result_count: len(results),
+      authoritative_first: false,
+      fetched_at: fetched.fetched_at,
+      cache_status: fetched.cache_status,
+      source_url: fetched.source_url,
+      final_url: fetched.final_url,
+    },
+  }
+}
+
+/**
+ * Search authoritative web, docs, or registry evidence through a normalized
+ * backend contract.
+ *
+ * Backends:
+ *   - `index` / `results`: deterministic curated entries scored locally.
+ *   - `api`: configured JSON search API fetched through `web_fetch`.
+ *   - `provider_results`: externally captured hosted-tool results normalized
+ *     without coupling this primitive to any provider.
+ *   - `HARN_WEB_SEARCH_URL`: optional process configuration for an API backend.
+ *
+ * @effects: [net, time]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn web_search(harness: Harness, query: string, options = nil) -> dict {
+  const opts = options ?? {}
+  const backend = __web_search_backend(harness.env, opts)
+  if backend.kind == "api" {
+    return __web_search_api(harness, query, opts, backend)
+  }
+  if backend.kind == "provider_hosted" {
+    return __web_search_provider_results(query, opts, backend)
+  }
+  return __web_search_curated(query, opts, backend)
+}
+
+/**
+ * Deterministically verify package imports and optional symbol evidence for
+ * source files. Options include `project_root`, `installed_packages`,
+ * `registry`, `now`, `low_trust_threshold`, and `min_package_age_days`.
+ *
+ * @effects: [fs]
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn verify_imports(fs: HarnessFs, paths, options = nil) -> dict {
+  return fs.verify_imports(paths, options ?? {})
+}
+
+/**
+ * Add model-callable `web_search` and `verify_imports` tools with
+ * capability-gated grounding guidance.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn web_grounding_tools(harness: Harness, registry = nil, options = nil) {
+  const opts = options ?? {}
+  let tools = registry ?? tool_registry()
+  tools = tool_define(
+    tools,
+    opts?.search_tool_name ?? "web_search",
+    "Search authoritative docs, package registries, or a configured search API and return normalized results with provenance.",
+    {
+      parameters: {
+        type: "object",
+        required: ["query"],
+        properties: {
+          query: {type: "string"},
+          limit: {type: "integer"},
+          index: {type: "array"},
+          api: {type: "object"},
+        },
+      },
+      annotations: {readOnlyHint: true},
+      handler: { args -> web_search(harness, args.query, __web_search_tool_options(opts, args)) },
+      guidance:
+        "For unfamiliar APIs, package names, or recent behavior, call web_search against authoritative docs or registries before coding. Prefer pinned docs and registry evidence over general web snippets, and carry source URLs into the answer or follow-up prompt.",
+    },
+  )
+  tools = tool_define(
+    tools,
+    opts?.verify_tool_name ?? "verify_imports",
+    "Verify imports in source files against manifests, installed-package hints, registry evidence, symbol metadata, and package trust signals.",
+    {
+      parameters: {
+        type: "object",
+        required: ["paths"],
+        properties: {
+          paths: {type: "array", items: {type: "string"}},
+          project_root: {type: "string"},
+          registry: {type: "array"},
+          installed_packages: {},
+        },
+      },
+      annotations: {readOnlyHint: true},
+      handler: { args ->
+        verify_imports(harness.fs, args.paths ?? [args.path], __web_search_tool_options(opts, args))
+      },
+      guidance:
+        "After generating or editing code with imports, call verify_imports on the touched source files. Treat package_not_found and symbol_not_found as blockers. Treat fresh_package or low_trust_package warnings as a forced lookup trigger before proceeding.",
+    },
+  )
+  return tools
+}
+
+/**
+ * Resolve a URL reference against a fetched source URL.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn web_resolve_url(base_url: string, href: string) {
+  return __web_resolve_url(base_url, href)
+}
+
+/**
+ * Return the origin URL with `path`, dropping query and fragment.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn web_origin_url(url: string, path: string = "/") -> string {
+  return __web_origin_url(url, path)
+}
+
+/**
+ * Parse title, meta, canonical URL, links, tables, JSON-LD, and plain text.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn web_parse_html(html: string, source_url = nil) -> dict {
+  return __web_extract_html(html, source_url)
+}
+
+/**
+ * Extract the HTML title.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn html_title(html: string) {
+  return web_parse_html(html).title
+}
+
+/**
+ * Extract normalized HTML meta tags keyed by lower-case name/property.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn html_meta(html: string) {
+  return web_parse_html(html).meta
+}
+
+/**
+ * Extract resolved links from anchors.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn html_links(html: string, source_url = nil) {
+  return web_parse_html(html, source_url).links
+}
+
+/**
+ * Extract table captions, headers, and rows.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn html_tables(html: string) {
+  return web_parse_html(html).tables
+}
+
+/**
+ * Extract parsed JSON-LD script blocks.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn html_json_ld(html: string) {
+  return web_parse_html(html).json_ld
+}
+
+/**
+ * Extract normalized visible text without script/style/noscript bodies.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn html_text(html: string) {
+  return web_parse_html(html).text
+}
+
+fn __web_robots_url(url) {
+  return web_origin_url(url, "/robots.txt")
+}
+
+fn __web_line_value(line) {
+  const parts = split(line, ":")
+  if len(parts) < 2 {
+    return nil
+  }
+  return {field: lowercase(trim(parts[0])), value: trim(join(parts[1:], ":"))}
+}
+
+fn __web_robots_rows(body) {
+  let rows = []
+  for line in split(body ?? "", "\n") {
+    const clean = trim(split(line, "#")[0])
+    if clean != "" {
+      const row = __web_line_value(clean)
+      if row != nil {
+        rows = rows + [row]
+      }
+    }
+  }
+  return rows
+}
+
+fn __web_robots_group_score(agents, target) {
+  let score = 0
+  for agent in agents {
+    const normalized = lowercase(trim(agent))
+    if normalized == target {
+      score = 2
+    } else if normalized == "*" && score < 1 {
+      score = 1
+    }
+  }
+  return score
+}
+
+fn __web_robots_push_group(groups, agents, rules, target) {
+  if len(agents) == 0 || len(rules) == 0 {
+    return groups
+  }
+  const score = __web_robots_group_score(agents, target)
+  if score <= 0 {
+    return groups
+  }
+  return groups + [{score: score, rules: rules}]
+}
+
+fn __web_robots_rules(body, user_agent) {
+  const target = lowercase(trim(user_agent ?? "*"))
+  let groups = []
+  let agents = []
+  let group_rules = []
+  for row in __web_robots_rows(body) {
+    if row.field == "user-agent" {
+      if len(group_rules) > 0 {
+        groups = __web_robots_push_group(groups, agents, group_rules, target)
+        agents = []
+        group_rules = []
+      }
+      agents = agents + [row.value]
+    } else if row.field == "allow" || row.field == "disallow" {
+      group_rules = group_rules + [{kind: row.field, path: row.value}]
+    }
+  }
+  groups = __web_robots_push_group(groups, agents, group_rules, target)
+  let best_score = 0
+  for group in groups {
+    if group.score > best_score {
+      best_score = group.score
+    }
+  }
+  let rules = []
+  for group in groups {
+    if group.score == best_score {
+      rules = rules + group.rules
+    }
+  }
+  return rules
+}
+
+fn __web_path_for_robots(url) {
+  const parsed = url_parse(url)
+  const query = parsed?.query
+  if query == nil || query == "" {
+    return parsed.path ?? "/"
+  }
+  const path = parsed.path ?? "/"
+  return path + "?" + query
+}
+
+/**
+ * Return whether robots.txt permits `user_agent` to fetch `url`.
+ *
+ * Missing or non-2xx robots files allow by default. Matching uses the
+ * deterministic subset recurring CI workflows need: exact or `*` user-agent
+ * groups, Allow/Disallow path prefixes, and longest-prefix precedence.
+ *
+ * @effects: [net]
+ * @errors: []
+ */
+pub fn robots_allowed(
+  harness: Harness,
+  url: string,
+  user_agent: string = "*",
+  options = nil,
+) -> bool {
+  const opts = options ?? {}
+  const robots_url = opts?.robots_url ?? __web_robots_url(url)
+  const response = web_fetch(harness, robots_url, opts?.fetch_options ?? {})
+  if !(response.ok ?? false) {
+    return true
+  }
+  const path = __web_path_for_robots(url)
+  let best_len = -1
+  let allowed = true
+  for rule in __web_robots_rules(response.body, user_agent) {
+    if rule.path == "" {
+      continue
+    }
+    if starts_with(path, rule.path) {
+      const score = len(rule.path)
+      if score > best_len || (score == best_len && rule.kind == "allow") {
+        best_len = score
+        allowed = rule.kind == "allow"
+      }
+    }
+  }
+  return allowed
+}
+
+fn __web_xml_unescape(text) {
+  let out = regex_replace("&amp;", "&", text)
+  out = regex_replace("&lt;", "<", out)
+  out = regex_replace("&gt;", ">", out)
+  out = regex_replace("&quot;", "\"", out)
+  out = regex_replace("&apos;", "'", out)
+  return out
+}
+
+fn __web_sitemap_locs(xml) {
+  let urls = []
+  for capture in regex_captures("(?is)<loc\\b[^>]*>(.*?)</loc>", xml ?? "") {
+    const loc = trim(__web_xml_unescape(capture.groups[0] ?? ""))
+    if loc != "" && !urls.contains(loc) {
+      urls = urls + [loc]
+    }
+  }
+  return urls
+}
+
+fn __web_sitemap_candidates(harness: Harness, base_url, opts) {
+  if opts?.sitemap_urls != nil {
+    return opts.sitemap_urls
+  }
+  let urls = []
+  const robots = web_fetch(
+    harness,
+    opts?.robots_url ?? web_origin_url(base_url, "/robots.txt"),
+    opts?.fetch_options ?? {},
+  )
+  if robots.ok {
+    for row in __web_robots_rows(robots.body) {
+      if row.field == "sitemap" && row.value != "" && !urls.contains(row.value) {
+        urls = urls + [row.value]
+      }
+    }
+  }
+  if len(urls) == 0 {
+    urls = [web_origin_url(base_url, "/sitemap.xml")]
+  }
+  return urls
+}
+
+/**
+ * Discover URLs from robots-advertised sitemaps or `/sitemap.xml`.
+ *
+ * Options: sitemap_urls, robots_url, fetch_options, max_sitemaps.
+ *
+ * @effects: [net]
+ * @errors: []
+ */
+pub fn sitemap_urls(harness: Harness, base_url: string, options = nil) -> list<string> {
+  const opts = options ?? {}
+  const max_sitemaps = opts?.max_sitemaps ?? 10
+  let found = []
+  let count = 0
+  for sitemap_url in __web_sitemap_candidates(harness, base_url, opts) {
+    if count >= max_sitemaps {
+      return found
+    }
+    count = count + 1
+    const response = web_fetch(harness, sitemap_url, opts?.fetch_options ?? {})
+    if response.ok {
+      for loc in __web_sitemap_locs(response.body) {
+        if !found.contains(loc) {
+          found = found + [loc]
+        }
+      }
+    }
+  }
+  return found
+}

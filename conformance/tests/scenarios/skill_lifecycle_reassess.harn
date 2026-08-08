@@ -1,0 +1,91 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+/**
+ * Skills & Tool Vault phase 3 (harn#74): `sticky: false` triggers
+ * the reassess phase before each turn, swapping skills when later
+ * user context outgrows the earlier match.
+ *
+ * Flow:
+ *   Turn 0: user prompt names a draft task → `draft` activates.
+ *   Turn 0 response: text+tool call → post_turn_callback fires and
+ *     injects a pivot user message ("review this instead").
+ *   Turn 1: sticky=false, reassess re-reads visible_messages,
+ *     scores the pivot, activates `review`, deactivates `draft`.
+ */
+pipeline test(harness: Harness, task) {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "noop",
+    "Noop that always succeeds",
+    {parameters: {}, handler: { _args -> "ok" }},
+  )
+  skill draft {
+    description "Draft a new document from scratch"
+    when_to_use "User asks to draft/write/compose"
+  }
+  skill review_skill {
+    description "Review existing code for correctness"
+    when_to_use "User asks to review/audit"
+  }
+  const registry = skill_define(
+    draft,
+    "review_skill",
+    skill_find(review_skill, "review_skill") ?? {},
+  )
+  // Turn 0: a tool call forces post_turn_callback to fire, giving
+  // us a hook to inject a runtime user message that pivots intent.
+  with_llm_script(
+    harness.llm,
+    [{text: "Drafting.", tool_calls: [{id: "t0", name: "noop", arguments: {}}]}],
+    { ->
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text("Reviewing now.")],
+    { ->
+      const result = agent_loop(
+        harness,
+        "Please draft the launch memo",
+        nil,
+        {
+          provider: "mock",
+          tools: tools,
+          tool_format: "native",
+          max_iterations: 2,
+          loop_until_done: true,
+          skills: registry,
+          skill_match: {strategy: "metadata", top_n: 1, sticky: false},
+          post_turn_callback: { info ->
+            if info?.iteration == 0 {
+              return {message: "Actually, please review the existing launch memo."}
+            }
+            return ""
+          },
+        },
+      )
+      const events = transcript_events(result?.transcript)
+      let draft_activate = false
+      let review_activate = false
+      let draft_deactivate = false
+      for ev in events {
+        if ev.kind == "skill_activated" && ev.metadata?.name == "draft" {
+          draft_activate = true
+        }
+        if ev.kind == "skill_activated" && ev.metadata?.name == "review_skill" {
+          review_activate = true
+        }
+        if ev.kind == "skill_deactivated" && ev.metadata?.name == "draft" {
+          draft_deactivate = true
+        }
+      }
+      assert(draft_activate, "draft activated on turn 0")
+      assert(review_activate, "review activated after reassess on turn 1")
+      assert(draft_deactivate, "draft deactivated before review took over")
+      harness.stdio.log("skill_lifecycle_reassess tests passed")
+    },
+  )
+}
+// Turn 1: acknowledge the pivot.

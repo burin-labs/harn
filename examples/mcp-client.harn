@@ -1,0 +1,43 @@
+/**
+ * MCP Client Example
+ *
+ * Demonstrates connecting to an external MCP server, discovering its
+ * tools, invoking them, and cleaning up the connection.
+ *
+ * This example connects to the echo server bundled with the conformance
+ * suite. For real use, replace the server command with your MCP server.
+ *
+ * Run with: cargo run --bin harn -- run examples/mcp-client.harn
+ */
+pipeline main(harness: Harness, task) {
+  // Locate the bundled echo server for demonstration
+  const root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const harn_bin = harness.env.get("HARN_BIN") ?? "harn"
+  const server_path = path_join(root, "conformance/helpers/mcp_echo_server.harn")
+  harness.stdio.log("Connecting to MCP echo server...")
+  const client = harness.tools.mcp_connect(harn_bin, ["serve", "mcp", server_path])
+  harness.stdio.log("Connected (type: ${type_of(client)})")
+  // Discover available tools
+  const tools = harness.tools.mcp_list_tools(client)
+  harness.stdio.log("")
+  harness.stdio.log("=== Available Tools (${tools.count}) ===")
+  for t in tools {
+    harness.stdio.log("  - ${t.name}: ${t.description}")
+  }
+  // Call the echo tool
+  harness.stdio.log("")
+  harness.stdio.log("Calling echo tool...")
+  const echo_result = harness.tools.mcp_call(client, "echo", {message: "hello from harn"})
+  harness.stdio.log("Echo result: ${echo_result}")
+  // Call the add tool
+  harness.stdio.log("Calling add tool...")
+  const sum = harness.tools.mcp_call(client, "add", {a: 17, b: 25})
+  harness.stdio.log("17 + 25 = ${sum}")
+  // Check server info
+  const info = harness.tools.mcp_server_info(client)
+  harness.stdio.log("")
+  harness.stdio.log("Server connected: ${info.connected}")
+  // Clean up
+  harness.tools.mcp_disconnect(client)
+  harness.stdio.log("Disconnected from MCP server.")
+}

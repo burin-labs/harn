@@ -1,0 +1,211 @@
+{
+  "name": "harn-lang",
+  "displayName": "Harn Language",
+  "description": "Language support for Harn — the pipeline-oriented language for AI agents",
+  "version": "0.1.0",
+  "publisher": "burin-labs",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/burin-labs/harn"
+  },
+  "categories": ["Programming Languages", "Snippets"],
+  "license": "MIT OR Apache-2.0",
+  "icon": "icon.png",
+  "galleryBanner": {
+    "color": "#0b1413",
+    "theme": "dark"
+  },
+  "keywords": ["harn", "agents", "pipeline", "lsp"],
+  "engines": {
+    "vscode": "^1.125.0"
+  },
+  "activationEvents": [
+    "onLanguage:harn",
+    "onLanguage:harn-prompt",
+    "onDebug",
+    "onTaskType:harn"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "harn",
+        "aliases": ["Harn", "harn"],
+        "extensions": [".harn"],
+        "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "harn-prompt",
+        "aliases": ["Harn Prompt", "harn-prompt"],
+        "extensions": [".harn.prompt", ".prompt"],
+        "configuration": "./language-configuration-prompt.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "harn",
+        "scopeName": "source.harn",
+        "path": "./syntaxes/harn.tmLanguage.json"
+      },
+      {
+        "language": "harn-prompt",
+        "scopeName": "text.harn.prompt",
+        "path": "./syntaxes/harn-prompt.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "harn",
+        "path": "./snippets/harn.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "harn.runPipeline",
+        "title": "Harn: Run Pipeline"
+      },
+      {
+        "command": "harn.formatFile",
+        "title": "Harn: Format File"
+      },
+      {
+        "command": "harn.applyAllAutofixes",
+        "title": "Harn: Apply All Autofixes"
+      }
+    ],
+    "configurationDefaults": {
+      "[harn]": {
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+          "source.fixAll.harn": "always"
+        }
+      }
+    },
+    "debuggers": [
+      {
+        "type": "harn",
+        "label": "Harn",
+        "languages": ["harn"],
+        "configurationAttributes": {
+          "launch": {
+            "required": ["program"],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "Path to the .harn file to debug",
+                "default": "${file}"
+              },
+              "cwd": {
+                "type": "string",
+                "description": "Working directory for the debug session",
+                "default": "${workspaceFolder}"
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "harn",
+            "request": "launch",
+            "name": "Debug Current Harn File",
+            "program": "${file}",
+            "cwd": "${workspaceFolder}"
+          }
+        ]
+      }
+    ],
+    "configuration": {
+      "title": "Harn",
+      "properties": {
+        "harn.path": {
+          "type": "string",
+          "default": "harn",
+          "description": "Path to the harn binary"
+        },
+        "harn.lspPath": {
+          "type": "string",
+          "default": "harn-lsp",
+          "description": "Path to the harn-lsp language server binary"
+        },
+        "harn.dapPath": {
+          "type": "string",
+          "default": "harn-dap",
+          "description": "Path to the harn-dap debug adapter binary"
+        }
+      }
+    },
+    "taskDefinitions": [
+      {
+        "type": "harn",
+        "required": ["command"],
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": ["run", "check", "fmt", "lint", "test"],
+            "description": "The harn subcommand to invoke."
+          },
+          "file": {
+            "type": "string",
+            "description": "Path to a .harn script. Defaults to the current file when omitted.",
+            "default": "${file}"
+          },
+          "args": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Extra arguments appended after the file path.",
+            "default": []
+          },
+          "cwd": {
+            "type": "string",
+            "description": "Working directory for the spawned process.",
+            "default": "${workspaceFolder}"
+          }
+        }
+      }
+    ],
+    "problemMatchers": [
+      {
+        "name": "harn",
+        "owner": "harn",
+        "source": "harn",
+        "fileLocation": ["relative", "${workspaceFolder}"],
+        "pattern": {
+          "regexp": "^(?:error|warning|note)?\\s*([^:]+):(\\d+):(\\d+):?\\s+(error|warning|note):?\\s+(.*)$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "severity": 4,
+          "message": 5
+        }
+      },
+      {
+        "name": "harn-lint",
+        "owner": "harn",
+        "source": "harn-lint",
+        "fileLocation": ["relative", "${workspaceFolder}"],
+        "pattern": {
+          "regexp": "^([^:]+):(\\d+):(\\d+):\\s+(error|warning|info):\\s+(.*)$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "severity": 4,
+          "message": 5
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "test": "node --test test/*.test.js",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.125.0",
+    "typescript": "^7.0.2",
+    "@vscode/vsce": "^3.9.2",
+    "ovsx": "^1.0.2"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^10.1.0"
+  }
+}

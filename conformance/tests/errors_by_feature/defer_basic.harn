@@ -1,0 +1,47 @@
+pipeline test(harness: Harness, task) {
+  // Defer runs on explicit return
+  fn with_cleanup() {
+    defer {
+      harness.stdio.log("cleanup done")
+    }
+    harness.stdio.log("doing work")
+    return "result"
+  }
+  const r = with_cleanup()
+  harness.stdio.log(r)
+  // Multiple defers run in LIFO order
+  fn lifo_order() {
+    defer {
+      harness.stdio.log("first registered")
+    }
+    defer {
+      harness.stdio.log("second registered")
+    }
+    defer {
+      harness.stdio.log("third registered")
+    }
+    harness.stdio.log("body")
+  }
+  lifo_order()
+  // Defer runs on implicit return (no explicit return statement)
+  fn implicit_return() {
+    defer {
+      harness.stdio.log("implicit cleanup")
+    }
+    harness.stdio.log("implicit body")
+  }
+  implicit_return()
+  // Defer runs on throw
+  fn throws_with_defer() {
+    defer {
+      harness.stdio.log("throw cleanup")
+    }
+    harness.stdio.log("before throw")
+    throw "boom"
+  }
+  const err = try {
+    throws_with_defer()
+  }
+  harness.stdio.log(is_err(err))
+  harness.stdio.log(unwrap_err(err))
+}

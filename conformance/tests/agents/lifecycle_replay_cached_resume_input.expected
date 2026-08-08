@@ -1,0 +1,7 @@
+hit_ok=true
+hit_input_approved=true
+hit_input_reviewer=alice
+reorder_ok=true
+miss_ok=false
+miss_code=HARN-SUS-011
+hash_canonical=true

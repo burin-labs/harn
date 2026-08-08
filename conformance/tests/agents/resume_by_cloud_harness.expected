@@ -1,0 +1,6 @@
+handled=false
+mechanism=ResumeBy.cloud_harness
+reason=no_cloud_session
+audit_kind=resume_by_declined
+audit_reason=no_cloud_session
+audit_mechanism=ResumeBy.cloud_harness

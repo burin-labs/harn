@@ -1,0 +1,47 @@
+{
+  "providers": [],
+  "aliases": [],
+  "qc_defaults": {},
+  "available_providers": [],
+  "known_model_names": [],
+  "models": [
+    {
+      "id": "claude-haiku-4-5-20251001",
+      "provider": "anthropic",
+      "name": "Claude Haiku 4.5",
+      "context_window": 200000,
+      "capabilities": [],
+      "pricing": {
+        "input_per_mtok": 1.0,
+        "output_per_mtok": 5.0,
+        "cache_read_per_mtok": 0.10,
+        "cache_write_per_mtok": 1.25
+      }
+    },
+    {
+      "id": "claude-opus-4-7-20260301",
+      "provider": "anthropic",
+      "name": "Claude Opus 4.7",
+      "context_window": 200000,
+      "capabilities": [],
+      "pricing": {
+        "input_per_mtok": 15.0,
+        "output_per_mtok": 75.0,
+        "cache_read_per_mtok": 1.50,
+        "cache_write_per_mtok": 18.75
+      }
+    },
+    {
+      "id": "gpt-4o",
+      "provider": "openai",
+      "name": "GPT-4o",
+      "context_window": 128000,
+      "capabilities": [],
+      "pricing": {
+        "input_per_mtok": 2.50,
+        "output_per_mtok": 10.00,
+        "cache_read_per_mtok": 1.25
+      }
+    }
+  ]
+}

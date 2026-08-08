@@ -1,0 +1,97 @@
+import "std/triggers"
+
+/**
+ * Verifies v0.1 lineage metadata: a 3-agent chain
+ * (parent → child → grandchild) round-trips `actor_chain`,
+ * `effects_grant`, `effects_used`, and `parent_record_id` end-to-end
+ * through the stdlib `trust_graph_record` / `trust_query` surface, and
+ * the effect plus actor-chain inheritance invariants hold.
+ */
+pipeline test(harness: Harness, task) {
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(
+    harness.random.range(100000, 999999),
+  )
+  const parent_grant = [
+    {kind: {kind: "net"}, scope: "write", resource: "https://api.example"},
+    {kind: {kind: "fs"}, scope: "read", resource: "/workspace/src"},
+    {kind: {kind: "fs"}, scope: "write", resource: "/workspace/tmp"},
+  ]
+  const child_grant = [
+    {kind: {kind: "net"}, scope: "write", resource: "https://api.example"},
+    {kind: {kind: "fs"}, scope: "read", resource: "/workspace/src"},
+  ]
+  const grandchild_used = [{kind: {kind: "fs"}, scope: "read", resource: "/workspace/src"}]
+  const parent_agent = "trust-graph-v0-1-parent-" + unique
+  const child_agent = "trust-graph-v0-1-child-" + unique
+  const grandchild_agent = "trust-graph-v0-1-grandchild-" + unique
+  const actor_origin = "user:operator-" + unique
+  const parent_actor = "agent:" + parent_agent
+  const child_actor = "agent:" + child_agent
+  const grandchild_actor = "agent:" + grandchild_agent
+  const parent_actor_chain = {sub: actor_origin, act: {sub: parent_actor}}
+  const child_actor_chain = {sub: actor_origin, act: {sub: child_actor, act: {sub: parent_actor}}}
+  const grandchild_actor_chain = {
+    sub: actor_origin,
+    act: {sub: grandchild_actor, act: {sub: child_actor, act: {sub: parent_actor}}},
+  }
+  const parent_id: TrustEntryId = harness.runtime.trust_graph_record(
+    {
+      agent: parent_agent,
+      action: "agent.spawn",
+      approver: nil,
+      outcome: "success",
+      trace_id: "trace-parent-" + unique,
+      autonomy_tier: "act_auto",
+      metadata: {actor_chain: parent_actor_chain, effects_grant: parent_grant},
+    },
+  )
+  const child_id: TrustEntryId = harness.runtime.trust_graph_record(
+    {
+      agent: child_agent,
+      action: "agent.spawn",
+      approver: nil,
+      outcome: "success",
+      trace_id: "trace-child-" + unique,
+      autonomy_tier: "act_auto",
+      metadata: {
+        actor_chain: child_actor_chain,
+        effects_grant: child_grant,
+        parent_record_id: parent_id,
+      },
+    },
+  )
+  const _grandchild_id: TrustEntryId = harness.runtime.trust_graph_record(
+    {
+      agent: grandchild_agent,
+      action: "fs.read",
+      approver: nil,
+      outcome: "success",
+      trace_id: "trace-grandchild-" + unique,
+      autonomy_tier: "act_auto",
+      metadata: {
+        actor_chain: grandchild_actor_chain,
+        effects_used: grandchild_used,
+        parent_record_id: child_id,
+      },
+    },
+  )
+  const parent: list<TrustRecord> = harness.runtime.trust_query({agent: parent_agent})
+  const child: list<TrustRecord> = harness.runtime.trust_query({agent: child_agent})
+  const grandchild: list<TrustRecord> = harness.runtime.trust_query({agent: grandchild_agent})
+  const report: TrustChainReport = harness.runtime.trust_graph_verify_chain()
+  harness.stdio.println(len(parent) == 1 && len(child) == 1 && len(grandchild) == 1)
+  harness.stdio.println(parent[0]?.schema == "opentrustgraph/v0.1")
+  harness.stdio.println(child[0]?.metadata?.parent_record_id == parent_id)
+  harness.stdio.println(grandchild[0]?.metadata?.parent_record_id == child_id)
+  harness.stdio.println(len(parent[0]?.metadata?.effects_grant) == 3)
+  harness.stdio.println(len(child[0]?.metadata?.effects_grant) == 2)
+  harness.stdio.println(len(grandchild[0]?.metadata?.effects_used) == 1)
+  harness.stdio.println(parent[0]?.metadata?.actor_chain?.sub == actor_origin)
+  harness.stdio.println(child[0]?.metadata?.actor_chain?.act?.sub == child_actor)
+  harness.stdio.println(child[0]?.metadata?.actor_chain?.act?.act?.sub == parent_actor)
+  harness.stdio.println(grandchild[0]?.metadata?.actor_chain?.act?.sub == grandchild_actor)
+  harness.stdio.println(grandchild[0]?.metadata?.actor_chain?.act?.act?.sub == child_actor)
+  harness.stdio.println(grandchild[0]?.metadata?.actor_chain?.act?.act?.act?.sub == parent_actor)
+  harness.stdio.println(report.verified)
+}

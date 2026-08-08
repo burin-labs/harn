@@ -1,0 +1,22 @@
+{
+  "notice": {
+    "source_id": "anthropic-shared-id",
+    "retrieved_at": "2026-07-28T12:00:00Z",
+    "provider": "anthropic",
+    "text": "The shared model input price changes from $1 to $2.",
+    "provenance": "authenticated"
+  },
+  "extraction": {
+    "classification": "candidate",
+    "candidate": {
+      "kind": "price",
+      "provider": "anthropic",
+      "model_id": "shared",
+      "effective_date": "2026-08-01",
+      "field": "input_per_mtok",
+      "old_value": 1.0,
+      "new_value": 2.0,
+      "evidence": "The shared model input price changes from $1 to $2."
+    }
+  }
+}

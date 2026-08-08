@@ -1,0 +1,49 @@
+import { workflow_run_repair } from "std/workflow/repair"
+
+/**
+ * Contract: `workflow_run_repair` preserves a caller-supplied
+ * `repair_prompt_builder` closure across the one-stage graph normalization
+ * boundary. The executor only passes after seeing the builder's replacement
+ * task, so a dropped builder exhausts attempts and fails.
+ */
+pipeline default(harness: Harness) {
+  const token = "REPAIRED"
+  const executor = { ctx ->
+    if contains(ctx.task, token) {
+      return {text: ctx.task + "|PASS"}
+    }
+    return {text: "first attempt"}
+  }
+  const verifier = { r ->
+    return {ok: contains(to_string(r?.visible_text), token), findings: ["need " + token]}
+  }
+  const builder = { ctx ->
+    return token
+      + "|attempt="
+      + to_string(ctx.attempt)
+      + "|findings="
+      + join(ctx.findings, ",")
+      + "|prior="
+      + ctx.prior_text
+  }
+  const out = workflow_run_repair(
+    harness,
+    {
+      task: "base",
+      executor: executor,
+      verify: verifier,
+      repair_prompt_builder: builder,
+      max_attempts: 2,
+    },
+  )
+  harness.stdio.println(out.ok)
+  harness.stdio.println(len(out.attempts))
+  harness.stdio.println(out.attempts[0].status)
+  harness.stdio.println(out.attempts[1].status)
+  harness.stdio.println(contains(out.text, token))
+  harness.stdio.println(contains(out.text, "attempt=1"))
+  harness.stdio.println(contains(out.text, "need " + token))
+  harness.stdio.println(contains(out.text, "prior=first attempt"))
+  // The builder takes precedence over the default feedback template.
+  harness.stdio.println(contains(out.text, "Previous attempt"))
+}

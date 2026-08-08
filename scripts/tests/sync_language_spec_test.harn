@@ -1,0 +1,27 @@
+// Tests for scripts/sync_language_spec.harn — verify the
+// generated-mirror header and that the spec body is preserved verbatim
+// under it. Uses `render_mirror_from(spec_text)` so the test is
+// independent of the test runner's working directory.
+import "../sync_language_spec.harn"
+
+const EXPECTED_HEADER =
+  "<!-- Generated from spec/chapters/*.md by scripts/sync_language_spec.harn -->\n\n"
+
+@test
+pipeline test_render_mirror_starts_with_header(harness: Harness, task) {
+  const rendered = render_mirror_from("hello\n")
+  assert(rendered.starts_with(EXPECTED_HEADER))
+}
+
+@test
+pipeline test_render_mirror_preserves_body(harness: Harness, task) {
+  const body = "## Title\n\nbody line\n"
+  const rendered = render_mirror_from(body)
+  assert(rendered.ends_with(body))
+}
+
+@test
+pipeline test_render_mirror_empty_body(harness: Harness, task) {
+  const rendered = render_mirror_from("")
+  assert_eq(rendered, EXPECTED_HEADER)
+}

@@ -1,0 +1,92 @@
+# canonical wrapper with json keys and heredocs
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"exact_patch","new_string":"const schema_json = \"\";","old_string":"const schema_json =\n    \\\\{\n    \\\\  \"sections\": {","path":"src/schema.zig"}
+  prose=""
+  answer=null
+  done=null
+# back to back wrapper blocks, same line
+  calls=2 errors=0 violations=0 stray=0
+  call edit {"action":"create","content":"code","path":"a.zig"}
+  call verify {}
+  prose=""
+  answer=null
+  done=null
+# adjacent wrapper blocks with a space
+  calls=2 errors=0 violations=0 stray=0
+  call verify {}
+  call run {"command":"zig build test"}
+  prose=""
+  answer=null
+  done=null
+# done block adjacent to a wrapper block
+  calls=1 errors=0 violations=0 stray=0
+  call verify {}
+  prose=""
+  answer=null
+  done="##DONE##"
+# prose before a wrapper block
+  calls=1 errors=0 violations=0 stray=0
+  call look {"file":"Sources/SysMonCore/Providers.swift"}
+  prose="We need to create BatteryProvider.swift and wire it into LiveSystemProvider."
+  answer=null
+  done=null
+# bare call inside stray prose
+  calls=1 errors=0 violations=0 stray=1
+  call look {"file":"src/parse.zig"}
+  prose="Let me inspect the parser first.\n\nThen I will patch it."
+  answer=null
+  done=null
+# invoke markup with a string attribute inside the wrapper
+  calls=1 errors=0 violations=0 stray=0
+  call look {"file":"src/root.zig"}
+  prose=""
+  answer=null
+  done=null
+# invoke markup in a function_calls wrapper
+  calls=1 errors=0 violations=1 stray=0
+  call look {"file":"src/main.zig","intent":"read"}
+  vio "Tool call `look` was emitted as chat-template function markup instead of `<tool_call>look({ ... })</tool_call>`. Recovered this turn so work moves forward; emit the canonical form on subsequent turns."
+  prose=""
+  answer=null
+  done=null
+# genuinely unterminated parameter still errors
+  calls=0 errors=1 violations=0 stray=0
+  err "TOOL CALL TRUNCATED: a `<parameter ...>` block in the `<invoke name=...>` markup for `look` was never closed with `</parameter>` — the response appears to have been cut off. The call was NOT executed; re-emit the complete call."
+  prose=""
+  answer=null
+  done=null
+# edit action verb as the tool name
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"replace_range","content":"    } else {\n        try stderr.print(\"bad\", .{});\n    }","path":"src/main.zig","range_end":84,"range_start":71}
+  prose=""
+  answer=null
+  done=null
+# shell alias folds to run
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"zig build test"}
+  prose=""
+  answer=null
+  done=null
+# genuinely unknown tool name
+  calls=0 errors=1 violations=0 stray=0
+  err "Unknown tool 'frobnicate'. Tool calls must be one of: [edit, ledger, load_skill, look, run, verify]."
+  prose=""
+  answer=null
+  done=null
+# unclosed terminal user_response
+  calls=0 errors=0 violations=0 stray=0
+  prose="Implemented the INI schema validation system with a `Schema` definition and a `cmdCheck` command."
+  answer="Implemented the INI schema validation system with a `Schema` definition and a `cmdCheck` command."
+  done=null
+# unclosed terminal assistant_prose
+  calls=0 errors=0 violations=0 stray=0
+  prose="Implemented full INI schema validation:\n- Added `src/schema.zig`.\n- Imported the new module in `src/main.zig`."
+  answer=null
+  done=null
+# unclosed response tag before a call stays strict
+  calls=1 errors=0 violations=1 stray=0
+  call verify {}
+  vio "Unclosed <user_response> block. Close it with </user_response> or remove it; only <tool_call>, <assistant_prose>, <user_response>, and <done> are accepted."
+  prose="Done, verifying now."
+  answer=null
+  done=null

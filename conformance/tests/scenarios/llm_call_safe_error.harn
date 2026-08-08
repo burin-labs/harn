@@ -1,0 +1,19 @@
+import { with_llm_script } from "std/testing"
+
+/**
+ * llm_call_safe turns a categorized error into an envelope with
+ * {ok: false, response: nil, error: {category, message}}.
+ */
+pipeline default(harness: Harness, task) {
+  with_llm_script(
+    harness.llm,
+    [{error: {category: "rate_limit", message: "429 Too Many Requests"}}],
+    { ->
+      const r = harness.llm.call_safe("hello", nil, {provider: "mock"})
+      harness.stdio.println(r.ok)
+      harness.stdio.println(r.response == nil)
+      harness.stdio.println(r.error.category)
+      harness.stdio.println(r.error.message.contains("429"))
+    },
+  )
+}

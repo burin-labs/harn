@@ -1,0 +1,100 @@
+import { agent_loop } from "std/agent/loop"
+/**
+ * Captain preset wired into the cheap-model conformance harness:
+ * `agent_preset("release_captain", ...)` accepts a `cheap_caller` +
+ * `frontier_caller`
+ * + `escalate_predicate` and composes them into a `with_routing`-backed
+ * `llm_caller` that defaults to the cheap caller and escalates on the
+ * predicate (mirrors the cost-moat substrate from `std/llm/handlers`
+ * and the `prelude_cheap_classify_then_escalate` recipe).
+ *
+ * Verifies:
+ *   - cheap caller wins by default;
+ *   - frontier caller wins when the escalation predicate fires;
+ *   - the captain preset's `logging_sink` composes a `with_logging`
+ *     wrapper around the routed caller that fires for every call;
+ *   - the captain preset's defaults (long adaptive budget, persona
+ *     iteration scope) flow through to the agent_loop result.
+ */
+import { agent_preset } from "std/agent/presets"
+
+fn preset_agent(harness: Harness, kind, prompt, options = nil) {
+  const opts = agent_preset(harness, kind, options)
+  return agent_loop(harness, prompt, opts?.system, opts)
+}
+
+pipeline default(harness: Harness) {
+  const cheap_calls = harness.runtime.atomic(0)
+  const frontier_calls = harness.runtime.atomic(0)
+  const log_records = harness.runtime.atomic(0)
+  const cheap = { _call ->
+    let _ = harness.runtime.atomic_add(cheap_calls, 1)
+    return {
+      ok: true,
+      value: {
+        text: "Cheap-tier reply. ##DONE##",
+        model: "cheap-mock",
+        provider: "mock",
+        input_tokens: 1,
+        output_tokens: 1,
+      },
+    }
+  }
+  const frontier = { _call ->
+    let _ = harness.runtime.atomic_add(frontier_calls, 1)
+    return {
+      ok: true,
+      value: {
+        text: "Frontier-tier reply. ##DONE##",
+        model: "frontier-mock",
+        provider: "mock",
+        input_tokens: 1,
+        output_tokens: 1,
+      },
+    }
+  }
+  const escalate = { call -> contains(call.prompt, "Frontier") }
+  const logging_sink = { _record ->
+    let _ = harness.runtime.atomic_add(log_records, 1)
+  }
+  // Default route: cheap caller handles the call without escalation.
+  const cheap_run = preset_agent(
+    harness,
+    "release_captain",
+    "Cheap path.",
+    {
+      provider: "mock",
+      cheap_caller: cheap,
+      frontier_caller: frontier,
+      escalate_predicate: escalate,
+      logging_sink: logging_sink,
+      done_sentinel: "##DONE##",
+      max_iterations: 2,
+    },
+  )
+  harness.stdio.println(cheap_run.status)
+  harness.stdio.println(cheap_run.text)
+  harness.stdio.println(harness.runtime.atomic_get(cheap_calls))
+  harness.stdio.println(harness.runtime.atomic_get(frontier_calls))
+  harness.stdio.println(harness.runtime.atomic_get(log_records))
+  // Escalated route: the predicate classifies the prompt before dispatch.
+  const frontier_run = preset_agent(
+    harness,
+    "release_captain",
+    "Frontier path.",
+    {
+      provider: "mock",
+      cheap_caller: cheap,
+      frontier_caller: frontier,
+      escalate_predicate: escalate,
+      logging_sink: logging_sink,
+      done_sentinel: "##DONE##",
+      max_iterations: 2,
+    },
+  )
+  harness.stdio.println(frontier_run.status)
+  harness.stdio.println(frontier_run.text)
+  harness.stdio.println(harness.runtime.atomic_get(cheap_calls))
+  harness.stdio.println(harness.runtime.atomic_get(frontier_calls))
+  harness.stdio.println(harness.runtime.atomic_get(log_records))
+}

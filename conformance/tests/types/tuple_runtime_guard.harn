@@ -1,0 +1,11 @@
+fn boundary() -> any {
+  return ["jobs"]
+}
+
+fn label(row: tuple<string, int>) -> string {
+  return "${row[0]}:${row[1]}"
+}
+
+pipeline default(harness: Harness) {
+  harness.stdio.println(label(boundary()))
+}

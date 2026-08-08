@@ -1,0 +1,69 @@
+pipeline main(harness: Harness) {
+  const dir = path_join(harness.fs.workspace_temp_dir(), "harn_eval_manifest_artifacts")
+  harness.fs.mkdir(dir)
+  const baseline = run_record(
+    {
+      _type: "run_record",
+      id: "baseline",
+      workflow_id: "wf",
+      workflow_name: "demo",
+      task: "demo",
+      status: "completed",
+      started_at: "1",
+      stages: [
+        {
+          id: "stage_1",
+          node_id: "act",
+          kind: "stage",
+          status: "completed",
+          outcome: "success",
+          started_at: "1",
+        },
+      ],
+    },
+  )
+  const candidate = run_record(
+    {
+      _type: "run_record",
+      id: "candidate",
+      workflow_id: "wf",
+      workflow_name: "demo",
+      task: "demo",
+      status: "failed",
+      started_at: "1",
+      stages: [
+        {
+          id: "stage_1",
+          node_id: "act",
+          kind: "stage",
+          status: "failed",
+          outcome: "error",
+          started_at: "1",
+        },
+      ],
+    },
+  )
+  harness.fs.run_record_save(baseline, path_join(dir, "baseline.json"))
+  harness.fs.run_record_save(candidate, path_join(dir, "candidate.json"))
+  const suite = harness.runtime.eval_suite_run(
+    eval_suite_manifest(
+      {
+        base_dir: dir,
+        cases: [{label: "candidate", run_path: "candidate.json", compare_to: "baseline.json"}],
+      },
+    ),
+  )
+  const diff = artifact_diff("src/main.rs", "old\nsame", "new\nsame")
+  const review = artifact_diff_review(diff, "Needs approval")
+  const decision = artifact_review_decision(review, "accepted")
+  const workspace = artifact_workspace_file("src/main.rs", "fn " + "main() {}")
+  const command = artifact_command_result("cargo test", {status: 0, success: true})
+  harness.stdio.println(suite?.failed == 1)
+  harness.stdio.println(!suite?.cases[0]?.comparison?.identical)
+  harness.stdio.println(diff?.kind == "diff")
+  harness.stdio.println(review?.kind == "diff_review")
+  harness.stdio.println(decision?.kind == "review_decision")
+  harness.stdio.println(len(decision?.lineage) == 2)
+  harness.stdio.println(workspace?.kind == "workspace_file")
+  harness.stdio.println(command?.kind == "command_result")
+}

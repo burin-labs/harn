@@ -1,0 +1,35 @@
+pipeline test(harness: Harness, task) {
+  // Legacy webhook providers (older Bitbucket, pre-2018 GitHub) sign with
+  // SHA-1. The substrate must let connectors opt in.
+  const _intake = harness.runtime.webhook_intake_register(
+    {
+      id: "legacy-sha1",
+      secret: "legacy-secret",
+      algorithm: "sha1",
+      allow_legacy_sha1: true,
+      signature_header: "x-hub-signature",
+      signature_prefix: "sha1=",
+      delivery_id_header: "x-legacy-delivery",
+      topic: "tests.intake.legacy",
+    },
+  )
+  const body = "legacy-payload"
+  const signature = "sha1=" + hmac_sha1("legacy-secret", body)
+  const outcome = harness.runtime.webhook_intake_feed(
+    "legacy-sha1",
+    {headers: {"x-hub-signature": signature, "x-legacy-delivery": "legacy-1"}, body: body},
+  )
+  harness.stdio.println(outcome.status == "accepted")
+  // SHA-256 signature against a SHA-1 intake is rejected (mismatch).
+  const wrong = harness.runtime.webhook_intake_feed(
+    "legacy-sha1",
+    {
+      headers: {
+        "x-hub-signature": "sha1=" + hmac_sha256("legacy-secret", body),
+        "x-legacy-delivery": "legacy-2",
+      },
+      body: body,
+    },
+  )
+  harness.stdio.println(wrong.status == "rejected")
+}

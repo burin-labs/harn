@@ -1,0 +1,70 @@
+import "std/hitl"
+import "std/triggers"
+
+pub fn hitl_handler(harness: Harness, event: TriggerEvent) -> dict {
+  const answer = harness.interaction.ask_user("Should we continue handling " + event.kind + "?")
+  const approval: {
+    approved: bool,
+    reviewers: list<string>,
+    approved_at: string,
+    reason: string?,
+    signatures: list<{reviewer: string, signed_at: string, signature: string}>,
+  } = harness.interaction.request_approval(
+    "approve " + event.kind,
+    {quorum: 2, reviewers: ["alice", "bob", "carol"]},
+  )
+  return {
+    verdict: answer.verdict,
+    event_id: event.id,
+    first_reviewer: approval.signatures[0]?.reviewer,
+    first_signed_at: approval.signatures[0]?.signed_at,
+    first_signature: approval.signatures[0]?.signature,
+  }
+}
+
+pipeline test(harness: Harness, task) {
+  harness.testing.clear()
+  harness.testing.respond("interaction", "question_response", {answer: {verdict: "approved"}})
+  harness.testing.respond(
+    "interaction",
+    "approval_response",
+    [
+      {approved: true, reviewer: "alice", responded_at: "2026-04-20T12:00:00Z"},
+      {approved: true, reviewer: "bob", responded_at: "2026-04-20T12:00:01Z"},
+    ],
+  )
+  const unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(
+    harness.random.range(100000, 999999),
+  )
+  const handle: TriggerHandle = harness.runtime.trigger_register(
+    {
+      id: "hitl-replay-" + unique,
+      kind: "issue.opened",
+      provider: "webhook",
+      handler: hitl_handler,
+      retry: {max: 1, backoff: "immediate"},
+      when: nil,
+      match: nil,
+      events: ["issue.opened"],
+      dedupe_key: nil,
+      filter: nil,
+      budget: nil,
+      manifest_path: nil,
+      package_name: nil,
+    },
+  )
+  const fired: DispatchHandle = harness.runtime.trigger_fire(
+    handle,
+    {provider: "webhook", kind: "issue.opened", headers: {x_delivery: "evt-hitl-replay"}},
+  )
+  harness.stdio.println(fired.status == "dispatched")
+  harness.stdio.println(contains(json_stringify(fired.result ?? {}), "\"verdict\":\"approved\""))
+  harness.testing.clear()
+  const replay: DispatchHandle = harness.runtime.trigger_replay(fired.event_id)
+  harness.stdio.println(replay.status == "dispatched")
+  harness.stdio.println(contains(json_stringify(replay.result ?? {}), "\"verdict\":\"approved\""))
+  harness.stdio.println(replay.result?.first_reviewer == "alice")
+  harness.stdio.println(replay.result?.first_signed_at == fired.result?.first_signed_at)
+  harness.stdio.println(replay.result?.first_signature == fired.result?.first_signature)
+}

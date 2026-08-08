@@ -1,0 +1,31 @@
+{
+  "name": "mcp.tools_list.missing_jsonrpc",
+  "protocol": "mcp",
+  "schema": "schemas/mcp-2026-07-28.schema.json",
+  "expect": "invalid",
+  "documents": [
+    {
+      "id": 2,
+      "method": "tools/list",
+      "params": {
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientInfo": {
+            "name": "harn-conformance",
+            "version": "0.10.60"
+          },
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
+    }
+  ],
+  "matrix": {
+    "version": "2026-07-28",
+    "family": "tools_list",
+    "case": "negative",
+    "source": {
+      "kind": "hand_authored",
+      "description": "Protocol matrix fixture maintained from the pinned Harn adapter profile and upstream protocol semantics."
+    }
+  }
+}

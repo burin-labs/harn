@@ -1,0 +1,7 @@
+jobs
+3
+workers:4
+retries:2
+jobs:3
+6
+6

@@ -1,0 +1,4 @@
+pipeline default(harness: Harness, task) {
+  harness.stdio.progress("download", "Fetching artifacts", {mode: "spinner", step: 1})
+  harness.stdio.progress("index", "Indexing files", {mode: "bar", current: 3, total: 5, width: 10})
+}

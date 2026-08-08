@@ -1,0 +1,210 @@
+import { filter_nil } from "std/collections"
+
+/**
+ * A normalized content block from an ACP session prompt.
+ *
+ * Text blocks always carry `text`. Binary image, audio, and PDF blocks carry
+ * either inline `base64` data or a `url`; the remaining fields preserve source
+ * provenance and provider hints when ACP supplied them.
+ */
+pub type RuntimePromptContentBlock = {
+  type: "text" | "image" | "audio" | "pdf",
+  text?: string,
+  media_type?: string,
+  base64?: string,
+  url?: string,
+  source_uri?: string,
+  uri?: string,
+  detail?: string,
+}
+
+/**
+ * Harn-owned state directories rooted beneath a caller-selected directory.
+ *
+ * Unlike `harness.fs.runtime_paths()`, this explicit layout never consults ambient path
+ * overrides such as `HARN_STATE_DIR`.
+ */
+pub type RuntimeStatePaths = {state_root: string, worktree_root: string}
+
+/**
+ * Resolve Harn's conventional state layout beneath `root`.
+ *
+ * Use `harness.fs.runtime_paths()` for the active process and this function only when a
+ * caller has named a distinct project root.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn runtime_state_paths_under(root: string) -> RuntimeStatePaths {
+  const state_root = path_join(root, ".harn")
+  return {state_root: state_root, worktree_root: path_join(state_root, "worktrees")}
+}
+
+/**
+ * runtime_task.
+ *
+ * @effects: [host]
+ * @errors: []
+ */
+pub fn runtime_task(runtime: HarnessRuntime) -> string {
+  return runtime.task()
+}
+
+/**
+ * runtime_pipeline_input.
+ *
+ * @effects: [host]
+ * @errors: []
+ */
+pub fn runtime_pipeline_input(runtime: HarnessRuntime) {
+  return runtime.pipeline_input()
+}
+
+/**
+ * Return the active ACP session prompt as normalized content blocks.
+ *
+ * Outside an ACP session, hosts may provide the same capability; the
+ * standalone runtime returns an empty list.
+ *
+ * @effects: [host]
+ * @errors: []
+ */
+pub fn runtime_prompt_content(runtime: HarnessRuntime) -> list<RuntimePromptContentBlock> {
+  return runtime.prompt_content()
+}
+
+/**
+ * runtime_dry_run.
+ *
+ * @effects: [host]
+ * @errors: []
+ */
+pub fn runtime_dry_run(runtime: HarnessRuntime) -> bool {
+  return runtime.dry_run()
+}
+
+/**
+ * runtime_approved_plan.
+ *
+ * @effects: [host]
+ * @errors: []
+ */
+pub fn runtime_approved_plan(runtime: HarnessRuntime) -> string {
+  return runtime.approved_plan()
+}
+
+/**
+ * process_run.
+ *
+ * @effects: [host]
+ * @errors: []
+ */
+pub fn process_run(process: HarnessProcess, argv: list<string>, options = nil) {
+  if len(argv) == 0 {
+    throw "process_run: argv must contain a program"
+  }
+  const opts = options ?? {}
+  return process.run(filter_nil(opts + {program: argv[0], args: argv[1:len(argv)]}))
+}
+
+/**
+ * process_shell.
+ *
+ * @effects: [host]
+ * @errors: []
+ */
+pub fn process_shell(process: HarnessProcess, command: string, options = nil) {
+  const opts = options ?? {}
+  const invocation = process.shell_invocation({command: command})
+  return process.run(filter_nil(opts + {program: invocation.program, args: invocation.args}))
+}
+
+/**
+ * process_result_text.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn process_result_text(result: dict) -> string {
+  const {stdout = "", stderr = ""} = result ?? {}
+  if stdout && stderr {
+    return "${stdout}\n${stderr}"
+  }
+  if stdout {
+    return stdout
+  }
+  if stderr {
+    return stderr
+  }
+  return result?.combined ?? result?.inline_output ?? ""
+}
+
+/**
+ * process_result_success.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn process_result_success(result: dict) -> bool {
+  if result?.success != nil {
+    return result?.success ? true : false
+  }
+  const {status = "completed", exit_code = -1} = result ?? {}
+  return status == "completed" && exit_code == 0
+}
+
+/**
+ * shell_quote.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn shell_quote(value) -> string {
+  return "'" + to_string(value ?? "").replace("'", "'\"'\"'") + "'"
+}
+
+/**
+ * interaction_ask.
+ *
+ * @effects: [host]
+ * @errors: []
+ */
+pub fn interaction_ask(interaction: HarnessInteraction, question) -> string {
+  return interaction.ask(question)
+}
+
+/**
+ * interaction_ask_with_kind.
+ *
+ * @effects: [host]
+ * @errors: []
+ */
+pub fn interaction_ask_with_kind(interaction: HarnessInteraction, question, kind) -> string {
+  return interaction.ask(question, kind)
+}
+
+/**
+ * record_run_metadata.
+ *
+ * @effects: [host]
+ * @errors: []
+ */
+pub fn record_run_metadata(runtime: HarnessRuntime, run, workflow_name) {
+  if run?.path {
+    runtime.record_run(
+      {
+        workflow: workflow_name,
+        path: run?.path,
+        status: run?.status ?? "",
+        fixture_type: run?.run?.replay_fixture?._type,
+        usage: run?.usage,
+        persisted_path: run?.persisted_path,
+        summary: transcript_summary(run?.transcript),
+        transcript_state: run?.transcript?.state ?? "",
+        message_count: len(transcript_messages(run?.transcript)),
+        event_count: len(transcript_events(run?.transcript)),
+        asset_count: len(transcript_assets(run?.transcript)),
+      },
+    )
+  }
+}

@@ -1,0 +1,7 @@
+pipeline test(harness: Harness, task) {
+  const result = harness.runtime.trigger_test_harness("webhook_dedupe_blocks_duplicates")
+  harness.stdio.println(result.ok)
+  harness.stdio.println(len(result.emitted) == 1)
+  harness.stdio.println(result.emitted[0].dedupe_key == "msg_p5jXN8AQM9LWM0D4loKWxJek")
+  harness.stdio.println(result.details.first_appended && !result.details.second_appended)
+}

@@ -1,0 +1,119 @@
+name: Windows nightly
+
+# Runs the full workspace nextest surface on Windows once per night, plus
+# on-demand from the Actions tab. Complements the per-PR `windows` job in
+# `ci.yml`, which builds the workspace test graph but only runs a curated
+# subset of unit tests to keep the PR pipeline fast. The nightly fan-out
+# is the cross-platform safety net: every test that is *not* gated to
+# `#![cfg(unix)]` is expected to pass here.
+#
+# Failure is informational, not blocking — the nightly does not gate the
+# `ci-status` job. When something regresses, file an issue and either
+# fix the underlying portability bug or add a per-test `#[cfg(unix)]`
+# annotation with rationale, then update
+# `docs/src/dev/windows-test-coverage.md` to reflect the disposition.
+#
+# Tracking issue: harn#946.
+
+on:
+  schedule:
+    # 07:00 UTC ≈ 23:00 Pacific the previous evening, ≈ 02:00 Eastern.
+    # Picked to land outside US business hours so the nightly result is
+    # waiting when contributors start their day.
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUSTFLAGS: "-D warnings"
+  # Give every test worker thread the same 16 MiB stack the production CLI
+  # runs on (`CLI_RUNTIME_STACK_SIZE` in `crates/harn-cli/src/lib.rs`). Tests
+  # that drive the Harn VM's recursive compile/evaluate/materialize paths need
+  # more than libtest's / tokio's default 2 MiB worker stack. That work is deep
+  # but bounded, and production already hosts it on a 16 MiB thread, so it never
+  # overflows in the field. Windows stack frames are larger than Unix, so the
+  # same VM walk that fits in 2 MiB on Linux/macOS overflows on Windows and
+  # aborts the whole test process (0xc00000fd). std::thread (and thus tokio's
+  # default-stack workers) honor RUST_MIN_STACK, so setting it here aligns the
+  # test stack with production and kills the overflow class across the whole
+  # workspace instead of padding one test module at a time.
+  RUST_MIN_STACK: "16777216"
+
+jobs:
+  nextest:
+    name: Workspace nextest (windows-latest)
+    runs-on: windows-latest
+    # Don't run forks of the repo on a fork's own schedule.
+    if: github.repository == 'burin-labs/harn'
+    env:
+      # Cache WRITER half of the rust-lld experiment — MUST stay byte-identical
+      # to ci.yml's `windows` job (the restore-only consumer) or the shared-cache
+      # policy's consumer/producer input comparison fails. Toggled together via
+      # the single HARN_WINDOWS_LLD repo variable. See the ci.yml windows job for
+      # the full rationale. Overrides the workflow-level `-D warnings`.
+      RUSTFLAGS: ${{ vars.HARN_WINDOWS_LLD == 'on' && '-D warnings -Clinker=rust-lld.exe' || '-D warnings' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Cache WRITER half of the Dev Drive experiment — MUST stay byte-identical
+      # to ci.yml's `windows` job (same position, action pin, and env-mapping) or
+      # the shared-cache policy's pre-cache step-sequence comparison fails.
+      # Toggled together via the single HARN_WINDOWS_DEVDRIVE repo variable. See
+      # the ci.yml windows job for the full rationale.
+      - name: Set up Dev Drive
+        if: ${{ vars.HARN_WINDOWS_DEVDRIVE == 'on' }}
+        uses: samypr100/setup-dev-drive@30f0f98ae5636b2b6501e181dfb3631b9974818d # v4.0.0
+        with:
+          drive-size: 25GB
+          drive-format: ReFS
+          env-mapping: |
+            CARGO_HOME,{{ DEV_DRIVE }}/.cargo
+            CARGO_TARGET_DIR,{{ DEV_DRIVE }}/target
+      - uses: ./.github/actions/rust-toolchain
+      - uses: ./.github/actions/rust-cache
+        # A release commit changes every workspace package version. Restoring
+        # the main target generation then retains old and new artifacts side by
+        # side until the fixed 25 GB Dev Drive fills. Exact-candidate runs are
+        # deliberately cold; dependency downloads still use Cargo's registry.
+        if: ${{ !startsWith(github.ref_name, 'release-certify/') }}
+        continue-on-error: true
+        with:
+          # This scheduled default-branch run is the sole writer for the
+          # native Windows workspace cache. Path-gated PR jobs restore it but
+          # never write, avoiding one immutable cache generation per PR. Keep
+          # this producer on plain rustc like the PR consumer: RUSTC_WRAPPER is
+          # part of rust-cache's environment hash, while runner-local sccache
+          # reported zero hits and made this target cache unreachable to PRs.
+          # Keep this key stable across source revisions: rust-cache's native
+          # restore key owns compatible fallback, while Cargo owns invalidation.
+          shared-key: workspace-windows
+          target-dir: ${{ env.CARGO_TARGET_DIR }}
+          cache-on-failure: true
+          cache-bin: false
+          save: true
+      - name: Report Windows build storage
+        shell: pwsh
+        run: |
+          $target = $env:CARGO_TARGET_DIR
+          if (-not $target) { $target = Join-Path $env:GITHUB_WORKSPACE "target" }
+          $root = [System.IO.Path]::GetPathRoot($target)
+          $drive = Get-PSDrive -Name $root.TrimEnd('\').TrimEnd(':')
+          "target=$target target_present=$(Test-Path $target) drive_free_bytes=$($drive.Free) drive_used_bytes=$($drive.Used)"
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2.85.5
+        with:
+          tool: nextest@0.9.132
+      - name: Run workspace nextest
+        shell: bash
+        # No package filter — the whole workspace runs. Tests gated to
+        # `#![cfg(unix)]` are excluded at compile time, so the nightly
+        # surface is exactly what is portable.
+        run: cargo nextest run --workspace --profile ci
+      - name: Smoke test harn run
+        shell: bash
+        run: |
+          echo 'fn main(harness: Harness) { harness.stdio.println("ok") }' > smoke.harn
+          "${CARGO_TARGET_DIR:-target}/debug/harn.exe" run smoke.harn

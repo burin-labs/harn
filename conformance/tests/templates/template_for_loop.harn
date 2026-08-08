@@ -1,0 +1,10 @@
+pipeline default(harness: Harness) {
+  harness.stdio.println(
+    harness.fs.render_prompt(
+      "fixtures/template/for_loop.prompt",
+      {xs: ["apple", "banana", "cherry"]},
+    ),
+  )
+  harness.stdio.println("---")
+  harness.stdio.println(harness.fs.render_prompt("fixtures/template/for_loop.prompt", {xs: []}))
+}

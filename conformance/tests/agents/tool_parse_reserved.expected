@@ -1,0 +1,48 @@
+# malformed opener with a complete call
+  calls=1 errors=0 violations=0 stray=0
+  call run {"command":"cargo test -p core"}
+  prose=""
+  answer=null
+  done=null
+# malformed opener leaves no debris in canonical replay
+  canonical="<tool_call>\nrun({\n  \"command\": \"cargo test -p core\"\n})\n</tool_call>"
+# malformed opener, truncated body
+  calls=0 errors=1 violations=0 stray=0
+  err "TOOL CALL TRUNCATED: `<tool_call>` opening `edit(...)` was never closed — the response appears to have been cut off mid-call (likely the model hit its max output token limit). Re-emit the complete `<tool_call>edit({ ... })</tool_call>` block; for very large arguments, split the work into smaller calls."
+  prose=""
+  answer=null
+  done=null
+# literal bracket marker inside an argument
+  calls=1 errors=0 violations=0 stray=0
+  call edit {"action":"create","content":"[[CALL] literal","path":"a.txt"}
+  prose=""
+  answer=null
+  done=null
+# unknown bracket text stays prose
+  calls=0 errors=0 violations=0 stray=0
+  prose="[[CALLER] is not a call"
+  answer=null
+  done=null
+# bracket marker in a closed fence stays prose
+  calls=0 errors=0 violations=0 stray=0
+  prose="```\n[[CALL]\n```"
+  answer=null
+  done=null
+# raw wire form, registry present
+  calls=1 errors=0 violations=0 stray=1
+  call run {"command":"cargo build"}
+  prose="[[CALL]]\n\n[[/CALL]]"
+  answer=null
+  done=null
+# raw wire form, no registry
+  calls=0 errors=1 violations=0 stray=0
+  err "Unknown tool 'run'. Tool calls must be one of: [ledger, load_skill]."
+  prose=""
+  answer=null
+  done=null
+# canonicalized wire form dispatches
+  calls=1 errors=0 violations=0 stray=0
+  call run {"command":"cargo build"}
+  prose=""
+  answer=null
+  done=null

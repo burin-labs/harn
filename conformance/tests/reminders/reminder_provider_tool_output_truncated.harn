@@ -1,0 +1,117 @@
+import { agent_loop } from "std/agent/loop"
+import { agent_dispatch_tool_call } from "std/agent/primitives"
+import {
+  agent_reminder_providers_fire,
+  agent_session_apply_reminder_post_turn,
+} from "std/agent/state"
+import { with_llm_script } from "std/testing"
+
+fn truncating_tools() {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "large_output",
+    "Return output long enough for the max_output hook to compact.",
+    {handler: { _args -> "large " + "x" * 800 }, parameters: {}, returns: {type: "string"}},
+  )
+  return tools
+}
+
+pipeline main(harness: Harness) {
+  const session = harness.agent.open("reminder-provider-tool-output-truncated")
+  harness.agent.reset(session)
+  const payload = {
+    session: {id: session},
+    iteration: 1,
+    tool: {name: "search", args: {}},
+    result: {text: "snipped", truncated: true, original_size: 4096, final_size: 64},
+  }
+  const first = agent_reminder_providers_fire(harness.agent, session, "post_tool_use", payload, {})
+  const second = agent_reminder_providers_fire(harness.agent, session, "post_tool_use", payload, {})
+  const before = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
+  const ttl = agent_session_apply_reminder_post_turn(harness.agent, session, 2)
+  const after = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
+  harness.stdio.println(first.fired_count)
+  harness.stdio.println(second.reports[0].deduped_count)
+  harness.stdio.println(len(before))
+  harness.stdio.println(before[0].reminder.tags[0])
+  harness.stdio.println(before[0].reminder.propagate)
+  harness.stdio.println(before[0].reminder.body.contains("search"))
+  harness.stdio.println(ttl.expired_count)
+  harness.stdio.println(len(after))
+  harness.tools.clear_hooks()
+  harness.tools.register_hook({pattern: "large_output", max_output: 200})
+  const dispatch_session = harness.agent.open("reminder-provider-tool-output-dispatch")
+  harness.agent.reset(dispatch_session)
+  const dispatch = agent_dispatch_tool_call(
+    harness.tools,
+    {id: "large_1", name: "large_output", arguments: {}},
+    truncating_tools(),
+    {session_id: dispatch_session, _iteration: 1},
+  )
+  const dispatch_reminders = transcript_events_by_kind(
+    harness.agent.snapshot(dispatch_session),
+    "system_reminder",
+  )
+  const same_turn_ttl = agent_session_apply_reminder_post_turn(harness.agent, dispatch_session, 0)
+  const same_turn_reminders = transcript_events_by_kind(
+    harness.agent.snapshot(dispatch_session),
+    "system_reminder",
+  )
+  harness.stdio.println(dispatch.tool_output_truncated)
+  harness.stdio.println(dispatch.reminder_provider_report.fired_count)
+  harness.stdio.println(len(dispatch_reminders))
+  harness.stdio.println(dispatch_reminders[0].reminder.tags[0])
+  harness.stdio.println(dispatch_reminders[0].reminder.propagate)
+  harness.stdio.println(same_turn_ttl.expired_count)
+  harness.stdio.println(len(same_turn_reminders))
+  harness.stdio.println(same_turn_reminders[0].reminder.ttl_turns)
+  with_llm_script(
+    harness.llm,
+    [
+      {tool_calls: [{id: "large_loop_1", name: "large_output", arguments: {}}]},
+      {tool_calls: [{id: "large_loop_2", name: "large_output", arguments: {}}]},
+    ],
+    { ->
+      const loop_enabled = agent_loop(
+        harness,
+        "call a large tool",
+        nil,
+        {
+          provider: "mock",
+          tools: truncating_tools(),
+          tool_format: "native",
+          max_iterations: 1,
+          done_judge: nil,
+          session_id: "reminder-provider-tool-output-loop-enabled",
+        },
+      )
+      const loop_enabled_reminders = transcript_events_by_kind(
+        loop_enabled.transcript,
+        "system_reminder",
+      )
+      const loop_disabled = agent_loop(
+        harness,
+        "call a large tool",
+        nil,
+        {
+          provider: "mock",
+          tools: truncating_tools(),
+          tool_format: "native",
+          max_iterations: 1,
+          done_judge: nil,
+          session_id: "reminder-provider-tool-output-loop-disabled",
+          reminders: {providers: ["-tool_output_truncated"]},
+        },
+      )
+      const loop_disabled_reminders = transcript_events_by_kind(
+        loop_disabled.transcript,
+        "system_reminder",
+      )
+      harness.stdio.println(len(loop_enabled_reminders))
+      harness.stdio.println(loop_enabled_reminders[0].reminder.tags[0])
+      harness.stdio.println(len(loop_disabled_reminders))
+      harness.tools.clear_hooks()
+    },
+  )
+}

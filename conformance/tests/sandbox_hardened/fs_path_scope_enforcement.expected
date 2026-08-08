@@ -1,0 +1,9 @@
+3
+tool_rejected
+hostlib_tools_write_file
+true
+true
+tool_rejected
+hostlib_fs_read_text
+true
+false

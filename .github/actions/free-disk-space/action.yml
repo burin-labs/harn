@@ -1,0 +1,95 @@
+name: Free disk space
+description: >-
+  Reclaim disk on GitHub-hosted Ubuntu runners before a full-workspace Rust
+  build. The default image ships ~30 GB of preinstalled SDKs (Android, .NET,
+  GHC/Haskell, CodeQL) the Rust jobs never touch; the cold `target/` tree plus
+  sccache and nextest archives for this workspace otherwise push the ~14 GB of
+  free root space over the edge ("No space left on device").
+
+inputs:
+  min-free-gb:
+    description: >-
+      Skip reclaim when / already has at least this many GiB available.
+      GitHub-hosted images vary by runner pool; larger roots should not spend
+      a minute deleting SDKs they do not need to delete.
+    required: false
+    default: "28"
+
+runs:
+  using: composite
+  steps:
+    - name: Remove unused preinstalled SDKs when disk is tight
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        echo "Disk before reclaim:"
+        df -h /
+        available_kib="$(df --output=avail -k / | tail -n 1 | tr -d '[:space:]')"
+        min_free_kib="$((${MIN_FREE_GB} * 1024 * 1024))"
+        if [ "${available_kib}" -ge "${min_free_kib}" ]; then
+          printf 'Skipping reclaim: / has %s GiB available (threshold: %s GiB).\n' \
+            "$((available_kib / 1024 / 1024))" "${MIN_FREE_GB}"
+          exit 0
+        fi
+
+        # Each path is removed best-effort; a missing one on a future image
+        # revision must not fail the build. These jobs are Rust-only; keep the
+        # system runtimes but remove hosted SDK/tool caches that are not needed
+        # after checkout. Large harn-vm reverse-dependency test closures can
+        # link harn-serve plus perf crates and need more than the stock image's
+        # free root space even after the high-volume Android/.NET/GHC reclaim.
+        pids=""
+        for path in \
+          /usr/local/lib/android \
+          /usr/share/dotnet \
+          /opt/ghc \
+          /usr/local/.ghcup \
+          /opt/hostedtoolcache/CodeQL \
+          /opt/hostedtoolcache/Go \
+          /opt/hostedtoolcache/Python \
+          /opt/hostedtoolcache/PyPy \
+          /opt/hostedtoolcache/Ruby \
+          /opt/hostedtoolcache/node \
+          /usr/lib/google-cloud-sdk \
+          /usr/local/aws-cli \
+          /usr/local/graalvm \
+          /usr/local/julia \
+          /usr/local/share/boost \
+          /usr/local/share/powershell \
+          /usr/local/share/chromium \
+          /usr/local/share/vcpkg \
+          /usr/local/lib/node_modules \
+          /opt/az \
+          /opt/google/chrome \
+          /opt/microsoft \
+          /usr/share/miniconda \
+          /usr/share/swift; do
+          printf 'Reclaiming %s\n' "$path"
+          sudo rm -rf "$path" &
+          pids="${pids} $!"
+        done
+
+        for path in /opt/hostedtoolcache/Java_*; do
+          [ -e "$path" ] || continue
+          printf 'Reclaiming %s\n' "$path"
+          sudo rm -rf "$path" &
+          pids="${pids} $!"
+        done
+
+        for pid in ${pids}; do
+          wait "${pid}" || true
+        done
+        sudo docker image prune --all --force >/dev/null 2>&1 || true
+        sudo apt-get clean >/dev/null 2>&1 || true
+
+        echo "Disk after reclaim:"
+        df -h /
+        available_kib="$(df --output=avail -k / | tail -n 1 | tr -d '[:space:]')"
+        if [ "${available_kib}" -lt "${min_free_kib}" ]; then
+          printf '::error::Only %s GiB available on / after reclaim; Rust CI needs at least %s GiB.\n' \
+            "$((available_kib / 1024 / 1024))" "${MIN_FREE_GB}"
+          exit 1
+        fi
+      env:
+        MIN_FREE_GB: ${{ inputs.min-free-gb }}

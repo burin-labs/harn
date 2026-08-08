@@ -1,0 +1,127 @@
+import { FileReplaceOptions } from "std/fs"
+import "std/run_artifacts"
+import "std/schema"
+
+type Facts = {status: string, count?: int}
+
+type WrongFacts = {status: string, count: string}
+
+fn facts_descriptor(name: string = "facts.json") -> ArtifactDescriptor<Facts> {
+  return artifact_descriptor(name, schema_contract(schema_of(Facts), []))
+}
+
+pipeline test(harness: Harness, task) {
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-run-artifacts-" + harness.random.uuid_v7(),
+  )
+  const open_options: RunArtifactsOpenOptions = {root: root, run_id: "run-a"}
+  const run: RunArtifactsRun = run_artifacts_open(harness, "eval", open_options)
+  const paths: RunArtifactPaths = run.paths
+  harness.stdio.println(run.kind)
+  harness.stdio.println(run.run_id)
+  harness.stdio.println(run.root == path_normalize(root))
+  harness.stdio.println(harness.fs.exists(run.dir))
+  harness.stdio.println(path_relative_to(paths.facts, run.dir))
+  const facts_artifact = facts_descriptor()
+  run_artifact_write_json(harness.fs, run, facts_artifact, {status: "ok", count: 2}, {pretty: true})
+  const facts = run_artifact_read_json(harness.fs, run, facts_artifact)
+  harness.stdio.println(facts.status)
+  harness.stdio.println(facts.count)
+  const typed_artifact = facts_descriptor("typed.json")
+  const first_write = run_artifact_write_json(
+    harness.fs,
+    run,
+    typed_artifact,
+    {status: "before", count: 1},
+  )
+  const invalid_value: any = {status: "invalid", count: "not-an-int"}
+  const rejected_write = run_artifact_write_json_result(
+    harness.fs,
+    run,
+    typed_artifact,
+    invalid_value,
+  )
+  harness.stdio.println(unwrap_err(rejected_write).kind)
+  harness.stdio.println(run_artifact_read_json(harness.fs, run, typed_artifact).status)
+  const typed_result = run_artifact_read_json_result(harness.fs, run, typed_artifact)
+  harness.stdio.println(unwrap(typed_result).count)
+  const wrong_artifact = artifact_descriptor(
+    "typed.json",
+    schema_contract(schema_of(WrongFacts), []),
+  )
+  const invalid_typed_result = run_artifact_read_json_result(harness.fs, run, wrong_artifact)
+  harness.stdio.println(unwrap_err(invalid_typed_result).kind)
+  run_artifact_write_json(harness.fs, run, typed_artifact, {status: "after", count: 2})
+  const stale_replace: FileReplaceOptions = {expected_sha256: first_write.after_sha256}
+  const stale_options: ArtifactWriteOptions = {replace: stale_replace}
+  const stale = run_artifact_write_json(
+    harness.fs,
+    run,
+    typed_artifact,
+    {status: "stale", count: 3},
+    stale_options,
+  )
+  harness.stdio.println(
+    stale.status + ":" + run_artifact_read_json(harness.fs, run, typed_artifact).status,
+  )
+  const shared_artifact = facts_descriptor("shared.json")
+  const concurrent_writes = parallel each [1, 2, 3, 4, 5, 6, 7, 8] with {
+    max_concurrent: 8,
+  } { writer ->
+    return run_artifact_write_json(
+      harness.fs,
+      run,
+      shared_artifact,
+      {status: "writer", count: writer},
+    )
+  }
+  const shared = run_artifact_read_json(harness.fs, run, shared_artifact)
+  harness.stdio.println(
+    len(concurrent_writes) == 8 && shared.status == "writer" && shared.count >= 1
+      && shared.count <= 8,
+  )
+  const missing = run_artifact_read_json_raw_result(harness.fs, run, "missing.json")
+  harness.stdio.println(unwrap_err(missing).kind)
+  harness.fs.write_text(run_artifact_path(run, "bad.json"), "{bad")
+  const malformed = run_artifact_read_json_raw_result(harness.fs, run, "bad.json")
+  harness.stdio.println(unwrap_err(malformed).kind)
+  run_artifact_write_text(harness.fs, run, "review.md", "hello")
+  harness.stdio.println(run_artifact_read_text(harness.fs, run, "review.md", "") == "hello\n")
+  harness.stdio.println(path_relative_to(run_artifact_transcript_dir(run), run.dir))
+  harness.stdio.println(path_relative_to(run_artifact_transcript_path(run, "chat-llm"), run.dir))
+  const reopened: RunArtifactsRun = run_artifacts_from_dir("eval", run.dir)
+  harness.stdio.println(reopened.run_id)
+  harness.stdio.println(path_relative_to(reopened.paths.agent_result, reopened.dir))
+  const escaped = try {
+    run_artifact_path(run, "../secret.json")
+  }
+  harness.stdio.println(!is_ok(escaped))
+  const invalid_descriptor = try {
+    facts_descriptor("../secret.json")
+  }
+  harness.stdio.println(!is_ok(invalid_descriptor))
+  const missing_root = path_join(root, "missing-root")
+  harness.stdio.println(len(run_artifacts_list(harness.fs, "eval", {root: missing_root})) == 0)
+  const empty_root = path_join(root, "empty-root")
+  harness.fs.mkdir(path_join(empty_root, "eval"))
+  harness.stdio.println(len(run_artifacts_list(harness.fs, "eval", {root: empty_root})) == 0)
+  const run_b = run_artifacts_open(harness, "eval", {root: root, run_id: "run-b"})
+  run_artifact_write_json(harness.fs, run_b, facts_artifact, {status: "ok"})
+  const listed: list<RunArtifactsRun> = run_artifacts_list(
+    harness.fs,
+    "eval",
+    {root: root, limit: 10},
+  )
+  harness.stdio.println(len(listed))
+  harness.stdio.println(listed[0]?.modified >= listed[1]?.modified)
+  harness.stdio.println(len(run_artifacts_list(harness.fs, "eval", {root: root, limit: 1})))
+  harness.stdio.println(len(run_artifacts_list(harness.fs, "eval", {root: root, limit: 0})))
+  const namespaced = run_artifacts_open(
+    harness,
+    "eval",
+    {root: root, namespace: "fleet", run_id: "run-c"},
+  )
+  harness.stdio.println(path_relative_to(namespaced.dir, root))
+  harness.fs.delete(root)
+}

@@ -1,0 +1,52 @@
+# generic tool wrapper unwraps to the real call
+  calls=1 errors=0 violations=0 stray=1
+  call look {"file":"src/storage/page_cache.h","intent":"read"}
+  prose=""
+  answer=null
+  done=null
+# harmony channel suffix on the name
+  calls=0 errors=0 violations=1 stray=0
+  vio "unparsed_tool_syntax: text shaped like a tool call was not recognized as one and did not run. Emit every call as `<tool_call>name({ ... })</tool_call>`. Unrecognized fragment: …\"name\":\"run\ncommentary\",\"arguments\":{\"command\":\"cargo test\"}}"
+  prose="{\"name\":\"run\n\ncommentary\",\"arguments\":{\"command\":\"cargo test\"}}"
+  answer=null
+  done=null
+# constrain marker with a command argument
+  calls=0 errors=0 violations=1 stray=0
+  vio "unparsed_tool_syntax: text shaped like a tool call was not recognized as one and did not run. Emit every call as `<tool_call>name({ ... })</tool_call>`. Unrecognized fragment: …\"name\":\"\njson\",\"arguments\":{\"command\":\"cargo test\"}}"
+  prose="{\"name\":\"\n\njson\",\"arguments\":{\"command\":\"cargo test\"}}"
+  answer=null
+  done=null
+# constrain marker with a read intent
+  calls=0 errors=0 violations=1 stray=0
+  vio "unparsed_tool_syntax: text shaped like a tool call was not recognized as one and did not run. Emit every call as `<tool_call>name({ ... })</tool_call>`. Unrecognized fragment: …\"name\":\"\njson\",\"arguments\":{\"intent\":\"read\",\"path\":\"src/main.zig\"}}"
+  prose="{\"name\":\"\n\njson\",\"arguments\":{\"intent\":\"read\",\"path\":\"src/main.zig\"}}"
+  answer=null
+  done=null
+# tool_call wrapper with a search intent
+  calls=1 errors=0 violations=0 stray=1
+  call search {"intent":"search","path":"src","query":"fn parse"}
+  prose=""
+  answer=null
+  done=null
+# read is aliased to look
+  calls=0 errors=1 violations=1 stray=0
+  err "Unknown tool 'read'. Use `look({ intent: \"read\", ... })` to read a file. Tool calls must be one of: [edit, ledger, load_skill, look, run]."
+  vio "unparsed_tool_syntax: text shaped like a tool call was not recognized as one and did not run. Emit every call as `<tool_call>name({ ... })</tool_call>`. Unrecognized fragment: …\"name\":\"read\",\"arguments\":\"{}\"}}]"
+  prose=""
+  answer=null
+  done=null
+# apply_patch is aliased to edit
+  calls=0 errors=1 violations=1 stray=0
+  err "Unknown tool 'apply_patch'. Use the `edit({ ... })` tool to modify a file. Tool calls must be one of: [edit, ledger, load_skill, look, run]."
+  vio "unparsed_tool_syntax: text shaped like a tool call was not recognized as one and did not run. Emit every call as `<tool_call>name({ ... })</tool_call>`. Unrecognized fragment: …\"name\":\"apply_patch\",\"arguments\":\"{}\"}}]"
+  prose=""
+  answer=null
+  done=null
+raw_argument_bytes=208
+# malformed arguments preview truncates on a char boundary
+  calls=0 errors=1 violations=1 stray=0
+  err "Could not parse arguments for tool 'edit': expected value at line 1 column 1. Raw: xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa€ …"
+  vio "unparsed_tool_syntax: text shaped like a tool call was not recognized as one and did not run. Emit every call as `<tool_call>name({ ... })</tool_call>`. Unrecognized fragment: …\"name\":\"edit\",\"arguments\":\"xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa€ trailing\"}}]"
+  prose=""
+  answer=null
+  done=null

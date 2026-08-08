@@ -1,0 +1,10 @@
+import { with_llm_script } from "std/testing"
+
+pipeline default(harness: Harness, task) {
+  with_llm_script(
+    harness.llm,
+    [{error: {status: 503, kind: "flaky"}}],
+    { ->
+    },
+  )
+}

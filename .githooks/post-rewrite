@@ -1,0 +1,106 @@
+#!/bin/sh
+# post-rewrite: re-sync `cat`-style generated mirror files after a
+# rebase or `git commit --amend` rewrites a commit that edited the
+# authoring source.
+#
+# Why this hook exists:
+#   `spec/HARN_SPEC.md` and `docs/src/language-spec.md` are both generated
+#   from the per-chapter sources in `spec/chapters/`. The repo configures a
+#   custom merge driver `merge.harn-generated.driver = true` (see
+#   scripts/configure_merge_drivers.sh) that silently keeps the current side
+#   of the merge instead of combining both. That works during plain merges
+#   where the user regenerates afterwards, but during a rebase it silently
+#   drops the author's regenerated files — the chapter sources are preserved
+#   (they have their own 3-way merge), but the generated copies revert to the
+#   upstream version. CI then fails on `make check-language-spec`.
+#
+# What this does:
+#   When the most recent rewrite touched a `spec/chapters/*.md` source,
+#   regenerate `spec/HARN_SPEC.md` + `docs/src/language-spec.md`. If that
+#   produces changes, fold them into the latest rewritten commit via
+#   `--amend --no-edit --no-verify`. `--no-verify` skips pre-commit so we
+#   don't recurse.
+#
+# Safety:
+#   - Only fires when the trigger is `rebase` (skips `amend` to avoid
+#     amend-during-amend infinite loops if anyone wires this in oddly).
+#   - Only fires when exactly one rewritten commit touched the spec, so
+#     a multi-commit rebase doesn't silently fold the regen into the
+#     wrong commit. The else-branch warns instead.
+#   - Bails on a detached HEAD or if the regen script fails.
+
+set -e
+
+trigger=$1
+[ "$trigger" = "rebase" ] || exit 0
+
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+cd "$repo_root"
+
+rewrites=$(cat) || exit 0
+[ -n "$rewrites" ] || exit 0
+
+# `spec/chapters/*.md` (the authoring source) → `spec/HARN_SPEC.md` +
+# `docs/src/language-spec.md` (both generated) is the mirror set we cheaply
+# regenerate here. The sync logic itself is a `.harn` script invoked through
+# the workspace's debug harn binary; we fast-path skip the regen if the binary
+# isn't built yet, so a clean checkout doesn't pay a Rust build cost.
+source_pattern='^spec/chapters/.*\.md$'
+generated_paths="spec/HARN_SPEC.md docs/src/language-spec.md docs/src/spec/language docs/src/SUMMARY.md"
+sync_script="scripts/sync_language_spec.harn"
+harn_bin="target/debug/harn"
+
+[ -f "$sync_script" ] || exit 0
+[ -x "$harn_bin" ] || exit 0
+
+# How many of the rewritten commits touched a spec chapter source?
+spec_touching_news=$(echo "$rewrites" | awk '{print $2}' | while read -r sha; do
+  [ -n "$sha" ] || continue
+  if git show --name-only --pretty=format: "$sha" 2>/dev/null | grep -Eq "$source_pattern"; then
+    echo "$sha"
+  fi
+done)
+
+count=$(printf '%s\n' "$spec_touching_news" | grep -c .)
+[ "$count" -gt 0 ] || exit 0
+
+last_sha=$(git rev-parse HEAD 2>/dev/null) || exit 0
+last_touched=$(printf '%s\n' "$spec_touching_news" | tail -n 1)
+
+# Re-apply the local codesign before launching. A pre-commit pass on
+# another commit during this rebase may have re-linked the binary and
+# stripped its ad-hoc signature; without re-signing, macOS blocks for
+# several seconds on a Gatekeeper "Verifying 'harn'..." popup before
+# the silent regen can complete.
+if [ "$(uname)" = "Darwin" ] && [ -x "scripts/sign_local_macos.sh" ]; then
+  HARN_LOCAL_SIGN_QUIET=1 ./scripts/sign_local_macos.sh >/dev/null 2>&1 || true
+fi
+
+"$harn_bin" run "$sync_script" >/dev/null 2>&1 || exit 0
+
+if git diff --quiet --exit-code -- $generated_paths; then
+  exit 0
+fi
+
+if [ "$count" -eq 1 ] && [ "$last_touched" = "$last_sha" ]; then
+  echo "post-rewrite: regenerated $generated_paths from spec/chapters; folding into $(git rev-parse --short HEAD)" >&2
+  git add -- $generated_paths
+  GIT_EDITOR=true git commit --amend --no-edit --no-verify >/dev/null
+  exit 0
+fi
+
+# Multi-commit rewrite or spec touch wasn't on the tip — auto-amending
+# would put the regen in the wrong commit. Leave the regenerated file
+# in the working tree and let the user fold it in manually.
+echo "" >&2
+echo "post-rewrite: generated spec files are stale relative to spec/chapters." >&2
+echo "" >&2
+echo "  $count rewritten commit(s) touched spec chapters; auto-amend would land" >&2
+echo "  the regen on the wrong commit. The regenerated files are in your working" >&2
+echo "  tree." >&2
+echo "" >&2
+echo "  Fold them into the right commit, e.g.:" >&2
+echo "    git add $generated_paths" >&2
+echo "    git rebase -i ${last_touched}^   # squash the regen into the spec commit" >&2
+echo "" >&2
+exit 0

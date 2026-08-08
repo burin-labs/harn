@@ -1,0 +1,847 @@
+/**
+ * Intra-turn resource fail-fast: when one assistant message emits multiple
+ * mutating calls for the same annotated workspace resource, a failure in an
+ * earlier sibling must stop later same-resource siblings before they can mutate
+ * stale state. Different resources and successful same-resource sequences still
+ * run normally.
+ */
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn edit_dependency_key_params() {
+  return ["anchor", "old_string", "function_name", "symbol_name", "name"]
+}
+
+fn edit_dependency_range_params() {
+  return [{start: "range_start", end: "range_end"}]
+}
+
+fn edit_tools(
+  metadata_key = "annotations",
+  dependency_key_params = [],
+  dependency_range_params = [],
+  arg_aliases = {},
+) {
+  let tools = tool_registry()
+  const arg_schema = {
+    path_params: ["path"],
+    dependency_key_params: dependency_key_params,
+    dependency_range_params: dependency_range_params,
+    arg_aliases: arg_aliases,
+  }
+  const metadata = {kind: "edit", side_effect_level: "workspace_write", arg_schema: arg_schema}
+  const burin_policy = {
+    path_params: ["path"],
+    dependency_key_params: dependency_key_params,
+    dependency_range_params: dependency_range_params,
+    arg_aliases: arg_aliases,
+    side_effect_level: "workspace_write",
+    mutation_classification: "workspace_write",
+  }
+  const metadata_field = if metadata_key == "policy" {
+    {policy: metadata}
+  } else if metadata_key == "burin_policy" {
+    {policy: burin_policy}
+  } else if metadata_key == "none" {
+    {}
+  } else {
+    {annotations: metadata}
+  }
+  tools = tool_define(
+    tools,
+    "edit",
+    "Edit a workspace file.",
+    {
+      handler: { args ->
+        if args?.fail_noop ?? false {
+          return "Error: [Edit rejected] old_string not found. Your edit was NOT applied to "
+            + to_string(
+            args?.path ?? "",
+          )
+            + " "
+            + to_string(args?.marker ?? "")
+        }
+        if args?.fail_applied ?? false {
+          return "## Diagnostics (1 errors, via zig ast-check)\n"
+            + "  L3 ERROR: expected ';' after statement\n"
+            + "-> Fix these errors before declaring done."
+        }
+        if args?.fail ?? false {
+          throw "rejected " + to_string(args?.path ?? "") + " " + to_string(args?.marker ?? "")
+        }
+        if args?.fail_return ?? false {
+          return "Error: rejected " + to_string(args?.path ?? "") + " "
+            + to_string(args?.marker ?? "")
+        }
+        if args?.diagnostics ?? false {
+          return "## Diagnostics (2 errors, via zig ast-check)\n"
+            + "  L12 ERROR: expected ',' after initializer\n"
+            + "  L19 ERROR: expected statement, found ';'\n"
+            + "-> Fix these errors before browsing, broad rewrites, or declaring done."
+        }
+        return "applied " + to_string(args?.path ?? "") + " " + to_string(args?.marker ?? "")
+      },
+      parameters: {
+        path: {type: "string", description: "Workspace-relative path"},
+        marker: {type: "string", description: "Probe marker"},
+        action: {type: "string", description: "Logical edit action", required: false},
+        range_start: {
+          type: "integer",
+          description: "Start offset for range-based edits",
+          required: false,
+        },
+        range_end: {
+          type: "integer",
+          description: "End offset for range-based edits",
+          required: false,
+        },
+        anchor: {type: "string", description: "Anchor text for anchored edits", required: false},
+        old_string: {
+          type: "string",
+          description: "Old text for replacement edits",
+          required: false,
+        },
+        function_name: {type: "string", description: "Target function name", required: false},
+        symbol_name: {type: "string", description: "Target symbol name", required: false},
+        name: {type: "string", description: "Generic target name", required: false},
+        fail: {type: "boolean", description: "Whether this call rejects", required: false},
+        fail_return: {
+          type: "boolean",
+          description: "Whether this call returns a product-level error",
+          required: false,
+        },
+        fail_noop: {
+          type: "boolean",
+          description: "Whether this call fails WITHOUT mutating (applied: false)",
+          required: false,
+        },
+        fail_applied: {
+          type: "boolean",
+          description: "Whether this call fails AFTER mutating (applied: true)",
+          required: false,
+        },
+        diagnostics: {
+          type: "boolean",
+          description: "Whether this call returns product-level diagnostics",
+          required: false,
+        },
+      },
+      returns: {type: "string"},
+    }
+      + metadata_field,
+  )
+  return tools
+}
+
+fn same_file_failure_batch() {
+  return [
+    {
+      id: "a1",
+      name: "edit",
+      arguments: {path: "src/a.zig", marker: "first", fail: true, fail_return: false},
+    },
+    {
+      id: "a2",
+      name: "edit",
+      arguments: {path: "src/a.zig", marker: "second", fail: false, fail_return: false},
+    },
+    {
+      id: "b1",
+      name: "edit",
+      arguments: {path: "src/b.zig", marker: "other", fail: false, fail_return: false},
+    },
+  ]
+}
+
+fn same_file_product_error_batch() {
+  return [
+    {
+      id: "a1",
+      name: "edit",
+      arguments: {path: "src/a.zig", marker: "first", fail: false, fail_return: true},
+    },
+    {
+      id: "a2",
+      name: "edit",
+      arguments: {path: "src/a.zig", marker: "second", fail: false, fail_return: false},
+    },
+    {
+      id: "b1",
+      name: "edit",
+      arguments: {path: "src/b.zig", marker: "other", fail: false, fail_return: false},
+    },
+  ]
+}
+
+fn same_file_diagnostics_batch() {
+  return [
+    {
+      id: "a1",
+      name: "edit",
+      arguments: {path: "src/a.zig", marker: "first", fail: false, diagnostics: true},
+    },
+    {
+      id: "a2",
+      name: "edit",
+      arguments: {path: "src/a.zig", marker: "second", fail: false, diagnostics: false},
+    },
+    {
+      id: "b1",
+      name: "edit",
+      arguments: {path: "src/b.zig", marker: "other", fail: false, diagnostics: false},
+    },
+  ]
+}
+
+fn same_file_success_batch() {
+  return [
+    {
+      id: "a1",
+      name: "edit",
+      arguments: {path: "src/a.zig", marker: "first", fail: false, fail_return: false},
+    },
+    {
+      id: "a2",
+      name: "edit",
+      arguments: {path: "src/a.zig", marker: "second", fail: false, fail_return: false},
+    },
+  ]
+}
+
+fn same_file_noop_failure_batch() {
+  return [
+    {id: "a1", name: "edit", arguments: {path: "src/a.zig", marker: "first", fail_noop: true}},
+    {
+      id: "a2",
+      name: "edit",
+      arguments: {path: "src/a.zig", marker: "second", fail: false, fail_return: false},
+    },
+  ]
+}
+
+fn same_file_applied_failure_batch() {
+  return [
+    {id: "a1", name: "edit", arguments: {path: "src/a.zig", marker: "first", fail_applied: true}},
+    {
+      id: "a2",
+      name: "edit",
+      arguments: {path: "src/a.zig", marker: "second", fail: false, fail_return: false},
+    },
+  ]
+}
+
+fn same_file_different_target_applied_failure_batch() {
+  return [
+    {
+      id: "a1",
+      name: "edit",
+      arguments: {
+        path: "src/a.zig",
+        marker: "first-target",
+        action: "replace_range",
+        range_start: 10,
+        range_end: 12,
+        fail_applied: true,
+      },
+    },
+    {
+      id: "a2",
+      name: "edit",
+      arguments: {
+        path: "src/a.zig",
+        marker: "second-target",
+        action: "replace_range",
+        range_start: 40,
+        range_end: 42,
+        fail: false,
+        fail_return: false,
+      },
+    },
+  ]
+}
+
+fn same_file_same_target_applied_failure_batch() {
+  return [
+    {
+      id: "a1",
+      name: "edit",
+      arguments: {
+        path: "src/a.zig",
+        marker: "first-target",
+        action: "replace_range",
+        range_start: 10,
+        range_end: 12,
+        fail_applied: true,
+      },
+    },
+    {
+      id: "a2",
+      name: "edit",
+      arguments: {
+        path: "src/a.zig",
+        marker: "same-target",
+        action: "replace_range",
+        range_start: 10,
+        range_end: 12,
+        fail: false,
+        fail_return: false,
+      },
+    },
+  ]
+}
+
+fn same_file_overlapping_target_applied_failure_batch() {
+  return [
+    {
+      id: "a1",
+      name: "edit",
+      arguments: {
+        path: "src/a.zig",
+        marker: "first-target",
+        action: "replace_range",
+        range_start: 10,
+        range_end: 20,
+        fail_applied: true,
+      },
+    },
+    {
+      id: "a2",
+      name: "edit",
+      arguments: {
+        path: "src/a.zig",
+        marker: "overlap-target",
+        action: "replace_range",
+        range_start: 15,
+        range_end: 25,
+        fail: false,
+        fail_return: false,
+      },
+    },
+  ]
+}
+
+fn same_file_same_range_different_action_applied_failure_batch() {
+  return [
+    {
+      id: "a1",
+      name: "edit",
+      arguments: {
+        path: "src/a.zig",
+        marker: "first-target",
+        action: "replace_range",
+        range_start: 10,
+        range_end: 12,
+        fail_applied: true,
+      },
+    },
+    {
+      id: "a2",
+      name: "edit",
+      arguments: {
+        path: "src/a.zig",
+        marker: "different-action-same-range",
+        action: "insert_after",
+        range_start: 11,
+        range_end: 11,
+        fail: false,
+        fail_return: false,
+      },
+    },
+  ]
+}
+
+fn same_file_same_alias_target_applied_failure_batch() {
+  return [
+    {
+      id: "a1",
+      name: "edit",
+      arguments: {
+        path: "src/a.zig",
+        marker: "canonical-old",
+        action: "exact_patch",
+        old_string: "let value = 1",
+        fail_applied: true,
+      },
+    },
+    {
+      id: "a2",
+      name: "edit",
+      arguments: {
+        path: "src/a.zig",
+        marker: "alias-old",
+        action: "exact_patch",
+        old: "let value = 1",
+        fail: false,
+        fail_return: false,
+      },
+    },
+  ]
+}
+
+fn same_file_different_alias_target_applied_failure_batch() {
+  return [
+    {
+      id: "a1",
+      name: "edit",
+      arguments: {
+        path: "src/a.zig",
+        marker: "canonical-old",
+        action: "exact_patch",
+        old_string: "let value = 1",
+        fail_applied: true,
+      },
+    },
+    {
+      id: "a2",
+      name: "edit",
+      arguments: {
+        path: "src/a.zig",
+        marker: "alias-old-different",
+        action: "exact_patch",
+        old: "let other = 2",
+        fail: false,
+        fail_return: false,
+      },
+    },
+  ]
+}
+
+fn same_file_same_range_alias_applied_failure_batch() {
+  return [
+    {
+      id: "a1",
+      name: "edit",
+      arguments: {
+        path: "src/a.zig",
+        marker: "canonical-range",
+        action: "replace_range",
+        range_start: 10,
+        range_end: 12,
+        fail_applied: true,
+      },
+    },
+    {
+      id: "a2",
+      name: "edit",
+      arguments: {
+        path: "src/a.zig",
+        marker: "alias-range",
+        action: "replace_range",
+        start: 10,
+        end: 12,
+        fail: false,
+        fail_return: false,
+      },
+    },
+  ]
+}
+
+fn run_scripted(harness: Harness, calls, opts = {}) {
+  return with_llm_script(
+    harness.llm,
+    [{text: "", tool_calls: calls}, llm_text("I saw the tool results.")],
+    { ->
+      const session = "intra-turn-resource-" + harness.random.uuid()
+      const captured = agent_capture_events(
+        harness.agent,
+        session,
+        fn() { return agent_loop(
+          harness,
+          "Apply the requested edits.",
+          nil,
+          {
+            provider: "mock",
+            tools: edit_tools(),
+            tool_format: "native",
+            loop_until_done: true,
+            max_iterations: 3,
+            done_judge: nil,
+            session_id: session,
+            tool_caller: { envelope, next ->
+              const result = next(envelope)
+              const args = envelope?.tool_args ?? {}
+              const mutation_status = if (args?.fail_noop ?? false)
+                || (args?.fail_return ?? false) {
+                "not_applied"
+              } else if (args?.fail_applied ?? false)
+                || (args?.diagnostics
+                ?? false) {
+                "applied"
+              } else if result?.ok ?? result?.success ?? false {
+                "applied"
+              } else {
+                "unknown"
+              }
+              const product_error = (args?.fail_noop ?? false)
+                || (args?.fail_applied ?? false)
+                || (args?.fail_return ?? false)
+                || (args?.diagnostics ?? false)
+              return result + {mutation_status: mutation_status, product_error: product_error}
+            },
+          }
+            + opts,
+        ) },
+      )
+      const mock_calls = harness.llm.mock_calls()
+      const transcript = json_stringify(mock_calls[len(mock_calls) - 1].messages)
+      return {result: captured.result, transcript: transcript, events: captured.events}
+    },
+  )
+}
+
+fn has_tool_update(events, status: string, category: string, text: string) -> bool {
+  return events.find(
+    { event ->
+      return event.type == "tool_call_update"
+        && to_string(event.tool_call_id ?? "") != ""
+        && event.status == status
+        && event.error_category == category
+        && contains(
+        to_string(event.error ?? event.raw_output ?? ""),
+        text,
+      )
+    },
+  )
+    != nil
+}
+
+fn partial_apply_receipt_at_index(events, skipped_call_index: number) {
+  for event in events {
+    const receipt = event?.raw_output?.partial_apply
+    if receipt?.skipped_call_index == skipped_call_index {
+      return receipt
+    }
+  }
+  return nil
+}
+
+pipeline main(harness: Harness) {
+  // Default-on fail-fast: second same-file edit is skipped, different file runs.
+  const defaulted = run_scripted(harness, same_file_failure_batch())
+  harness.stdio.println(defaulted.result.status)
+  harness.stdio.println(contains(defaulted.transcript, "skipped dependent `edit` call"))
+  harness.stdio.println(!contains(defaulted.transcript, "applied src/a.zig second"))
+  harness.stdio.println(contains(defaulted.transcript, "applied src/b.zig other"))
+  assert(
+    contains(defaulted.transcript, "stale-anchor safety"),
+    "same-resource skips should explain the stale-anchor safety reason",
+  )
+  assert(
+    contains(defaulted.transcript, "issue exactly ONE `edit` call"),
+    "same-resource skips should steer to one current-file recovery edit",
+  )
+  assert(
+    !contains(
+      defaulted.transcript,
+      "same assistant response failed for the same workspace resource",
+    ),
+    "same-resource skip wording should not imply every skipped sibling failed",
+  )
+  assert(
+    has_tool_update(defaulted.events, "failed", "rejected_loop", "skipped dependent `edit` call"),
+    "synthetic same-resource skip must emit a terminal tool_call_update for the skipped call",
+  )
+  const defaulted_receipt = partial_apply_receipt_at_index(defaulted.events, 1)
+  assert(
+    defaulted_receipt?.kind == "intra_turn_same_resource_partial_apply",
+    "synthetic same-resource skip must expose a typed partial-apply receipt",
+  )
+  assert(
+    defaulted_receipt.executed_prefix_count == 1,
+    "receipt should name the executed prefix length",
+  )
+  assert(
+    defaulted_receipt.skipped_suffix_count == 1,
+    "receipt should count only the skipped same-resource dependent suffix",
+  )
+  assert(defaulted_receipt.skipped_call_index == 1, "receipt should name the skipped sibling index")
+  assert(
+    defaulted_receipt.blocking_prior_tool_call_id != "",
+    "receipt should point to the prior mutating failure that blocked the sibling",
+  )
+  assert(
+    defaulted_receipt.blocking_prior_mutation_status == "unknown",
+    "opaque mutating failures should preserve an unknown mutation status",
+  )
+  assert(
+    defaulted_receipt.next_expected_action
+      == "read_current_resource_then_issue_one_reanchored_call",
+    "receipt should expose the recovery action as structured data",
+  )
+  // Burin exposes this metadata as `policy`; Harn must treat it as resource annotations.
+  const policy_metadata = run_scripted(
+    harness,
+    same_file_failure_batch(),
+    {tools: edit_tools("policy")},
+  )
+  harness.stdio.println(policy_metadata.result.status)
+  harness.stdio.println(contains(policy_metadata.transcript, "skipped dependent `edit` call"))
+  harness.stdio.println(!contains(policy_metadata.transcript, "applied src/a.zig second"))
+  harness.stdio.println(contains(policy_metadata.transcript, "applied src/b.zig other"))
+  // Burin's runtime policy stores path params directly on the policy dict,
+  // not under `arg_schema`; this must still be keyed.
+  const burin_policy_metadata = run_scripted(
+    harness,
+    same_file_failure_batch(),
+    {tools: edit_tools("burin_policy")},
+  )
+  harness.stdio.println(burin_policy_metadata.result.status)
+  harness.stdio.println(contains(burin_policy_metadata.transcript, "skipped dependent `edit` call"))
+  harness.stdio.println(!contains(burin_policy_metadata.transcript, "applied src/a.zig second"))
+  harness.stdio.println(contains(burin_policy_metadata.transcript, "applied src/b.zig other"))
+  // Some hosts carry canonical tool annotations in the turn policy rather
+  // than each registry entry. The scheduler should still see resource keys.
+  const turn_policy_metadata = run_scripted(
+    harness,
+    same_file_failure_batch(),
+    {
+      tools: edit_tools("none"),
+      policy: {
+        tool_annotations: {
+          edit: {kind: "edit", side_effect_level: "workspace_write", path_params: ["path"]},
+        },
+      },
+    },
+  )
+  harness.stdio.println(turn_policy_metadata.result.status)
+  harness.stdio.println(contains(turn_policy_metadata.transcript, "skipped dependent `edit` call"))
+  harness.stdio.println(!contains(turn_policy_metadata.transcript, "applied src/a.zig second"))
+  harness.stdio.println(contains(turn_policy_metadata.transcript, "applied src/b.zig other"))
+  // Product-level errors that carry a structured no-op mutation verdict leave
+  // the resource unpoisoned even when their rendered text begins with `Error:`.
+  const product_error = run_scripted(harness, same_file_product_error_batch())
+  harness.stdio.println(product_error.result.status)
+  harness.stdio.println(!contains(product_error.transcript, "skipped dependent `edit` call"))
+  harness.stdio.println(contains(product_error.transcript, "applied src/a.zig second"))
+  harness.stdio.println(contains(product_error.transcript, "applied src/b.zig other"))
+  // Post-edit diagnostics are product-level write failures even when the
+  // transport dispatch succeeded.
+  const diagnostics_error = run_scripted(harness, same_file_diagnostics_batch())
+  harness.stdio.println(diagnostics_error.result.status)
+  harness.stdio.println(contains(diagnostics_error.transcript, "skipped dependent `edit` call"))
+  harness.stdio.println(!contains(diagnostics_error.transcript, "applied src/a.zig second"))
+  harness.stdio.println(contains(diagnostics_error.transcript, "applied src/b.zig other"))
+  // A successful first edit does not block a later same-file edit.
+  const successful = run_scripted(harness, same_file_success_batch())
+  harness.stdio.println(successful.result.status)
+  harness.stdio.println(contains(successful.transcript, "applied src/a.zig first"))
+  harness.stdio.println(contains(successful.transcript, "applied src/a.zig second"))
+  harness.stdio.println(!contains(successful.transcript, "skipped dependent `edit` call"))
+  // Explicit opt-out preserves legacy dispatch-all behavior.
+  const disabled = run_scripted(
+    harness,
+    same_file_failure_batch(),
+    {intra_turn_resource_fail_fast: false},
+  )
+  harness.stdio.println(disabled.result.status)
+  harness.stdio.println(!contains(disabled.transcript, "skipped dependent `edit` call"))
+  harness.stdio.println(contains(disabled.transcript, "applied src/a.zig second"))
+  // Even when parallel dispatch is requested, keyed mutating batches serialize.
+  const parallel_requested = run_scripted(
+    harness,
+    same_file_failure_batch(),
+    {max_concurrent_tools: 4},
+  )
+  harness.stdio.println(parallel_requested.result.status)
+  harness.stdio.println(contains(parallel_requested.transcript, "skipped dependent `edit` call"))
+  harness.stdio.println(!contains(parallel_requested.transcript, "applied src/a.zig second"))
+  harness.stdio.println(contains(parallel_requested.transcript, "applied src/b.zig other"))
+  // Pre-apply REJECTION (`[Edit rejected] ... NOT applied`) leaves the view
+  // byte-identical, so an independent later same-file edit is NOT stale and MUST
+  // still run. Asserted directly (no golden line) so the safety/relaxation
+  // invariant is self-checking.
+  const noop_failure = run_scripted(harness, same_file_noop_failure_batch())
+  assert(
+    contains(noop_failure.transcript, "applied src/a.zig second"),
+    "a pre-apply rejection (not-applied) failure must NOT skip a later same-file edit",
+  )
+  assert(
+    !contains(noop_failure.transcript, "skipped dependent `edit` call"),
+    "no skip marker should be emitted when the prior failure did not mutate the resource",
+  )
+  // Post-apply failure (`## Diagnostics ...`) means the edit DID land, so the
+  // later same-file edit's anchor may be stale and MUST still be skipped.
+  const applied_failure = run_scripted(harness, same_file_applied_failure_batch())
+  assert(
+    contains(applied_failure.transcript, "skipped dependent `edit` call"),
+    "a post-apply (applied-then-flagged) failure must STILL skip a later same-file edit",
+  )
+  assert(
+    contains(applied_failure.transcript, "stale-anchor safety"),
+    "post-apply same-resource skips should explain the stale-anchor safety reason",
+  )
+  assert(
+    !contains(applied_failure.transcript, "applied src/a.zig second"),
+    "the later same-file edit must not run after a mutating failure (stale-anchor hazard)",
+  )
+  const applied_failure_receipt = partial_apply_receipt_at_index(applied_failure.events, 1)
+  assert(
+    applied_failure_receipt.blocking_prior_mutation_status == "applied",
+    "post-apply diagnostics should preserve an applied mutation status in the partial receipt",
+  )
+  const dependency_params = edit_dependency_key_params()
+  const range_params = edit_dependency_range_params()
+  const arg_aliases = {old: "old_string", start: "range_start", end: "range_end"}
+  const different_target = run_scripted(
+    harness,
+    same_file_different_target_applied_failure_batch(),
+    {tools: edit_tools("annotations", dependency_params, range_params)},
+  )
+  assert(
+    contains(different_target.transcript, "applied src/a.zig second-target"),
+    "declared dependency ranges should let independent same-file edit targets run after an applied failure",
+  )
+  assert(
+    !contains(different_target.transcript, "skipped dependent `edit` call"),
+    "independent same-file edit targets must not emit a dependency skip",
+  )
+  const same_target = run_scripted(
+    harness,
+    same_file_same_target_applied_failure_batch(),
+    {tools: edit_tools("annotations", dependency_params, range_params)},
+  )
+  assert(
+    contains(same_target.transcript, "skipped dependent `edit` call"),
+    "the same declared edit target must still be skipped after an applied failure",
+  )
+  assert(
+    !contains(same_target.transcript, "applied src/a.zig same-target"),
+    "the later same-file same-target edit must not run after a mutating failure",
+  )
+  const overlapping_target = run_scripted(
+    harness,
+    same_file_overlapping_target_applied_failure_batch(),
+    {tools: edit_tools("annotations", dependency_params, range_params)},
+  )
+  assert(
+    contains(overlapping_target.transcript, "skipped dependent `edit` call"),
+    "overlapping declared edit ranges must still be skipped after an applied failure",
+  )
+  assert(
+    !contains(overlapping_target.transcript, "applied src/a.zig overlap-target"),
+    "the later same-file overlapping edit must not run after a mutating failure",
+  )
+  const same_range_different_action = run_scripted(
+    harness,
+    same_file_same_range_different_action_applied_failure_batch(),
+    {tools: edit_tools("annotations", dependency_params, range_params)},
+  )
+  assert(
+    contains(same_range_different_action.transcript, "skipped dependent `edit` call"),
+    "same-range edits must not become independent just because the edit action differs",
+  )
+  assert(
+    !contains(
+      same_range_different_action.transcript,
+      "applied src/a.zig different-action-same-range",
+    ),
+    "the later same-file same-range/different-action edit must not run after a mutating failure",
+  )
+  const same_alias_target = run_scripted(
+    harness,
+    same_file_same_alias_target_applied_failure_batch(),
+    {tools: edit_tools("annotations", dependency_params, range_params, arg_aliases)},
+  )
+  assert(
+    contains(same_alias_target.transcript, "skipped dependent `edit` call"),
+    "dependency key aliases must fold to the canonical target before hashing",
+  )
+  assert(
+    !contains(same_alias_target.transcript, "applied src/a.zig alias-old"),
+    "the later same-file alias-spelled same-target edit must not run after a mutating failure",
+  )
+  const different_alias_target = run_scripted(
+    harness,
+    same_file_different_alias_target_applied_failure_batch(),
+    {tools: edit_tools("annotations", dependency_params, range_params, arg_aliases)},
+  )
+  assert(
+    contains(different_alias_target.transcript, "applied src/a.zig alias-old-different"),
+    "dependency key aliases must preserve different canonical target values",
+  )
+  const same_range_alias = run_scripted(
+    harness,
+    same_file_same_range_alias_applied_failure_batch(),
+    {tools: edit_tools("annotations", dependency_params, range_params, arg_aliases)},
+  )
+  assert(
+    contains(same_range_alias.transcript, "skipped dependent `edit` call"),
+    "dependency range aliases must fold to the canonical interval before overlap checks",
+  )
+  assert(
+    !contains(same_range_alias.transcript, "applied src/a.zig alias-range"),
+    "the later same-file alias-spelled overlapping range edit must not run after a mutating failure",
+  )
+  const burin_direct_target = run_scripted(
+    harness,
+    same_file_different_target_applied_failure_batch(),
+    {tools: edit_tools("burin_policy", dependency_params, range_params)},
+  )
+  assert(
+    contains(burin_direct_target.transcript, "applied src/a.zig second-target"),
+    "Burin direct runtime policy dependency_key_params should refine same-file resource skips",
+  )
+  const burin_direct_alias_target = run_scripted(
+    harness,
+    same_file_same_alias_target_applied_failure_batch(),
+    {tools: edit_tools("burin_policy", dependency_params, range_params, arg_aliases)},
+  )
+  assert(
+    contains(burin_direct_alias_target.transcript, "skipped dependent `edit` call"),
+    "Burin direct runtime policy arg_aliases must fold dependency keys before hashing",
+  )
+  assert(
+    !contains(burin_direct_alias_target.transcript, "applied src/a.zig alias-old"),
+    "Burin direct runtime policy must skip same-resource edits even when the later call uses an alias",
+  )
+  const turn_policy_target = run_scripted(
+    harness,
+    same_file_different_target_applied_failure_batch(),
+    {
+      tools: edit_tools("none"),
+      policy: {
+        tool_annotations: {
+          edit: {
+            kind: "edit",
+            side_effect_level: "workspace_write",
+            path_params: ["path"],
+            dependency_key_params: dependency_params,
+            dependency_range_params: range_params,
+          },
+        },
+      },
+    },
+  )
+  assert(
+    contains(turn_policy_target.transcript, "applied src/a.zig second-target"),
+    "turn policy dependency_key_params should refine same-file resource skips",
+  )
+  const turn_policy_alias_target = run_scripted(
+    harness,
+    same_file_same_alias_target_applied_failure_batch(),
+    {
+      tools: edit_tools("none"),
+      policy: {
+        tool_annotations: {
+          edit: {
+            kind: "edit",
+            side_effect_level: "workspace_write",
+            path_params: ["path"],
+            dependency_key_params: dependency_params,
+            dependency_range_params: range_params,
+            arg_aliases: arg_aliases,
+          },
+        },
+      },
+    },
+  )
+  assert(
+    contains(turn_policy_alias_target.transcript, "skipped dependent `edit` call"),
+    "turn policy arg_aliases must fold dependency keys before hashing",
+  )
+  assert(
+    !contains(turn_policy_alias_target.transcript, "applied src/a.zig alias-old"),
+    "turn policy must skip same-resource edits even when the later call uses an alias",
+  )
+}

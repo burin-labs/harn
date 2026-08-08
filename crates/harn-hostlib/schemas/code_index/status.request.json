@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/status.request.json",
+  "title": "code_index.status request",
+  "description": "Take no parameters; return a snapshot of every live agent + index health metric.",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}

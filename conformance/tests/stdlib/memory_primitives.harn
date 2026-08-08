@@ -1,0 +1,44 @@
+import "std/memory"
+
+pipeline default(harness: Harness) {
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn-memory-primitives-" + harness.random.uuid(),
+  )
+  const options = {root: root, now: "2026-04-29T00:00:00Z"}
+  const namespace = "agent/customer"
+  const first = memory_store(
+    harness.memory,
+    namespace,
+    "alice-profile",
+    {text: "Alice prefers Rust examples and concise plans"},
+    ["profile", "preference"],
+    options,
+  )
+  memory_store(
+    harness.memory,
+    namespace,
+    "bob-profile",
+    {text: "Bob prefers TypeScript examples"},
+    ["profile"],
+    {root: root, now: "2026-04-29T00:00:01Z"},
+  )
+  const recalled = memory_recall(harness.memory, namespace, "rust preference", 2, {root: root})
+  harness.stdio.println(first._type)
+  harness.stdio.println(len(recalled))
+  harness.stdio.println(recalled[0].key)
+  harness.stdio.println(recalled[0].score > 0.0)
+  const summary = memory_summarize(harness.memory, namespace, {limit: 2}, {root: root})
+  harness.stdio.println(summary._type)
+  harness.stdio.println(summary.count)
+  harness.stdio.println(contains(summary.text, "Alice prefers Rust examples"))
+  const forgotten = memory_forget(
+    harness.memory,
+    namespace,
+    {tag: "profile"},
+    {root: root, now: "2026-04-29T00:00:02Z"},
+  )
+  harness.stdio.println(forgotten.forgotten)
+  harness.stdio.println(len(memory_recall(harness.memory, namespace, "rust", 5, {root: root})))
+  harness.fs.delete(root)
+}

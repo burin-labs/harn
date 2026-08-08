@@ -1,0 +1,1119 @@
+//! LLM integration: API calls, streaming, agent loops, tool handling, and tracing.
+//!
+//! This module is split into sub-modules for maintainability:
+//! - `api`: core LLM API calls, request building, and response parsing
+//! - `call`: public call wrappers, schema retry, routing dispatch, and safe envelopes
+//! - `agent_*`: agent loop, host bridge, session, and tool orchestration support
+//! - `*_builtins`: VM builtin registration glue grouped by runtime concern
+//! - `helpers`: option extraction, provider/model/key resolution, and JSON conversion
+//! - `mock`, `trace`, and `stream`: process-local test doubles, tracing, and streaming support
+
+pub(crate) mod acp_permission;
+mod agent_config;
+mod agent_host_primitives;
+pub(crate) mod agent_observe;
+mod agent_result_projection;
+mod agent_runtime;
+pub(crate) mod agent_session_host;
+mod agent_session_transcript;
+mod agent_terminal_class;
+/// The run-record projector maps a loop's terminal status onto a run status,
+/// and this is the owner of what those status strings mean.
+pub(crate) use agent_terminal_class::session_status_indicates_error;
+pub use agent_terminal_class::{agent_terminal_class, AgentTerminalClass};
+mod agent_tools;
+pub mod api;
+#[cfg(test)]
+mod api_routing_credentials_tests;
+pub(crate) mod autonomy_budget;
+pub(crate) mod cache;
+pub mod cache_conformance;
+mod call;
+#[cfg(test)]
+mod call_error_projection_tests;
+pub mod capabilities;
+pub mod capability_audit;
+mod code_mode;
+pub(crate) mod compass_router;
+pub(crate) mod computer_use;
+pub(crate) mod config_builtins;
+pub(crate) mod content;
+pub(crate) mod content_hash;
+mod context_breakdown;
+mod conversation;
+pub(crate) mod cost;
+#[cfg(test)]
+mod cost_budget_tests;
+#[cfg(test)]
+mod cost_context_tests;
+pub(crate) mod cost_route;
+#[cfg(test)]
+mod cost_route_pricing_tests;
+pub(crate) mod daemon;
+pub mod eval;
+pub(crate) mod fake;
+pub(crate) mod first_token;
+pub(crate) mod helpers;
+pub mod introspection;
+pub mod jsonl;
+pub mod local_profiles;
+pub(crate) mod mock;
+mod mock_builtins;
+pub(crate) mod mock_store;
+mod model_test;
+mod permission_preview;
+pub(crate) mod permissions;
+pub mod plan;
+pub mod prompt;
+mod protocol_violation;
+pub use protocol_violation::{ProtocolViolation, ProtocolViolationKind};
+pub mod readiness;
+pub mod reasoning_policy;
+pub(crate) mod reminder_iteration;
+pub(crate) mod reminder_providers;
+mod rerank;
+pub mod resolved_dispatch;
+pub(crate) mod routing;
+pub(crate) mod routing_verifier;
+pub(crate) mod schema_recover;
+pub(crate) mod serving_tiers;
+pub(crate) mod skill_score;
+mod stream_builtins;
+pub(crate) mod structural_experiments;
+pub(crate) mod structured_envelope;
+pub(crate) mod system_placement;
+mod token_count;
+pub mod tool_conformance;
+pub mod tool_scorecard;
+mod tool_scorecard_types;
+mod tool_search_score;
+mod trace_builtins;
+pub(crate) mod transcript_seed;
+mod transcript_stats;
+pub(crate) mod usage_normalization;
+
+use std::collections::BTreeMap;
+use std::sync::{Mutex, OnceLock};
+
+pub(crate) use call::snapshot_in_flight_llm_calls;
+
+/// Non-streaming client: 120s request timeout, connection pooling.
+pub(crate) fn shared_blocking_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        crate::egress::install_ssrf_guard(client_builder_for_tests(
+            reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(30))
+                .timeout(std::time::Duration::from_mins(2))
+                .redirect(crate::egress::redirect_policy("llm_blocking_redirect", 10))
+                .pool_max_idle_per_host(4),
+        ))
+        .build()
+        .expect("LLM blocking HTTP client configuration should be valid")
+    })
+}
+
+/// Utility client for short-lived requests (healthchecks, context window
+/// lookups). Shorter timeouts than the blocking client, shared connection pool.
+pub(crate) fn shared_utility_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        crate::egress::install_ssrf_guard(client_builder_for_tests(
+            reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(10))
+                .timeout(std::time::Duration::from_secs(15))
+                .redirect(crate::egress::redirect_policy("llm_utility_redirect", 10))
+                .pool_max_idle_per_host(2),
+        ))
+        .build()
+        .expect("LLM utility HTTP client configuration should be valid")
+    })
+}
+
+pub(crate) fn streaming_client_for_base_url(base_url: &str) -> reqwest::Client {
+    static CLIENTS: OnceLock<Mutex<BTreeMap<String, reqwest::Client>>> = OnceLock::new();
+    cached_client_for_base_url(
+        "streaming",
+        base_url,
+        &CLIENTS,
+        reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(30))
+            .redirect(crate::egress::redirect_policy("llm_streaming_redirect", 10))
+            .pool_max_idle_per_host(4),
+    )
+}
+
+pub(crate) fn blocking_client_for_base_url(base_url: &str) -> reqwest::Client {
+    static CLIENTS: OnceLock<Mutex<BTreeMap<String, reqwest::Client>>> = OnceLock::new();
+    cached_client_for_base_url(
+        "blocking",
+        base_url,
+        &CLIENTS,
+        reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(30))
+            .timeout(std::time::Duration::from_mins(2))
+            .redirect(crate::egress::redirect_policy("llm_blocking_redirect", 10))
+            .pool_max_idle_per_host(4),
+    )
+}
+
+pub(crate) fn utility_client_for_base_url(base_url: &str) -> reqwest::Client {
+    static CLIENTS: OnceLock<Mutex<BTreeMap<String, reqwest::Client>>> = OnceLock::new();
+    cached_client_for_base_url(
+        "utility",
+        base_url,
+        &CLIENTS,
+        reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(15))
+            .redirect(crate::egress::redirect_policy("llm_utility_redirect", 10))
+            .pool_max_idle_per_host(2),
+    )
+}
+
+fn cached_client_for_base_url(
+    kind: &str,
+    base_url: &str,
+    cache: &OnceLock<Mutex<BTreeMap<String, reqwest::Client>>>,
+    builder: reqwest::ClientBuilder,
+) -> reqwest::Client {
+    let allow_hosts = crate::egress::configured_provider_private_allow_host(base_url)
+        .into_iter()
+        .collect::<Vec<_>>();
+    let key = format!(
+        "{kind};{}",
+        crate::egress::ssrf_client_cache_key(&allow_hosts)
+    );
+    let clients = cache.get_or_init(|| Mutex::new(BTreeMap::new()));
+    if let Some(client) = clients
+        .lock()
+        .expect("LLM client cache poisoned")
+        .get(&key)
+        .cloned()
+    {
+        return client;
+    }
+    let client = crate::egress::install_ssrf_guard_with_private_host_allowlist(
+        client_builder_for_tests(builder),
+        &allow_hosts,
+    )
+    .build()
+    .expect("LLM HTTP client configuration should be valid");
+    clients
+        .lock()
+        .expect("LLM client cache poisoned")
+        .insert(key, client.clone());
+    client
+}
+
+#[cfg(test)]
+fn client_builder_for_tests(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+    builder.danger_accept_invalid_certs(true)
+}
+
+#[cfg(not(test))]
+fn client_builder_for_tests(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+    builder
+}
+
+pub use api::{
+    ollama_runtime_settings_from_env, warm_ollama_model, warm_ollama_model_with_settings,
+    OllamaRuntimeSettings, HARN_OLLAMA_KEEP_ALIVE_ENV, HARN_OLLAMA_NUM_CTX_ENV,
+    OLLAMA_DEFAULT_KEEP_ALIVE, OLLAMA_DEFAULT_NUM_CTX, OLLAMA_HOST_ENV,
+};
+/// Catalog-backed per-call pricing, `None` when the (provider, model) pair has
+/// no rate. Exported so a CLI surface reports cost through the one owner of
+/// what a call costs instead of embedding its own rate table.
+pub use cost::pricing_aware_call_cost;
+pub use fake::{
+    fake_llm_captured_calls, install_fake_llm_script, FakeLlmCall, FakeLlmError, FakeLlmEvent,
+    FakeLlmGuard, FakeLlmScript, FakeLlmTurn, FakeStopReason,
+};
+pub use mock::drain_tool_recordings;
+mod healthcheck;
+pub(crate) mod pairing_receipts;
+pub(crate) mod provider;
+mod provider_auth;
+pub(crate) mod providers;
+pub mod rate_governor;
+pub(crate) mod rate_limit;
+pub mod receipts;
+pub(crate) mod route;
+mod stream;
+pub(crate) mod tool_delimiter;
+pub(crate) mod tools;
+mod trace;
+pub(crate) mod trigger_predicate;
+
+/// Shared process-wide lock for tests that mutate LLM-related environment
+/// variables (LOCAL_LLM_BASE_URL, LOCAL_LLM_MODEL, HARN_LLM_*). Any test that
+/// sets or removes one of these MUST hold this lock for its whole duration,
+/// including through any async LLM call, so concurrent tests from sibling
+/// modules cannot clobber each other's env and leak stale values into a
+/// streaming request.
+#[cfg(test)]
+pub(crate) fn env_lock() -> &'static std::sync::Mutex<()> {
+    use std::sync::{Mutex, OnceLock};
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+/// Acquire the env lock, recovering from poisoning. The mutex only
+/// serializes process-env mutation — a panicking holder leaves nothing
+/// corrupted behind — so treating poison as fatal just cascades one failing
+/// test into failures in every sibling test that touches LLM env vars.
+#[cfg(test)]
+pub(crate) fn env_guard() -> std::sync::MutexGuard<'static, ()> {
+    env_lock()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+pub const LLM_CALLS_DISABLED_ENV: &str = "HARN_LLM_CALLS_DISABLED";
+
+pub fn estimate_text_tokens(text: &str) -> i64 {
+    token_count::estimate_text_tokens(text, None).tokens
+}
+
+pub fn llm_pricing_per_1k(provider: &str, model: &str) -> Option<(f64, f64)> {
+    cost::pricing_per_1k_for(provider, model)
+}
+
+pub(crate) fn llm_calls_disabled() -> bool {
+    std::env::var(LLM_CALLS_DISABLED_ENV)
+        .ok()
+        .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "yes" | "on"))
+}
+
+pub(crate) fn ensure_real_llm_allowed(provider: &str) -> Result<(), crate::value::VmError> {
+    if !llm_calls_disabled() || provider == "mock" || provider == "fake" {
+        return Ok(());
+    }
+    Err(crate::value::VmError::Runtime(format!(
+        "LLM calls are disabled by {LLM_CALLS_DISABLED_ENV}; provider `{provider}` would make a real LLM request"
+    )))
+}
+
+use crate::stdlib::macros::{harn_builtin, register_builtin_defs, VmBuiltinDef};
+use crate::value::{VmError, VmValue};
+use crate::vm::Vm;
+use std::sync::Arc;
+
+use self::api::{vm_build_llm_result, vm_call_completion_full};
+use self::call::{llm_call_impl, llm_safe_envelope_err, llm_safe_envelope_ok};
+use self::stream_builtins::{llm_stream_builtin, llm_stream_call_impl, llm_stream_collect_impl};
+use self::trace::trace_llm_call;
+
+pub use self::api::{
+    normalize_ollama_keep_alive, ollama_readiness, OllamaReadinessOptions, OllamaReadinessResult,
+    OllamaWarmupResult,
+};
+
+#[cfg(feature = "llm-bench-internals")]
+#[doc(hidden)]
+pub mod bench_internals {
+    use super::*;
+
+    pub fn llm_options_roundtrip_probe(
+        args: &[VmValue],
+        options: &Option<crate::value::DictMap>,
+    ) -> Result<usize, VmError> {
+        let resolved_provider = helpers::vm_resolve_provider(options);
+        let extracted = extract_llm_options(args)?;
+        let pricing_per_1k = cost::pricing_per_1k_for(&extracted.provider, &extracted.model);
+        Ok(resolved_provider.len()
+            + extracted.provider.len()
+            + extracted.model.len()
+            + usize::from(pricing_per_1k.is_some()))
+    }
+}
+
+pub fn install_current_host_bridge(bridge: Arc<crate::bridge::HostBridge>) {
+    agent_runtime::install_current_host_bridge(bridge);
+}
+
+pub use agent_runtime::scope_agent_event_sink;
+
+pub fn clear_current_host_bridge() {
+    agent_runtime::clear_current_host_bridge();
+}
+
+pub(crate) fn append_observability_sidecar_entry(
+    event_type: &str,
+    fields: serde_json::Map<String, serde_json::Value>,
+) {
+    agent_observe::append_llm_observability_entry(event_type, fields);
+}
+
+pub(crate) use self::agent_config::agent_loop_result_from_llm;
+pub use self::agent_config::{
+    register_agent_loop_with_bridge, register_llm_call_structured_with_bridge,
+    register_llm_call_with_bridge,
+};
+#[cfg(test)]
+pub(crate) use self::agent_observe::{pop_llm_transcript_dir, push_llm_transcript_dir};
+pub use self::agent_runtime::{
+    current_agent_session_id, register_session_end_hook, SessionEndHookRegistration,
+};
+pub(crate) use self::agent_runtime::{
+    current_host_bridge, emit_agent_event_sync as emit_live_agent_event_sync,
+    emit_agent_event_with_ctx as emit_live_agent_event_with_ctx, register_session_close_hook,
+    swap_current_host_bridge, SessionCloseHookRegistration,
+};
+#[cfg(test)]
+pub(crate) use self::agent_runtime::{fire_session_close_hooks, fire_session_end_hooks};
+pub(crate) use self::agent_session_host::active_run_id as active_agent_run_id;
+pub use self::api::fetch_provider_max_context;
+pub(crate) use self::api::vm_call_llm_full;
+pub(crate) use self::call::{
+    execute_llm_call, execute_schema_retry_loop, extract_structured_data, rewrite_structured_args,
+    structured_output_errors, structured_safe_envelope_err, structured_safe_envelope_ok,
+    SchemaLoopOutcome,
+};
+pub use self::cost::{
+    calculate_cost_for_provider, install_llm_cost_budget, install_llm_token_budget,
+    peek_llm_cost_budget, peek_llm_token_budget, peek_total_cost, peek_total_tokens,
+    set_llm_cost_budget, set_llm_token_budget, LlmBudgetGuard, LlmTokenBudgetGuard,
+};
+pub use self::healthcheck::{
+    build_healthcheck_url, run_provider_healthcheck, run_provider_healthcheck_with_options,
+    ProviderHealthcheckOptions, ProviderHealthcheckResult,
+};
+pub(crate) use self::helpers::extract_llm_options;
+pub use self::helpers::{vm_value_to_json, vm_value_to_json_strict};
+pub use self::jsonl::{
+    load_llm_mocks_jsonl, parse_llm_mock_value, parse_llm_mock_value_versioned,
+    parse_llm_mocks_jsonl, serialize_llm_mock, serialize_llm_mock_fixture,
+};
+pub use self::mock::{
+    clear_cli_llm_mock_mode, enable_cli_llm_mock_recording, install_cli_llm_mock_fixture,
+    install_cli_llm_mocks, set_replay_mode, take_cli_llm_recordings, LlmMock, LlmMockFixture,
+    LlmReplayMode, MockError,
+};
+#[cfg(test)]
+pub(crate) use self::mock::{get_llm_mock_calls, push_llm_mock};
+pub use self::model_test::{run_model_smoke_test, ModelSmokeTestOptions, ModelSmokeTestResult};
+pub(crate) use self::provider_auth::provider_auth_status_with_definition;
+pub use self::provider_auth::{
+    available_provider_names, no_credentials_message, provider_auth_status, provider_auth_statuses,
+    resolve_api_key, ProviderAuthStatus, ProviderCredentialStatus,
+};
+pub use self::readiness::{selected_model_for_provider, supports_model_readiness_probe};
+pub use self::trace::{
+    agent_trace_summary, enable_tracing, peek_agent_trace, peek_trace, peek_trace_summary,
+    take_agent_trace, take_trace, AgentTraceEvent, LlmTraceEntry,
+};
+
+/// Fully wipe the process-global rate-limiter registry (config-derived
+/// limiters, retry-after cooldowns, usage windows, and runtime overrides).
+///
+/// This is deliberately **not** part of [`reset_llm_state`]: that runs from
+/// parallel unit tests where wiping the shared registry corrupts a sibling
+/// rate-limit test's counters mid-assertion. Callers that need a full reset use
+/// [`crate::reset_thread_local_state`], which serializes this wipe with
+/// [`env_guard`] in test builds and performs the reset directly in production.
+pub fn reset_rate_limit_registry() {
+    rate_limit::reset_rate_limit_state();
+}
+
+/// Reset thread-local LLM state (cost, trace, mock, providers). Call between
+/// test runs.
+///
+/// Note: the process-global rate-limiter registry is intentionally left alone
+/// here (only leaked *runtime overrides* are scrubbed) so concurrently running
+/// rate-limit tests aren't corrupted. Contexts that need full rate-limit
+/// isolation call [`reset_rate_limit_registry`] via
+/// [`crate::reset_thread_local_state`].
+pub fn reset_llm_state() {
+    call::clear_in_flight_llm_calls();
+    introspection::reset_snapshot();
+    cost::reset_cost_state();
+    trace::reset_trace_state();
+    trace::reset_agent_trace_state();
+    provider::register_default_providers();
+    // Deliberately the override-scoped reset, not the full registry wipe:
+    // the limiter registry is process-global, and a full wipe here raced
+    // (and corrupted) concurrently running rate-limit tests.
+    rate_limit::reset_runtime_rate_limit_overrides();
+    routing::clear_policy_registry();
+    mock::reset_llm_mock_state();
+    autonomy_budget::reset_autonomy_budget_state();
+    agent_session_host::reset_agent_session_host_state();
+    agent_runtime::reset_session_state();
+    reminder_providers::clear_reminder_providers();
+    permissions::clear_dynamic_permission_state();
+    crate::orchestration::clear_all_approval_policy_repeat_counts();
+    trigger_predicate::reset_trigger_predicate_state();
+    capabilities::clear_user_overrides();
+    // Per-`@step` registry, active stack, and completed-step log are
+    // thread-local; clear them between runs to prevent stale step
+    // metadata from one program leaking into the next.
+    crate::step_runtime::reset_thread_local_state();
+}
+
+/// Route an LLM request by cost and capability metadata.
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "__cost_route(options?: dict|nil) -> dict",
+    kind = "async",
+    category = "llm.host",
+    runtime_only = true
+)]
+async fn cost_route_builtin(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    cost_route::cost_route_impl(&ctx, args).await
+}
+
+/// Execute one LLM call and return the normalized Harn result dict.
+#[harn_builtin(
+    exposure = "harness.llm.call",
+    effects = ["llm.write@arg2.provider", "llm.write@arg2.model"],
+    sig_expr = harn_builtin_meta::signatures::LLM_CALL.with_name("__cap_llm_call"),
+    aliases = ["llm_call"],
+    kind = "async",
+    category = "llm.host"
+)]
+async fn llm_call_builtin(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    llm_call_impl(Some(&ctx), args).await
+}
+
+/// Execute one streaming LLM call and return the normalized Harn result dict.
+#[harn_builtin(
+    exposure = "harness.llm.stream_call",
+    effects = ["llm.write@arg2.provider", "llm.write@arg2.model"],
+    sig = "__cap_llm_stream_call(prompt: string, system?: string, options?: dict) -> stream",
+    aliases = ["llm_stream_call"],
+    kind = "async",
+    category = "llm.host"
+)]
+async fn llm_stream_call_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    llm_stream_call_impl(args).await
+}
+
+/// Streaming seam under `agent_loop`'s `on_delta:` option: run one LLM call
+/// through the streaming transport, forward each visible-text delta to the
+/// `on_delta` closure, and return the same normalized result dict as `llm_call`
+/// (tool calls + usage preserved so tool dispatch is unaffected). Internal
+/// primitive — the public surface is the `on_delta:` agent-loop option.
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "__host_llm_stream_collect(prompt: string, system?: string|nil, options?: dict|nil, on_delta?: any|nil) -> dict",
+    kind = "async",
+    category = "llm.host",
+    runtime_only = true
+)]
+async fn llm_stream_collect_builtin(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    llm_stream_collect_impl(&ctx, args).await
+}
+
+/// Rank a tool registry for Harn-managed client-mode tool search.
+#[harn_builtin(
+    exposure = "runtime_internal",
+    effects = [],
+    sig = "__host_tool_search_score(query: string, registry: dict, opts?: dict|nil) -> list",
+    category = "agent.host",
+    runtime_only = true
+)]
+fn host_tool_search_score_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let query = match args.first() {
+        Some(VmValue::String(s)) => s.to_string(),
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "__host_tool_search_score(query, registry, opts): query must be a string; got {}",
+                other.type_name()
+            )))
+        }
+        None => String::new(),
+    };
+    let registry = args
+        .get(1)
+        .map(helpers::vm_value_to_json)
+        .unwrap_or(serde_json::Value::Null);
+    let opts = args
+        .get(2)
+        .map(helpers::vm_value_to_json)
+        .unwrap_or(serde_json::Value::Null);
+    let ranked = tool_search_score::score_tools(&query, &registry, &opts);
+    Ok(crate::stdlib::json_to_vm_value(&serde_json::Value::Array(
+        ranked
+            .into_iter()
+            .map(|item| {
+                serde_json::json!({
+                    "tool_name": item.tool_name,
+                    "score": item.score,
+                    "snippet": item.snippet,
+                })
+            })
+            .collect(),
+    )))
+}
+
+/// Build a first-class routing policy handle. Pass {chain: [{provider, model}, ...],
+/// failover: {on_status?, on_timeout_ms?, on_error_kinds?, max_attempts?},
+/// latency: {race_after_ms?, target_p95_ms?}, budget: {per_call_usd?, session_usd?, on_exceed?},
+/// observe: {emit_event?}} and pipe the result through `harness.llm.call(... routing: policy ...)`
+/// to drive the chain with failover, latency-aware racing, and budget caps. Tape events:
+/// <dispatch>.{decision,attempt,race_started,race_won,race_lost,budget_exceeded,exhausted}.
+#[harn_builtin(
+    exposure = "harness.llm.routing_policy",
+    effects = ["state.read@dynamic"],
+    sig = "routing_policy(config: dict) -> dict", category = "llm.host"
+)]
+fn routing_policy_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let config = match args.first() {
+        Some(VmValue::Dict(dict)) => dict.as_ref().clone(),
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "routing_policy: expected a config dict, got {}",
+                other.type_name()
+            )));
+        }
+        None => {
+            return Err(VmError::Runtime(
+                "routing_policy: expected a config dict".to_string(),
+            ));
+        }
+    };
+    routing::build_routing_policy(&config)
+}
+
+/// Return resolved runtime facts {provider, model, model_alias, family, tool_format, tier,
+/// context_window, runtime_context_window, capabilities, harn_version, harness} for the
+/// most recent llm_call on this thread. Fields are nil before any llm_call has run. The
+/// model-callable surface (current_model() / current_provider() / ...) is opt-in via
+/// `runtime_introspection_tools(registry)`; the typed Harness method is the
+/// source API for this underlying read.
+#[harn_builtin(
+    exposure = "harness.runtime.introspection",
+    effects = ["host.read@const=runtime-tools"],
+    sig = "__cap_runtime_introspection() -> dict",
+    aliases = ["runtime_introspection"],
+    category = "llm.introspection"
+)]
+fn runtime_introspection_builtin_wrap(
+    args: &[VmValue],
+    out: &mut String,
+) -> Result<VmValue, VmError> {
+    introspection::runtime_introspection_builtin(args, out)
+}
+
+const LLM_RUNTIME_PRIMITIVE_BUILTINS: &[&VmBuiltinDef] = &[
+    // trace
+    &trace_builtins::AGENT_TRACE_BUILTIN_DEF,
+    &trace_builtins::AGENT_TRACE_SUMMARY_BUILTIN_DEF,
+    &trace_builtins::HOST_TYPED_CHECKPOINT_TRACE_BUILTIN_DEF,
+    // agent.host
+    &agent_host_primitives::event_capture::HOST_AGENT_CAPTURE_EVENTS_IMPL_DEF,
+    &agent_host_primitives::HOST_AGENT_PARSE_TOOL_CALLS_IMPL_DEF,
+    &agent_host_primitives::HOST_AGENT_DISPATCH_TOOL_CALL_IMPL_DEF,
+    &agent_host_primitives::HOST_AGENT_DISPATCH_TOOL_BATCH_IMPL_DEF,
+    &agent_host_primitives::HOST_AGENT_UNDISPATCHED_TOOL_RESULTS_BUILTIN_DEF,
+    &agent_host_primitives::HOST_MCP_BOOTSTRAP_IMPL_DEF,
+    &agent_host_primitives::HOST_MCP_DISCONNECT_IMPL_DEF,
+    &agent_host_primitives::HOST_AGENT_REMINDER_PROVIDERS_FIRE_IMPL_DEF,
+    &code_mode::HOST_CODE_MODE_RUN_IMPL_DEF,
+    // llm.host core
+    &COST_ROUTE_BUILTIN_DEF,
+    &LLM_CALL_BUILTIN_DEF,
+    &LLM_STREAM_CALL_BUILTIN_DEF,
+    &LLM_STREAM_COLLECT_BUILTIN_DEF,
+    &LLM_CALL_SAFE_BUILTIN_DEF,
+    // llm.structured
+    &LLM_CALL_STRUCTURED_BUILTIN_DEF,
+    &LLM_CALL_STRUCTURED_SAFE_BUILTIN_DEF,
+    &LLM_CALL_STRUCTURED_RESULT_BUILTIN_DEF,
+    // schema.recovery
+    &SCHEMA_RECOVER_BUILTIN_DEF,
+    // llm.rate_limit
+    &WITH_RATE_LIMIT_BUILTIN_DEF,
+    // llm.host completion + stream
+    &LLM_COMPLETION_BUILTIN_DEF,
+    &LLM_STREAM_BUILTIN_WRAP_DEF,
+    // agent.host tool search
+    &HOST_TOOL_SEARCH_SCORE_BUILTIN_DEF,
+    // llm.host routing
+    &ROUTING_POLICY_BUILTIN_DEF,
+    // llm.introspection
+    &RUNTIME_INTROSPECTION_BUILTIN_WRAP_DEF,
+];
+
+/// Execute one LLM call and return a non-throwing safe envelope.
+#[harn_builtin(
+    exposure = "harness.llm.call_safe",
+    effects = ["llm.write@arg2.provider", "llm.write@arg2.model"],
+    sig_expr = harn_builtin_meta::signatures::LLM_CALL_SAFE.with_name("__cap_llm_call_safe"),
+    aliases = ["llm_call_safe"],
+    kind = "async",
+    category = "llm.host"
+)]
+async fn llm_call_safe_builtin(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    match llm_call_impl(Some(&ctx), args).await {
+        Ok(response) => Ok(llm_safe_envelope_ok(response)),
+        Err(err) => Ok(llm_safe_envelope_err(&err)),
+    }
+}
+
+/// Call an LLM for JSON data and return parsed schema-valid data.
+#[harn_builtin(
+    exposure = "harness.llm.call_structured",
+    effects = ["llm.write@arg2.provider", "llm.write@arg2.model"],
+    sig_expr = harn_builtin_meta::signatures::LLM_CALL_STRUCTURED
+        .with_name("__cap_llm_call_structured"),
+    aliases = ["llm_call_structured"],
+    kind = "async",
+    category = "llm.structured"
+)]
+async fn llm_call_structured_builtin(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let rewritten = rewrite_structured_args(args)?;
+    let response = llm_call_impl(Some(&ctx), rewritten).await?;
+    Ok(extract_structured_data(response))
+}
+
+/// Call an LLM for JSON data and return a non-throwing schema envelope.
+#[harn_builtin(
+    exposure = "harness.llm.call_structured_safe",
+    effects = ["llm.write@arg2.provider", "llm.write@arg2.model"],
+    sig_expr = harn_builtin_meta::signatures::LLM_CALL_STRUCTURED_SAFE
+        .with_name("__cap_llm_call_structured_safe"),
+    aliases = ["llm_call_structured_safe"],
+    kind = "async",
+    category = "llm.structured"
+)]
+async fn llm_call_structured_safe_builtin(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let rewritten = match rewrite_structured_args(args) {
+        Ok(v) => v,
+        Err(err) => return Ok(structured_safe_envelope_err(&err)),
+    };
+    match llm_call_impl(Some(&ctx), rewritten).await {
+        Ok(response) => Ok(structured_safe_envelope_ok(extract_structured_data(
+            response,
+        ))),
+        Err(err) => Ok(structured_safe_envelope_err(&err)),
+    }
+}
+
+/// Call an LLM for JSON data and return a diagnostic structured-output envelope.
+#[harn_builtin(
+    exposure = "harness.llm.call_structured_result",
+    effects = ["llm.write@arg2.provider", "llm.write@arg2.model"],
+    sig_expr = harn_builtin_meta::signatures::LLM_CALL_STRUCTURED_RESULT
+        .with_name("__cap_llm_call_structured_result"),
+    aliases = ["llm_call_structured_result"],
+    kind = "async",
+    category = "llm.structured"
+)]
+async fn llm_call_structured_result_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    structured_envelope::llm_call_structured_result_impl(args, None).await
+}
+
+/// Recover malformed JSON text against a schema using deterministic and optional LLM repair.
+#[harn_builtin(
+    exposure = "harness.llm.recover_schema",
+    effects = ["llm.write@arg2.provider", "llm.write@arg2.model"],
+    sig_expr = harn_builtin_meta::signatures::SCHEMA_RECOVER
+        .with_name("__cap_llm_recover_schema"),
+    aliases = ["schema_recover"],
+    kind = "async",
+    category = "schema.recovery"
+)]
+async fn schema_recover_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    schema_recover::schema_recover_impl(args, None).await
+}
+
+/// Run a closure behind the provider rate limiter with retryable-error backoff.
+#[harn_builtin(
+    exposure = "harness.llm.with_rate_limit",
+    effects = ["state.mutate@arg0", "llm.write@arg0"],
+    sig = "__cap_llm_with_rate_limit(provider: string, callback: closure, options?: dict) -> any",
+    aliases = ["with_rate_limit"],
+    kind = "async",
+    category = "llm.rate_limit"
+)]
+async fn with_rate_limit_builtin(
+    ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let provider = args.first().map(|a| a.display()).unwrap_or_default();
+    if provider.is_empty() {
+        return Err(VmError::Runtime(
+            "with_rate_limit: provider name is required".to_string(),
+        ));
+    }
+    let closure = match args.get(1) {
+        Some(VmValue::Closure(c)) => c.clone(),
+        _ => {
+            return Err(VmError::Runtime(
+                "with_rate_limit: second argument must be a closure".to_string(),
+            ))
+        }
+    };
+    let opts = args.get(2).and_then(|a| a.as_dict()).cloned();
+    let max_retries = helpers::opt_int(&opts, "max_retries").unwrap_or(5).max(0) as usize;
+    let mut backoff_ms = helpers::opt_int(&opts, "backoff_ms").unwrap_or(1000).max(1) as u64;
+
+    let mut attempt: usize = 0;
+    loop {
+        let (result, output) = {
+            let _rate_limit_permit = rate_limit::acquire_permit(&provider).await?;
+            let mut child_vm = ctx.child_vm();
+            let result = child_vm.call_closure_pub(&closure, &[]).await;
+            let output = child_vm.take_output();
+            (result, output)
+        };
+        ctx.forward_output(&output);
+        match result {
+            Ok(v) => return Ok(v),
+            Err(err) => {
+                let cat = crate::value::error_to_category(&err);
+                let retryable = matches!(
+                    cat,
+                    crate::value::ErrorCategory::RateLimit
+                        | crate::value::ErrorCategory::Overloaded
+                        | crate::value::ErrorCategory::TransientNetwork
+                        | crate::value::ErrorCategory::Timeout
+                );
+                if !retryable || attempt >= max_retries {
+                    return Err(err);
+                }
+                crate::events::log_debug(
+                    "llm.with_rate_limit",
+                    &format!(
+                        "retrying after {cat:?} (attempt {}/{max_retries}) in {backoff_ms}ms",
+                        attempt + 1
+                    ),
+                );
+                crate::clock_mock::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+                backoff_ms = backoff_ms.saturating_mul(2).min(30_000);
+                attempt += 1;
+            }
+        }
+    }
+}
+
+/// Execute a fill-in-the-middle LLM completion request.
+#[harn_builtin(
+    exposure = "harness.llm.completion",
+    effects = ["llm.write@arg3.provider", "llm.write@arg3.model"],
+    sig_expr = harn_builtin_meta::signatures::LLM_COMPLETION.with_name("__cap_llm_completion"),
+    aliases = ["llm_completion"],
+    kind = "async",
+    category = "llm.host"
+)]
+async fn llm_completion_builtin(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let prefix = args.first().map(|a| a.display()).unwrap_or_default();
+    let suffix = args.get(1).and_then(|a| {
+        if matches!(a, VmValue::Nil) {
+            None
+        } else {
+            Some(a.display())
+        }
+    });
+    let opts = extract_llm_options(&[
+        VmValue::String(arcstr::ArcStr::from(prefix.clone())),
+        args.get(2).cloned().unwrap_or(VmValue::Nil),
+        args.get(3).cloned().unwrap_or(VmValue::Nil),
+    ])?;
+    if let Some(span_id) = crate::tracing::current_span_id() {
+        crate::tracing::span_set_metadata(span_id, "model", serde_json::json!(opts.model.clone()));
+        crate::tracing::span_set_metadata(
+            span_id,
+            "provider",
+            serde_json::json!(opts.provider.clone()),
+        );
+    }
+
+    let start = std::time::Instant::now();
+    let result = vm_call_completion_full(&opts, &prefix, suffix.as_deref()).await?;
+    trace_llm_call(LlmTraceEntry {
+        model: result.model.clone(),
+        provider: result.provider.clone(),
+        input_tokens: result.input_tokens,
+        output_tokens: result.output_tokens,
+        cost_usd: result.priced_cost_usd(),
+        duration_ms: start.elapsed().as_millis() as u64,
+    });
+    if let Some(span_id) = crate::tracing::current_span_id() {
+        crate::tracing::span_set_metadata(span_id, "status", serde_json::json!("ok"));
+        crate::tracing::span_set_metadata(
+            span_id,
+            "input_tokens",
+            serde_json::json!(result.input_tokens),
+        );
+        crate::tracing::span_set_metadata(
+            span_id,
+            "output_tokens",
+            serde_json::json!(result.output_tokens),
+        );
+    }
+    let projection = crate::llm::api::build_llm_text_projection(Some(&_ctx), &result, None).await?;
+    Ok(vm_build_llm_result(&result, None, None, &projection))
+}
+
+/// Execute a channel-based streaming LLM request.
+#[harn_builtin(
+    exposure = "harness.llm.stream",
+    effects = ["llm.write@arg2.provider", "llm.write@arg2.model"],
+    sig = "__cap_llm_stream(prompt: string, system?: string, options?: dict) -> channel",
+    aliases = ["llm_stream"],
+    kind = "async",
+    category = "llm.host"
+)]
+async fn llm_stream_builtin_wrap(
+    _ctx: crate::vm::AsyncBuiltinCtx,
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    llm_stream_builtin(args).await
+}
+
+/// Register LLM builtins on a VM.
+pub fn register_llm_builtins(vm: &mut Vm) {
+    agent_config::register_agent_control_primitives(vm);
+    register_builtin_defs(vm, LLM_RUNTIME_PRIMITIVE_BUILTINS);
+    register_builtin_defs(vm, tools::PARSE_HOST_PRIMITIVE_BUILTINS);
+    agent_config::register_agent_loop(vm);
+    agent_session_host::register_agent_session_host_primitives(vm);
+
+    conversation::register_conversation_builtins(vm);
+    cache::register_cache_builtins(vm);
+    config_builtins::register_config_builtins(vm);
+    cost::register_cost_builtins(vm);
+    rerank::register_rerank_builtins(vm);
+    mock_builtins::register_llm_mock_builtins(vm);
+    transcript_stats::register_transcript_builtins(vm);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::api::LlmCallOptions;
+    use super::call::{build_schema_nudge, compute_validation_errors, SchemaNudge};
+    use super::{execute_llm_call, reset_llm_state, structured_output_errors};
+    use crate::llm::mock;
+    use crate::value::VmDictExt;
+    use crate::value::VmValue;
+
+    fn base_opts() -> LlmCallOptions {
+        LlmCallOptions {
+            provider: "mock".to_string(),
+            model: "mock".to_string(),
+            max_tokens: 128,
+            output_format: super::api::OutputFormat::JsonObject,
+            response_format: Some("json".to_string()),
+            output_schema: Some(serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"}
+                }
+            })),
+            output_validation: Some("error".to_string()),
+            schema_stream_abort: true,
+            ..LlmCallOptions::default()
+        }
+    }
+
+    #[test]
+    fn llm_stack_registers_and_dispatches_through_full_stdlib() {
+        mock::reset_llm_mock_state();
+        let chunk = crate::compile_source(
+            "fn main(harness: Harness) { harness.llm.mock_enqueue({text: \"ok\"}) }\n",
+        )
+        .expect("compile");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+
+        runtime.block_on(async {
+            let local = tokio::task::LocalSet::new();
+            local
+                .run_until(async {
+                    let mut vm = crate::Vm::new();
+                    crate::register_vm_stdlib(&mut vm);
+                    vm.execute(&chunk).await.expect("execute");
+                    let outer = mock::swap_llm_mock_context(vm.llm_mock_context.clone());
+                    assert!(mock::builtin_llm_mock_active());
+                    let _ = mock::swap_llm_mock_context(outer);
+                    assert!(vm.builtin_names().iter().any(|name| name == "llm_mock"));
+                    assert!(vm.builtin_names().iter().any(|name| name == "llm_call"));
+                })
+                .await;
+        });
+        mock::reset_llm_mock_state();
+    }
+
+    #[test]
+    fn output_validation_accepts_matching_schema() {
+        let opts = base_opts();
+        let mut map = std::collections::BTreeMap::new();
+        map.put_str("name", "Ada");
+        let data = VmValue::dict(map);
+        let errors = compute_validation_errors(&data, &opts);
+        assert!(errors.is_empty(), "schema should pass: {errors:?}");
+    }
+
+    #[test]
+    fn output_validation_rejects_mismatched_schema_in_error_mode() {
+        let opts = base_opts();
+        let mut map = std::collections::BTreeMap::new();
+        map.insert("name".to_string(), VmValue::Int(42));
+        let data = VmValue::dict(map);
+        let errors = compute_validation_errors(&data, &opts);
+        assert!(!errors.is_empty(), "schema should fail");
+        assert!(errors.join(" ").contains("string"));
+    }
+
+    #[test]
+    fn structured_output_errors_report_missing_json() {
+        let result = VmValue::dict(std::collections::BTreeMap::from([
+            (
+                "text".to_string(),
+                VmValue::String(arcstr::ArcStr::from("Analyzing the task")),
+            ),
+            (
+                "protocol_violations".to_string(),
+                VmValue::List(std::sync::Arc::new(vec![VmValue::String(
+                    arcstr::ArcStr::from("stray text outside response tags"),
+                )])),
+            ),
+            (
+                "stop_reason".to_string(),
+                VmValue::String(arcstr::ArcStr::from("length")),
+            ),
+        ]));
+
+        let errors = structured_output_errors(&result, &base_opts());
+        assert!(errors.iter().any(|err| err.contains("parseable JSON")));
+        assert!(errors.iter().any(|err| err.contains("protocol violations")));
+        assert!(errors.iter().any(|err| err.contains("token limit")));
+    }
+
+    #[test]
+    fn schema_retry_nudge_includes_nested_array_object_keys() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "required": ["summary", "findings"],
+            "additionalProperties": false,
+            "properties": {
+                "summary": {"type": "string"},
+                "findings": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "severity": {"type": "string"},
+                            "title": {"type": "string"},
+                            "detail": {"type": "string"},
+                            "file": {"type": ["string", "null"]},
+                            "line_start": {"type": ["integer", "null"]}
+                        }
+                    }
+                }
+            }
+        });
+        let nudge = build_schema_nudge(
+            &["findings[0].description is not allowed".to_string()],
+            Some(&schema),
+            &SchemaNudge::Auto,
+        );
+
+        assert!(nudge.contains("Required keys: summary, findings."));
+        assert!(nudge.contains("Expected JSON schema shape:"));
+        assert!(nudge.contains("findings[] object allowed keys"));
+        assert!(nudge.contains("detail"));
+        assert!(nudge.contains("line_start"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn execute_llm_call_retries_when_response_has_no_json_data() {
+        reset_llm_state();
+        mock::push_llm_mock(mock::LlmMock {
+            text: "Analyzing the task carefully".to_string(),
+            tool_calls: Vec::new(),
+            raw_tool_calls: Vec::new(),
+            match_pattern: None,
+            scope: mock::DEFAULT_MOCK_SCOPE.to_string(),
+            entry_id: String::new(),
+            sticky: false,
+            input_tokens: None,
+            output_tokens: None,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+            thinking: None,
+            thinking_summary: None,
+            stop_reason: None,
+            model: "mock".to_string(),
+            provider: Some("mock".to_string()),
+            blocks: None,
+            logprobs: Vec::new(),
+            error: None,
+            stream_chunks: Vec::new(),
+        });
+        mock::push_llm_mock(mock::LlmMock {
+            text: "{\"name\":\"Ada\"}".to_string(),
+            tool_calls: Vec::new(),
+            raw_tool_calls: Vec::new(),
+            match_pattern: None,
+            scope: mock::DEFAULT_MOCK_SCOPE.to_string(),
+            entry_id: String::new(),
+            sticky: false,
+            input_tokens: None,
+            output_tokens: None,
+            cache_read_tokens: None,
+            cache_write_tokens: None,
+            thinking: None,
+            thinking_summary: None,
+            stop_reason: None,
+            model: "mock".to_string(),
+            provider: Some("mock".to_string()),
+            blocks: None,
+            logprobs: Vec::new(),
+            error: None,
+            stream_chunks: Vec::new(),
+        });
+
+        let response = execute_llm_call(None, base_opts(), None, None, None)
+            .await
+            .expect("structured retry should recover");
+        let dict = response.as_dict().expect("dict response");
+        let data = dict
+            .get("data")
+            .and_then(VmValue::as_dict)
+            .expect("parsed data");
+        assert_eq!(
+            data.get("name").map(VmValue::display).as_deref(),
+            Some("Ada")
+        );
+        assert_eq!(mock::get_llm_mock_calls().len(), 2);
+    }
+}

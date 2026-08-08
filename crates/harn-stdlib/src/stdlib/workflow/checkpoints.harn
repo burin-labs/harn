@@ -1,0 +1,21 @@
+// @harn-entrypoint-category workflow.stdlib
+import { typed_output_checkpoint } from "std/checkpoint"
+
+/**
+ * workflow_typed_output_checkpoint.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn workflow_typed_output_checkpoint(
+  agent: HarnessAgent,
+  llm: HarnessLlm,
+  name,
+  prompt,
+  schema,
+  options = nil,
+  validator = nil,
+) {
+  return typed_output_checkpoint(agent, llm, name, prompt, schema, options, validator)
+}

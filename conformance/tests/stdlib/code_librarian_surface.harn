@@ -1,0 +1,85 @@
+import "std/code_librarian"
+
+/**
+ * Uses the same minimal Rust corpus as the #2434 graph-surface test
+ * (crates/harn-hostlib/tests/harn_hostlib/code_index_graph_surface.rs) so canned
+ * Cypher queries land on the same node shapes.
+ */
+fn seed_corpus(fs: HarnessFs, root: string) {
+  fs.mkdir(root)
+  fs.mkdir(path_join(root, "src"))
+  fs.write_text(path_join(root, "src/a.rs"), "pub fn alpha() {}\npub fn beta() { alpha(); }\n")
+  fs.write_text(path_join(root, "src/b.rs"), "pub fn gamma() {}\npub fn driver() { gamma(); }\n")
+}
+
+pipeline default(harness: Harness) {
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn_code_librarian_" + to_string(harness.random.range(100000, 999999)),
+  )
+  seed_corpus(harness.fs, root)
+  const _ = harness.code_index.rebuild({root: root})
+  // 1) Cypher pass-through returns rows + overlay nil on base.
+  const cy: LibrarianCypherResult = code_librarian_query(
+    harness.code_index,
+    "MATCH (f:Function {name: 'alpha'}) RETURN f.path AS path",
+  )
+  harness.stdio.println(len(cy.rows) == 1 && cy.rows[0].path == "src/a.rs")
+  harness.stdio.println(cy.overlay == nil)
+  // 2) outline returns typed symbols + import edges for known files.
+  //    Since #2458, the symbol-graph rebuild also populates the flat
+  //    `IndexedFile.symbols` list that `outline_get` returns, so the
+  //    corpus's two `pub fn`s show up here.
+  const outline: LibrarianOutline = code_librarian_outline(harness.code_index, "src/a.rs")
+  harness.stdio.println(outline.known && outline.path == "src/a.rs")
+  harness.stdio.println(len(outline.symbols) >= 2)
+  // 3) outline on an unknown path returns known=false (not a throw).
+  const absent: LibrarianOutline = code_librarian_outline(
+    harness.code_index,
+    "src/does-not-exist.rs",
+  )
+  harness.stdio.println(!absent.known && len(absent.symbols) == 0)
+  // 4) who_calls returns the CallSite list for the target symbol.
+  const callers: list<LibrarianCallSite> = code_librarian_who_calls(harness.code_index, "alpha")
+  harness.stdio.println(len(callers) >= 1)
+  harness.stdio.println(callers[0]?.path == "src/a.rs" && callers[0]?.symbol == "alpha")
+  // 5) what_imports returns a list (empty here — corpus has no imports).
+  const imps: list<LibrarianImport> = code_librarian_what_imports(harness.code_index, "src/a.rs")
+  harness.stdio.println(type_of(imps) == "list")
+  // 6) recent_changes from seq=0 returns a list shape.
+  const changes: list<LibrarianFileChange> = code_librarian_recent_changes(harness.code_index, 0)
+  harness.stdio.println(type_of(changes) == "list")
+  // 7) freshness reports known/not-stale for an indexed file.
+  const fresh: LibrarianFreshness = code_librarian_freshness(harness.code_index, "src/a.rs")
+  harness.stdio.println(fresh.known && !fresh.stale)
+  // 8) freshness on an unknown path reports known=false.
+  const unknown_fresh: LibrarianFreshness = code_librarian_freshness(
+    harness.code_index,
+    "src/does-not-exist.rs",
+  )
+  harness.stdio.println(!unknown_fresh.known)
+  // 9) file_hash_snapshot returns the direct path->hash map expected by
+  //    verification_diagnostic_classify plus missing-path metadata.
+  const hash_snapshot: LibrarianFileHashSnapshot = code_librarian_file_hash_snapshot(
+    harness.code_index,
+    ["src/a.rs", "src/does-not-exist.rs"],
+  )
+  harness.stdio.println(hash_snapshot.seq == 0)
+  harness.stdio.println(hash_snapshot.snapshot["src/a.rs"] != nil)
+  harness.stdio.println(hash_snapshot.missing[0] == "src/does-not-exist.rs")
+  const diagnostic = verification_diagnostic_classify(
+    {
+      rung: "R2",
+      rowId: "code-librarian",
+      at: hash_snapshot.captured_at_ms,
+      snapshot: hash_snapshot.snapshot,
+    },
+    hash_snapshot.snapshot,
+  )
+  harness.stdio.println(diagnostic.status == "bound_fresh" && diagnostic.feedsGates)
+  // 10) branch_overlay(branch) activates; nil deactivates.
+  const on: LibrarianOverlay = code_librarian_branch_overlay(harness.code_index, "topic/test")
+  harness.stdio.println(on.active == "topic/test")
+  const off: LibrarianOverlay = code_librarian_branch_overlay(harness.code_index, nil)
+  harness.stdio.println(off.active == nil)
+}

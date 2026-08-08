@@ -1,0 +1,33 @@
+import { ToolDefinitionSpec, ToolRegistry, tool_define_many, tool_registry_from } from "std/tools"
+
+pipeline test(harness: Harness, task) {
+  const specs: list<ToolDefinitionSpec> = [
+    {
+      name: "search_code",
+      description: "Search code",
+      parameters: {query: {type: "string"}},
+      handler: { args -> "search:" + args.query },
+    },
+    {
+      name: "read_file",
+      description: "Read file",
+      config: {
+        parameters: {path: {type: "string"}},
+        returns: {type: "string"},
+        handler: { args -> "read:" + args.path },
+      },
+    },
+  ]
+  const registry: ToolRegistry = tool_define_many(tool_registry(), specs)
+  assert(tool_count(registry) == 2, "tool_define_many registers both tools")
+  assert(
+    tool_find(registry, "search_code").parameters.query.type == "string",
+    "inline config works",
+  )
+  assert(tool_find(registry, "read_file").outputSchema.type == "string", "nested config works")
+  const fresh: ToolRegistry = tool_registry_from(
+    [{name: "one", desc: "One tool", parameters: {}, handler: { _ -> "ok" }}],
+  )
+  assert(tool_count(fresh) == 1, "tool_registry_from creates a registry")
+  harness.stdio.log("tool_define_many tests passed")
+}

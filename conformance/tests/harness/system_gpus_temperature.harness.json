@@ -1,0 +1,12 @@
+{
+  "mode": "mock",
+  "expect_calls": [
+    {"sub_handle": "system", "method": "gpus", "args": []},
+    {"sub_handle": "system", "method": "temperature", "args": []},
+    {"sub_handle": "stdio", "method": "println", "args": ["list"]},
+    {"sub_handle": "stdio", "method": "println", "args": ["0"]},
+    {"sub_handle": "stdio", "method": "println", "args": ["dict"]},
+    {"sub_handle": "stdio", "method": "println", "args": ["0"]}
+  ],
+  "expect_stdio": "list\n0\ndict\n0\n"
+}

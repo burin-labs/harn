@@ -1,0 +1,3 @@
+pipeline default(harness: Harness) {
+  harness.stdio.println("${totally_undefined_fn()}")
+}

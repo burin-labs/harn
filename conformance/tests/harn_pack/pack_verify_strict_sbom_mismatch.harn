@@ -1,0 +1,84 @@
+import "../_common"
+
+pipeline default(harness: Harness) {
+  const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  const harn_bin = harness.env.get_or(
+    "HARN_CONFORMANCE_HARN_BIN",
+    resolve_harn_bin(harness, repo_root),
+  )
+  const root = path_join(
+    harness.fs.workspace_temp_dir(),
+    "harn_pack_strict_sbom_" + harness.random.uuid_v7(),
+  )
+  harness.fs.mkdir(root)
+  harness.fs.write_text(
+    path_join(root, "hello.harn"),
+    "fn main(harness: Harness) { harness.stdio.println(\"hi\") }\n",
+  )
+  const pack = harness.process.exec_at(
+    root,
+    harn_bin,
+    "pack",
+    "hello.harn",
+    "--unsigned",
+    "--out",
+    path_join(root, "hello.harnpack"),
+  )
+  harness.stdio.println(pack.success)
+  const unpack_dir = path_join(root, "unpack")
+  const unpack = harness.process.exec_at(
+    root,
+    harn_bin,
+    "pack",
+    "unpack",
+    "hello.harnpack",
+    "--out",
+    unpack_dir,
+  )
+  harness.stdio.println(unpack.success)
+  const tamper = harness.process.exec_at(
+    root,
+    "python3",
+    "-c",
+    "import json, pathlib, sys\nZERO = 'blake3:0000000000000000000000000000000000000000000000000000000000000000'\nmanifest = pathlib.Path(sys.argv[1])\nsbom = pathlib.Path(sys.argv[2])\nmanifest_data = json.loads(manifest.read_text())\nfor package in manifest_data['sbom']['packages']:\n    if package.get('name') == 'module:hello.harn':\n        package['package_hash_blake3'] = ZERO\n        break\nmanifest.write_text(json.dumps(manifest_data, separators=(',', ':')))\nsbom_data = json.loads(sbom.read_text())\nfor package in sbom_data['packages']:\n    if package.get('name') == 'module:hello.harn':\n        package['package_hash_blake3'] = ZERO\n        break\nsbom.write_text(json.dumps(sbom_data, separators=(',', ':')))\n",
+    path_join(root, "unpack/harnpack.json"),
+    path_join(root, "unpack/sbom.spdx.json"),
+  )
+  harness.stdio.println(tamper.success)
+  const repack = harness.process.exec_at(
+    root,
+    harn_bin,
+    "pack",
+    "repack",
+    unpack_dir,
+    "--out",
+    "tampered.harnpack",
+  )
+  harness.stdio.println(repack.success)
+  const lenient = harness.process.exec_at(
+    root,
+    harn_bin,
+    "pack",
+    "verify",
+    path_join(root, "tampered.harnpack"),
+    "--allow-unsigned",
+    "--json",
+  )
+  harness.stdio.println(lenient.success)
+  const lenient_data = json_parse(lenient.stdout)
+  harness.stdio.println(lenient_data.ok)
+  const strict = harness.process.exec_at(
+    root,
+    harn_bin,
+    "pack",
+    "verify",
+    path_join(root, "tampered.harnpack"),
+    "--allow-unsigned",
+    "--strict",
+    "--json",
+  )
+  harness.stdio.println(strict.success)
+  const strict_data = json_parse(strict.stdout)
+  harness.stdio.println(strict_data.ok)
+  harness.stdio.println(strict_data.error.code)
+}

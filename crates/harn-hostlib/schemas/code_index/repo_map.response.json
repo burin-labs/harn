@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/code_index/repo_map.response.json",
+  "title": "code_index.repo_map response",
+  "type": "object",
+  "properties": {
+    "rendered": {
+      "type": "string",
+      "description": "Token-budgeted, path-grouped symbol map suitable for prompt injection."
+    },
+    "entries": {
+      "type": "array",
+      "description": "Ranked definition entries before token-budget rendering truncates the text.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "line": { "type": "integer", "minimum": 1 },
+          "kind": { "type": "string", "enum": ["Function", "Type"] },
+          "name": { "type": "string" },
+          "signature": { "type": "string" },
+          "score": { "type": "number" },
+          "reasons": {
+            "type": "array",
+            "items": { "type": "string", "enum": ["task_symbol", "context_file"] }
+          }
+        },
+        "required": ["path", "line", "kind", "name", "signature", "score", "reasons"],
+        "additionalProperties": false
+      }
+    },
+    "truncated": {
+      "type": "boolean",
+      "description": "True when max_entries or token_budget omitted ranked entries from rendered output."
+    },
+    "overlay": {
+      "type": ["string", "null"],
+      "description": "Name of the active branch overlay that served this query, if any."
+    }
+  },
+  "required": ["rendered", "entries", "truncated", "overlay"],
+  "additionalProperties": false
+}

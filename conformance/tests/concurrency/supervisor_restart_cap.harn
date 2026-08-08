@@ -1,0 +1,27 @@
+pipeline default(harness: Harness) {
+  const starts = harness.runtime.atomic(0)
+  const sup = harness.runtime.supervisor_start(
+    {
+      name: "capped",
+      strategy: "one_for_one",
+      children: [
+        {
+          name: "bad-stream",
+          kind: "connector_stream",
+          restart: {mode: "on_failure", max_restarts: 1, window_ms: 1000, backoff_ms: 1},
+          task: { _ctx ->
+            harness.runtime.atomic_add(starts, 1)
+            throw "stream-failed"
+          },
+        },
+      ],
+    },
+  )
+  harness.clock.sleep_ms(25ms)
+  const state = harness.runtime.supervisor_state(sup)
+  harness.stdio.println(harness.runtime.atomic_get(starts))
+  harness.stdio.println(state.children[0].status)
+  harness.stdio.println(state.children[0].current_wait_reason)
+  harness.stdio.println(state.metrics.failed)
+  harness.stdio.println(state.metrics.suppressed)
+}

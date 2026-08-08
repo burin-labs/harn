@@ -1,0 +1,21 @@
+pipeline test(harness: Harness, task) {
+  // require with true condition passes silently
+  require true, "this should not throw"
+  harness.stdio.log("passed")
+  // require with custom message
+  try {
+    require false, "custom error message"
+  } catch (e) {
+    harness.stdio.log(e)
+  }
+  // require without message
+  try {
+    require 1 == 2
+  } catch (e) {
+    harness.stdio.log(e)
+  }
+  // require with expression
+  const x = 5
+  require x > 0, "x must be positive"
+  harness.stdio.log("x is positive")
+}
