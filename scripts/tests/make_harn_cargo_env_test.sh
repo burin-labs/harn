@@ -252,7 +252,7 @@ done
 
 make_targets="$tmp_root/make-cargo-targets.txt"
 make -C "$repo_root" -n \
-  build build-release fmt fmt-check lint test-cargo test-e2e release-smoke \
+  build build-release fmt fmt-check lint test test-cargo test-e2e release-smoke \
   mcp-conformance lint-harn gen-run-view-fixtures check-run-view-fixtures > "$make_targets"
 
 for expected in \
@@ -261,6 +261,7 @@ for expected in \
   './scripts/cargo_with_worktree_build_dir.sh fmt --all' \
   './scripts/cargo_with_worktree_build_dir.sh fmt --all -- --check' \
   './scripts/cargo_with_worktree_build_dir.sh clippy --workspace --all-targets -- -D warnings' \
+  './scripts/cargo_with_worktree_build_dir.sh nextest run --workspace' \
   './scripts/cargo_with_worktree_build_dir.sh test --workspace' \
   './scripts/cargo_with_worktree_build_dir.sh nextest run --workspace --profile e2e --run-ignored all' \
   './scripts/cargo_with_worktree_build_dir.sh build --release -p harn-cli --bin harn' \
@@ -274,6 +275,21 @@ do
     exit 1
   fi
 done
+
+make_focused_test="$tmp_root/make-focused-test.txt"
+make -C "$repo_root" -n test ARGS='-p harn-vm typed_options_parity' > "$make_focused_test"
+if ! grep -Fq \
+  './scripts/cargo_with_worktree_build_dir.sh nextest run -p harn-vm typed_options_parity' \
+  "$make_focused_test"; then
+  echo "Makefile test target did not forward documented focused ARGS" >&2
+  cat "$make_focused_test" >&2
+  exit 1
+fi
+if grep -Fq 'nextest run --workspace -p harn-vm' "$make_focused_test"; then
+  echo "focused Makefile test target retained --workspace and would compile every package" >&2
+  cat "$make_focused_test" >&2
+  exit 1
+fi
 
 for variable in \
   HARN_EGRESS_ALLOW \

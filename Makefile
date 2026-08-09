@@ -260,12 +260,14 @@ check-dependabot-groups:
 # runner has no profile filter (so it widens into the e2e tier) and runs tests
 # as threads in one process (so process-local env mutations race). Use
 # `make test-cargo` only when you intentionally want those semantics (#6145).
+# `ARGS` replaces the default `--workspace` selector so `-p <crate>` also
+# narrows compilation instead of forming Cargo's additive workspace union.
 test:
 	@command -v cargo-nextest >/dev/null 2>&1 || { \
 		echo "make test requires cargo-nextest; run 'make setup' or 'cargo install cargo-nextest --locked'" >&2; \
 		echo "for intentional plain cargo test (different isolation; includes e2e binaries): make test-cargo" >&2; \
 		exit 1; }
-	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run --workspace
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) nextest run $(if $(strip $(ARGS)),$(ARGS),--workspace)
 
 # Run exactly one library test without making nextest enumerate every test
 # binary in the package first. The environment-variable boundary keeps the
