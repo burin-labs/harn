@@ -186,6 +186,11 @@ phases, cache contract, defaults, and machine-readable receipts.
 - Run adjacent package or conformance coverage.
 - Run repository drift checks against current source.
 - Rebuild before binary-semantics checks.
-- Run the broad gate before merge.
+- Run the broad gate before merge only in a free worktree-local resource lane.
+  First check for other active Harn builds; never share mutable targets or
+  start a second umbrella build behind another lane's compiler lock. If the
+  lane is occupied, keep the focused exact-head proof, let isolated remote CI
+  own the broad gate, and report the skipped local umbrella gate as a blind
+  spot rather than interrupting another worker.
 - Inspect the rebased final diff and status.
 - Report evidence by claim, plus residual risk.
