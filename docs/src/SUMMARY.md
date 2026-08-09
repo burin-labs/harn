@@ -30,10 +30,11 @@
 # How-to guides
 
 - [Common tasks](./common-tasks.md)
+- [Configure a provider](./provider-setup.md)
 - [Run a workflow bundle from the CLI](./workflow-authoring-quickstart.md)
 - [Cookbook](./cookbook.md)
 - [Scripting cheatsheet](./scripting-cheatsheet.md)
-- [LLM quick reference](./docs/llm/harn-quickref.md)
+- [LLM quick reference](../llm/harn-quickref.md)
 - [Best practices](./best-practices.md)
 - [Compile a bounded experiment](./cookbooks/compile-hypothesis.md)
 - [Pipeline lifecycle cookbook](./cookbooks/lifecycle.md)

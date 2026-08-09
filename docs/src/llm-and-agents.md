@@ -1,171 +1,91 @@
-# LLM and agents
+# LLM calls and agents
 
-Harn has built-in support for calling language models, streaming responses,
-running loop-until-done agents, and delegating work to child agents. This page
-is the map; the detailed references now live in focused pages.
+Use the smallest API that matches the job:
 
-## Start here
+| Job | API | What it does |
+|---|---|---|
+| One model response | `harness.llm.call` | Sends one request and returns one response. |
+| Several model/tool turns | `agent_loop` | Keeps working until it reaches a terminal state or a limit. |
+| Named dependent stages | `workflow_execute` | Runs a typed, inspectable workflow graph. |
+| Independent child work | Workers | Runs separate agent contexts that a parent can await or resume. |
 
-| Topic | Use it for |
-|---|---|
-| [`llm_call`](./llm/llm_call.md) | Single model requests, structured JSON output, completions, budgets, and mock responses |
-| [LLM reranking](./llm/rerank.md) | Pairwise candidate ranking and token-logprob self-certainty |
-| [`agent_loop`](./llm/agent_loop.md) | Loop-until-done agents, profiles, daemon loops, skills, and delegated workers |
-| [Simulated users](./llm/agent_loop.md#simulated-users-for-eval-harnesses) | Agentic or scripted users for clarification-question eval harnesses |
-| [Tools](./llm/tools.md) | Typed tools, Tool Vault progressive disclosure, and MCP server tools |
-| [LLM ensemble helpers](./llm/ensemble.md) | Deterministic search helpers such as `tree_of_thoughts(...)` |
-| [Streaming](./llm/streaming.md) | `llm_stream`, `llm_stream_call`, partial deltas, transcripts, workflow sessions, and token usage summaries |
-| [Providers](./llm/providers.md) | Provider setup, API details, local servers, enterprise cloud providers, and capability overrides |
+See [Configure a model provider](./provider-setup.md) before you use a real
+provider. Use `provider: "mock"` in examples and tests that should run without
+credentials.
 
-## Providers
-
-Harn ships with built-in configs for Anthropic, OpenAI, OpenRouter, Ollama,
-HuggingFace, Bedrock, Azure OpenAI, Vertex AI, and local OpenAI-compatible
-servers. Most scripts choose a provider with the `provider` option, the
-`HARN_LLM_PROVIDER` environment variable, or a model name that Harn can infer.
-
-See [LLM providers](./llm/providers.md) for API keys, local model setup,
-enterprise provider notes, Ollama runtime environment variables, and the
-capability matrix.
-
-## Capability matrix + `harn.toml` overrides
-
-Provider capability rules, project overrides, and packaged provider adapters now
-live in [LLM providers](./llm/providers.md#capability-matrix--harntoml-overrides).
-
-## llm_call
-
-Use `harness.llm.call(prompt, system?, options?)` for a single model turn. It returns a
-canonical dict with `text`, `visible_text`, `model`, `provider`, token usage,
-structured `data` when JSON mode is enabled, tool calls, thinking blocks, and a
-transcript.
+## One model call
 
 ```harn
-const result = harness.llm.call("Translate to French: Hello, world", nil, {
-  provider: "openai",
-  model: "gpt-4o",
-  max_tokens: 1024,
-})
-harness.stdio.log(result.text)
+import { LlmCallOptions } from "std/llm/options"
+
+fn main(harness: Harness) {
+  const options: LlmCallOptions = {
+    provider: "mock",
+    max_tokens: 128,
+  }
+  const response = harness.llm.call(
+    "Translate 'Hello, world' to French.",
+    "You are a concise translator.",
+    options,
+  )
+  harness.stdio.println(response.text)
+}
 ```
 
-For schema-validated JSON, use `harness.llm.call_structured(...)` or its safe/result
-envelope variants. See [LLM calls](./llm/llm_call.md) for the full options and
-return-value tables.
+`harness.llm.call` returns a canonical response. Read `text` for the answer;
+read `usage`, `outcome`, `tool_calls`, and `transcript` when your program needs
+accounting or run information. See [LLM calls](./llm/llm_call.md) for the full
+return shape, structured output, streaming, and errors.
 
-## llm_call_structured
+## An agent loop
 
-Use `harness.llm.call_structured(prompt, schema, options?)` for schema-validated JSON
-responses. Safe and diagnostic-envelope variants are documented in
-[LLM calls](./llm/llm_call.md#llm_call_structured).
-
-## llm_completion
-
-Use `harness.llm.completion(prefix, suffix?, system?, options?)` for text continuation
-and fill-in-the-middle generation. It shares provider, model, budget, and usage
-semantics with `llm_call`.
-
-## Tool vault
-
-Tool Vault is Harn's progressive-tool-disclosure primitive. Tools marked
-`defer_loading: true` stay out of the prompt-visible tool surface until native
-or client-executed `tool_search` promotes them. Use it for large tool registries
-and MCP-heavy agents.
-
-Typed tool patterns, Tool Vault options, provider support, and MCP server tool
-prefixing are covered in [LLM tools](./llm/tools.md).
-
-## agent_loop
-
-Use `agent_loop(harness, prompt, system?, options?)` when an agent should keep working
-across turns. Persistent loops continue until the model emits the completion
-sentinel, a budget or iteration limit is reached, daemon state idles, or a tool
-policy fails.
+Use a loop when the model must choose actions across several turns. Build the
+options as an `AgentSpec` so `harn check` can catch misspelled options.
 
 ```harn
-const result = agent_loop(harness,
-  "Write a function that sorts a list, then write tests for it.",
-  "You are a senior engineer.",
-  {loop_until_done: true, profile: "tool_using"}
-)
-harness.stdio.log(result.status)
-harness.stdio.log(result.llm.iterations)
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+
+fn main(harness: Harness) {
+  const options: AgentSpec = {
+    provider: "mock",
+    loop_until_done: true,
+    max_iterations: 2,
+  }
+  const result = agent_loop(
+    harness,
+    "Answer this question in one sentence: why test a program?",
+    "You are a concise teacher.",
+    options,
+  )
+  harness.stdio.println(result.status)
+  harness.stdio.println(result.text)
+}
 ```
 
-The result is namespaced as `llm`, `tools`, `trace`, `task_ledger`, and
-`transcript`. Profiles preload common loop budgets for tool-using, researcher,
-verifier, and completer loops. See [Agent loops](./llm/agent_loop.md).
+An agent result includes the visible text, terminal outcome, model usage, tool
+summary, and transcript. Only a natural terminal outcome proves that the agent
+completed its task. See [Agent loops](./llm/agent_loop.md) for tools, budgets,
+sessions, workers, and suspension.
 
-## Simulated users
+## Workflows and workers
 
-`std/agent/user` provides `agentic_user(...)`, `scripted_user(...)`, and
-`user_tools(...)` for eval harnesses that need a model or fixture to answer the
-agent's clarification questions. See
-[simulated users for eval harnesses](./llm/agent_loop.md#simulated-users-for-eval-harnesses).
+Use a workflow when the program has named stages, dependencies, joins, or
+verification steps. Use a worker when a parent must delegate independent or
+long-running work. These are orchestration choices; the model call remains the
+smallest unit inside them.
 
-## Daemon stdlib wrappers
+- [Workflow runtime](./workflow-runtime.md)
+- [Delegated workers](./llm/agent_loop.md#delegated-workers)
+- [Typed tools](./llm/tools.md)
+- [Streaming and transcripts](./llm/streaming.md)
 
-Use `daemon_spawn`, `daemon_trigger`, `daemon_snapshot`, `daemon_stop`, and
-`daemon_resume` when you want first-class daemon handles instead of wiring daemon
-options on `agent_loop` directly.
+## Provider choice
 
-## Skills lifecycle
+Harn resolves a provider from call options, project configuration, environment,
+or the model catalog. For reproducible programs, set the provider explicitly
+in the options and use a current model from `harn models list`.
 
-Skills bundle metadata, a system-prompt fragment, scoped tools, and lifecycle
-hooks into a typed unit. Pass a skill registry to `agent_loop` with the
-`skills:` option to match, activate, scope, and optionally deactivate skills
-across turns. See [Agent loops](./llm/agent_loop.md#skills-lifecycle).
-
-## Streaming responses
-
-`llm_stream` returns a channel of raw response chunks. `llm_stream_call` returns
-a first-class `Stream` of structured chunks `{delta, visible_delta, partial,
-role, stop_reason}` and cancels the background request when the stream is
-dropped. Both accept the same provider, model, and generation options as
-`llm_call`. See [Streaming and transcripts](./llm/streaming.md).
-
-## Delegated workers
-
-For long-running or parallel orchestration, `spawn_agent`, `sub_agent_run`,
-`wait_agent`, `send_input`, `resume_agent`, and `close_agent` expose child-agent
-lifecycle directly in the runtime. See
-[delegated workers](./llm/agent_loop.md#delegated-workers).
-
-## Transcript management
-
-Transcripts carry context across calls, forks, repairs, resumptions, and workflow
-sessions. Use `transcript_render_visible`, `transcript_render_full`,
-`transcript_events`, `transcript_summarize`, and `transcript_compact` when host
-apps need stable rendering and replay boundaries. See
-[Streaming and transcripts](./llm/streaming.md#transcript-management) and
-[Transcript projection](./llm/transcript-projection.md) for policies that derive
-a clean model-visible prefix without destroying audit lineage.
-
-## Workflow runtime
-
-For multi-stage orchestration, prefer workflow graphs and `workflow_execute`
-over product-side loop wiring. This keeps orchestration structure, transcript
-policy, context policy, artifacts, and retries inside Harn. See
-[workflow runtime notes](./llm/streaming.md#workflow-runtime).
-
-## Cost tracking
-
-`llm_call`, `agent_loop`, and workflow sessions expose normalized token usage.
-Use `llm_cost`, `llm_session_cost`, `llm_budget`, `llm_budget_remaining`,
-`tiktoken_count_tokens`, `std/llm/budget`, and per-call `budget` envelopes to
-estimate and enforce spend before provider requests leave the process. See
-[LLM calls](./llm/llm_call.md#cost-tracking).
-
-## Provider API details
-
-Provider-specific endpoint, auth, readiness, and local-server notes are in
-[LLM providers](./llm/providers.md#provider-api-details).
-
-## Testing with mock LLM responses
-
-The `mock` provider and `harness.llm.mock_enqueue(...)` queue deterministic text, tool-call, and
-error responses without API keys. See
-[mock LLM responses](./llm/llm_call.md#testing-with-mock-llm-responses).
-Agent turns and built-in auxiliary calls carry Harn-owned mock purposes (for
-example `agent.main`, `completion.judge`, and `agent.input_guardrail`) so a
-single versioned fixture cannot be consumed by the wrong call site.
+The [provider reference](./llm/providers.md) contains endpoint and capability
+details. The [provider setup guide](./provider-setup.md) contains the shortest
+path from an API key to a verified call.

@@ -451,7 +451,13 @@ fn provider_runtime_mismatch(requested_provider: &str, actual_provider: &str) ->
 }
 
 pub fn model_is_served(model: &str, served_models: &[String]) -> bool {
+    // Gemini's `/models` resource returns ids such as `models/gemini-2.5-flash`,
+    // while Harn catalog selectors and the request path use the bare model id.
+    // Compare the resource-qualified and selector forms at this boundary so a
+    // successful provider discovery does not reject an otherwise valid model.
+    let model = model.strip_prefix("models/").unwrap_or(model);
     served_models.iter().any(|served| {
+        let served = served.strip_prefix("models/").unwrap_or(served);
         served == model
             || served
                 .strip_prefix(model)
@@ -750,6 +756,18 @@ mod tests {
         assert_eq!(result.status, ReadinessStatus::Ok);
         assert_eq!(result.model.as_deref(), Some("deepinfra/zai-org/GLM-5.2"));
         assert!(result.message.contains("served as 'zai-org/GLM-5.2'"));
+    }
+
+    #[test]
+    fn model_is_served_accepts_gemini_resource_ids() {
+        assert!(model_is_served(
+            "gemini-2.5-flash",
+            &["models/gemini-2.5-flash".to_string()]
+        ));
+        assert!(model_is_served(
+            "models/gemini-2.5-flash",
+            &["gemini-2.5-flash".to_string()]
+        ));
     }
 
     #[tokio::test]

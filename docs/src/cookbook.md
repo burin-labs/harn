@@ -44,7 +44,7 @@ pipeline default(harness: Harness, task) {
   const response = harness.llm.call(
     "Explain the builder pattern in three sentences.",
     "You are a software engineering tutor. Be concise.",
-    {provider: "openai", model: "gpt-4o", max_tokens: 512}
+    {provider: "openai", model: "gpt-5.4-mini", max_tokens: 512}
   )
   harness.stdio.log(response)
 }

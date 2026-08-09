@@ -30,7 +30,7 @@ import { LlmCallOptions } from "std/llm/options"
 
 const opts: LlmCallOptions = {
   provider: "openai",
-  model: "gpt-4o",
+  model: "gpt-5.4-mini",
   max_tokens: 1024,
 }
 const result = harness.llm.call(
@@ -752,7 +752,7 @@ const budget: LlmBudget = {
 }
 const budgeted_opts: LlmCallOptions = {
   provider: "openai",
-  model: "gpt-4o",
+  model: "gpt-5.4-mini",
   max_tokens: 1024,
   budget: budget,
 }

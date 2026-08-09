@@ -1927,7 +1927,7 @@ provider, latency, first streamed delta timing, token usage, and estimated
 cost.
 
 ```bash
-harn models test gpt-4o-mini --prompt "Reply with pong."
+harn models test gpt-5.4-mini --prompt "Reply with pong."
 harn models test qwen3:30b --provider ollama --json
 ```
 
@@ -1958,7 +1958,7 @@ Plan provider Batch API use for latency-tolerant model workloads:
 ```bash
 harn models batch plan --workload eval
 harn models batch plan --provider openai --min-discount-percent 50 --json
-harn models batch plan --model gpt-4o-mini --max-turnaround-hours 24
+harn models batch plan --model gpt-5.4-mini --max-turnaround-hours 24
 ```
 
 The planner reads Harn's provider catalog and lists routes whose provider
@@ -1989,9 +1989,9 @@ agent-loop pass@1 evidence for the meter stick.
 Build a durable, provider-neutral manifest for a JSONL request ledger:
 
 ```bash
-harn models batch manifest --provider openai --model gpt-4o-mini \
+harn models batch manifest --provider openai --model gpt-5.4-mini \
   --requests ./requests.jsonl --out ./batch-manifest.json
-harn models batch manifest --provider openai --model gpt-4o-mini \
+harn models batch manifest --provider openai --model gpt-5.4-mini \
   --requests ./requests.jsonl --out ./batch-manifest.json --tool-format json --json
 ```
 
@@ -2013,7 +2013,7 @@ Own a complete provider-batch lifecycle in one durable execution directory:
 
 ```bash
 harn models batch execute init --requests ./requests.jsonl \
-  --execution-dir ./.harn/batches/eval-001 --provider openai --model gpt-4o-mini
+  --execution-dir ./.harn/batches/eval-001 --provider openai --model gpt-5.4-mini
 harn models batch execute advance --execution-dir ./.harn/batches/eval-001 --json
 harn models batch execute inspect --execution-dir ./.harn/batches/eval-001 --json
 harn models batch execute cancel --execution-dir ./.harn/batches/eval-001 --json
@@ -2867,7 +2867,7 @@ harn eval prompt prompts/agent.harn.prompt --fleet-name frontier --output html -
 
 # Score repo-context artifact selection and rendered section shape.
 harn eval prompt examples/evals/repo-context-quality.harn.prompt \
-    --fleet claude-3-5-sonnet,gpt-4o,ollama:qwen3.5 \
+    --fleet claude-sonnet-5,gpt-5.4-mini,ollama:qwen3.5 \
     --context-fixture examples/evals/context-retrieval-fixture.json \
     --output json -o context-quality.json
 ```

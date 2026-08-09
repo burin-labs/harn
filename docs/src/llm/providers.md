@@ -2,61 +2,34 @@
 
 ## Built-in providers
 
-Harn ships with built-in configs for Anthropic, OpenAI, OpenRouter, Vercel AI Gateway, Baseten,
-HuggingFace, Together, DeepInfra, NVIDIA NIM, Bedrock, Azure OpenAI, Vertex AI,
-and local OpenAI-compatible servers. Set the appropriate environment variable
-to authenticate or point Harn at an endpoint:
+Harn includes adapters for common cloud providers and local OpenAI-compatible
+servers. The model catalog is the current source of truth:
 
-Run `harn quickstart` to detect existing credentials, local Ollama, free disk
-space, and GPU availability, then write starter `providers.toml`, `harn.toml`,
-and `.env` files.
+```bash
+harn models list
+harn models list --provider anthropic
+harn models info <model>
+```
 
-Run `harn models recommend` to choose a starter model for the current hardware.
-Run `harn provider catalog recommend --json` to inspect the coding-agent readiness
-evidence that orders local provider/model presets for quickstart. The report
-reads the latest `harn eval coding-agent --include-local` output when present
-and falls back to bundled seed evidence, while keeping runtime transport
-failures separate from model task failures.
-Run `harn models install devstral-small-2` or `harn models install
-ollama-gemma4` to resolve Harn aliases and pull the matching Ollama model.
-Ollama has no working qwen3.x route — its qwen3.5-family server-side tool-call
-parser 500s on Harn's text-tool output — so use the llamacpp provider for local
-qwen3.x. For non-Ollama local runtimes, `harn models install
-local-qwen3.6-gguf` and `harn models install mlx-qwen3.6` print concrete
-llama.cpp / MLX download, launch, context-window, endpoint, and
-`provider-ready` verification commands.
+Set the provider credential in the environment. The most common variables are:
 
-Related references: the generated [provider capability
-matrix](../provider-matrix.md) for per-model feature support, and
-[provider support recommendations](../provider-support.md) for
-family-level guidance, endpoint notes, and downstream JSON support data.
+| Provider | Environment variable |
+|---|---|
+| Anthropic | `ANTHROPIC_API_KEY` |
+| OpenAI | `OPENAI_API_KEY` |
+| Gemini | `GEMINI_API_KEY` |
+| OpenRouter | `OPENROUTER_API_KEY` |
+| Together AI | `TOGETHER_AI_API_KEY` |
+| DeepInfra | `DEEPINFRA_API_KEY` |
+| NVIDIA NIM | `NVIDIA_API_KEY` |
+| Hugging Face | `HUGGINGFACE_API_KEY` |
+| Ollama | `OLLAMA_HOST` (optional) |
+| Local server | `LOCAL_LLM_BASE_URL` |
 
-| Provider | Environment variable | Default model |
-|---|---|---|
-| Anthropic (default) | `ANTHROPIC_API_KEY` | `claude-sonnet-5` |
-| OpenAI | `OPENAI_API_KEY` | `gpt-4o` |
-| OpenRouter | `OPENROUTER_API_KEY` | `anthropic/claude-sonnet-4.6` |
-| Vercel AI Gateway | `AI_GATEWAY_API_KEY` or `VERCEL_AI_GATEWAY_API_KEY` | `vercel-gpt-5.4-nano` |
-| Baseten Model APIs | `BASETEN_API_KEY` | `baseten-glm-5.2` or explicit `baseten/<wire-id>` |
-| Together AI | `TOGETHER_AI_API_KEY` | explicit Together model ID |
-| DeepInfra | `DEEPINFRA_API_KEY` or `DEEPINFRA_TOKEN` | explicit `deepinfra/<wire-id>` |
-| NVIDIA NIM | `NVIDIA_API_KEY` or `NIM_API_KEY` | explicit `nvidia/<wire-id>` |
-| Nebius Token Factory | `NEBIUS_API_KEY` | explicit model ID from `/v1/models` |
-| FlexAI Token Factory | `FLEXAI_API_KEY` | explicit model ID from model discovery |
-| Hyperbolic | `HYPERBOLIC_API_KEY` | explicit model ID from `/v1/models` |
-| SiliconFlow | `SILICONFLOW_API_KEY` | explicit model ID from `/v1/models` |
-| Parasail | `PARASAIL_API_KEY` | explicit model ID from `/v1/models` |
-| Atlas Cloud | `ATLAS_API_KEY` or `ATLASCLOUD_API_KEY` | explicit model ID from `/v1/models` |
-| HuggingFace | `HF_TOKEN` or `HUGGINGFACE_API_KEY` | explicit `model` |
-| Bedrock | AWS SDK credential chain | explicit Bedrock `model` |
-| Azure OpenAI | `AZURE_OPENAI_API_KEY` or `AZURE_OPENAI_AD_TOKEN` | deployment name in `model` |
-| Gemini API | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | `gemini-2.5-flash` or explicit Gemini model ID |
-| Vertex AI | `VERTEX_AI_ACCESS_TOKEN` or `GOOGLE_APPLICATION_CREDENTIALS` | Gemini model ID |
-| Ollama | `OLLAMA_HOST` (optional) | `devstral-small-2` when installed, otherwise `llama3.2` |
-| Local server | `LOCAL_LLM_BASE_URL` | `LOCAL_LLM_MODEL` or explicit `model` |
-| llama.cpp server | `LLAMACPP_BASE_URL` | explicit `model` from `/v1/models` |
-| MLX OpenAI-compatible server | `MLX_BASE_URL` | `MLX_MODEL_ID` or `mlx-qwen3.6` |
-| vLLM OpenAI-compatible server | `VLLM_BASE_URL` | explicit `model` from `/v1/models` |
+Do not rely on an implicit model in an example. Select a current model from the
+catalog and set it explicitly in a call. See [Configure a model
+provider](../provider-setup.md) for the short setup path, and the [provider
+capability matrix](../provider-matrix.md) for per-model support.
 
 Baseten Model APIs use `https://inference.baseten.co/v1`. The built-in catalog
 includes current Baseten rows for GLM 5.2, Kimi K2.7 Code, DeepSeek V4 Pro,
@@ -834,7 +807,7 @@ egress Harn adds this versioned request extension:
     "version": 1,
     "logical_route": {
       "provider": "openai",
-      "model": "gpt-4o-mini",
+      "model": "gpt-5.4-mini",
       "capability_fingerprint": "<64 hex characters>"
     }
   }
@@ -1158,7 +1131,7 @@ provider in this order:
 
 1. **Explicit option** — `harness.llm.call({provider: "openai", ...})` in your script
 2. **Environment variable** — `HARN_LLM_PROVIDER`
-3. **Inferred from model name** — e.g. `gpt-4o` → OpenAI, `claude-3` → Anthropic
+3. **Inferred from model name** — e.g. `gpt-5.4-mini` → OpenAI, `claude-sonnet-5` → Anthropic
 4. **Default** — `anthropic`
 5. **Fallback** — if Anthropic key is missing, tries `ollama` then `local`
 
@@ -1188,7 +1161,7 @@ Set the model explicitly or via environment:
 harness.llm.call("...", nil, {model: "claude-sonnet-5"})
 
 // Or via environment
-// export HARN_LLM_MODEL=gpt-4o
+// export HARN_LLM_MODEL=gpt-5.4-mini
 ```
 
 The `HARN_LLM_MODEL` environment variable sets the default model when none
