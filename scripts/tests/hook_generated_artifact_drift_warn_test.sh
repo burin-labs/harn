@@ -32,6 +32,7 @@ fake_harn="$tmp_root/fake-harn"
 cat > "$fake_harn" <<'SH'
 #!/bin/sh
 printf 'run:%s\n' "$*" >> "${HOOK_DRIFT_RECORD:?}"
+exit "${HOOK_DRIFT_FAKE_STATUS:-0}"
 SH
 chmod +x "$fake_harn"
 
@@ -52,6 +53,45 @@ printf '%s\n' 'crates/harn-lexer/src/token.rs' > "$staged"
 if ! grep -Eq '^run:run scripts/warn_generated_artifact_drift\.harn -- --staged-files .*/\.harn/tmp/staged-paths\.' "$record"; then
   fail "hook should invoke Harn warner with in-repo staged list; got: $(cat "$record")"
 fi
+
+# Without an explicit override, prefer the repository's no-build resolver to a
+# PATH binary that may belong to another checkout or be replaced mid-build.
+resolver_bin="$tmp_root/resolver-bin"
+mkdir -p "$resolver_bin"
+cat > "$resolver_bin/harn" <<'SH'
+#!/bin/sh
+exit 91
+SH
+chmod +x "$resolver_bin/harn"
+cat > "$wire_root/scripts/harn_bin.sh" <<'SH'
+#!/bin/sh
+printf '%s\n' "${HOOK_RESOLVED_HARN:?}"
+SH
+chmod +x "$wire_root/scripts/harn_bin.sh"
+: > "$record"
+(
+  cd "$wire_root"
+  unset HARN_BIN
+  PATH="$resolver_bin:$PATH" HOOK_RESOLVED_HARN="$fake_harn" \
+    hook_warn_generated_artifact_drift "$staged"
+)
+grep -Fq 'run:run scripts/warn_generated_artifact_drift.harn' "$record" \
+  || fail "hook should prefer the worktree Harn resolver"
+
+# An advisory failure must remain non-blocking but visible. In particular, an
+# out-of-memory SIGKILL exits 137 and must not look like a successful check.
+set +e
+failed_advisory_out=$(
+  cd "$wire_root"
+  HOOK_DRIFT_FAKE_STATUS=137 HARN_BIN="$fake_harn" \
+    hook_warn_generated_artifact_drift "$staged" 2>&1
+)
+status=$?
+set -e
+[ "$status" -eq 0 ] || fail "failed advisory must still exit 0"
+printf '%s\n' "$failed_advisory_out" \
+  | grep -Fq "generated-artifact drift check did not run (harn exited 137)" \
+  || fail "failed advisory must explain that it did not run; out=$failed_advisory_out"
 
 # Missing binary must not fail the commit path.
 set +e

@@ -6,6 +6,23 @@ pub(super) fn scan_command_risk_scan_json(
 ) -> JsonValue {
     let command_text = command_text(ctx);
     let lower = command_text.to_ascii_lowercase();
+    let shell_command_groups = super::catastrophic::shell_command_groups(&command_text)
+        .into_iter()
+        .map(|group| {
+            group
+                .into_iter()
+                .map(|stage| {
+                    let writes_to_file =
+                        has_output_redirect_write_intent(&stage.text.to_ascii_lowercase());
+                    serde_json::json!({
+                        "text": stage.text,
+                        "argv": stage.argv,
+                        "writes_to_file": writes_to_file,
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
     let mut labels = BTreeSet::new();
     let mut rationale = Vec::new();
 
@@ -111,6 +128,7 @@ pub(super) fn scan_command_risk_scan_json(
         } else {
             rationale.join("; ")
         },
+        "shell_command_groups": shell_command_groups,
     });
     if let Some(reason) = catastrophe {
         scan["catastrophic_reason"] = JsonValue::String(reason);

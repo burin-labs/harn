@@ -8,7 +8,7 @@
 /// `truncate -s 0` of a tracked project file, and `>`/`>>` redirection onto a
 /// tracked project file) through adversarial quoting, chained-command splitting, `bash -c`
 /// recursion, and the `sudo`/`env`/`nice`/`nohup`/`time`/`timeout`/`command`/
-/// `builtin` wrapper family.
+/// `builtin`/`exec` wrapper family.
 use std::path::Path;
 
 mod project_delete;
@@ -17,6 +17,12 @@ mod tracked_writes;
 
 use project_delete::segment_deletes_project;
 use shell::*;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct ShellCommandStage {
+    pub(super) text: String,
+    pub(super) argv: Vec<String>,
+}
 
 /// Maximum `bash -c` recursion depth. Each level strips a shell wrapper, so
 /// the string strictly shrinks; the cap is a defensive bound only.
@@ -42,6 +48,30 @@ pub(super) fn reason_at(
 
 pub(super) fn command_segments(command: &str) -> Vec<String> {
     command_segments_inner(command, 0)
+}
+
+/// Parse a shell command into chain groups and pipeline stages. This is the
+/// shared shell boundary for policy written outside Rust; consumers receive
+/// normalized argv while the original stage text remains available for
+/// syntax-sensitive checks such as output redirection.
+pub(super) fn shell_command_groups(command: &str) -> Vec<Vec<ShellCommandStage>> {
+    split_chained_command(command)
+        .into_iter()
+        .filter_map(|group| {
+            let stages = split_pipeline_command(&group)
+                .into_iter()
+                .filter_map(|text| {
+                    let tokens = shell_words(&text);
+                    let index = unwrapped_command_index(&tokens, 0, tokens.len());
+                    (index < tokens.len()).then(|| ShellCommandStage {
+                        text: text.trim().to_string(),
+                        argv: tokens[index..].to_vec(),
+                    })
+                })
+                .collect::<Vec<_>>();
+            (!stages.is_empty()).then_some(stages)
+        })
+        .collect()
 }
 
 fn command_segments_inner(command: &str, depth: usize) -> Vec<String> {

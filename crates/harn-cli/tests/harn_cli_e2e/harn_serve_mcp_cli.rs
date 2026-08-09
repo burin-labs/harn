@@ -83,6 +83,23 @@ fn main(harness: Harness) {
     .unwrap();
 }
 
+fn write_trusted_host_dispatch_fixture(temp: &TempDir) {
+    fs::write(
+        temp.path().join("harn.toml"),
+        "[check]\ntrusted_host_dispatch = true\n",
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join("server.harn"),
+        r#"
+pub fn host_environment() -> dict {
+  return host_call("env.host", {})
+}
+"#,
+    )
+    .unwrap();
+}
+
 fn wait_for_http_listener(child: &mut std::process::Child, rx: &Receiver<String>) -> String {
     test_util::stdio_jsonrpc::wait_for_child_log_suffix(
         child,
@@ -125,6 +142,97 @@ fn serve_mcp_stdio_discovers_and_calls_exported_tool() {
     assert_eq!(
         called["result"]["structuredContent"]["message"],
         "Hello, Harn!"
+    );
+    client.shutdown_expect_success();
+}
+
+#[ignore = "binary surface — runs in the slow E2E/smoke job"]
+#[test]
+fn serve_mcp_stdio_initializes_and_calls_from_released_client() {
+    let temp = TempDir::new().unwrap();
+    write_export_fixture(&temp);
+    let mut command = harn_e2e_command();
+    command
+        .current_dir(temp.path())
+        .arg("serve")
+        .arg("mcp")
+        .arg("server.harn");
+    let mut client = StdioJsonRpcClient::spawn("harn serve mcp", command);
+
+    let initialized = client.request(json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {},
+            "clientInfo": {"name": "codex-mcp-client", "version": "test"}
+        }
+    }));
+    assert_eq!(initialized["result"]["protocolVersion"], "2025-11-25");
+    assert_eq!(initialized["result"]["serverInfo"]["name"], "server");
+
+    client.send(&json!({
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized"
+    }));
+    let tools = client.request(json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/list",
+        "params": {}
+    }));
+    assert_eq!(tools["result"]["tools"][0]["name"], "greet");
+    assert!(tools["result"].get("resultType").is_none());
+
+    let called = client.request(json!({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {
+            "name": "greet",
+            "arguments": {"name": "Codex", "excited": true},
+            "_meta": {"progressToken": "codex-proof"}
+        }
+    }));
+    assert_eq!(
+        called["result"]["structuredContent"]["message"],
+        "Hello, Codex!"
+    );
+    assert!(called["result"].get("resultType").is_none());
+    client.shutdown_expect_success();
+}
+
+#[ignore = "binary surface — runs in the slow E2E/smoke job"]
+#[test]
+fn serve_mcp_honors_manifest_trusted_host_dispatch() {
+    let temp = TempDir::new().unwrap();
+    write_trusted_host_dispatch_fixture(&temp);
+    let mut command = harn_e2e_command();
+    command
+        .current_dir(temp.path())
+        .arg("serve")
+        .arg("mcp")
+        .arg("server.harn")
+        .env_remove("HARN_LEGACY_AMBIENT_CAPABILITIES");
+    let mut client = StdioJsonRpcClient::spawn("harn serve mcp", command);
+
+    let _ = client.request(stable_request(1, "server/discover", json!({})));
+    let called = client.request(stable_request(
+        2,
+        "tools/call",
+        json!({"name": "host_environment", "arguments": {}}),
+    ));
+    let content = called["result"]["content"][0]["text"]
+        .as_str()
+        .expect("tool error text");
+    assert!(
+        content.contains("unsupported operation env.host"),
+        "manifest authority should reach runtime dispatch: {content}"
+    );
+    assert!(
+        !content.contains("not callable source API"),
+        "manifest authority was ignored: {content}"
     );
     client.shutdown_expect_success();
 }

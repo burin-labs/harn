@@ -269,6 +269,15 @@ if [[ ! -d "$rust_target_dir" ]]; then
 fi
 
 add_available_cargo_tools "$rust_repo"
+printf '{"private":true}\n' > "$rust_repo/package.json"
+printf '{"name":"setup-fixture","lockfileVersion":3,"requires":true,"packages":{"":{"name":"setup-fixture"}}}\n' \
+  > "$rust_repo/package-lock.json"
+{
+  printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
+  printf '%s\n' 'printf "%s\n" "$*" >> "$DEV_SETUP_TEST_NPM_RECORD"'
+  printf '%s\n' 'if [[ "${1:-}" == ci ]]; then mkdir -p node_modules; fi'
+} > "$rust_repo/bin/npm"
+chmod +x "$rust_repo/bin/npm"
 mkdir -p "$tmp_root/tmp-profile-switch"
 HARN_DEV_SETUP_STORAGE_ROOT='' \
 HARN_DEV_TARGET_DIR='' \
@@ -281,7 +290,13 @@ PATH="$rust_repo/bin:/usr/bin:/bin" \
   HARN_DEV_SETUP_FORCE=1 \
   HARN_DEV_SETUP_STATE_DIR="$tmp_root/state-profile-switch" \
   DEV_SETUP_TEST_CARGO_RECORD="$tmp_root/profile-switch-cargo.txt" \
+  DEV_SETUP_TEST_NPM_RECORD="$tmp_root/profile-switch-npm.txt" \
   "$rust_repo/scripts/dev_setup.sh" > "$tmp_root/profile-switch-output.txt" 2>&1
+if ! grep -Fxq 'ci --no-audit --fund=false' "$tmp_root/profile-switch-npm.txt"; then
+  echo "full setup did not install Node dependencies from the lockfile" >&2
+  cat "$tmp_root/profile-switch-npm.txt" >&2
+  exit 1
+fi
 profile_switch_target="$tmp_root/full-storage-root/harn-target/$(basename "$tmp_root")-rust"
 if ! grep -Fxq \
   "target-dir = \"$profile_switch_target\" # harn-dev-setup-managed" \

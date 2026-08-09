@@ -79,15 +79,178 @@ pub fn mcp_task_status_wire_name(status: McpTaskStatus) -> String {
         .to_string()
 }
 
-/// Returns the protocol versions implemented by Harn-owned server adapters.
-/// Older peers are supported only by SDK-managed clients; Harn servers expose
-/// the current stable lifecycle and wire shape exclusively.
-pub fn supported_protocol_versions() -> &'static [&'static str] {
-    &[PROTOCOL_VERSION]
+/// Returns every protocol version known to the official SDK.
+pub fn sdk_protocol_versions() -> Vec<&'static str> {
+    rmcp::model::ProtocolVersion::KNOWN_VERSIONS
+        .iter()
+        .map(rmcp::model::ProtocolVersion::as_str)
+        .collect()
 }
 
-pub fn is_supported_protocol_version(version: &str) -> bool {
-    supported_protocol_versions().contains(&version)
+pub fn is_sdk_protocol_version(version: &str) -> bool {
+    rmcp::model::ProtocolVersion::KNOWN_VERSIONS
+        .iter()
+        .any(|supported| supported.as_str() == version)
+}
+
+/// Returns the SDK-known versions that use metadata on each request.
+pub fn request_metadata_protocol_versions() -> Vec<&'static str> {
+    rmcp::model::ProtocolVersion::KNOWN_VERSIONS
+        .iter()
+        .filter(|version| *version >= &rmcp::model::ProtocolVersion::STANDARD_HEADERS)
+        .map(rmcp::model::ProtocolVersion::as_str)
+        .collect()
+}
+
+pub fn is_request_metadata_protocol_version(version: &str) -> bool {
+    rmcp::model::ProtocolVersion::KNOWN_VERSIONS
+        .iter()
+        .filter(|supported| *supported >= &rmcp::model::ProtocolVersion::STANDARD_HEADERS)
+        .any(|supported| supported.as_str() == version)
+}
+
+fn is_initialize_protocol_version(version: &rmcp::model::ProtocolVersion) -> bool {
+    version < &rmcp::model::ProtocolVersion::STANDARD_HEADERS
+        && rmcp::model::ProtocolVersion::KNOWN_VERSIONS.contains(version)
+}
+
+/// Result of the SDK-typed `initialize` negotiation.
+#[derive(Clone, Debug, PartialEq)]
+struct McpInitializeOutcome {
+    client_identity: String,
+    protocol_version: rmcp::model::ProtocolVersion,
+    result: JsonValue,
+}
+
+/// Negotiate the released MCP initialize lifecycle with official SDK types.
+///
+/// MCP 2026-07-28 uses `server/discover` and per-request metadata, but released
+/// clients still open stdio servers with `initialize`. The SDK supports both
+/// lifecycles; this helper keeps Harn's custom dispatch cores aligned without
+/// recreating a second protocol model or version registry.
+fn negotiate_initialize(
+    params: &JsonValue,
+    capabilities: JsonValue,
+    server_info: JsonValue,
+    instructions: Option<&str>,
+) -> Result<McpInitializeOutcome, String> {
+    let request: rmcp::model::InitializeRequestParams = serde_json::from_value(params.clone())
+        .map_err(|error| format!("invalid MCP initialize params: {error}"))?;
+    let protocol_version = if is_initialize_protocol_version(&request.protocol_version) {
+        request.protocol_version.clone()
+    } else {
+        rmcp::model::ProtocolVersion::LATEST
+    };
+    let capabilities: rmcp::model::ServerCapabilities = serde_json::from_value(capabilities)
+        .map_err(|error| format!("invalid MCP server capabilities: {error}"))?;
+    let server_info: rmcp::model::Implementation = serde_json::from_value(server_info)
+        .map_err(|error| format!("invalid MCP server info: {error}"))?;
+    let mut result = rmcp::model::InitializeResult::new(capabilities)
+        .with_protocol_version(protocol_version.clone())
+        .with_server_info(server_info);
+    if let Some(instructions) = instructions {
+        result = result.with_instructions(instructions);
+    }
+    let result = serde_json::to_value(result)
+        .map_err(|error| format!("failed to encode MCP initialize result: {error}"))?;
+    Ok(McpInitializeOutcome {
+        client_identity: format!(
+            "{}/{}",
+            request.client_info.name, request.client_info.version
+        ),
+        protocol_version,
+        result,
+    })
+}
+
+/// The protocol profile for one accepted server request.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct McpRequestProfile {
+    protocol_version: rmcp::model::ProtocolVersion,
+}
+
+impl McpRequestProfile {
+    pub fn uses_result_envelope(&self) -> bool {
+        self.protocol_version >= rmcp::model::ProtocolVersion::V_2026_07_28
+    }
+}
+
+/// Connection state shared by Harn's generic and orchestrator MCP servers.
+///
+/// The state stores only facts negotiated for the connection. Version support,
+/// request metadata, and initialize payloads remain owned by official SDK
+/// types.
+#[derive(Clone, Debug)]
+pub struct McpServerSession {
+    client_identity: String,
+    initialized_protocol_version: Option<rmcp::model::ProtocolVersion>,
+}
+
+impl Default for McpServerSession {
+    fn default() -> Self {
+        Self {
+            client_identity: "unknown".to_string(),
+            initialized_protocol_version: None,
+        }
+    }
+}
+
+impl McpServerSession {
+    pub fn client_identity(&self) -> &str {
+        &self.client_identity
+    }
+
+    pub fn initialize(
+        &mut self,
+        params: &JsonValue,
+        capabilities: JsonValue,
+        server_info: JsonValue,
+        instructions: Option<&str>,
+    ) -> Result<JsonValue, String> {
+        let outcome = negotiate_initialize(params, capabilities, server_info, instructions)?;
+        self.client_identity = outcome.client_identity;
+        self.initialized_protocol_version = Some(outcome.protocol_version);
+        Ok(outcome.result)
+    }
+
+    /// Validate one request and return the response profile it negotiated.
+    pub fn accept_request(
+        &mut self,
+        id: &JsonValue,
+        method: &str,
+        params: &JsonValue,
+    ) -> Result<McpRequestProfile, JsonValue> {
+        let uses_inline_lifecycle = method == METHOD_SERVER_DISCOVER
+            || (self.initialized_protocol_version.is_none() && params.get("_meta").is_some());
+        if uses_inline_lifecycle {
+            let metadata = parse_request_metadata(params);
+            enforce_request_protocol_version(id, &metadata)?;
+            if let Some(info) = metadata.client_info() {
+                self.client_identity = format!("{}/{}", info.name, info.version);
+            }
+            return Ok(McpRequestProfile {
+                protocol_version: rmcp::model::ProtocolVersion::V_2026_07_28,
+            });
+        }
+
+        if let Some(protocol_version) = &self.initialized_protocol_version {
+            return Ok(McpRequestProfile {
+                protocol_version: protocol_version.clone(),
+            });
+        }
+
+        if method == "ping" {
+            return Ok(McpRequestProfile {
+                protocol_version: rmcp::model::ProtocolVersion::LATEST,
+            });
+        }
+
+        Err(crate::jsonrpc::error_response(
+            id.clone(),
+            -32002,
+            "server not initialized",
+        ))
+    }
 }
 
 /// The official SDK's typed stable per-request metadata map.
@@ -146,7 +309,7 @@ pub fn unsupported_protocol_version_response(
         UNSUPPORTED_PROTOCOL_VERSION_CODE,
         "Unsupported protocol version",
         json!({
-            "supported": supported_protocol_versions(),
+            "supported": request_metadata_protocol_versions(),
             "requested": requested,
         }),
     )
@@ -350,7 +513,7 @@ pub fn server_discover_result(
 ) -> JsonValue {
     let mut result = json!({
         "resultType": RESULT_TYPE_COMPLETE,
-        "supportedVersions": supported_protocol_versions(),
+        "supportedVersions": request_metadata_protocol_versions(),
         "capabilities": capabilities,
         "ttlMs": 0,
         "cacheScope": "private",
@@ -521,10 +684,99 @@ mod tests {
             PROTOCOL_VERSION,
             rmcp::model::ProtocolVersion::V_2026_07_28.as_str()
         );
-        assert_eq!(supported_protocol_versions(), &[PROTOCOL_VERSION]);
+        assert_eq!(
+            sdk_protocol_versions(),
+            rmcp::model::ProtocolVersion::KNOWN_VERSIONS
+                .iter()
+                .map(rmcp::model::ProtocolVersion::as_str)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            request_metadata_protocol_versions(),
+            rmcp::model::ProtocolVersion::KNOWN_VERSIONS
+                .iter()
+                .filter(|version| *version >= &rmcp::model::ProtocolVersion::STANDARD_HEADERS)
+                .map(rmcp::model::ProtocolVersion::as_str)
+                .collect::<Vec<_>>()
+        );
         assert_eq!(UNSUPPORTED_PROTOCOL_VERSION_CODE, -32022);
         assert_eq!(MISSING_REQUIRED_CLIENT_CAPABILITY_CODE, -32021);
         assert_eq!(HEADER_MISMATCH_CODE, -32020);
+    }
+
+    #[test]
+    fn initialize_negotiates_every_sdk_released_version() {
+        for protocol_version in rmcp::model::ProtocolVersion::KNOWN_VERSIONS
+            .iter()
+            .filter(|version| *version < &rmcp::model::ProtocolVersion::STANDARD_HEADERS)
+        {
+            let outcome = negotiate_initialize(
+                &json!({
+                    "protocolVersion": protocol_version.as_str(),
+                    "capabilities": {},
+                    "clientInfo": {"name": "codex-mcp-client", "version": "test"},
+                }),
+                json!({"tools": {}}),
+                json!({"name": "harn", "version": "test"}),
+                Some("test server"),
+            )
+            .expect("SDK-supported initialize version should negotiate");
+            assert_eq!(&outcome.protocol_version, protocol_version);
+            assert_eq!(outcome.client_identity, "codex-mcp-client/test");
+            assert_eq!(
+                outcome.result["protocolVersion"],
+                json!(protocol_version.as_str())
+            );
+            assert_eq!(outcome.result["capabilities"]["tools"], json!({}));
+            assert_eq!(outcome.result["serverInfo"]["name"], json!("harn"));
+            assert_eq!(outcome.result["instructions"], json!("test server"));
+
+            let typed: rmcp::model::InitializeResult = serde_json::from_value(outcome.result)
+                .expect("initialize response must remain SDK-typed");
+            assert_eq!(&typed.protocol_version, protocol_version);
+        }
+
+        let modern_initialize = negotiate_initialize(
+            &json!({
+                "protocolVersion": rmcp::model::ProtocolVersion::STANDARD_HEADERS.as_str(),
+                "capabilities": {},
+                "clientInfo": {"name": "codex-mcp-client", "version": "test"},
+            }),
+            json!({"tools": {}}),
+            json!({"name": "harn", "version": "test"}),
+            None,
+        )
+        .expect("modern initialize request should negotiate a released fallback");
+        assert_eq!(
+            modern_initialize.protocol_version,
+            rmcp::model::ProtocolVersion::LATEST
+        );
+    }
+
+    #[test]
+    fn initialized_session_keeps_its_version_when_request_meta_has_a_progress_token() {
+        let mut session = McpServerSession::default();
+        session
+            .initialize(
+                &json!({
+                    "protocolVersion": "2025-11-25",
+                    "capabilities": {},
+                    "clientInfo": {"name": "codex-mcp-client", "version": "test"},
+                }),
+                json!({"tools": {}}),
+                json!({"name": "harn", "version": "test"}),
+                None,
+            )
+            .expect("initialize should negotiate");
+
+        let profile = session
+            .accept_request(
+                &json!(2),
+                "tools/call",
+                &json!({"_meta": {"progressToken": "codex-proof"}}),
+            )
+            .expect("released request metadata should use the initialized version");
+        assert!(!profile.uses_result_envelope());
     }
 
     #[test]
@@ -665,7 +917,7 @@ mod tests {
         );
         assert_eq!(err["error"]["data"]["requested"], json!("2099-01-01"));
         let supported = err["error"]["data"]["supported"].as_array().unwrap();
-        assert_eq!(supported, &[json!(PROTOCOL_VERSION)]);
+        assert!(supported.contains(&json!(PROTOCOL_VERSION)));
     }
 
     #[test]
@@ -794,7 +1046,7 @@ mod tests {
     }
 
     #[test]
-    fn server_discover_result_advertises_only_stable() {
+    fn server_discover_result_advertises_request_metadata_versions() {
         let discover = server_discover_result(
             json!({"tools": {}}),
             json!({"name": "harn", "version": "x"}),

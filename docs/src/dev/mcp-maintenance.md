@@ -42,16 +42,18 @@ routing, audit events, orchestrator dispatch, and persistence. Keep an adapter
 only when it enforces one of those contracts. Do not fork an SDK type merely to
 rename its fields.
 
-Harn-owned servers implement the current stable version only. Do not add an
-`initialize` fallback, session header, legacy SSE route, or old request shape
-to a server adapter. The SDK-managed stdio client is the compatibility boundary
-for released older servers.
+Both Harn-owned stdio servers accept the protocol versions listed by `rmcp`.
+`McpServerSession` owns version checks and connection state for both servers.
+It parses `initialize` requests and responses with SDK types, and it checks
+2026-07-28 request metadata with the same SDK registry. Do not copy this work
+into either server adapter or a downstream product. Streamable HTTP stays on
+the session-free 2026-07-28 flow.
 
 The owning paths are:
 
 - `crates/harn-vm/src/mcp/sdk.rs` for the SDK client handler;
 - `crates/harn-vm/src/mcp_input.rs` for Harn handler suspension and stable MRTR re-entry;
-- `crates/harn-vm/src/mcp_protocol.rs` for Harn policy projected from SDK types;
+- `crates/harn-vm/src/mcp_protocol.rs` for shared server sessions and Harn policy projected from SDK types;
 - `crates/harn-vm/src/mcp/transport.rs` for Harn-specific HTTP policy;
 - `crates/harn-serve/src/adapters/mcp.rs` for the generic server;
 - `crates/harn-cli/src/commands/mcp/serve/` for the orchestrator server;

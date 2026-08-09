@@ -570,7 +570,7 @@ pub fn compile_trusted_host_dispatch_module_artifact_from_source(
 /// projection. Suite prewarming uses this entry point so it can share the
 /// module graph walk without weakening provenance or rebuilding the graph in
 /// every fresh VM.
-pub(crate) fn compile_trusted_host_dispatch_module_artifact_from_source_with_imported_enums(
+pub fn compile_trusted_host_dispatch_module_artifact_from_source_with_imported_enums(
     source_path: &Path,
     source: &str,
     imported_enum_candidates: impl IntoIterator<Item = String>,

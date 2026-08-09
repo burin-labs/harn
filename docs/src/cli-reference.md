@@ -1091,7 +1091,8 @@ source stays unprivileged. The flag mirrors
 [`harn check --trusted-host-dispatch`](#harn-check) and, like it, monotonically
 enables `[check] trusted_host_dispatch`. Declaring the key in `harn.toml` is
 usually better than passing the flag at every call site, because it governs
-checking, linting, tests, direct execution, and ACP execution together:
+checking, linting, tests, precompilation, direct execution, and file-backed
+MCP, A2A, site, and ACP execution together:
 
 ```toml
 [check]

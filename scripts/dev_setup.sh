@@ -346,6 +346,15 @@ run_setup_step() {
   touch "${stamp}"
 }
 
+install_locked_node_dependencies() {
+  local directory="$1"
+
+  (
+    cd "${directory}"
+    npm ci --no-audit --fund=false
+  )
+}
+
 echo "=== Harn dev setup ==="
 
 if ! command -v cargo >/dev/null 2>&1; then
@@ -476,7 +485,7 @@ if [[ "${SETUP_PROFILE}" == "full" && -f package.json ]] \
     "Installing repo-local Node tooling" \
     "${SETUP_STATE_DIR}/root-node-${root_node_fp}.stamp" \
     node_modules \
-    -- npm install --no-audit --fund=false
+    -- install_locked_node_dependencies .
 
   if [[ -f crates/harn-cli/portal/package.json ]]; then
     portal_deps_fp="$(hash_setup_inputs portal-deps scripts/ensure_portal_deps.sh crates/harn-cli/portal/package.json crates/harn-cli/portal/package-lock.json)"
@@ -493,7 +502,7 @@ if [[ "${SETUP_PROFILE}" == "full" && -f package.json ]] \
       "Installing tree-sitter-harn dependencies" \
       "${SETUP_STATE_DIR}/tree-sitter-node-${tree_sitter_fp}.stamp" \
       tree-sitter-harn/node_modules \
-      -- bash -c 'cd tree-sitter-harn && npm install --no-audit --fund=false'
+      -- install_locked_node_dependencies tree-sitter-harn
   fi
 
   if [[ -f editors/vscode/package.json ]]; then
@@ -502,7 +511,7 @@ if [[ "${SETUP_PROFILE}" == "full" && -f package.json ]] \
       "Installing VS Code extension dependencies" \
       "${SETUP_STATE_DIR}/vscode-node-${vscode_fp}.stamp" \
       editors/vscode/node_modules \
-      -- bash -c 'cd editors/vscode && npm install --no-audit --fund=false'
+      -- install_locked_node_dependencies editors/vscode
   fi
 
   if [[ -f crates/harn-cli/portal/package.json ]]; then
@@ -520,7 +529,7 @@ if [[ "${SETUP_PROFILE}" == "full" && -f package.json ]] \
       "Installing harnlang.com site dependencies" \
       "${SETUP_STATE_DIR}/website-node-${website_fp}.stamp" \
       website/node_modules \
-      -- bash -c 'cd website && npm install --no-audit --fund=false'
+      -- install_locked_node_dependencies website
   fi
 elif [[ "${SETUP_PROFILE}" == "full" ]]; then
   echo "warning: npm not found; skipping markdown, portal, tree-sitter, VS Code extension, and docs-site dependencies"

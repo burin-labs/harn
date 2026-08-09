@@ -1,9 +1,6 @@
 use serde_json::{json, Value as JsonValue};
 
-use harn_vm::mcp_protocol::{
-    self, apply_result_envelope, enforce_request_protocol_version, parse_request_metadata,
-    server_discover_result, McpCacheHint,
-};
+use harn_vm::mcp_protocol::{self, apply_result_envelope, server_discover_result, McpCacheHint};
 
 use super::types::{ConnectionState, McpOrchestratorService};
 impl McpOrchestratorService {
@@ -19,20 +16,29 @@ impl McpOrchestratorService {
             .unwrap_or_default();
         let params = request.get("params").cloned().unwrap_or_else(|| json!({}));
 
-        let metadata = parse_request_metadata(&params);
-        if let Err(response) = enforce_request_protocol_version(&id, &metadata) {
-            return response;
+        if method == "initialize" {
+            return match session.mcp.initialize(
+                &params,
+                orchestrator_capabilities(),
+                orchestrator_server_info(),
+                Some("Expose Harn trigger and orchestrator controls over MCP."),
+            ) {
+                Ok(result) => {
+                    session.authenticated = true;
+                    harn_vm::jsonrpc::response(id, result)
+                }
+                Err(error) => harn_vm::jsonrpc::error_response(id, -32602, &error),
+            };
         }
-        if let Some(name) = params
-            .pointer("/_meta/io.modelcontextprotocol~1clientInfo/name")
-            .and_then(JsonValue::as_str)
-        {
-            let version = params
-                .pointer("/_meta/io.modelcontextprotocol~1clientInfo/version")
-                .and_then(JsonValue::as_str)
-                .unwrap_or("unknown");
-            session.client_identity = format!("{name}/{version}");
+
+        if request.get("id").is_none() && method == "notifications/initialized" {
+            return JsonValue::Null;
         }
+
+        let request_profile = match session.mcp.accept_request(&id, method, &params) {
+            Ok(profile) => profile,
+            Err(response) => return response,
+        };
 
         if method == mcp_protocol::METHOD_SERVER_DISCOVER {
             session.authenticated = true;
@@ -74,7 +80,11 @@ impl McpOrchestratorService {
                 harn_vm::jsonrpc::error_response(id, -32601, &format!("Method not found: {method}"))
             }
         };
-        apply_envelope(response, cache_hint_for_method(method))
+        if request_profile.uses_result_envelope() {
+            apply_envelope(response, cache_hint_for_method(method))
+        } else {
+            response
+        }
     }
 
     pub(super) fn handle_server_discover(&self, id: JsonValue) -> JsonValue {

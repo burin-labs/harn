@@ -26,6 +26,7 @@ use harn_vm::module_artifact::ModuleArtifact;
 use crate::cli::PrecompileArgs;
 use crate::command_error;
 use crate::commands::collect_harn_files;
+use crate::compiler_context::SourceCompilerAuthority;
 use crate::dispatch;
 use crate::env_guard::ScopedEnvVar;
 use crate::parse_source_file;
@@ -169,7 +170,8 @@ fn precompile_one(
 
     // Resolve imports like `execute`/`harn check` so a call to an imported
     // symbol that shadows a builtin is checked against the right signature.
-    let checker = checker_with_resolved_imports(harn_parser::TypeChecker::new(), source_path);
+    let authority = SourceCompilerAuthority::for_source(source_path);
+    let checker = checker_with_resolved_imports(authority.typechecker(), source_path);
 
     let mut had_type_error = false;
     let mut messages = String::new();
@@ -187,7 +189,7 @@ fn precompile_one(
         eprint!("{messages}");
     }
 
-    let artifacts = compile_artifacts(source_path, &source, &program)?;
+    let artifacts = compile_artifacts(source_path, &source, &program, authority)?;
     let entry_key = harn_vm::bytecode_cache::CacheKey::from_source(source_path, &source);
 
     let entry_dest = output_path(source_path, source_root, out_root, CACHE_EXTENSION)?;
@@ -215,18 +217,15 @@ fn compile_artifacts(
     source_path: &Path,
     source: &str,
     program: &[harn_parser::SNode],
+    authority: SourceCompilerAuthority,
 ) -> Result<PrecompileArtifacts, String> {
     let imported_enum_candidates = crate::imported_enum_candidates_for_source(source_path, source);
-    let entry_chunk =
-        crate::compiler_with_imported_enum_candidates(imported_enum_candidates.iter().cloned())
-            .compile(program)
-            .map_err(|e| format!("compile error: {e}"))?;
-    let module_artifact =
-        harn_vm::module_artifact::compile_module_artifact_from_source_with_imported_enums(
-            source_path,
-            source,
-            imported_enum_candidates,
-        )
+    let entry_chunk = authority
+        .compiler_with_imported_enums(imported_enum_candidates.iter().cloned())
+        .compile(program)
+        .map_err(|e| format!("compile error: {e}"))?;
+    let module_artifact = authority
+        .compile_module_with_imported_enums(source_path, source, imported_enum_candidates)
         .map_err(|e| format!("module compile error: {e}"))
         .ok();
     Ok(PrecompileArtifacts {

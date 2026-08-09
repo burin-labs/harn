@@ -1041,7 +1041,7 @@ async fn server_discover_returns_stable_capabilities() {
     let supported = response["result"]["supportedVersions"]
         .as_array()
         .expect("supportedVersions array");
-    assert_eq!(supported.as_slice(), [json!(MCP_PROTOCOL_VERSION)]);
+    assert_eq!(supported, &[json!(MCP_PROTOCOL_VERSION)]);
     assert_eq!(response["result"]["capabilities"]["tools"], json!({}));
     assert_eq!(response["result"]["capabilities"]["resources"], json!({}));
     assert_eq!(response["result"]["capabilities"]["prompts"], json!({}));
@@ -1090,6 +1090,62 @@ async fn stable_tools_list_requires_only_request_metadata() {
         .iter()
         .any(|tool| tool["name"] == json!("harn.trigger.list")));
     assert!(session.authenticated);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn released_initialize_lifecycle_lists_tools_without_request_metadata() {
+    let _guard = lock_harn_state_async().await;
+    let temp = TempDir::new().unwrap();
+    write_fixture(&temp);
+    let args = fixture_args(&temp);
+    let service = McpOrchestratorService::new_local(args.local.clone()).unwrap();
+    let mut session = ConnectionState::default();
+
+    let initialized = service
+        .handle_request(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-11-25",
+                    "capabilities": {},
+                    "clientInfo": {"name": "codex-mcp-client", "version": "test"}
+                }
+            }),
+        )
+        .await;
+    assert_eq!(
+        initialized["result"]["protocolVersion"],
+        json!("2025-11-25")
+    );
+    assert_eq!(session.mcp.client_identity(), "codex-mcp-client/test");
+
+    let notification = service
+        .handle_request(
+            &mut session,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized"
+            }),
+        )
+        .await;
+    assert!(notification.is_null());
+
+    let tools = service
+        .handle_request(
+            &mut session,
+            json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}),
+        )
+        .await;
+    assert!(tools["result"]["tools"]
+        .as_array()
+        .expect("tools array")
+        .iter()
+        .any(|tool| tool["name"] == json!("harn.trigger.list")));
+    assert!(tools["result"].get("resultType").is_none());
+    assert!(tools["result"].get("ttlMs").is_none());
 }
 
 #[tokio::test(flavor = "current_thread")]

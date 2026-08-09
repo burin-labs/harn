@@ -38,8 +38,8 @@ use axum::{Json, Router};
 use futures::channel::mpsc::{unbounded, UnboundedReceiver};
 use futures::{stream, StreamExt};
 use harn_vm::mcp_protocol::{
-    self, apply_result_envelope, enforce_request_protocol_version, negotiate_http_request,
-    parse_request_metadata, server_discover_result, standard_name_header_value, McpCacheHint,
+    self, apply_result_envelope, negotiate_http_request, server_discover_result,
+    standard_name_header_value, McpCacheHint,
 };
 use serde_json::{json, Value as JsonValue};
 use tokio::sync::mpsc;
@@ -105,19 +105,6 @@ pub struct McpServer {
     executor: DispatchRuntime,
 }
 
-#[derive(Clone, Debug)]
-struct ConnectionState {
-    client_identity: String,
-}
-
-impl Default for ConnectionState {
-    fn default() -> Self {
-        Self {
-            client_identity: "unknown".to_string(),
-        }
-    }
-}
-
 #[derive(Clone)]
 struct ActiveCall {
     cancel_token: Arc<AtomicBool>,
@@ -126,7 +113,7 @@ struct ActiveCall {
 
 #[derive(Default)]
 struct SessionState {
-    connection: ConnectionState,
+    connection: mcp_protocol::McpServerSession,
     active_calls: HashMap<String, ActiveCall>,
 }
 
@@ -142,7 +129,7 @@ impl SharedSession {
         }
     }
 
-    fn connection(&self) -> ConnectionState {
+    fn connection(&self) -> mcp_protocol::McpServerSession {
         self.inner
             .lock()
             .expect("session poisoned")
@@ -150,8 +137,8 @@ impl SharedSession {
             .clone()
     }
 
-    fn update_connection(&self, connection: ConnectionState) {
-        self.inner.lock().expect("session poisoned").connection = connection;
+    fn with_connection<T>(&self, f: impl FnOnce(&mut mcp_protocol::McpServerSession) -> T) -> T {
+        f(&mut self.inner.lock().expect("session poisoned").connection)
     }
 
     fn insert_call(&self, request_id: String, active: ActiveCall) {
@@ -190,7 +177,7 @@ struct HttpState {
 #[derive(Clone)]
 struct RequestContext {
     session: SharedSession,
-    connection: ConnectionState,
+    connection: mcp_protocol::McpServerSession,
     auth: AuthRequest,
 }
 
@@ -206,6 +193,7 @@ struct StreamJob {
     tool_name: String,
     arguments: JsonValue,
     progress_token: Option<JsonValue>,
+    request_profile: mcp_protocol::McpRequestProfile,
     context: RequestContext,
 }
 
@@ -350,6 +338,23 @@ impl McpServer {
             .unwrap_or_default();
         let params = request.get("params").cloned().unwrap_or_else(|| json!({}));
 
+        if method == "initialize" {
+            let result = session.with_connection(|connection| {
+                connection.initialize(
+                    &params,
+                    JsonValue::Object(self.server_capabilities()),
+                    self.server_info(),
+                    None,
+                )
+            });
+            return match result {
+                Ok(result) => ImmediateResult::Response(harn_vm::jsonrpc::response(id, result)),
+                Err(error) => {
+                    ImmediateResult::Response(harn_vm::jsonrpc::error_response(id, -32602, &error))
+                }
+            };
+        }
+
         if request.get("id").is_none() {
             if method == "notifications/cancelled" {
                 self.handle_cancel_notification(&session, &params);
@@ -357,22 +362,12 @@ impl McpServer {
             return ImmediateResult::Accepted;
         }
 
-        let metadata = parse_request_metadata(&params);
-        if let Err(response) = enforce_request_protocol_version(&id, &metadata) {
-            return ImmediateResult::Response(response);
-        }
-        if let Some(name) = params
-            .pointer("/_meta/io.modelcontextprotocol~1clientInfo/name")
-            .and_then(JsonValue::as_str)
+        let request_profile = match session
+            .with_connection(|connection| connection.accept_request(&id, method, &params))
         {
-            let version = params
-                .pointer("/_meta/io.modelcontextprotocol~1clientInfo/version")
-                .and_then(JsonValue::as_str)
-                .unwrap_or("unknown");
-            session.update_connection(ConnectionState {
-                client_identity: format!("{name}/{version}"),
-            });
-        }
+            Ok(profile) => profile,
+            Err(response) => return ImmediateResult::Response(response),
+        };
 
         if method == mcp_protocol::METHOD_SERVER_DISCOVER {
             return ImmediateResult::Response(self.handle_server_discover(id));
@@ -395,7 +390,14 @@ impl McpServer {
         let response = match method {
             "ping" => harn_vm::jsonrpc::response(id, json!({})),
             "tools/list" => harn_vm::jsonrpc::response(id, self.tools_list_result(&params)),
-            "tools/call" => match self.prepare_stream_job(id, params, session, connection, auth) {
+            "tools/call" => match self.prepare_stream_job(
+                id,
+                params,
+                request_profile,
+                session,
+                connection,
+                auth,
+            ) {
                 Ok(job) => return ImmediateResult::Stream(Box::new(job)),
                 Err(response) => return ImmediateResult::Response(response),
             },
@@ -413,7 +415,11 @@ impl McpServer {
                 harn_vm::jsonrpc::error_response(id, -32601, &format!("Method not found: {method}"))
             }
         };
-        ImmediateResult::Response(envelope(response, cache_hint_for_method(method)))
+        if request_profile.uses_result_envelope() {
+            ImmediateResult::Response(envelope(response, cache_hint_for_method(method)))
+        } else {
+            ImmediateResult::Response(response)
+        }
     }
 
     fn handle_server_discover(&self, id: JsonValue) -> JsonValue {
@@ -503,8 +509,9 @@ impl McpServer {
         &self,
         request_id: JsonValue,
         params: JsonValue,
+        request_profile: mcp_protocol::McpRequestProfile,
         session: SharedSession,
-        connection: ConnectionState,
+        connection: mcp_protocol::McpServerSession,
         auth: AuthRequest,
     ) -> Result<StreamJob, JsonValue> {
         let tool_name = params
@@ -534,6 +541,7 @@ impl McpServer {
             tool_name,
             arguments,
             progress_token,
+            request_profile,
             context: RequestContext {
                 session,
                 connection,
@@ -564,7 +572,7 @@ impl McpServer {
 
         let request = match build_call_request(
             &self.descriptor.id,
-            &job.context.connection.client_identity,
+            job.context.connection.client_identity(),
             &job.tool_name,
             job.arguments,
             job.context.auth,
@@ -591,10 +599,7 @@ impl McpServer {
         }
 
         let response = match result {
-            Ok(response) => envelope(
-                harn_vm::jsonrpc::response(job.request_id, tool_call_success(response)),
-                None,
-            ),
+            Ok(response) => harn_vm::jsonrpc::response(job.request_id, tool_call_success(response)),
             Err(DispatchError::Validation(message)) => {
                 harn_vm::jsonrpc::error_response(job.request_id, -32602, &message)
             }
@@ -617,15 +622,18 @@ impl McpServer {
             Err(DispatchError::Execution(message))
             | Err(DispatchError::Cancelled(message))
             | Err(DispatchError::Io(message))
-            | Err(DispatchError::Cache(message)) => envelope(
-                harn_vm::jsonrpc::response(job.request_id, tool_call_error(message)),
-                None,
-            ),
+            | Err(DispatchError::Cache(message)) => {
+                harn_vm::jsonrpc::response(job.request_id, tool_call_error(message))
+            }
             Err(error @ DispatchError::RateLimited { .. })
-            | Err(error @ DispatchError::BudgetExceeded { .. }) => envelope(
-                harn_vm::jsonrpc::response(job.request_id, tool_call_error(error.message())),
-                None,
-            ),
+            | Err(error @ DispatchError::BudgetExceeded { .. }) => {
+                harn_vm::jsonrpc::response(job.request_id, tool_call_error(error.message()))
+            }
+        };
+        let response = if job.request_profile.uses_result_envelope() {
+            envelope(response, None)
+        } else {
+            response
         };
         notify(response);
     }

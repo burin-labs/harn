@@ -110,7 +110,7 @@ async fn stable_tools_call_returns_stable_envelope() {
 }
 
 #[tokio::test]
-async fn server_discover_returns_only_stable_version() {
+async fn server_discover_returns_request_metadata_versions() {
     let server = generic_server_harness::spawn().await;
     let body = json!({
         "jsonrpc": "2.0",
@@ -124,7 +124,10 @@ async fn server_discover_returns_only_stable_version() {
     assert_eq!(response.status, 200);
     let result = &response.body["result"];
     assert_eq!(result["resultType"], json!("complete"));
-    assert_eq!(result["supportedVersions"], json!(["2026-07-28"]));
+    let supported = result["supportedVersions"]
+        .as_array()
+        .expect("supported versions array");
+    assert_eq!(supported, &[json!("2026-07-28")]);
 }
 
 #[tokio::test]

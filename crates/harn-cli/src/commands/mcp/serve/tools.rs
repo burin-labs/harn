@@ -277,7 +277,7 @@ impl McpOrchestratorService {
         .await;
 
         let _ = self
-            .record_tool_call(name, &trace_id, &session.client_identity, &result)
+            .record_tool_call(name, &trace_id, session.mcp.client_identity(), &result)
             .await;
         match result {
             Ok(value) => harn_vm::jsonrpc::response(
@@ -337,7 +337,7 @@ impl McpOrchestratorService {
         let now = now_rfc3339();
         let task = McpTaskState {
             task_id: task_id.clone(),
-            owner: session.client_identity.clone(),
+            owner: session.mcp.client_identity().to_string(),
             status: mcp_protocol::McpTaskStatus::Working,
             status_message: Some("The operation is now in progress.".to_string()),
             created_at: now.clone(),
@@ -398,7 +398,7 @@ impl McpOrchestratorService {
             .execute_tool_call(&name, &session, &trace_id, arguments)
             .await;
         let _ = self
-            .record_tool_call(&name, &trace_id, &session.client_identity, &result)
+            .record_tool_call(&name, &trace_id, session.mcp.client_identity(), &result)
             .await;
         self.complete_task(&task_id, result);
     }
@@ -495,7 +495,7 @@ impl McpOrchestratorService {
                     "Cannot cancel task: task not found",
                 );
             };
-            if record.task.owner != session.client_identity {
+            if record.task.owner != session.mcp.client_identity() {
                 return harn_vm::jsonrpc::error_response(
                     id,
                     -32602,
@@ -541,7 +541,7 @@ impl McpOrchestratorService {
         let record = tasks
             .get(task_id)
             .ok_or_else(|| "Failed to retrieve task: task not found".to_string())?;
-        if record.task.owner != session.client_identity {
+        if record.task.owner != session.mcp.client_identity() {
             return Err("Failed to retrieve task: task not found".to_string());
         }
         Ok(record.clone())
@@ -576,7 +576,7 @@ impl McpOrchestratorService {
         report_milestone(0.3, "preparing event");
         let mut event = synthetic_event_for_binding(&ctx, &request.trigger_id)?;
         merge_json_object(&mut event, request.payload);
-        inject_trace_headers(&mut event, &session.client_identity, trace_id);
+        inject_trace_headers(&mut event, session.mcp.client_identity(), trace_id);
         report_milestone(0.5, "firing trigger");
         let handle = trigger_fire(&mut ctx, &request.trigger_id, event).await?;
         report_milestone(0.95, "trigger complete");

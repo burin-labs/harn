@@ -40,11 +40,52 @@ fn enter_policy(workspace: &Path) -> PolicyGuard {
 }
 
 fn find_program(name: &str) -> Option<PathBuf> {
-    std::env::var_os("PATH").and_then(|path| {
-        std::env::split_paths(&path)
-            .map(|dir| dir.join(name))
-            .find(|candidate| candidate.is_file())
-    })
+    std::env::var_os("PATH").and_then(|path| find_program_in_path(name, &path))
+}
+
+fn find_program_in_path(name: &str, path: &std::ffi::OsStr) -> Option<PathBuf> {
+    std::env::split_paths(path)
+        .map(|dir| dir.join(name))
+        .find(|candidate| is_executable_file(candidate))
+}
+
+fn is_executable_file(candidate: &Path) -> bool {
+    let Ok(metadata) = candidate.metadata() else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn program_lookup_skips_non_executable_path_entries() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = tempfile::tempdir().unwrap();
+    let inert_dir = root.path().join("inert");
+    let executable_dir = root.path().join("executable");
+    std::fs::create_dir_all(&inert_dir).unwrap();
+    std::fs::create_dir_all(&executable_dir).unwrap();
+    let inert = inert_dir.join("env");
+    let executable = executable_dir.join("env");
+    std::fs::write(&inert, "not executable").unwrap();
+    std::fs::write(&executable, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let path = std::env::join_paths([inert_dir, executable_dir]).unwrap();
+
+    assert_eq!(find_program_in_path("env", &path), Some(executable));
 }
 
 fn run(program: &Path, args: &[&str], workspace: &Path) -> std::process::Output {

@@ -56,10 +56,10 @@ pub(crate) fn resolve_connect_protocol_options(
     let protocol_version = protocol_version_value
         .unwrap_or(PROTOCOL_VERSION)
         .to_string();
-    if !crate::mcp_protocol::is_supported_protocol_version(&protocol_version) {
+    if !crate::mcp_protocol::is_sdk_protocol_version(&protocol_version) {
         return Err(VmError::Runtime(format!(
             "mcp_connect: unsupported protocol_version {protocol_version:?}; expected one of {}",
-            crate::mcp_protocol::supported_protocol_versions().join(", ")
+            crate::mcp_protocol::sdk_protocol_versions().join(", ")
         )));
     }
     Ok(McpConnectOptions { protocol_version })

@@ -46,6 +46,46 @@ fn deterministic_scan_classifies_high_risk_commands() {
 }
 
 #[test]
+fn deterministic_scan_projects_quote_aware_shell_command_groups() {
+    let scan = command_risk_scan_json(
+        &shell_ctx(
+            "ps -axo command | rg 'rustc .*harn_vm|cargo build --locked' | head -n 20; git status --short",
+        ),
+        None,
+    );
+
+    assert_eq!(
+        scan["shell_command_groups"],
+        serde_json::json!([
+            [
+                {
+                    "text": "ps -axo command",
+                    "argv": ["ps", "-axo", "command"],
+                    "writes_to_file": false,
+                },
+                {
+                    "text": "rg 'rustc .*harn_vm|cargo build --locked'",
+                    "argv": ["rg", "rustc .*harn_vm|cargo build --locked"],
+                    "writes_to_file": false,
+                },
+                {
+                    "text": "head -n 20",
+                    "argv": ["head", "-n", "20"],
+                    "writes_to_file": false,
+                },
+            ],
+            [
+                {
+                    "text": "git status --short",
+                    "argv": ["git", "status", "--short"],
+                    "writes_to_file": false,
+                },
+            ],
+        ])
+    );
+}
+
+#[test]
 fn deterministic_scan_detects_outside_workspace_paths() {
     let scan = command_risk_scan_json(&ctx(&["cat", "/etc/passwd"]), None);
     assert!(labels(&scan).contains(&"outside_workspace".to_string()));
