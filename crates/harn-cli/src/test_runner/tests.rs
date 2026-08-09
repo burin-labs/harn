@@ -2,6 +2,8 @@ use super::*;
 
 use std::sync::Arc;
 
+use harn_vm::VmValue;
+
 mod compile_once_tests;
 
 struct TempTestDir {

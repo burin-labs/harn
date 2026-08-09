@@ -33,8 +33,11 @@ impl Default for TestRunSession {
 }
 
 /// Aggregate prepared-module cache counters for a [`TestRunSession`].
+///
+/// This shape is intentionally exhaustive: it is embedded in the versioned
+/// test-worker receipt, so adding a counter must update that protocol and its
+/// schema regression instead of silently extending an internal snapshot.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
-#[non_exhaustive]
 pub struct TestRunSessionStats {
     pub workers: usize,
     pub hits: u64,
