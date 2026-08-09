@@ -270,6 +270,9 @@ fn install_openai_stub_provider(provider: &str, addr: std::net::SocketAddr) {
     crate::llm_config::set_user_overrides(Some(overlay));
 }
 
+#[path = "transport_managed_supply_tests.rs"]
+mod managed_supply_tests;
+
 #[test]
 fn capability_admission_rejects_before_transport_egress() {
     let _guard = env_guard();

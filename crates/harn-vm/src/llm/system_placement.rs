@@ -363,7 +363,7 @@ pub(crate) fn normalize_conversation(
 /// matrix and normalize the conversation in place. Called from
 /// `From<&LlmCallOptions> for LlmRequestPayload`.
 pub(crate) fn normalize_payload_system_messages(payload: &mut crate::llm::api::LlmRequestPayload) {
-    let caps = crate::llm::capabilities::lookup(&payload.provider, &payload.model);
+    let caps = crate::llm::managed_supply::capabilities_for(&payload.provider, &payload.model);
     let placement = resolve_system_message_placement(&caps);
     normalize_conversation(&mut payload.messages, &mut payload.system, placement);
 }

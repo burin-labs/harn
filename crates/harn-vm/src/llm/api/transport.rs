@@ -132,9 +132,12 @@ async fn vm_call_llm_api_inner(
     // the real transport, so it is exempt (`mock` already resolves to the
     // anthropic dialect for Claude ids and so never trips the guard).
     if !crate::llm::fake::FakeLlmProvider::should_intercept(provider) {
-        crate::llm::route::Route::resolve(provider, &opts.model, &opts.thinking).map_err(
-            |err| VmError::Thrown(VmValue::String(arcstr::ArcStr::from(err.into_message()))),
-        )?;
+        let (capability_provider, capability_model) =
+            crate::llm::managed_supply::logical_route(provider, &opts.model)?;
+        crate::llm::route::Route::resolve(&capability_provider, &capability_model, &opts.thinking)
+            .map_err(|err| {
+                VmError::Thrown(VmValue::String(arcstr::ArcStr::from(err.into_message())))
+            })?;
     }
 
     // Route explicit Responses requests through providers that advertise the
@@ -266,6 +269,7 @@ pub(crate) async fn vm_call_llm_api_with_body(
 ) -> Result<LlmResult, VmError> {
     let started = Instant::now();
     let mut result = vm_call_llm_api_with_body_inner(opts, delta_tx, body, dialect).await?;
+    crate::llm::managed_supply::apply_terminal_receipt(&mut result, &opts.provider, &opts.model)?;
     // Reserved-token tool-call delimiter remap (single boundary).
     //
     // For models that reserve `<tool_call>`/`</tool_call>` as special tokens
@@ -286,7 +290,9 @@ pub(crate) async fn vm_call_llm_api_with_body(
     // (convergence-fatal). The streamed live deltas are canonicalized
     // separately by `canonicalizing_delta_tx`; this remaps the assembled
     // `result.text` that the parser/transcript consume.
-    if crate::llm::capabilities::lookup(&opts.provider, &opts.model).reserved_tool_call_token {
+    if crate::llm::managed_supply::capabilities_for(&opts.provider, &opts.model)
+        .reserved_tool_call_token
+    {
         let wire_open = result.text.matches("[[CALL]]").count();
         result.text = crate::llm::tool_delimiter::wire_to_canonical(&result.text);
         let canon_open = result.text.matches("<tool_call>").count();
@@ -321,6 +327,7 @@ async fn vm_call_llm_api_with_body_inner(
     let stream_protocol = dialect.stream_protocol();
     let provider = &opts.provider;
     let model = &opts.model;
+    crate::llm::managed_supply::attach_request_extension(&mut body, provider, model)?;
     let raw_capture_context = crate::llm::agent_observe::current_raw_provider_capture_context();
     let wants_streaming = delta_tx.is_some() && opts.stream;
     // Whether this request offered any tools to the model. Used by the
@@ -333,7 +340,7 @@ async fn vm_call_llm_api_with_body_inner(
         .unwrap_or(false);
 
     let resolved = crate::llm::helpers::ResolvedProvider::resolve(provider);
-    let caps = crate::llm::capabilities::lookup(provider, model);
+    let caps = crate::llm::managed_supply::capabilities_for(provider, model);
     let use_stream_transport = if stream_protocol == StreamProtocol::OllamaNdjson && !opts.stream {
         crate::events::log_warn(
             "llm",
