@@ -120,7 +120,10 @@ fn release_binary_workflow() {
                 "steps.release-build-inputs.outputs.release_build_inputs || 'false'",
               ),
             },
-            run: "if [[ \"$RELEASE_BUILD_INPUTS_CHANGED\" == \"true\" ]]; then\n  :\nfi",
+            run: "if [[ \"$RELEASE_BUILD_INPUTS_CHANGED\" == \"true\" ]]; then\n  :\nfi\n"
+              + "select(\n"
+              + "  (.event == \"push\" and ((.headBranch // \"\") | test(\"^v[0-9]+\\\\.[0-9]+\\\\.[0-9]+(-[0-9A-Za-z.-]+)?$\")))\n"
+              + ")",
           },
         ],
       },
@@ -544,6 +547,33 @@ pipeline test_release_warm_cache_concurrency_rejects_setup_only_preemption(harne
       "build-release-binaries.yml:build must instantiate only after setup selects a real build",
       "build-release-binaries.yml:build must share one warm lane per target and qualify every other run",
       "build-release-binaries.yml:build must let only real main-branch warms supersede a target warm",
+    ],
+  )
+}
+
+pipeline test_release_warm_cache_concurrency_rejects_dispatch_as_release(harness: Harness, task) {
+  const workflow = release_binary_workflow()
+  const resolve = setup_step_by_id(workflow, "resolve")
+  const invalid = {
+    ...workflow,
+    jobs: {
+      ...workflow.jobs,
+      setup: {
+        ...workflow.jobs.setup,
+        steps: workflow.jobs.setup.steps.map({ step ->
+          if step?.id == "resolve" {
+            {...resolve, run: resolve.run + "\nselect((.event == \"workflow_dispatch\"))"}
+          } else {
+            step
+          }
+        }),
+      },
+    },
+  }
+  assert_eq(
+    release_warm_cache_concurrency_errors(invalid),
+    [
+      "build-release-binaries.yml:setup must not misclassify benchmark or warm dispatches as releases",
     ],
   )
 }

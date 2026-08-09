@@ -130,6 +130,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
+  # Emergency cost/capacity rollback. Repository owners can set this Actions
+  # variable to true without changing release source or waiting for a PR.
+  HARN_RELEASE_FORCE_STANDARD_MACOS: ${{ vars.HARN_RELEASE_FORCE_STANDARD_MACOS || 'false' }}
 
 jobs:
   setup:
@@ -230,9 +233,17 @@ jobs:
           RUNNER_PROFILE="${INPUT_RUNNER_PROFILE:-policy}"
           FULL_BUILD_MATRIX='[]'
 
-          active_release_binary_runs() {
+          active_tag_release_runs() {
             local status
             for status in queued in_progress; do
+              # A generic workflow_dispatch may be a benchmark or another
+              # warm. Treating every dispatch as a release starves the cache:
+              # a replacement warm cancels the useful old warm at concurrency
+              # admission, then observes the benchmark and skips its own
+              # matrix. Tag pushes are the authoritative shipping path and are
+              # unambiguous from run-list metadata. Manual recovery is
+              # restore-only, so overlapping its rare targeted build with a
+              # default-branch cache save is safe.
               gh run list \
                 --repo "$GITHUB_REPOSITORY" \
                 --workflow build-release-binaries.yml \
@@ -242,7 +253,6 @@ jobs:
                 --jq '.[] |
                   select((.databaseId | tostring) != env.GITHUB_RUN_ID) |
                   select(
-                    (.event == "workflow_dispatch") or
                     (.event == "push" and ((.headBranch // "") | test("^v[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$")))
                   ) |
                   "\(.databaseId)\t\(.event)\t\(.headBranch // "<unknown>")\t\(.url)"'
@@ -317,25 +327,25 @@ jobs:
             (( ${#MISSING_PUBLIC_CONTAINER_TAGS[@]} > 0 ))
           }
 
-          skip_warm_cache_if_release_active() {
+          skip_warm_cache_if_tag_release_active() {
             local active_runs
-            active_runs="$(active_release_binary_runs || true)"
+            active_runs="$(active_tag_release_runs || true)"
             if [[ -z "$active_runs" ]]; then
               return 1
             fi
 
-            echo "::notice::Skipping warm-cache binary matrix because release binary workflow run(s) are already queued/in progress."
+            echo "::notice::Skipping warm-cache binary matrix because tag-release binary run(s) are already queued/in progress."
             {
               echo "### Warm-cache overlap guard"
               echo
-              echo "Skipped this warm-cache binary matrix because release-mode build-release-binaries run(s) are already active."
+              echo "Skipped this warm-cache binary matrix because tag-release build-release-binaries run(s) are already active."
               echo
               echo "| Run | Event | Ref | URL |"
               echo "| --- | --- | --- | --- |"
             } >> "$GITHUB_STEP_SUMMARY"
             while IFS=$'\t' read -r run_id event head url; do
               [[ -n "$run_id" ]] || continue
-              echo "::notice::  active release binary run $run_id ($event $head): $url"
+              echo "::notice::  active tag-release binary run $run_id ($event $head): $url"
               echo "| $run_id | $event | $head | $url |" >> "$GITHUB_STEP_SUMMARY"
             done <<<"$active_runs"
             echo "::notice::A later push/scheduled warm can refresh the default-branch cache after the release lane clears."
@@ -422,7 +432,7 @@ jobs:
             RUNNER_PROFILE=policy
             FULL_BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" "$RUNNER_PROFILE")"
             VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
-            if skip_warm_cache_if_release_active; then
+            if skip_warm_cache_if_tag_release_active; then
               echo "::notice::Warm-cache-only workflow_dispatch suppressed while release binaries are already building."
             else
               SHOULD_BUILD_BINARIES=true
@@ -465,7 +475,7 @@ jobs:
             RUNNER_PROFILE=policy
             FULL_BUILD_MATRIX="$(resolve_runner_matrix "$BUILD_MODE" "$RUNNER_PROFILE")"
             VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
-            if skip_warm_cache_if_release_active; then
+            if skip_warm_cache_if_tag_release_active; then
               echo "::notice::Warm-cache-only run (schedule) suppressed while release binaries are already building."
             else
               SHOULD_BUILD_BINARIES=true
@@ -480,7 +490,7 @@ jobs:
             COMMIT_SUBJECT="$(git log -1 --pretty=%s)"
             if [[ "$COMMIT_SUBJECT" =~ ^Release[[:space:]]v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
               echo "::notice::Push to main is a release merge commit ('$COMMIT_SUBJECT'). The tag release builds the same source state, and an overlapping warm-cache run cannot help that active release. Skipping build matrix; the daily schedule will refresh the main cache."
-            elif skip_warm_cache_if_release_active; then
+            elif skip_warm_cache_if_tag_release_active; then
               echo "::notice::Push-to-main warm-cache run suppressed while release binaries are already building."
             else
               # The parsed path policy owns which changes rotate a build cache

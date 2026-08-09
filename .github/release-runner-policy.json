@@ -12,8 +12,8 @@
       "use_sccache": "false",
       "runners": {
         "warm": "macos-15-intel",
-        "primary": "macos-15-intel",
-        "recovery": "macos-15-intel",
+        "primary": "macos-15-large",
+        "recovery": "macos-15-large",
         "standard": "macos-15-intel",
         "fast": "macos-15-large"
       }

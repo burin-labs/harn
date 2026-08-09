@@ -32,6 +32,15 @@ fn matrix(fs: HarnessFs, process: HarnessProcess, args) {
   return json_parse(result.stdout)
 }
 
+fn matrix_with_env(fs: HarnessFs, process: HarnessProcess, env: string, args: string) {
+  const root = dirname(dirname(fs.runtime_paths().asset_root))
+  const result = process.shell_at(root, env + " bash scripts/release_runner_matrix.sh " + args)
+  if !result.success {
+    throw result.stderr
+  }
+  return json_parse(result.stdout)
+}
+
 fn runners(rows) {
   return rows.map({ row -> row.target + "=" + row.runner })
 }
@@ -53,8 +62,20 @@ pipeline test_release_runner_policy_pins_every_mode(harness: Harness, task) {
     "x86_64-pc-windows-msvc=windows-latest",
   ]
   assert_eq(runners(matrix(harness.fs, harness.process, "--mode warm")), standard)
-  assert_eq(runners(matrix(harness.fs, harness.process, "--mode primary")), standard)
-  assert_eq(runners(matrix(harness.fs, harness.process, "--mode recovery")), standard)
+  const release = ["x86_64-apple-darwin=macos-15-large"] + standard.slice(1, len(standard))
+  assert_eq(runners(matrix(harness.fs, harness.process, "--mode primary")), release)
+  assert_eq(runners(matrix(harness.fs, harness.process, "--mode recovery")), release)
+  assert_eq(
+    runners(
+      matrix_with_env(
+        harness.fs,
+        harness.process,
+        "HARN_RELEASE_FORCE_STANDARD_MACOS=true",
+        "--mode primary",
+      ),
+    ),
+    standard,
+  )
   assert_eq(
     codegen_units(matrix(harness.fs, harness.process, "--mode primary")),
     [
@@ -107,6 +128,7 @@ pipeline test_release_runner_policy_selects_targeted_fast_capacity(harness: Harn
 }
 
 pipeline test_release_runner_policy_rejects_unsafe_requests(harness: Harness, task) {
+  const root = dirname(dirname(harness.fs.runtime_paths().asset_root))
   assert_eq(
     run_matrix(harness.fs, harness.process, "--mode benchmark --profile policy").success,
     false,
@@ -117,10 +139,18 @@ pipeline test_release_runner_policy_rejects_unsafe_requests(harness: Harness, ta
   )
   assert_eq(run_matrix(harness.fs, harness.process, "--mode warm --profile fast").success, false)
   assert_eq(
+    harness.process
+      .shell_at(
+        root,
+        "HARN_RELEASE_FORCE_STANDARD_MACOS=maybe bash scripts/release_runner_matrix.sh --mode primary",
+      )
+      .success,
+    false,
+  )
+  assert_eq(
     run_matrix(harness.fs, harness.process, "--mode recovery --targets unknown-target").success,
     false,
   )
-  const root = dirname(dirname(harness.fs.runtime_paths().asset_root))
   // The policy is consumed by scripts/release_runner_matrix.sh, so no Harn
   // module owns its shape. This test spreads the real document to build
   // deliberately-invalid variants, and each assertion below is only meaningful

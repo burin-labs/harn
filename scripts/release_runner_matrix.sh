@@ -6,6 +6,7 @@ POLICY="${HARN_RELEASE_RUNNER_POLICY:-${ROOT}/.github/release-runner-policy.json
 MODE=""
 PROFILE="policy"
 TARGETS=""
+FORCE_STANDARD_MACOS="${HARN_RELEASE_FORCE_STANDARD_MACOS:-false}"
 
 usage() {
   cat <<'EOF'
@@ -51,6 +52,14 @@ case "$MODE:$PROFILE" in
     ;;
   *)
     printf 'unsupported release runner mode/profile: %s/%s\n' "$MODE" "$PROFILE" >&2
+    exit 2
+    ;;
+esac
+
+case "$FORCE_STANDARD_MACOS" in
+  true|false) ;;
+  *)
+    echo 'HARN_RELEASE_FORCE_STANDARD_MACOS must be true or false' >&2
     exit 2
     ;;
 esac
@@ -101,6 +110,7 @@ fi
 
 jq -c \
   --arg runner_key "$RUNNER_KEY" \
+  --argjson force_standard_macos "$FORCE_STANDARD_MACOS" \
   --argjson requested "$REQUESTED_JSON" '
     def rust_cache_broad_restore_prefix($target):
       if $target == "x86_64-apple-darwin" then
@@ -122,7 +132,14 @@ jq -c \
       | select(($requested | length) == 0 or ($requested | index($entry.target)))
       | {
           target,
-          runner: .runners[$runner_key],
+          runner: (
+            if $force_standard_macos
+              and ($runner_key == "primary" or $runner_key == "recovery")
+              and .target == "x86_64-apple-darwin"
+            then .runners.standard
+            else .runners[$runner_key]
+            end
+          ),
           rust_cache_broad_restore_prefix: rust_cache_broad_restore_prefix(.target),
           release_codegen_units,
           use_sccache

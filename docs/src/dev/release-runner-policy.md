@@ -35,24 +35,47 @@ and the [larger runner reference](https://docs.github.com/en/actions/reference/r
 
 ## Current decision
 
-Keep primary, recovery, and warm policy on standard runners. Retain `fast` only
-as an explicit targeted benchmark/recovery override. All three measured builds
-below reported `Swatinem cache hit: false`, so the comparison does not hide a
-cache-state advantage.
+Use `macos-15-large` for primary and recovery `x86_64-apple-darwin`
+builds. Keep `warm` and `standard` on `macos-15-intel`. Routine main pushes and
+scheduled cache refreshes therefore stay free; only a shipping or recovery job
+uses paid capacity.
 
-| Receipt | Runner | Cargo duration | Job duration | Estimated larger-runner cost |
+Set the repository Actions variable `HARN_RELEASE_FORCE_STANDARD_MACOS=true`
+to route policy-selected primary and recovery Intel builds back to
+`macos-15-intel` without a code change. Unset the variable, or set it to
+`false`, to restore the checked-in policy. Explicit `standard` and `fast`
+recovery or benchmark profiles still honor the operator's selected profile.
+
+The policy is based on the cache-hit pair below. Both benchmark runs used
+v0.10.67 commit `64321c120a119ac32cae267831a3e54cd56a6ec8`, the same
+target, AOT payload, thin-LTO profile, and 16 codegen units. Both reported
+`Swatinem cache hit: true`.
+
+| Receipt | Runner | Cargo duration | Job duration | Larger-runner cost |
 | --- | --- | ---: | ---: | ---: |
-| [v0.10.13](https://github.com/burin-labs/harn/actions/runs/29206955853) | `macos-15-intel` | 39m27s | 41m35s | $0 |
-| [v0.10.14](https://github.com/burin-labs/harn/actions/runs/29213650285) | `macos-15-intel` | 62m45s | 65m53s | $0 |
-| [Controlled fast benchmark](https://github.com/burin-labs/harn/actions/runs/29217171568) | `macos-15-large` | 38m32s | 39m27s | $3.08 |
+| [Standard benchmark](https://github.com/burin-labs/harn/actions/runs/31319356648) | `macos-15-intel` | 36m38s | 38m13s | $0 |
+| [Large benchmark](https://github.com/burin-labs/harn/actions/runs/31317916273) | `macos-15-large` | 23m25s | 24m32s | about $1.93 |
 
-The Large runner saved only 55 seconds of Cargo time and 2m08s of total job
-time against the recent typical standard run, while billing 40 rounded minutes.
-It was faster than the anomalous v0.10.14 tail, but that variance does not
-justify a paid default. The asynchronous release watcher prevents the long
-artifact lane from blocking the operator; use `fast` only when a specific
-recovery's latency is worth the metered spend.
+Large saved 13m13s of Cargo time, or 36.1%, and 13m41s of job wall time. This
+clears the adoption threshold of both 10 minutes and 30% under equivalent cache
+state. Harn published 60 v0.10.x releases in the 30 days ending 2026-08-09. At
+that unusually high cadence, the measured job projects to about $116 per month
+and removes about 13.7 hours of aggregate release critical-path waiting.
+
+Cache availability remains the larger lever. The v0.10.67 release
+[missed its cache](https://github.com/burin-labs/harn/actions/runs/31312058230)
+and spent 79m05s in Cargo on standard Intel. A warm standard runner cut that to
+36m38s without paid capacity; Large removes the remaining capacity-sensitive
+tail. Cache warms therefore stay on the free standard runner and retain the
+repository's existing storage budgets and pruning.
+
+An earlier cold-cache benchmark saved only 55 seconds on Large. That result
+correctly blocked adoption at the time, but cold dependency compilation is not
+the intended steady-state release path. The cache-hit pair above changes one
+variable and measures the path the default-branch warmer exists to provide.
 
 Update this table and any `primary` label change only from an observed
-workflow/job receipt. Do not infer a capacity win from runner specifications
-alone.
+workflow/job receipt. Revert to standard if two controlled cache-hit pairs show
+less than a 10-minute or 30% Cargo advantage, or if projected larger-runner
+spend exceeds $150 per month without a matching release cadence. Do not infer a
+capacity win from runner specifications alone.
