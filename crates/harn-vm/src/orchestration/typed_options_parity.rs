@@ -12,7 +12,7 @@
 //! key with no runtime backing (either wire it up or move it to the
 //! allowlist with a tracking comment).
 
-use std::collections::BTreeSet;
+use std::{borrow::Cow, collections::BTreeSet};
 
 use serde::Serialize;
 
@@ -24,6 +24,14 @@ const AGENT_OPTIONS_MODULE: &str = "agent/options";
 const AGENT_OPTIONS_TYPES_MODULE: &str = "agent/options_types";
 const AGENT_CONTRACTS_MODULE: &str = "agent/contracts";
 const WORKFLOW_OPTIONS_MODULE: &str = "workflow/options";
+
+fn normalized_harn_source(source: &str) -> Cow<'_, str> {
+    if source.contains('\r') {
+        Cow::Owned(source.replace("\r\n", "\n").replace('\r', "\n"))
+    } else {
+        Cow::Borrowed(source)
+    }
+}
 
 fn stdlib_source(module: &str) -> &'static str {
     harn_stdlib::get_stdlib_source(module)
@@ -60,6 +68,7 @@ const AGENT_SPEC_PARTS: [&str; 6] = [
 ];
 
 fn agent_spec_keys_from(source: &str) -> BTreeSet<String> {
+    let source = normalized_harn_source(source);
     let declaration = concat!(
         "pub type AgentSpec = AgentModelSpec \\\n",
         "  & AgentExecutionSpec \\\n",
@@ -74,7 +83,7 @@ fn agent_spec_keys_from(source: &str) -> BTreeSet<String> {
     );
     AGENT_SPEC_PARTS
         .into_iter()
-        .flat_map(|name| harn_alias_keys(source, name))
+        .flat_map(|name| harn_alias_keys(&source, name))
         .collect()
 }
 
@@ -158,6 +167,7 @@ fn harn_alias_keys(source: &str, name: &str) -> BTreeSet<String> {
 }
 
 fn harn_string_union_values(source: &str, name: &str) -> BTreeSet<String> {
+    let source = normalized_harn_source(source);
     let marker = format!("type {name} =");
     let (_, declaration) = source
         .split_once(&marker)
@@ -172,6 +182,23 @@ fn harn_string_union_values(source: &str, name: &str) -> BTreeSet<String> {
             (!value.is_empty()).then(|| value.to_string())
         })
         .collect()
+}
+
+#[test]
+fn typed_contract_parsers_accept_crlf_sources() {
+    let crlf_options = agent_options_harn().replace('\n', "\r\n");
+    assert_eq!(
+        agent_spec_keys_from(&crlf_options),
+        agent_spec_keys_from(agent_options_harn()),
+        "AgentSpec extraction must be independent of checkout line endings",
+    );
+
+    let crlf_contracts = agent_contracts_harn().replace('\n', "\r\n");
+    assert_eq!(
+        harn_string_union_values(&crlf_contracts, "AgentTerminalKind"),
+        harn_string_union_values(agent_contracts_harn(), "AgentTerminalKind"),
+        "string-union extraction must be independent of checkout line endings",
+    );
 }
 
 /// Serialize a struct's `Default` and return the top-level JSON object keys.
