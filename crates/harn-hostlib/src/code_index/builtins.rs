@@ -7,12 +7,10 @@
 //! op also reads from the capability's `current_agent` slot, but for
 //! every other op the index mutex is the source of truth.
 
+use harn_vm::VmValue;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
-
-use harn_vm::VmValue;
 
 use super::agents::AgentId;
 use super::file_table::{fnv1a64, FileId};
@@ -190,41 +188,6 @@ pub(super) fn collect_hits_into(
     for hit in &mut hits[before..] {
         hit.root = Some(root.clone());
     }
-}
-
-pub(super) fn run_rebuild(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, HostlibError> {
-    let raw = dict_arg(BUILTIN_REBUILD, args)?;
-    let dict = raw.as_ref();
-    let _force = optional_bool(BUILTIN_REBUILD, dict, "force", false)?;
-    let root = optional_string(BUILTIN_REBUILD, dict, "root")?
-        .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    if !root.exists() {
-        return Err(HostlibError::InvalidParameter {
-            builtin: BUILTIN_REBUILD,
-            param: "root",
-            message: format!("path `{}` does not exist", root.display()),
-        });
-    }
-    if !root.is_dir() {
-        return Err(HostlibError::InvalidParameter {
-            builtin: BUILTIN_REBUILD,
-            param: "root",
-            message: format!("path `{}` is not a directory", root.display()),
-        });
-    }
-    let started = Instant::now();
-    let (state, outcome) = IndexState::build_from_root(&root);
-    let elapsed_ms = started.elapsed().as_millis() as i64;
-    {
-        let mut guard = index.lock().expect("code_index mutex poisoned");
-        *guard = Some(state);
-    }
-    Ok(build_dict([
-        ("files_indexed", VmValue::Int(outcome.files_indexed as i64)),
-        ("files_skipped", VmValue::Int(outcome.files_skipped as i64)),
-        ("elapsed_ms", VmValue::Int(elapsed_ms)),
-    ]))
 }
 
 pub(super) fn run_stats(index: &SharedIndex, _args: &[VmValue]) -> Result<VmValue, HostlibError> {
