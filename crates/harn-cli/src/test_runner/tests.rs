@@ -30,6 +30,29 @@ impl TempTestDir {
     }
 }
 
+#[tokio::test]
+async fn curated_paths_share_one_suite_and_deduplicate_overlaps() {
+    let temp = TempTestDir::new();
+    temp.write("suite/test_alpha.harn", "pipeline test_alpha(_task) {}");
+    temp.write(
+        "suite/nested/test_beta.harn",
+        "pipeline test_beta(_task) {}",
+    );
+    let paths = vec![
+        temp.path().join("suite/test_alpha.harn"),
+        temp.path().join("suite/nested"),
+        temp.path().join("suite/nested/test_beta.harn"),
+    ];
+    let options = RunOptions::new(30_000);
+    let summary =
+        run_tests_with_paths_and_operator_grant(&paths, &options, &TestRunSession::default(), None)
+            .await;
+
+    assert_eq!(summary.total, 2);
+    assert_eq!(summary.passed, 2);
+    assert_eq!(summary.failed, 0);
+}
+
 fn loaded_skills_for(file: &Path) -> crate::skill_loader::LoadedSkills {
     crate::skill_loader::load_skills(&crate::skill_loader::SkillLoaderInputs {
         cli_dirs: Vec::new(),

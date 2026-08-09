@@ -261,8 +261,23 @@ pub(crate) fn run_tests_with_session_and_operator_grant<'a>(
     session: &'a TestRunSession,
     operator_approval_grant: Option<&'a harn_vm::orchestration::OperatorApprovalGrant>,
 ) -> Pin<Box<dyn Future<Output = TestSummary> + 'a>> {
+    Box::pin(async move {
+        let paths = [path.to_path_buf()];
+        run_tests_with_paths_and_operator_grant(&paths, options, session, operator_approval_grant)
+            .await
+    })
+}
+
+/// Run a curated set of files/directories through one discovery, import-graph
+/// preparation, and scheduler session. Overlapping paths are deduplicated.
+pub(crate) fn run_tests_with_paths_and_operator_grant<'a>(
+    paths: &'a [PathBuf],
+    options: &'a RunOptions,
+    session: &'a TestRunSession,
+    operator_approval_grant: Option<&'a harn_vm::orchestration::OperatorApprovalGrant>,
+) -> Pin<Box<dyn Future<Output = TestSummary> + 'a>> {
     Box::pin(run_tests_with_session_impl(
-        path,
+        paths,
         options,
         session,
         operator_approval_grant,
@@ -270,7 +285,7 @@ pub(crate) fn run_tests_with_session_and_operator_grant<'a>(
 }
 
 async fn run_tests_with_session_impl(
-    path: &Path,
+    paths: &[PathBuf],
     options: &RunOptions,
     session: &TestRunSession,
     operator_approval_grant: Option<&harn_vm::orchestration::OperatorApprovalGrant>,
@@ -282,15 +297,27 @@ async fn run_tests_with_session_impl(
     let start = Instant::now();
 
     let collection_start = Instant::now();
-    let canonical_target = canonicalize_existing_path(path);
-    let files = if canonical_target.is_dir() {
-        discover_test_files(&canonical_target)
-    } else {
-        vec![canonical_target.clone()]
-    };
+    let canonical_targets = paths
+        .iter()
+        .map(|path| canonicalize_existing_path(path))
+        .collect::<Vec<_>>();
+    let mut files = canonical_targets
+        .iter()
+        .flat_map(|target| {
+            if target.is_dir() {
+                discover_test_files(target)
+            } else {
+                vec![target.clone()]
+            }
+        })
+        .collect::<Vec<_>>();
+    files.sort();
+    files.dedup();
 
     let workers = resolve_workers(options);
-    let timings_path = timings_cache_path(&canonical_target);
+    let timings_path = canonical_targets
+        .first()
+        .and_then(|target| timings_cache_path(target));
     let timings = timings_path
         .as_deref()
         .map(load_timings_cache)

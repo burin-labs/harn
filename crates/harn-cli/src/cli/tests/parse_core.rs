@@ -254,6 +254,28 @@ fn test_parses_test_shard_flags() {
 }
 
 #[test]
+fn test_parses_curated_user_test_paths() {
+    let cli = Cli::parse_from([
+        "harn",
+        "test",
+        "tests/fast.harn",
+        "--test-path",
+        "tests/integration.harn",
+        "--test-path",
+        "tests/contracts/",
+    ]);
+
+    let Command::Test(args) = cli.command.unwrap() else {
+        panic!("expected test command");
+    };
+    assert_eq!(args.target.as_deref(), Some("tests/fast.harn"));
+    assert_eq!(
+        args.test_paths,
+        ["tests/integration.harn", "tests/contracts/"]
+    );
+}
+
+#[test]
 fn test_parses_new_template() {
     let cli = Cli::parse_from(["harn", "new", "review-bot", "--template", "agent"]);
 
