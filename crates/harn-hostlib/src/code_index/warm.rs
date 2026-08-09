@@ -4,7 +4,8 @@
 //! cold workspace can restore a snapshot or begin a background rebuild without
 //! stalling the model's first turn. Sync [`hostlib_code_index_rebuild`] joins
 //! the same single-flight gate so `ensure_initialised` does not start a second
-//! full walk while the warm is still running.
+//! full walk while the warm is still running. Once the slot is live, a later
+//! sync rebuild still re-walks disk — join only applies to an in-flight build.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
@@ -254,15 +255,17 @@ pub(super) fn run_rebuild_single_flight(
 
     let canonical = canonicalize(&root);
 
-    // Join an in-flight warm/rebuild for this root so callers never pay a
-    // second full walk.
+    // Own a rebuild flight when possible. Only join (return live stats without
+    // rebuilding) when another warm/rebuild already owns this root — never skip
+    // a refresh just because the slot is already populated. Callers use rebuild
+    // after edits via `host_codeindex_ensure_initialised` / `ensure_fresh`.
     for _ in 0..3 {
-        warm.wait_if_building(&canonical);
-        if let Some(stats) = live_stats_for_root(index, &canonical) {
-            return Ok(stats);
-        }
         let Some(flight) = warm.try_begin(&canonical) else {
-            // Lost the race to another builder; loop and join it.
+            // Another builder owns this root; wait for it instead of double-walking.
+            warm.wait_if_building(&canonical);
+            if let Some(stats) = live_stats_for_root(index, &canonical) {
+                return Ok(stats);
+            }
             continue;
         };
 
@@ -394,5 +397,43 @@ mod tests {
         };
         assert_eq!(files, 2);
         assert!(elapsed < Duration::from_secs(30));
+    }
+
+    #[test]
+    fn sync_rebuild_refreshes_already_live_index_after_disk_change() {
+        let dir = fixture_tree();
+        let cap = CodeIndexCapability::new();
+        let args = [root_arg(dir.path())];
+        let first = run_rebuild_single_flight(&cap.shared(), &cap.warm, &args).expect("seed");
+        let first_files = match first {
+            VmValue::Dict(d) => match d.get(&harn_vm::value::intern_key("files_indexed")) {
+                Some(VmValue::Int(n)) => *n,
+                other => panic!("expected files_indexed int, got {other:?}"),
+            },
+            other => panic!("expected dict, got {other:?}"),
+        };
+        assert_eq!(first_files, 2);
+
+        fs::write(
+            dir.path().join("src/gamma.rs"),
+            "pub fn gamma() -> i32 { 3 }\n",
+        )
+        .unwrap();
+
+        let second = run_rebuild_single_flight(&cap.shared(), &cap.warm, &args).expect("refresh");
+        let second_files = match second {
+            VmValue::Dict(d) => match d.get(&harn_vm::value::intern_key("files_indexed")) {
+                Some(VmValue::Int(n)) => *n,
+                other => panic!("expected files_indexed int, got {other:?}"),
+            },
+            other => panic!("expected dict, got {other:?}"),
+        };
+        assert_eq!(
+            second_files, 3,
+            "rebuild must re-walk disk even when the slot is already live"
+        );
+        let shared = cap.shared();
+        let guard = shared.lock().unwrap();
+        assert_eq!(guard.as_ref().map(|s| s.files.len()), Some(3));
     }
 }
