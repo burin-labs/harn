@@ -1667,6 +1667,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Check CI latency policy
+        uses: burin-labs/.github/.github/actions/ci-latency-policy@9650d5116b7d5fde63cb71e7039d8ab7252dc38a
+        with:
+          baseline-sha: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || '' }}
+          github-token: ${{ github.token }}
       - name: Install actionlint
         env:
           ACTIONLINT_VERSION: "1.7.12"
