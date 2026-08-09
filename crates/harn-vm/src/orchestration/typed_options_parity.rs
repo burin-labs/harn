@@ -186,14 +186,14 @@ fn harn_string_union_values(source: &str, name: &str) -> BTreeSet<String> {
 
 #[test]
 fn typed_contract_parsers_accept_crlf_sources() {
-    let crlf_options = agent_options_harn().replace('\n', "\r\n");
+    let crlf_options = normalized_harn_source(agent_options_harn()).replace('\n', "\r\n");
     assert_eq!(
         agent_spec_keys_from(&crlf_options),
         agent_spec_keys_from(agent_options_harn()),
         "AgentSpec extraction must be independent of checkout line endings",
     );
 
-    let crlf_contracts = agent_contracts_harn().replace('\n', "\r\n");
+    let crlf_contracts = normalized_harn_source(agent_contracts_harn()).replace('\n', "\r\n");
     assert_eq!(
         harn_string_union_values(&crlf_contracts, "AgentTerminalKind"),
         harn_string_union_values(agent_contracts_harn(), "AgentTerminalKind"),
