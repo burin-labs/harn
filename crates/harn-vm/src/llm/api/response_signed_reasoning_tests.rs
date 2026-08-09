@@ -1,4 +1,5 @@
 use super::parse_llm_response;
+use crate::llm::capabilities::WireDialect;
 
 #[test]
 fn anthropic_parser_records_tool_search_tool_result_as_event() {
@@ -18,8 +19,14 @@ fn anthropic_parser_records_tool_search_tool_result_as_event() {
         ],
         "usage": {"input_tokens": 3, "output_tokens": 1}
     });
-    let result = parse_llm_response(&response, "anthropic", "claude-opus-4-7", true, false)
-        .expect("parser succeeds");
+    let result = parse_llm_response(
+        &response,
+        "anthropic",
+        "claude-opus-4-7",
+        WireDialect::Anthropic,
+        false,
+    )
+    .expect("parser succeeds");
 
     let result_block = result
         .blocks
@@ -53,8 +60,14 @@ fn anthropic_parser_preserves_signed_reasoning_blocks_for_replay() {
         "stop_reason": "end_turn"
     });
 
-    let result = parse_llm_response(&response, "anthropic", "claude-opus-4-7", true, false)
-        .expect("parser succeeds");
+    let result = parse_llm_response(
+        &response,
+        "anthropic",
+        "claude-opus-4-7",
+        WireDialect::Anthropic,
+        false,
+    )
+    .expect("parser succeeds");
 
     assert_eq!(
         result.thinking.as_deref(),

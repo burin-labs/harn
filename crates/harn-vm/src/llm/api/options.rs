@@ -449,10 +449,6 @@ pub(crate) struct LlmCallOptions {
 
     // --- Structured output ---
     pub output_format: OutputFormat,
-    /// Legacy compatibility mirror for older internals and replay hashes.
-    pub response_format: Option<String>,
-    /// Legacy compatibility mirror for older internals and replay hashes.
-    pub json_schema: Option<serde_json::Value>,
     pub output_schema: Option<serde_json::Value>,
     pub output_validation: Option<String>,
     /// Abort the streaming response when partial JSON can no longer
@@ -584,8 +580,6 @@ impl Default for LlmCallOptions {
             portable_option_intent: std::collections::BTreeSet::new(),
             fast: false,
             output_format: OutputFormat::default(),
-            response_format: None,
-            json_schema: None,
             output_schema: None,
             output_validation: None,
             schema_stream_abort: false,
@@ -758,8 +752,6 @@ pub(crate) struct LlmRequestPayload {
     /// so confirmed-fast responses bill at the premium tier.
     pub fast: bool,
     pub output_format: OutputFormat,
-    pub response_format: Option<String>,
-    pub json_schema: Option<serde_json::Value>,
     /// Normalized `output_schema` forwarded to the streaming transport
     /// so it can fail-fast when partial JSON can no longer satisfy the
     /// schema. Mirrors `LlmCallOptions::output_schema` after option
@@ -849,8 +841,6 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             presence_penalty: opts.presence_penalty,
             fast: opts.fast,
             output_format: opts.output_format.clone(),
-            response_format: opts.response_format.clone(),
-            json_schema: opts.json_schema.clone(),
             output_schema: opts.output_schema.clone(),
             schema_stream_abort: opts.schema_stream_abort,
             thinking: opts.thinking.clone(),
@@ -961,8 +951,6 @@ pub(crate) fn base_opts(provider: &str) -> LlmCallOptions {
             schema: serde_json::json!({"type": "object"}),
             strict: true,
         },
-        response_format: Some("json".to_string()),
-        json_schema: Some(serde_json::json!({"type": "object"})),
         output_schema: Some(serde_json::json!({"type": "object"})),
         output_validation: Some("error".to_string()),
         tools: Some(VmValue::String(arcstr::ArcStr::from("vm-local-tools"))),

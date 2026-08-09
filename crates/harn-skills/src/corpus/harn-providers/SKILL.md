@@ -50,6 +50,9 @@ Pair it with [[harn-orchestration]] for workflow behavior and [[harn-testing]] f
 
 - Model capabilities should be data-driven.
 - Avoid hardcoding provider quirks in caller code.
+- Resolve `message_wire_format` and `live_endpoint_family` as one dialect for
+  request, stream, response, and error handling. Do not choose a builder or
+  parser independently from provider strings or response headers.
 - Put route-specific reasoning behavior in capability rows and resolve it with
   `harness.llm.apply_reasoning_policy`; do not branch on model IDs, providers,
   families, or lineages in stdlib policy.

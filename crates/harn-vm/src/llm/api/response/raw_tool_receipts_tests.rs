@@ -1,4 +1,5 @@
 use super::parse_llm_response;
+use crate::llm::capabilities::WireDialect;
 
 #[test]
 fn openai_parser_preserves_harmony_wrapper_before_normalizing() {
@@ -24,7 +25,7 @@ fn openai_parser_preserves_harmony_wrapper_before_normalizing() {
         &response,
         "fireworks",
         "accounts/fireworks/models/gpt-oss-120b",
-        false,
+        WireDialect::OpenAiCompat,
         false,
     )
     .expect("parser succeeds");
@@ -65,7 +66,7 @@ fn openai_parser_preserves_channel_suffix_before_stripping() {
         &response,
         "fireworks",
         "accounts/fireworks/models/gpt-oss-120b",
-        false,
+        WireDialect::OpenAiCompat,
         false,
     )
     .expect("parser succeeds");

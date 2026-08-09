@@ -28,7 +28,7 @@ fn cerebras_request_strips_harn_tool_extensions() {
         }
     })]);
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
     let tool = &body["tools"][0];
     assert_eq!(tool["type"], "function");
     assert!(tool.get("namespace").is_none());
@@ -99,7 +99,7 @@ fn openai_strict_schemas_are_sanitized_before_request() {
         }
     })]);
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     let response_schema = &body["response_format"]["json_schema"]["schema"];
     assert_eq!(response_schema["additionalProperties"], false);
@@ -160,7 +160,7 @@ fn openai_tool_search_request_keeps_wire_extensions() {
         }),
     ]);
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
     assert_eq!(body["tools"][0]["namespaces"], json!(["ops"]));
     assert_eq!(body["tools"][1]["namespace"], "ops");
     assert_eq!(body["tools"][1]["defer_loading"], true);
@@ -188,7 +188,7 @@ fn openai_regular_request_strips_tool_search_extensions_without_meta_tool() {
         }
     })]);
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
     assert!(body["tools"][0].get("namespace").is_none());
     assert!(body["tools"][0].get("defer_loading").is_none());
 }
@@ -215,7 +215,7 @@ fn openrouter_kimi27_code_normalizes_forced_tool_choice_to_auto() {
     })]);
     payload.tool_choice = Some(json!("required"));
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert_eq!(body["tool_choice"], "auto");
     assert_eq!(body["tools"][0]["function"]["name"], "add_two");
@@ -243,7 +243,7 @@ fn openrouter_kimi27_code_keeps_allowed_tool_choice_none() {
     })]);
     payload.tool_choice = Some(json!("none"));
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert_eq!(body["tool_choice"], "none");
     assert_eq!(body["tools"][0]["function"]["name"], "add_two");
@@ -271,7 +271,7 @@ fn openai_compat_bare_tool_choice_string_becomes_function_selection() {
     })]);
     payload.tool_choice = Some(json!("edit"));
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert_eq!(
         body["tool_choice"],
@@ -287,7 +287,7 @@ fn openai_compat_omits_tool_choice_for_text_tool_routes() {
     payload.model = "accounts/fireworks/models/gpt-oss-120b".to_string();
     payload.tool_choice = Some(json!("edit"));
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert!(body.get("tool_choice").is_none());
     assert!(body.get("tools").is_none());
@@ -300,7 +300,7 @@ fn openai_compat_omits_required_tool_choice_without_native_tools() {
     payload.model = "zai-org/glm-5.2".to_string();
     payload.tool_choice = Some(json!("required"));
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert!(body.get("tool_choice").is_none());
     assert!(body.get("tools").is_none());

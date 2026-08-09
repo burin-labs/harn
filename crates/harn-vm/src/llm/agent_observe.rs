@@ -574,7 +574,7 @@ fn rand_range_inclusive<R: rand::RngExt>(max: u64, rng: &mut R) -> u64 {
 /// without rebuilding the whole request from scratch. Mirrors the established
 /// "text-channel request" shape (see the Ollama raw-generate test in `api.rs`):
 /// drop the provider-native tool payload, force `Text` output, and clear the
-/// structured-output mirrors so the transport serves a plain chat completion
+/// provider-native structured output so the transport serves a plain chat completion
 /// the model answers in content. The agent loop's text-tool parser then reads
 /// the calls back out of the assistant text.
 ///
@@ -589,8 +589,6 @@ fn degrade_options_to_text_channel(
     let mut degraded = opts.clone();
     degraded.native_tools = None;
     degraded.output_format = super::api::OutputFormat::Text;
-    degraded.response_format = None;
-    degraded.json_schema = None;
     degraded
 }
 
@@ -715,8 +713,7 @@ pub(crate) async fn observed_llm_call(
 
         let mut call_start_meta =
             serde_json::json!({"model": opts.model, "prompt_chars": prompt_chars});
-        call_start_meta["stream_publicly"] =
-            serde_json::json!(opts.response_format.as_deref() != Some("json"));
+        call_start_meta["stream_publicly"] = serde_json::json!(!opts.output_format.is_structured());
         call_start_meta["user_visible"] = serde_json::json!(user_visible);
         if let Some(iter) = iteration {
             call_start_meta["iteration"] = serde_json::json!(iter);

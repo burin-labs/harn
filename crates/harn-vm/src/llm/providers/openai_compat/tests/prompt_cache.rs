@@ -10,7 +10,7 @@ fn openrouter_anthropic_cache_uses_top_level_breakpoint() {
     payload.model = "anthropic/claude-sonnet-4-6".to_string();
     payload.cache = true;
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert_eq!(body["cache_control"], json!({"type": "ephemeral"}));
     assert_eq!(cache_control_count(&body), 1);
@@ -29,7 +29,7 @@ fn openrouter_qwen_explicit_cache_uses_last_content_block() {
         ],
     })];
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert!(body.get("cache_control").is_none());
     assert_eq!(
@@ -52,7 +52,7 @@ fn openrouter_gemini_explicit_cache_uses_last_content_block() {
         ],
     })];
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert_eq!(
         body["messages"][0]["content"][1]["cache_control"],
@@ -67,7 +67,7 @@ fn openrouter_automatic_cache_route_does_not_emit_cache_control() {
     payload.model = "deepseek/deepseek-v3".to_string();
     payload.cache = true;
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert_eq!(cache_control_count(&body), 0);
 }
@@ -78,7 +78,7 @@ fn openrouter_qwen_open_weight_route_does_not_emit_cache_control() {
     payload.model = "qwen/qwen3.6-35b-a3b".to_string();
     payload.cache = true;
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert_eq!(cache_control_count(&body), 0);
 }
@@ -100,7 +100,7 @@ fn openrouter_explicit_cache_preserves_existing_message_breakpoint() {
         ],
     })];
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert_eq!(
         body["messages"][0]["content"][0]["cache_control"],
@@ -127,7 +127,7 @@ fn openrouter_cache_preserves_existing_tool_breakpoint() {
         }
     })]);
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert!(body.get("cache_control").is_none());
     assert_eq!(

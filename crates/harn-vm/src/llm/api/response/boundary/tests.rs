@@ -13,6 +13,7 @@ use crate::boundary::tests::CapturedEvents;
 use crate::boundary::{BoundaryFailureKind, BoundaryId};
 
 use crate::llm::api::response::{parse_llm_response, parse_openai_responses_response};
+use crate::llm::capabilities::WireDialect;
 
 fn details(events: &[AgentEvent]) -> Vec<String> {
     events
@@ -45,8 +46,14 @@ fn an_anthropic_content_block_with_no_handler_is_reported() {
         ],
         "usage": {"output_tokens": 12},
     });
-    parse_llm_response(&response, "anthropic", "claude-x", true, false)
-        .expect("a response with one usable block still parses");
+    parse_llm_response(
+        &response,
+        "anthropic",
+        "claude-x",
+        WireDialect::Anthropic,
+        false,
+    )
+    .expect("a response with one usable block still parses");
 
     let reported = details(&captured.boundary_failures());
     assert_eq!(reported.len(), 1, "got: {reported:?}");
@@ -63,7 +70,14 @@ fn a_fully_handled_anthropic_response_stays_quiet() {
         "content": [{"type": "text", "text": "all good"}],
         "usage": {"output_tokens": 3},
     });
-    parse_llm_response(&response, "anthropic", "claude-x", true, false).expect("parses");
+    parse_llm_response(
+        &response,
+        "anthropic",
+        "claude-x",
+        WireDialect::Anthropic,
+        false,
+    )
+    .expect("parses");
     assert!(
         captured.boundary_failures().is_empty(),
         "a fully handled response must not emit boundary noise",
@@ -116,7 +130,14 @@ fn discarded_completions_past_the_first_choice_are_reported() {
             {"message": {"role": "assistant", "content": "second"}, "finish_reason": "stop"},
         ],
     });
-    parse_llm_response(&response, "openai", "gpt-x", false, false).expect("parses");
+    parse_llm_response(
+        &response,
+        "openai",
+        "gpt-x",
+        WireDialect::OpenAiCompat,
+        false,
+    )
+    .expect("parses");
 
     let reported = details(&captured.boundary_failures());
     assert_eq!(reported.len(), 1, "got: {reported:?}");

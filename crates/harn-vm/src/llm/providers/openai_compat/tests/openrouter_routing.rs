@@ -19,7 +19,7 @@ fn openrouter_structured_output_requires_supported_parameters() {
         strict: true,
     };
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert_eq!(body["provider"]["require_parameters"], true);
 }
@@ -45,12 +45,12 @@ fn openrouter_builder_projects_top_k_after_admission() {
     let mut payload = base_request_payload();
     payload.model = "google/gemma-4-26b-a4b-it".to_string();
     payload.top_k = Some(64);
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
     assert_eq!(body["top_k"].as_i64(), Some(64));
     assert_eq!(body["provider"]["require_parameters"], true);
 
     payload.model = "mistralai/devstral-small".to_string();
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
     assert_eq!(body["top_k"].as_i64(), Some(64));
     assert_eq!(body["provider"]["require_parameters"], true);
 }
@@ -90,7 +90,7 @@ fn build_request_body_applies_qwen36_ambient_denylist_for_openrouter_only() {
     let mut payload = base_request_payload();
     payload.provider = "openrouter".to_string();
     payload.model = "qwen/qwen3.6-35b-a3b".to_string();
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
     let ignore = body["provider"]["ignore"]
         .as_array()
         .expect("provider.ignore array present for qwen3.6 openrouter route");
@@ -104,7 +104,7 @@ fn build_request_body_applies_qwen36_ambient_denylist_for_openrouter_only() {
     let mut other = base_request_payload();
     other.provider = "vllm".to_string();
     other.model = "qwen/qwen3.6-35b-a3b".to_string();
-    let other_body = OpenAiCompatibleProvider::build_request_body(&other, false);
+    let other_body = OpenAiCompatibleProvider::build_request_body(&other);
     assert!(
         other_body.get("provider").is_none(),
         "non-openrouter provider must not receive provider.ignore: {other_body}"
@@ -148,7 +148,7 @@ fn build_request_body_pins_gpt_oss_openrouter_to_clean_subproviders() {
     let mut payload = base_request_payload();
     payload.provider = "openrouter".to_string();
     payload.model = "openai/gpt-oss-120b".to_string();
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
     assert_eq!(
         body["provider"]["order"],
         json!(["Cerebras", "Groq"]),
@@ -168,7 +168,7 @@ fn build_request_body_does_not_pin_other_openrouter_models() {
     let mut payload = base_request_payload();
     payload.provider = "openrouter".to_string();
     payload.model = "anthropic/claude-sonnet-4.5".to_string();
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
     let order = body
         .get("provider")
         .and_then(|provider| provider.get("order"));
@@ -185,7 +185,7 @@ fn build_request_body_does_not_pin_gpt_oss_on_other_providers() {
     let mut payload = base_request_payload();
     payload.provider = "groq".to_string();
     payload.model = "openai/gpt-oss-120b".to_string();
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
     assert!(
         body.get("provider").is_none(),
         "non-openrouter gpt-oss route must not be pinned: {body}"

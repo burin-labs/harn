@@ -19,7 +19,6 @@ use crate::llm::api::{
     DeltaSender, LlmRequestPayload, LlmResult, OutputFormat, ProviderTelemetry,
     RawProviderToolCall, ReasoningEffort, ThinkingConfig,
 };
-use crate::llm::capabilities::LiveEndpointFamily;
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::llm::providers::common::{
     apply_provider_overrides, google_function_declaration_tools, maybe_emit_delta,
@@ -46,16 +45,6 @@ impl LlmProviderChat for GeminiProvider {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<LlmResult, VmError>> + 'a>> {
         Box::pin(self.chat_impl(request, delta_tx))
     }
-}
-
-/// The live endpoint family for a route, or `None` when the route is not on the
-/// Gemini dialect at all. The single reader of the capability, so a caller can
-/// never re-derive the switch from a model-name substring.
-pub(crate) fn gemini_live_endpoint_family(
-    provider: &str,
-    model: &str,
-) -> Option<LiveEndpointFamily> {
-    crate::llm::capabilities::lookup(provider, model).live_endpoint_family
 }
 
 // Per-model Gemini thinking quirks are read from the capability matrix
@@ -111,6 +100,13 @@ fn gemini_thinking_budget(
 }
 
 impl GeminiProvider {
+    pub(crate) fn parse_response(
+        json: &serde_json::Value,
+        request: &LlmRequestPayload,
+    ) -> Result<LlmResult, VmError> {
+        parse_response(json, request)
+    }
+
     pub(crate) fn build_request_body(opts: &LlmRequestPayload) -> serde_json::Value {
         let mut contents = Vec::new();
         let mut system_parts = Vec::new();
@@ -237,15 +233,14 @@ impl GeminiProvider {
         request: &LlmRequestPayload,
         delta_tx: Option<DeltaSender>,
     ) -> Result<LlmResult, VmError> {
+        let dialect = crate::llm::api::DialectContract::for_request(request);
         // The one place the two Gemini live endpoint families diverge. Vertex
         // never reaches here — it has its own `chat_impl` and delegates only to
         // `build_request_body` — so its URL/auth envelope stays untouched.
-        if gemini_live_endpoint_family(&request.provider, &request.model)
-            .is_some_and(LiveEndpointFamily::is_gemini_interactions)
-        {
+        if dialect.stream_protocol() == crate::llm::api::StreamProtocol::GeminiInteractionsSse {
             return interactions::GeminiInteractions::chat(request, delta_tx).await;
         }
-        let body = Self::build_request_body(request);
+        let body = dialect.build_request_body(request);
         let pdef = crate::llm_config::provider_config(&request.provider);
         let base_url = pdef
             .as_ref()
@@ -268,14 +263,17 @@ impl GeminiProvider {
             ))))
         })?;
         if !response.status().is_success() {
-            return Err(crate::llm::api::err_for_non_success("gemini", response).await);
+            return Err(crate::llm::api::err_for_non_success_with_dialect(
+                dialect, "gemini", response,
+            )
+            .await);
         }
         let json: serde_json::Value = response.json().await.map_err(|error| {
             VmError::Thrown(VmValue::String(arcstr::ArcStr::from(format!(
                 "gemini response parse error: {error}"
             ))))
         })?;
-        let result = parse_response(&json, request)?;
+        let result = dialect.parse_response(&json, request, false)?;
         maybe_emit_delta(delta_tx, &result.text);
         Ok(result)
     }
@@ -642,8 +640,6 @@ mod tests {
             presence_penalty: None,
             fast: false,
             output_format: crate::llm::api::OutputFormat::Text,
-            response_format: None,
-            json_schema: None,
             output_schema: None,
             schema_stream_abort: false,
             thinking: ThinkingConfig::Disabled,
@@ -706,8 +702,6 @@ mod tests {
             presence_penalty: None,
             fast: false,
             output_format: crate::llm::api::OutputFormat::Text,
-            response_format: None,
-            json_schema: None,
             output_schema: None,
             schema_stream_abort: false,
             thinking: ThinkingConfig::Disabled,
@@ -776,8 +770,6 @@ mod tests {
             presence_penalty: None,
             fast: false,
             output_format: crate::llm::api::OutputFormat::Text,
-            response_format: None,
-            json_schema: None,
             output_schema: None,
             schema_stream_abort: false,
             thinking: ThinkingConfig::Disabled,

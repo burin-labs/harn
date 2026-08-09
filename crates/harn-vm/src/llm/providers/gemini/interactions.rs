@@ -52,6 +52,13 @@ pub(crate) struct GeminiInteractions;
 // ---------------------------------------------------------------------------
 
 impl GeminiInteractions {
+    pub(crate) fn parse_response(
+        json: &Value,
+        request: &LlmRequestPayload,
+    ) -> Result<LlmResult, VmError> {
+        parse_response(json, request)
+    }
+
     /// Build a `POST /v1beta/interactions` body from a neutral Harn payload.
     ///
     /// `stream` is left to the transport so the dry-run request audit and the
@@ -126,7 +133,8 @@ impl GeminiInteractions {
         request: &LlmRequestPayload,
         delta_tx: Option<DeltaSender>,
     ) -> Result<LlmResult, VmError> {
-        let mut body = Self::build_request_body(request);
+        let dialect = crate::llm::api::DialectContract::for_request(request);
+        let mut body = dialect.build_request_body(request);
         if request.stream {
             body["stream"] = json!(true);
         }
@@ -150,19 +158,22 @@ impl GeminiInteractions {
             ))
         })?;
         if !response.status().is_success() {
-            return Err(crate::llm::api::err_for_non_success("gemini", response).await);
+            return Err(crate::llm::api::err_for_non_success_with_dialect(
+                dialect, "gemini", response,
+            )
+            .await);
         }
 
         if request.stream {
-            let envelope = read_interaction_stream(response, delta_tx).await?;
-            return parse_response(&envelope, request);
+            let envelope = read_interaction_stream(response, delta_tx, dialect).await?;
+            return dialect.parse_response(&envelope, request, false);
         }
 
         let json: Value = response
             .json()
             .await
             .map_err(|error| vm_err(format!("gemini response parse error: {error}")))?;
-        let result = parse_response(&json, request)?;
+        let result = dialect.parse_response(&json, request, false)?;
         maybe_emit_delta(delta_tx, &result.text);
         Ok(result)
     }
@@ -171,6 +182,7 @@ impl GeminiInteractions {
 async fn read_interaction_stream(
     response: reqwest::Response,
     delta_tx: Option<DeltaSender>,
+    dialect: crate::llm::api::DialectContract,
 ) -> Result<Value, VmError> {
     use tokio_stream::StreamExt;
 
@@ -178,7 +190,7 @@ async fn read_interaction_stream(
         .bytes_stream()
         .map(|result| result.map_err(std::io::Error::other));
     let reader = tokio::io::BufReader::new(tokio_util::io::StreamReader::new(stream));
-    consume_interaction_sse(reader, delta_tx).await
+    consume_interaction_sse(reader, delta_tx, dialect).await
 }
 
 /// Drive the [`InteractionStream`] assembler from SSE lines.
@@ -188,8 +200,15 @@ async fn read_interaction_stream(
 pub(crate) async fn consume_interaction_sse<R: tokio::io::AsyncBufRead + Unpin>(
     reader: R,
     delta_tx: Option<DeltaSender>,
+    dialect: crate::llm::api::DialectContract,
 ) -> Result<Value, VmError> {
     use tokio::io::AsyncBufReadExt;
+
+    if dialect.stream_protocol() != crate::llm::api::StreamProtocol::GeminiInteractionsSse {
+        return Err(vm_err(
+            "Gemini Interactions stream received a mismatched dialect",
+        ));
+    }
 
     let mut lines = reader.lines();
     let mut stream = InteractionStream::new();

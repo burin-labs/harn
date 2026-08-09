@@ -1150,8 +1150,6 @@ fn observed_qwen_dispatch_receipt_matches_captured_egress_system() {
         opts.system = Some("you are an agent.".to_string());
         opts.thinking = ThinkingConfig::Disabled;
         opts.output_format = super::OutputFormat::Text;
-        opts.response_format = None;
-        opts.json_schema = None;
         opts.output_schema = None;
         opts.context_manifest = crate::llm::prompt::ContextAssemblyManifest::internal(
             "test:system",
@@ -1258,8 +1256,6 @@ fn ollama_qwen_text_tool_route_bypasses_chat_parser_with_raw_generate() {
                 opts.model = "qwen3.5:35b-a3b-coding-nvfp4".to_string();
                 opts.native_tools = None;
                 opts.output_format = crate::llm::api::OutputFormat::Text;
-                opts.response_format = None;
-                opts.json_schema = None;
                 let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
                 let result = vm_call_llm_full_streaming_offthread(&opts, tx)
                     .await
@@ -1391,8 +1387,6 @@ fn run_streaming_error_case(
                 opts.native_tools = None;
                 opts.tool_choice = None;
                 opts.output_format = crate::llm::api::OutputFormat::Text;
-                opts.response_format = None;
-                opts.json_schema = None;
                 opts.output_schema = None;
                 let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
                 let call = tokio::time::timeout(

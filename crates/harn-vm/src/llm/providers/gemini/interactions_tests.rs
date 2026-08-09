@@ -17,6 +17,13 @@ use serde_json::{json, Value};
 
 const MODEL: &str = "gemini-2.5-flash";
 
+fn interactions_dialect() -> crate::llm::api::DialectContract {
+    crate::llm::api::DialectContract::new(
+        crate::llm::capabilities::WireDialect::Gemini,
+        Some(LiveEndpointFamily::GeminiInteractions),
+    )
+}
+
 fn interactions_override() -> CapabilitiesFile {
     toml::from_str(
         // `extends` is what makes this a one-field overlay: without it the
@@ -652,11 +659,67 @@ async fn sse_transcript_drives_the_same_assembly() {
         "data: [DONE]\n",
         "\n",
     );
-    let envelope = super::interactions::consume_interaction_sse(transcript.as_bytes(), None)
-        .await
-        .expect("stream parses");
+    let envelope = super::interactions::consume_interaction_sse(
+        transcript.as_bytes(),
+        None,
+        interactions_dialect(),
+    )
+    .await
+    .expect("stream parses");
     let payload = gemini_payload(MODEL, ThinkingConfig::Disabled);
     let result = parse_response(&envelope, &payload).expect("parses");
     assert_eq!(result.text, "hi");
     assert_eq!(result.telemetry.request_id.as_deref(), Some("v1_abc"));
+}
+
+#[tokio::test]
+async fn stream_parser_rejects_a_mismatched_dialect_contract() {
+    let dialect = crate::llm::api::DialectContract::new(
+        crate::llm::capabilities::WireDialect::OpenAiCompat,
+        None,
+    );
+    let error = super::interactions::consume_interaction_sse(b"".as_slice(), None, dialect)
+        .await
+        .expect_err("an OpenAI contract must not decode Gemini events");
+    assert!(error.to_string().contains("mismatched dialect"));
+}
+
+#[tokio::test]
+async fn events_match_external_golden() {
+    #[derive(serde::Deserialize)]
+    struct GoldenResult {
+        text: String,
+        input_tokens: i64,
+        output_tokens: i64,
+        stop_reason: String,
+    }
+    #[derive(serde::Deserialize)]
+    struct Golden {
+        wire_events: String,
+        result: GoldenResult,
+    }
+
+    let golden: Golden = serde_json::from_str(include_str!(
+        "../../testdata/dialects/gemini_interactions.json"
+    ))
+    .expect("valid interactions golden");
+    let (delta_tx, mut delta_rx) = tokio::sync::mpsc::unbounded_channel();
+    let envelope = super::interactions::consume_interaction_sse(
+        golden.wire_events.as_bytes(),
+        Some(delta_tx),
+        interactions_dialect(),
+    )
+    .await
+    .expect("golden stream parses");
+    let payload = gemini_payload(MODEL, ThinkingConfig::Disabled);
+    let result = parse_response(&envelope, &payload).expect("golden response parses");
+
+    assert_eq!(result.text, golden.result.text);
+    assert_eq!(result.input_tokens, golden.result.input_tokens);
+    assert_eq!(result.output_tokens, golden.result.output_tokens);
+    assert_eq!(
+        result.stop_reason.as_deref(),
+        Some(golden.result.stop_reason.as_str())
+    );
+    assert_eq!(delta_rx.recv().await.as_deref(), Some("hello back"));
 }

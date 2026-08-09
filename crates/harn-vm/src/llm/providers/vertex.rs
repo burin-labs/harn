@@ -8,10 +8,6 @@
 use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::llm::providers::common::{apply_provider_overrides, maybe_emit_delta, vm_err};
-use crate::llm::providers::schema_compat::{
-    sanitize_schema_for_provider, SchemaCompatProfile, SchemaSurface,
-};
-use crate::llm::providers::GeminiProvider;
 use crate::url_encoding::percent_encode_component;
 use crate::value::VmError;
 
@@ -37,6 +33,13 @@ struct ServiceAccountClaims<'a> {
 }
 
 impl VertexProvider {
+    fn dialect() -> crate::llm::api::DialectContract {
+        crate::llm::api::DialectContract::new(
+            crate::llm::capabilities::WireDialect::Gemini,
+            Some(crate::llm::capabilities::LiveEndpointFamily::GeminiGenerateContent),
+        )
+    }
+
     pub(crate) fn build_request_body(request: &LlmRequestPayload) -> serde_json::Value {
         // Vertex speaks the same generateContent dialect as the Gemini API, so
         // delegate the body shaping (multimodal parts, tool-call history,
@@ -46,7 +49,7 @@ impl VertexProvider {
         // text (dropping image/pdf/audio parts and function-call history) and
         // omitted seed/penalty/logprobs params. Only the genuinely
         // vertex-specific envelope differences are adjusted below.
-        let mut body = GeminiProvider::build_request_body(request);
+        let mut body = Self::dialect().build_request_body(request);
 
         // Vertex-specific: assistant prefill is emulated with a trailing
         // `model` turn. The shared builder never emits one (the gemini
@@ -69,36 +72,6 @@ impl VertexProvider {
             }
         }
 
-        // Vertex-specific legacy mirror: callers that only set
-        // `response_format: "json"` (+ optional `json_schema`) still get a
-        // structured-output directive. The modern `output_format` wins when
-        // both are set (the shared builder already lowered it above).
-        if matches!(request.output_format, crate::llm::api::OutputFormat::Text)
-            && request.response_format.as_deref() == Some("json")
-        {
-            if !body["generationConfig"].is_object() {
-                body["generationConfig"] = serde_json::json!({});
-            }
-            let config = body["generationConfig"]
-                .as_object_mut()
-                .expect("generationConfig ensured above");
-            config.insert(
-                "responseMimeType".to_string(),
-                serde_json::json!("application/json"),
-            );
-            if let Some(schema) = request.json_schema.as_ref() {
-                config.insert(
-                    "responseSchema".to_string(),
-                    sanitize_schema_for_provider(
-                        &request.provider,
-                        &request.model,
-                        SchemaCompatProfile::Google,
-                        SchemaSurface::StructuredOutput,
-                        schema,
-                    ),
-                );
-            }
-        }
         body
     }
 
@@ -161,6 +134,7 @@ impl VertexProvider {
         request: &LlmRequestPayload,
         delta_tx: Option<DeltaSender>,
     ) -> Result<LlmResult, VmError> {
+        let dialect = Self::dialect();
         let url = Self::endpoint_url(request)?;
         let token = Self::bearer_token(&request.api_key).await?;
         let mut body = Self::build_request_body(request);
@@ -180,13 +154,16 @@ impl VertexProvider {
                 ))
             })?;
         if !response.status().is_success() {
-            return Err(crate::llm::api::err_for_non_success("vertex", response).await);
+            return Err(crate::llm::api::err_for_non_success_with_dialect(
+                dialect, "vertex", response,
+            )
+            .await);
         }
         let json: serde_json::Value = response
             .json()
             .await
             .map_err(|error| vm_err(format!("vertex response parse error: {error}")))?;
-        let result = crate::llm::providers::parse_gemini_response(&json, request)?;
+        let result = dialect.parse_response(&json, request, false)?;
         maybe_emit_delta(delta_tx, &result.text);
         Ok(result)
     }
@@ -394,11 +371,13 @@ mod tests {
     #[test]
     fn build_request_honors_legacy_response_format_json_mirror() {
         // Callers that only set the legacy `response_format`/`json_schema`
-        // mirror (no modern output_format) must still get the Vertex
-        // structured-output directive.
+        // The typed output contract must reach Vertex's structured-output
+        // directive through the shared Gemini request grammar.
         let mut request = base_request();
-        request.response_format = Some("json".to_string());
-        request.json_schema = Some(json!({"type": "object"}));
+        request.output_format = crate::llm::api::OutputFormat::JsonSchema {
+            schema: json!({"type": "object"}),
+            strict: true,
+        };
         let body = VertexProvider::build_request_body(&request);
         assert_eq!(
             body["generationConfig"]["responseMimeType"],
@@ -544,8 +523,6 @@ mod tests {
             presence_penalty: None,
             fast: false,
             output_format: crate::llm::api::OutputFormat::Text,
-            response_format: None,
-            json_schema: None,
             output_schema: None,
             schema_stream_abort: false,
             thinking: ThinkingConfig::Disabled,

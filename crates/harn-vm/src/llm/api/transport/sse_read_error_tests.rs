@@ -8,6 +8,8 @@
 
 use super::liveness::StreamDeadlinePolicy;
 use super::sse::{consume_sse_lines, consume_sse_lines_with_policy};
+use crate::llm::api::DialectContract;
+use crate::llm::capabilities::WireDialect;
 use crate::value::{
     ErrorCategory, ProviderStreamDeadline, ProviderStreamFailureReason, ProviderStreamPhase,
 };
@@ -36,7 +38,7 @@ async fn mid_stream_timeout_surfaces_as_retryable_error_not_empty_success() {
         reader,
         "openrouter",
         "test-model",
-        false,
+        DialectContract::new(WireDialect::OpenAiCompat, None),
         delta_tx,
         None,
         None,
@@ -73,7 +75,7 @@ async fn mid_stream_connection_reset_is_also_retryable() {
         reader,
         "llamacpp",
         "test-model",
-        false,
+        DialectContract::new(WireDialect::OpenAiCompat, None),
         delta_tx,
         None,
         None,
@@ -109,7 +111,7 @@ async fn finish_reason_terminal_completes_without_waiting_for_eof() {
         tokio::io::BufReader::new(reader),
         "openai",
         "test-model",
-        false,
+        DialectContract::new(WireDialect::OpenAiCompat, None),
         delta_tx,
         None,
         None,
@@ -130,7 +132,7 @@ async fn clean_eof_without_terminal_evidence_is_typed_failure() {
         tokio::io::BufReader::new(body),
         "openai",
         "test-model",
-        false,
+        DialectContract::new(WireDialect::OpenAiCompat, None),
         delta_tx,
         None,
         None,
@@ -160,7 +162,7 @@ async fn pending_sse_deadline(
         tokio::io::BufReader::new(reader),
         "openai",
         "test-model",
-        false,
+        DialectContract::new(WireDialect::OpenAiCompat, None),
         delta_tx,
         None,
         None,

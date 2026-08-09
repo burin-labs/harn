@@ -9,7 +9,7 @@ pub(super) async fn vm_call_llm_api_sse_from_response(
     response: reqwest::Response,
     provider: &str,
     model: &str,
-    is_anthropic_style: bool,
+    dialect: DialectContract,
     delta_tx: DeltaSender,
     session_id: Option<&str>,
     schema_watch: Option<super::super::schema_stream::StreamSchemaWatch>,
@@ -38,7 +38,7 @@ pub(super) async fn vm_call_llm_api_sse_from_response(
         reader,
         provider,
         model,
-        is_anthropic_style,
+        dialect,
         delta_tx,
         session_id,
         schema_watch,
@@ -289,12 +289,12 @@ pub(super) async fn send_stream_request_with_ollama_warmup(
     req: reqwest::RequestBuilder,
     provider: &str,
     model: &str,
-    is_ollama: bool,
+    protocol: StreamProtocol,
     unload_grace: Duration,
     warmup_gate: &mut bool,
 ) -> Result<reqwest::Response, VmError> {
     let send = req.send();
-    if !is_ollama || *warmup_gate || unload_grace.is_zero() {
+    if protocol != StreamProtocol::OllamaNdjson || *warmup_gate || unload_grace.is_zero() {
         return send
             .await
             .map_err(|error| stream_send_error(provider, error));
@@ -497,7 +497,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
     reader: R,
     provider: &str,
     model: &str,
-    is_anthropic_style: bool,
+    dialect: DialectContract,
     delta_tx: DeltaSender,
     session_id: Option<&str>,
     schema_watch: Option<super::super::schema_stream::StreamSchemaWatch>,
@@ -507,7 +507,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
         reader,
         provider,
         model,
-        is_anthropic_style,
+        dialect,
         delta_tx,
         session_id,
         schema_watch,
@@ -526,7 +526,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
     reader: R,
     provider: &str,
     model: &str,
-    is_anthropic_style: bool,
+    dialect: DialectContract,
     delta_tx: DeltaSender,
     session_id: Option<&str>,
     mut schema_watch: Option<super::super::schema_stream::StreamSchemaWatch>,
@@ -633,7 +633,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
             Err(_) => continue,
         };
         liveness.mark_partial_output();
-        let terminal_frame = if is_anthropic_style {
+        let terminal_frame = if dialect.stream_protocol() == StreamProtocol::AnthropicSse {
             json["type"].as_str() == Some("message_stop")
         } else {
             json["choices"].as_array().is_some_and(|choices| {
@@ -645,7 +645,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
             })
         };
 
-        if is_anthropic_style {
+        if dialect.stream_protocol() == StreamProtocol::AnthropicSse {
             match json["type"].as_str() {
                 Some("message_start") => {
                     if let Some(n) = json["message"]["usage"]["input_tokens"].as_i64() {
@@ -1181,12 +1181,12 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
     {
         // Name the ACTUAL wire style, not a hardcoded "openai-compatible".
         // This streaming parser handles BOTH the native Anthropic SSE shape
-        // and the OpenAI-compatible shape (see `is_anthropic_style`), so a
+        // and the OpenAI-compatible shape selected by the contract, so a
         // native Anthropic empty-completion flake used to be mislabeled as
         // "openai-compatible model", which sent a real root-cause hunt down
         // the wrong (transport-routing) path. The `provider` id is the ground
         // truth; the wire style disambiguates native vs. compat.
-        let wire_style = if is_anthropic_style {
+        let wire_style = if dialect.stream_protocol() == StreamProtocol::AnthropicSse {
             "anthropic-native"
         } else {
             "openai-compatible"
@@ -1230,12 +1230,15 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
     // call actually went to. Anthropic's classic SSE shape still implies
     // provider="anthropic" because the wire protocol is anthropic-specific
     // even when the configured provider name disagrees (proxies / mocks).
-    let result_provider = if is_anthropic_style {
+    let result_provider = if dialect.stream_protocol() == StreamProtocol::AnthropicSse {
         "anthropic".to_string()
     } else {
         provider.to_string()
     };
-    if telemetry.is_empty() && is_anthropic_style && (input_tokens > 0 || output_tokens > 0) {
+    if telemetry.is_empty()
+        && dialect.stream_protocol() == StreamProtocol::AnthropicSse
+        && (input_tokens > 0 || output_tokens > 0)
+    {
         let usage = serde_json::json!({
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,

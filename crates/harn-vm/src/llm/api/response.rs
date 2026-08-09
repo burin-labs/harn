@@ -10,6 +10,8 @@ use super::telemetry::ProviderTelemetry;
 
 #[cfg(test)]
 mod cache_mapping_tests;
+#[cfg(test)]
+mod test_support;
 
 mod boundary;
 mod cache_mapping;
@@ -771,7 +773,7 @@ pub(crate) fn parse_llm_response(
     json: &serde_json::Value,
     provider: &str,
     model: &str,
-    is_anthropic_style: bool,
+    dialect: crate::llm::capabilities::WireDialect,
     tools_offered: bool,
 ) -> Result<LlmResult, VmError> {
     if provider == "openai"
@@ -783,7 +785,7 @@ pub(crate) fn parse_llm_response(
         return parse_openai_responses_response(json, provider, model);
     }
 
-    if is_anthropic_style {
+    if dialect == crate::llm::capabilities::WireDialect::Anthropic {
         if let Some(err) = json["error"]["message"].as_str() {
             return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(
                 format!("{provider} API error: {err}"),
@@ -1203,16 +1205,14 @@ mod tests {
 
     use super::{
         extract_cache_read_tokens, extract_cache_write_tokens, extract_openai_choice_logprobs,
-        is_billed_noncommittal_completion, parse_llm_response, parse_openai_responses_response,
-        parse_tool_arguments, preview_chars, CompletionContractSignals,
+        is_billed_noncommittal_completion, parse_openai_responses_response, parse_tool_arguments,
+        preview_chars, test_support::parse_llm_response, CompletionContractSignals,
     };
 
     #[test]
     fn parse_tool_arguments_preview_does_not_panic_mid_utf8() {
-        // 199 ASCII bytes + a 3-byte char means byte index 200 lands INSIDE the
-        // multibyte char. The old `&text[..text.len().min(200)]` slice panicked
-        // here; the char-safe preview must not. The body is invalid JSON so we
-        // hit the __parse_error path that builds the preview.
+        // The old 200-byte slice landed inside the multibyte character and
+        // panicked while building the invalid-JSON preview.
         let mut malformed = "a".repeat(199);
         malformed.push('→'); // 3 bytes (E2 86 92), straddles byte 200
         malformed.push_str(" not json");
