@@ -20,6 +20,9 @@ type ReleaseWorkflowStep = {
   uses?: string,
   run?: string,
   env?: {
+    CARGO_PROFILE_RELEASE_LTO?: string,
+    CARGO_PROFILE_RELEASE_CODEGEN_UNITS?: string,
+    CARGO_PROFILE_RELEASE_STRIP?: string,
     HARN_REQUIRE_CLI_AOT?: string,
     BINARY_SIZE_FUSE_BYTES?: string,
     BINARY_SIZE_SOURCE_REF?: string,
@@ -31,7 +34,15 @@ type ReleaseWorkflow = {
   jobs: {
     setup: {outputs: {binary_size_fuse_bytes: string}, steps: list<ReleaseWorkflowStep>},
     prepare_cli_aot: {needs: string, if: string, steps: list<ReleaseWorkflowStep>},
-    build: {needs: list<string>, steps: list<ReleaseWorkflowStep>},
+    build: {
+      needs: list<string>,
+      env: {
+        CARGO_PROFILE_RELEASE_LTO: string,
+        CARGO_PROFILE_RELEASE_CODEGEN_UNITS: string,
+        CARGO_PROFILE_RELEASE_STRIP: string,
+      },
+      steps: list<ReleaseWorkflowStep>,
+    },
     release: {needs: list<string>, if: string},
   },
 }
@@ -46,6 +57,9 @@ fn release_workflow(fs: HarnessFs) -> ReleaseWorkflow {
       env: schema_field(
         schema_object(
           {
+            CARGO_PROFILE_RELEASE_LTO: schema_field(schema_string(), false),
+            CARGO_PROFILE_RELEASE_CODEGEN_UNITS: schema_field(schema_string(), false),
+            CARGO_PROFILE_RELEASE_STRIP: schema_field(schema_string(), false),
             HARN_REQUIRE_CLI_AOT: schema_field(schema_string(), false),
             BINARY_SIZE_FUSE_BYTES: schema_field(schema_string(), false),
             BINARY_SIZE_SOURCE_REF: schema_field(schema_string(), false),
@@ -84,6 +98,15 @@ fn release_workflow(fs: HarnessFs) -> ReleaseWorkflow {
               schema_object(
                 {
                   needs: schema_field(schema_list(schema_string())),
+                  env: schema_field(
+                    schema_object(
+                      {
+                        CARGO_PROFILE_RELEASE_LTO: schema_field(schema_string()),
+                        CARGO_PROFILE_RELEASE_CODEGEN_UNITS: schema_field(schema_string()),
+                        CARGO_PROFILE_RELEASE_STRIP: schema_field(schema_string()),
+                      },
+                    ),
+                  ),
                   steps: schema_field(schema_list(step_schema)),
                 },
               ),
@@ -644,8 +667,21 @@ pipeline test_workflow_preserves_bloat_after_a_failed_size_gate(harness: Harness
   const diagnostic_mode = measured_target
     + " && (needs.setup.outputs.build_mode == 'warm' || (needs.setup.outputs.build_mode == 'benchmark' && inputs.benchmark_cargo_bloat) || steps.binary_size_fuse.outcome == 'failure' || steps.binary_size_growth.outcome == 'failure')"
   const diagnostics = "always() && " + diagnostic_mode
-  const steps = release_workflow(harness.fs).jobs.build.steps
+  const build = release_workflow(harness.fs).jobs.build
+  const steps = build.steps
   const bloat = release_workflow_step(steps, "Generate cargo-bloat report")
+  // Cargo's environment-backed profile configuration is job-wide so the
+  // canonical build and every later Cargo diagnostic share one fingerprint.
+  assert_eq(build.env.CARGO_PROFILE_RELEASE_LTO, "thin")
+  assert_eq(
+    build.env.CARGO_PROFILE_RELEASE_CODEGEN_UNITS,
+    gha_expression("matrix.release_codegen_units"),
+  )
+  assert_eq(build.env.CARGO_PROFILE_RELEASE_STRIP, "symbols")
+  const canonical_build = release_workflow_step(steps, "Build")
+  assert_eq(canonical_build.env?.CARGO_PROFILE_RELEASE_LTO, nil)
+  assert_eq(canonical_build.env?.CARGO_PROFILE_RELEASE_CODEGEN_UNITS, nil)
+  assert_eq(canonical_build.env?.CARGO_PROFILE_RELEASE_STRIP, nil)
   // Install precedes both size gates, so it cannot read their outcome. It must
   // stay unconditional on the measured target or a size failure would try to
   // attribute itself with cargo-bloat missing.
