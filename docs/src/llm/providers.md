@@ -674,6 +674,13 @@ accepts these fields:
 | `temperature_supported`, `top_p_supported`, `top_k_supported`, `seed_supported`, `frequency_penalty_supported`, `presence_penalty_supported`, `stop_supported` | bool | Portable generation-option admission facts. An authored `false` rejects caller intent before provider transport; an unknown custom generation route remains open-world. |
 | `thinking_disable_directive` | string | In-prompt directive (e.g. `"/no_think"` for Qwen3 chat templates) auto-prepended to the system message when the resolved `thinking` is `Disabled`. Lets script authors write `thinking: false` uniformly across providers without learning per-template prompt directives. Idempotent — never injected twice. |
 
+Harn resolves `message_wire_format` and `live_endpoint_family` once per call.
+That one dialect contract builds the request, selects the stream grammar,
+parses the final response, and classifies provider errors. A custom proxy must
+declare the wire format it actually speaks; response headers do not switch a
+call to another provider parser. See [LLM dialect
+ownership](../dev/llm-dialect-contract.md) for the design boundary.
+
 `tool_mode_parity` is a *declaration* about a route, and it is always
 present: when no capability row states one, it is computed from
 `native_tools` and `text_tool_wire_format_supported`. The two used to be

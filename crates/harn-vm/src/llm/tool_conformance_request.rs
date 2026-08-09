@@ -6,7 +6,6 @@ use super::{
     ToolProbeMode, ToolProbeRequestProfile, TOOL_PROBE_TOOL_NAME,
 };
 use crate::llm::api::{LlmApiMode, LlmRequestPayload, OutputFormat};
-use crate::llm::capabilities::WireDialect;
 use crate::llm_config;
 
 #[path = "tool_conformance_request_validation.rs"]
@@ -204,8 +203,6 @@ pub(super) fn probe_request_payload_for_format(
         presence_penalty: None,
         fast: false,
         output_format: OutputFormat::Text,
-        response_format: None,
-        json_schema: None,
         output_schema: None,
         schema_stream_abort: false,
         thinking,
@@ -417,24 +414,7 @@ fn provider_compatible_probe_request_body(payload: &LlmRequestPayload) -> Value 
         _ => {}
     }
 
-    let caps = crate::llm::capabilities::lookup(&payload.provider, &payload.model);
-    match caps.message_wire_format {
-        WireDialect::Anthropic => {
-            crate::llm::providers::AnthropicProvider::build_request_body(payload)
-        }
-        WireDialect::Gemini
-            if caps.live_endpoint_family.is_some_and(
-                crate::llm::capabilities::LiveEndpointFamily::is_gemini_interactions,
-            ) =>
-        {
-            crate::llm::providers::GeminiInteractions::build_request_body(payload)
-        }
-        WireDialect::Gemini => crate::llm::providers::GeminiProvider::build_request_body(payload),
-        WireDialect::Ollama => crate::llm::providers::OllamaProvider::build_request_body(payload),
-        WireDialect::OpenAiCompat => {
-            crate::llm::providers::OpenAiCompatibleProvider::build_request_body(payload, false)
-        }
-    }
+    crate::llm::api::DialectContract::for_request(payload).build_request_body(payload)
 }
 
 fn request_body_warnings(

@@ -3,8 +3,7 @@ use std::fs;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Instant;
 
@@ -12,52 +11,28 @@ use crate::env_guard::ScopedEnvVar;
 use crate::package;
 use crate::test_timing::DurationSummary;
 use crate::CLI_RUNTIME_STACK_SIZE;
-use harn_parser::SNode;
-use harn_vm::{IsolateValue, VmValue};
+use harn_vm::IsolateValue;
 
-mod discovery;
 mod execution;
 #[cfg(test)]
 mod fixture_tests;
-mod fixtures;
-mod reporting;
-mod session;
 mod skill_context;
 #[cfg(test)]
 mod tests;
 
-use discovery::{extract_cases_from_program, parse_program, seed_imported_enum_candidates};
 use execution::{execute_case, execute_file_fixture};
-use fixtures::{FixtureScope, TestFixture};
-use reporting::SuiteCallablePreparation;
-pub use reporting::{
-    AggregateTimings, PhaseTimings, TestPhase, TestResult, TestSummary, TestTimeout,
+use harn_test_runner::{
+    extract_cases_from_program, parse_program, prepare_callable_entries,
+    seed_imported_enum_candidates, FixtureScope, TestCase, TestFixture,
 };
-pub use session::{TestRunSession, TestRunSessionStats};
+pub use harn_test_runner::{
+    AggregateTimings, PhaseTimings, SuiteCallablePreparation, TestPhase, TestResult, TestSummary,
+    TestTimeout,
+};
+pub use harn_test_runner::{TestRunSession, TestRunSessionStats};
 use skill_context::PreparedSkillContexts;
 
-#[derive(Clone, Debug)]
-pub enum TestRunEvent {
-    SuiteDiscovered {
-        total_tests: usize,
-        total_files: usize,
-        parallel: bool,
-        workers: usize,
-    },
-    LargeSequentialSuite {
-        total_tests: usize,
-        total_files: usize,
-    },
-    TestStarted {
-        name: String,
-        file: String,
-        test_index: usize,
-        total_tests: usize,
-    },
-    TestFinished(TestResult),
-}
-
-pub type TestRunProgress = Arc<dyn Fn(TestRunEvent) + Send + Sync>;
+pub use harn_test_runner::{TestRunEvent, TestRunProgress};
 
 const LARGE_SEQUENTIAL_TEST_THRESHOLD: usize = 50;
 const LARGE_SEQUENTIAL_FILE_THRESHOLD: usize = 10;
@@ -167,45 +142,6 @@ impl RunOptions {
             ..Default::default()
         }
     }
-}
-
-/// A single executable test discovered during scan. Workers compile and
-/// run each case in isolation; the parsed program is shared by `Arc` so
-/// large suites parse exactly once.
-#[derive(Clone)]
-struct TestCase {
-    file: PathBuf,
-    name: String,
-    pipeline_name: String,
-    source: Arc<String>,
-    program: Arc<Vec<SNode>>,
-    /// Public enum names imported by this file, computed once during
-    /// discovery and shared by all parameterized cases from the file.
-    imported_enum_candidates: Arc<Vec<String>>,
-    /// Optional serial group — tests with the same group never run
-    /// concurrently with each other, even if workers are idle. Used for
-    /// shared fixtures.
-    serial_group: Option<String>,
-    /// Number of workers this test reserves while running. Capped at the
-    /// pool size during discovery so heavy tests still get scheduled.
-    weight: usize,
-    /// Explicit values supplied by one `@test(cases: [...])` row.
-    args: Vec<VmValue>,
-    /// Optional reusable setup selected by `@test(fixture: name)`.
-    fixture: Option<TestFixture>,
-    /// File-scoped fixture result cloned through Harn's isolate-safe COW
-    /// contract before this case enters its fresh VM.
-    file_fixture_value: Option<IsolateValue>,
-    /// Immutable entry artifact prepared once with every other selected test
-    /// pipeline from this source file. Each case still instantiates it in a
-    /// fresh VM, so compilation reuse never becomes runtime-state reuse.
-    compiled_entry: Option<Arc<harn_vm::CompiledCallableEntry>>,
-    /// File fixture entry lowered with the selected pipelines. The result is
-    /// shared so a fixture compile failure remains one file-scoped result.
-    compiled_file_fixture_entry:
-        Option<Result<Arc<harn_vm::CompiledCallableEntry>, harn_vm::CompileError>>,
-    /// Operator-selected authority for this case and its private import graph.
-    trusted_host_dispatch: bool,
 }
 
 fn canonicalize_existing_path(path: &Path) -> PathBuf {
@@ -939,142 +875,6 @@ struct PreparedFixtureCases {
     failures: Vec<TestResult>,
 }
 
-#[derive(Default)]
-struct PreparedCallableCases {
-    cases: Vec<TestCase>,
-    failures: Vec<TestResult>,
-    timing: SuiteCallablePreparation,
-}
-
-fn prepare_callable_entries(
-    mut cases: Vec<TestCase>,
-    session: &TestRunSession,
-) -> PreparedCallableCases {
-    let started = Instant::now();
-    let mut by_file: BTreeMap<PathBuf, Vec<usize>> = BTreeMap::new();
-    for (index, case) in cases.iter().enumerate() {
-        by_file.entry(case.file.clone()).or_default().push(index);
-    }
-
-    let mut failed = HashSet::new();
-    let mut failures = Vec::new();
-    let mut compiled_entries = 0usize;
-    for indices in by_file.values() {
-        let first = &cases[indices[0]];
-        let mut request_indices: BTreeMap<(String, Option<String>), Vec<usize>> = BTreeMap::new();
-        for &index in indices {
-            let case = &cases[index];
-            let fixture = case
-                .fixture
-                .as_ref()
-                .filter(|fixture| fixture.scope == FixtureScope::Case)
-                .map(|fixture| fixture.name.clone());
-            request_indices
-                .entry((case.pipeline_name.clone(), fixture))
-                .or_default()
-                .push(index);
-        }
-        let owned_requests = request_indices.keys().cloned().collect::<Vec<_>>();
-        let requests = owned_requests
-            .iter()
-            .map(|(pipeline, fixture)| (pipeline.as_str(), fixture.as_deref()))
-            .collect::<Vec<_>>();
-        let mut fixture_indices: BTreeMap<String, Vec<usize>> = BTreeMap::new();
-        for &index in indices {
-            if let Some(fixture) = cases[index]
-                .fixture
-                .as_ref()
-                .filter(|fixture| fixture.scope == FixtureScope::File)
-            {
-                fixture_indices
-                    .entry(fixture.name.clone())
-                    .or_default()
-                    .push(index);
-            }
-        }
-        let fixture_names = fixture_indices
-            .keys()
-            .map(String::as_str)
-            .collect::<Vec<_>>();
-        let imported_enums = first.imported_enum_candidates.iter().cloned();
-        let compiler = if first.trusted_host_dispatch {
-            harn_vm::Compiler::new_trusted_host_dispatch()
-                .with_imported_enum_candidates(imported_enums)
-        } else {
-            crate::compiler_with_imported_enum_candidates(imported_enums)
-        };
-        let entries =
-            compiler.compile_named_callable_entries(&first.program, &requests, &fixture_names);
-        match entries {
-            Ok(batch) => {
-                let entries = batch.pipelines;
-                let fixture_entries = batch.functions;
-                compiled_entries += entries.iter().filter(|entry| entry.is_ok()).count();
-                for ((_, case_indices), entry) in request_indices.into_iter().zip(entries) {
-                    match entry {
-                        Ok(entry) => {
-                            let entry = Arc::new(entry);
-                            for index in case_indices {
-                                cases[index].compiled_entry = Some(Arc::clone(&entry));
-                            }
-                        }
-                        Err(error) => {
-                            for index in case_indices {
-                                failed.insert(index);
-                                failures
-                                    .push(prepared_compile_failure(&cases[index], error.clone()));
-                            }
-                        }
-                    }
-                }
-                compiled_entries += fixture_entries.iter().filter(|entry| entry.is_ok()).count();
-                for ((_, case_indices), entry) in fixture_indices.into_iter().zip(fixture_entries) {
-                    let entry = entry.map(Arc::new);
-                    for index in case_indices {
-                        cases[index].compiled_file_fixture_entry = Some(entry.clone());
-                    }
-                }
-            }
-            Err(error) => {
-                for &index in indices {
-                    failed.insert(index);
-                    failures.push(prepared_compile_failure(&cases[index], error.clone()));
-                }
-            }
-        }
-    }
-
-    let files = by_file.len();
-    cases = cases
-        .into_iter()
-        .enumerate()
-        .filter_map(|(index, case)| (!failed.contains(&index)).then_some(case))
-        .collect();
-    session.record_callable_preparation(files, compiled_entries);
-    PreparedCallableCases {
-        cases,
-        failures,
-        timing: SuiteCallablePreparation {
-            duration_ms: started.elapsed().as_millis() as u64,
-            files,
-            entries: compiled_entries,
-        },
-    }
-}
-
-fn prepared_compile_failure(case: &TestCase, error: harn_vm::CompileError) -> TestResult {
-    TestResult {
-        name: case.name.clone(),
-        file: case.file.display().to_string(),
-        passed: false,
-        error: Some(format!("Compile error: {error}")),
-        captured_output: None,
-        timeout: None,
-        duration_ms: 0,
-        phases: None,
-    }
-}
-
 async fn prepare_file_fixtures(
     cases: Vec<TestCase>,
     options: &RunOptions,
@@ -1193,134 +993,54 @@ async fn execute_cases(
         };
     }
 
-    let queue = Arc::new(Mutex::new(cases));
     let skill_contexts = Arc::new(skill_contexts);
-    let gate = Arc::new(ResourceGate::new(workers));
-    let results: Arc<Mutex<Vec<TestResult>>> = Arc::new(Mutex::new(Vec::new()));
-    let infrastructure_errors: Arc<Mutex<Vec<TestResult>>> = Arc::new(Mutex::new(Vec::new()));
-    let cancelled = Arc::new(AtomicBool::new(false));
-
-    let mut handles = Vec::with_capacity(workers);
-    for worker_idx in 0..workers {
-        let queue = Arc::clone(&queue);
-        let skill_contexts = Arc::clone(&skill_contexts);
-        let gate = Arc::clone(&gate);
-        let results = Arc::clone(&results);
-        let infrastructure_errors = Arc::clone(&infrastructure_errors);
-        let completed = Arc::clone(&completed);
-        let timeout_ms = options.timeout_ms;
-        let max_test_ms = options.max_test_ms;
-        let max_execute_ms = options.max_execute_ms;
-        let progress = options.progress.clone();
-        let diagnose = options.diagnose;
-        let fail_fast = options.fail_fast;
-        let cancelled = Arc::clone(&cancelled);
-        let prepared_module_cache = session.prepared_module_cache(worker_idx);
-        let stdio_available = session.stdio_available();
-        let operator_approval_grant = operator_approval_grant.cloned();
-        let handle = thread::Builder::new()
-            .name(format!("harn-test-worker-{worker_idx}"))
-            .stack_size(CLI_RUNTIME_STACK_SIZE)
-            .spawn(move || {
-                let runtime = match tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                {
-                    Ok(rt) => rt,
-                    Err(error) => {
-                        infrastructure_errors.lock().unwrap().push(TestResult {
-                            name: "<worker error>".to_string(),
-                            file: String::new(),
-                            passed: false,
-                            error: Some(format!("failed to start test runtime: {error}")),
-                            captured_output: None,
-                            timeout: None,
-                            duration_ms: 0,
-                            phases: None,
-                        });
-                        return;
-                    }
-                };
-                // Cases are sorted ascending by historical duration; popping
-                // from the tail gives this worker the slowest unclaimed
-                // test, which front-loads long poles and prevents workers
-                // from stranding on quick tests at the end of the run.
-                loop {
-                    let case = claim_next_case(&queue, &cancelled, fail_fast);
-                    let Some(case) = case else { break };
-                    let _guard = gate.acquire(case.weight, case.serial_group.as_deref());
-                    // A worker may have claimed this case before another
-                    // worker failed, then waited behind a heavy/serial gate.
-                    // Recheck at the execution barrier so queued work is not
-                    // mistaken for already-running work under fail-fast.
-                    if fail_fast && cancelled.load(Ordering::Acquire) {
-                        break;
-                    }
-                    let cwd = case_execution_cwd(&case);
-                    let loaded_skills = skill_contexts.for_case(&case);
-                    let test_index = next_test_index(&completed);
-                    emit_progress(
-                        &progress,
-                        TestRunEvent::TestStarted {
-                            name: case.name.clone(),
-                            file: case.file.display().to_string(),
-                            test_index,
-                            total_tests,
-                        },
-                    );
-                    let result = runtime.block_on(execute_case(
-                        &case,
-                        &cwd,
-                        timeout_ms,
-                        loaded_skills,
-                        &prepared_module_cache,
-                        stdio_available,
-                        operator_approval_grant.as_ref(),
-                    ));
-                    let result = enforce_case_budgets(result, max_test_ms, max_execute_ms);
-                    if fail_fast && !result.passed {
-                        cancelled.store(true, Ordering::Release);
-                    }
-                    if diagnose {
-                        result.emit_diagnose();
-                    }
-                    emit_progress(&progress, TestRunEvent::TestFinished(result.clone()));
-                    results.lock().unwrap().push(result);
-                }
-            })
-            .expect("spawning a harn-test worker thread should succeed");
-        handles.push(handle);
-    }
-
-    for handle in handles {
-        let _ = handle.join();
-    }
-
-    // All workers have joined, so this Arc holds the only remaining
-    // reference. The lock-and-clone fallback survives the unlikely case
-    // where a panic-unwind kept an extra reference alive.
-    let cases = Arc::try_unwrap(results)
-        .map(|m| m.into_inner().unwrap_or_default())
-        .unwrap_or_else(|arc| arc.lock().unwrap().clone());
-    let infrastructure_errors = Arc::try_unwrap(infrastructure_errors)
-        .map(|mutex| mutex.into_inner().unwrap_or_default())
-        .unwrap_or_else(|arc| arc.lock().unwrap().clone());
-    CaseExecutionResults {
+    let prepared_module_caches = (0..workers)
+        .map(|worker_idx| session.prepared_module_cache(worker_idx))
+        .collect::<Vec<_>>();
+    let stdio_available = session.stdio_available();
+    let operator_approval_grant = operator_approval_grant.cloned();
+    let timeout_ms = options.timeout_ms;
+    let max_test_ms = options.max_test_ms;
+    let max_execute_ms = options.max_execute_ms;
+    let diagnose = options.diagnose;
+    let parallel = harn_test_runner::execute_parallel_cases(
         cases,
-        infrastructure_errors,
-    }
-}
-
-fn claim_next_case(
-    queue: &Mutex<Vec<TestCase>>,
-    cancelled: &AtomicBool,
-    fail_fast: bool,
-) -> Option<TestCase> {
-    let mut queue = queue.lock().unwrap();
-    if fail_fast && cancelled.load(Ordering::Acquire) {
-        None
-    } else {
-        queue.pop()
+        harn_test_runner::ParallelRunOptions {
+            workers,
+            total_tests,
+            stack_size: CLI_RUNTIME_STACK_SIZE,
+            fail_fast: options.fail_fast,
+            progress: options.progress.clone(),
+        },
+        move |worker_idx| {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|error| format!("failed to start test runtime: {error}"))?;
+            Ok((runtime, prepared_module_caches[worker_idx].clone()))
+        },
+        move |worker, case| {
+            let cwd = case_execution_cwd(case);
+            let loaded_skills = skill_contexts.for_case(case);
+            let result = worker.0.block_on(execute_case(
+                case,
+                &cwd,
+                timeout_ms,
+                loaded_skills,
+                &worker.1,
+                stdio_available,
+                operator_approval_grant.as_ref(),
+            ));
+            let result = enforce_case_budgets(result, max_test_ms, max_execute_ms);
+            if diagnose {
+                result.emit_diagnose();
+            }
+            result
+        },
+    );
+    CaseExecutionResults {
+        cases: parallel.cases,
+        infrastructure_errors: parallel.infrastructure_errors,
     }
 }
 
@@ -1383,94 +1103,6 @@ fn case_execution_cwd(case: &TestCase) -> PathBuf {
         .filter(|p| !p.as_os_str().is_empty())
         .map(Path::to_path_buf)
         .unwrap_or_else(test_execution_cwd)
-}
-
-/// Coordinates worker permits and serial-group exclusivity without
-/// requiring an async lock — workers are dedicated OS threads, so a
-/// classic Mutex+Condvar gate keeps everything off the tokio scheduler.
-struct ResourceGate {
-    state: Mutex<GateState>,
-    cond: Condvar,
-    capacity: usize,
-}
-
-struct GateState {
-    available: usize,
-    busy_groups: HashSet<String>,
-}
-
-struct GateGuard<'a> {
-    gate: &'a ResourceGate,
-    weight: usize,
-    group: Option<String>,
-}
-
-impl ResourceGate {
-    fn new(capacity: usize) -> Self {
-        Self {
-            state: Mutex::new(GateState {
-                available: capacity,
-                busy_groups: HashSet::new(),
-            }),
-            cond: Condvar::new(),
-            capacity,
-        }
-    }
-
-    fn acquire(&self, weight: usize, group: Option<&str>) -> GateGuard<'_> {
-        let weight = weight.min(self.capacity).max(1);
-        let mut state = self.state.lock().unwrap();
-        loop {
-            if let Some(guard) = self.try_grab_locked(&mut state, weight, group) {
-                return guard;
-            }
-            state = self.cond.wait(state).unwrap();
-        }
-    }
-
-    /// Grab a permit if one is immediately available, holding the already-locked
-    /// state. Returns `None` without blocking when the pool is exhausted or the
-    /// group is busy. Shared by `acquire` (which retries) and `try_acquire`.
-    fn try_grab_locked<'a>(
-        &'a self,
-        state: &mut GateState,
-        weight: usize,
-        group: Option<&str>,
-    ) -> Option<GateGuard<'a>> {
-        let group_free = group.is_none_or(|g| !state.busy_groups.contains(g));
-        if state.available >= weight && group_free {
-            state.available -= weight;
-            if let Some(g) = group {
-                state.busy_groups.insert(g.to_string());
-            }
-            return Some(GateGuard {
-                gate: self,
-                weight,
-                group: group.map(str::to_owned),
-            });
-        }
-        None
-    }
-
-    /// Non-blocking variant of `acquire` used by tests to assert gate state
-    /// deterministically (in-process, no threads or wall-clock sleeps).
-    #[cfg(test)]
-    fn try_acquire(&self, weight: usize, group: Option<&str>) -> Option<GateGuard<'_>> {
-        let weight = weight.min(self.capacity).max(1);
-        let mut state = self.state.lock().unwrap();
-        self.try_grab_locked(&mut state, weight, group)
-    }
-}
-
-impl Drop for GateGuard<'_> {
-    fn drop(&mut self) {
-        let mut state = self.gate.state.lock().unwrap();
-        state.available += self.weight;
-        if let Some(group) = self.group.as_deref() {
-            state.busy_groups.remove(group);
-        }
-        self.gate.cond.notify_all();
-    }
 }
 
 fn discover_test_files(dir: &Path) -> Vec<PathBuf> {

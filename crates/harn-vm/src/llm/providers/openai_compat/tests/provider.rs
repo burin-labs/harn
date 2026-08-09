@@ -1,7 +1,8 @@
 //! Provider-level surface: model-generation gating, tool-search variant
 //! advertisement, and HTTP error classification.
 
-use crate::llm::api::{LlmErrorKind, LlmErrorReason};
+use crate::llm::api::{DialectContract, LlmErrorKind, LlmErrorReason};
+use crate::llm::capabilities::WireDialect;
 use crate::llm::provider::LlmProvider;
 use crate::llm::providers::openai_compat::{
     gpt_generation, gpt_model_supports_tool_search, OpenAiCompatibleProvider,
@@ -67,7 +68,7 @@ fn native_tool_search_variants_empty_for_old_model() {
 
 #[test]
 fn classifies_openai_context_length_as_terminal_context_overflow() {
-    let info = OpenAiCompatibleProvider::classify_http_error(
+    let info = DialectContract::new(WireDialect::OpenAiCompat, None).classify_http_error(
         "openai",
         reqwest::StatusCode::BAD_REQUEST,
         None,
@@ -79,7 +80,7 @@ fn classifies_openai_context_length_as_terminal_context_overflow() {
 
 #[test]
 fn classifies_openai_rate_limit_as_transient_rate_limit() {
-    let info = OpenAiCompatibleProvider::classify_http_error(
+    let info = DialectContract::new(WireDialect::OpenAiCompat, None).classify_http_error(
         "openai",
         reqwest::StatusCode::TOO_MANY_REQUESTS,
         Some("5"),

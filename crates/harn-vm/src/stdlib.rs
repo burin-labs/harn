@@ -31,6 +31,7 @@ pub(crate) mod clock;
 pub(crate) mod collections;
 mod command_policy;
 pub(crate) mod compaction;
+#[cfg(feature = "compression")]
 mod compression;
 mod concurrency;
 pub(crate) use concurrency::cancelled_vm_error;
@@ -42,6 +43,7 @@ mod csv;
 mod datetime;
 mod diff;
 pub(crate) use datetime::date_dict_from_millis;
+#[cfg(feature = "content")]
 mod document;
 mod durable_step;
 mod event_log;
@@ -122,6 +124,7 @@ mod types;
 mod url_parse;
 mod vision;
 pub(crate) mod waitpoint;
+#[cfg(feature = "content")]
 mod web;
 pub mod workflow_messages;
 pub(crate) mod xml;
@@ -147,11 +150,13 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     xml::register_xml_builtins(vm);
     datetime::register_datetime_builtins(vm);
     diff::register_diff_builtins(vm);
+    #[cfg(feature = "content")]
     document::register_document_builtins(vm);
     calendar::register_calendar_builtins(vm);
     cron::register_cron_builtins(vm);
     regex::register_regex_builtins(vm);
     bytes::register_bytes_builtins(vm);
+    #[cfg(feature = "compression")]
     compression::register_compression_builtins(vm);
     command_policy::register_command_policy_builtins(vm);
     runtime_scope::register_runtime_scope_builtins(vm);
@@ -160,6 +165,7 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     junit::register_junit_builtins(vm);
     multipart::register_multipart_builtins(vm);
     url_parse::register_url_builtins(vm);
+    #[cfg(feature = "content")]
     web::register_web_builtins(vm);
     cookies::register_cookie_builtins(vm);
     path::register_path_helper_builtins(vm);

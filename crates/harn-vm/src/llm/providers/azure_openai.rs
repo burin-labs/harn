@@ -10,8 +10,6 @@ use crate::llm::providers::common::{apply_provider_overrides, maybe_emit_delta, 
 use crate::url_encoding::percent_encode_component;
 use crate::value::VmError;
 
-use super::openai_compat::OpenAiCompatibleProvider;
-
 pub(crate) const DEFAULT_API_VERSION: &str = "2024-10-21";
 
 pub(crate) struct AzureOpenAiProvider;
@@ -23,8 +21,15 @@ pub(crate) enum AzureAuth {
 }
 
 impl AzureOpenAiProvider {
+    fn dialect() -> crate::llm::api::DialectContract {
+        crate::llm::api::DialectContract::new(
+            crate::llm::capabilities::WireDialect::OpenAiCompat,
+            None,
+        )
+    }
+
     pub(crate) fn build_request_body(request: &LlmRequestPayload) -> serde_json::Value {
-        let mut body = OpenAiCompatibleProvider::build_request_body(request, false);
+        let mut body = Self::dialect().build_request_body(request);
         if let Some(obj) = body.as_object_mut() {
             // Azure deployment routing supplies the model identity in the path.
             obj.remove("model");
@@ -87,6 +92,7 @@ impl AzureOpenAiProvider {
         request: &LlmRequestPayload,
         delta_tx: Option<DeltaSender>,
     ) -> Result<LlmResult, VmError> {
+        let dialect = Self::dialect();
         let url = Self::endpoint_url(request)?;
         let auth = Self::resolve_auth(&request.api_key)?;
         let mut body = Self::build_request_body(request);
@@ -107,7 +113,12 @@ impl AzureOpenAiProvider {
             ))
         })?;
         if !response.status().is_success() {
-            return Err(crate::llm::api::err_for_non_success("azure_openai", response).await);
+            return Err(crate::llm::api::err_for_non_success_with_dialect(
+                dialect,
+                "azure_openai",
+                response,
+            )
+            .await);
         }
         let json: serde_json::Value = response
             .json()
@@ -118,13 +129,7 @@ impl AzureOpenAiProvider {
             .and_then(|tools| tools.as_array())
             .map(|tools| !tools.is_empty())
             .unwrap_or(false);
-        let result = crate::llm::api::parse_llm_response_for_provider(
-            &json,
-            "azure_openai",
-            &request.model,
-            false,
-            tools_offered,
-        )?;
+        let result = dialect.parse_response(&json, request, tools_offered)?;
         maybe_emit_delta(delta_tx, &result.text);
         Ok(result)
     }
@@ -241,8 +246,6 @@ mod tests {
             presence_penalty: None,
             fast: false,
             output_format: crate::llm::api::OutputFormat::Text,
-            response_format: None,
-            json_schema: None,
             output_schema: None,
             schema_stream_abort: false,
             thinking: ThinkingConfig::Disabled,

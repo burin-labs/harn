@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::agent_events::{AgentEvent, ToolCallErrorCategory, ToolCallStatus};
-use crate::llm::capabilities::{should_use_responses_transport, WireDialect};
+use crate::llm::capabilities::should_use_responses_transport;
 use crate::value::{VmError, VmValue};
 
 use super::openai_normalize::{
@@ -17,12 +17,13 @@ use super::options::{DeltaSender, LlmApiMode, LlmRequestPayload};
 use super::partial_tool_args::{project_partial, DeltaCoalescer, PartialToolArgs};
 use super::response::{
     billed_noncommittal_completion_error, empty_generation_error, extract_cache_read_tokens,
-    extract_cache_write_tokens, is_billed_noncommittal_completion, parse_llm_response,
+    extract_cache_write_tokens, is_billed_noncommittal_completion,
     parse_openai_tool_argument_json_values, CompletionContractSignals,
 };
 use super::result::{LlmResult, RawProviderToolCall};
 use super::telemetry::{elapsed_ms, source as telemetry_source, ProviderTelemetry};
 use super::thinking::ThinkingStreamSplitter;
+use super::{DialectContract, StreamProtocol};
 
 mod capture;
 mod liveness;
@@ -84,50 +85,6 @@ fn append_ollama_tool_calls(
             "visibility": "internal",
         }));
     }
-}
-
-fn should_request_stream_usage(is_anthropic_style: bool, is_ollama: bool, endpoint: &str) -> bool {
-    if is_anthropic_style {
-        return false;
-    }
-    // OpenAI-compatible streams expose aggregate usage in a final chunk
-    // when requested. Ollama's native `/api/chat` shape does not use
-    // this field, but its `/v1/chat/completions` compatibility endpoint
-    // does.
-    !is_ollama || endpoint.contains("/v1/")
-}
-
-fn classify_transport_http_error(
-    provider: &str,
-    status: reqwest::StatusCode,
-    retry_after: Option<&str>,
-    body: &str,
-    is_anthropic_style: bool,
-    is_ollama: bool,
-) -> String {
-    if is_anthropic_style {
-        return crate::llm::providers::AnthropicProvider::classify_http_error(
-            status,
-            retry_after,
-            body,
-        )
-        .message;
-    }
-    if is_ollama {
-        return crate::llm::providers::OllamaProvider::classify_http_error(
-            status,
-            retry_after,
-            body,
-        )
-        .message;
-    }
-    crate::llm::providers::OpenAiCompatibleProvider::classify_http_error(
-        provider,
-        status,
-        retry_after,
-        body,
-    )
-    .message
 }
 
 /// Dispatch an LLM API call to the appropriate provider. This is the main
@@ -203,25 +160,21 @@ async fn vm_call_llm_api_inner(
     // is_anthropic / else OpenAI-compat` chain, which quietly sent a
     // Gemini-dialect route's OpenAI-shaped body to the Gemini base URL instead
     // of failing. A `match` makes a new dialect a compile error here.
-    let dialect = crate::llm::capabilities::lookup(provider, &opts.model).message_wire_format;
-
-    let body = match dialect {
-        WireDialect::Ollama => {
+    let dialect = DialectContract::for_request(opts);
+    let body = match dialect.stream_protocol() {
+        StreamProtocol::OllamaNdjson => {
             return crate::llm::providers::OllamaProvider
                 .chat_impl(opts, delta_tx)
                 .await;
         }
         // Owns both Gemini live endpoint families; see `providers::gemini`.
-        WireDialect::Gemini => {
+        StreamProtocol::GeminiJson | StreamProtocol::GeminiInteractionsSse => {
             return crate::llm::providers::GeminiProvider
                 .chat_impl(opts, delta_tx)
                 .await;
         }
-        WireDialect::Anthropic => {
-            crate::llm::providers::AnthropicProvider::build_request_body(opts)
-        }
-        WireDialect::OpenAiCompat => {
-            crate::llm::providers::OpenAiCompatibleProvider::build_request_body(opts, false)
+        StreamProtocol::AnthropicSse | StreamProtocol::OpenAiSse => {
+            dialect.build_request_body(opts)
         }
     };
 
@@ -230,9 +183,9 @@ async fn vm_call_llm_api_inner(
 
 /// Dispatch to a registered provider by name.
 ///
-/// Provider selection uses trait methods (`is_mock()`, `is_local()`,
-/// `is_anthropic_style()`) instead of string comparisons so that each
-/// provider owns its own dispatch semantics.
+/// Mock and enterprise transports keep their concrete auth envelopes. Every
+/// ordinary registered route selects its provider-wire adapter from the same
+/// dialect contract used for request and response semantics.
 async fn dispatch_to_registered_provider(
     opts: &LlmRequestPayload,
     delta_tx: Option<DeltaSender>,
@@ -254,19 +207,6 @@ async fn dispatch_to_registered_provider(
             .await;
     }
 
-    let ollama = crate::llm::providers::OllamaProvider;
-    if (provider == ollama.name()
-        || crate::llm::provider::provider_uses_ollama_messages(provider, &opts.model))
-        && ollama.is_local()
-    {
-        return ollama.chat_impl(opts, delta_tx).await;
-    }
-
-    let gemini = crate::llm::providers::GeminiProvider;
-    if provider == gemini.name() {
-        return gemini.chat_impl(opts, delta_tx).await;
-    }
-
     if provider == "bedrock" {
         return crate::llm::providers::BedrockProvider
             .chat_impl(opts, delta_tx)
@@ -285,14 +225,28 @@ async fn dispatch_to_registered_provider(
             .await;
     }
 
-    if crate::llm::provider::provider_uses_anthropic_messages(provider, &opts.model) {
-        let anthropic = crate::llm::providers::AnthropicProvider;
-        return anthropic.chat_impl(opts, delta_tx).await;
+    match DialectContract::for_request(opts).stream_protocol() {
+        StreamProtocol::OllamaNdjson => {
+            crate::llm::providers::OllamaProvider
+                .chat_impl(opts, delta_tx)
+                .await
+        }
+        StreamProtocol::GeminiJson | StreamProtocol::GeminiInteractionsSse => {
+            crate::llm::providers::GeminiProvider
+                .chat_impl(opts, delta_tx)
+                .await
+        }
+        StreamProtocol::AnthropicSse => {
+            crate::llm::providers::AnthropicProvider
+                .chat_impl(opts, delta_tx)
+                .await
+        }
+        StreamProtocol::OpenAiSse => {
+            crate::llm::providers::OpenAiCompatibleProvider::new(provider.clone())
+                .chat_impl(opts, delta_tx)
+                .await
+        }
     }
-
-    crate::llm::providers::OpenAiCompatibleProvider::new(provider.clone())
-        .chat_impl(opts, delta_tx)
-        .await
 }
 
 /// Execute an LLM API call with a pre-built request body. This is the shared
@@ -308,7 +262,7 @@ pub(crate) async fn vm_call_llm_api_with_body(
     opts: &LlmRequestPayload,
     delta_tx: Option<DeltaSender>,
     body: serde_json::Value,
-    dialect: WireDialect,
+    dialect: DialectContract,
 ) -> Result<LlmResult, VmError> {
     let started = Instant::now();
     let mut result = vm_call_llm_api_with_body_inner(opts, delta_tx, body, dialect).await?;
@@ -362,14 +316,9 @@ async fn vm_call_llm_api_with_body_inner(
     opts: &LlmRequestPayload,
     delta_tx: Option<DeltaSender>,
     mut body: serde_json::Value,
-    dialect: WireDialect,
+    dialect: DialectContract,
 ) -> Result<LlmResult, VmError> {
-    // Derive the transport-shape booleans once from the single typed dialect.
-    // The `(true, true)` state was never valid; a single `WireDialect` makes
-    // it unrepresentable and removes the re-derivation that used to happen at
-    // the response-parse boundary below.
-    let is_anthropic_style = dialect.is_anthropic();
-    let is_ollama = dialect.is_ollama();
+    let stream_protocol = dialect.stream_protocol();
     let provider = &opts.provider;
     let model = &opts.model;
     let raw_capture_context = crate::llm::agent_observe::current_raw_provider_capture_context();
@@ -385,7 +334,7 @@ async fn vm_call_llm_api_with_body_inner(
 
     let resolved = crate::llm::helpers::ResolvedProvider::resolve(provider);
     let caps = crate::llm::capabilities::lookup(provider, model);
-    let use_stream_transport = if is_ollama && !opts.stream {
+    let use_stream_transport = if stream_protocol == StreamProtocol::OllamaNdjson && !opts.stream {
         crate::events::log_warn(
             "llm",
             "stream=false is not supported by Ollama, using streaming",
@@ -398,16 +347,18 @@ async fn vm_call_llm_api_with_body_inner(
         );
         true
     } else {
-        wants_streaming || is_ollama || caps.requires_streaming
+        wants_streaming
+            || stream_protocol == StreamProtocol::OllamaNdjson
+            || caps.requires_streaming
     };
 
-    if !is_ollama {
+    if stream_protocol != StreamProtocol::OllamaNdjson {
         crate::llm::provider::apply_provider_wire_overrides(
             &mut body,
             opts.provider_overrides.as_ref(),
         );
     }
-    if is_anthropic_style {
+    if stream_protocol == StreamProtocol::AnthropicSse {
         crate::llm::providers::anthropic::reconcile_request_body(&mut body, model, &opts.thinking);
     }
     if provider == "openrouter"
@@ -426,7 +377,7 @@ async fn vm_call_llm_api_with_body_inner(
     if use_stream_transport {
         body["stream"] = serde_json::json!(true);
         // OpenAI-style: request usage in the final streaming chunk.
-        if should_request_stream_usage(is_anthropic_style, is_ollama, &resolved.endpoint) {
+        if dialect.requests_stream_usage(&resolved.endpoint) {
             body["stream_options"] = serde_json::json!({"include_usage": true});
         }
     }
@@ -443,7 +394,7 @@ async fn vm_call_llm_api_with_body_inner(
         .timeout(std::time::Duration::from_secs(opts.resolve_timeout()))
         .json(&body);
     let mut req = resolved.apply_headers(req, &opts.api_key);
-    if is_anthropic_style && !opts.anthropic_beta_features.is_empty() {
+    if stream_protocol == StreamProtocol::AnthropicSse && !opts.anthropic_beta_features.is_empty() {
         req = req.header("anthropic-beta", opts.anthropic_beta_features.join(","));
     }
 
@@ -454,8 +405,12 @@ async fn vm_call_llm_api_with_body_inner(
             let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<String>();
             tx
         };
-        let max_attempts = if is_ollama { 2 } else { 1 };
-        let unload_grace = if is_ollama {
+        let max_attempts = if stream_protocol == StreamProtocol::OllamaNdjson {
+            2
+        } else {
+            1
+        };
+        let unload_grace = if stream_protocol == StreamProtocol::OllamaNdjson {
             crate::llm::api::ollama_unload_grace_duration_from_env()
         } else {
             Duration::ZERO
@@ -466,7 +421,7 @@ async fn vm_call_llm_api_with_body_inner(
                 raw_capture_context.as_ref(),
                 provider,
                 model,
-                dialect.as_str(),
+                dialect.wire().as_str(),
                 Some(attempt),
                 &body,
             );
@@ -476,14 +431,16 @@ async fn vm_call_llm_api_with_body_inner(
                 .timeout(std::time::Duration::from_secs(opts.resolve_timeout()))
                 .json(&body);
             let mut req = resolved.apply_headers(req, &opts.api_key);
-            if is_anthropic_style && !opts.anthropic_beta_features.is_empty() {
+            if stream_protocol == StreamProtocol::AnthropicSse
+                && !opts.anthropic_beta_features.is_empty()
+            {
                 req = req.header("anthropic-beta", opts.anthropic_beta_features.join(","));
             }
             let response = send_stream_request_with_ollama_warmup(
                 req,
                 provider,
                 model,
-                is_ollama,
+                stream_protocol,
                 unload_grace,
                 &mut ollama_warmup_gate,
             )
@@ -503,39 +460,35 @@ async fn vm_call_llm_api_with_body_inner(
                     content_type.as_deref(),
                     &body,
                 );
-                let msg = classify_transport_http_error(
-                    provider,
-                    status,
-                    retry_after.as_deref(),
-                    &body,
-                    is_anthropic_style,
-                    is_ollama,
-                );
+                let msg = dialect
+                    .classify_http_error(provider, status, retry_after.as_deref(), &body)
+                    .message;
                 return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(msg))));
             }
-            let is_sse = response
-                .headers()
-                .get("content-type")
-                .and_then(|v| v.to_str().ok())
-                .is_some_and(|ct| ct.contains("text/event-stream"));
             // Build a fresh schema watch per attempt so an Ollama-retry
             // restart doesn't see chunks from the previous run.
             let schema_watch = super::schema_stream::StreamSchemaWatch::from_payload(opts);
             let deadline_policy = liveness::StreamDeadlinePolicy::from_payload(opts);
-            if is_sse {
-                return vm_call_llm_api_sse_from_response(
-                    response,
-                    provider,
-                    model,
-                    is_anthropic_style,
-                    tx,
-                    opts.session_id.as_deref(),
-                    schema_watch,
-                    tools_offered,
-                    deadline_policy,
-                    RawProviderCaptureTarget::new(raw_capture_context.clone(), Some(attempt)),
-                )
-                .await;
+            match stream_protocol {
+                StreamProtocol::AnthropicSse | StreamProtocol::OpenAiSse => {
+                    return vm_call_llm_api_sse_from_response(
+                        response,
+                        provider,
+                        model,
+                        dialect,
+                        tx,
+                        opts.session_id.as_deref(),
+                        schema_watch,
+                        tools_offered,
+                        deadline_policy,
+                        RawProviderCaptureTarget::new(raw_capture_context.clone(), Some(attempt)),
+                    )
+                    .await;
+                }
+                StreamProtocol::OllamaNdjson => {}
+                StreamProtocol::GeminiJson | StreamProtocol::GeminiInteractionsSse => {
+                    unreachable!("Gemini streaming is owned by the Gemini provider transport")
+                }
             }
             match vm_call_llm_api_ndjson_from_response(
                 response,
@@ -557,7 +510,7 @@ async fn vm_call_llm_api_with_body_inner(
                 // parser bug (done_reason stop/absent) is retried.
                 Ok(result) => return Ok(result),
                 Err(err)
-                    if is_ollama
+                    if stream_protocol == StreamProtocol::OllamaNdjson
                         && attempt + 1 < max_attempts
                         && is_ollama_empty_content_parser_bug(&err) =>
                 {
@@ -579,7 +532,7 @@ async fn vm_call_llm_api_with_body_inner(
         raw_capture_context.as_ref(),
         provider,
         model,
-        dialect.as_str(),
+        dialect.wire().as_str(),
         None,
         &body,
     );
@@ -606,14 +559,9 @@ async fn vm_call_llm_api_with_body_inner(
             content_type.as_deref(),
             &body,
         );
-        let msg = classify_transport_http_error(
-            provider,
-            status,
-            retry_after.as_deref(),
-            &body,
-            is_anthropic_style,
-            is_ollama,
-        );
+        let msg = dialect
+            .classify_http_error(provider, status, retry_after.as_deref(), &body)
+            .message;
         return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(msg))));
     }
 
@@ -640,10 +588,9 @@ async fn vm_call_llm_api_with_body_inner(
         ))))
     })?;
 
-    // Reuse the dialect resolved for this dispatch instead of re-looking it up
-    // (the previous re-lookup passed the same `(provider, model)` and could
-    // only ever agree with `is_anthropic_style` above).
-    parse_llm_response(&json, provider, model, is_anthropic_style, tools_offered)
+    // Reuse the complete contract resolved for this dispatch instead of
+    // re-looking up any response-shape predicates.
+    dialect.parse_response(&json, opts, tools_offered)
 }
 
 use ndjson::{
@@ -655,6 +602,8 @@ use sse::{
     vm_call_llm_api_sse_from_response,
 };
 
+#[cfg(test)]
+mod dialect_golden_stream_tests;
 #[cfg(test)]
 mod schema_stream_abort_tests;
 #[cfg(test)]

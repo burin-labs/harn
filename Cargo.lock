@@ -3450,6 +3450,7 @@ dependencies = [
  "harn-serve",
  "harn-skills",
  "harn-stdlib",
+ "harn-test-runner",
  "harn-vm",
  "hex",
  "hmac 0.13.0",
@@ -3938,6 +3939,17 @@ dependencies = [
  "serde",
  "thiserror 2.0.19",
  "vt100",
+]
+
+[[package]]
+name = "harn-test-runner"
+version = "0.10.66"
+dependencies = [
+ "harn-lexer",
+ "harn-modules",
+ "harn-parser",
+ "harn-vm",
+ "serde",
 ]
 
 [[package]]

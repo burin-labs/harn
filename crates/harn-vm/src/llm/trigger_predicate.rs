@@ -81,8 +81,6 @@ pub(crate) fn request_hash(request: &LlmRequestPayload) -> String {
         "frequency_penalty": request.frequency_penalty,
         "presence_penalty": request.presence_penalty,
         "output_format": request.output_format,
-        "response_format": request.response_format,
-        "json_schema": request.json_schema,
         "thinking": request.thinking,
         "anthropic_beta_features": request.anthropic_beta_features,
         "native_tools": request.native_tools,

@@ -31,14 +31,6 @@ impl LlmProviderChat for OllamaProvider {
 }
 
 impl OllamaProvider {
-    pub(crate) fn classify_http_error(
-        status: reqwest::StatusCode,
-        retry_after: Option<&str>,
-        body: &str,
-    ) -> crate::llm::api::LlmErrorInfo {
-        crate::llm::api::classify_provider_http_error("ollama", status, retry_after, body)
-    }
-
     /// Build the Ollama-specific request body. Ollama uses OpenAI-style messages
     /// but with additional options and NDJSON streaming.
     pub(crate) fn build_request_body(opts: &LlmRequestPayload) -> serde_json::Value {
@@ -193,14 +185,9 @@ impl OllamaProvider {
         if Self::should_route_via_raw_generate(request) {
             return self.raw_generate_chat_impl(request, delta_tx).await;
         }
-        let body = Self::build_request_body(request);
-        crate::llm::api::vm_call_llm_api_with_body(
-            request,
-            delta_tx,
-            body,
-            crate::llm::capabilities::WireDialect::Ollama,
-        )
-        .await
+        let dialect = crate::llm::api::DialectContract::for_request(request);
+        let body = dialect.build_request_body(request);
+        crate::llm::api::vm_call_llm_api_with_body(request, delta_tx, body, dialect).await
     }
 
     async fn raw_generate_chat_impl(
@@ -240,7 +227,9 @@ impl OllamaProvider {
             let status = response.status();
             let retry_after = crate::llm::api::retry_after_header(response.headers());
             let body = response.text().await.unwrap_or_default();
-            let msg = Self::classify_http_error(status, retry_after.as_deref(), &body).message;
+            let msg = crate::llm::api::DialectContract::for_request(request)
+                .classify_http_error(&request.provider, status, retry_after.as_deref(), &body)
+                .message;
             return Err(VmError::Thrown(VmValue::String(arcstr::ArcStr::from(msg))));
         }
         let mut result = if request.stream {
@@ -602,8 +591,6 @@ mod tests {
                 schema: serde_json::json!({"type": "object"}),
                 strict: true,
             },
-            response_format: Some("json".to_string()),
-            json_schema: Some(serde_json::json!({"type": "object"})),
             output_schema: Some(serde_json::json!({"type": "object"})),
             schema_stream_abort: false,
             thinking: ThinkingConfig::Disabled,
@@ -643,8 +630,6 @@ mod tests {
     fn output_format_json_object_maps_to_ollama_json_format() {
         let mut payload = base_payload();
         payload.output_format = crate::llm::api::OutputFormat::JsonObject;
-        payload.response_format = None;
-        payload.json_schema = None;
 
         let body = OllamaProvider::build_request_body(&payload);
 
@@ -656,8 +641,6 @@ mod tests {
     fn plain_requests_do_not_emit_format_field() {
         let mut payload = base_payload();
         payload.output_format = crate::llm::api::OutputFormat::Text;
-        payload.response_format = None;
-        payload.json_schema = None;
         let body = OllamaProvider::build_request_body(&payload);
         assert!(body.get("format").is_none());
     }
@@ -667,8 +650,6 @@ mod tests {
         let mut payload = base_payload();
         payload.model = "llava:latest".to_string();
         payload.output_format = crate::llm::api::OutputFormat::Text;
-        payload.response_format = None;
-        payload.json_schema = None;
         payload.messages = vec![serde_json::json!({
             "role": "user",
             "content": [
@@ -697,8 +678,6 @@ mod tests {
         ];
         let mut payload = base_payload();
         payload.output_format = crate::llm::api::OutputFormat::Text;
-        payload.response_format = None;
-        payload.json_schema = None;
         let body = OllamaProvider::build_request_body(&payload);
         assert_eq!(body["options"]["num_ctx"], serde_json::json!(32768));
         assert_eq!(body["keep_alive"], serde_json::json!("30m"));
@@ -725,8 +704,6 @@ mod tests {
     fn qwen_text_tool_route_uses_raw_generate_bypass() {
         let mut payload = base_payload();
         payload.output_format = crate::llm::api::OutputFormat::Text;
-        payload.response_format = None;
-        payload.json_schema = None;
         payload.native_tools = None;
 
         assert!(OllamaProvider::should_route_via_raw_generate(&payload));
@@ -746,8 +723,6 @@ mod tests {
     fn qwen_native_tool_route_stays_on_ollama_chat() {
         let mut payload = base_payload();
         payload.output_format = crate::llm::api::OutputFormat::Text;
-        payload.response_format = None;
-        payload.json_schema = None;
         payload.native_tools = Some(vec![serde_json::json!({
             "type": "function",
             "function": {"name": "read"}
@@ -760,8 +735,6 @@ mod tests {
     fn qwen_raw_generate_prompt_filters_private_content_blocks() {
         let mut payload = base_payload();
         payload.output_format = crate::llm::api::OutputFormat::Text;
-        payload.response_format = None;
-        payload.json_schema = None;
         payload.native_tools = None;
         payload.messages = vec![serde_json::json!({
             "role": "assistant",
@@ -784,8 +757,6 @@ mod tests {
     fn qwen_raw_generate_prompt_renders_nested_tool_result_content() {
         let mut payload = base_payload();
         payload.output_format = crate::llm::api::OutputFormat::Text;
-        payload.response_format = None;
-        payload.json_schema = None;
         payload.native_tools = None;
         payload.messages = vec![serde_json::json!({
             "role": "tool",
@@ -813,8 +784,6 @@ mod tests {
     fn raw_generate_inline_thinking_stays_private() {
         let mut payload = base_payload();
         payload.output_format = crate::llm::api::OutputFormat::Text;
-        payload.response_format = None;
-        payload.json_schema = None;
 
         let result = parse_raw_generate_json(
             serde_json::json!({
@@ -849,8 +818,6 @@ mod tests {
     fn raw_generate_thinking_only_is_not_promoted_to_text() {
         let mut payload = base_payload();
         payload.output_format = crate::llm::api::OutputFormat::Text;
-        payload.response_format = None;
-        payload.json_schema = None;
 
         let result = parse_raw_generate_json(
             serde_json::json!({
@@ -876,7 +843,12 @@ mod tests {
 
     #[test]
     fn classifies_ollama_missing_model_as_terminal_model_unavailable() {
-        let info = OllamaProvider::classify_http_error(
+        let info = crate::llm::api::DialectContract::new(
+            crate::llm::capabilities::WireDialect::Ollama,
+            None,
+        )
+        .classify_http_error(
+            "ollama",
             reqwest::StatusCode::NOT_FOUND,
             None,
             r#"{"error":"model not found"}"#,
@@ -887,7 +859,12 @@ mod tests {
 
     #[test]
     fn classifies_ollama_timeout_as_transient_timeout() {
-        let info = OllamaProvider::classify_http_error(
+        let info = crate::llm::api::DialectContract::new(
+            crate::llm::capabilities::WireDialect::Ollama,
+            None,
+        )
+        .classify_http_error(
+            "ollama",
             reqwest::StatusCode::GATEWAY_TIMEOUT,
             None,
             r#"{"error":"upstream timeout"}"#,
@@ -900,8 +877,6 @@ mod tests {
     fn raw_generate_prompt_continues_prefill_without_end_token() {
         let mut payload = base_payload();
         payload.output_format = crate::llm::api::OutputFormat::Text;
-        payload.response_format = None;
-        payload.json_schema = None;
         payload.prefill = Some("<tool_call>\nedit(".to_string());
         let body = OllamaProvider::build_raw_generate_body(&payload);
         let prompt = body["prompt"].as_str().unwrap_or_default();

@@ -202,8 +202,6 @@ fn degrade_options_to_text_channel_strips_native_tool_payload() {
     opts.model = "qwen3.6-35b-a3b".to_string();
     opts.native_tools = Some(vec![serde_json::json!({"name": "edit"})]);
     opts.output_format = crate::llm::api::OutputFormat::JsonObject;
-    opts.response_format = Some("json".to_string());
-    opts.json_schema = Some(serde_json::json!({"type": "object"}));
 
     let degraded = degrade_options_to_text_channel(&opts);
 
@@ -215,8 +213,6 @@ fn degrade_options_to_text_channel_strips_native_tool_payload() {
         matches!(degraded.output_format, crate::llm::api::OutputFormat::Text),
         "output must fall back to plain Text so the model answers in content"
     );
-    assert!(degraded.response_format.is_none());
-    assert!(degraded.json_schema.is_none());
     // The logical request is otherwise unchanged.
     assert_eq!(degraded.provider, "ollama");
     assert_eq!(degraded.model, "qwen3.6-35b-a3b");

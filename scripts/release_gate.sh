@@ -532,6 +532,44 @@ AUDIT_RECEIPT_REUSED="false"
 PRESERVE_AUDIT_TMP=0
 AUDIT_TMP_DIR=""
 
+# Validate lane-owned tools before the warm build or shared AOT preparation.
+# A missing audit dependency is an environment error, not evidence about the
+# candidate, and discovering it after those expensive phases wastes the whole
+# attempt. Keep this keyed by semantic lane so receipt/source-only plans only
+# require the tools they will actually execute.
+release_gate_preflight_audit_tools() {
+  local -a required=(cargo git make)
+  local step tool
+  for step in "${SELECTED_AUDIT_STEPS[@]}"; do
+    case "$step" in
+      rust-audit)
+        required+=(cargo-nextest)
+        ;;
+      docs-audit | grammar-audit)
+        required+=(npm)
+        ;;
+      security-audit)
+        required+=(rg)
+        ;;
+    esac
+  done
+
+  local -a missing=()
+  local seen=" "
+  for tool in "${required[@]}"; do
+    [[ "$seen" == *" $tool "* ]] && continue
+    seen+="$tool "
+    command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
+  done
+  if [[ "${#missing[@]}" -gt 0 ]]; then
+    printf 'error: release audit prerequisites missing: %s\n' "${missing[*]}" >&2
+    if [[ " ${missing[*]} " == *" cargo-nextest "* ]]; then
+      echo "hint: run 'make setup' or install cargo-nextest before retrying" >&2
+    fi
+    return 1
+  fi
+}
+
 # Render a lane's terminal exit status. A lane killed by a signal writes
 # nothing recognizable into its log, so the status is the only record of how it
 # died; name it rather than leaving an unexplained failing lane.
@@ -683,6 +721,7 @@ cmd_audit() {
   if [[ "$validate_only" -eq 1 ]]; then
     return 0
   fi
+  release_gate_preflight_audit_tools || exit 1
 
   echo "=== Parallel release audit ==="
   export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
@@ -778,10 +817,20 @@ cmd_audit() {
   # Two cores per lane is the smallest split under which neither pool is
   # reduced to a single worker. Below that, overlap costs more than it buys.
   local serial_lanes=0
-  if [[ "$lane_cpus" -gt 0 && "$lane_cpus" -lt $(( ${#SELECTED_AUDIT_STEPS[@]} * 2 )) ]]; then
+  local serialize_heavy_lanes=0
+  if [[ "$lane_cpus" -gt 0 && "$lane_cpus" -lt 4 ]]; then
     serial_lanes=1
     printf 'audit lanes: serial (%s cpu for %s lanes)\n' \
       "$lane_cpus" "${#SELECTED_AUDIT_STEPS[@]}"
+  elif [[ "$lane_cpus" -gt 0 && "$lane_cpus" -lt $(( ${#SELECTED_AUDIT_STEPS[@]} * 2 )) ]]; then
+    # Rust, Harn conformance, and package verification each own an internal
+    # worker/compiler pool. Serialize only those resource-heavy lanes while
+    # allowing single-process docs/generated/grammar/security/smoke work to
+    # overlap. This avoids both hosted-runner starvation and the old eight-lane
+    # serial tail on ordinary 12-core build servers.
+    serialize_heavy_lanes=1
+    printf 'audit lanes: resource-aware (%s cpu; heavy lanes serialized, light lanes parallel)\n' \
+      "$lane_cpus"
   fi
 
   # Each step writes its wall-clock duration to `<name>.dur` so the
@@ -816,9 +865,22 @@ cmd_audit() {
     return "$rc"
   }
 
+  local last_heavy_lane_idx=-1
   launch_step() {
     local name="$1"
     shift
+    local is_heavy=0
+    case "$name" in
+      rust-audit | harn-audit | package-audit) is_heavy=1 ;;
+    esac
+    if [[ "$serialize_heavy_lanes" -eq 1 && "$is_heavy" -eq 1 \
+      && "$last_heavy_lane_idx" -ge 0 ]]; then
+      local prior_pid="${pids[$last_heavy_lane_idx]}"
+      if [[ -n "$prior_pid" ]]; then
+        wait "$prior_pid" || true
+        pids[$last_heavy_lane_idx]=""
+      fi
+    fi
     printf 'log: %-15s (%s)\n' "$name" "$tmp/$name.log"
     run_step "$name" "$@" &
     local launched="$!"
@@ -834,6 +896,9 @@ cmd_audit() {
       return
     fi
     pids+=("$launched")
+    if [[ "$serialize_heavy_lanes" -eq 1 && "$is_heavy" -eq 1 ]]; then
+      last_heavy_lane_idx=$(( ${#pids[@]} - 1 ))
+    fi
   }
 
   local lane_idx

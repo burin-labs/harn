@@ -1,0 +1,36 @@
+{
+  "provider": "gemini",
+  "model": "fixture-gemini",
+  "wire": "gemini",
+  "stream_protocol": "gemini_json",
+  "request": {
+    "messages": [{"role": "user", "content": "hello"}],
+    "max_tokens": 64
+  },
+  "wire_request": {
+    "contents": [{"parts": [{"text": "hello"}], "role": "user"}],
+    "generationConfig": {"maxOutputTokens": 64}
+  },
+  "wire_response": {
+    "responseId": "gemini-golden",
+    "candidates": [{
+      "content": {"parts": [{"text": "hello back"}]},
+      "finishReason": "STOP"
+    }],
+    "usageMetadata": {"promptTokenCount": 3, "candidatesTokenCount": 2}
+  },
+  "wire_events": null,
+  "result": {
+    "text": "hello back",
+    "input_tokens": 3,
+    "output_tokens": 2,
+    "stop_reason": "STOP"
+  },
+  "error": {
+    "status": 401,
+    "body": "{\"error\":{\"status\":\"UNAUTHENTICATED\",\"message\":\"bad key\"}}",
+    "kind": "terminal",
+    "reason": "auth_failure",
+    "message_contains": "gemini HTTP 401"
+  }
+}

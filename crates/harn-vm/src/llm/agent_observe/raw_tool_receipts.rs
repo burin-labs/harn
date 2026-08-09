@@ -103,7 +103,7 @@ mod tests {
             &response,
             "fireworks",
             "accounts/fireworks/models/gpt-oss-120b",
-            false,
+            crate::llm::capabilities::WireDialect::OpenAiCompat,
             false,
         )
         .expect("parser succeeds")

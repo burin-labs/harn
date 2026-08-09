@@ -1,0 +1,46 @@
+{
+  "provider": "gemini",
+  "model": "fixture-gemini",
+  "wire": "gemini",
+  "live_endpoint": "gemini_interactions",
+  "stream_protocol": "gemini_interactions_sse",
+  "request": {
+    "messages": [{"role": "user", "content": "hello"}],
+    "max_tokens": 64
+  },
+  "wire_request": {
+    "model": "fixture-gemini",
+    "input": [{
+      "type": "user_input",
+      "content": [{"type": "text", "text": "hello"}]
+    }],
+    "generation_config": {
+      "max_output_tokens": 64,
+      "thinking_level": "minimal"
+    },
+    "store": false
+  },
+  "wire_response": {
+    "id": "interaction-golden",
+    "status": "completed",
+    "steps": [{
+      "type": "model_output",
+      "content": [{"type": "text", "text": "hello back"}]
+    }],
+    "usage": {"total_input_tokens": 3, "total_output_tokens": 2}
+  },
+  "wire_events": "event: step.start\ndata: {\"event_type\":\"step.start\",\"index\":0,\"step\":{\"type\":\"model_output\"}}\n\nevent: step.delta\ndata: {\"event_type\":\"step.delta\",\"index\":0,\"delta\":{\"type\":\"text\",\"text\":\"hello back\"}}\n\nevent: step.stop\ndata: {\"event_type\":\"step.stop\",\"index\":0}\n\nevent: interaction.completed\ndata: {\"event_type\":\"interaction.completed\",\"interaction\":{\"id\":\"interaction-golden\",\"status\":\"completed\",\"usage\":{\"total_input_tokens\":3,\"total_output_tokens\":2}}}\n\n",
+  "result": {
+    "text": "hello back",
+    "input_tokens": 3,
+    "output_tokens": 2,
+    "stop_reason": "completed"
+  },
+  "error": {
+    "status": 400,
+    "body": "{\"error\":{\"status\":\"INVALID_ARGUMENT\",\"message\":\"bad interaction\"}}",
+    "kind": "terminal",
+    "reason": "invalid_request",
+    "message_contains": "gemini HTTP 400"
+  }
+}

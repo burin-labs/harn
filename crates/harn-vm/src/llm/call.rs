@@ -1073,8 +1073,6 @@ mod schema_stream_abort_retry_tests {
             schema: schema(),
             strict: true,
         };
-        opts.json_schema = Some(schema());
-        opts.response_format = Some("json".to_string());
         opts.output_validation = Some("error".to_string());
         opts.schema_stream_abort = true;
         opts.native_tools = None;

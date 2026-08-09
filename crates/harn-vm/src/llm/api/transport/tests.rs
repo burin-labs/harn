@@ -1,9 +1,9 @@
 use super::ndjson::consume_ollama_ndjson_lines;
 use super::sse::reqwest_send_error;
-use super::{
-    append_ollama_tool_calls, non_stream_send_error, should_request_stream_usage, telemetry_source,
-};
+use super::{append_ollama_tool_calls, non_stream_send_error, telemetry_source};
 use crate::llm::api::response::parse_tool_arguments;
+use crate::llm::api::DialectContract;
+use crate::llm::capabilities::WireDialect;
 use crate::value::{error_to_category, ErrorCategory, VmError};
 use std::time::Duration;
 
@@ -75,18 +75,13 @@ async fn stream_and_non_stream_send_paths_share_one_classifier() {
 
 #[test]
 fn stream_usage_requested_for_openai_compatible_endpoints() {
-    assert!(should_request_stream_usage(
-        false,
-        false,
-        "/chat/completions"
-    ));
-    assert!(should_request_stream_usage(
-        false,
-        true,
-        "/v1/chat/completions"
-    ));
-    assert!(!should_request_stream_usage(false, true, "/api/chat"));
-    assert!(!should_request_stream_usage(true, false, "/messages"));
+    let openai = DialectContract::new(WireDialect::OpenAiCompat, None);
+    let ollama = DialectContract::new(WireDialect::Ollama, None);
+    let anthropic = DialectContract::new(WireDialect::Anthropic, None);
+    assert!(openai.requests_stream_usage("/chat/completions"));
+    assert!(ollama.requests_stream_usage("/v1/chat/completions"));
+    assert!(!ollama.requests_stream_usage("/api/chat"));
+    assert!(!anthropic.requests_stream_usage("/messages"));
 }
 
 #[test]

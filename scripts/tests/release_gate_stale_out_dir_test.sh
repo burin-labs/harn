@@ -41,6 +41,12 @@ if [[ "${1:-}" == "run" && "${2:-}" == "scripts/release_audit_contract.harn" ]];
       printf 'lane\trust-audit\trun_rust_audit\n'
       printf 'lane\tsecurity-audit\trun_security_audit\n'
       ;;
+    constrained)
+      printf 'lane\trust-audit\trun_rust_audit\n'
+      printf 'lane\tharn-audit\trun_harn_audit\n'
+      printf 'lane\tsecurity-audit\trun_security_audit\n'
+      printf 'lane\tpackage-audit\trun_package_audit\n'
+      ;;
     package)
       printf 'lane\tpackage-audit\trun_package_audit\n'
       ;;
@@ -146,6 +152,12 @@ case "${1:-}" in
 esac
 SH
 chmod +x "$fake_bin/cargo"
+
+cat > "$fake_bin/cargo-nextest" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+chmod +x "$fake_bin/cargo-nextest"
 
 cat > "$fake_bin/make" <<'SH'
 #!/usr/bin/env bash
@@ -464,6 +476,7 @@ fi
 run_lane_cpu_case() {
   local label="$1"
   local cpus="$2"
+  local plan="${3:-parallel}"
   local state="$tmp_root/state-lanecpu-$label"
   local target="$tmp_root/target lanecpu $label"
   local build="$tmp_root/build lanecpu $label"
@@ -476,7 +489,7 @@ run_lane_cpu_case() {
     HARN_BIN="$fake_harn" \
     CARGO_TARGET_DIR="$target" \
     CARGO_BUILD_BUILD_DIR="$build" \
-    FAKE_AUDIT_LANE=parallel \
+    FAKE_AUDIT_LANE="$plan" \
     HARN_RELEASE_GATE_LANE_CPUS="$cpus" \
     FAKE_CARGO_MODE=success \
     FAKE_CARGO_RECORD="$state/cargo-record" \
@@ -523,6 +536,60 @@ fi
 if grep -Fq 'audit lanes: serial' "$wide_state/output"; then
   echo "a host with CPUs to spare should keep its lanes parallel" >&2
   cat "$wide_state/output" >&2
+  exit 1
+fi
+
+constrained_state=$(run_lane_cpu_case constrained 6 constrained)
+if [[ "$(<"$constrained_state/status")" -ne 0 ]]; then
+  echo "resource-aware audit lanes should still pass" >&2
+  cat "$constrained_state/output" >&2
+  exit 1
+fi
+if ! grep -Fq \
+  'audit lanes: resource-aware (6 cpu; heavy lanes serialized, light lanes parallel)' \
+  "$constrained_state/output"; then
+  echo "a medium host should serialize only internally parallel lanes" >&2
+  cat "$constrained_state/output" >&2
+  exit 1
+fi
+
+# Missing lane prerequisites must fail before the warm build, not after the
+# candidate has paid any Cargo or AOT preparation cost.
+mv "$fake_bin/cargo-nextest" "$fake_bin/cargo-nextest.disabled"
+missing_tool_state="$tmp_root/state-missing-tool"
+mkdir -p "$missing_tool_state"
+: > "$missing_tool_state/cargo-record"
+: > "$missing_tool_state/make-record"
+: > "$missing_tool_state/event-record"
+set +e
+HARN_RELEASE_ROOT="$release_root" \
+  HARN_BIN="$fake_harn" \
+  CARGO_TARGET_DIR="$tmp_root/target-missing-tool" \
+  CARGO_BUILD_BUILD_DIR="$tmp_root/build-missing-tool" \
+  FAKE_AUDIT_LANE=rust \
+  FAKE_CARGO_MODE=success \
+  FAKE_CARGO_RECORD="$missing_tool_state/cargo-record" \
+  FAKE_CARGO_STATE="$missing_tool_state" \
+  FAKE_EVENT_RECORD="$missing_tool_state/event-record" \
+  FAKE_MAKE_MODE=success \
+  FAKE_MAKE_RECORD="$missing_tool_state/make-record" \
+  PATH="$fake_bin:/usr/bin:/bin" \
+  "$release_tools/release_gate.sh" audit --source-only \
+  > "$missing_tool_state/output" 2>&1
+missing_tool_status=$?
+set -e
+mv "$fake_bin/cargo-nextest.disabled" "$fake_bin/cargo-nextest"
+if [[ "$missing_tool_status" -eq 0 ]] \
+  || ! grep -Fq 'release audit prerequisites missing: cargo-nextest' \
+    "$missing_tool_state/output"; then
+  echo "missing cargo-nextest should fail during release preflight" >&2
+  cat "$missing_tool_state/output" >&2
+  exit 1
+fi
+if [[ -s "$missing_tool_state/cargo-record" || -s "$missing_tool_state/make-record" ]]; then
+  echo "missing prerequisite should fail before build preparation" >&2
+  cat "$missing_tool_state/cargo-record" >&2
+  cat "$missing_tool_state/make-record" >&2
   exit 1
 fi
 

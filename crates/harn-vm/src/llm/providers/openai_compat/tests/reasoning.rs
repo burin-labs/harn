@@ -18,7 +18,7 @@ fn kimi_replays_canonical_reasoning_under_its_typed_wire_field() {
         "reasoning_content": "untrusted seeded value"
     })];
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert_eq!(
         body["messages"][0]["reasoning_content"],
@@ -39,7 +39,7 @@ fn default_openai_compatible_route_strips_reasoning_history() {
         "reasoning_content": "untrusted seeded value"
     })];
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert!(body["messages"][0].get("reasoning").is_none());
     assert!(body["messages"][0].get("reasoning_content").is_none());
@@ -52,7 +52,7 @@ fn openrouter_thinking_enabled_maps_to_reasoning_enabled() {
     payload.thinking = ThinkingConfig::Enabled {
         budget_tokens: None,
     };
-    let mut body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let mut body = OpenAiCompatibleProvider::build_request_body(&payload);
     provider.transform_request(&mut body);
 
     assert_eq!(body["reasoning"]["enabled"], true);
@@ -71,7 +71,7 @@ fn openrouter_no_reasoning_model_omits_reasoning_on_structured_disable() {
     payload.model = "qwen/qwen3-coder".to_string();
     payload.thinking = ThinkingConfig::Disabled;
     payload.output_format = crate::llm::api::OutputFormat::JsonObject;
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert!(
         body.get("reasoning").is_none(),
@@ -92,7 +92,7 @@ fn openrouter_reasoning_capable_model_still_disables_on_directive() {
     payload.model = "qwen/qwen3.6-35b-a3b".to_string();
     payload.thinking = ThinkingConfig::Disabled;
     payload.output_format = crate::llm::api::OutputFormat::JsonObject;
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert_eq!(
         body["reasoning"]["enabled"], false,
@@ -107,7 +107,7 @@ fn openrouter_mandatory_reasoning_model_omits_unsupported_disable() {
     payload.model = "stepfun/step-3.7-flash".to_string();
     payload.thinking = ThinkingConfig::Disabled;
     payload.output_format = crate::llm::api::OutputFormat::JsonObject;
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert!(
         body.get("reasoning").is_none(),
@@ -122,7 +122,7 @@ fn openrouter_thinking_budget_maps_to_reasoning_max_tokens() {
     payload.thinking = ThinkingConfig::Enabled {
         budget_tokens: Some(2048),
     };
-    let mut body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let mut body = OpenAiCompatibleProvider::build_request_body(&payload);
     provider.transform_request(&mut body);
 
     assert_eq!(body["reasoning"]["max_tokens"], 2048);
@@ -137,7 +137,7 @@ fn openai_effort_maps_to_reasoning_effort() {
     payload.thinking = ThinkingConfig::Effort {
         level: ReasoningEffort::High,
     };
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert_eq!(body["reasoning_effort"], "high");
     assert_eq!(body["max_completion_tokens"], 64);
@@ -153,7 +153,7 @@ fn openai_none_effort_maps_to_reasoning_effort_none() {
     payload.thinking = ThinkingConfig::Effort {
         level: ReasoningEffort::None,
     };
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert_eq!(body["reasoning_effort"], "none");
 }
@@ -166,7 +166,7 @@ fn together_hybrid_reasoning_uses_reasoning_enabled() {
     payload.thinking = ThinkingConfig::Enabled {
         budget_tokens: None,
     };
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert_eq!(body["reasoning"]["enabled"], true);
     assert!(body.get("chat_template_kwargs").is_none());
@@ -182,7 +182,7 @@ fn zai_glm52_effort_uses_thinking_object_and_reasoning_effort() {
         level: ReasoningEffort::Max,
     };
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert_eq!(body["thinking"], json!({"type": "enabled"}));
     assert_eq!(body["reasoning_effort"], "max");
@@ -203,7 +203,7 @@ fn zai_glm52_disabled_uses_thinking_disabled() {
     payload.model = "glm-5.2".to_string();
     payload.thinking = ThinkingConfig::Disabled;
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert_eq!(body["thinking"], json!({"type": "disabled"}));
     assert!(body.get("reasoning_effort").is_none());
@@ -219,7 +219,7 @@ fn zai_glm52_none_effort_is_explicitly_supported() {
         level: ReasoningEffort::None,
     };
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert_eq!(body["thinking"], json!({"type": "disabled"}));
     assert_eq!(body["reasoning_effort"], "none");
@@ -235,7 +235,7 @@ fn minimax_m3_uses_adaptive_thinking_and_completion_tokens() {
         budget_tokens: Some(4096),
     };
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert_eq!(body["thinking"]["type"], "adaptive");
     assert_eq!(body["reasoning_split"], true);
@@ -251,7 +251,7 @@ fn minimax_m3_disables_thinking_explicitly() {
     payload.model = "MiniMax-M3".to_string();
     payload.thinking = ThinkingConfig::Disabled;
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert_eq!(body["thinking"]["type"], "disabled");
     assert!(body.get("reasoning_split").is_none());
@@ -265,7 +265,7 @@ fn together_gpt_oss_effort_uses_reasoning_effort() {
     payload.thinking = ThinkingConfig::Effort {
         level: ReasoningEffort::Medium,
     };
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert_eq!(body["reasoning_effort"], "medium");
     assert!(body.get("reasoning").is_none());
@@ -278,7 +278,7 @@ fn openrouter_effort_maps_to_nested_reasoning_effort() {
     payload.thinking = ThinkingConfig::Effort {
         level: ReasoningEffort::Medium,
     };
-    let mut body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let mut body = OpenAiCompatibleProvider::build_request_body(&payload);
     provider.transform_request(&mut body);
 
     assert_eq!(body["reasoning"]["effort"], "medium");
@@ -292,7 +292,7 @@ fn openrouter_disabled_thinking_emits_reasoning_enabled_false() {
     let provider = OpenAiCompatibleProvider::new("openrouter".to_string());
     let mut payload = base_request_payload();
     payload.thinking = ThinkingConfig::Disabled;
-    let mut body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let mut body = OpenAiCompatibleProvider::build_request_body(&payload);
     provider.transform_request(&mut body);
 
     assert_eq!(body["reasoning"]["enabled"], false);

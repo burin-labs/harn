@@ -15,11 +15,11 @@ fn fast_tier_injects_service_tier_for_openai() {
     payload.provider = "openai".to_string();
     payload.model = "gpt-5.5".to_string();
     payload.fast = true;
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
     assert_eq!(body["service_tier"], json!("fast"));
 
     payload.fast = false;
-    let body_off = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body_off = OpenAiCompatibleProvider::build_request_body(&payload);
     assert!(body_off.get("service_tier").is_none());
 }
 
@@ -31,14 +31,14 @@ fn build_request_body_clamps_sampling_ranges_before_send() {
     payload.temperature = Some(99.0);
     payload.top_p = Some(5000.0);
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert_eq!(body["temperature"], json!(2.0));
     assert_eq!(body["top_p"], json!(1.0));
 
     payload.temperature = Some(f64::NEG_INFINITY);
     payload.top_p = Some(f64::NAN);
-    let non_finite_body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let non_finite_body = OpenAiCompatibleProvider::build_request_body(&payload);
     assert_eq!(non_finite_body["temperature"], json!(1.0));
     assert_eq!(non_finite_body["top_p"], json!(1.0));
 }
@@ -53,7 +53,7 @@ fn openrouter_builder_projects_sampling_params_after_admission() {
     payload.frequency_penalty = Some(0.1);
     payload.presence_penalty = Some(0.2);
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert_eq!(body["temperature"], json!(0.2));
     assert_eq!(body["top_p"], json!(0.8));
@@ -75,7 +75,7 @@ fn openai_compatible_builder_does_not_repeat_capability_policy() {
     payload.presence_penalty = Some(0.2);
     payload.stop = Some(vec!["STOP".to_string()]);
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert_eq!(body["stop"], json!(["STOP"]));
     assert_eq!(body["frequency_penalty"], json!(0.1));
@@ -92,7 +92,7 @@ fn qwen36_emits_preserve_thinking_in_chat_template_kwargs() {
     payload.thinking = ThinkingConfig::Enabled {
         budget_tokens: None,
     };
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
     assert_eq!(
         body["chat_template_kwargs"]["preserve_thinking"], true,
         "Qwen3.6 should request preserve_thinking so <think> blocks survive across agentic turns"
@@ -106,7 +106,7 @@ fn build_request_body_uses_wire_model_for_catalog_key() {
     payload.provider = "groq".to_string();
     payload.model = "groq/openai/gpt-oss-120b".to_string();
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert_eq!(body["model"], "openai/gpt-oss-120b");
 }
@@ -128,7 +128,7 @@ thinking_modes = ["enabled"]
     payload.thinking = ThinkingConfig::Enabled {
         budget_tokens: None,
     };
-    let mut body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let mut body = OpenAiCompatibleProvider::build_request_body(&payload);
     assert!(body.get("chat_template_kwargs").is_some());
 
     provider.transform_request(&mut body);
@@ -157,7 +157,7 @@ thinking_modes = ["enabled"]
         budget_tokens: None,
     };
 
-    let mut body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let mut body = OpenAiCompatibleProvider::build_request_body(&payload);
     assert!(body.get("chat_template_args").is_some());
     assert!(body.get("chat_template_kwargs").is_none());
     body["chat_template_kwargs"] = json!({"enable_thinking": false});
@@ -192,7 +192,7 @@ fn ollama_qwen35_does_not_emit_chat_template_kwargs() {
     payload.thinking = ThinkingConfig::Enabled {
         budget_tokens: None,
     };
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
     assert!(
         body.get("chat_template_kwargs").is_none(),
         "Ollama silently drops chat_template_kwargs today; gate them so strict validation would not break requests"
@@ -205,7 +205,7 @@ fn qwen35_local_disables_thinking_when_absent() {
     payload.provider = "local".to_string();
     payload.model = "Qwen/Qwen3.5-Coder-32B".to_string();
     payload.thinking = ThinkingConfig::Disabled;
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
     assert_eq!(body["chat_template_kwargs"]["enable_thinking"], false);
 }
 
@@ -215,7 +215,7 @@ fn openai_non_reasoning_model_uses_legacy_max_tokens() {
     payload.provider = "openai".to_string();
     payload.model = "gpt-4o".to_string();
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert_eq!(body["max_tokens"], 64);
     assert!(body.get("max_completion_tokens").is_none());
@@ -235,7 +235,7 @@ fn image_content_maps_to_openai_image_url_block() {
         ],
     })];
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
     assert_eq!(body["messages"][0]["content"][0]["text"], "caption");
     assert_eq!(
         body["messages"][0]["content"][1],
@@ -261,7 +261,7 @@ fn image_url_content_maps_to_openai_image_url_block() {
         ],
     })];
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
     assert_eq!(
         body["messages"][0]["content"][0],
         json!({
@@ -287,7 +287,7 @@ fn video_content_maps_to_openai_video_url_block() {
         ],
     })];
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
     assert_eq!(body["messages"][0]["content"][0]["text"], "summarize");
     assert_eq!(
         body["messages"][0]["content"][1],
@@ -312,7 +312,7 @@ fn output_format_json_schema_maps_to_openai_response_format() {
         strict: false,
     };
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert_eq!(body["response_format"]["type"], "json_schema");
     assert_eq!(
@@ -344,7 +344,7 @@ fn cerebras_tools_drop_response_format() {
         }
     })]);
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert!(body.get("tools").is_some());
     assert!(
@@ -360,7 +360,7 @@ fn cerebras_keeps_response_format_without_tools() {
     payload.model = "gpt-oss-120b".to_string();
     payload.output_format = crate::llm::api::OutputFormat::JsonObject;
 
-    let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+    let body = OpenAiCompatibleProvider::build_request_body(&payload);
 
     assert_eq!(body["response_format"]["type"], "json_object");
     assert!(body.get("tools").is_none());
@@ -379,7 +379,7 @@ fn build_request_body_remaps_reserved_tool_call_token() {
         "role": "assistant",
         "content": "<tool_call>\nlook({})\n</tool_call>"
     })];
-    let serialized = OpenAiCompatibleProvider::build_request_body(&payload, false).to_string();
+    let serialized = OpenAiCompatibleProvider::build_request_body(&payload).to_string();
     assert!(
         !serialized.contains("<tool_call>") && !serialized.contains("</tool_call>"),
         "canonical delimiters must be remapped off the wire: {serialized}"
@@ -396,7 +396,7 @@ fn build_request_body_keeps_canonical_for_normal_models() {
     // text tool-call delimiters exactly as authored.
     let mut payload = base_request_payload();
     payload.system = Some("Use <tool_call>\nname({})\n</tool_call> blocks.".to_string());
-    let serialized = OpenAiCompatibleProvider::build_request_body(&payload, false).to_string();
+    let serialized = OpenAiCompatibleProvider::build_request_body(&payload).to_string();
     assert!(
         serialized.contains("<tool_call>"),
         "non-reserved model keeps canonical delimiter: {serialized}"

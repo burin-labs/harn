@@ -11,6 +11,7 @@ members = [
     "crates/harn-glob",
     "crates/harn-secret-catalog",
     "crates/harn-terminal",
+    "crates/harn-test-runner",
     "crates/harn-lexer",
     "crates/harn-parser",
     "crates/harn-ir",
