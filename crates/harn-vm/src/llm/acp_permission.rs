@@ -17,6 +17,9 @@
 //! path are deliberately untouched — they are harn semantics carried as
 //! vendor extensions alongside the canonical fields.
 
+use std::collections::BTreeSet;
+use std::path::Path;
+
 use serde_json::{json, Value as JsonValue};
 
 /// Canonical ACP method for asking the client to decide a tool permission.
@@ -93,6 +96,7 @@ pub(crate) fn request_params(
         obj.insert("toolDescriptor".to_string(), descriptor);
     }
     let content = permission_content(&approval_request);
+    let locations = permission_locations(&approval_request);
     let mut tool_call = json!({
         "sessionUpdate": "tool_call_update",
         "toolCallId": tool_call_id,
@@ -107,9 +111,32 @@ pub(crate) fn request_params(
             .expect("tool call object")
             .insert("content".to_string(), JsonValue::Array(content));
     }
+    if !locations.is_empty() {
+        tool_call
+            .as_object_mut()
+            .expect("tool call object")
+            .insert("locations".to_string(), JsonValue::Array(locations));
+    }
     params.insert("toolCall".to_string(), tool_call);
     params.insert("options".to_string(), canonical_options());
     JsonValue::Object(params)
+}
+
+fn permission_locations(approval_request: &JsonValue) -> Vec<JsonValue> {
+    approval_request
+        .get("evidence_refs")
+        .and_then(JsonValue::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|evidence| {
+            evidence.get("kind").and_then(JsonValue::as_str) == Some("file_mutation_diff")
+        })
+        .filter_map(|evidence| evidence.get("path").and_then(JsonValue::as_str))
+        .filter(|path| Path::new(path).is_absolute())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .map(|path| json!({ "path": path }))
+        .collect()
 }
 
 fn permission_content(approval_request: &JsonValue) -> Vec<JsonValue> {
@@ -242,15 +269,36 @@ mod tests {
             json!({
                 "id": "tool-1",
                 "action": "edit",
-                "evidence_refs": [{
-                    "kind": "file_mutation_diff",
-                    "path": "/workspace/src/lib.rs",
-                    "oldText": "old\n",
-                    "newText": "new\n",
-                    "preimageSha256": "abc123",
-                    "byteCount": 4,
-                    "source": "pre_approval"
-                }]
+                "evidence_refs": [
+                    {
+                        "kind": "file_mutation_diff",
+                        "path": "/workspace/src/lib.rs",
+                        "oldText": "old\n",
+                        "newText": "new\n",
+                        "preimageSha256": "abc123",
+                        "byteCount": 4,
+                        "source": "pre_approval"
+                    },
+                    {
+                        "kind": "file_mutation_diff",
+                        "path": "/workspace/src/a.rs",
+                        "newText": "new\n"
+                    },
+                    {
+                        "kind": "file_mutation_diff",
+                        "path": "/workspace/src/lib.rs",
+                        "newText": "duplicate path\n"
+                    },
+                    {
+                        "kind": "command",
+                        "path": "/workspace/ignored.rs"
+                    },
+                    {
+                        "kind": "file_mutation_diff",
+                        "path": "relative/not-valid-acp-location.rs",
+                        "newText": "ignored\n"
+                    }
+                ]
             }),
             &json!({"decision": "ask"}),
             None,
@@ -266,6 +314,30 @@ mod tests {
             diff["_meta"]["harn"]["permission_preview"]["preimageSha256"],
             "abc123"
         );
+        assert_eq!(
+            params["toolCall"]["locations"],
+            json!([
+                { "path": "/workspace/src/a.rs" },
+                { "path": "/workspace/src/lib.rs" }
+            ]),
+            "file scopes are canonical, deterministic, and deduplicated"
+        );
+    }
+
+    #[test]
+    fn request_params_omit_locations_without_file_evidence() {
+        let params = request_params(
+            Some("session-1"),
+            "tool-1",
+            "run",
+            &json!({"command": "pwd"}),
+            json!({"id": "tool-1", "evidence_refs": []}),
+            &json!({"decision": "ask"}),
+            None,
+            ToolKind::Execute,
+        );
+
+        assert!(params["toolCall"].get("locations").is_none());
     }
 
     #[test]
