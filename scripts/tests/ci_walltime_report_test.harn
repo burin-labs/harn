@@ -230,9 +230,8 @@ pipeline test_evaluation_needs_two_breached_windows_but_hard_max_is_immediate(
       { run ->
         if run.id == 0 {
           return {...run, duration_ms: 900000}
-        } else {
-          return run
         }
+        return run
       },
     )
       .to_list(),
