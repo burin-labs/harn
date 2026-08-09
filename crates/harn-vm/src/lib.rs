@@ -39,7 +39,7 @@ pub(crate) mod aws_sigv4;
 pub(crate) mod aws_sigv4;
 pub mod boundary;
 pub mod bridge;
-pub use bridge::inject_leading_authority;
+pub use bridge::{inject_leading_authorities, inject_leading_authority};
 pub mod builtin_profile;
 pub mod bytecode_cache;
 pub mod call_budget;

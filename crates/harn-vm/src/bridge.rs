@@ -2,7 +2,7 @@
 //! stdin/stdout when `harn run --bridge` is active.
 
 mod authority;
-pub use authority::inject_leading_authority;
+pub use authority::{inject_leading_authorities, inject_leading_authority};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::io::Write;

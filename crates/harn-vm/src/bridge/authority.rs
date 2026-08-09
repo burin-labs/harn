@@ -39,54 +39,68 @@ pub(super) fn directive_authority(
     }
 }
 
-/// Prepend the root or nominal sub-handle declared by a callable's leading
-/// parameter. Pure callables with no authority parameter are unchanged.
+/// Backward-compatible name for [`inject_leading_authorities`].
 pub fn inject_leading_authority(
     vm: &Vm,
     closure: &VmClosure,
     args: &[VmValue],
     callable_label: &str,
 ) -> Result<Vec<VmValue>, VmError> {
-    let Some(param) = closure.func.params.first() else {
-        return Ok(args.to_vec());
-    };
-    // Preserve the long-standing untyped `harness` entrypoint convention while
-    // making an explicit root or nominal Harness type independent of the
-    // parameter's local name.
-    let type_name = param
-        .type_expr
-        .as_ref()
-        .and_then(named_type)
-        .or_else(|| (param.name == "harness").then_some("Harness"));
-    let Some(type_name) = type_name else {
-        return Ok(args.to_vec());
-    };
+    inject_leading_authorities(vm, closure, args, callable_label)
+}
 
-    let capability = CapabilityId::from_type_name(type_name);
-    if type_name != "Harness" && capability.is_none() {
-        return Ok(args.to_vec());
+/// Prepend every root or nominal Harness handle in a callable's contiguous
+/// authority prefix. Pure callables with no authority prefix are unchanged.
+///
+/// Capability migration can legitimately widen a host export from one handle
+/// to several (for example `HarnessPostgres, HarnessProcess, args`). The host
+/// bridge owns that prefix and derives each handle from the same installed root
+/// Harness; JSON arguments begin at the first non-authority parameter.
+pub fn inject_leading_authorities(
+    vm: &Vm,
+    closure: &VmClosure,
+    args: &[VmValue],
+    callable_label: &str,
+) -> Result<Vec<VmValue>, VmError> {
+    let mut call_args = Vec::with_capacity(closure.func.params.len().max(args.len()));
+    for param in &closure.func.params {
+        // Preserve the long-standing untyped `harness` entrypoint convention
+        // while making explicit nominal Harness types independent of the
+        // parameter's local name.
+        let type_name = param
+            .type_expr
+            .as_ref()
+            .and_then(named_type)
+            .or_else(|| (param.name == "harness").then_some("Harness"));
+        let Some(type_name) = type_name else {
+            break;
+        };
+
+        let capability = CapabilityId::from_type_name(type_name);
+        if type_name != "Harness" && capability.is_none() {
+            break;
+        }
+
+        let authority = if type_name == "Harness" {
+            vm.root_harness_value()
+        } else {
+            capability.and_then(|capability| {
+                let VmValue::Harness(root) = vm.root_harness_value()? else {
+                    return None;
+                };
+                root.sub_handle(capability.field_name())
+                    .map(VmValue::harness)
+            })
+        }
+        .ok_or_else(|| {
+            VmError::Runtime(format!(
+                "{callable_label} requires `{type_name}`, \
+                 but no root Harness is installed"
+            ))
+        })?;
+        call_args.push(authority);
     }
 
-    let authority = if type_name == "Harness" {
-        vm.root_harness_value()
-    } else {
-        capability.and_then(|capability| {
-            let VmValue::Harness(root) = vm.root_harness_value()? else {
-                return None;
-            };
-            root.sub_handle(capability.field_name())
-                .map(VmValue::harness)
-        })
-    }
-    .ok_or_else(|| {
-        VmError::Runtime(format!(
-            "{callable_label} requires `{type_name}`, \
-             but no root Harness is installed"
-        ))
-    })?;
-
-    let mut call_args = Vec::with_capacity(args.len() + 1);
-    call_args.push(authority);
     call_args.extend_from_slice(args);
     Ok(call_args)
 }
@@ -97,12 +111,47 @@ pub(super) fn inject_export_authority(
     args: &[VmValue],
     export_name: &str,
 ) -> Result<Vec<VmValue>, VmError> {
-    inject_leading_authority(
+    inject_leading_authorities(
         vm,
         closure,
         args,
         &format!("playground host export `{export_name}`"),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn injects_every_leading_authority_and_calls_the_export() {
+        let mut vm = Vm::new();
+        crate::stdlib::register_vm_stdlib(&mut vm);
+        vm.set_harness(crate::Harness::real());
+        let exports = vm
+            .load_module_exports_from_source(
+                "<multi-authority-host-export>",
+                "pub fn dispatch(postgres: HarnessPostgres, process: HarnessProcess, args: dict) -> dict { return args }",
+            )
+            .await
+            .expect("load multi-authority export");
+        let closure = exports.get("dispatch").expect("dispatch export");
+        let input = VmValue::dict(crate::value::DictMap::default());
+
+        let call_args = inject_leading_authorities(&vm, closure, &[input], "dispatch")
+            .expect("inject authority prefix");
+        assert_eq!(call_args.len(), 3);
+        assert!(
+            matches!(&call_args[0], VmValue::Harness(handle) if handle.type_name() == "HarnessPostgres")
+        );
+        assert!(
+            matches!(&call_args[1], VmValue::Harness(handle) if handle.type_name() == "HarnessProcess")
+        );
+
+        vm.call_closure_pub(closure, &call_args)
+            .await
+            .expect("multi-authority export accepts injected prefix");
+    }
 }
 
 fn named_type(type_expr: &TypeExpr) -> Option<&str> {
