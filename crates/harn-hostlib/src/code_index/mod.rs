@@ -77,6 +77,7 @@ mod symbol_graph;
 mod trigram;
 mod versions;
 mod walker;
+mod warm;
 mod words;
 
 use std::path::Path;
@@ -99,6 +100,7 @@ pub use state::{BuildOutcome, IndexState};
 pub use symbol_graph::{Edge, EdgeKind, Node, NodeId, NodeKind, SymbolGraph};
 pub use trigram::TrigramIndex;
 pub use versions::{ChangeRecord, EditOp, VersionEntry, VersionLog, HISTORY_LIMIT};
+pub use warm::SessionWarmOutcome;
 pub use words::{WordHit, WordIndex};
 
 /// Code-index capability handle.
@@ -117,6 +119,8 @@ pub struct CodeIndexCapability {
     /// never clobbers the project index.
     readonly: ReadonlyRoots,
     current_agent: Arc<Mutex<Option<AgentId>>>,
+    /// Single-flight gate shared by [`Self::warm_session`] and sync rebuild.
+    warm: Arc<warm::WarmCoordinator>,
 }
 
 impl CodeIndexCapability {
@@ -127,6 +131,7 @@ impl CodeIndexCapability {
             index: Arc::new(Mutex::new(None)),
             readonly: Arc::new(Mutex::new(Vec::new())),
             current_agent: Arc::new(Mutex::new(None)),
+            warm: Arc::new(warm::WarmCoordinator::default()),
         }
     }
 
@@ -214,13 +219,18 @@ impl HostlibCapability for CodeIndexCapability {
                 handler,
             });
         }
-        register(
-            registry,
-            self.index.clone(),
-            builtins::BUILTIN_REBUILD,
-            "rebuild",
-            builtins::run_rebuild,
-        );
+        {
+            let index = self.index.clone();
+            let warm = self.warm.clone();
+            let handler: SyncHandler =
+                Arc::new(move |args| warm::run_rebuild_single_flight(&index, &warm, args));
+            registry.register(RegisteredBuiltin {
+                name: builtins::BUILTIN_REBUILD,
+                module: "code_index",
+                method: "rebuild",
+                handler,
+            });
+        }
         register(
             registry,
             self.index.clone(),

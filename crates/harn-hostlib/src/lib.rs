@@ -77,14 +77,37 @@ pub use host_lease::{
 };
 pub use registry::{BuiltinRegistry, HostlibCapability, HostlibRegistry, RegisteredBuiltin};
 
+/// Handles retained from [`install_default_with_handles`] so embedders can
+/// warm or introspect capabilities out-of-band of the VM.
+pub struct DefaultHostlibHandles {
+    /// Shared code-index capability when the `ast` feature is enabled.
+    #[cfg(feature = "ast")]
+    pub code_index: code_index::CodeIndexCapability,
+}
+
 /// Convenience: build a `HostlibRegistry` populated with every capability
 /// the crate ships, register them on the supplied VM, and return the
 /// registry so callers can introspect (e.g. for schema-drift tests).
 ///
 /// This is the canonical entry point for embedders that want the full
 /// hostlib surface; pick-and-choose embedders should construct
-/// [`HostlibRegistry`] directly.
+/// [`HostlibRegistry`] directly. Embedders that need the retained
+/// [`code_index::CodeIndexCapability`] handle (for
+/// [`code_index::CodeIndexCapability::warm_session`]) should call
+/// [`install_default_with_handles`] instead.
 pub fn install_default(vm: &mut harn_vm::Vm) -> HostlibRegistry {
+    install_default_with_handles(vm).0
+}
+
+/// Like [`install_default`], but also returns retained capability handles.
+///
+/// The code-index handle shares the same [`code_index::SharedIndex`] cell
+/// installed into the VM, so a session-start
+/// [`code_index::CodeIndexCapability::warm_session`] populates the index
+/// visible to later agent turns.
+pub fn install_default_with_handles(
+    vm: &mut harn_vm::Vm,
+) -> (HostlibRegistry, DefaultHostlibHandles) {
     let mut registry = HostlibRegistry::new();
     let embed = embed::EmbedCapability::default();
     let session = session::SessionCapability::with_embedder(embed.embedder().clone());
@@ -92,12 +115,14 @@ pub fn install_default(vm: &mut harn_vm::Vm) -> HostlibRegistry {
     // compiled when the `ast` feature is on. Lean clients that omit it get
     // the deterministic tool surface without tree-sitter or any grammar.
     #[cfg(feature = "ast")]
-    {
+    let code_index_handle = {
         let code_index = code_index::CodeIndexCapability::new();
+        let handle = code_index.clone();
         registry = registry
             .with(ast::AstCapabilityWithCodeIndex::new(code_index.shared()))
             .with(code_index);
-    }
+        handle
+    };
     registry = registry
         .with(scanner::ScannerCapability)
         .with(embed)
@@ -132,5 +157,9 @@ pub fn install_default(vm: &mut harn_vm::Vm) -> HostlibRegistry {
     // that spelling as a no-op so dispatch does not fall through to an
     // embedder host bridge.
     vm.register_builtin("hostlib_enable", |_args, _out| Ok(harn_vm::VmValue::Nil));
-    registry
+    let handles = DefaultHostlibHandles {
+        #[cfg(feature = "ast")]
+        code_index: code_index_handle,
+    };
+    (registry, handles)
 }

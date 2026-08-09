@@ -376,7 +376,7 @@ pub(crate) fn now_unix_ms() -> i64 {
         .unwrap_or(0)
 }
 
-fn canonicalize(root: &Path) -> PathBuf {
+pub(super) fn canonicalize(root: &Path) -> PathBuf {
     std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf())
 }
 
