@@ -9,6 +9,43 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.66
+
+### Added
+
+- Add a pure fresh-turn skill projection so prompt previews can match live tool and skill policy without opening or
+  mutating an agent session.
+- Document and wire org-admin `bypass-ci` / `bypass-merge-queue` /
+  `force-merge` labels for rare CI and merge-queue overrides.
+
+### Changed
+
+- **Agent sessions preserve provider context across portable resume (#6312).**
+  Checkpoints retain signed reasoning plus the suspending turn's usage and
+  outcome facts, while capability-owned cache and reasoning policies keep
+  replay private and provider-correct.
+- **User test files and import graphs now compile once per suite (#6359).** Selected pipelines share one immutable
+  lowering of their file's imports and top-level declarations, parameterized rows reuse their pipeline artifact, and
+  trusted host-dispatch graphs use a provenance-separated in-memory cache. Every case still runs with fresh module
+  state in a fresh VM. Typed counters expose the number of compiled files and entries.
+
+### Fixed
+
+- Make singleton capability fixtures reusable by default, preserve ordered response
+  scripts, and project one consistent call record across typed and legacy host fixtures.
+- Run per-test timing budgets in a serial measurement lane so parallel VM
+  contention cannot turn a passing correctness test into a performance failure.
+- The Clippy string-slicing lint migration touched the run/session view implementation
+  without changing either versioned view schema; the canonical view fixtures remain
+  byte-for-byte stable.
+- The reusable Harn bump workflow no longer persists checkout credentials into
+  consumer repositories, preventing runner-temporary Git configuration from
+  breaking caller-owned regeneration and ownership checks.
+- Release archive publication now accepts the repository-pinned hosted
+  release-bot SSH signature when GitHub reports the App bot key as unknown,
+  while still binding the local tag object and peeled commit to GitHub's API
+  response.
+
 ## v0.10.65
 
 ### Changed
