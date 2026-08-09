@@ -5,7 +5,7 @@ use std::process;
 
 use crate::cli::{
     SessionArgs, SessionCheckpointArgs, SessionCommand, SessionExportArgs, SessionImportArgs,
-    SessionListArgs, SessionSchemaArgs, SessionValidateArgs,
+    SessionListArgs, SessionSchemaArgs, SessionValidateArgs, SessionViewFixturesArgs,
 };
 
 const DEFAULT_SCHEMA_PATH: &str = "spec/schemas/session-bundle.v1.schema.json";
@@ -18,6 +18,7 @@ pub(crate) async fn run(args: SessionArgs) {
         SessionCommand::Import(import) => run_import(import),
         SessionCommand::Validate(validate) => run_validate(validate),
         SessionCommand::Schema(schema) => run_schema(schema),
+        SessionCommand::ViewFixtures(fixtures) => run_view_fixtures(fixtures),
     }
 }
 
@@ -296,6 +297,31 @@ fn run_schema(args: SessionSchemaArgs) {
         println!("{}", path.display());
     } else {
         write_stdout(&rendered);
+    }
+}
+
+fn run_view_fixtures(args: SessionViewFixturesArgs) {
+    let mode = match (args.check, args.write) {
+        (true, false) => harn_vm::orchestration::RunViewFixtureMode::Check,
+        (false, true) => harn_vm::orchestration::RunViewFixtureMode::Write,
+        _ => unreachable!("clap requires exactly one fixture mode"),
+    };
+    match harn_vm::orchestration::sync_run_view_fixtures(&args.repository_root, mode) {
+        Ok(summary) => println!(
+            "{} {} run/session-view snapshots across {} cases ({} run views)",
+            if mode == harn_vm::orchestration::RunViewFixtureMode::Write {
+                "wrote"
+            } else {
+                "checked"
+            },
+            summary.snapshot_count,
+            summary.case_count,
+            summary.run_view_count,
+        ),
+        Err(error) => {
+            eprintln!("error: {error}");
+            process::exit(1);
+        }
     }
 }
 

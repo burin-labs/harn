@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{Args, Subcommand};
+use clap::{ArgGroup, Args, Subcommand};
 
 #[derive(Debug, Args)]
 pub(crate) struct SessionArgs {
@@ -22,6 +22,9 @@ pub(crate) enum SessionCommand {
     Validate(SessionValidateArgs),
     /// Print or check the generated session-bundle JSON Schema.
     Schema(SessionSchemaArgs),
+    /// Check or rewrite the repository's run/session-view compatibility fixtures.
+    #[command(hide = true)]
+    ViewFixtures(SessionViewFixturesArgs),
 }
 
 /// Sessions are the input to `harn runs --from-session`, so they need a way to
@@ -116,4 +119,23 @@ pub(crate) struct SessionSchemaArgs {
     /// Schema path used by --check, or write destination when --check is absent.
     #[arg(long, value_name = "PATH")]
     pub out: Option<String>,
+}
+
+#[derive(Debug, Args)]
+#[command(group(
+    ArgGroup::new("mode")
+        .required(true)
+        .multiple(false)
+        .args(["check", "write"])
+))]
+pub(crate) struct SessionViewFixturesArgs {
+    /// Repository root containing spec/run-view-fixtures.
+    #[arg(long, value_name = "PATH", default_value = ".")]
+    pub repository_root: PathBuf,
+    /// Fail when a checked-in snapshot differs from the production projection.
+    #[arg(long, conflicts_with = "write")]
+    pub check: bool,
+    /// Rewrite checked-in snapshots from the production projection.
+    #[arg(long, conflicts_with = "check")]
+    pub write: bool,
 }
