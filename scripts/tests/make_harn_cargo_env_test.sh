@@ -266,8 +266,7 @@ for expected in \
   './scripts/cargo_with_worktree_build_dir.sh nextest run --workspace --profile e2e --run-ignored all' \
   './scripts/cargo_with_worktree_build_dir.sh build --release -p harn-cli --bin harn' \
   './scripts/cargo_with_worktree_build_dir.sh test -p harn-mcp-compat --tests' \
-  './scripts/cargo_with_worktree_build_dir.sh test -p harn-cli --lib mcp_compat_tests' \
-  './scripts/cargo_with_worktree_build_dir.sh test -p harn-vm --test harn_vm -- run_view_fixtures::run_view_fixture_snapshots_match --exact'
+  './scripts/cargo_with_worktree_build_dir.sh test -p harn-cli --lib mcp_compat_tests'
 do
   if ! grep -Fq "$expected" "$make_targets"; then
     echo "Makefile target did not use the Cargo env wrapper: $expected" >&2
@@ -275,6 +274,22 @@ do
     exit 1
   fi
 done
+
+for expected in \
+  './scripts/harn_bin.sh -- session view-fixtures --write --repository-root .' \
+  './scripts/harn_bin.sh -- session view-fixtures --check --repository-root .'
+do
+  if ! grep -Fq "$expected" "$make_targets"; then
+    echo "run-view fixture target did not use the production Harn binary: $expected" >&2
+    cat "$make_targets" >&2
+    exit 1
+  fi
+done
+if grep -Fq 'run_view_fixtures::run_view_fixture_snapshots_match' "$make_targets"; then
+  echo "run-view fixture target regressed to a separate Cargo test graph" >&2
+  cat "$make_targets" >&2
+  exit 1
+fi
 
 make_focused_test="$tmp_root/make-focused-test.txt"
 make -C "$repo_root" -n test ARGS='-p harn-vm typed_options_parity' > "$make_focused_test"

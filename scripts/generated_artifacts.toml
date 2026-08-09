@@ -361,12 +361,14 @@ outputs = [
 ]
 sources = [
   "crates/harn-vm/src/orchestration/records/view.rs",
+  "crates/harn-vm/src/orchestration/run_view_fixtures.rs",
+  "crates/harn-cli/src/cli/session.rs",
+  "crates/harn-cli/src/commands/session.rs",
   "crates/harn-vm/tests/harn_vm/run_view_fixtures.rs",
   "spec/run-view-fixtures/cases/",
 ]
-# The Rust `run_view_fixtures` integration test executes this same snapshot
-# comparison in the full CI suite. Keep the named Make target for local and
-# release-gate use without compiling harn-vm a second time in the audit lane.
+# The production CLI and Rust integration test execute the same fixture engine.
+# The release residual audit supplies its already-certified exact HARN_BIN.
 ci = false
 make_all = true
 
@@ -595,7 +597,7 @@ make_all = false  # excluded from `make all` for the same reason (no sibling che
 # --- excluded: build/test, external toolchain, cross-repo, runtime fixtures, or perf soak ---
 "check-all-features" = "excluded"             # cargo check --workspace --all-features (build)
 "check-cli-aot" = "excluded"                  # cargo run -p harn-cli-aot-gen (build)
-"check-run-view-fixtures" = "excluded"        # cargo test -p harn-vm (build + test)
+"check-run-view-fixtures" = "binary"          # production CLI fixture engine
 "check-bindings" = "excluded"                 # go vet/test round-trip (external toolchain)
 "check-tree-sitter-parser" = "excluded"       # pinned npm tree-sitter CLI generation (external toolchain)
 "check-wasm-wit" = "excluded"                 # pinned Bytecode Alliance wasm-tools validation (external toolchain)

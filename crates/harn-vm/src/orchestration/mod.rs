@@ -136,6 +136,9 @@ pub use records::*;
 mod run_review;
 pub use run_review::*;
 
+mod run_view_fixtures;
+pub use run_view_fixtures::*;
+
 mod training_example;
 pub use training_example::*;
 

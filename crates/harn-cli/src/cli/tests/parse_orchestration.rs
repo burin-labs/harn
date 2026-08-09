@@ -321,6 +321,24 @@ fn test_parses_session_bundle_commands() {
         panic!("expected session schema");
     };
     assert!(schema.check);
+
+    let cli = Cli::parse_from([
+        "harn",
+        "session",
+        "view-fixtures",
+        "--check",
+        "--repository-root",
+        "/repo",
+    ]);
+    let Command::Session(args) = cli.command.unwrap() else {
+        panic!("expected session command");
+    };
+    let SessionCommand::ViewFixtures(fixtures) = args.command else {
+        panic!("expected session view-fixtures");
+    };
+    assert!(fixtures.check);
+    assert!(!fixtures.write);
+    assert_eq!(fixtures.repository_root, std::path::PathBuf::from("/repo"));
 }
 
 #[test]
