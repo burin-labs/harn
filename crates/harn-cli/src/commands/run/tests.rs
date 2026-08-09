@@ -1040,7 +1040,7 @@ fn main(harness: Harness) {
 }
 
 #[tokio::test]
-async fn execute_run_without_builtin_policy_defers_unrelated_manifest_handler_initialization() {
+async fn execute_run_defaults_to_lazy_handlers_and_supports_eager_validation() {
     harn_vm::reset_thread_local_state();
     let project = tempfile::tempdir().expect("temp project");
     let script = write_manifest_trigger_project(
@@ -1066,21 +1066,6 @@ pipeline main(harness: Harness) {
 
     assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
     assert_eq!(outcome.stdout.trim(), "target-ran");
-    harn_vm::reset_thread_local_state();
-}
-
-#[tokio::test]
-async fn execute_run_eager_project_handlers_fail_fast_on_module_initialization() {
-    harn_vm::reset_thread_local_state();
-    let project = tempfile::tempdir().expect("temp project");
-    let script = write_manifest_trigger_project(
-        project.path(),
-        r#"
-pipeline main(harness: Harness) {
-  harness.stdio.println("target-ran")
-}
-"#,
-    );
 
     let outcome = execute_run_with_eager_project_handlers(&script.to_string_lossy()).await;
 

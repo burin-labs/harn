@@ -124,7 +124,7 @@ pub(crate) async fn run_acp_channel_server(
 mod tests {
     use super::*;
 
-    async fn configure_fixture(declared: bool) -> Result<(), String> {
+    async fn configure_and_resolve_fixture(declared: bool) -> Result<(), String> {
         harn_vm::reset_thread_local_state();
         crate::compiler_context::ensure_builtin_signatures_installed();
         let project = tempfile::tempdir().expect("temp project");
@@ -141,22 +141,38 @@ pub fn on_tick(_event) -> nil {
             );
         let mut vm = harn_vm::Vm::new();
         harn_vm::register_vm_stdlib(&mut vm);
-        let result = CliAcpRuntimeConfigurator
-            .configure(&mut vm, Some(&script))
-            .await;
+        let result = async {
+            CliAcpRuntimeConfigurator
+                .configure(&mut vm, Some(&script))
+                .await?;
+            let extensions = crate::package::load_runtime_extensions(&script);
+            let collected = crate::package::collect_manifest_triggers(&mut vm, &extensions)
+                .await
+                .map_err(|error| error.to_string())?;
+            let crate::package::CollectedTriggerHandler::Local { callable, .. } =
+                &collected[0].handler
+            else {
+                return Err("fixture trigger must use a local handler".to_string());
+            };
+            vm.resolve_callable(callable)
+                .await
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        .await;
         harn_vm::reset_thread_local_state();
         result
     }
 
     #[tokio::test]
     async fn acp_honors_manifest_trusted_host_dispatch_before_installing_triggers() {
-        configure_fixture(true)
+        configure_and_resolve_fixture(true)
             .await
-            .expect("declared ACP project accepts privileged trigger import graph");
+            .expect("declared ACP project resolves its privileged trigger on dispatch");
 
-        let error = configure_fixture(false)
+        let error = configure_and_resolve_fixture(false)
             .await
-            .expect_err("undeclared ACP project remains unprivileged");
+            .expect_err("undeclared ACP project remains unprivileged on dispatch");
         assert!(
             error.contains("host_call") && error.contains("not callable source API"),
             "unexpected refusal: {error}"

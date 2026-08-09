@@ -1401,13 +1401,7 @@ async fn check_manifest_from(anchor: &Path) -> Vec<DoctorCheck> {
         harn_vm::register_vm_stdlib(&mut vm);
         crate::install_default_hostlib(&mut vm);
         harn_vm::clear_trigger_registry();
-        match package::install_manifest_triggers_with_initialization(
-            &mut vm,
-            &extensions,
-            package::ManifestHandlerInitialization::Eager,
-        )
-        .await
-        {
+        match package::install_manifest_triggers(&mut vm, &extensions).await {
             Ok(()) => {
                 for trigger in harn_vm::snapshot_trigger_bindings() {
                     checks.push(DoctorCheck {
