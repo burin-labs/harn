@@ -77,6 +77,10 @@ cat > "$fake_bin/cargo" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> "$FAKE_CARGO_RECORD"
+if [[ -n "${FAKE_LANE_ENV_RECORD:-}" ]]; then
+  printf 'cargo\t%s\t%s\t%s\n' "$*" "${CARGO_BUILD_JOBS-}" "${HARN_CONFORMANCE_JOBS-}" \
+    >> "$FAKE_LANE_ENV_RECORD"
+fi
 case "${1:-}" in
   build)
     count=0
@@ -163,6 +167,10 @@ cat > "$fake_bin/make" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >> "$FAKE_MAKE_RECORD"
+if [[ -n "${FAKE_LANE_ENV_RECORD:-}" ]]; then
+  printf 'make\t%s\t%s\t%s\n' "$*" "${CARGO_BUILD_JOBS-}" "${HARN_CONFORMANCE_JOBS-}" \
+    >> "$FAKE_LANE_ENV_RECORD"
+fi
 if [[ "${1:-}" == "fmt-check" && "${FAKE_MAKE_MODE:-}" == parallel-* ]]; then
   count=0
   if [[ -f "$FAKE_CARGO_STATE/fmt-count" ]]; then
@@ -484,6 +492,7 @@ run_lane_cpu_case() {
   : > "$state/cargo-record"
   : > "$state/make-record"
   : > "$state/event-record"
+  : > "$state/lane-env-record"
   set +e
   HARN_RELEASE_ROOT="$release_root" \
     HARN_BIN="$fake_harn" \
@@ -495,6 +504,7 @@ run_lane_cpu_case() {
     FAKE_CARGO_RECORD="$state/cargo-record" \
     FAKE_CARGO_STATE="$state" \
     FAKE_EVENT_RECORD="$state/event-record" \
+    FAKE_LANE_ENV_RECORD="$state/lane-env-record" \
     FAKE_MAKE_MODE=success \
     FAKE_MAKE_RECORD="$state/make-record" \
     PATH="$fake_bin:$PATH" \
@@ -539,6 +549,33 @@ if grep -Fq 'audit lanes: serial' "$wide_state/output"; then
   exit 1
 fi
 
+# Three internally parallel heavy lanes on a wide host remain concurrent, but
+# their configured pools partition the machine instead of each claiming all of
+# it. On 18 CPUs that gives both Cargo lanes 6 workers and caps conformance at
+# its established maximum of 4.
+budgeted_state=$(run_lane_cpu_case budgeted 18 constrained)
+if [[ "$(<"$budgeted_state/status")" -ne 0 ]]; then
+  echo "bounded parallel audit lanes should pass" >&2
+  cat "$budgeted_state/output" >&2
+  exit 1
+fi
+if ! grep -Fq \
+  'audit lanes: bounded parallel (18 cpu; 3 heavy lanes; 6 workers per heavy lane)' \
+  "$budgeted_state/output"; then
+  echo "a wide host should publish its heavy-lane worker partition" >&2
+  cat "$budgeted_state/output" >&2
+  exit 1
+fi
+if ! grep -Eq $'^make\tfmt-check\t6\t$' "$budgeted_state/lane-env-record"; then
+  echo "rust audit did not receive its Cargo worker budget" >&2
+  cat "$budgeted_state/lane-env-record" >&2
+  exit 1
+fi
+if ! grep -Eq $'^make\tconformance\t\t4$' "$budgeted_state/lane-env-record"; then
+  echo "harn audit did not receive its bounded conformance worker pool" >&2
+  cat "$budgeted_state/lane-env-record" >&2
+  exit 1
+fi
 constrained_state=$(run_lane_cpu_case constrained 6 constrained)
 if [[ "$(<"$constrained_state/status")" -ne 0 ]]; then
   echo "resource-aware audit lanes should still pass" >&2
