@@ -20,7 +20,8 @@ clients and servers in Harn, not editing the runtime that carries them.
 
 - `docs/src/mcp-and-acp.md` is the public client and server reference.
 - `docs/src/mcp-server.md` covers the orchestrator server, `harn mcp serve`.
-- Harn implements stable MCP `2026-07-28` on both transports.
+- Harn's stdio servers accept the released `initialize` lifecycle and the
+  2026-07-28 request-metadata lifecycle. Streamable HTTP uses 2026-07-28.
 - The official Rust SDK owns protocol mechanics; Harn owns product policy.
 - Route every capability through `harness.tools.*`.
 

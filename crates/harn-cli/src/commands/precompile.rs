@@ -169,7 +169,12 @@ fn precompile_one(
 
     // Resolve imports like `execute`/`harn check` so a call to an imported
     // symbol that shadows a builtin is checked against the right signature.
-    let checker = checker_with_resolved_imports(harn_parser::TypeChecker::new(), source_path);
+    let trusted_host_dispatch =
+        crate::compiler_context::trusted_host_dispatch_for_source(source_path);
+    let checker = checker_with_resolved_imports(
+        harn_parser::TypeChecker::new().with_privileged_wire_builtins(trusted_host_dispatch),
+        source_path,
+    );
 
     let mut had_type_error = false;
     let mut messages = String::new();
@@ -187,7 +192,7 @@ fn precompile_one(
         eprint!("{messages}");
     }
 
-    let artifacts = compile_artifacts(source_path, &source, &program)?;
+    let artifacts = compile_artifacts(source_path, &source, &program, trusted_host_dispatch)?;
     let entry_key = harn_vm::bytecode_cache::CacheKey::from_source(source_path, &source);
 
     let entry_dest = output_path(source_path, source_root, out_root, CACHE_EXTENSION)?;
@@ -215,20 +220,33 @@ fn compile_artifacts(
     source_path: &Path,
     source: &str,
     program: &[harn_parser::SNode],
+    trusted_host_dispatch: bool,
 ) -> Result<PrecompileArtifacts, String> {
     let imported_enum_candidates = crate::imported_enum_candidates_for_source(source_path, source);
-    let entry_chunk =
+    let compiler = if trusted_host_dispatch {
+        harn_vm::Compiler::new_trusted_host_dispatch()
+            .with_imported_enum_candidates(imported_enum_candidates.iter().cloned())
+    } else {
         crate::compiler_with_imported_enum_candidates(imported_enum_candidates.iter().cloned())
-            .compile(program)
-            .map_err(|e| format!("compile error: {e}"))?;
-    let module_artifact =
+    };
+    let entry_chunk = compiler
+        .compile(program)
+        .map_err(|e| format!("compile error: {e}"))?;
+    let module_artifact = if trusted_host_dispatch {
+        harn_vm::module_artifact::compile_trusted_host_dispatch_module_artifact_from_source_with_imported_enums(
+            source_path,
+            source,
+            imported_enum_candidates,
+        )
+    } else {
         harn_vm::module_artifact::compile_module_artifact_from_source_with_imported_enums(
             source_path,
             source,
             imported_enum_candidates,
         )
-        .map_err(|e| format!("module compile error: {e}"))
-        .ok();
+    }
+    .map_err(|e| format!("module compile error: {e}"))
+    .ok();
     Ok(PrecompileArtifacts {
         entry_chunk,
         module_artifact,

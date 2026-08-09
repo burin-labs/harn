@@ -143,7 +143,7 @@ async fn orchestrator_server_discover_returns_stable_capabilities() {
     let supported = result["supportedVersions"]
         .as_array()
         .expect("supportedVersions array");
-    assert_eq!(supported.as_slice(), [json!("2026-07-28")]);
+    assert_eq!(supported, &[json!("2026-07-28")]);
     assert!(session.authenticated);
 }
 

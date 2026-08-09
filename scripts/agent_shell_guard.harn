@@ -35,119 +35,70 @@ const CARGO_VERB_TARGETS = {
 
 pub type ShellGuardDecision = {allow: bool, reason: string}
 
-/** Tokenize one shell stage without mistaking whitespace inside quotes for argv boundaries. */
-pub fn shell_words(stage: string) -> list<string> {
-  let words = []
-  let current = ""
-  let quote = ""
-  let escaped = false
-  for character in stage.chars() {
-    if escaped {
-      current = current + character
-      escaped = false
-    } else if character == "\\" && quote != "'" {
-      escaped = true
-    } else if quote != "" {
-      if character == quote {
-        quote = ""
-      } else {
-        current = current + character
-      }
-    } else if character == "\"" || character == "'" {
-      quote = character
-    } else if character == " " || character == "\t" {
-      if current != "" {
-        words = words + [current]
-        current = ""
-      }
-    } else {
-      current = current + character
-    }
-  }
-  if escaped {
-    current = current + "\\"
-  }
-  if current != "" {
-    words = words + [current]
-  }
-  return words
+type ShellCommandStage = {text: string, argv: list<string>, writes_to_file: bool}
+
+const EMPTY_SHELL_STAGE: ShellCommandStage = {text: "", argv: [], writes_to_file: false}
+
+fn command_groups(command: string) -> list<list<ShellCommandStage>> {
+  const scan = command_risk_scan({request: {mode: "shell", command: command}})
+  return scan.shell_command_groups ?? []
 }
 
-pub fn strip_shell_prefix(words: list<string>) -> list<string> {
-  // Skip shell wrappers and environment settings so the guard sees the real
-  // program name.
-  let rest = words
-  while len(rest) > 0 {
-    const head = rest[0] ?? ""
-    if ["env", "command", "exec"].contains(head) {
-      rest = rest.slice(1, len(rest))
-    } else if ["-u", "--unset"].contains(head) && len(rest) > 1 {
-      rest = rest.slice(2, len(rest))
-    } else if ["--", "-i", "--ignore-environment"].contains(head) {
-      rest = rest.slice(1, len(rest))
-    } else if head.contains("=") && !head.starts_with("-") {
-      rest = rest.slice(1, len(rest))
-    } else {
-      return rest
-    }
-  }
-  return rest
-}
-
-pub fn program_of(segment: string) -> string {
-  const words = shell_words(segment)
-  const stripped = strip_shell_prefix(words)
-  if len(stripped) == 0 {
+fn stage_program(stage: ShellCommandStage) -> string {
+  if len(stage.argv) == 0 {
     return ""
   }
   // Keep only the basename so `./target/release/harn` and `/usr/bin/make`
   // classify the same as their bare names.
-  const parts = (stripped[0] ?? "").split("/")
+  const parts = (stage.argv[0] ?? "").split("/")
   return parts[len(parts) - 1] ?? ""
+}
+
+pub fn program_of(segment: string) -> string {
+  const groups = command_groups(segment)
+  if len(groups) == 0 || len(groups[0] ?? []) == 0 {
+    return ""
+  }
+  return stage_program((groups[0] ?? [])[0] ?? EMPTY_SHELL_STAGE)
 }
 
 /** Split a compound command into independently classified stages. */
 pub fn segments_of(command: string) -> list<string> {
-  let normalized = command
-  for separator in ["&&", "||", ";", "\n"] {
-    normalized = normalized.replace(separator, "|")
+  let segments: list<string> = []
+  for group in command_groups(command) {
+    for stage in group {
+      segments = segments + [stage.text]
+    }
   }
-  return normalized.split("|").map(fn(part: string) { return part.trim() }).to_list()
-}
-
-fn command_groups(command: string) -> list<string> {
-  let normalized = command
-  for separator in ["&&", "||", ";", "\n"] {
-    normalized = normalized.replace(separator, "\n")
-  }
-  return normalized.split("\n").map(fn(part: string) { return part.trim() }).to_list()
+  return segments
 }
 
 pub fn cargo_violation(command: string) -> string {
-  for segment in segments_of(command) {
-    if program_of(segment) != "cargo" {
-      continue
+  for group in command_groups(command) {
+    for stage in group {
+      if stage_program(stage) != "cargo" {
+        continue
+      }
+      const verb_index = if (stage.argv[1] ?? "").starts_with("+") {
+        2
+      } else {
+        1
+      }
+      const verb = if len(stage.argv) > verb_index {
+        stage.argv[verb_index] ?? ""
+      } else {
+        ""
+      }
+      const target = CARGO_VERB_TARGETS[verb] ?? ""
+      if target == "" {
+        continue
+      }
+      return "`cargo " + verb + "` bypasses the repository Make target, including "
+        + "its worktree-local build directory and required environment. Run `"
+        + target
+        + "` instead. "
+        + "For a genuine one-off, set HARN_ALLOW_RAW_CARGO=1 in the command."
     }
-    const words = strip_shell_prefix(shell_words(segment))
-    const verb_index = if (words[1] ?? "").starts_with("+") {
-      2
-    } else {
-      1
-    }
-    const verb = if len(words) > verb_index {
-      words[verb_index] ?? ""
-    } else {
-      ""
-    }
-    const target = CARGO_VERB_TARGETS[verb] ?? ""
-    if target == "" {
-      continue
-    }
-    return "`cargo " + verb + "` bypasses the repository Make target, including "
-      + "its worktree-local build directory and required environment. Run `"
-      + target
-      + "` instead. "
-      + "For a genuine one-off, set HARN_ALLOW_RAW_CARGO=1 in the command."
   }
   return ""
 }
@@ -202,31 +153,32 @@ pub fn is_disposable_path(token: string) -> bool {
 
 /** Reject Trash as a cleanup backend only when an argv path is disposable. */
 pub fn disposable_trash_violation(command: string) -> string {
-  for segment in segments_of(command) {
-    const program = program_of(segment)
-    if program != "trash" && program != "trash-put" {
-      continue
-    }
-    const words = strip_shell_prefix(shell_words(segment))
-    for token in words.slice(1, len(words)) {
-      if token == "--" || token.starts_with("-") {
+  for group in command_groups(command) {
+    for stage in group {
+      const program = stage_program(stage)
+      if program != "trash" && program != "trash-put" {
         continue
       }
-      if is_disposable_path(token) {
-        return "`" + program
-          + "` would move disposable generated data into the user's visible Trash. "
-          + "Keep rebuildable caches in place unless invalidation is required. For temporary output, "
-          + "use an OS temporary directory and an exact, validated permanent cleanup accepted by the host. "
-          + "If permanent cleanup is refused, leave the artifact in its temporary/build root and report it; "
-          + "reserve Trash for user-authored or uncertain data."
+      for token in stage.argv.slice(1, len(stage.argv)) {
+        if token == "--" || token.starts_with("-") {
+          continue
+        }
+        if is_disposable_path(token) {
+          return "`" + program
+            + "` would move disposable generated data into the user's visible Trash. "
+            + "Keep rebuildable caches in place unless invalidation is required. For temporary output, "
+            + "use an OS temporary directory and an exact, validated permanent cleanup accepted by the host. "
+            + "If permanent cleanup is refused, leave the artifact in its temporary/build root and report it; "
+            + "reserve Trash for user-authored or uncertain data."
+        }
       }
     }
   }
   return ""
 }
 
-pub fn is_slow(segment: string) -> bool {
-  return SLOW_COMMANDS.contains(program_of(segment))
+fn is_slow(stage: ShellCommandStage) -> bool {
+  return SLOW_COMMANDS.contains(stage_program(stage))
 }
 
 /**
@@ -237,39 +189,33 @@ pub fn is_slow(segment: string) -> bool {
  * grep error` reads as "already captured" when nothing was captured at all.
  * `&>file` survives the strip and still counts.
  */
-pub fn writes_to_file(stage: string) -> bool {
-  let without_dups = stage
-  for dup in [">&1", ">&2", ">&"] {
-    without_dups = without_dups.replace(dup, "")
-  }
-  return without_dups.contains(">")
+fn writes_to_file(stage: ShellCommandStage) -> bool {
+  return stage.writes_to_file
 }
 
-fn tee_writes_to_file(stage: string) -> bool {
-  if program_of(stage) != "tee" {
+fn tee_writes_to_file(stage: ShellCommandStage) -> bool {
+  if stage_program(stage) != "tee" {
     return false
   }
-  const words = strip_shell_prefix(
-    stage.trim().split(" ").filter(fn(word: string) { return word != "" }).to_list(),
-  )
   // Options change how tee writes; they are not destinations. Requiring one
   // non-option argument keeps `tee -a | grep` from pretending it saved a log.
-  return words.slice(1, len(words)).any(fn(word: string) { return !word.starts_with("-") })
+  return stage.argv.slice(1, len(stage.argv)).any(
+    fn(word: string) { return !word.starts_with("-") },
+  )
 }
 
 pub fn discarded_output_violation(command: string) -> string {
   for group in command_groups(command) {
-    const stages = group.split("|").map(fn(part: string) { return part.trim() }).to_list()
-    if len(stages) < 2 {
+    if len(group) < 2 {
       continue
     }
     // Capture must happen before the first filter. Redirecting the filter's
     // output preserves only the filtered lines, not the expensive command.
-    for index in range(0, len(stages) - 1) {
-      const stage = stages[index] ?? ""
-      const next = stages[index + 1] ?? ""
+    for index in range(0, len(group) - 1) {
+      const stage = group[index] ?? EMPTY_SHELL_STAGE
+      const next = group[index + 1] ?? EMPTY_SHELL_STAGE
       if is_slow(stage) && !writes_to_file(stage) && !tee_writes_to_file(next) {
-        return "`" + program_of(stage) + "` output is piped into a filter "
+        return "`" + stage_program(stage) + "` output is piped into a filter "
           + "and then discarded, so recovering any other line costs a full rerun. "
           + "Redirect first, then read the file:\n"
           + "  <command> > .harn-runs/cmd.log 2>&1; echo \"exit=$?\"; grep ... .harn-runs/cmd.log\n"

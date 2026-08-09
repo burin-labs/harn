@@ -337,6 +337,38 @@ hook_check_generated_registry() {
   "$HARN_BIN" run scripts/check_generated_registry.harn
 }
 
+# Find an already-built Harn without starting a build. The worktree resolver is
+# authoritative because it understands lane-local Cargo target directories;
+# PATH is only a last resort and may point at another checkout's changing
+# binary.
+hook_find_existing_harn_bin() {
+  if [ -n "${HARN_BIN:-}" ]; then
+    [ -x "$HARN_BIN" ] || return 1
+    printf '%s\n' "$HARN_BIN"
+    return 0
+  fi
+
+  repo_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)
+  resolver="$repo_root/scripts/harn_bin.sh"
+  if [ -x "$resolver" ]; then
+    resolved=$(HARN_BIN_NO_BUILD=1 "$resolver" --no-build --print 2>/dev/null || true)
+    if [ -n "$resolved" ] && [ -x "$resolved" ]; then
+      printf '%s\n' "$resolved"
+      return 0
+    fi
+  fi
+  if [ -x "$repo_root/target/debug/harn" ]; then
+    printf '%s\n' "$repo_root/target/debug/harn"
+    return 0
+  fi
+  path_harn=$(command -v harn 2>/dev/null || true)
+  if [ -n "$path_harn" ] && [ -x "$path_harn" ]; then
+    printf '%s\n' "$path_harn"
+    return 0
+  fi
+  return 1
+}
+
 # Warn (never fail) when staged paths touch a regenerable artifact's sources
 # without staging any of its outputs. Path matching lives in
 # scripts/warn_generated_artifact_drift.harn. Reuses an available harn binary
@@ -347,14 +379,8 @@ hook_warn_generated_artifact_drift() {
   script="$repo_root/scripts/warn_generated_artifact_drift.harn"
   [ -f "$script" ] || return 0
 
-  harn_bin=${HARN_BIN:-}
+  harn_bin=$(hook_find_existing_harn_bin || true)
   if [ -z "$harn_bin" ]; then
-    harn_bin=$(command -v harn 2>/dev/null || true)
-  fi
-  if [ -z "$harn_bin" ] && [ -x "$repo_root/target/debug/harn" ]; then
-    harn_bin="$repo_root/target/debug/harn"
-  fi
-  if [ -z "$harn_bin" ] || [ ! -x "$harn_bin" ]; then
     return 0
   fi
 
@@ -367,9 +393,14 @@ hook_warn_generated_artifact_drift() {
     rm -f "$staged_in_repo"
     return 0
   fi
-  # Stay advisory even if the script errors — CI remains the drift authority.
+  # Stay advisory even if the script errors, but never turn a failed check into
+  # a silent success. The required repository gate remains the final check.
+  status=0
   "$harn_bin" run scripts/warn_generated_artifact_drift.harn -- \
-    --staged-files "$staged_in_repo" || true
+    --staged-files "$staged_in_repo" || status=$?
+  if [ "$status" -ne 0 ]; then
+    echo "warning: generated-artifact drift check did not run (harn exited $status); the required repository gate will check it before merge" >&2
+  fi
   rm -f "$staged_in_repo"
 }
 
@@ -382,7 +413,7 @@ hook_export_existing_harn_bin_for_non_rust_changes() {
     hook_export_harn_bin
     return 0
   fi
-  path_harn=$(command -v harn 2>/dev/null || true)
+  path_harn=$(hook_find_existing_harn_bin || true)
   if [ -z "$path_harn" ]; then
     return 0
   fi

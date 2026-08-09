@@ -197,6 +197,16 @@ test-group = "harn-windows-sandbox"
 # ---------------------------------------------------------------------------
 # Slow-test budgets
 # ---------------------------------------------------------------------------
+# This test drives a complete randomized experiment through the public Harn
+# workflow, fails the native attestation for the terminal decision, and then
+# proves recovery. The statistical stopping rule needs several full ledger
+# rebuilds, so a loaded developer machine can legitimately cross the generic
+# 60s ceiling even though every advance is bounded. Keep the wider budget on
+# this exact recovery claim instead of weakening the workspace default.
+[[profile.default.overrides]]
+filter = 'package(harn-vm) and test(native_adapter_recovers_a_decision_after_its_first_attestation_fails)'
+slow-timeout = { period = "30s", terminate-after = 4, grace-period = "10s" }
+
 # Transport-layer LLM tests do real localhost TCP with a 3s accept deadline.
 # They're bounded internally but give them a bit more room than the default
 # slow-test threshold to reduce false-positive flags on cold CI workers.

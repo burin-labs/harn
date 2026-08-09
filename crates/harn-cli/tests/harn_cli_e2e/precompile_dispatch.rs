@@ -126,6 +126,46 @@ pipeline default(harness: Harness, task) {
 }
 
 #[test]
+fn precompile_honors_manifest_trusted_host_dispatch() {
+    let workdir = tempfile::tempdir().expect("workdir");
+    let source = workdir.path().join("host-route.harn");
+    std::fs::write(
+        &source,
+        "pub fn host_environment() { return host_call(\"env.host\", {}) }\n",
+    )
+    .expect("write host route");
+
+    let strict = run_precompile(
+        &[source.to_string_lossy().as_ref()],
+        &[("HARN_LEGACY_AMBIENT_CAPABILITIES", "0")],
+    );
+    assert_ne!(strict.exit_code, 0, "untrusted precompile must fail");
+    assert!(collect_artifacts(workdir.path()).is_empty());
+
+    std::fs::write(
+        workdir.path().join("harn.toml"),
+        "[check]\ntrusted_host_dispatch = true\n",
+    )
+    .expect("write harn.toml");
+    let declared = run_precompile(
+        &[source.to_string_lossy().as_ref()],
+        &[("HARN_LEGACY_AMBIENT_CAPABILITIES", "0")],
+    );
+    assert_eq!(
+        declared.exit_code, 0,
+        "manifest-declared host dispatch was ignored:\n{}",
+        declared.stderr
+    );
+    assert_eq!(
+        collect_artifacts(workdir.path()),
+        BTreeSet::from([
+            PathBuf::from("host-route.harnbc"),
+            PathBuf::from("host-route.harnmod"),
+        ])
+    );
+}
+
+#[test]
 fn out_directory_mirrors_source_tree_under_target() {
     let workdir = tempfile::tempdir().expect("workdir");
     let outdir = tempfile::tempdir().expect("outdir");

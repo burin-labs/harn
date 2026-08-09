@@ -72,6 +72,16 @@ if [[ -n "$allowed" ]]; then
   exit 1
 fi
 
+quoted_pipeline="$({
+  printf '%s' \
+    '{"tool_name":"Bash","tool_input":{"command":"ps -axo command | rg '\''rustc .*harn_vm|cargo build --locked'\'' | head -n 20"}}'
+} | HARN_BIN="$HARN_BIN" "$fixture_root/scripts/agent-shell-guard.sh")"
+if [[ -n "$quoted_pipeline" ]]; then
+  echo "adapter treated a quoted search pattern as a command" >&2
+  printf '%s\n' "$quoted_pipeline" >&2
+  exit 1
+fi
+
 mkdir -p "$fixture_root/model-probe"
 cp "$repo_root/scripts/agent-shell-guard.sh" "$fixture_root/model-probe/"
 cat >"$fixture_root/model-probe/agent_shell_guard.harn" <<'HARN'

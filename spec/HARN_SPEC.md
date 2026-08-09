@@ -6862,8 +6862,9 @@ workspace = ["read_text", "write_text"]
   equivalent is `--strict-types`; combine it with `--strict` for a zero-warning
   type-safety gate.
 - `trusted_host_dispatch` exposes privileged host builtins while checking,
-  testing, or executing an embedder-owned route module graph, including through
-  ACP. Its check-only flag equivalent is `--trusted-host-dispatch`. Enable it
+  testing, precompiling, executing, or serving an embedder-owned route module
+  graph through MCP, A2A, site, or ACP. Its check-only flag equivalent is
+  `--trusted-host-dispatch`. Enable it
   only when a Rust host selects and loads the graph through the trusted-dispatch
   VM boundary; ordinary modules remain unprivileged.
 - `preflight_severity` downgrades preflight diagnostics to warnings or

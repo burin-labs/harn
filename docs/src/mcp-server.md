@@ -328,15 +328,17 @@ when clients request a catalog page.
 
 ## Protocol support
 
-`harn mcp serve` implements stable MCP `2026-07-28`. It is a control-plane
-server for Harn orchestration state, so it supports tools, resources, prompts,
-completions, MCP tasks, cancellation, and progress. It does not expose roots.
+On stdio, `harn mcp serve` accepts `initialize` from released MCP clients and
+`server/discover` from 2026-07-28 clients. Streamable HTTP uses the session-free
+2026-07-28 flow. The server supports tools, resources, prompts, completions,
+MCP tasks, cancellation, and progress. It does not expose roots.
 The orchestrator-mode catalog does not currently embed sampling input requests
 (Harn's MCP clients resolve sampling input — see the
 [client docs](mcp-and-acp.md#mcp-client-support-matrix)).
 
 | Method or feature | Status |
 |---|---|
+| `initialize`, `notifications/initialized` | Supported on stdio for released MCP clients |
 | `server/discover`, `ping` | Supported |
 | `tools/list`, `tools/call` | Supported for the Harn tool catalog above |
 | `notifications/progress`, `notifications/cancelled` | Supported for cancellable work |

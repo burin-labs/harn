@@ -69,17 +69,21 @@ fn http_spec(url: &str, auth_token: Option<&str>) -> McpServerSpec {
 }
 
 #[test]
-fn connect_protocol_options_reject_non_stable_versions() {
-    for version in ["2025-11-25", "2099-01-01"] {
-        let error = match resolve_connect_protocol_options(Some(version)) {
-            Ok(_) => panic!("non-stable protocol version must fail locally: {version}"),
-            Err(error) => error,
-        };
-        assert!(
-            error.to_string().contains("unsupported protocol_version"),
-            "{error}"
-        );
+fn connect_protocol_options_accept_sdk_versions_and_reject_unknown_versions() {
+    for version in crate::mcp_protocol::sdk_protocol_versions() {
+        let options = resolve_connect_protocol_options(Some(version))
+            .expect("SDK-supported protocol version should be accepted");
+        assert_eq!(options.protocol_version, version);
     }
+
+    let error = match resolve_connect_protocol_options(Some("2099-01-01")) {
+        Ok(_) => panic!("unknown protocol version must fail locally"),
+        Err(error) => error,
+    };
+    assert!(
+        error.to_string().contains("unsupported protocol_version"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -144,6 +148,7 @@ print(json.dumps({
     "cacheScope": "private",
     "_meta": {"io.modelcontextprotocol/serverInfo": {"name": "stable", "version": "1.0.0"}}
 }
+
 }), flush=True)
 "#;
     let handle = connect_stdio_test_script(script, PROTOCOL_VERSION.to_string()).await;
@@ -152,6 +157,44 @@ print(json.dumps({
         discovery["protocolVersion"],
         serde_json::json!(PROTOCOL_VERSION)
     );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn stdio_client_falls_back_to_initialize_with_each_sdk_released_version() {
+    let script = r#"
+import json, sys
+discover = json.loads(sys.stdin.readline())
+assert discover["method"] == "server/discover"
+requested = discover["params"]["_meta"]["io.modelcontextprotocol/protocolVersion"]
+print(json.dumps({
+    "jsonrpc": "2.0",
+    "id": discover["id"],
+    "error": {"code": -32601, "message": "Method not found"}
+}), flush=True)
+initialize = json.loads(sys.stdin.readline())
+assert initialize["method"] == "initialize"
+assert initialize["params"]["protocolVersion"] == requested
+print(json.dumps({
+    "jsonrpc": "2.0",
+    "id": initialize["id"],
+    "result": {
+        "protocolVersion": requested,
+        "capabilities": {"tools": {}},
+        "serverInfo": {"name": "released", "version": "1.0.0"}
+    }
+}), flush=True)
+initialized = json.loads(sys.stdin.readline())
+assert initialized["method"] == "notifications/initialized"
+"#;
+
+    for version in rmcp::model::ProtocolVersion::KNOWN_VERSIONS
+        .iter()
+        .filter(|version| *version < &rmcp::model::ProtocolVersion::STANDARD_HEADERS)
+    {
+        let handle = connect_stdio_test_script(script, version.as_str().to_string()).await;
+        let peer = handle.discovery_result.lock().await.clone().unwrap();
+        assert_eq!(peer["protocolVersion"], serde_json::json!(version.as_str()));
+    }
 }
 
 #[tokio::test(flavor = "current_thread")]

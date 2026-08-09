@@ -10,6 +10,7 @@ pub(super) fn unwrapped_command_index(tokens: &[String], start: usize, end: usiz
         let next = match command_basename(&tokens[index]) {
             "command" => skip_command_wrapper(tokens, index + 1, end),
             "builtin" | "nohup" => index + 1,
+            "exec" => skip_exec_wrapper(tokens, index + 1, end),
             "sudo" => skip_sudo_wrapper(tokens, index + 1, end),
             "env" => skip_env_wrapper(tokens, index + 1, end),
             "nice" => skip_nice_wrapper(tokens, index + 1, end),
@@ -21,6 +22,26 @@ pub(super) fn unwrapped_command_index(tokens: &[String], start: usize, end: usiz
             return index;
         }
         index = next;
+    }
+    index
+}
+
+pub(super) fn skip_exec_wrapper(tokens: &[String], start: usize, end: usize) -> usize {
+    let mut index = start;
+    while index < end {
+        let token = &tokens[index];
+        if token == "--" {
+            return index + 1;
+        }
+        if token == "-a" && index + 1 < end {
+            index += 2;
+            continue;
+        }
+        if token.starts_with('-') && token != "-" {
+            index += 1;
+            continue;
+        }
+        break;
     }
     index
 }
@@ -348,6 +369,58 @@ pub(super) fn split_chained_command(command: &str) -> Vec<String> {
     }
     append_segment(&mut segments, &mut current);
     segments
+}
+
+/// Split one chain member into pipeline stages without treating quoted or
+/// escaped pipes as separators. The returned text keeps its original quoting
+/// so downstream policy can still distinguish shell syntax from argument text.
+pub(super) fn split_pipeline_command(command: &str) -> Vec<String> {
+    let mut stages = Vec::new();
+    let mut current = String::new();
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut escaping = false;
+    let chars: Vec<char> = command.chars().collect();
+    let mut index = 0;
+    while index < chars.len() {
+        let ch = chars[index];
+        if escaping {
+            current.push(ch);
+            escaping = false;
+            index += 1;
+            continue;
+        }
+        if ch == '\\' && !in_single_quote {
+            escaping = true;
+            current.push(ch);
+            index += 1;
+            continue;
+        }
+        if ch == '\'' && !in_double_quote {
+            in_single_quote = !in_single_quote;
+            current.push(ch);
+            index += 1;
+            continue;
+        }
+        if ch == '"' && !in_single_quote {
+            in_double_quote = !in_double_quote;
+            current.push(ch);
+            index += 1;
+            continue;
+        }
+        if ch == '|' && !in_single_quote && !in_double_quote {
+            append_segment(&mut stages, &mut current);
+            index += 1;
+            if chars.get(index) == Some(&'&') {
+                index += 1;
+            }
+            continue;
+        }
+        current.push(ch);
+        index += 1;
+    }
+    append_segment(&mut stages, &mut current);
+    stages
 }
 
 pub(super) fn append_segment(segments: &mut Vec<String>, current: &mut String) {

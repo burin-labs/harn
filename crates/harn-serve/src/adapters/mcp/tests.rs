@@ -83,6 +83,72 @@ pub fn greet(name: string) -> string {
 }
 
 #[tokio::test]
+async fn released_initialize_lifecycle_lists_generic_server_tools() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let script = dir.path().join("server.harn");
+    std::fs::write(
+        &script,
+        r"
+pub fn greet(name: string) -> string {
+  return name
+}
+",
+    )
+    .expect("write script");
+    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+    let server = McpServer::new(McpServerConfig::new(core));
+    let session = SharedSession::new();
+
+    let initialized = match server
+        .process_message(
+            json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-11-25",
+                    "capabilities": {},
+                    "clientInfo": {"name": "codex-mcp-client", "version": "test"}
+                }
+            }),
+            session.clone(),
+            AuthRequest::default(),
+        )
+        .await
+    {
+        ImmediateResult::Response(response) => response,
+        ImmediateResult::Accepted | ImmediateResult::Stream(_) => {
+            panic!("initialize must return a response")
+        }
+    };
+    assert_eq!(
+        initialized["result"]["protocolVersion"],
+        json!("2025-11-25")
+    );
+    assert_eq!(
+        session.connection().client_identity(),
+        "codex-mcp-client/test"
+    );
+
+    let tools = match server
+        .process_message(
+            json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}),
+            session,
+            AuthRequest::default(),
+        )
+        .await
+    {
+        ImmediateResult::Response(response) => response,
+        ImmediateResult::Accepted | ImmediateResult::Stream(_) => {
+            panic!("tools/list must return a response")
+        }
+    };
+    assert_eq!(tools["result"]["tools"][0]["name"], json!("greet"));
+    assert!(tools["result"].get("resultType").is_none());
+    assert!(tools["result"].get("ttlMs").is_none());
+}
+
+#[tokio::test]
 async fn package_context_resources_templates_prompts_and_completions_roundtrip() {
     let dir = tempfile::tempdir().expect("tempdir");
     let script = dir.path().join("server.harn");

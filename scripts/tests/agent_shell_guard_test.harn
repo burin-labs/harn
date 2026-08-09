@@ -34,14 +34,6 @@ pipeline test_program_of_sees_through_env_prefixes(harness: Harness, task) {
 }
 
 @test
-pipeline test_shell_words_preserves_quoted_and_escaped_paths(harness: Harness, task) {
-  assert_eq(
-    shell_words("trash '/tmp/probe output' \"./target/debug cache\" escaped\\ path"),
-    ["trash", "/tmp/probe output", "./target/debug cache", "escaped path"],
-  )
-}
-
-@test
 pipeline test_cargo_verbs_with_a_makefile_owner_are_denied(harness: Harness, task) {
   for verb in ["build", "check", "clippy", "fmt", "test", "nextest", "bench"] {
     assert(
@@ -70,6 +62,14 @@ pipeline test_cargo_is_caught_anywhere_in_a_pipeline(harness: Harness, task) {
   assert(cargo_violation("make build; cargo test | tail") != "")
   // A `cargo` substring inside another word is not a cargo call.
   assert_eq(cargo_violation("grep cargo-test README.md"), "")
+}
+
+@test
+pipeline test_quoted_shell_separators_stay_inside_arguments(harness: Harness, task) {
+  const diagnostic = "ps -axo command | rg 'rustc .*harn_vm|cargo build --locked' | head -n 20"
+  assert_eq(cargo_violation(diagnostic), "")
+  assert_eq(len(segments_of(diagnostic)), 3)
+  assert(decision(codex_payload(diagnostic)).allow)
 }
 
 @test
@@ -123,6 +123,7 @@ pipeline test_disposable_paths_never_enter_user_trash(harness: Harness, task) {
     "trash /tmp/burin-bench-baseline.out /tmp/burin-bench-check.out /tmp/burin-bench-measure.out",
     "trash /private/tmp/burin-bench-probe.iM1F3P",
     "trash '/tmp/burin bench output'",
+    "trash /tmp/burin\\ bench\\ output",
     "/usr/bin/trash .build/arm64-apple-macosx/debug/ModuleCache",
   ] {
     const violation = disposable_trash_violation(command)

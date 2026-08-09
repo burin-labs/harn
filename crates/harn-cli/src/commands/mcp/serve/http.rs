@@ -251,7 +251,7 @@ fn validate_protocol_header(headers: &HeaderMap) -> Result<(), Box<Response>> {
     else {
         return Ok(());
     };
-    if mcp_protocol::is_supported_protocol_version(value) {
+    if mcp_protocol::is_request_metadata_protocol_version(value) {
         Ok(())
     } else {
         Err(Box::new(StatusCode::BAD_REQUEST.into_response()))

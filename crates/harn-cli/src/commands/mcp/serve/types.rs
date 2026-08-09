@@ -94,19 +94,10 @@ impl McpTaskState {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub(super) struct ConnectionState {
     pub(super) authenticated: bool,
-    pub(super) client_identity: String,
-}
-
-impl Default for ConnectionState {
-    fn default() -> Self {
-        Self {
-            authenticated: false,
-            client_identity: "unknown".to_string(),
-        }
-    }
+    pub(super) mcp: mcp_protocol::McpServerSession,
 }
 
 #[derive(Clone)]

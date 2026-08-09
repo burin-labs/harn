@@ -498,7 +498,9 @@ through `pub fn` exports or through the `harness.tools.mcp_tools(...)` /
 `harness.tools.mcp_resource(...)` / `harness.tools.mcp_prompt(...)` methods shown
 above and serves the appropriate one over stdio or Streamable HTTP. All
 `print`/`println` output goes to stderr when stdio is the MCP transport.
-The server implements stable MCP `2026-07-28` on both transports.
+On stdio, the server accepts `initialize` from released MCP clients and
+`server/discover` from 2026-07-28 clients. Streamable HTTP uses the session-free
+2026-07-28 flow.
 
 List endpoints are cursor-paginated. `tools/list`, `resources/list`,
 `resources/templates/list`, and `prompts/list` return up to 100 entries by
@@ -515,6 +517,7 @@ implements the stable request-scoped stream.
 
 | Method or feature | Harn as MCP server |
 |---|---|
+| `initialize`, `notifications/initialized` | Supported on stdio for released MCP clients |
 | `server/discover`, `ping` | Supported |
 | `tools/list`, `tools/call` | Supported |
 | `notifications/progress`, `notifications/cancelled` | Supported for long-running tool calls |

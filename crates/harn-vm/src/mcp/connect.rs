@@ -21,6 +21,11 @@ pub(crate) async fn mcp_connect_stdio_impl(
     })?;
     let requested_version = sdk_protocol_version(&requested_protocol_version);
     let handler = HarnSdkClientHandler::new(command, requested_version.clone());
+    let legacy_version = if requested_version >= rmcp::model::ProtocolVersion::STANDARD_HEADERS {
+        rmcp::model::ProtocolVersion::LATEST
+    } else {
+        requested_version.clone()
+    };
     let mut preferred_versions = vec![requested_version];
     for version in rmcp::model::ProtocolVersion::KNOWN_VERSIONS.iter().rev() {
         if version.as_str() != requested_protocol_version {
@@ -29,7 +34,7 @@ pub(crate) async fn mcp_connect_stdio_impl(
     }
     let lifecycle = rmcp::service::ClientLifecycleMode::Auto {
         preferred_versions,
-        legacy_version: Some(rmcp::model::ProtocolVersion::V_2025_11_25),
+        legacy_version: Some(legacy_version),
     };
     use rmcp::service::ClientServiceExt;
     let running = handler

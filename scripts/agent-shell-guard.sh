@@ -38,13 +38,13 @@ resolve_harn() {
 harn_runner="$(resolve_harn)"
 [[ -n "$harn_runner" && -x "$harn_runner" ]] || exit 0
 
-# The policy uses core data functions plus stdin/stdout. The empty allow list
-# denies non-core ambient builtins, the model kill switch blocks real provider
-# calls, and the named handler mode keeps unrelated project handler
-# initialization out of this command check.
+# The policy uses core data functions, stdin/stdout, and Harn's deterministic
+# command parser. That parser is the only non-core builtin allowed here; the
+# model kill switch blocks real provider calls, and the named handler mode keeps
+# unrelated project handler initialization out of this command check.
 run_guard() {
   BURIN_HARNW_AUTO_FETCH=0 HARN_LLM_CALLS_DISABLED=1 "$harn_runner" run \
-    --defer-project-handlers --allow= "$script_dir/agent_shell_guard.harn"
+    --defer-project-handlers --allow=command_risk_scan "$script_dir/agent_shell_guard.harn"
 }
 
 if [[ "${AGENT_SHELL_GUARD_DEBUG:-0}" == "1" ]]; then

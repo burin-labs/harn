@@ -33,6 +33,19 @@ use crate::cli::{
 /// axum buffers a request.
 pub(crate) const SERVE_DEFAULT_MAX_BODY_BYTES: usize = 10 * 1024 * 1024;
 
+/// Build the dispatch configuration for a file-backed server.
+///
+/// The source project's manifest owns privileged host-dispatch authority. All
+/// server adapters must consume that declaration just as `check`, `test`,
+/// `run`, and ACP do; callers may still add transport-specific policy after
+/// this shared projection.
+fn dispatch_core_config_for_source(path: &str) -> DispatchCoreConfig {
+    let mut config = DispatchCoreConfig::for_script(path);
+    config.trusted_host_dispatch =
+        crate::compiler_context::trusted_host_dispatch_for_source(Path::new(path));
+    config
+}
+
 /// End a script-backed MCP server before its transport starts.
 ///
 /// MCP reserves stdout for protocol messages, so pipeline output belongs on
@@ -205,7 +218,7 @@ pub(crate) async fn run_a2a_server(args: &A2aServeArgs) -> Result<(), String> {
         .unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], args.port)));
     guard_serve_bind_auth("a2a", bind, &auth_policy, &tls)?;
 
-    let mut config = DispatchCoreConfig::for_script(&args.file);
+    let mut config = dispatch_core_config_for_source(&args.file);
     config.auth_policy = auth_policy;
     let core = DispatchCore::new(config).map_err(|error| error.to_string())?;
     harn_serve::emit_export_diagnostics(core.catalog().diagnostics());
@@ -249,7 +262,7 @@ pub(crate) async fn run_site_server(args: &SiteServeArgs) -> Result<(), String> 
     let tls = build_tls_config(args.tls, args.cert.as_ref(), args.key.as_ref())?;
     guard_serve_bind_auth("site", args.bind, &auth_policy, &tls)?;
 
-    let mut config = DispatchCoreConfig::for_script(&args.file);
+    let mut config = dispatch_core_config_for_source(&args.file);
     config.auth_policy = auth_policy;
     // An HTTP host must run its handler on every request — caching the
     // reply to an identical second POST would skip the handler's side
@@ -360,7 +373,7 @@ pub(crate) async fn run_mcp_server(args: &ServeMcpArgs) -> Result<(), String> {
     }
 
     let auth_policy = build_auth_policy(&args.api_key, args.hmac_secret.as_ref());
-    let mut config = DispatchCoreConfig::for_script(&args.file);
+    let mut config = dispatch_core_config_for_source(&args.file);
     config.auth_policy = auth_policy.clone();
     let core = DispatchCore::new(config).map_err(|error| error.to_string())?;
     let mut server_config = McpServerConfig::new(core);
