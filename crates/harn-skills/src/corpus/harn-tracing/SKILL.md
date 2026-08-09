@@ -90,10 +90,10 @@ Pair it with [[harn-orchestration]] for workflow events and [[harn-testing]] for
 
 ## Verify
 
-- Run-record tests: targeted `cargo test -p harn-vm record`.
-- Replay tests: targeted `cargo test -p harn-vm replay`.
-- Orchestration events: `cargo test -p harn-vm orchestration`.
-- CLI audit or eval: `cargo test -p harn-cli --test <test-name>`.
+- Run-record tests: targeted `make test ARGS='-p harn-vm record'`.
+- Replay tests: targeted `make test ARGS='-p harn-vm replay'`.
+- Orchestration events: `make test ARGS='-p harn-vm orchestration'`.
+- CLI audit or eval: `make test ARGS='-p harn-cli --test <test-name>'`.
 - Portal contract changes: `npm run portal:lint`.
 - Portal tests: `npm run portal:test`.
 - Portal build: `npm run portal:build`.

@@ -134,5 +134,5 @@ Pair it with [[harn-orchestration]] for workflow behavior and [[harn-testing]] f
 - Mock-provider fixtures: targeted conformance or CLI tests.
 - JSON surfaces: `harn --json-schemas --command <command>`.
 - Docs snippets: `make check-docs-snippets` when examples change.
-- Broad VM changes: `cargo test -p harn-vm`.
+- Broad VM changes: `make test ARGS='-p harn-vm'`.
 - Cross-crate provider changes: `make test`.

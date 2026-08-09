@@ -100,4 +100,5 @@ conformance fixtures.
 - `rules_apply` is a gated deterministic tool: pass `harness.rules` as its
   first argument, including for dry runs. The nominal handle is the authority;
   there is no ambient enable step.
-- Format every rule run / fixture with both `cargo fmt` and `harn fmt`.
+- Format Rust and Harn fixtures through their owning seams: `make fmt` and
+  `HARN_BIN_NO_BUILD=1 ./scripts/harn_bin.sh -- fmt <paths>`.
