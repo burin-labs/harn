@@ -798,18 +798,16 @@ cmd_audit() {
   local -a failed_lane_indices=()
   local needs_harn_performance=0
 
-  # Lane concurrency is a property of the machine, not of the audit. Each lane
-  # runs its own worker pool sized to the host (nextest in `rust-audit`, `harn
-  # test conformance --parallel` in `harn-audit`), so running them together
-  # oversubscribes the CPU by however many lanes are live. On a workstation
-  # that is the point. On a four-core hosted runner it starves the conformance
-  # pool until agent cases that suspend and cold-restart a subprocess exceed
-  # the per-test timeout, which is a hang backstop rather than a performance
-  # budget — so contention reads as a hang and fails the release.
+  # Lane concurrency is a property of the machine, not of the audit. Each heavy
+  # lane owns an internal pool (Cargo in `rust-audit` and `package-audit`, Harn
+  # workers in `harn-audit`). Leaving every pool at the host default multiplies
+  # the advertised CPU count by the number of live lanes, so startup contention
+  # can exceed a nested process timeout that exists as a hang backstop rather
+  # than a performance budget.
   #
-  # `ci.yml` already resolved the same starvation for the same two pools by
-  # giving conformance its own runner. This gate has one machine, so it
-  # serializes instead when the host cannot cover the lanes it would launch.
+  # `ci.yml` gives conformance its own runner. This gate has one machine: small
+  # hosts serialize heavy lanes, while wider hosts partition their worker
+  # budget at this scheduler boundary and retain useful overlap.
   local lane_cpus="${HARN_RELEASE_GATE_LANE_CPUS:-}"
   if [[ -z "$lane_cpus" ]]; then
     lane_cpus="$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 0)"
@@ -818,6 +816,16 @@ cmd_audit() {
   # reduced to a single worker. Below that, overlap costs more than it buys.
   local serial_lanes=0
   local serialize_heavy_lanes=0
+  local heavy_lane_count=0
+  local heavy_lane_worker_budget=0
+  local selected_lane
+  for selected_lane in "${SELECTED_AUDIT_STEPS[@]}"; do
+    case "$selected_lane" in
+      rust-audit | harn-audit | package-audit)
+        heavy_lane_count=$((heavy_lane_count + 1))
+        ;;
+    esac
+  done
   if [[ "$lane_cpus" -gt 0 && "$lane_cpus" -lt 4 ]]; then
     serial_lanes=1
     printf 'audit lanes: serial (%s cpu for %s lanes)\n' \
@@ -831,6 +839,16 @@ cmd_audit() {
     serialize_heavy_lanes=1
     printf 'audit lanes: resource-aware (%s cpu; heavy lanes serialized, light lanes parallel)\n' \
       "$lane_cpus"
+  elif [[ "$lane_cpus" -gt 0 && "$heavy_lane_count" -gt 1 ]]; then
+    # A wide host still needs a budget: Cargo otherwise gives *each* concurrent
+    # rust/package lane the full host worker count while conformance owns its
+    # own process pool. Partition the host once at this scheduler boundary so
+    # the configured pools cannot oversubscribe it. Explicit lane env remains
+    # an operator-owned override for diagnosis.
+    heavy_lane_worker_budget=$((lane_cpus / heavy_lane_count))
+    [[ "$heavy_lane_worker_budget" -lt 1 ]] && heavy_lane_worker_budget=1
+    printf 'audit lanes: bounded parallel (%s cpu; %s heavy lanes; %s workers per heavy lane)\n' \
+      "$lane_cpus" "$heavy_lane_count" "$heavy_lane_worker_budget"
   fi
 
   # Each step writes its wall-clock duration to `<name>.dur` so the
@@ -853,6 +871,18 @@ cmd_audit() {
     set +e
     (
       set -euo pipefail
+      if [[ "$heavy_lane_worker_budget" -gt 0 ]]; then
+        case "$name" in
+          rust-audit | package-audit)
+            export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-$heavy_lane_worker_budget}"
+            ;;
+          harn-audit)
+            local conformance_lane_jobs="$heavy_lane_worker_budget"
+            [[ "$conformance_lane_jobs" -gt 4 ]] && conformance_lane_jobs=4
+            export HARN_CONFORMANCE_JOBS="${HARN_CONFORMANCE_JOBS:-$conformance_lane_jobs}"
+            ;;
+        esac
+      fi
       echo ">>> $name"
       "$@"
     ) >"$tmp/$name.log" 2>&1
