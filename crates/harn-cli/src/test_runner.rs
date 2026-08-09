@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -1150,4 +1150,66 @@ fn discover_test_files(dir: &Path) -> Vec<PathBuf> {
     }
     files.sort();
     files
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum AffectedTestFiles {
+    Selected(Vec<PathBuf>),
+    Full { reason: String },
+}
+
+/// Select test roots whose module graph can observe one of `changed_files`.
+///
+/// This deliberately returns [`AffectedTestFiles::Full`] for every unknown
+/// edge. Dynamic fixture reads, process-launched scripts, deleted modules, and
+/// repository policy files are represented by the command layer as an
+/// unmodelled change and therefore retain complete coverage.
+pub(crate) fn select_affected_test_files(
+    targets: &[PathBuf],
+    changed_files: &[PathBuf],
+) -> AffectedTestFiles {
+    let mut test_files = targets
+        .iter()
+        .flat_map(|target| {
+            let target = canonicalize_existing_path(target);
+            if target.is_dir() {
+                discover_test_files(&target)
+            } else {
+                vec![target]
+            }
+        })
+        .collect::<Vec<_>>();
+    test_files.sort();
+    test_files.dedup();
+
+    if changed_files.is_empty() {
+        return AffectedTestFiles::Selected(Vec::new());
+    }
+
+    let graph = harn_modules::build(&test_files);
+    let test_file_set = test_files.iter().cloned().collect::<BTreeSet<_>>();
+    let mut selected = BTreeSet::new();
+
+    for changed in changed_files {
+        let changed = canonicalize_existing_path(changed);
+        if !graph.contains_module(&changed) {
+            return AffectedTestFiles::Full {
+                reason: format!(
+                    "changed module {} is outside the resolved test module graph",
+                    changed.display()
+                ),
+            };
+        }
+
+        if test_file_set.contains(&changed) {
+            selected.insert(changed.clone());
+        }
+        for importer in graph.transitive_importers_of(&changed) {
+            if test_file_set.contains(&importer) {
+                selected.insert(importer);
+            }
+        }
+    }
+
+    AffectedTestFiles::Selected(selected.into_iter().collect())
 }

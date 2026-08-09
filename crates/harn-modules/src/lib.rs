@@ -459,6 +459,32 @@ impl ModuleGraph {
         out
     }
 
+    /// Every module that directly or transitively imports `target`.
+    ///
+    /// The target itself is not included. Consumers that invalidate a changed
+    /// module should combine this result with the target when appropriate.
+    /// Cycles are handled by the visited set, and the result is sorted so CI
+    /// plans and editor projections remain deterministic.
+    pub fn transitive_importers_of(&self, target: &Path) -> Vec<PathBuf> {
+        let target = normalize_path(target);
+        let mut visited = HashSet::from([target.clone()]);
+        let mut pending = vec![target];
+        let mut out = Vec::new();
+
+        while let Some(current) = pending.pop() {
+            for importer in self.importers_of(&current) {
+                let importer = normalize_path(&importer);
+                if visited.insert(importer.clone()) {
+                    pending.push(importer.clone());
+                    out.push(importer);
+                }
+            }
+        }
+
+        out.sort();
+        out
+    }
+
     /// Import edges declared by `file`, sorted by raw path and selected names.
     pub fn imports_for_module(&self, file: &Path) -> Vec<ModuleImport> {
         let file = normalize_path(file);

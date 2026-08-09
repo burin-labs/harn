@@ -530,6 +530,7 @@ harn test tests/ --filter "auth*"      # filter by pattern
 harn test tests/ --parallel            # run tests concurrently with bounded workers
 harn test tests/ --parallel --timing   # show progress and slowest tests/files
 harn test tests/ --parallel -j 4       # pin worker count (also via HARN_TEST_JOBS)
+harn test tests/ --affected-from origin/main --parallel # run changed modules' importer tests
 harn test tests/fast.harn --test-path tests/contracts.harn --parallel # one curated suite
 harn test tests/ --watch               # re-run on file changes
 harn test conformance --verbose        # show per-test timing
@@ -558,6 +559,7 @@ test still receives a fresh VM, module state, and persistence root.
 | `--parallel` | Run a bounded worker pool. User tests run in-process and front-load slow files using `.harn/test-timings.json`. Conformance tests run in isolated processes because each worker owns process-wide runtime state. |
 | `--jobs <N>` / `-j <N>` | Maximum concurrent workers (also `HARN_TEST_JOBS`). The default follows available CPU and memory, capped at 8. |
 | `--test-path <PATH>` | Add a user-test file or directory to the same compile-once suite. Repeatable; overlapping paths are deduplicated. |
+| `--affected-from <GIT_REF>` | Run only user-test files affected since a Git ref. Uses Harn's resolved module graph and falls back to the complete suite for any unmodelled change. One-shot user suites only. |
 | `--watch` | Re-run tests on file changes (mutually exclusive with `--junit` / `--json-out`) |
 | `--verbose` / `-v` | Show per-test timing and detailed failures, including a passing test's captured `log`/`print`/`println` output (a failing test's captured output is always shown) |
 | `--timing` | Show detailed per-test timing, slowest tests/files, and phase totals. Every user-test run prints the concise p50/p90 latency line |
