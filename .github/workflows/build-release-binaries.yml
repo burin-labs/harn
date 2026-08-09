@@ -792,6 +792,14 @@ jobs:
     # macOS is the slowest surface; if it cannot finish inside this budget,
     # fail loudly so the release queue does not burn hours silently.
     timeout-minutes: 150
+    # Every Cargo consumer in this job must resolve the same release artifact.
+    # Keeping these at job scope prevents diagnostics such as cargo-bloat from
+    # silently selecting Cargo's default release profile and paying for a
+    # second LTO link after the canonical build has already completed.
+    env:
+      CARGO_PROFILE_RELEASE_LTO: thin
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ matrix.release_codegen_units }}
+      CARGO_PROFILE_RELEASE_STRIP: symbols
     strategy:
       # Release artifacts are uploaded incrementally per target. If one leg
       # fails (for example a size-budget ratchet or platform-specific signer
@@ -940,13 +948,6 @@ jobs:
         timeout-minutes: 90
         shell: bash
         env:
-          # Scope the compile-time optimization tradeoff to release CI only.
-          CARGO_PROFILE_RELEASE_LTO: thin
-          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ matrix.release_codegen_units }}
-          # Strip symbols + debuginfo from the shipped binaries (~20 MB/binary
-          # on macOS arm64). Stripping happens at link time, before the macOS
-          # sign/notarize step, so signatures stay valid.
-          CARGO_PROFILE_RELEASE_STRIP: symbols
           HARN_RELEASE_TARGET: ${{ matrix.target }}
           HARN_RELEASE_REF: ${{ needs.setup.outputs.ref }}
           HARN_RELEASE_VERSION: ${{ needs.setup.outputs.version }}
