@@ -40,7 +40,8 @@ HARN
 
 payload='{"tool_name":"Bash","tool_input":{"command":"cargo check"}}'
 if printf '%s' "$payload" \
-  | "$HARN_BIN" run "$fixture_root/scripts/agent_shell_guard.harn" \
+  | "$HARN_BIN" run --eager-project-handlers \
+    "$fixture_root/scripts/agent_shell_guard.harn" \
     >"$fixture_root/eager.out" 2>"$fixture_root/eager.err"; then
   echo "broken neighboring trigger unexpectedly initialized successfully" >&2
   exit 1
