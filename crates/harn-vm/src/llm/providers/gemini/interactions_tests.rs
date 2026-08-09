@@ -53,6 +53,40 @@ fn gemini_routes_default_to_generate_content() {
 }
 
 #[test]
+fn current_gemini_models_route_to_interactions_and_strip_sampling_controls() {
+    clear_user_overrides();
+    for model in ["gemini-3.6-flash", "gemini-3.5-flash-lite"] {
+        let caps = lookup("gemini", model);
+        assert_eq!(
+            caps.live_endpoint_family,
+            Some(LiveEndpointFamily::GeminiInteractions),
+            "{model} endpoint family"
+        );
+        assert!(!caps.temperature_supported, "{model} temperature");
+        assert!(!caps.top_p_supported, "{model} top_p");
+        assert!(!caps.top_k_supported, "{model} top_k");
+
+        let mut payload = gemini_payload(
+            model,
+            ThinkingConfig::Effort {
+                level: ReasoningEffort::Medium,
+            },
+        );
+        payload.temperature = Some(0.2);
+        payload.top_p = Some(0.8);
+        payload.top_k = Some(20);
+        let body =
+            crate::llm::api::DialectContract::for_request(&payload).build_request_body(&payload);
+        assert_eq!(body["generation_config"]["thinking_level"], "medium");
+        assert!(body["generation_config"].get("temperature").is_none());
+        assert!(body["generation_config"].get("top_p").is_none());
+        assert!(body["generation_config"].get("top_k").is_none());
+        assert!(body.get("contents").is_none());
+        assert!(body.get("tools").is_none(), "fixture has no tools");
+    }
+}
+
+#[test]
 fn non_gemini_routes_have_no_endpoint_family() {
     clear_user_overrides();
     assert_eq!(
