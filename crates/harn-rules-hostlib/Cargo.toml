@@ -32,6 +32,17 @@ arcstr = { version = "1", features = ["serde", "std"] }
 
 [dev-dependencies]
 tempfile = "3"
+# Library stays lean (`ast` only); tests exercise multi-language rules and need
+# the grammar families those fixtures use. Cargo unifies these into the test
+# build without forcing grammars on embedders (#6416).
+harn-hostlib = { path = "../harn-hostlib", version = "=0.10.67", default-features = false, features = [
+    "ast",
+    "grammar-harn",
+    "grammar-web",
+    "grammar-systems",
+    "grammar-scripting",
+    "grammar-data",
+] }
 
 [lints]
 workspace = true
