@@ -77,19 +77,25 @@ machine-readable result shape.
 For user tests, `--timeout` bounds only the pipeline execution phase. VM,
 stdlib, skill, and manifest setup is measured separately and cannot consume the
 test body's correctness budget. The selected files' import graph is compiled
-once into the suite's shared immutable prepared-module cache before any
-per-test clock starts; each test still instantiates fresh module state and runs
-module initialization in its own VM. Use `--max-test-ms` when total wall time
-is a performance requirement, or `--max-execute-ms` to ratchet execution cost.
-Either measurement budget makes the runner use one worker even when
-`--parallel` or `--jobs` is present, so co-scheduled test VMs cannot change the
-verdict. Use the ordinary `--timeout` safety rail for bounded parallel
-correctness suites, and measure performance in a host-isolated job.
+once into the suite's shared immutable prepared-module cache. Trusted
+host-dispatch artifacts use a provenance-separated in-memory lane and never
+enter the ordinary process-wide disk cache. Each selected
+test file also lowers its imports and top-level declarations once, then emits
+one immutable callable entry per selected test pipeline; parameterized rows
+share that entry. This work completes before any per-test clock starts. Every
+test still instantiates fresh module state and runs module initialization in
+its own VM. Use `--max-test-ms` when total wall time is a performance
+requirement, or `--max-execute-ms` to ratchet execution cost. Either
+measurement budget makes the runner use one worker even when `--parallel` or
+`--jobs` is present, so co-scheduled test VMs cannot change the verdict. Use
+the ordinary `--timeout` safety rail for bounded parallel correctness suites,
+and measure performance in a host-isolated job.
 Conformance and other non-user targets continue to apply `--timeout` to their
 whole test case or subprocess.
 
-Per-case top-level phases are disjoint: `compile` builds the selected test
-chunk; `setup` constructs and configures its fresh VM; `execute` is the
+Per-case top-level phases are disjoint: `compile` is zero for suite-prepared
+test entries (and covers fallback compilation for direct embedders); `setup`
+constructs and configures its fresh VM; `execute` is the
 inclusive `vm.execute_with_timeout` envelope; and `teardown` cancels/drops
 remaining VM tasks and resets case-local runtime state. Their sum reconciles
 with case wall time modulo measurement overhead.
@@ -98,6 +104,8 @@ Every user-test run prints p50/p90 latency from the runner's typed distribution.
 `--timing` adds average, p95/p99, slowest tests/files, and aggregate phases.
 Empty suites print `p50=n/a  p90=n/a (0 samples)`. Detailed timing prints module
 compile/load attribution separately and labels it as overlapping the phases.
+The aggregate receipt exposes `test_file_compile_ms`, `test_files_compiled`,
+and `test_entries_compiled` so compile-once behavior is mechanically visible.
 Cold module compilation overlaps the suite compile phase; module instantiation
 and initialization remain attributed to the test that executes them. User JSON
 report schema v2 carries the same distribution, typed timeout metadata, and

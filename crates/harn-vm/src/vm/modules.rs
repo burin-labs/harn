@@ -1152,17 +1152,14 @@ impl Vm {
                 }
 
                 match provenance {
-                    ModuleProvenance::TrustedHostDispatch => {
-                        let mut compile_span = self.module_compile_span();
-                        let compiled = compile_trusted_host_dispatch_module_artifact_from_source(
-                            &file_path,
-                            source.as_str(),
-                        )?;
-                        if let Some(span) = &mut compile_span {
-                            span.mark_compile_succeeded();
-                        }
-                        Arc::new(PreparedModuleArtifact::from_cached(compiled))
-                    }
+                    ModuleProvenance::TrustedHostDispatch => self.prepared_module_cache.prepare(
+                        &file_path,
+                        &canonical,
+                        &source,
+                        None,
+                        self.module_phase_recorder.as_ref(),
+                        ModuleProvenance::TrustedHostDispatch,
+                    )?,
                     ModuleProvenance::User | ModuleProvenance::PrivilegedWire => {
                         self.prepared_module_cache.prepare(
                             &file_path,
@@ -1170,6 +1167,7 @@ impl Vm {
                             &source,
                             None,
                             self.module_phase_recorder.as_ref(),
+                            ModuleProvenance::User,
                         )?
                     }
                 }
@@ -1224,7 +1222,10 @@ impl Vm {
         if !bytecode_cache::cache_enabled() {
             return None;
         }
-        if let Some(prepared) = self.prepared_module_cache.get(canonical, content_hash) {
+        if let Some(prepared) =
+            self.prepared_module_cache
+                .get(canonical, content_hash, ModuleProvenance::User)
+        {
             return Some(prepared);
         }
         let key = bytecode_cache::CacheKey::from_module_content_hash(content_hash);

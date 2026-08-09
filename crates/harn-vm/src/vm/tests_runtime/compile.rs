@@ -92,6 +92,67 @@ fn callable_entry_invokes_pipeline_with_explicit_typed_values() {
 }
 
 #[test]
+fn callable_entry_batch_returns_independent_pipeline_and_function_artifacts() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let source = r"
+let seed = 40
+fn fixture() { return seed + 1 }
+pipeline first(harness: Harness, value: int) { return seed + value }
+pipeline second(harness: Harness, value: int) { return seed + value + 1 }
+";
+                let program = parse(source);
+                let batch = Compiler::new()
+                    .compile_named_callable_entries(
+                        &program,
+                        &[("first", None), ("second", None)],
+                        &["fixture"],
+                    )
+                    .unwrap();
+                let pipelines = batch
+                    .pipelines
+                    .into_iter()
+                    .collect::<Result<Vec<_>, _>>()
+                    .unwrap();
+                let fixture = batch.functions.into_iter().next().unwrap().unwrap();
+
+                for (entry, expected) in pipelines.iter().zip([42, 43]) {
+                    let mut vm = Vm::new();
+                    register_vm_stdlib(&mut vm);
+                    vm.set_harness(crate::Harness::real());
+                    assert!(matches!(
+                        vm.execute_callable_entry_with_timeout(
+                            entry,
+                            &[VmValue::Int(2)],
+                            std::time::Duration::from_secs(1),
+                        )
+                        .await,
+                        Ok(VmValue::Int(value)) if value == expected
+                    ));
+                }
+
+                let mut vm = Vm::new();
+                register_vm_stdlib(&mut vm);
+                assert!(matches!(
+                    vm.execute_callable_entry_with_timeout(
+                        &fixture,
+                        &[],
+                        std::time::Duration::from_secs(1),
+                    )
+                    .await,
+                    Ok(VmValue::Int(41))
+                ));
+            })
+            .await;
+    });
+}
+
+#[test]
 fn callable_entry_runs_fixture_and_pipeline_in_one_initialized_vm() {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()

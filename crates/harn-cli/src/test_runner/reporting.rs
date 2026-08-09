@@ -80,6 +80,12 @@ pub struct AggregateTimings {
     pub collection_ms: u64,
     pub setup_ms: u64,
     pub compile_ms: u64,
+    /// Suite-level lowering of selected test-file entries. This is included in
+    /// `compile_ms` and exposed separately so callers can verify compile-once
+    /// behavior without inferring it from case timings.
+    pub test_file_compile_ms: u64,
+    pub test_files_compiled: usize,
+    pub test_entries_compiled: usize,
     pub execute_ms: u64,
     pub teardown_ms: u64,
     /// Suite preparation plus per-case module attribution. Overlaps compile,
@@ -93,16 +99,29 @@ pub(super) struct SuiteModulePreparation {
     pub modules: harn_vm::ModulePhaseStats,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct SuiteCallablePreparation {
+    pub duration_ms: u64,
+    pub files: usize,
+    pub entries: usize,
+}
+
 impl AggregateTimings {
     pub(super) fn from_results(
         collection_ms: u64,
         module_preparation: SuiteModulePreparation,
+        callable_preparation: SuiteCallablePreparation,
         results: &[TestResult],
     ) -> Self {
         results.iter().filter_map(|result| result.phases).fold(
             Self {
                 collection_ms,
-                compile_ms: module_preparation.duration_ms,
+                compile_ms: module_preparation
+                    .duration_ms
+                    .saturating_add(callable_preparation.duration_ms),
+                test_file_compile_ms: callable_preparation.duration_ms,
+                test_files_compiled: callable_preparation.files,
+                test_entries_compiled: callable_preparation.entries,
                 modules: module_preparation.modules,
                 ..Self::default()
             },
@@ -110,6 +129,9 @@ impl AggregateTimings {
                 collection_ms: acc.collection_ms,
                 setup_ms: acc.setup_ms.saturating_add(phases.setup_ms),
                 compile_ms: acc.compile_ms.saturating_add(phases.compile_ms),
+                test_file_compile_ms: acc.test_file_compile_ms,
+                test_files_compiled: acc.test_files_compiled,
+                test_entries_compiled: acc.test_entries_compiled,
                 execute_ms: acc.execute_ms.saturating_add(phases.execute_ms),
                 teardown_ms: acc.teardown_ms.saturating_add(phases.teardown_ms),
                 modules: acc.modules.saturating_add(phases.modules),

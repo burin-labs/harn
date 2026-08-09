@@ -29,6 +29,7 @@ mod tests;
 use discovery::{extract_cases_from_program, parse_program, seed_imported_enum_candidates};
 use execution::{execute_case, execute_file_fixture};
 use fixtures::{FixtureScope, TestFixture};
+use reporting::SuiteCallablePreparation;
 pub use reporting::{
     AggregateTimings, PhaseTimings, TestPhase, TestResult, TestSummary, TestTimeout,
 };
@@ -195,6 +196,14 @@ struct TestCase {
     /// File-scoped fixture result cloned through Harn's isolate-safe COW
     /// contract before this case enters its fresh VM.
     file_fixture_value: Option<IsolateValue>,
+    /// Immutable entry artifact prepared once with every other selected test
+    /// pipeline from this source file. Each case still instantiates it in a
+    /// fresh VM, so compilation reuse never becomes runtime-state reuse.
+    compiled_entry: Option<Arc<harn_vm::CompiledCallableEntry>>,
+    /// File fixture entry lowered with the selected pipelines. The result is
+    /// shared so a fixture compile failure remains one file-scoped result.
+    compiled_file_fixture_entry:
+        Option<Result<Arc<harn_vm::CompiledCallableEntry>, harn_vm::CompileError>>,
     /// Operator-selected authority for this case and its private import graph.
     trusted_host_dispatch: bool,
 }
@@ -402,10 +411,23 @@ async fn run_tests_with_session_impl(
 
     let mut cases = discovery.cases;
     sort_cases_longest_first(&mut cases, &timings);
-    let module_preparation = session.prepare_import_graph(&case_files(&cases));
+    let module_preparation = session.prepare_import_graphs(
+        cases
+            .iter()
+            .map(|case| (case.file.clone(), case.trusted_host_dispatch)),
+    );
 
     let mut all_results = discovery.discovery_errors;
     let total_tests = cases.len();
+    let callable_preparation = if !options.fail_fast || all_results.is_empty() {
+        let prepared = prepare_callable_entries(cases, session);
+        cases = prepared.cases;
+        all_results.extend(prepared.failures);
+        prepared.timing
+    } else {
+        cases.clear();
+        SuiteCallablePreparation::default()
+    };
     if !options.fail_fast || all_results.is_empty() {
         let prepared = prepare_file_fixtures(
             cases,
@@ -450,7 +472,12 @@ async fn run_tests_with_session_impl(
     let total = all_results.len();
     let passed = all_results.iter().filter(|result| result.passed).count();
     let failed = total - passed;
-    let aggregate = AggregateTimings::from_results(collection_ms, module_preparation, &all_results);
+    let aggregate = AggregateTimings::from_results(
+        collection_ms,
+        module_preparation,
+        callable_preparation,
+        &all_results,
+    );
 
     TestSummary {
         results: all_results,
@@ -523,10 +550,21 @@ async fn run_test_file_with_session_impl(
 
     let mut cases = extract_cases_from_program(path, &source, &program, filter, usize::MAX)?;
     seed_imported_enum_candidates(path, &source, &mut cases);
+    let trusted_host_dispatch = package::load_check_config(Some(path)).trusted_host_dispatch;
+    for case in &mut cases {
+        case.trusted_host_dispatch = trusted_host_dispatch;
+    }
     let skill_contexts = PreparedSkillContexts::prepare(&cases, cli_skill_dirs);
-    let _module_preparation = session.prepare_import_graph(&case_files(&cases));
+    let _module_preparation = session.prepare_import_graphs(
+        cases
+            .iter()
+            .map(|case| (case.file.clone(), case.trusted_host_dispatch)),
+    );
 
     let mut results = Vec::with_capacity(cases.len());
+    let callable_preparation = prepare_callable_entries(cases, session);
+    results.extend(callable_preparation.failures);
+    let cases = callable_preparation.cases;
     let execution_cwd = execution_cwd
         .map(Path::to_path_buf)
         .unwrap_or_else(test_execution_cwd);
@@ -849,15 +887,6 @@ fn count_files_with_cases(cases: &[TestCase]) -> usize {
     files.len()
 }
 
-fn case_files(cases: &[TestCase]) -> Vec<PathBuf> {
-    cases
-        .iter()
-        .map(|case| case.file.clone())
-        .collect::<std::collections::BTreeSet<_>>()
-        .into_iter()
-        .collect()
-}
-
 fn timings_key(file: &Path, name: &str) -> String {
     format!("{}::{}", file.display(), name)
 }
@@ -908,6 +937,142 @@ struct CaseExecutionResults {
 struct PreparedFixtureCases {
     cases: Vec<TestCase>,
     failures: Vec<TestResult>,
+}
+
+#[derive(Default)]
+struct PreparedCallableCases {
+    cases: Vec<TestCase>,
+    failures: Vec<TestResult>,
+    timing: SuiteCallablePreparation,
+}
+
+fn prepare_callable_entries(
+    mut cases: Vec<TestCase>,
+    session: &TestRunSession,
+) -> PreparedCallableCases {
+    let started = Instant::now();
+    let mut by_file: BTreeMap<PathBuf, Vec<usize>> = BTreeMap::new();
+    for (index, case) in cases.iter().enumerate() {
+        by_file.entry(case.file.clone()).or_default().push(index);
+    }
+
+    let mut failed = HashSet::new();
+    let mut failures = Vec::new();
+    let mut compiled_entries = 0usize;
+    for indices in by_file.values() {
+        let first = &cases[indices[0]];
+        let mut request_indices: BTreeMap<(String, Option<String>), Vec<usize>> = BTreeMap::new();
+        for &index in indices {
+            let case = &cases[index];
+            let fixture = case
+                .fixture
+                .as_ref()
+                .filter(|fixture| fixture.scope == FixtureScope::Case)
+                .map(|fixture| fixture.name.clone());
+            request_indices
+                .entry((case.pipeline_name.clone(), fixture))
+                .or_default()
+                .push(index);
+        }
+        let owned_requests = request_indices.keys().cloned().collect::<Vec<_>>();
+        let requests = owned_requests
+            .iter()
+            .map(|(pipeline, fixture)| (pipeline.as_str(), fixture.as_deref()))
+            .collect::<Vec<_>>();
+        let mut fixture_indices: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+        for &index in indices {
+            if let Some(fixture) = cases[index]
+                .fixture
+                .as_ref()
+                .filter(|fixture| fixture.scope == FixtureScope::File)
+            {
+                fixture_indices
+                    .entry(fixture.name.clone())
+                    .or_default()
+                    .push(index);
+            }
+        }
+        let fixture_names = fixture_indices
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let imported_enums = first.imported_enum_candidates.iter().cloned();
+        let compiler = if first.trusted_host_dispatch {
+            harn_vm::Compiler::new_trusted_host_dispatch()
+                .with_imported_enum_candidates(imported_enums)
+        } else {
+            crate::compiler_with_imported_enum_candidates(imported_enums)
+        };
+        let entries =
+            compiler.compile_named_callable_entries(&first.program, &requests, &fixture_names);
+        match entries {
+            Ok(batch) => {
+                let entries = batch.pipelines;
+                let fixture_entries = batch.functions;
+                compiled_entries += entries.iter().filter(|entry| entry.is_ok()).count();
+                for ((_, case_indices), entry) in request_indices.into_iter().zip(entries) {
+                    match entry {
+                        Ok(entry) => {
+                            let entry = Arc::new(entry);
+                            for index in case_indices {
+                                cases[index].compiled_entry = Some(Arc::clone(&entry));
+                            }
+                        }
+                        Err(error) => {
+                            for index in case_indices {
+                                failed.insert(index);
+                                failures
+                                    .push(prepared_compile_failure(&cases[index], error.clone()));
+                            }
+                        }
+                    }
+                }
+                compiled_entries += fixture_entries.iter().filter(|entry| entry.is_ok()).count();
+                for ((_, case_indices), entry) in fixture_indices.into_iter().zip(fixture_entries) {
+                    let entry = entry.map(Arc::new);
+                    for index in case_indices {
+                        cases[index].compiled_file_fixture_entry = Some(entry.clone());
+                    }
+                }
+            }
+            Err(error) => {
+                for &index in indices {
+                    failed.insert(index);
+                    failures.push(prepared_compile_failure(&cases[index], error.clone()));
+                }
+            }
+        }
+    }
+
+    let files = by_file.len();
+    cases = cases
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, case)| (!failed.contains(&index)).then_some(case))
+        .collect();
+    session.record_callable_preparation(files, compiled_entries);
+    PreparedCallableCases {
+        cases,
+        failures,
+        timing: SuiteCallablePreparation {
+            duration_ms: started.elapsed().as_millis() as u64,
+            files,
+            entries: compiled_entries,
+        },
+    }
+}
+
+fn prepared_compile_failure(case: &TestCase, error: harn_vm::CompileError) -> TestResult {
+    TestResult {
+        name: case.name.clone(),
+        file: case.file.display().to_string(),
+        passed: false,
+        error: Some(format!("Compile error: {error}")),
+        captured_output: None,
+        timeout: None,
+        duration_ms: 0,
+        phases: None,
+    }
 }
 
 async fn prepare_file_fixtures(

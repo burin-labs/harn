@@ -43,8 +43,9 @@ pub use benchmark::{
 };
 pub use builtin_id::BuiltinId;
 pub use compiler::{
-    CompileError, CompiledCallableEntry, CompiledPortableModule, Compiler, CompilerOptions,
-    PortableExportKind, PortableImport, PortableSourceModule, PortableSourcePackage,
+    CompileError, CompiledCallableBatch, CompiledCallableEntry, CompiledPortableModule, Compiler,
+    CompilerOptions, PortableExportKind, PortableImport, PortableSourceModule,
+    PortableSourcePackage,
 };
 pub use execution::{
     replay, resume, start, CapabilityRequest, CapabilityResult, DataValue, Execution, GrantSet,

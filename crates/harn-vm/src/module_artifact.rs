@@ -566,6 +566,25 @@ pub fn compile_trusted_host_dispatch_module_artifact_from_source(
     )
 }
 
+/// Compile a trusted host-dispatch module with an already-resolved enum-import
+/// projection. Suite prewarming uses this entry point so it can share the
+/// module graph walk without weakening provenance or rebuilding the graph in
+/// every fresh VM.
+pub(crate) fn compile_trusted_host_dispatch_module_artifact_from_source_with_imported_enums(
+    source_path: &Path,
+    source: &str,
+    imported_enum_candidates: impl IntoIterator<Item = String>,
+) -> Result<ModuleArtifact, VmError> {
+    let program = parse_module_source(source_path, source)?;
+    let imported_enum_candidates = imported_enum_candidates.into_iter().collect::<Vec<_>>();
+    compile_module_artifact_with_provenance(
+        &program,
+        Some(source_path.display().to_string()),
+        &imported_enum_candidates,
+        ModuleProvenance::TrustedHostDispatch,
+    )
+}
+
 /// Resolve imported enum names only for modules whose match patterns can use
 /// them. Ordinary property access is runtime lookup and does not need a graph
 /// walk; avoiding it keeps uncached module compilation independent of the

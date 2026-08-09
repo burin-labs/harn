@@ -15,7 +15,9 @@ use parking_lot::Mutex;
 use crate::chunk::{Chunk, CompiledFunction};
 use crate::module_artifact::{
     compile_module_artifact_from_source, compile_module_artifact_from_source_with_imported_enums,
-    ModuleArtifact, ModuleImportSpec, ModuleProvenance,
+    compile_trusted_host_dispatch_module_artifact_from_source,
+    compile_trusted_host_dispatch_module_artifact_from_source_with_imported_enums, ModuleArtifact,
+    ModuleImportSpec, ModuleProvenance,
 };
 use crate::module_source::ModuleSource;
 use crate::{ModulePhaseRecorder, ModulePhaseStats, VmError};
@@ -161,6 +163,25 @@ impl PreparedModuleCache {
     /// their transitive import closure is prepared. Invalid modules are left
     /// uncached for the canonical VM load to diagnose.
     pub fn prepare_import_graph(&self, roots: &[PathBuf]) -> ModulePhaseStats {
+        self.prepare_import_graph_with_provenance(roots, ModuleProvenance::User)
+    }
+
+    /// Prepare a Rust-embedder-selected host-dispatch graph without making its
+    /// bytecode visible to ordinary user imports. The in-memory cache key
+    /// retains provenance, and fresh VMs still instantiate independent module
+    /// state from the immutable artifacts.
+    pub fn prepare_trusted_host_dispatch_import_graph(
+        &self,
+        roots: &[PathBuf],
+    ) -> ModulePhaseStats {
+        self.prepare_import_graph_with_provenance(roots, ModuleProvenance::TrustedHostDispatch)
+    }
+
+    fn prepare_import_graph_with_provenance(
+        &self,
+        roots: &[PathBuf],
+        provenance: ModuleProvenance,
+    ) -> ModulePhaseStats {
         if roots.is_empty() {
             return ModulePhaseStats::default();
         }
@@ -201,6 +222,7 @@ impl PreparedModuleCache {
                 &source,
                 Some(&imported_enum_candidates),
                 Some(&recorder),
+                provenance,
             );
         }
 
@@ -211,12 +233,10 @@ impl PreparedModuleCache {
         &self,
         canonical_path: &Path,
         source_hash: [u8; 32],
+        provenance: ModuleProvenance,
     ) -> Option<Arc<PreparedModuleArtifact>> {
-        let key = PreparedModuleCacheKey::new(
-            canonical_path.to_path_buf(),
-            source_hash,
-            ModuleProvenance::User,
-        );
+        let key =
+            PreparedModuleCacheKey::new(canonical_path.to_path_buf(), source_hash, provenance);
         let mut inner = self.inner.lock();
         let artifact = inner.entries.get(&key).cloned();
         if artifact.is_some() {
@@ -259,10 +279,11 @@ impl PreparedModuleCache {
         source: &ModuleSource,
         imported_enum_candidates: Option<&[String]>,
         recorder: Option<&ModulePhaseRecorder>,
+        provenance: ModuleProvenance,
     ) -> Result<Arc<PreparedModuleArtifact>, VmError> {
         let prepared = {
             let _load_span = recorder.map(ModulePhaseRecorder::load_span);
-            self.get(canonical_path, source.sha256())
+            self.get(canonical_path, source.sha256(), provenance)
         };
         if let Some(prepared) = prepared {
             return Ok(prepared);
@@ -271,35 +292,60 @@ impl PreparedModuleCache {
         // Disk cache hits skip parse + compile. The scoped prepared cache
         // additionally skips deserialization and chunk hydration on later
         // fresh VMs without sharing any runtime module state.
-        let lookup = {
-            let _load_span = recorder.map(ModulePhaseRecorder::load_span);
-            crate::bytecode_cache::load_module(source_path, source)
-        };
-        let cached = if let Some(artifact) = lookup.artifact {
-            artifact
-        } else {
+        let cached = if provenance == ModuleProvenance::TrustedHostDispatch {
             let mut compile_span = recorder.map(ModulePhaseRecorder::compile_span);
             let compiled = match imported_enum_candidates {
-                Some(candidates) => compile_module_artifact_from_source_with_imported_enums(
+                Some(candidates) => {
+                    compile_trusted_host_dispatch_module_artifact_from_source_with_imported_enums(
+                        source_path,
+                        source.as_str(),
+                        candidates.iter().cloned(),
+                    )?
+                }
+                None => compile_trusted_host_dispatch_module_artifact_from_source(
                     source_path,
                     source.as_str(),
-                    candidates.iter().cloned(),
                 )?,
-                None => compile_module_artifact_from_source(source_path, source.as_str())?,
             };
             if let Some(span) = &mut compile_span {
                 span.mark_compile_succeeded();
             }
             drop(compile_span);
-            if let Err(err) = crate::bytecode_cache::store_module(&lookup.key, &compiled) {
-                if std::env::var_os("HARN_BYTECODE_CACHE_DEBUG").is_some() {
-                    eprintln!(
-                        "[harn] module cache write skipped for {}: {err}",
-                        source_path.display()
-                    );
-                }
-            }
             compiled
+        } else {
+            // Only ordinary user bytecode enters the process-wide disk cache.
+            // Trusted host-dispatch artifacts remain in this explicitly scoped,
+            // provenance-keyed in-memory cache.
+            let lookup = {
+                let _load_span = recorder.map(ModulePhaseRecorder::load_span);
+                crate::bytecode_cache::load_module(source_path, source)
+            };
+            if let Some(artifact) = lookup.artifact {
+                artifact
+            } else {
+                let mut compile_span = recorder.map(ModulePhaseRecorder::compile_span);
+                let compiled = match imported_enum_candidates {
+                    Some(candidates) => compile_module_artifact_from_source_with_imported_enums(
+                        source_path,
+                        source.as_str(),
+                        candidates.iter().cloned(),
+                    )?,
+                    None => compile_module_artifact_from_source(source_path, source.as_str())?,
+                };
+                if let Some(span) = &mut compile_span {
+                    span.mark_compile_succeeded();
+                }
+                drop(compile_span);
+                if let Err(err) = crate::bytecode_cache::store_module(&lookup.key, &compiled) {
+                    if std::env::var_os("HARN_BYTECODE_CACHE_DEBUG").is_some() {
+                        eprintln!(
+                            "[harn] module cache write skipped for {}: {err}",
+                            source_path.display()
+                        );
+                    }
+                }
+                compiled
+            }
         };
         let prepared = {
             let _load_span = recorder.map(ModulePhaseRecorder::load_span);
@@ -353,9 +399,22 @@ mod tests {
             empty_artifact_with_provenance(ModuleProvenance::PrivilegedWire),
         );
         assert!(
-            cache.get(Path::new("same.harn"), source.sha256()).is_none(),
+            cache
+                .get(
+                    Path::new("same.harn"),
+                    source.sha256(),
+                    ModuleProvenance::User,
+                )
+                .is_none(),
             "user module lookup must be provenance-separated"
         );
+        assert!(cache
+            .get(
+                Path::new("same.harn"),
+                source.sha256(),
+                ModuleProvenance::PrivilegedWire,
+            )
+            .is_some());
     }
 
     #[test]
@@ -372,10 +431,18 @@ mod tests {
         );
 
         assert!(cache
-            .get(Path::new("first.harn"), first_source.sha256())
+            .get(
+                Path::new("first.harn"),
+                first_source.sha256(),
+                ModuleProvenance::User,
+            )
             .is_none());
         assert!(cache
-            .get(Path::new("second.harn"), second_source.sha256())
+            .get(
+                Path::new("second.harn"),
+                second_source.sha256(),
+                ModuleProvenance::User,
+            )
             .is_some());
         assert_eq!(cache.stats().evictions, 1);
         assert_eq!(cache.stats().entries, 1);

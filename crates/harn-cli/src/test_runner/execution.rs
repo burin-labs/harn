@@ -69,28 +69,34 @@ pub(super) async fn execute_case(
 ) -> TestResult {
     let total_start = Instant::now();
     let compile_start = Instant::now();
-    let imported_enums = case.imported_enum_candidates.iter().cloned();
-    let compiler = if case.trusted_host_dispatch {
-        harn_vm::Compiler::new_trusted_host_dispatch().with_imported_enum_candidates(imported_enums)
+    let owned_entry;
+    let (entry, compile_ms) = if let Some(entry) = case.compiled_entry.as_deref() {
+        (entry, 0)
     } else {
-        crate::compiler_with_imported_enum_candidates(imported_enums)
+        let imported_enums = case.imported_enum_candidates.iter().cloned();
+        let compiler = if case.trusted_host_dispatch {
+            harn_vm::Compiler::new_trusted_host_dispatch()
+                .with_imported_enum_candidates(imported_enums)
+        } else {
+            crate::compiler_with_imported_enum_candidates(imported_enums)
+        };
+        let case_fixture = case
+            .fixture
+            .as_ref()
+            .filter(|fixture| fixture.scope == super::FixtureScope::Case)
+            .map(|fixture| fixture.name.as_str());
+        owned_entry = match compiler.compile_named_pipeline_entry(
+            &case.program,
+            &case.pipeline_name,
+            case_fixture,
+        ) {
+            Ok(entry) => entry,
+            Err(error) => {
+                return compile_failure(case, &case.name, error, compile_start, total_start);
+            }
+        };
+        (&owned_entry, compile_start.elapsed().as_millis() as u64)
     };
-    let case_fixture = case
-        .fixture
-        .as_ref()
-        .filter(|fixture| fixture.scope == super::FixtureScope::Case)
-        .map(|fixture| fixture.name.as_str());
-    let entry = match compiler.compile_named_pipeline_entry(
-        &case.program,
-        &case.pipeline_name,
-        case_fixture,
-    ) {
-        Ok(c) => c,
-        Err(e) => {
-            return compile_failure(case, &case.name, e, compile_start, total_start);
-        }
-    };
-    let compile_ms = compile_start.elapsed().as_millis() as u64;
     let mut args = case.args.clone();
     if let Some(value) = &case.file_fixture_value {
         args.insert(0, value.instantiate());
@@ -98,7 +104,7 @@ pub(super) async fn execute_case(
     execute_compiled(
         case,
         &case.name,
-        &entry,
+        entry,
         &args,
         execution_cwd,
         timeout_ms,
@@ -125,29 +131,51 @@ pub(super) async fn execute_file_fixture(
 ) -> Result<harn_vm::IsolateValue, TestResult> {
     let total_start = Instant::now();
     let compile_start = Instant::now();
-    let imported_enums = case.imported_enum_candidates.iter().cloned();
-    let compiler = if case.trusted_host_dispatch {
-        harn_vm::Compiler::new_trusted_host_dispatch().with_imported_enum_candidates(imported_enums)
-    } else {
-        crate::compiler_with_imported_enum_candidates(imported_enums)
-    };
-    let entry = match compiler.compile_named_function_entry(&case.program, &fixture.name) {
-        Ok(entry) => entry,
-        Err(error) => {
-            return Err(compile_failure(
-                case,
-                &format!("<fixture {}>", fixture.name),
-                error,
-                compile_start,
-                total_start,
-            ));
+    let owned_entry;
+    let entry = if let Some(entry) = case.compiled_file_fixture_entry.as_ref() {
+        match entry {
+            Ok(entry) => entry.as_ref(),
+            Err(error) => {
+                return Err(compile_failure(
+                    case,
+                    &format!("<fixture {}>", fixture.name),
+                    error.clone(),
+                    compile_start,
+                    total_start,
+                ));
+            }
         }
+    } else {
+        let imported_enums = case.imported_enum_candidates.iter().cloned();
+        let compiler = if case.trusted_host_dispatch {
+            harn_vm::Compiler::new_trusted_host_dispatch()
+                .with_imported_enum_candidates(imported_enums)
+        } else {
+            crate::compiler_with_imported_enum_candidates(imported_enums)
+        };
+        owned_entry = match compiler.compile_named_function_entry(&case.program, &fixture.name) {
+            Ok(entry) => entry,
+            Err(error) => {
+                return Err(compile_failure(
+                    case,
+                    &format!("<fixture {}>", fixture.name),
+                    error,
+                    compile_start,
+                    total_start,
+                ));
+            }
+        };
+        &owned_entry
     };
-    let compile_ms = compile_start.elapsed().as_millis() as u64;
+    let compile_ms = if case.compiled_file_fixture_entry.is_none() {
+        compile_start.elapsed().as_millis() as u64
+    } else {
+        0
+    };
     let execution = execute_compiled(
         case,
         &format!("<fixture {}>", fixture.name),
-        &entry,
+        entry,
         &[],
         execution_cwd,
         timeout_ms,
