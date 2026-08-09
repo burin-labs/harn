@@ -10,8 +10,8 @@ use crate::stdlib::macros::{harn_builtin, VmBuiltinDef};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 use crate::workspace_path::{
-    canonicalize_existing_workspace_path, classify_workspace_path, normalize_workspace_path,
-    WorkspacePathInfo,
+    canonicalize_existing_workspace_path, classify_workspace_path, is_absolute_path_syntax,
+    normalize_workspace_path, WorkspacePathInfo,
 };
 
 /// Convert all backslashes to forward slashes.
@@ -26,17 +26,6 @@ fn to_native(s: &str) -> String {
     } else {
         posix
     }
-}
-
-/// Returns true if the path is absolute (leading `/` on posix or `X:/` drive
-/// root on windows). `X:foo` is drive-relative, not absolute.
-fn is_absolute_str(p: &str) -> bool {
-    let p = to_posix(p);
-    if p.starts_with('/') {
-        return true;
-    }
-    let bytes = p.as_bytes();
-    bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/'
 }
 
 /// Split a path into segments, preserving whether it was absolute.
@@ -380,7 +369,7 @@ fn path_with_stem_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
 )]
 fn path_is_absolute_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::Bool(is_absolute_str(&p)))
+    Ok(VmValue::Bool(is_absolute_path_syntax(&p)))
 }
 
 #[harn_builtin(
@@ -390,7 +379,7 @@ fn path_is_absolute_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue,
 )]
 fn path_is_relative_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let p = args.first().map(|a| a.display()).unwrap_or_default();
-    Ok(VmValue::Bool(!is_absolute_str(&p)))
+    Ok(VmValue::Bool(!is_absolute_path_syntax(&p)))
 }
 
 #[harn_builtin(
@@ -593,12 +582,14 @@ mod tests {
 
     #[test]
     fn is_absolute_detection() {
-        assert!(is_absolute_str("/a/b"));
-        assert!(is_absolute_str("C:/a/b"));
-        assert!(!is_absolute_str("C:a/b"));
-        assert!(!is_absolute_str("a/b"));
-        assert!(!is_absolute_str("./a"));
-        assert!(!is_absolute_str(""));
+        assert!(is_absolute_path_syntax("/a/b"));
+        assert!(is_absolute_path_syntax("C:/a/b"));
+        assert!(is_absolute_path_syntax(r"C:\a\b"));
+        assert!(is_absolute_path_syntax(r"\\server\share\a"));
+        assert!(!is_absolute_path_syntax("C:a/b"));
+        assert!(!is_absolute_path_syntax("a/b"));
+        assert!(!is_absolute_path_syntax("./a"));
+        assert!(!is_absolute_path_syntax(""));
     }
 
     #[test]

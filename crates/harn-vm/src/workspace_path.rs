@@ -107,7 +107,7 @@ pub fn classify_workspace_path(path: &str, workspace_root: Option<&Path>) -> Wor
         .map(|root| normalize_host_path(root))
         .filter(|root| !root.is_empty());
 
-    if !is_absolute_str(trimmed) {
+    if !is_absolute_path_syntax(trimmed) {
         let workspace_path = normalized_input;
         if escapes_workspace(&workspace_path) {
             let host_path = root_path.as_ref().map(|root| {
@@ -205,7 +205,9 @@ fn to_posix(s: &str) -> String {
     s.replace('\\', "/")
 }
 
-fn is_absolute_str(path: &str) -> bool {
+/// Return whether a serialized path is absolute in either POSIX or Windows
+/// syntax, independent of the host running Harn.
+pub(crate) fn is_absolute_path_syntax(path: &str) -> bool {
     let path = to_posix(path);
     if path.starts_with('/') {
         return true;

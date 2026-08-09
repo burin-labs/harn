@@ -18,9 +18,10 @@
 //! vendor extensions alongside the canonical fields.
 
 use std::collections::BTreeSet;
-use std::path::Path;
 
 use serde_json::{json, Value as JsonValue};
+
+use crate::workspace_path::is_absolute_path_syntax;
 
 /// Canonical ACP method for asking the client to decide a tool permission.
 pub(crate) const METHOD_REQUEST_PERMISSION: &str = "session/request_permission";
@@ -132,7 +133,7 @@ fn permission_locations(approval_request: &JsonValue) -> Vec<JsonValue> {
             evidence.get("kind").and_then(JsonValue::as_str) == Some("file_mutation_diff")
         })
         .filter_map(|evidence| evidence.get("path").and_then(JsonValue::as_str))
-        .filter(|path| Path::new(path).is_absolute())
+        .filter(|path| is_absolute_path_syntax(path))
         .collect::<BTreeSet<_>>()
         .into_iter()
         .map(|path| json!({ "path": path }))
@@ -290,6 +291,11 @@ mod tests {
                         "newText": "duplicate path\n"
                     },
                     {
+                        "kind": "file_mutation_diff",
+                        "path": r"C:\workspace\src\win.rs",
+                        "newText": "windows path\n"
+                    },
+                    {
                         "kind": "command",
                         "path": "/workspace/ignored.rs"
                     },
@@ -318,7 +324,8 @@ mod tests {
             params["toolCall"]["locations"],
             json!([
                 { "path": "/workspace/src/a.rs" },
-                { "path": "/workspace/src/lib.rs" }
+                { "path": "/workspace/src/lib.rs" },
+                { "path": r"C:\workspace\src\win.rs" }
             ]),
             "file scopes are canonical, deterministic, and deduplicated"
         );
