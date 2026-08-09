@@ -9,7 +9,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use super::super::glob_match;
-use super::{reject_tool, PolicyDenial};
+use super::{operation_is_covered, reject_tool, PolicyDenial};
 use crate::agent_events::DenialGate;
 use crate::tool_annotations::ToolAnnotations;
 use crate::value::VmValue;
@@ -570,7 +570,12 @@ impl CapabilityPolicy {
                 if let Some(allowed_ops) = self.capability_operations(capability) {
                     let denied: Vec<String> = requested_ops
                         .iter()
-                        .filter(|op| !allowed_ops.is_empty() && !allowed_ops.contains(*op))
+                        .filter(|op| {
+                            !allowed_ops.is_empty()
+                                && !allowed_ops
+                                    .iter()
+                                    .any(|allowed| operation_is_covered(capability, allowed, op))
+                        })
                         .cloned()
                         .collect();
                     if !denied.is_empty() {
@@ -627,7 +632,11 @@ impl CapabilityPolicy {
                         } else {
                             requested_ops
                                 .iter()
-                                .filter(|op| allowed_ops.contains(*op))
+                                .filter(|op| {
+                                    allowed_ops.iter().any(|allowed| {
+                                        operation_is_covered(capability, allowed, op)
+                                    })
+                                })
                                 .cloned()
                                 .collect()
                         };
@@ -738,7 +747,12 @@ impl CapabilityPolicy {
                         }
                         let widened: Vec<String> = requested_ops
                             .iter()
-                            .filter(|op| !allowed_ops.is_empty() && !allowed_ops.contains(*op))
+                            .filter(|op| {
+                                !allowed_ops.is_empty()
+                                    && !allowed_ops.iter().any(|allowed| {
+                                        operation_is_covered(capability, allowed, op)
+                                    })
+                            })
                             .cloned()
                             .collect();
                         if !widened.is_empty() {

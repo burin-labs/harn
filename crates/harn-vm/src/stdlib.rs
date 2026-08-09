@@ -47,6 +47,7 @@ pub(crate) use datetime::date_dict_from_millis;
 mod document;
 mod durable_step;
 mod event_log;
+pub use event_log::mint_hypothesis_native_attestation;
 mod external_agent;
 pub(crate) mod files;
 mod flow;

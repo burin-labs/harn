@@ -1,0 +1,319 @@
+/** Domain-neutral human-readable projection of the typed plan and ledger. */
+import { HypothesisLedgerSnapshot } from "std/eval/hypothesis/ledger_contracts"
+
+pub type HypothesisReport = {
+  schema: "harn.hypothesis.report.v1",
+  hypothesis_id: string,
+  plan_fingerprint: string?,
+  decision_outcome: string?,
+  markdown: string,
+  content_fingerprint: string,
+}
+
+fn __items(values: list<string>, empty: string) -> list<string> {
+  if len(values) == 0 {
+    return ["- " + empty]
+  }
+  return values.map({ value -> "- " + __markdown_text(value) }).to_list()
+}
+
+fn __markdown_text(value: string) -> string {
+  let escaped = replace(value, "&", "&amp;")
+  escaped = replace(escaped, "<", "&lt;")
+  escaped = replace(escaped, ">", "&gt;")
+  escaped = replace(escaped, "\\", "\\\\")
+  escaped = replace(escaped, "`", "\\`")
+  escaped = replace(escaped, "*", "\\*")
+  escaped = replace(escaped, "_", "\\_")
+  escaped = replace(escaped, "{", "\\{")
+  escaped = replace(escaped, "}", "\\}")
+  escaped = replace(escaped, "#", "\\#")
+  escaped = replace(escaped, "+", "\\+")
+  escaped = replace(escaped, "-", "\\-")
+  escaped = replace(escaped, ".", "\\.")
+  escaped = replace(escaped, "!", "\\!")
+  escaped = replace(escaped, "|", "\\|")
+  escaped = replace(escaped, "~", "\\~")
+  escaped = replace(escaped, "[", "\\[")
+  escaped = replace(escaped, "]", "\\]")
+  escaped = replace(escaped, "(", "\\(")
+  escaped = replace(escaped, ")", "\\)")
+  escaped = replace(escaped, "\n", " ")
+  return replace(escaped, "\r", " ")
+}
+
+fn __inline(values: list<string>) -> string {
+  return join(values.map({ value -> __markdown_text(value) }).to_list(), ", ")
+}
+
+fn __adapter(value) -> string {
+  if value == nil {
+    return "not registered"
+  }
+  return __markdown_text(value.id + "/" + value.variant_id)
+}
+
+fn __outcome(value) -> string {
+  if value == nil {
+    return "not observable"
+  }
+  return __markdown_text(value.id)
+    + " ("
+    + value.direction
+    + ", bounds "
+    + to_string(value.bounds.lo)
+    + " to "
+    + to_string(value.bounds.hi)
+    + ")"
+}
+
+/**
+ * Render a report from the canonical read model; the Markdown is never a source of truth.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn hypothesis_report(snapshot: HypothesisLedgerSnapshot) -> HypothesisReport {
+  let lines: list<string> = [
+    "# Hypothesis report",
+    "",
+    "- Hypothesis ID: " + __markdown_text(snapshot.hypothesis_id),
+    "- Ledger events: " + to_string(snapshot.event_count),
+    "- Latest cursor: " + to_string(snapshot.latest_cursor),
+    "",
+  ]
+  let plan_fingerprint: string? = nil
+  if snapshot.plan == nil {
+    lines = lines
+      + [
+      "## Problem and decision",
+      "",
+      "No validated experiment plan has been registered.",
+      "",
+    ]
+  } else {
+    const plan = snapshot.plan
+    const intent = plan.intent
+    const design = plan.design
+    plan_fingerprint = plan.fingerprint
+    lines = lines
+      + [
+      "- Plan ID: " + __markdown_text(plan.plan_id),
+      "- Plan fingerprint: " + __markdown_text(plan.fingerprint),
+      "- Plan kind: " + __markdown_text(plan.kind),
+      "",
+      "## Problem and decision",
+      "",
+      __markdown_text(intent.question),
+      "",
+      "Decision informed: " + __markdown_text(intent.decision),
+      "",
+      "## Prior evidence and rationale",
+      "",
+      if intent.prior == nil {
+        "No planner prior was recorded."
+      } else {
+        "Planner prior: "
+          + to_string(intent.prior.probability)
+          + ". "
+          + __markdown_text(intent.prior.rationale)
+      },
+      "",
+    ]
+    for citation in intent.citations {
+      lines = lines
+        + [
+        "- Citation `"
+          + __markdown_text(citation.id)
+          + "`: "
+          + __markdown_text(citation.title)
+          + " — "
+          + __markdown_text(citation.url)
+          + " — "
+          + __markdown_text(citation.supports),
+      ]
+    }
+    if len(intent.citations) == 0 {
+      lines = lines + ["- No citations were supplied."]
+    }
+    lines = lines
+      + [
+      "",
+      "## Hypothesis, null, and alternatives",
+      "",
+      "Hypothesis: " + __markdown_text(intent.hypothesis),
+      "",
+      "Null: " + __markdown_text(intent.null_hypothesis),
+      "",
+      "Claim ceiling: " + __markdown_text(design.claim_strength),
+      "",
+      "## Assumptions and threats",
+      "",
+    ]
+      + __items(intent.assumptions, "No assumptions were recorded.")
+      + ["", "Threats:", ""]
+      + __items(intent.threats, "No threats were recorded.")
+      + [
+      "",
+      "## Method, interventions, and assignment",
+      "",
+      "- Lane: " + __markdown_text(design.lane),
+      "- Intervention: " + __adapter(design.intervention),
+      "- Comparator: " + __adapter(design.comparator),
+      "- Assignment unit: " + __markdown_text(to_string(intent.assignment_unit)),
+      "- Population: " + __markdown_text(to_string(intent.population_id)),
+      "- Primary outcome: " + __outcome(design.primary_outcome),
+      "- Evidence policy: " + __markdown_text(design.evidence.id),
+      "- Approval required: " + to_string(design.approval_required),
+      "- Approval ID: " + __markdown_text(to_string(design.approval_id)),
+      "",
+      "Resource ceilings: "
+        + to_string(design.budget.max_trials_per_case)
+        + " trials/case, $"
+        + to_string(design.budget.max_spend_usd)
+        + ", "
+        + to_string(design.budget.max_wall_clock_ms)
+        + " ms wall time, "
+        + to_string(design.budget.max_tokens)
+        + " tokens, "
+        + to_string(design.budget.max_api_calls)
+        + " API calls.",
+      "",
+      "Capability boundary: "
+        + __markdown_text(design.capabilities.side_effect_level)
+        + "; tools "
+        + __inline(design.capabilities.tools)
+        + "; network domains "
+        + __inline(design.capabilities.network.domains)
+        + ".",
+      "",
+    ]
+  }
+  lines = lines
+    + [
+    "## What actually executed",
+    "",
+    "- Active run ID: " + __markdown_text(to_string(snapshot.active_run_id)),
+    "- Approval status: " + __markdown_text(to_string(snapshot.approval_status)),
+    "- Recorded approval ID: " + __markdown_text(to_string(snapshot.approval_id)),
+    "- Run state: " + __markdown_text(to_string(snapshot.run_state)),
+    "- Observations: " + to_string(snapshot.observation_count),
+    "- Observed arms: " + __inline(snapshot.observed_arms),
+    "- Receipt IDs: " + __inline(snapshot.receipt_ids),
+    "- Spend observed: $" + to_string(snapshot.total_spend_usd),
+    "- Compute observed: " + to_string(snapshot.total_compute_ms) + " ms",
+    "- Tokens observed: " + to_string(snapshot.total_tokens),
+    "- API calls observed: " + to_string(snapshot.total_api_calls),
+    "",
+    "Registered-plan drift:",
+    "",
+  ]
+  if len(snapshot.drift) == 0 {
+    lines = lines + ["- No drift was recorded."]
+  } else {
+    for drift in snapshot.drift {
+      lines = lines
+        + [
+        "- "
+          + __markdown_text(drift.severity)
+          + " "
+          + __markdown_text(drift.path)
+          + ": planned "
+          + __markdown_text(drift.planned)
+          + ", actual "
+          + __markdown_text(drift.actual)
+          + " — "
+          + __markdown_text(drift.reason),
+      ]
+    }
+  }
+  lines = lines + ["", "## Observations, metrics, and evidence policy", ""]
+  if snapshot.decision == nil || snapshot.decision.decision.primary_effect == nil {
+    lines = lines + ["No canonical terminal effect interval has been recorded."]
+  } else {
+    const effect = snapshot.decision.decision.primary_effect
+    lines = lines
+      + [
+      "The canonical decision for "
+        + __markdown_text(snapshot.decision.decision.primary_metric)
+        + " recorded effect "
+        + to_string(effect.mean)
+        + " with interval ["
+        + to_string(effect.lo)
+        + ", "
+        + to_string(effect.hi)
+        + "] across "
+        + to_string(snapshot.decision.decision.trials)
+        + " paired observations.",
+    ]
+  }
+  lines = lines + ["", "Telemetry or capability degradation:", ""]
+    + __items(
+    snapshot.telemetry_degradations,
+    "None recorded.",
+  )
+    + ["", "## Conclusion, belief update, decision, and follow-up", ""]
+  let decision_outcome: string? = nil
+  if snapshot.decision == nil {
+    lines = lines
+      + ["No terminal decision has been recorded; the result is pending or inconclusive."]
+  } else {
+    const decision = snapshot.decision
+    decision_outcome = decision.decision.verdict
+    lines = lines
+      + [
+      "- Outcome: " + __markdown_text(decision.decision.verdict),
+      "- Winner: " + __markdown_text(to_string(decision.decision.winner)),
+      "- Registered claim ceiling: " + to_string(snapshot.plan?.design?.claim_strength),
+      "- Paired observations: " + to_string(decision.decision.trials),
+      "- Spend: $" + to_string(decision.decision.spend_usd),
+      "- Belief before: " + to_string(decision.belief_before),
+      "- Belief after: " + to_string(decision.belief_after),
+      "- Decision utility: " + to_string(decision.decision_utility),
+      "- Total elapsed: " + to_string(decision.elapsed_ms) + " ms",
+      "",
+      "The following summary and conclusion lists are recorded operator interpretation. They are not validated statistical claims; the canonical verdict and registered claim ceiling above remain authoritative.",
+      "",
+      __markdown_text(decision.summary),
+      "",
+      "Can conclude:",
+      "",
+    ]
+      + __items(decision.can_conclude, "Nothing beyond the registered result.")
+      + [
+      "",
+      "Cannot conclude:",
+      "",
+    ]
+      + __items(decision.cannot_conclude, "No additional limitation was recorded.")
+      + [
+      "",
+      "Follow-up: " + __markdown_text(to_string(decision.follow_up)),
+    ]
+  }
+  if len(snapshot.invalidations) > 0 {
+    lines = lines + ["", "Invalidations:", ""]
+    for invalidation in snapshot.invalidations {
+      lines = lines + ["- " + __markdown_text(invalidation.reason)]
+    }
+  }
+  if len(snapshot.regressions) > 0 {
+    lines = lines + ["", "Later regressions:", ""]
+    for regression in snapshot.regressions {
+      lines = lines
+        + [
+        "- " + __markdown_text(regression.observed_at) + ": " + __markdown_text(regression.summary),
+      ]
+    }
+  }
+  const markdown = join(lines, "\n") + "\n"
+  return {
+    schema: "harn.hypothesis.report.v1",
+    hypothesis_id: snapshot.hypothesis_id,
+    plan_fingerprint: plan_fingerprint,
+    decision_outcome: decision_outcome,
+    markdown: markdown,
+    content_fingerprint: "sha256:" + sha256(markdown),
+  }
+}

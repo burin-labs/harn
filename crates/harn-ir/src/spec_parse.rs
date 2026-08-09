@@ -286,7 +286,7 @@ fn split_config_list(raw: &str) -> Vec<String> {
 
 fn capability_help() -> Option<String> {
     Some(
-        "known capabilities are `fs.write`, `process.exec`, `network.access`, `mcp.connector`, `llm.model`, `worker.dispatch`, `human.approval`, and `autonomy.policy`"
+        "known capabilities are `fs.write`, `process.exec`, `network.access`, `mcp.connector`, `llm.model`, `worker.dispatch`, `human.approval`, `authority.access`, and `autonomy.policy`"
             .to_string(),
     )
 }

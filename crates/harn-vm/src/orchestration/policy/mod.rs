@@ -1,6 +1,7 @@
 //! Policy types and capability-ceiling enforcement.
 
 mod approval_rules;
+mod capability_lattice;
 mod effect_call_cache;
 mod effects;
 mod nested_budget;
@@ -20,6 +21,8 @@ use crate::runtime_limits::RuntimeLimits;
 use crate::tool_annotations::{SideEffectLevel, ToolAnnotations};
 use crate::value::{VmError, VmValue};
 use crate::workspace_path::{classify_workspace_path, WorkspacePathInfo};
+pub(crate) use capability_lattice::operation_is_covered;
+use capability_lattice::policy_allows_capability;
 
 pub use crate::tool_annotations::{ToolArgSchema, ToolKind};
 pub use approval_rules::{
@@ -175,46 +178,6 @@ impl Drop for TrustedBridgeCallGuard {
 
 fn policy_allows_tool(policy: &CapabilityPolicy, tool: &str) -> bool {
     policy.tool_pattern_allows(tool)
-}
-
-fn policy_grants_capability(policy: &CapabilityPolicy, capability: &str, op: &str) -> bool {
-    policy
-        .capabilities
-        .get(capability)
-        .is_some_and(|ops| ops.is_empty() || ops.iter().any(|allowed| allowed == op))
-}
-
-fn policy_allows_capability(policy: &CapabilityPolicy, capability: &str, op: &str) -> bool {
-    if !policy.capabilities_are_restricted() {
-        // Empty capability map = allow-all (e.g. the root agent policy).
-        return true;
-    }
-    if policy.capabilities_deny_all() {
-        return false;
-    }
-    if policy_grants_capability(policy, capability, op) {
-        return true;
-    }
-    // Capability subsumption: a stronger read grant implies the weaker
-    // observations it already exposes. An existence/metadata probe
-    // (`workspace.exists`, used by `file_exists`/`path_status`/`stat`) reveals strictly less
-    // than reading file contents (`workspace.read_text`) or listing a directory
-    // (`workspace.list`) — both of which already disclose whether a path
-    // exists. A policy that grants read/list but withholds the existence probe
-    // is incoherent, and silently wedges any tool that stats a path before
-    // reading it (look, read_file, edit/scaffold preflight). Narrowed worker
-    // policies derived from tool annotations hit this constantly because no
-    // annotation declares `workspace.exists`. Encode the lattice once here so
-    // every narrowed policy benefits, not one dispatch surface at a time.
-    if capability == "workspace" && op == "exists" {
-        return policy_grants_capability(policy, "workspace", "read_text")
-            || policy_grants_capability(policy, "workspace", "list");
-    }
-    // LLM calls resolve the catalog; keep the read visible without a second grant.
-    if capability == "llm" && op == "catalog" {
-        return policy_grants_capability(policy, "llm", "call");
-    }
-    false
 }
 
 fn policy_allows_side_effect(policy: &CapabilityPolicy, requested: &str) -> bool {

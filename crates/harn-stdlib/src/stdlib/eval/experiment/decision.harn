@@ -5,7 +5,11 @@
  * candidate × (primary + guardrails) cell. Removed arms never refund it.
  */
 import { VersionedContract, versioned_contract, versioned_descriptor } from "std/artifacts/typed"
-import { RealizedAssignment } from "std/eval/experiment/assignment"
+import {
+  RealizedAssignment,
+  plan_assignments,
+  realize_assignment,
+} from "std/eval/experiment/assignment"
 import {
   ExperimentArm,
   ExperimentGuardrail,
@@ -122,12 +126,14 @@ fn __check_assignment(
   observation: PairedObservation,
   expected_arm: string,
 ) {
-  if assignment.registration_id != registration.registration_id
-    || assignment.phase
-    != registration.phase
-    || assignment.case_id != observation.case_id
-    || assignment.trial_index != observation.trial_index
-    || assignment.arm_id != expected_arm {
+  const plan = plan_assignments(
+    registration,
+    observation.case_id,
+    observation.trial_index,
+    assignment.blocking_values,
+  )
+  const expected = realize_assignment(plan, expected_arm, assignment.blocking_values)
+  if json_stringify(assignment) != json_stringify(expected) {
     throw "std/eval/experiment: realized assignment does not match its observation"
   }
 }
@@ -153,78 +159,105 @@ fn __find_guardrail(
   return nil
 }
 
+/**
+ * Return the canonical identity of one immutable arm/case/trial observation.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn paired_observation_cell_key(observation: PairedObservation) -> string {
+  return observation.arm_id
+    + "\n"
+    + observation.case_id
+    + "\n"
+    + to_string(observation.trial_index)
+}
+
+/**
+ * Validate one immutable paired observation and return its canonical
+ * arm/case/trial cell identity. `observed_cells` is the caller's accumulated
+ * set, so append-time validation does not need to recompute a full decision.
+ *
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn validate_paired_observation(
+  registration: ExperimentRegistration,
+  observation: PairedObservation,
+  observed_cells: dict<string, bool>,
+) -> string {
+  const arm = __find_arm(registration, observation.arm_id)
+  if arm == nil {
+    throw "std/eval/experiment: observation names an unregistered candidate"
+  }
+  if !registration.case_set.cases.contains(observation.case_id) {
+    throw "std/eval/experiment: observation is outside the frozen case set"
+  }
+  if observation.trial_index < 0
+    || observation.trial_index
+    >= registration.budget.max_trials_per_case {
+    throw "std/eval/experiment: observation exceeds the trial ceiling"
+  }
+  const cell = paired_observation_cell_key(observation)
+  if observed_cells[cell] ?? false {
+    throw "std/eval/experiment: duplicate immutable arm/case/trial observation"
+  }
+  if observation.baseline_assignment.plan_id != observation.candidate_assignment.plan_id {
+    throw "std/eval/experiment: paired observations must share one assignment block"
+  }
+  __check_assignment(
+    observation.baseline_assignment,
+    registration,
+    observation,
+    registration.baseline.id,
+  )
+  __check_assignment(
+    observation.candidate_assignment,
+    registration,
+    observation,
+    observation.arm_id,
+  )
+  const metric_ids = __metric_ids(registration)
+  if len(observation.metrics) != len(metric_ids) {
+    throw "std/eval/experiment: every observation must carry primary and guardrail metrics"
+  }
+  let seen_metrics: dict<string, bool> = {}
+  for pair in observation.metrics {
+    if seen_metrics[pair.id] ?? false {
+      throw "std/eval/experiment: duplicate metric in paired observation"
+    }
+    seen_metrics = seen_metrics + {[pair.id]: true}
+    if pair.id == registration.metrics.primary.id {
+      __check_pair_bounds(pair, registration.metrics.primary)
+    } else {
+      const guardrail = __find_guardrail(registration, pair.id)
+      if guardrail == nil {
+        throw "std/eval/experiment: observation names an unregistered metric"
+      }
+      const metric: ExperimentMetric = {
+        id: guardrail.id,
+        direction: guardrail.direction,
+        bounds: guardrail.bounds,
+      }
+      __check_pair_bounds(pair, metric)
+    }
+  }
+  for metric_id in metric_ids {
+    if !(seen_metrics[metric_id] ?? false) {
+      throw "std/eval/experiment: observation omits metric '" + metric_id + "'"
+    }
+  }
+  return cell
+}
+
 fn __validate_observations(
   registration: ExperimentRegistration,
   observations: list<PairedObservation>,
 ) {
   let seen: dict<string, bool> = {}
-  const metric_ids = __metric_ids(registration)
   for observation in observations {
-    const arm = __find_arm(registration, observation.arm_id)
-    if arm == nil {
-      throw "std/eval/experiment: observation names an unregistered candidate"
-    }
-    if !registration.case_set.cases.contains(observation.case_id) {
-      throw "std/eval/experiment: observation is outside the frozen case set"
-    }
-    if observation.trial_index < 0
-      || observation.trial_index
-      >= registration.budget.max_trials_per_case {
-      throw "std/eval/experiment: observation exceeds the trial ceiling"
-    }
-    const cell = observation.arm_id
-      + "\n"
-      + observation.case_id
-      + "\n"
-      + to_string(observation.trial_index)
-    if seen[cell] ?? false {
-      throw "std/eval/experiment: duplicate immutable arm/case/trial observation"
-    }
+    const cell = validate_paired_observation(registration, observation, seen)
     seen = seen + {[cell]: true}
-    if observation.baseline_assignment.plan_id != observation.candidate_assignment.plan_id {
-      throw "std/eval/experiment: paired observations must share one assignment block"
-    }
-    __check_assignment(
-      observation.baseline_assignment,
-      registration,
-      observation,
-      registration.baseline.id,
-    )
-    __check_assignment(
-      observation.candidate_assignment,
-      registration,
-      observation,
-      observation.arm_id,
-    )
-    if len(observation.metrics) != len(metric_ids) {
-      throw "std/eval/experiment: every observation must carry primary and guardrail metrics"
-    }
-    let seen_metrics: dict<string, bool> = {}
-    for pair in observation.metrics {
-      if seen_metrics[pair.id] ?? false {
-        throw "std/eval/experiment: duplicate metric in paired observation"
-      }
-      seen_metrics = seen_metrics + {[pair.id]: true}
-      if pair.id == registration.metrics.primary.id {
-        __check_pair_bounds(pair, registration.metrics.primary)
-      } else {
-        const guardrail = __find_guardrail(registration, pair.id)
-        if guardrail == nil {
-          throw "std/eval/experiment: observation names an unregistered metric"
-        }
-        const metric: ExperimentMetric = {
-          id: guardrail.id,
-          direction: guardrail.direction,
-          bounds: guardrail.bounds,
-        }
-        __check_pair_bounds(pair, metric)
-      }
-    }
-    for metric_id in metric_ids {
-      if !(seen_metrics[metric_id] ?? false) {
-        throw "std/eval/experiment: observation omits metric '" + metric_id + "'"
-      }
-    }
   }
 }
 

@@ -1,0 +1,161 @@
+import {
+  ExperimentAdapterCatalog,
+  ExperimentCapabilityManifest,
+  ExperimentCompileContext,
+  ExperimentIntent,
+  ExperimentResourceBudget,
+  InterventionAdapter,
+  OutcomeAdapter,
+  PopulationAdapter,
+} from "std/eval/hypothesis"
+
+pub fn hypothesis_fixture_capabilities() -> ExperimentCapabilityManifest {
+  return {
+    tools: ["run"],
+    capabilities: {filesystem: ["fixtures/read"]},
+    workspace_roots: ["fixtures"],
+    read_only_roots: ["fixtures"],
+    side_effect_level: "read_only",
+    sandbox_profile: "worktree",
+    process: {commands: [], read_roots: ["fixtures"], write_roots: []},
+    network: {domains: [], allow_private: false},
+    connectors: [],
+    database_scopes: [],
+    provider_ids: ["mock"],
+    secret_refs: [],
+    mutation: {reversible: true, rollback_adapter_id: nil, requires_approval: false},
+  }
+}
+
+pub fn hypothesis_fixture_intervention(variant: string, complexity: int) -> InterventionAdapter {
+  return {
+    id: "prompt",
+    variant_id: variant,
+    domain: "agent",
+    description: "A registered prompt variant.",
+    supported_lanes: ["randomized_offline", "replay_simulation"],
+    config: {prompt: variant},
+    complexity: complexity,
+    executable: true,
+    randomizable: true,
+    reversible: true,
+    contamination_risk: "none",
+    carryover_risk: "none",
+    interference_risk: "none",
+    capabilities: hypothesis_fixture_capabilities(),
+  }
+}
+
+pub fn hypothesis_fixture_outcome() -> OutcomeAdapter {
+  return {
+    id: "success",
+    domain: "agent",
+    description: "Task success.",
+    direction: "up",
+    bounds: {lo: 0.0, hi: 1.0},
+    observation_delay_ms: 0,
+    observable: true,
+    grader_id: "exact",
+    guardrail: false,
+    alarm: nil,
+  }
+}
+
+pub fn hypothesis_fixture_population() -> PopulationAdapter {
+  return {
+    id: "fixtures-v1",
+    domain: "agent",
+    assignment_unit: "case-trial",
+    iterate: {id: "tune", digest: "sha256:tune", cases: ["a", "b"]},
+    gate: {id: "gate", digest: "sha256:gate", cases: ["z"]},
+    blocking_factors: ["host", "time_slot"],
+    independent_enough: true,
+  }
+}
+
+pub fn hypothesis_fixture_catalog(reverse: bool = false) -> ExperimentAdapterCatalog {
+  const interventions = if reverse {
+    [
+      hypothesis_fixture_intervention("candidate", 1),
+      hypothesis_fixture_intervention("baseline", 0),
+    ]
+  } else {
+    [
+      hypothesis_fixture_intervention("baseline", 0),
+      hypothesis_fixture_intervention("candidate", 1),
+    ]
+  }
+  return {
+    schema: "harn.experiment.adapter_catalog.v1",
+    interventions: interventions,
+    outcomes: [hypothesis_fixture_outcome()],
+    populations: [hypothesis_fixture_population()],
+  }
+}
+
+pub fn hypothesis_fixture_budget() -> ExperimentResourceBudget {
+  return {
+    min_trials_per_case: 4,
+    max_trials_per_case: 32,
+    max_wall_clock_ms: 60000,
+    max_compute_ms: 30000,
+    max_tokens: 1000,
+    max_api_calls: 16,
+    max_spend_usd: 1.0,
+    max_concurrency: 2,
+  }
+}
+
+pub fn hypothesis_fixture_context(reverse: bool = false) -> ExperimentCompileContext {
+  return {
+    owner: "eval-team",
+    seed: "seed-1",
+    catalog: hypothesis_fixture_catalog(reverse),
+    trusted_citations: [],
+    risk_floor: {
+      touches_people: false,
+      touches_customer_data: false,
+      touches_money: false,
+      touches_production: false,
+      irreversible: false,
+    },
+    capability_ceiling: hypothesis_fixture_capabilities(),
+    supported_blocking_factors: ["host", "time_slot"],
+    host_identity_available: true,
+    budget_request: hypothesis_fixture_budget(),
+    budget_ceiling: hypothesis_fixture_budget()
+      + {max_spend_usd: 2.0, max_trials_per_case: 64},
+    approval_id: nil,
+    provenance: {source: "conformance", actor: "test", created_at: "2026-08-08T00:00:00Z"},
+  }
+}
+
+pub fn hypothesis_fixture_intent() -> ExperimentIntent {
+  return {
+    schema: "harn.experiment.intent.v1",
+    schema_version: 1,
+    question: "Does the candidate prompt improve task success?",
+    hypothesis: "The candidate improves bounded success.",
+    null_hypothesis: "The candidate does not improve bounded success.",
+    decision: "Choose the prompt used for the frozen gate.",
+    domain: "agent",
+    requested_lane: "auto",
+    requested_evidence: "standard_sequential",
+    intervention: {adapter_id: "prompt", variant_id: "candidate"},
+    comparator: {adapter_id: "prompt", variant_id: "baseline"},
+    assignment_unit: "case-trial",
+    population_id: "fixtures-v1",
+    outcome_ids: ["success"],
+    assumptions: ["fixtures represent the target workload"],
+    threats: ["grader drift"],
+    prior: {probability: 0.5, rationale: "No prior experiment."},
+    citations: [],
+    risk: {
+      touches_people: false,
+      touches_customer_data: false,
+      touches_money: false,
+      touches_production: false,
+      irreversible: false,
+    },
+  }
+}

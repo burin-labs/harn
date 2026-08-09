@@ -1,0 +1,225 @@
+/** Portable append-only hypothesis, evidence, and relationship events. */
+import { VersionedContract, versioned_contract, versioned_descriptor } from "std/artifacts/typed"
+import { ExperimentDecision, PairedObservation } from "std/eval/experiment/decision"
+import { HypothesisPlan } from "std/eval/hypothesis/contracts"
+import { ArtifactDescriptor } from "std/run_artifacts"
+import { schema_contract } from "std/schema"
+
+pub type HypothesisEntityKind = "hypothesis" \
+  | "experiment_plan" \
+  | "experiment_run" \
+  | "observation" \
+  | "evidence_update" \
+  | "decision" \
+  | "monitor" \
+  | "learning_loop" \
+  | "receipt"
+
+pub type HypothesisRelationKind = "competes_with" \
+  | "tested_by" \
+  | "supersedes" \
+  | "follows_up" \
+  | "supported_by" \
+  | "decided_by" \
+  | "promoted_to_learning_loop" \
+  | "monitors" \
+  | "invalidates" \
+  | "regressed_by"
+
+pub type HypothesisEntityRef = {
+  kind: HypothesisEntityKind,
+  id: string,
+  version: int?,
+  fingerprint: string?,
+}
+
+pub type HypothesisRelationship = {
+  schema: "harn.hypothesis.relationship.v1",
+  relationship_id: string,
+  kind: HypothesisRelationKind,
+  from: HypothesisEntityRef,
+  to: HypothesisEntityRef,
+  created_at: string,
+  actor: string,
+  rationale: string,
+}
+
+pub type HypothesisRunState = "scheduled" \
+  | "running" \
+  | "paused" \
+  | "completed" \
+  | "cancelled" \
+  | "failed" \
+  | "invalid"
+
+pub type HypothesisEventAuthorityKind = "plan_admission" \
+  | "native_approval" \
+  | "native_observation" \
+  | "lifecycle_audit"
+
+pub type HypothesisPlanRegistered = {kind: "plan_registered", plan: HypothesisPlan}
+
+pub type HypothesisApprovalRecorded = {
+  kind: "approval_recorded",
+  approval_id: string,
+  plan_fingerprint: string,
+  decision: "approved" | "denied",
+  rationale: string,
+}
+
+pub type HypothesisRunTransition = {
+  kind: "run_transition",
+  state: HypothesisRunState,
+  reason: string?,
+  receipt_ids: list<string>,
+}
+
+pub type HypothesisObservationRecorded = {
+  kind: "observation_recorded",
+  observation_id: string,
+  observation: PairedObservation,
+  spend_delta_usd: float,
+  compute_delta_ms: int,
+  token_delta: int,
+  api_call_delta: int,
+  telemetry_status: "observed" | "unavailable" | "not_observable",
+  capability_degradations: list<string>,
+}
+
+pub type HypothesisDecisionRecorded = {
+  kind: "decision_recorded",
+  decision: ExperimentDecision,
+  summary: string,
+  belief_before: float?,
+  belief_after: float?,
+  decision_utility: float?,
+  elapsed_ms: int,
+  can_conclude: list<string>,
+  cannot_conclude: list<string>,
+  follow_up: string?,
+}
+
+pub type HypothesisRelationshipRecorded = {
+  kind: "relationship_recorded",
+  relationship: HypothesisRelationship,
+}
+
+pub type HypothesisExecutionDrift = {
+  kind: "execution_drift",
+  path: string,
+  planned: string,
+  actual: string,
+  severity: "info" | "warning" | "invalidating",
+  reason: string,
+}
+
+pub type HypothesisInvalidated = {
+  kind: "invalidated",
+  reason: string,
+  invalidated_assumptions: list<string>,
+}
+
+pub type HypothesisRegressionObserved = {
+  kind: "regression_observed",
+  monitor_id: string,
+  decision_id: string,
+  summary: string,
+  observed_at: string,
+}
+
+pub type HypothesisEventPayload = HypothesisPlanRegistered \
+  | HypothesisApprovalRecorded \
+  | HypothesisRunTransition \
+  | HypothesisObservationRecorded \
+  | HypothesisDecisionRecorded \
+  | HypothesisRelationshipRecorded \
+  | HypothesisExecutionDrift \
+  | HypothesisInvalidated \
+  | HypothesisRegressionObserved
+
+pub type HypothesisEventContent = {
+  schema: "harn.hypothesis.event.v1",
+  schema_version: 1,
+  event_id: string,
+  hypothesis_id: string,
+  plan_id: string?,
+  run_id: string?,
+  predecessor_fingerprint: string?,
+  occurred_at: string,
+  actor: string,
+  source: string,
+  payload: HypothesisEventPayload,
+}
+
+pub type HypothesisLedgerEvent = {content: HypothesisEventContent, fingerprint: string}
+
+pub type HypothesisLedgerAppendReceipt = {
+  schema: "harn.hypothesis.ledger_append.v1",
+  topic: string,
+  cursor: int,
+  inserted: bool,
+  event_id: string,
+  fingerprint: string,
+  record_hash: string,
+}
+
+pub type HypothesisLedgerRecord = {
+  cursor: int,
+  record_hash: string,
+  authority_kind: HypothesisEventAuthorityKind,
+  authority_plan_fingerprint: string,
+  event: HypothesisLedgerEvent,
+}
+
+pub type HypothesisLedgerSnapshot = {
+  schema: "harn.hypothesis.snapshot.v1",
+  hypothesis_id: string,
+  event_count: int,
+  latest_cursor: int?,
+  plan: HypothesisPlan?,
+  active_run_id: string?,
+  approval_status: "approved" | "denied" | nil,
+  approval_id: string?,
+  run_state: HypothesisRunState?,
+  decision: HypothesisDecisionRecorded?,
+  observation_count: int,
+  observed_arms: list<string>,
+  receipt_ids: list<string>,
+  drift: list<HypothesisExecutionDrift>,
+  relationships: list<HypothesisRelationship>,
+  invalidations: list<HypothesisInvalidated>,
+  regressions: list<HypothesisRegressionObserved>,
+  total_spend_usd: float,
+  total_compute_ms: int,
+  total_tokens: int,
+  total_api_calls: int,
+  telemetry_degradations: list<string>,
+}
+
+/**
+ * Return the strict, versioned contract for one portable ledger event.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn hypothesis_event_content_contract() -> VersionedContract<HypothesisEventContent> {
+  return versioned_contract(
+    "harn.hypothesis.event",
+    1,
+    schema_contract(schema_of(HypothesisEventContent), []),
+  )
+}
+
+/**
+ * Create a typed run-artifact descriptor for portable ledger event content.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
+pub fn hypothesis_event_content_descriptor(
+  name: string = "hypothesis-event.json",
+) -> ArtifactDescriptor<HypothesisEventContent> {
+  return versioned_descriptor(name, hypothesis_event_content_contract())
+}

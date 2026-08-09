@@ -1,0 +1,83 @@
+pub import {
+  compile_experiment_intent,
+  validate_compiled_hypothesis_plan,
+} from "std/eval/hypothesis/compiler"
+/**
+ * std/eval/hypothesis — portable hypothesis and experiment-design contracts.
+ *
+ * The model-facing intent is data. Deterministic compilation, registered
+ * adapters, and existing experiment semantics own the portable decision.
+ * Execution remains explicitly deferred to an enforcing host adapter.
+ */
+pub import {
+  ClaimStrength,
+  EvidenceMode,
+  EvidencePolicy,
+  ExperimentAdapterCatalog,
+  ExperimentAdapterRef,
+  ExperimentCapabilityManifest,
+  ExperimentCompileContext,
+  ExperimentCompileDiagnostic,
+  ExperimentCompileFailure,
+  ExperimentCompileReceipt,
+  ExperimentDesign,
+  ExperimentIntent,
+  ExperimentIntentRisk,
+  ExperimentLane,
+  ExperimentResourceBudget,
+  HypothesisCitation,
+  HypothesisPlan,
+  HypothesisPrior,
+  InterventionAdapter,
+  MutationCapability,
+  NetworkCapability,
+  ObserveOnlyHypothesisPlan,
+  OutcomeAdapter,
+  PlanProvenance,
+  PopulationAdapter,
+  ProcessCapability,
+  RegisteredExperimentPlan,
+  RequestedExperimentLane,
+  experiment_intent_contract,
+  experiment_intent_descriptor,
+  hypothesis_plan_contract,
+  hypothesis_plan_descriptor,
+} from "std/eval/hypothesis/contracts"
+pub import {
+  hypothesis_event,
+  hypothesis_ledger_append,
+  hypothesis_ledger_project,
+  hypothesis_ledger_read,
+} from "std/eval/hypothesis/ledger"
+pub import {
+  HypothesisApprovalRecorded,
+  HypothesisDecisionRecorded,
+  HypothesisEntityKind,
+  HypothesisEntityRef,
+  HypothesisEventAuthorityKind,
+  HypothesisEventContent,
+  HypothesisEventPayload,
+  HypothesisExecutionDrift,
+  HypothesisInvalidated,
+  HypothesisLedgerAppendReceipt,
+  HypothesisLedgerEvent,
+  HypothesisLedgerRecord,
+  HypothesisLedgerSnapshot,
+  HypothesisObservationRecorded,
+  HypothesisPlanRegistered,
+  HypothesisRegressionObserved,
+  HypothesisRelationKind,
+  HypothesisRelationship,
+  HypothesisRelationshipRecorded,
+  HypothesisRunState,
+  HypothesisRunTransition,
+  hypothesis_event_content_contract,
+  hypothesis_event_content_descriptor,
+} from "std/eval/hypothesis/ledger_contracts"
+pub import {
+  HypothesisPlannerOptions,
+  HypothesisPlannerReceipt,
+  design_hypothesis,
+} from "std/eval/hypothesis/planner"
+pub import { resolve_evidence_policy } from "std/eval/hypothesis/policies"
+pub import { HypothesisReport, hypothesis_report } from "std/eval/hypothesis/report"

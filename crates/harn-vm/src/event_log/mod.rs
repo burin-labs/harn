@@ -235,6 +235,26 @@ pub struct AppendOutcome {
     pub inserted: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum AppendHeadExpectation<'a> {
+    Any,
+    Exact(Option<&'a str>),
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EventLogVerificationReport {
+    pub verified: bool,
+    pub errors: Vec<String>,
+    pub event_count: usize,
+    pub last_hash: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VerifiedEventSnapshot {
+    pub verification: EventLogVerificationReport,
+    pub events: Vec<(EventId, LogEvent)>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EventLogDescription {
     pub backend: EventLogBackendKind,
@@ -252,6 +272,11 @@ pub enum LogError {
     Serde(String),
     Sqlite(String),
     ConsumerLagged(EventId),
+    StaleTopicHead {
+        topic: String,
+        expected: Option<String>,
+        actual: Option<String>,
+    },
 }
 
 impl fmt::Display for LogError {
@@ -266,6 +291,14 @@ impl fmt::Display for LogError {
             Self::ConsumerLagged(last_id) => {
                 write!(f, "subscriber lagged behind after event {last_id}")
             }
+            Self::StaleTopicHead {
+                topic,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "event log topic '{topic}' chain head mismatch; expected {expected:?}, found {actual:?}"
+            ),
         }
     }
 }
@@ -578,6 +611,82 @@ impl AnyEventLog {
         }
     }
 
+    /// Append a new idempotent event only when the topic's provenance-chain
+    /// head still equals `expected_head`.
+    ///
+    /// An existing `(header, value)` identity is returned before the head is
+    /// compared, so a retry remains idempotent even after later events advance
+    /// the chain. For a new identity, lookup, head comparison, and append are
+    /// one backend-owned critical section. `None` requires an empty topic.
+    pub async fn append_idempotent_chained_by_header(
+        &self,
+        topic: &Topic,
+        header: &str,
+        value: &str,
+        expected_head: Option<&str>,
+        event: LogEvent,
+    ) -> Result<AppendOutcome, LogError> {
+        if header.trim().is_empty() {
+            return Err(LogError::Config(
+                "idempotent append header cannot be empty".to_string(),
+            ));
+        }
+        match self {
+            Self::Memory(log) => {
+                log.append_idempotent_chained_by_header(topic, header, value, expected_head, event)
+                    .await
+            }
+            Self::File(log) => {
+                log.append_idempotent_chained_by_header(topic, header, value, expected_head, event)
+            }
+            Self::Sqlite(log) => {
+                log.append_idempotent_chained_by_header(topic, header, value, expected_head, event)
+            }
+        }
+    }
+
+    /// Recompute and verify the complete provenance chain for one topic.
+    ///
+    /// Verification starts at the topic genesis. A compacted prefix therefore
+    /// cannot be reported as a complete verified chain without a future typed
+    /// checkpoint contract that binds the retained first event to that prefix.
+    pub async fn verify_topic(
+        &self,
+        topic: &Topic,
+    ) -> Result<EventLogVerificationReport, LogError> {
+        let events = self.read_range(topic, None, usize::MAX).await?;
+        Ok(verify_topic_events(topic, &events))
+    }
+
+    /// Verify one retained topic snapshot and return only events matching a
+    /// header projection. The topic is materialized once, so typed aggregate
+    /// readers do not race or repeatedly rescan it between verification and
+    /// filtering.
+    pub async fn verified_snapshot_by_header(
+        &self,
+        topic: &Topic,
+        header: &str,
+        value: &str,
+    ) -> Result<VerifiedEventSnapshot, LogError> {
+        if header.trim().is_empty() {
+            return Err(LogError::Config(
+                "verified snapshot header cannot be empty".to_string(),
+            ));
+        }
+        let mut events = self.read_range(topic, None, usize::MAX).await?;
+        let verification = verify_topic_events(topic, &events);
+        events.retain(|(_, event)| {
+            event
+                .headers
+                .get(header)
+                .is_some_and(|candidate| candidate == value)
+        });
+        Ok(VerifiedEventSnapshot {
+            verification,
+            events,
+        })
+    }
+
     /// Read the event previously appended under `(header, value)`, the read
     /// counterpart of [`Self::append_idempotent_by_header`]. On the SQLite
     /// backend this is an indexed JOIN; the memory/file dev backends scan.
@@ -598,6 +707,92 @@ impl AnyEventLog {
             Self::Sqlite(log) => log.read_idempotent_by_header(topic, header, value),
         }
     }
+}
+
+pub(super) fn require_expected_topic_head(
+    topic: &Topic,
+    previous: Option<(EventId, &LogEvent)>,
+    expectation: AppendHeadExpectation<'_>,
+) -> Result<(), LogError> {
+    let AppendHeadExpectation::Exact(expected) = expectation else {
+        return Ok(());
+    };
+    let actual = previous
+        .map(|(event_id, event)| {
+            crate::provenance::event_record_hash_from_headers(topic.as_str(), event_id, event)
+        })
+        .transpose()?;
+    if actual.as_deref() == expected {
+        return Ok(());
+    }
+    Err(LogError::StaleTopicHead {
+        topic: topic.as_str().to_string(),
+        expected: expected.map(str::to_string),
+        actual,
+    })
+}
+
+fn verify_topic_events(
+    topic: &Topic,
+    events: &[(EventId, LogEvent)],
+) -> EventLogVerificationReport {
+    let mut report = EventLogVerificationReport {
+        event_count: events.len(),
+        ..EventLogVerificationReport::default()
+    };
+    let mut previous_hash: Option<String> = None;
+
+    for (event_id, event) in events {
+        match event.headers.get(crate::provenance::HEADER_SCHEMA) {
+            Some(schema) if schema == crate::provenance::EVENT_PROVENANCE_SCHEMA => {}
+            Some(schema) => report.errors.push(format!(
+                "topic {topic} event {event_id} provenance schema mismatch; expected '{}', found '{schema}'",
+                crate::provenance::EVENT_PROVENANCE_SCHEMA
+            )),
+            None => report.errors.push(format!(
+                "topic {topic} event {event_id} is missing provenance schema header"
+            )),
+        }
+
+        let found_previous = event
+            .headers
+            .get(crate::provenance::HEADER_PREV_HASH)
+            .cloned();
+        if found_previous != previous_hash {
+            report.errors.push(format!(
+                "topic {topic} event {event_id} prev_hash mismatch; expected {previous_hash:?}, found {found_previous:?}"
+            ));
+        }
+
+        let stored_hash = event
+            .headers
+            .get(crate::provenance::HEADER_RECORD_HASH)
+            .filter(|hash| !hash.trim().is_empty())
+            .cloned();
+        match stored_hash.as_deref() {
+            Some(found_hash) => {
+                match crate::provenance::compute_event_record_hash(topic.as_str(), *event_id, event)
+                {
+                    Ok(expected_hash) if expected_hash == found_hash => {}
+                    Ok(expected_hash) => report.errors.push(format!(
+                        "topic {topic} event {event_id} record_hash mismatch; expected {expected_hash}, found {found_hash}"
+                    )),
+                    Err(error) => report.errors.push(format!(
+                        "topic {topic} event {event_id} record_hash verification failed: {error}"
+                    )),
+                }
+            }
+            None => report.errors.push(format!(
+                "topic {topic} event {event_id} is missing provenance record_hash header"
+            )),
+        }
+
+        previous_hash = stored_hash;
+    }
+
+    report.last_hash = previous_hash;
+    report.verified = report.errors.is_empty();
+    report
 }
 
 impl EventLog for AnyEventLog {

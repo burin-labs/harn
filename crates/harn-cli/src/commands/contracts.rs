@@ -153,6 +153,7 @@ fn effect_kind_name(kind: EffectKind) -> &'static str {
         EffectKind::Observability => "observability",
         EffectKind::Channel => "channel",
         EffectKind::State => "state",
+        EffectKind::Authority => "authority",
     }
 }
 

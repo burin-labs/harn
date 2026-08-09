@@ -19,6 +19,7 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
+use super::policy::operation_is_covered;
 use super::workflow_bundle::WorkflowBundle;
 use super::workflow_patch::{bundle_capability_ceiling, CapabilityCeilingViolation};
 use super::CapabilityPolicy;
@@ -131,7 +132,11 @@ fn collect_violations(
                     continue;
                 }
                 for op in ops {
-                    if !parent_ops.is_empty() && !parent_ops.contains(op) {
+                    if !parent_ops.is_empty()
+                        && !parent_ops
+                            .iter()
+                            .any(|allowed| operation_is_covered(capability, allowed, op))
+                    {
                         violations.push(CapabilityCeilingViolation {
                             kind: "capability".to_string(),
                             detail: format!(
@@ -689,5 +694,24 @@ mod tests {
             &NestedInvocationTarget::WorkflowBundle(&bundle),
         );
         assert!(report.allowed(), "{report:#?}");
+    }
+
+    #[test]
+    fn broad_authority_write_covers_a_scoped_nested_request() {
+        let mut parent = CapabilityPolicy::default();
+        parent.restrict_capabilities(BTreeMap::from([(
+            "authority".to_string(),
+            vec!["write".to_string()],
+        )]));
+        let mut requested = CapabilityPolicy::default();
+        requested.restrict_capabilities(BTreeMap::from([(
+            "authority".to_string(),
+            vec!["write@native_observation".to_string()],
+        )]));
+
+        assert!(
+            collect_violations(&parent, &requested).is_empty(),
+            "broad authority.write must survive nested invocation narrowing"
+        );
     }
 }

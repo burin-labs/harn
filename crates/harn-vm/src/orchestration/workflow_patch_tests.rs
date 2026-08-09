@@ -45,6 +45,23 @@ fn parent_ceiling_read_only() -> CapabilityPolicy {
     }
 }
 
+#[test]
+fn broad_authority_write_covers_a_scoped_workflow_patch_request() {
+    let mut parent = CapabilityPolicy::default();
+    parent.restrict_capabilities(BTreeMap::from([(
+        "authority".to_string(),
+        vec!["write".to_string()],
+    )]));
+    let mut requested = CapabilityPolicy::default();
+    requested.restrict_capabilities(BTreeMap::from([(
+        "authority".to_string(),
+        vec!["write@plan_admission".to_string()],
+    )]));
+
+    let violations = collect_ceiling_violations(&parent, &requested, &BTreeMap::new(), &[], None);
+    assert!(violations.is_empty(), "{violations:#?}");
+}
+
 fn pr_verifier_patch() -> WorkflowPatch {
     serde_json::from_value(json!({
         "schema_version": 1,

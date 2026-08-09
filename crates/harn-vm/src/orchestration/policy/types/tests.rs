@@ -3,6 +3,8 @@
 //! Split out of `types.rs` to keep that module within the
 //! source-file-length ratchet; the module path is unchanged.
 
+use std::collections::BTreeMap;
+
 use super::{
     intersect_roots, sandbox_profile_strictness, CapabilityPolicy, ModelPolicy,
     RequiredSuccessfulTool, SandboxProfile,
@@ -167,4 +169,36 @@ fn a_path_only_profile_loses_to_a_process_confining_parent() {
     };
     let merged = parent.intersect(&child).expect("intersect");
     assert_eq!(merged.sandbox_profile, SandboxProfile::OsHardened);
+}
+
+fn authority_policy(operation: &str) -> CapabilityPolicy {
+    let mut capabilities = BTreeMap::new();
+    capabilities.insert("authority".to_string(), vec![operation.to_string()]);
+    CapabilityPolicy {
+        capabilities,
+        ..CapabilityPolicy::default()
+    }
+}
+
+#[test]
+fn broad_authority_write_covers_scoped_delegation_and_flattening() {
+    let ceiling = authority_policy("write");
+    let scoped = authority_policy("write@plan_admission");
+
+    let merged = ceiling
+        .intersect(&scoped)
+        .expect("broad authority ceiling covers a scoped request");
+    assert_eq!(
+        merged.capability_operations("authority"),
+        Some(["write@plan_admission".to_string()].as_slice())
+    );
+    ceiling
+        .assert_within_ceiling(&scoped)
+        .expect("flattened scoped authority remains within the broad ceiling");
+
+    let sibling = authority_policy("write@native_approval");
+    scoped
+        .intersect(&sibling)
+        .expect_err("a scoped grant must not authorize a sibling authority kind");
+    assert!(scoped.assert_within_ceiling(&sibling).is_err());
 }

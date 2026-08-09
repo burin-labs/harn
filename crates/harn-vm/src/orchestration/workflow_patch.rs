@@ -19,6 +19,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
+use super::policy::operation_is_covered;
 use super::workflow::{WorkflowEdge, WorkflowNode};
 use super::workflow_bundle::{
     preview_workflow_bundle, validate_workflow_bundle, WorkflowBundle, WorkflowBundleGraphExport,
@@ -914,7 +915,11 @@ fn collect_ceiling_violations(
                     continue;
                 }
                 for op in ops {
-                    if !parent_ops.is_empty() && !parent_ops.contains(op) {
+                    if !parent_ops.is_empty()
+                        && !parent_ops
+                            .iter()
+                            .any(|allowed| operation_is_covered(capability, allowed, op))
+                    {
                         violations.push(CapabilityCeilingViolation {
                             kind: "capability".to_string(),
                             detail: format!(

@@ -204,6 +204,7 @@ pub enum Capability {
     CommandExecution,
     NetworkAccess,
     ConnectorAccess,
+    Authority,
     ModelCall,
     WorkerDispatch,
     Stdio,
@@ -227,6 +228,7 @@ impl Capability {
             Self::CommandExecution => "process.exec",
             Self::NetworkAccess => "network.access",
             Self::ConnectorAccess => "mcp.connector",
+            Self::Authority => "authority.access",
             Self::ModelCall => "llm.model",
             Self::WorkerDispatch => "worker.dispatch",
             Self::Stdio => "stdio.access",
@@ -258,6 +260,7 @@ impl Capability {
             "mcp.connector" | "connector" | "connectors" | "mcp" | "host.tool" | "host_tool" => {
                 Some(Self::ConnectorAccess)
             }
+            "authority.access" | "authority" => Some(Self::Authority),
             "llm.model" | "model" | "llm" | "model.call" => Some(Self::ModelCall),
             "worker.dispatch" | "worker" | "delegated.worker" | "a2a" => Some(Self::WorkerDispatch),
             "stdio.access" | "stdio" => Some(Self::Stdio),
@@ -273,6 +276,30 @@ impl Capability {
             _ => None,
         }
     }
+}
+
+/// Canonical execution-policy operation for an authority effect.
+///
+/// The access and resolved resource remain part of the authority scope
+/// (`write@plan_admission`). A missing dynamic resource retains the access
+/// (`write`) so an explicitly broad grant remains possible without inventing a
+/// sentinel resource.
+pub fn authority_effect_policy_operation(
+    access: harn_builtin_meta::EffectAccess,
+    resource: Option<&str>,
+) -> String {
+    let access = match access {
+        harn_builtin_meta::EffectAccess::Read => "read",
+        harn_builtin_meta::EffectAccess::Write => "write",
+        harn_builtin_meta::EffectAccess::Mutate => "mutate",
+        harn_builtin_meta::EffectAccess::Observe => "observe",
+    };
+    resource
+        .filter(|resource| !resource.is_empty())
+        .map_or_else(
+            || access.to_string(),
+            |resource| format!("{access}@{resource}"),
+        )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

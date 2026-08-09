@@ -1,0 +1,47 @@
+import { design_hypothesis } from "std/eval/hypothesis"
+import { llm_text, with_llm_script } from "std/testing"
+import {
+  hypothesis_fixture_context,
+  hypothesis_fixture_intent,
+} from "./hypothesis_fixture_lib.harn"
+
+pipeline default(harness: Harness, _task) {
+  const invalid = hypothesis_fixture_intent()
+    + {
+    intervention: {adapter_id: "prompt", variant_id: "invented"},
+  }
+  const valid = hypothesis_fixture_intent()
+  with_llm_script(
+    harness.llm,
+    [llm_text(json_stringify(invalid)), llm_text(json_stringify(valid))],
+    { ->
+      const receipt = design_hypothesis(
+        harness,
+        "Does the registered candidate prompt improve success?",
+        hypothesis_fixture_context(),
+        {provider: "mock", validator_retries: 1},
+      )
+      require receipt.ok, "one compiler-guided repair produces a valid plan"
+      require receipt.intent?.intervention?.variant_id == "candidate",
+        "the planner repairs to a registered adapter"
+      require receipt.compilation?.plan?.kind == "registered_experiment",
+        "model-authored data passes through deterministic compilation"
+      require len(harness.llm.mock_calls()) == 2, "repair is bounded to one additional model call"
+      const first_prompt = harness.llm.mock_calls()[0]?.messages[0]?.content
+      require contains(first_prompt, "Never emit Harn source"),
+        "the planner prompt states the trust boundary"
+      require contains(first_prompt, "non_experimental_research"),
+        "the prompt includes honest non-experimental counterexamples"
+      require !contains(first_prompt, "\"config\":"),
+        "execution config is not exposed to the planner prompt"
+      const repair_prompt = harness.llm.mock_calls()[1]?.messages[0]?.content
+      require contains(repair_prompt, "intervention is not registered"),
+        "deterministic compiler diagnostics drive bounded repair"
+    },
+  )
+  const before = len(harness.llm.mock_calls())
+  const blank = design_hypothesis(harness, "  ", hypothesis_fixture_context(), {provider: "mock"})
+  require !blank.ok && blank.attempts == 0, "blank intake fails before model spend"
+  require len(harness.llm.mock_calls()) == before, "preflight failure performs no model call"
+  harness.stdio.println("hypothesis-planner-ok")
+}
