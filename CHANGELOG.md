@@ -9,6 +9,41 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.68
+
+### Added
+
+- Add a typed native hypothesis workflow that starts, pauses, resumes, and stops
+  runs, executes one Harn-randomized case/trial block at a time, records exact
+  native receipts on the canonical ledger, and derives terminal experiment
+  decisions without delegating assignment or statistics to the host.
+- Embedders can retain the shared `CodeIndexCapability` from
+  `install_default_with_handles` and call `warm_session` to restore a snapshot or
+  start a single-flight background rebuild without blocking the first agent turn.
+  Sync `hostlib_code_index_rebuild` joins the same gate so `ensure_initialised`
+  does not start a second full walk while the warm is still running.
+- The public `hypothesis_ledger_snapshot` now verifies, decodes, and projects one
+  retained history in a single pass while returning the retained-topic integrity
+  scope and last hash. Typed completion evidence distinguishes statistical
+  stopping from exact max-trial, natively attested budget, and wall-clock
+  exhaustion, so early decisions no longer inherit `budget_spent: true`. A closed
+  `hypothesis_workflow` state machine inspects start, resume, inspect, and
+  stand-down requests and returns `adapter_unavailable` without recording fake
+  lifecycle events when no native operation adapter exists.
+
+### Changed
+
+- Run/session-view fixture drift checks now reuse the already-built production
+  Harn binary instead of compiling a separate VM integration-test graph.
+- Final-lane developer setup now builds the canonical Harn CLI once, allowing
+  later product checks and focused tests to reuse the linked dependency graph.
+
+### Fixed
+
+- Project file scopes into canonical ACP permission requests so clients can make path-scoped approval decisions.
+- Recognize serialized POSIX and Windows absolute paths consistently when projecting ACP permission locations on every host.
+- Release warm-cache diagnostics now reuse the canonical release-profile build instead of triggering a second LTO link.
+
 ## v0.10.67
 
 ### Breaking
