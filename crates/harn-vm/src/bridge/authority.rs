@@ -119,6 +119,13 @@ pub(super) fn inject_export_authority(
     )
 }
 
+fn named_type(type_expr: &TypeExpr) -> Option<&str> {
+    match type_expr {
+        TypeExpr::Named(name) => Some(name),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,12 +158,5 @@ mod tests {
         vm.call_closure_pub(closure, &call_args)
             .await
             .expect("multi-authority export accepts injected prefix");
-    }
-}
-
-fn named_type(type_expr: &TypeExpr) -> Option<&str> {
-    match type_expr {
-        TypeExpr::Named(name) => Some(name),
-        _ => None,
     }
 }
