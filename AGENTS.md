@@ -185,14 +185,17 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 
 ## Release
 
-- Use the release harness from `harn-bump-fleet`:
-  `scripts/with_env.sh harn run --no-sandbox release_harn.harn -- --repo <harn-checkout> --mode ship-pr --agent --yes-live-release`.
-- Resume post-tag proof from `harn-bump-fleet` with
+- Run live releases only through the `hosted-release.yml` workflow on
+  `burin-labs/harn-bump-fleet`, pinned to an exact current `origin/main` SHA,
+  and approve its protected `release` environment. Do not run the local
+  harness or `scripts/release_ship.sh` for a normal live release.
+- After the tag exists, resume durable post-tag proof from `harn-bump-fleet`
+  with
   `scripts/watch_harn_release.sh --tag vX.Y.Z --repo <harn-checkout> --yes-live-release`.
-- Run both commands from the `harn-bump-fleet` checkout so its pinned runtime,
+- Run the watcher from the `harn-bump-fleet` checkout so its pinned runtime,
   environment loader, release lease, and cleanup authority stay canonical.
-- Do not invoke `scripts/release_ship.sh --prepare` directly for normal
-  releases.
+  Completion requires the release PR, complete asset manifest, main-cache
+  warm, and transient-ref cleanup—not just a visible tag or GitHub release.
 - Dry-run the full release gate with
   `./scripts/release_gate.sh full --bump patch --dry-run`.
 - Dry-run crate publishing with `./scripts/publish.sh --dry-run`.
