@@ -33,6 +33,10 @@ fn normalized_harn_source(source: &str) -> Cow<'_, str> {
     }
 }
 
+fn crlf_harn_source(source: &str) -> String {
+    normalized_harn_source(source).replace('\n', "\r\n")
+}
+
 fn stdlib_source(module: &str) -> &'static str {
     harn_stdlib::get_stdlib_source(module)
         .unwrap_or_else(|| panic!("stdlib source module `{module}` is embedded"))
@@ -186,14 +190,15 @@ fn harn_string_union_values(source: &str, name: &str) -> BTreeSet<String> {
 
 #[test]
 fn typed_contract_parsers_accept_crlf_sources() {
-    let crlf_options = agent_options_harn().replace('\n', "\r\n");
+    let crlf_options = crlf_harn_source(agent_options_harn());
+    assert_eq!(crlf_harn_source(&crlf_options), crlf_options);
     assert_eq!(
         agent_spec_keys_from(&crlf_options),
         agent_spec_keys_from(agent_options_harn()),
         "AgentSpec extraction must be independent of checkout line endings",
     );
 
-    let crlf_contracts = agent_contracts_harn().replace('\n', "\r\n");
+    let crlf_contracts = crlf_harn_source(agent_contracts_harn());
     assert_eq!(
         harn_string_union_values(&crlf_contracts, "AgentTerminalKind"),
         harn_string_union_values(agent_contracts_harn(), "AgentTerminalKind"),
