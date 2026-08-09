@@ -107,6 +107,7 @@ pub(crate) fn capabilities_to_vm_value(
         "cache_breakpoint_style",
         caps.cache_breakpoint_style.as_str(),
     );
+    dict.put_str("reasoning_round_trip", caps.reasoning_round_trip.as_str());
     // Full cache-control profile (min useful prefix, TTL notes, usage-field
     // mapping) derived from this one capability path, so Burin dogfood (#3532)
     // and Harn Cloud receipts (#1106) read cache requirements without a

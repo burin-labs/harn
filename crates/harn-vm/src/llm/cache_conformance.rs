@@ -82,7 +82,7 @@ impl CacheControlProfile {
         if !caps.prompt_caching {
             return Self {
                 prompt_caching: false,
-                cache_breakpoint_style: caps.cache_breakpoint_style.clone(),
+                cache_breakpoint_style: caps.cache_breakpoint_style.as_str().to_string(),
                 min_useful_prefix_tokens: None,
                 ttl_notes: None,
                 supported_ttls: Vec::new(),
@@ -121,7 +121,7 @@ impl CacheControlProfile {
             .unwrap_or(dialect_min_prefix);
         Self {
             prompt_caching: true,
-            cache_breakpoint_style: caps.cache_breakpoint_style.clone(),
+            cache_breakpoint_style: caps.cache_breakpoint_style.as_str().to_string(),
             min_useful_prefix_tokens: if min_prefix > 0 {
                 Some(min_prefix)
             } else {

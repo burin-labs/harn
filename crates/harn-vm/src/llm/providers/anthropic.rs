@@ -472,6 +472,7 @@ impl AnthropicProvider {
 
     /// Build the Anthropic-style request body.
     pub(crate) fn build_request_body(opts: &LlmRequestPayload) -> serde_json::Value {
+        let caps = crate::llm::capabilities::lookup(&opts.provider, &opts.model);
         let anthropic_max = if opts.max_tokens > 0 {
             opts.max_tokens
         } else {
@@ -508,7 +509,10 @@ impl AnthropicProvider {
                 if let Some(object) = message.as_object_mut() {
                     if let Some(content) = object.get("content").cloned() {
                         let content = drop_anthropic_whitespace_text_blocks(
-                            crate::llm::content::anthropic_content(&content),
+                            crate::llm::content::anthropic_content_for_request(
+                                &content,
+                                caps.reasoning_round_trip,
+                            ),
                         );
                         object.insert("content".to_string(), content);
                     }
@@ -553,12 +557,6 @@ impl AnthropicProvider {
             "messages": messages,
             "max_tokens": anthropic_max,
         });
-        if opts.cache {
-            // Anthropic automatic prompt caching now applies at the
-            // top-level request and caches the stable prefix across
-            // tools, system, and messages for multi-turn conversations.
-            body["cache_control"] = anthropic_cache_control(opts.prompt_cache_ttl);
-        }
         if let Some(ref sys) = opts.system {
             body["system"] = serde_json::json!(sys);
         }
@@ -575,6 +573,12 @@ impl AnthropicProvider {
         if let Some(ref stop) = opts.stop {
             body["stop_sequences"] = serde_json::json!(stop);
         }
+        crate::llm::prompt_cache::apply_prompt_cache_breakpoint(
+            &mut body,
+            opts.cache,
+            &caps,
+            anthropic_cache_control(opts.prompt_cache_ttl),
+        );
         if let Some(ref tools) = opts.native_tools {
             if !tools.is_empty() {
                 let sanitized: Vec<serde_json::Value> = tools
@@ -1534,24 +1538,6 @@ mod tests {
         assert_eq!(
             tool_results[0].get("content").and_then(|v| v.as_str()),
             Some("fn main() {}")
-        );
-    }
-
-    #[test]
-    fn cache_control_message_key_survives_anthropic_egress() {
-        // `cache_control` is a canonical message-level field for prompt
-        // caching and must NOT be stripped by the egress sanitizer.
-        let mut opts = base_payload();
-        opts.messages = vec![serde_json::json!({
-            "role": "user",
-            "content": "hello",
-            "cache_control": {"type": "ephemeral"},
-        })];
-        let body = AnthropicProvider::build_request_body(&opts);
-        let msg = body["messages"][0].as_object().expect("message object");
-        assert_eq!(
-            msg.get("cache_control"),
-            Some(&serde_json::json!({"type": "ephemeral"}))
         );
     }
 

@@ -183,6 +183,33 @@ async fn anthropic_stream_announces_tool_call_then_streams_partials() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn anthropic_stream_preserves_signed_reasoning_block_for_replay() {
+    let body = concat!(
+        "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":3}}}\n",
+        "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\",\"signature\":\"\"}}\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Check the \"}}\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"tool.\"}}\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"signed-stream\"}}\n",
+        "data: {\"type\":\"content_block_stop\",\"index\":0}\n",
+        "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"Done.\"}}\n",
+        "data: {\"type\":\"content_block_stop\",\"index\":1}\n",
+        "data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":4},\"delta\":{\"stop_reason\":\"end_turn\"}}\n",
+        "data: [DONE]\n",
+    );
+    let session_id = fresh_session_id("anth-signed-reasoning");
+    let (result, _) = drive(body.as_bytes(), &session_id, true).await;
+
+    assert_eq!(result.thinking.as_deref(), Some("Check the tool."));
+    assert!(result.blocks.contains(&serde_json::json!({
+        "type": "thinking",
+        "thinking": "Check the tool.",
+        "signature": "signed-stream"
+    })));
+    clear_session_sinks(&session_id);
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn anthropic_stream_terminalizes_announced_tool_when_block_never_dispatches() {
     let body = concat!(
             "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_orphan\",\"name\":\"search_web\"}}\n",

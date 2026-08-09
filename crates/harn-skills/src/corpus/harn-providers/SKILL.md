@@ -40,6 +40,8 @@ Pair it with [[harn-orchestration]] for workflow behavior and [[harn-testing]] f
 - Unknown custom generation routes remain open-world. Explicit `cache: true`
   and `prompt_cache_ttl` require authored support because cache lowering is
   provider-specific; TTL values must be listed in `prompt_cache_ttls`.
+- Let `cache_breakpoint_style` choose the request marker location. Provider
+  adapters must use the canonical lowering and preserve explicit caller markers.
 - Keep provider tool execution distinct with `provider_tools`.
 - Preserve tool-call format negotiation and cost controls.
 - Preserve mock-provider determinism.
@@ -59,6 +61,9 @@ Pair it with [[harn-orchestration]] for workflow behavior and [[harn-testing]] f
 - Keep capability-field names such as `reasoning_effort_supported` distinct
   from the public call option `effort`; capability data may describe a wire
   mechanic that callers never spell directly.
+- Keep provider continuation metadata private and byte-exact. The capability
+  field `reasoning_round_trip` defaults to `strip`; use `echo_signed` only for
+  signed blocks and `echo_same_key` only with a typed history wire field.
 - Vision, PDF, audio, tools, cache, and streaming support vary independently.
 - Prompt scaffolding may differ by provider.
 - Tool prompting may differ by provider.

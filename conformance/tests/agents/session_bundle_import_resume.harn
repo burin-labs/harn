@@ -33,6 +33,19 @@ fn resume_signature(final) {
   }
 }
 
+fn llm_call_facts(transcript) {
+  for event in transcript?.events ?? [] {
+    if (event?.kind ?? "") == "llm_call" {
+      return {
+        input_tokens: event?.metadata?.input_tokens ?? 0,
+        output_tokens: event?.metadata?.output_tokens ?? 0,
+        provider_stop_reason: event?.metadata?.provider_stop_reason ?? "",
+      }
+    }
+  }
+  return {input_tokens: 0, output_tokens: 0, provider_stop_reason: ""}
+}
+
 pipeline main(harness: Harness) {
   const repo_root = harness.process.exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   const harn_bin = harness.env.get_or(
@@ -54,7 +67,13 @@ pipeline main(harness: Harness) {
 import { agent_loop } from "std/agent/loop"
 
 pipeline main(harness: Harness) {
-  harness.llm.mock_enqueue({tool_calls: [{id: "park_bundle", name: "agent_await_resumption", arguments: {reason: "bundle migration park"}}]})
+  harness.llm.mock_enqueue({
+    tool_calls: [{id: "park_bundle", name: "agent_await_resumption", arguments: {reason: "bundle migration park"}}],
+    input_tokens: 7,
+    output_tokens: 3,
+    thinking: "bundle reasoning checkpoint",
+    stop_reason: "tool_use",
+  })
   let result = agent_loop(harness, "Park so a session bundle can carry this run.", nil, {provider: "mock", tool_format: "native", max_iterations: 2, session_id: "bundle-resume-" + harness.random.uuid_v7()})
   harness.stdio.println("status=" + result.status)
   harness.stdio.println("snapshot=" + result.handle.snapshot_path)
@@ -135,6 +154,42 @@ pipeline main(harness: Harness) {
         == json_stringify(
         snapshot_value.transcript?.messages ?? [],
       ),
+    ),
+  )
+  const source_transcript = json_stringify(snapshot_value.transcript)
+  const imported_transcript = json_stringify(imported_snapshot_value.transcript)
+  const source_llm_call = llm_call_facts(snapshot_value.transcript)
+  const imported_llm_call = llm_call_facts(imported_snapshot_value.transcript)
+  harness.stdio.println(
+    "transcript_facts_preserved=" + to_string(imported_transcript == source_transcript),
+  )
+  harness.stdio.println(
+    "reasoning_fact_preserved="
+      + to_string(
+      contains(source_transcript, "bundle reasoning checkpoint")
+        && contains(
+        imported_transcript,
+        "bundle reasoning checkpoint",
+      ),
+    ),
+  )
+  harness.stdio.println(
+    "usage_facts_preserved="
+      + to_string(
+      source_llm_call.input_tokens == 7
+        && source_llm_call.output_tokens == 3
+        && json_stringify(imported_llm_call)
+        == json_stringify(
+        source_llm_call,
+      ),
+    ),
+  )
+  harness.stdio.println(
+    "outcome_fact_preserved="
+      + to_string(
+      source_llm_call.provider_stop_reason == "tool_use"
+        && imported_llm_call.provider_stop_reason
+        == "tool_use",
     ),
   )
   harness.stdio.println(

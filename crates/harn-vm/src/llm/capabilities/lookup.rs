@@ -774,7 +774,10 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         reset();
         let caps = lookup("openrouter", "google/gemini-2.5-flash");
         assert!(caps.prompt_caching);
-        assert_eq!(caps.cache_breakpoint_style, "last_block");
+        assert_eq!(
+            caps.cache_breakpoint_style,
+            super::super::CacheBreakpointStyle::LastBlock
+        );
     }
 
     #[test]
@@ -1034,7 +1037,8 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
                 "{model} via openrouter should report prompt_caching=true",
             );
             assert_eq!(
-                caps.cache_breakpoint_style, "top_level",
+                caps.cache_breakpoint_style,
+                super::super::CacheBreakpointStyle::TopLevel,
                 "{model} via openrouter should use top-level cache_control",
             );
             assert_eq!(
@@ -1055,34 +1059,17 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         assert_eq!(caps.tool_mode_parity.as_deref(), Some("native_unreliable"));
         assert_eq!(caps.structured_output.as_deref(), Some("native"));
         assert!(caps.prompt_caching);
-        assert_eq!(caps.cache_breakpoint_style, "last_block");
+        assert_eq!(
+            caps.cache_breakpoint_style,
+            super::super::CacheBreakpointStyle::LastBlock
+        );
 
         let automated = lookup("openrouter", "deepseek/deepseek-v3");
         assert!(automated.prompt_caching);
-        assert_eq!(automated.cache_breakpoint_style, "none");
-    }
-
-    #[test]
-    fn openrouter_explicit_cache_routes_get_block_breakpoints() {
-        reset();
-        for model in [
-            "qwen/qwen3.6-plus",
-            "qwen/qwen3-coder-plus",
-            "qwen/qwen3-coder-flash",
-            "qwen/qwen3-max",
-            "qwen/qwen-plus",
-        ] {
-            let caps = lookup("openrouter", model);
-            assert!(caps.prompt_caching, "{model} should support prompt cache");
-            assert_eq!(
-                caps.cache_breakpoint_style, "last_block",
-                "{model} should request explicit content-block cache breakpoints",
-            );
-        }
-
-        let open_weight = lookup("openrouter", "qwen/qwen3.6-35b-a3b");
-        assert!(!open_weight.prompt_caching);
-        assert_eq!(open_weight.cache_breakpoint_style, "none");
+        assert_eq!(
+            automated.cache_breakpoint_style,
+            super::super::CacheBreakpointStyle::None
+        );
     }
 
     #[test]

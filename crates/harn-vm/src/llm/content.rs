@@ -561,8 +561,19 @@ pub(crate) fn provider_visible_content(content: &serde_json::Value) -> serde_jso
     }
 }
 
+#[cfg(test)]
 pub(crate) fn anthropic_content(content: &serde_json::Value) -> serde_json::Value {
-    let visible = anthropic_visible_content(content);
+    anthropic_content_for_request(
+        content,
+        crate::llm::capabilities::ReasoningRoundTripPolicy::EchoSigned,
+    )
+}
+
+pub(crate) fn anthropic_content_for_request(
+    content: &serde_json::Value,
+    reasoning_policy: crate::llm::capabilities::ReasoningRoundTripPolicy,
+) -> serde_json::Value {
+    let visible = anthropic_visible_content(content, reasoning_policy);
     let content = &visible;
     match content {
         serde_json::Value::Array(blocks) => {
@@ -600,7 +611,8 @@ pub(crate) fn anthropic_content(content: &serde_json::Value) -> serde_json::Valu
                     // round-trips unchanged through the `_ => content.clone()` arm.
                     let mut normalized_block = block.clone();
                     if let Some(inner) = block.get("content") {
-                        normalized_block["content"] = anthropic_content(inner);
+                        normalized_block["content"] =
+                            anthropic_content_for_request(inner, reasoning_policy);
                     }
                     out.push(normalized_block);
                 } else {
@@ -613,9 +625,12 @@ pub(crate) fn anthropic_content(content: &serde_json::Value) -> serde_json::Valu
             let normalized = screenshot_image_block(content);
             let content = normalized.as_ref().unwrap_or(content);
             if let Ok(Some(image)) = parse_image_block(content) {
-                anthropic_content(&serde_json::Value::Array(vec![serde_json::json!(
-                    image_to_neutral_json(&image)
-                )]))
+                anthropic_content_for_request(
+                    &serde_json::Value::Array(vec![serde_json::json!(image_to_neutral_json(
+                        &image
+                    ))]),
+                    reasoning_policy,
+                )
             } else if parse_video_block(content).is_ok_and(|video| video.is_some()) {
                 content.clone()
             } else if let Ok(Some(file)) = parse_file_block(content) {
@@ -628,26 +643,39 @@ pub(crate) fn anthropic_content(content: &serde_json::Value) -> serde_json::Valu
     }
 }
 
-fn anthropic_visible_content(content: &serde_json::Value) -> serde_json::Value {
+fn anthropic_visible_content(
+    content: &serde_json::Value,
+    reasoning_policy: crate::llm::capabilities::ReasoningRoundTripPolicy,
+) -> serde_json::Value {
     match content {
-        serde_json::Value::Array(blocks) => {
-            serde_json::Value::Array(blocks.iter().filter_map(anthropic_visible_block).collect())
-        }
-        serde_json::Value::Object(_) if is_anthropic_replay_thinking_block(content) => {
+        serde_json::Value::Array(blocks) => serde_json::Value::Array(
+            blocks
+                .iter()
+                .filter_map(|block| anthropic_visible_block(block, reasoning_policy))
+                .collect(),
+        ),
+        serde_json::Value::Object(_)
+            if crate::llm::reasoning_history::should_replay_anthropic_block(
+                content,
+                reasoning_policy,
+            ) =>
+        {
             content.clone()
         }
         serde_json::Value::Object(_) if is_private_or_reasoning_block(content) => {
             serde_json::Value::Array(Vec::new())
         }
-        serde_json::Value::Object(_) => {
-            anthropic_visible_block(content).unwrap_or_else(|| serde_json::Value::Array(Vec::new()))
-        }
+        serde_json::Value::Object(_) => anthropic_visible_block(content, reasoning_policy)
+            .unwrap_or_else(|| serde_json::Value::Array(Vec::new())),
         _ => content.clone(),
     }
 }
 
-fn anthropic_visible_block(block: &serde_json::Value) -> Option<serde_json::Value> {
-    if is_anthropic_replay_thinking_block(block) {
+fn anthropic_visible_block(
+    block: &serde_json::Value,
+    reasoning_policy: crate::llm::capabilities::ReasoningRoundTripPolicy,
+) -> Option<serde_json::Value> {
+    if crate::llm::reasoning_history::should_replay_anthropic_block(block, reasoning_policy) {
         return Some(block.clone());
     }
     if is_private_or_reasoning_block(block) {
@@ -655,29 +683,9 @@ fn anthropic_visible_block(block: &serde_json::Value) -> Option<serde_json::Valu
     }
     let mut normalized = block.clone();
     if let Some(inner) = block.get("content") {
-        normalized["content"] = anthropic_visible_content(inner);
+        normalized["content"] = anthropic_visible_content(inner, reasoning_policy);
     }
     Some(normalized)
-}
-
-fn is_anthropic_replay_thinking_block(block: &serde_json::Value) -> bool {
-    match block.get("type").and_then(serde_json::Value::as_str) {
-        Some("thinking") => {
-            block
-                .get("thinking")
-                .and_then(serde_json::Value::as_str)
-                .is_some()
-                && block
-                    .get("signature")
-                    .and_then(serde_json::Value::as_str)
-                    .is_some()
-        }
-        Some("redacted_thinking") => block
-            .get("data")
-            .and_then(serde_json::Value::as_str)
-            .is_some(),
-        _ => false,
-    }
 }
 
 pub(crate) fn openai_content(content: &serde_json::Value) -> serde_json::Value {

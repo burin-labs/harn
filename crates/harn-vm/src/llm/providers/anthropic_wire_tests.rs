@@ -1,5 +1,75 @@
+use super::anthropic_test_support::base_payload;
 use super::AnthropicProvider;
 use crate::llm::api::{LlmCallOptions, LlmRequestPayload};
+
+#[test]
+fn cache_control_message_key_survives_anthropic_egress() {
+    let mut opts = base_payload();
+    opts.messages = vec![serde_json::json!({
+        "role": "user",
+        "content": "hello",
+        "cache_control": {"type": "ephemeral"},
+    })];
+    let body = AnthropicProvider::build_request_body(&opts);
+    let msg = body["messages"][0].as_object().expect("message object");
+    assert_eq!(
+        msg.get("cache_control"),
+        Some(&serde_json::json!({"type": "ephemeral"}))
+    );
+}
+
+#[test]
+fn signed_reasoning_blocks_round_trip_on_anthropic_routes() {
+    let mut opts = base_payload();
+    opts.messages = vec![serde_json::json!({
+        "role": "assistant",
+        "content": [
+            {
+                "type": "thinking",
+                "thinking": "Check the tool.",
+                "signature": "signed-thinking"
+            },
+            {"type": "redacted_thinking", "data": "opaque-reasoning"},
+            {"type": "text", "text": "Done."}
+        ]
+    })];
+
+    let body = AnthropicProvider::build_request_body(&opts);
+
+    assert_eq!(
+        body["messages"][0]["content"][0]["signature"],
+        "signed-thinking"
+    );
+    assert_eq!(
+        body["messages"][0]["content"][1]["data"],
+        "opaque-reasoning"
+    );
+}
+
+#[test]
+fn unsigned_route_strips_anthropic_reasoning_blocks() {
+    let mut opts = base_payload();
+    opts.provider = "custom".to_string();
+    opts.model = "custom-model".to_string();
+    opts.messages = vec![serde_json::json!({
+        "role": "assistant",
+        "content": [
+            {
+                "type": "thinking",
+                "thinking": "Do not replay.",
+                "signature": "signed-thinking"
+            },
+            {"type": "text", "text": "Done."}
+        ]
+    })];
+
+    let body = AnthropicProvider::build_request_body(&opts);
+
+    assert_eq!(
+        body["messages"][0]["content"],
+        serde_json::json!([{"type": "text", "text": "Done."}])
+    );
+}
 
 /// Producer-only session facts must survive recording but never leak into the
 /// provider request. This also retains the byte-perfect screenshot regression

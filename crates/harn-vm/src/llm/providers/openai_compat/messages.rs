@@ -367,12 +367,10 @@ fn remap_tool_call_content(content: &serde_json::Value) -> serde_json::Value {
 pub(super) fn sanitize_openai_message_for_request(
     message: &mut serde_json::Value,
     remap_tool_call: bool,
+    reasoning_round_trip: crate::llm::capabilities::ReasoningRoundTripPolicy,
     reasoning_history_wire_field: Option<crate::llm::capabilities::ReasoningHistoryWireField>,
 ) {
-    let Some(object) = message.as_object_mut() else {
-        return;
-    };
-    let role = object
+    let role = message
         .get("role")
         .and_then(serde_json::Value::as_str)
         .map(str::to_string);
@@ -383,19 +381,20 @@ pub(super) fn sanitize_openai_message_for_request(
     // reasoning field is replayed. Project only Harn-owned canonical reasoning
     // through the typed catalog mode; never pass through arbitrary seeded
     // `reasoning_content` from transcript/history input.
-    let replay_reasoning = (role.as_deref() == Some("assistant"))
-        .then(|| object.get("reasoning").and_then(serde_json::Value::as_str))
-        .flatten()
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned);
+    let replay_reasoning = crate::llm::reasoning_history::openai_same_key_reasoning(
+        message,
+        reasoning_round_trip,
+        reasoning_history_wire_field,
+    );
+
+    let Some(object) = message.as_object_mut() else {
+        return;
+    };
 
     object.retain(|key, _| openai_message_key_allowed(role.as_deref(), key));
 
-    if let (Some(field), Some(reasoning)) = (reasoning_history_wire_field, replay_reasoning) {
-        object.insert(
-            field.as_str().to_string(),
-            serde_json::Value::String(reasoning),
-        );
+    if let Some((field, reasoning)) = replay_reasoning {
+        object.insert(field.to_string(), reasoning);
     }
 
     if let Some(content) = object.get("content").cloned() {

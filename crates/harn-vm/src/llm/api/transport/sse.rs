@@ -579,7 +579,7 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
     }
     let mut current_server_tool: Option<ServerToolBlock> = None;
     let mut thinking_text = String::new();
-    let mut in_thinking_block = false;
+    let mut current_thinking: Option<crate::llm::reasoning_history::AnthropicThinkingBlock> = None;
     let mut stop_reason: Option<String> = None;
     let mut cache_read_tokens: i64 = 0;
     let mut cache_write_tokens: i64 = 0;
@@ -715,7 +715,18 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                             }));
                         }
                         Some("thinking") => {
-                            in_thinking_block = true;
+                            current_thinking = Some(
+                                crate::llm::reasoning_history::AnthropicThinkingBlock::from_start(
+                                    block,
+                                ),
+                            );
+                        }
+                        Some("redacted_thinking") => {
+                            if let Some(block) =
+                                crate::llm::reasoning_history::capture_anthropic_block(block)
+                            {
+                                blocks.push(block);
+                            }
                         }
                         _ => {}
                     }
@@ -738,7 +749,16 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                         Some("thinking_delta") => {
                             if let Some(t) = delta["thinking"].as_str() {
                                 thinking_text.push_str(t);
-                                blocks.push(serde_json::json!({"type": "reasoning", "text": t, "visibility": "private"}));
+                                if let Some(thinking) = current_thinking.as_mut() {
+                                    thinking.push_thinking(t);
+                                }
+                            }
+                        }
+                        Some("signature_delta") => {
+                            if let (Some(signature), Some(thinking)) =
+                                (delta["signature"].as_str(), current_thinking.as_mut())
+                            {
+                                thinking.push_signature(signature);
                             }
                         }
                         Some("input_json_delta") => {
@@ -812,8 +832,9 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                             "query": query,
                             "visibility": "internal",
                         }));
+                    } else if let Some(thinking) = current_thinking.take() {
+                        blocks.push(thinking.finish());
                     }
-                    in_thinking_block = false;
                 }
                 Some("message_delta") => {
                     if let Some(n) = json["usage"]["output_tokens"].as_i64() {
@@ -1118,8 +1139,6 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
     if !oai_thinking_splitter.thinking.is_empty() {
         append_paragraph(&mut thinking_text, &oai_thinking_splitter.thinking);
     }
-
-    let _ = in_thinking_block; // suppress unused warning
 
     // When the stream is cut off mid-thought (finish_reason == "length") with
     // no committed visible content, the reasoning trace is a partial, garbage

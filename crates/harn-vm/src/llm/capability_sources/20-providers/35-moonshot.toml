@@ -58,6 +58,7 @@ reasoning_effort_levels = ["max"]
 reasoning_none_supported = false
 reasoning_disable_supported = false
 reasoning_history_wire_field = "reasoning_content"
+reasoning_round_trip = "echo_same_key"
 temperature_supported = false
 top_p_supported = false
 frequency_penalty_supported = false

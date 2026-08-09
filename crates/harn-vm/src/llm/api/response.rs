@@ -21,6 +21,10 @@ use item_kinds::{is_openai_responses_hosted_tool_item, openai_responses_tool_kin
 #[path = "response_gateway_tests.rs"]
 mod gateway_tests;
 
+#[cfg(test)]
+#[path = "response_signed_reasoning_tests.rs"]
+mod signed_reasoning_tests;
+
 fn render_reasoning_summary_value(value: &serde_json::Value) -> String {
     match value {
         serde_json::Value::String(text) => text.trim().to_string(),
@@ -811,7 +815,23 @@ pub(crate) fn parse_llm_response(
                 Some("thinking") => {
                     if let Some(t) = block["thinking"].as_str() {
                         thinking_text.push_str(t);
-                        blocks.push(serde_json::json!({"type": "reasoning", "text": t, "visibility": "private"}));
+                    }
+                    blocks.push(
+                        crate::llm::reasoning_history::capture_anthropic_block(block)
+                            .unwrap_or_else(|| {
+                                serde_json::json!({
+                                    "type": "reasoning",
+                                    "text": block["thinking"].as_str().unwrap_or_default(),
+                                    "visibility": "private"
+                                })
+                            }),
+                    );
+                }
+                Some("redacted_thinking") => {
+                    if let Some(block) =
+                        crate::llm::reasoning_history::capture_anthropic_block(block)
+                    {
+                        blocks.push(block);
                     }
                 }
                 Some("tool_use") => {
@@ -2233,43 +2253,6 @@ mod tests {
                 && block.get("text").and_then(|value| value.as_str())
                     == Some("Checked the constraints.\nChose the direct answer.")
         }));
-    }
-
-    #[test]
-    fn anthropic_parser_records_tool_search_tool_result_as_event() {
-        let response = serde_json::json!({
-            "content": [
-                {
-                    "type": "tool_search_tool_result",
-                    "tool_use_id": "srvtoolu_01",
-                    "content": {
-                        "type": "tool_search_tool_search_result",
-                        "tool_references": [
-                            {"type": "tool_reference", "tool_name": "get_weather"}
-                        ]
-                    }
-                },
-                {"type": "text", "text": "ok"}
-            ],
-            "usage": {"input_tokens": 3, "output_tokens": 1}
-        });
-        let result = parse_llm_response(&response, "anthropic", "claude-opus-4-7", true, false)
-            .expect("parser succeeds");
-
-        let result_block = result
-            .blocks
-            .iter()
-            .find(|b| b.get("type").and_then(|v| v.as_str()) == Some("tool_search_result"))
-            .expect("tool_search_result block present");
-        let refs = result_block["tool_references"]
-            .as_array()
-            .expect("tool_references array");
-        assert_eq!(refs.len(), 1);
-        assert_eq!(
-            refs[0]["tool_name"].as_str(),
-            Some("get_weather"),
-            "reference name preserved"
-        );
     }
 
     #[test]

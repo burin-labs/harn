@@ -109,7 +109,11 @@ pub(crate) fn build_assistant_response_message(
     model: &str,
 ) -> serde_json::Value {
     let mut message = if !tool_calls.is_empty() {
-        if super::super::provider::provider_uses_gemini_messages(provider, model)
+        if super::super::provider::provider_uses_anthropic_messages(provider, model) {
+            let mut message = build_assistant_tool_message(text, tool_calls, provider, model);
+            crate::llm::reasoning_history::prepend_signed_anthropic_blocks(&mut message, blocks);
+            message
+        } else if super::super::provider::provider_uses_gemini_messages(provider, model)
             && !blocks.is_empty()
         {
             let content =
@@ -125,6 +129,17 @@ pub(crate) fn build_assistant_response_message(
         } else {
             build_assistant_tool_message(text, tool_calls, provider, model)
         }
+    } else if super::super::provider::provider_uses_anthropic_messages(provider, model)
+        && blocks
+            .iter()
+            .any(crate::llm::reasoning_history::is_signed_anthropic_block)
+    {
+        let mut message = serde_json::json!({
+            "role": "assistant",
+            "content": text,
+        });
+        crate::llm::reasoning_history::prepend_signed_anthropic_blocks(&mut message, blocks);
+        message
     } else if !blocks.is_empty() {
         serde_json::json!({
             "role": "assistant",

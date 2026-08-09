@@ -18,10 +18,7 @@ use super::agent_terminal_class::{
     agent_terminal_class, agent_turn_made_no_llm_call, session_status_indicates_error,
 };
 use super::cost::calculate_cost_for_provider_with_cache;
-use super::tools::{
-    assistant_prose_block, build_assistant_response_message, render_canonical_call,
-    text_tool_call_block,
-};
+use super::tools::build_assistant_response_message;
 use super::{emit_live_agent_event_sync as emit_event, permissions};
 
 const HOST_SESSION_FINALIZE: &str = "__host_agent_session_finalize";
@@ -51,8 +48,10 @@ const HOST_DAEMON_WAIT: &str = "__host_agent_daemon_wait";
 const HOST_AGENT_RECORD_NATIVE_TOOL_FALLBACK: &str = "__host_agent_record_native_tool_fallback";
 const HOST_AGENT_RECORD_COMPACTION: &str = "__host_agent_record_compaction";
 
+mod assistant_messages;
 pub(crate) mod cancellation;
 mod tool_result_messages;
+use assistant_messages::{canonical_text_history_for_tool_calls, durable_anthropic_blocks};
 use cancellation::CancelSafeNestedExecutionGuard;
 mod live_transcript_journal;
 mod plan_document;
@@ -1062,37 +1061,6 @@ fn host_agent_session_messages_builtin(
     Ok(messages)
 }
 
-fn canonical_text_history_for_tool_calls(
-    text: &str,
-    tool_calls: &[serde_json::Value],
-) -> Option<String> {
-    let mut parts = Vec::new();
-    let trimmed = text.trim();
-    if !trimmed.is_empty() {
-        parts.push(assistant_prose_block(trimmed));
-    }
-    for call in tool_calls {
-        let name = call
-            .get("name")
-            .and_then(|value| value.as_str())
-            .unwrap_or("")
-            .trim();
-        if name.is_empty() {
-            continue;
-        }
-        let args = call
-            .get("arguments")
-            .cloned()
-            .unwrap_or_else(|| serde_json::json!({}));
-        parts.push(text_tool_call_block(&render_canonical_call(name, &args)));
-    }
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join("\n\n"))
-    }
-}
-
 fn assistant_message_from_llm_result(llm_result: &VmValue) -> VmValue {
     let text = dict_get(llm_result, "text")
         .map(|v| v.display())
@@ -1112,6 +1080,7 @@ fn assistant_message_from_llm_result(llm_result: &VmValue) -> VmValue {
         .iter()
         .map(vm_to_json)
         .collect::<Vec<_>>();
+    let durable_blocks = durable_anthropic_blocks(llm_result, &provider, &model);
     let thinking = dict_get(llm_result, "thinking").map(|v| v.display());
     let agent_tool_format = dict_get(llm_result, "_agent_tool_format").map(|v| v.display());
     let text_history_requested = agent_tool_format.as_deref() == Some("text");
@@ -1187,6 +1156,17 @@ fn assistant_message_from_llm_result(llm_result: &VmValue) -> VmValue {
             }
         }
         let mut msg = crate::value::DictMap::new();
+        if !durable_blocks.is_empty() {
+            let message = build_assistant_response_message(
+                &text,
+                &durable_blocks,
+                &[],
+                thinking.as_deref(),
+                &provider,
+                &model,
+            );
+            return json_to_vm(&message);
+        }
         msg.put_str("role", "assistant");
         msg.put_str("content", text);
         return VmValue::dict(msg);
@@ -1194,7 +1174,7 @@ fn assistant_message_from_llm_result(llm_result: &VmValue) -> VmValue {
 
     let msg = build_assistant_response_message(
         &text,
-        &[],
+        &durable_blocks,
         &native_calls_json,
         thinking.as_deref(),
         &provider,

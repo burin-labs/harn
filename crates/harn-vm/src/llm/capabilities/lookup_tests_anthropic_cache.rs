@@ -7,6 +7,20 @@ use super::{clear_user_overrides as reset, lookup};
 use crate::llm::cache_conformance::CacheControlProfile;
 
 #[test]
+fn anthropic_defaults_own_cache_and_signed_reasoning_lowering() {
+    reset();
+    let caps = lookup("anthropic", "claude-opus-4-7");
+    assert_eq!(
+        caps.cache_breakpoint_style,
+        super::CacheBreakpointStyle::TopLevel
+    );
+    assert_eq!(
+        caps.reasoning_round_trip,
+        super::ReasoningRoundTripPolicy::EchoSigned
+    );
+}
+
+#[test]
 fn anthropic_opus_5_inherits_the_47_surface_with_a_512_token_cache_floor() {
     reset();
     let caps = lookup("anthropic", "claude-opus-5");

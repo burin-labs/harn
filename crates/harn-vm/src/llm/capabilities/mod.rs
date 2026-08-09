@@ -71,9 +71,9 @@ pub use lookup::{
     set_user_overrides_from_manifest_toml, set_user_overrides_toml,
 };
 pub use model::{
-    Capabilities, CapabilitiesFile, ComputerUseStyle, GovernorBackoff, LiveEndpointFamily,
-    ProviderDefaults, ProviderLimits, ReasoningHistoryWireField, ScreenshotScaling,
-    SystemMessagePlacement, WireDialect,
+    CacheBreakpointStyle, Capabilities, CapabilitiesFile, ComputerUseStyle, GovernorBackoff,
+    LiveEndpointFamily, ProviderDefaults, ProviderLimits, ReasoningHistoryWireField,
+    ReasoningRoundTripPolicy, ScreenshotScaling, SystemMessagePlacement, WireDialect,
 };
 
 /// Resolve the effective placement for an interleaved `system`/`developer`
