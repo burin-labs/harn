@@ -197,6 +197,17 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
   `./scripts/release_gate.sh full --bump patch --dry-run`.
 - Dry-run crate publishing with `./scripts/publish.sh --dry-run`.
 
+## Merge overrides
+
+- Rare founder overrides for CI incidents, merge-queue cost spikes, or
+  fix-forward lands use the org-admin labels `bypass-ci`,
+  `bypass-merge-queue`, and `force-merge`.
+- Labels are a trigger only. The workflow re-checks organization or repository
+  admin permission and refuses fork PRs. See
+  [Merge overrides](docs/src/dev/merge-overrides.md) and the
+  [`burin-labs/.github` README](https://github.com/burin-labs/.github#merge-overrides).
+- Prefer the normal merge queue whenever it is cheap enough.
+
 <!-- BEGIN HARN SHARED AGENT CONTRACT: managed by harn-bump-fleet -->
 
 ## Ecosystem working agreement
