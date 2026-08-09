@@ -63,7 +63,8 @@ live in [Engineering principles](docs/src/dev/engineering-principles.md):
 
 - Run `make setup` on a fresh clone and in every new worktree. It installs
   hooks and tools, configures sccache and a private target directory, then runs
-  `cargo check --locked --workspace`.
+  a locked build of the canonical Harn CLI so later product-path commands and
+  focused tests reuse the same linked dependency graph.
 - A raw `git worktree add` has no `.cargo/config.toml`; without setup, cold
   Cargo probes can time out. Reuse an existing binary with
   `HARN_BIN=<path> HARN_BIN_NO_BUILD=1` or explicitly allow a cold probe with

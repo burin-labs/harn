@@ -3,6 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
+# shellcheck source=lib/file_time.sh
+source "$ROOT_DIR/scripts/lib/file_time.sh"
 
 SETUP_STATE_DIR="${HARN_DEV_SETUP_STATE_DIR:-$ROOT_DIR/.codex/dev-setup}"
 SETUP_PROFILE="${HARN_DEV_SETUP_PROFILE:-full}"
@@ -222,6 +224,20 @@ write_build_config() {
   mv "${tmp_path}" "${config_path}"
 }
 
+configured_cargo_target_dir() {
+  awk '
+    /^\[build\][[:space:]]*$/ { in_build = 1; next }
+    /^\[[^]]+\][[:space:]]*$/ { in_build = 0 }
+    in_build && /^[[:space:]]*target-dir[[:space:]]*=/ {
+      value = $0
+      sub(/^[^=]*=[[:space:]]*"/, "", value)
+      sub(/"[[:space:]]*(#.*)?$/, "", value)
+      print value
+      exit
+    }
+  ' .cargo/config.toml
+}
+
 write_sccache_env_config() {
   local enabled="$1"
   local config_path=".cargo/config.toml"
@@ -281,7 +297,7 @@ hash_setup_inputs() {
 
 cargo_setup_fingerprint() {
   {
-    printf 'cargo-check:v2-locked\n'
+    printf 'cargo-build-harn:v2-wrapper-locked\n'
     find . \
       \( -name target -o -name '.target-*' -o -name .codex -o -name .claude -o -name node_modules -o -name .git \) -prune \
       -o \( -name Cargo.toml -o -name Cargo.lock -o -name build.rs \) -type f -print0 \
@@ -289,6 +305,17 @@ cargo_setup_fingerprint() {
       | xargs -0 shasum -a 256
     true
   } | shasum -a 256 | awk '{print $1}'
+}
+
+setup_requirements_ready() {
+  local required_path
+  for required_path in "$@"; do
+    if [[ "${required_path}" == executable:* ]]; then
+      [[ -x "${required_path#executable:}" ]] || return 1
+    else
+      [[ -e "${required_path}" ]] || return 1
+    fi
+  done
 }
 
 run_setup_step() {
@@ -304,16 +331,7 @@ run_setup_step() {
   shift
 
   if [[ "${HARN_DEV_SETUP_FORCE:-0}" != "1" && -f "${stamp}" ]]; then
-    local ready=1
-    local required_path
-    for required_path in "${required[@]}"; do
-      if [[ ! -e "${required_path}" ]]; then
-        ready=0
-        break
-      fi
-    done
-
-    if [[ "${ready}" -eq 1 ]]; then
+    if setup_requirements_ready "${required[@]}"; then
       echo "${label} up to date."
       return 0
     fi
@@ -321,6 +339,10 @@ run_setup_step() {
 
   log "${label}"
   "$@"
+  if ! setup_requirements_ready "${required[@]}"; then
+    echo "error: ${label} completed without producing its required artifact" >&2
+    return 1
+  fi
   touch "${stamp}"
 }
 
@@ -433,7 +455,7 @@ if [[ "${SETUP_PROFILE}" != "bootstrap" ]] && [[ -x ./scripts/prune_stale_target
   should_prune=1
 
   if [[ "${HARN_DEV_SETUP_FORCE:-0}" != "1" && -f "${prune_stamp}" ]]; then
-    last_prune="$(stat -f %m "${prune_stamp}" 2>/dev/null || stat -c %Y "${prune_stamp}" 2>/dev/null || echo 0)"
+    last_prune="$(file_mtime_epoch "${prune_stamp}" || printf '0\n')"
     now="$(date +%s)"
     if (( now - last_prune < prune_interval )); then
       should_prune=0
@@ -505,13 +527,23 @@ elif [[ "${SETUP_PROFILE}" == "full" ]]; then
 fi
 
 if [[ "${SETUP_PROFILE}" != "bootstrap" ]]; then
-  cargo_target_root="${target_dir:-$ROOT_DIR/target}"
+  cargo_target_root="$(configured_cargo_target_dir)"
+  cargo_target_root="${CARGO_TARGET_DIR:-${cargo_target_root:-$ROOT_DIR/target}}"
   cargo_fp="$(cargo_setup_fingerprint)"
+  harn_binary_suffix=""
+  case "$(uname -s)" in
+    CYGWIN* | MINGW* | MSYS*) harn_binary_suffix=".exe" ;;
+  esac
+  harn_binary_path="${cargo_target_root}/debug/harn${harn_binary_suffix}"
+  cargo_builder=(cargo)
+  if [[ -x ./scripts/cargo_with_worktree_build_dir.sh ]]; then
+    cargo_builder=(./scripts/cargo_with_worktree_build_dir.sh)
+  fi
   run_setup_step \
-    "Running a quick workspace build check" \
-    "${SETUP_STATE_DIR}/cargo-check-${cargo_fp}.stamp" \
-    "${cargo_target_root}/debug" \
-    -- cargo check --locked --workspace
+    "Building the canonical Harn CLI" \
+    "${SETUP_STATE_DIR}/cargo-build-harn-${cargo_fp}.stamp" \
+    "executable:${harn_binary_path}" \
+    -- "${cargo_builder[@]}" build --locked -p harn-cli --bin harn
 else
   echo "Bootstrap profile configured the worktree; deferring compilation to the final task lane."
 fi

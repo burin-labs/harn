@@ -55,8 +55,8 @@ setup:
 	./scripts/dev_setup.sh
 
 # Focused Rust setup for remote or constrained machines. It configures local
-# build paths and runs the workspace check without installing optional tools or
-# frontend dependencies.
+# build paths and warms the canonical linked Harn graph without installing
+# optional tools or frontend dependencies.
 setup-rust:
 	HARN_DEV_SETUP_PROFILE=rust HARN_DEV_TARGET_WORKTREE_PATH="$(CURDIR)" ./scripts/dev_setup.sh
 
