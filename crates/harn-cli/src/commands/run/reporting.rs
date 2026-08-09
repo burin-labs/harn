@@ -52,7 +52,7 @@ pub struct RunAuxOptions {
 #[derive(Clone, Debug, Default)]
 pub struct RunControlOptions {
     pub timeout: Option<Duration>,
-    pub defer_project_handlers: bool,
+    pub eager_project_handlers: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -133,7 +133,7 @@ pub(crate) fn run_aux_options_from_args(args: &crate::cli::RunArgs) -> RunAuxOpt
 pub(crate) fn run_control_options_from_args(args: &crate::cli::RunArgs) -> RunControlOptions {
     RunControlOptions {
         timeout: args.timeout,
-        defer_project_handlers: args.defer_project_handlers,
+        eager_project_handlers: args.eager_project_handlers,
     }
 }
 

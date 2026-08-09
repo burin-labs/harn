@@ -46,7 +46,7 @@ harn run --resume .harn/workers/worker_...json
 | `--resume <handle-or-snapshot>` | Cold-restore a suspended top-level agent from its persisted worker snapshot |
 | `--deny <builtins>` | Deny specific builtins (comma-separated) |
 | `--allow <builtins>` | Allow only specific builtins (comma-separated) |
-| `--defer-project-handlers` | Parse and validate project triggers and hooks now, but load their handler code only if a handler runs |
+| `--eager-project-handlers` | Load every project trigger and hook handler module during startup |
 | `--approve-risky <operation>` | Explicitly authorize one exact risky stdlib operation for this invocation; repeatable (for example `git.push`) |
 | `--no-sandbox` | Disable the default worktree filesystem/process sandbox and network side-effect ceiling |
 | `--allow-process-network` | Allow network access for the Harn run and its child processes. Filesystem and process confinement remain active. See [Network grants](./sandboxing.md#network-grants-are-coarser-than-they-look). |
@@ -77,6 +77,16 @@ harn run --resume .harn/workers/worker_...json
 `--approve-risky` is explicit operator authority, not pipeline configuration. It
 records a receipt on the protected operation and never relaxes the generic
 `process.exec` safety floor or configured command-policy rules.
+
+### Project handler startup
+
+`harn run` parses and validates project trigger and hook declarations, exports,
+and callable signatures before it runs the entry script. It initializes each
+handler module and its imports only when an event dispatches to that handler.
+This keeps unrelated project code off the startup path.
+
+Use `--eager-project-handlers` to diagnose failures in top-level handler module
+initialization. It restores fail-fast initialization for every project handler.
 
 ### Environment policies and grants
 

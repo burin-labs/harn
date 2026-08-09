@@ -228,13 +228,10 @@ pub async fn install_manifest_hooks(
     install_manifest_hooks_with_mode(vm, extensions, false).await
 }
 
-/// Install manifest hooks. When `lazy` is set, each hook's handler closure
-/// is resolved on first fire (against the firing VM) instead of now — the
-/// resolution loads the handler module's whole import graph, which for
-/// a large IDE host is ~1s. Eager resolution made every harn test (even pure
-/// unit tests that never fire a hook) pay that cost during setup; the test
-/// runner therefore installs hooks lazily. Production callers stay eager so
-/// a misconfigured handler fails fast at startup, not mid-turn.
+/// Install manifest hooks. When `lazy` is set, each hook's handler closure is
+/// resolved on first fire against the firing VM. Declarations, exports, and
+/// callable signatures are still validated before installation. Callers can
+/// request eager resolution when diagnosing top-level module initialization.
 pub async fn install_manifest_hooks_with_mode(
     vm: &mut harn_vm::Vm,
     extensions: &RuntimeExtensions,
@@ -1087,9 +1084,8 @@ pub async fn install_manifest_triggers(
 }
 
 /// Install manifest triggers, optionally deferring VM-backed handlers and
-/// predicates until dispatch. Production remains eager so invalid handlers
-/// fail at startup; the test runner uses lazy resolution so tests that never
-/// dispatch a trigger do not instantiate an unrelated handler graph.
+/// predicates until dispatch. Both modes validate declarations, exports, and
+/// callable signatures before installation.
 pub async fn install_manifest_triggers_with_mode(
     vm: &mut harn_vm::Vm,
     extensions: &RuntimeExtensions,

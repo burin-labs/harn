@@ -25,10 +25,11 @@ pub(crate) struct RunArgs {
     /// Allow only the listed builtins as a comma-separated list.
     #[arg(long, conflicts_with = "deny")]
     pub allow: Option<String>,
-    /// Load project trigger and hook handler code only if that handler runs.
-    /// Declarations are still parsed and validated before the entry script runs.
-    #[arg(long = "defer-project-handlers")]
-    pub defer_project_handlers: bool,
+    /// Load every project trigger and hook handler before the entry script runs.
+    /// By default, declarations are validated at startup and handler modules load
+    /// only when their trigger or hook fires.
+    #[arg(long = "eager-project-handlers")]
+    pub eager_project_handlers: bool,
     /// Explicitly authorize a named risky operation for this run. Repeatable.
     ///
     /// This is operator authority, not pipeline configuration: names are exact
