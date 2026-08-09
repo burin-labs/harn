@@ -1,329 +1,114 @@
 # Getting started
 
-This page gets you from zero to running your first Harn program.
+Install Harn, create a project, and run a program without an API key.
 
-## Installation
+## Install Harn
 
-### One-line installer (recommended)
+### macOS and Linux
 
 ```bash
 curl -fsSL https://harnlang.com/install.sh | sh
 ```
 
-Detects your OS and CPU, downloads the matching signed binary from the
-latest GitHub release, verifies its SHA256 against the release manifest,
-and installs `harn`, `harn-dap`, and `harn-lsp` into the first writable
-target among `$HARN_INSTALL_DIR`, `$XDG_BIN_DIR`, `$HOME/bin`,
-`$HOME/.local/bin`, or `$HOME/.harn/bin`. macOS binaries are notarized,
-so Gatekeeper validates them on first launch with no extra prompts.
+The installer downloads the release for your operating system and CPU. To
+install a particular release, set `HARN_VERSION` to its release tag.
 
-To pin a specific release, pass `HARN_VERSION`:
+### Windows
 
-```bash
-curl -fsSL https://harnlang.com/install.sh | HARN_VERSION=v0.8.32 sh
-```
-
-To upgrade later, run `harn upgrade` — it reuses the same release
-artifacts and SHA256SUMS manifest to atomically replace the running
-binary.
-
-### Windows (PowerShell)
+Run this command in PowerShell:
 
 ```powershell
 irm https://harnlang.com/install.ps1 | iex
 ```
 
-Downloads and SHA256-verifies the Windows release archive, installs
-`harn`, `harn-dap`, and `harn-lsp`, and adds the install directory to
-your user `PATH`.
-
-### From crates.io
-
-If you already have a Rust toolchain:
-
-```bash
-cargo install harn-cli
-```
-
 ### From source
 
 ```bash
-git clone https://github.com/burin-labs/harn
+git clone https://github.com/burin-labs/harn.git
 cd harn
-./scripts/dev_setup.sh   # installs dev tooling, portal deps/build, git hooks, sccache
-cargo install --path crates/harn-cli
+make setup
 ```
 
-For a constrained or remote machine that only needs a Rust verification loop,
-run `make setup-rust`. It configures the local Cargo paths and runs the
-workspace check without installing optional tools or frontend dependencies.
-Its build artifacts default to `$XDG_CACHE_HOME/harn/dev-setup`; set
-`HARN_DEV_SETUP_STORAGE_ROOT` to choose another durable volume.
-
-Verify the installation:
+Check the installation:
 
 ```bash
-harn version
+harn --version
 ```
 
-## Prerequisites for building from source
+## Create a project
 
-- **[Rust](https://rustup.rs/)** 1.95 or later (`rustup update` to upgrade) --
-  install with `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
-- **Git**
-
-The one-line installer and `cargo install harn-cli` do not require a
-Rust toolchain on the user's machine.
-
-For repeatable local automation and non-GitHub CI, use the
-[cross-platform exact-version bootstrap command](./dev/bootstrap-harn.md). It
-accepts an explicit version or `.harn-version`, verifies the release checksum,
-supports explicit cache/install directories and offline reuse, and emits a
-machine-readable receipt.
-
-## See Harn in action in 30 seconds
-
-Before configuring anything, run a bundled offline demo. No API keys,
-no project setup, no network — every demo replays from a JSONL tape
-embedded in the binary:
+The project generator creates a `harn.toml`, a program, a library directory,
+and a test directory.
 
 ```bash
-harn demo                  # menu of bundled scenarios
-harn demo merge-captain    # persona-supervised PR triage
-harn demo --list           # one-line summary of every scenario
+harn init hello-harn
+cd hello-harn
 ```
 
-See [`harn demo` in the CLI reference](cli-reference.md#harn-demo) for
-the full surface and `--live` opt-in.
+For a small first program, replace `main.harn` with:
 
-## Run this first
-
-`harn doctor` is the one-command environment readiness check. It probes the
-toolchain, optional dev tools, portal dependencies, platform capabilities,
-provider credentials, and protocol artifact freshness, then prints a
-red/yellow/green summary with the exact fix command for anything that needs
-attention.
-
-```bash
-harn doctor                # local checks; skips remote provider probes by default
-harn doctor --check-providers  # actively probe configured providers
-harn doctor --json         # machine-readable output for preflight automation
-```
-
-The JSON output is versioned (`schema_version`) and stable across patch
-releases — IDE hosts and cloud platforms read the `summary.blocked_flows` array to
-decide whether a host can build, test, release, run scripts, or work on the
-portal.
-
-## Optional shell completions
-
-```bash
-mkdir -p ~/.local/share/bash-completion/completions
-harn completion bash > ~/.local/share/bash-completion/completions/harn
-
-mkdir -p ~/.zfunc
-harn completion zsh > ~/.zfunc/_harn
-# Add to ~/.zshrc if needed: fpath=(~/.zfunc $fpath); autoload -Uz compinit; compinit
-
-mkdir -p ~/.config/fish/completions
-harn completion fish > ~/.config/fish/completions/harn.fish
-```
-
-## Your first program
-
-Create a file called `hello.harn`:
-
-```harn,check
+```harn
 fn main(harness: Harness) {
-  harness.stdio.println("Hello, world!")
+  const response = harness.llm.call(
+    "Say hello in one short sentence.",
+    nil,
+    { provider: "mock" }
+  )
+  harness.stdio.println(response.text)
 }
 ```
 
 Run it:
 
 ```bash
-harn run hello.harn
+harn run
 ```
 
-That's it. For capability-aware scripts, `fn main(harness: Harness)` is the
-canonical entrypoint: the runtime passes in the script's `Harness` handle and
-you route side effects through `harness.*`.
+The mock provider is deterministic and needs no network access or API key. Use
+it while you learn the language and write tests.
 
-Harn still supports top-level code without boilerplate. For tiny one-off
-snippets, the runtime can wrap top-level statements as an **implicit pipeline**,
-but the explicit `main(harness: Harness)` form is the recommended starting
-point once a script needs stdio, clock, filesystem, env, random, or network
-access.
+## Check your program
 
-## Adding a pipeline
+Run these commands before you commit:
 
-For larger workflow-style programs, organize code into named pipelines. The
-runtime executes the `default` pipeline (or the first one declared):
+```bash
+harn fmt main.harn
+harn check main.harn
+harn lint main.harn
+```
+
+`fmt` applies the formatter. `check` validates syntax and types. `lint` finds
+common problems and style issues.
+
+## Call a real provider
+
+Choose a provider and model, set its API key in your shell, then run a small
+program. For example:
+
+```bash
+export ANTHROPIC_API_KEY=your-key
+harn models test claude-sonnet-5 --provider anthropic
+```
+
+The test command checks the provider path without requiring a Harn program. To
+use the same provider in code, change the options in the example to:
 
 ```harn
-pipeline default(harness: Harness, task) {
-  const name = "Harn"
-  harness.stdio.log("Hello from ${name}!")
-}
+{ provider: "anthropic", model: "claude-sonnet-5" }
 ```
 
-The `task` parameter is injected by the host runtime. It carries the
-user's request when Harn is used as an agent backend.
+Do not copy API keys into Harn source or commit them. See [Configure a
+provider](./provider-setup.md) for discovery, readiness checks, local models,
+and provider-specific details.
 
-## Calling an LLM
+## See bundled examples
 
-Harn has native LLM support. Run quickstart to inspect available provider
-credentials, local Ollama status, disk space, and GPU availability, then write
-starter `harn.toml`, `providers.toml`, and `.env` files:
+Harn includes offline demos that do not need an API key:
 
 ```bash
-harn quickstart
-source .env
+harn demo --list
+harn demo <scenario>
 ```
 
-For CI or scripts, use deterministic defaults:
-
-```bash
-harn quickstart --non-interactive --provider ollama --model llama3.2
-```
-
-You can also set an API key yourself and call a model directly:
-
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-```
-
-```harn
-const response = harness.llm.call(
-  "Explain quicksort in two sentences.",
-  "You are a computer science tutor.",
-  {provider: "anthropic", model: "claude-sonnet-5"}
-)
-harness.stdio.log(response)
-```
-
-The third argument is the model route. You can omit it after `harn quickstart`
-writes defaults, or when environment variables select a provider. With no
-explicit options, Harn checks `HARN_LLM_PROVIDER`, then `HARN_LLM_MODEL`, then
-the default provider from `HARN_DEFAULT_PROVIDER` or provider config. The
-built-in default is Anthropic when its key is available; otherwise Harn can fall
-back to keyless Ollama/local routes. See [LLM providers](./llm/providers.md)
-for the full resolution order, provider table, and `providers.toml` format.
-
-No imports, no SDK initialization, no response parsing.
-
-For production callers, wrap with retry middleware from
-`std/llm/handlers`:
-
-```harn,ignore
-import {default_llm_caller} from "std/llm/caller"
-import {with_retry} from "std/llm/handlers"
-
-const caller = with_retry(default_llm_caller(), {max_attempts: 4})
-const result = agent_loop(harness, task, system, {llm_caller: caller, loop_until_done: true})
-```
-
-See [Composable callers and middleware](./stdlib/llm-handlers.md) for
-fallback chains, shadowing, ensembles, and model-aware option packs.
-
-## The REPL
-
-Start an interactive session:
-
-```bash
-harn repl
-```
-
-The REPL evaluates expressions as you type and displays results
-immediately. It keeps a persistent history in `~/.harn/repl_history` and
-supports multi-line blocks until delimiters are balanced, which makes it useful
-for experimenting with builtins and small snippets.
-
-## Project setup
-
-Scaffold a new project with `harn init` or pick a starter with `harn new`:
-
-```bash
-harn new my-agent --template agent
-cd my-agent
-harn quickstart --non-interactive
-source .env
-harn doctor
-```
-
-This creates a directory with `harn.toml` (project config) and starter files
-for the selected template. The `agent` template uses an opinionated `agent/`
-layout: `agent/instructions.md`, `agent/app.harn`, `agent/skills/`, and
-convention folders for tools, subagents, channels, sandbox policy, and durable
-schedules. Run it with:
-
-```bash
-harn run main.harn
-```
-
-For a streaming local chat loop, use the chat starter:
-
-```bash
-harn new my-chat --template chat
-cd my-chat
-harn run main.harn
-```
-
-The generated `harn.toml` points the `chat` model alias at Ollama by default.
-Edit the alias or set `HARN_CHAT_MODEL` to use another configured provider.
-See [LLM providers](./llm/providers.md) for provider setup.
-
-## Remote MCP quick start
-
-Use a remote MCP server when a Harn program needs tools hosted outside your
-machine. Notion is the common example: the server runs on Notion's side, Harn
-stores your OAuth token locally, and your `.harn` code calls the server through
-the normal MCP builtins.
-
-```bash
-harn mcp login notion
-harn mcp status notion
-```
-
-`harn mcp login notion` opens the browser, completes OAuth with PKCE, and
-stores the token in the local OS keychain. `harn mcp redirect-uri` just prints
-the default callback URI (`http://127.0.0.1:9783/oauth/callback`) for servers
-that ask you to pre-register one; you usually do not need it for built-in
-presets such as Notion. Harn tries that port first. For CIMD and dynamically
-registered native clients, a bind conflict falls back to an
-operating-system-assigned loopback port; exact-match preregistered clients fail
-with the URI and client mode instead of silently changing their registered
-redirect. `harn mcp status notion` shows the connection state and,
-when the server exposes identity metadata in its OAuth token response, the
-connected account/workspace. Scripts can read the same value from
-`harn.mcp.status()[i].display_identity`.
-
-Then declare the server in `harn.toml`:
-
-```toml
-[[mcp]]
-name = "notion"
-transport = "http"
-url = "https://mcp.notion.com/mcp"
-```
-
-And call it from a program:
-
-```harn,ignore
-fn main(harness: Harness) {
-  const pages = harness.tools.mcp_call(mcp.notion, "search", {query: "release notes"})
-  harness.stdio.println(json_stringify_pretty(pages))
-}
-```
-
-For the complete client/server surface, see
-[MCP, ACP, and A2A integration](./mcp-and-acp.md).
-
-## Next steps
-
-- **[Why Harn?](./why-harn.md)** -- What problems Harn solves
-- **[Language basics](./language-basics.md)** -- Syntax, types, control flow
-- **[LLM calls and agent loops](./llm-and-agents.md)** -- Calling models and building agents
-- **[Workflow authoring quickstart](./workflow-authoring-quickstart.md)** -- Author, validate, preview, run, and
-  supervise a portable workflow bundle without paid credentials
-- **[Cookbook](./cookbook.md)** -- Practical recipes and patterns
+When you know the kind of program you want to build, use [Common tasks](./common-tasks.md).
+When you need syntax details, use [Language basics](./language-basics.md).

@@ -545,7 +545,7 @@ import { AgentSpec } from "std/agent/options"
 
 const compaction_opts: AgentSpec = {
   provider: "openai",
-  model: "gpt-4o",
+  model: "gpt-5.4-mini",
   compaction: {strategy: "hybrid", keep_last_n: 10},
 }
 const result = agent_loop(harness, task, system, compaction_opts)
@@ -815,7 +815,7 @@ const opts = agent_preset("repair", {
 const result = agent_loop(harness, prompt, system, opts)
 
 // Cheap one-shot summary. tool_choice="none", iteration_budget fixed at 1.
-const summary_opts = agent_preset("summary", {provider: "openai", model: "gpt-4o-mini"})
+const summary_opts = agent_preset("summary", {provider: "openai", model: "gpt-5.4-mini"})
 const summary = agent_loop(harness, "Summarize the audit findings.", nil, summary_opts)
 
 // Local/configured route. The audit preset keeps its audit behavior,

@@ -109,7 +109,7 @@ pub(crate) async fn run_file_mcp_serve(
         Path::new(path),
         store_base,
         &mut vm,
-        false,
+        crate::package::ManifestHandlerInitialization::OnDispatch,
     )
     .await
     {

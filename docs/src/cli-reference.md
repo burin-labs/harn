@@ -46,7 +46,7 @@ harn run --resume .harn/workers/worker_...json
 | `--resume <handle-or-snapshot>` | Cold-restore a suspended top-level agent from its persisted worker snapshot |
 | `--deny <builtins>` | Deny specific builtins (comma-separated) |
 | `--allow <builtins>` | Allow only specific builtins (comma-separated) |
-| `--defer-project-handlers` | Parse and validate project triggers and hooks now, but load their handler code only if a handler runs |
+| `--eager-project-handlers` | Load every project trigger and hook handler module during startup |
 | `--approve-risky <operation>` | Explicitly authorize one exact risky stdlib operation for this invocation; repeatable (for example `git.push`) |
 | `--no-sandbox` | Disable the default worktree filesystem/process sandbox and network side-effect ceiling |
 | `--allow-process-network` | Allow network access for the Harn run and its child processes. Filesystem and process confinement remain active. See [Network grants](./sandboxing.md#network-grants-are-coarser-than-they-look). |
@@ -77,6 +77,16 @@ harn run --resume .harn/workers/worker_...json
 `--approve-risky` is explicit operator authority, not pipeline configuration. It
 records a receipt on the protected operation and never relaxes the generic
 `process.exec` safety floor or configured command-policy rules.
+
+### Project handler startup
+
+`harn run` parses and validates project trigger and hook declarations, exports,
+and callable signatures before it runs the entry script. It initializes each
+handler module and its imports only when an event dispatches to that handler.
+This keeps unrelated project code off the startup path.
+
+Use `--eager-project-handlers` to diagnose failures in top-level handler module
+initialization. It restores fail-fast initialization for every project handler.
 
 ### Environment policies and grants
 
@@ -530,6 +540,7 @@ harn test tests/ --filter "auth*"      # filter by pattern
 harn test tests/ --parallel            # run tests concurrently with bounded workers
 harn test tests/ --parallel --timing   # show progress and slowest tests/files
 harn test tests/ --parallel -j 4       # pin worker count (also via HARN_TEST_JOBS)
+harn test tests/ --affected-from origin/main --parallel # run changed modules' importer tests
 harn test tests/fast.harn --test-path tests/contracts.harn --parallel # one curated suite
 harn test tests/ --watch               # re-run on file changes
 harn test conformance --verbose        # show per-test timing
@@ -558,6 +569,7 @@ test still receives a fresh VM, module state, and persistence root.
 | `--parallel` | Run a bounded worker pool. User tests run in-process and front-load slow files using `.harn/test-timings.json`. Conformance tests run in isolated processes because each worker owns process-wide runtime state. |
 | `--jobs <N>` / `-j <N>` | Maximum concurrent workers (also `HARN_TEST_JOBS`). The default follows available CPU and memory, capped at 8. |
 | `--test-path <PATH>` | Add a user-test file or directory to the same compile-once suite. Repeatable; overlapping paths are deduplicated. |
+| `--affected-from <GIT_REF>` | Run only user-test files affected since a Git ref. Uses Harn's resolved module graph and falls back to the complete suite for any unmodelled change. One-shot user suites only. |
 | `--watch` | Re-run tests on file changes (mutually exclusive with `--junit` / `--json-out`) |
 | `--verbose` / `-v` | Show per-test timing and detailed failures, including a passing test's captured `log`/`print`/`println` output (a failing test's captured output is always shown) |
 | `--timing` | Show detailed per-test timing, slowest tests/files, and phase totals. Every user-test run prints the concise p50/p90 latency line |
@@ -1928,7 +1940,7 @@ provider, latency, first streamed delta timing, token usage, and estimated
 cost.
 
 ```bash
-harn models test gpt-4o-mini --prompt "Reply with pong."
+harn models test gpt-5.4-mini --prompt "Reply with pong."
 harn models test qwen3:30b --provider ollama --json
 ```
 
@@ -1959,7 +1971,7 @@ Plan provider Batch API use for latency-tolerant model workloads:
 ```bash
 harn models batch plan --workload eval
 harn models batch plan --provider openai --min-discount-percent 50 --json
-harn models batch plan --model gpt-4o-mini --max-turnaround-hours 24
+harn models batch plan --model gpt-5.4-mini --max-turnaround-hours 24
 ```
 
 The planner reads Harn's provider catalog and lists routes whose provider
@@ -1990,9 +2002,9 @@ agent-loop pass@1 evidence for the meter stick.
 Build a durable, provider-neutral manifest for a JSONL request ledger:
 
 ```bash
-harn models batch manifest --provider openai --model gpt-4o-mini \
+harn models batch manifest --provider openai --model gpt-5.4-mini \
   --requests ./requests.jsonl --out ./batch-manifest.json
-harn models batch manifest --provider openai --model gpt-4o-mini \
+harn models batch manifest --provider openai --model gpt-5.4-mini \
   --requests ./requests.jsonl --out ./batch-manifest.json --tool-format json --json
 ```
 
@@ -2014,7 +2026,7 @@ Own a complete provider-batch lifecycle in one durable execution directory:
 
 ```bash
 harn models batch execute init --requests ./requests.jsonl \
-  --execution-dir ./.harn/batches/eval-001 --provider openai --model gpt-4o-mini
+  --execution-dir ./.harn/batches/eval-001 --provider openai --model gpt-5.4-mini
 harn models batch execute advance --execution-dir ./.harn/batches/eval-001 --json
 harn models batch execute inspect --execution-dir ./.harn/batches/eval-001 --json
 harn models batch execute cancel --execution-dir ./.harn/batches/eval-001 --json
@@ -2868,7 +2880,7 @@ harn eval prompt prompts/agent.harn.prompt --fleet-name frontier --output html -
 
 # Score repo-context artifact selection and rendered section shape.
 harn eval prompt examples/evals/repo-context-quality.harn.prompt \
-    --fleet claude-3-5-sonnet,gpt-4o,ollama:qwen3.5 \
+    --fleet claude-sonnet-5,gpt-5.4-mini,ollama:qwen3.5 \
     --context-fixture examples/evals/context-retrieval-fixture.json \
     --output json -o context-quality.json
 ```

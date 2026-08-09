@@ -20,6 +20,7 @@ use crate::test_report::{self, TestCaseReport, TestOutcome, TestReport};
 use crate::test_runner;
 use crate::{execute_with_skill_dirs, ExecError};
 
+mod affected;
 mod conformance;
 mod reporting;
 #[cfg(feature = "hostlib")]
@@ -70,6 +71,17 @@ pub(crate) async fn run_command(args: TestArgs) {
     }
     if args.watch && !args.test_paths.is_empty() {
         command_error("`harn test --watch` does not support --test-path");
+    }
+    if args.affected_from.is_some()
+        && (args.watch
+            || args.determinism
+            || args.evals
+            || matches!(
+                args.target.as_deref(),
+                Some("agents-conformance" | "conformance" | "protocols" | "package")
+            ))
+    {
+        command_error("--affected-from is supported only for one-shot user-test suites");
     }
 
     if args.coverage || args.coverage_out.is_some() {
@@ -317,6 +329,26 @@ async fn run_user_test_targets(
     cli_skill_dirs: &[PathBuf],
     operator_approval_grant: Option<harn_vm::orchestration::OperatorApprovalGrant>,
 ) {
+    let selected_paths;
+    let paths = if let Some(base) = args.affected_from.as_deref() {
+        match affected::resolve(paths, base) {
+            affected::AffectedTestPaths::Selected(selected) => {
+                eprintln!(
+                    "affected tests: selected {} test file(s) from {} requested target(s)",
+                    selected.len(),
+                    paths.len()
+                );
+                selected_paths = selected;
+                &selected_paths
+            }
+            affected::AffectedTestPaths::Full { reason } => {
+                eprintln!("affected tests: {reason}; running the complete requested suite");
+                paths
+            }
+        }
+    } else {
+        paths
+    };
     let run_args = UserTestRunArgs {
         filter: args.filter.as_deref(),
         timeout_ms: args.timeout,

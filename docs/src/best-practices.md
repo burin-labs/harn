@@ -1,65 +1,50 @@
 # Best practices
 
-This guide collects the habits that keep Harn programs small, testable, and
-easier to operate.
+These habits make Harn programs easier to understand, test, and operate.
 
-## Keep prompts narrow
+## Give each layer one job
 
-The best prompts are short and explicit. Tell the model exactly what shape of
-output you want, what to avoid, and when to say it does not know something.
-Prefer one task per call over one giant prompt that tries to do everything.
+- Use `harness.llm.call` for one model request.
+- Use `agent_loop` when the model must act across turns.
+- Use a workflow for named stages, joins, and verification.
+- Keep product UI, approval decisions, file mutation, and persistence in the
+  host that owns them. See [the host boundary](./host-boundary.md).
 
-## Use explicit context
+## Keep inputs and prompts small
 
-Pass the minimum useful context into each model call. If the model only needs a
-few files or a short patch, read those directly instead of dumping the entire
-repository into the prompt.
+Pass the context that the current step needs. Ask for one clear result. State
+the output shape, limits, and failure behavior in the prompt or schema.
 
-## Prefer typed boundaries
+## Make effects explicit
 
-Use type annotations, shape types, and small helper functions where they make
-the interface clearer. A narrow typed boundary is easier to debug than a
-large pile of implicit dicts.
+Route model, file, network, and process access through `harness.*`. Keep pure
+transforms in ordinary functions. Give an agent only the tools and capability
+scope that it needs.
 
-## Make concurrency obvious
+## Make concurrency readable
 
-Use `parallel each` when the work is independent and order matters. Use
-`parallel` when you need indexed fan-out. Keep the body of each worker short so
-it is obvious what is happening concurrently.
+Use `parallel each` for independent work. Give each worker a clear input and
+join the results at a visible point. Set limits before you add fan-out.
 
-## Record metrics early
+## Treat completion as a contract
 
-If a pipeline matters enough to keep, add `eval_metric()` calls sooner rather
-than later. Track the numbers you will want during regressions: accuracy,
-latency, token usage, and counts of failures or retries.
+Do not treat a model's confident sentence as proof that work is complete. Use a
+typed result, a verification stage, or an explicit terminal condition. Record
+the evidence that a critical action ran.
 
-## Fail fast on unclear inputs
+## Test in two modes
 
-Use `require`, `guard`, typed catches, and explicit validation when the pipeline
-depends on a particular shape of data. It is cheaper to fail immediately than
-to let a bad input travel through several stages.
+Use the `mock` provider for deterministic syntax, error, and control-flow
+tests. Run a small number of real-provider smoke tests for provider wiring and
+model capability. These prove different things.
 
-## Keep operational surfaces small
+Before you commit, run:
 
-For MCP servers, host integrations, and agent tools, expose only the minimum
-surface you need. Smaller tool surfaces are easier to document, secure, and
-debug.
+```bash
+harn fmt <file-or-directory>
+harn check <file-or-directory>
+harn lint <file-or-directory>
+```
 
-## Inspect before you scale
-
-Use `harn repl` for quick experiments, `harn viz` for structural overviews,
-`harn doctor` for environment checks, and `cargo run --bin harn-dap` through
-the DAP adapter when you need line-level stepping.
-
-## Recommended workflow
-
-For a new agent or pipeline:
-
-1. Prototype the prompt in `harn repl`.
-2. Turn it into a named pipeline.
-3. Add a small example under `examples/`.
-4. Add metrics or a conformance test.
-5. Use `harn viz` and the debugger when the control flow gets complicated.
-
-That sequence is usually enough to keep the implementation honest without
-turning the repository into a framework project.
+Use [Testing](./testing.md) for fixtures, replay, evaluation, and evidence
+standards.

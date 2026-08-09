@@ -1,67 +1,22 @@
-<!-- markdownlint-disable MD013 MD033 -->
-
 # Concepts
 
-Start here if Harn is new to you, or if you've been writing Harn long enough that the docs you actually want are the ones that explain *why* things are shaped the way they are.
+These pages explain how Harn fits together. They do not replace the syntax
+reference or a task guide.
 
-These pages don't teach you syntax and don't list every function. They explain the model that the rest of the docs assume you already have.
+## Read first
 
-<div class="harn-paths">
+| If you want to... | Read... |
+|---|---|
+| See how the main pieces fit together | [Mental model](./mental-model.md) |
+| Choose between a call, loop, workflow, or worker | [Choosing an abstraction](./abstraction-ladder.md) |
+| Find the exact meaning of a Harn term | [Glossary](./glossary.md) |
+| Understand the Harn/host boundary | [Host boundary](../host-boundary.md) |
+| Compare Harn terms with other agent tools | [Coming from elsewhere](./sota-comparison.md) |
 
-<div class="harn-path-card">
+## If you need to ship code
 
-## [Mental model](./mental-model.md)
-
-The containment diagram for a Harn conversation: how `llm_call`, `agent_loop`, `workflow`, `pipeline`, and `session` fit together.
-
-</div>
-
-<div class="harn-path-card">
-
-## [Glossary](./glossary.md)
-
-Every term Harn uses for a conversational unit, with one-line definitions and pointers to the page that owns each one.
-
-</div>
-
-<div class="harn-path-card">
-
-## [Choosing an abstraction](./abstraction-ladder.md)
-
-When to reach for `llm_call`, `agent_loop`, `workflow_execute`, `spawn_agent`, and friends.
-
-</div>
-
-<div class="harn-path-card">
-
-## [Steering seams](./steering-seams.md)
-
-Where you can safely inject a user message into a running agent, and where you can't (yet).
-
-</div>
-
-<div class="harn-path-card">
-
-## [Cross-session pattern knowledge](./cross-session-pattern-knowledge.md)
-
-Why reusable agent pattern recall is a Harn memory primitive, not a host-side
-session-store extension.
-
-</div>
-
-<div class="harn-path-card">
-
-## [Coming from elsewhere](./sota-comparison.md)
-
-Terminology cross-reference for readers arriving from OpenAI Agents SDK, Anthropic Claude Agent SDK, LangGraph, Inngest, Mastra, ACP, A2A, and MCP.
-
-</div>
-
-</div>
-
-## If you're here to ship code today
-
-- [Getting started](../getting-started.md) — install and run your first program.
-- [Tutorials](../tutorial-code-review-agent.md) — guided walkthroughs.
-- [Cookbook](../cookbook.md) — task-oriented recipes.
-- [Reference](../builtins.md) — every builtin function and option.
+- [Getting started](../getting-started.md) — install Harn and run a first
+  program.
+- [Language basics](../language-basics.md) — learn the syntax.
+- [LLM calls and agents](../llm-and-agents.md) — choose a model-backed API.
+- [Common tasks](../common-tasks.md) — follow a focused implementation path.
