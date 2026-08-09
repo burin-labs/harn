@@ -134,6 +134,7 @@ pub static VM_DECLARED_CAPABILITY_METHODS: &[(&str, &str)] = &[
     ("obs", "friction_record"),
     ("obs", "hypothesis_event_append"),
     ("obs", "hypothesis_event_authority_mint"),
+    ("obs", "hypothesis_event_authority_request"),
     ("obs", "hypothesis_event_snapshot"),
     ("obs", "lifecycle_span_end"),
     ("obs", "lifecycle_span_start"),

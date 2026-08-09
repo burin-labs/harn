@@ -156,6 +156,7 @@ pub(super) fn harn_acp_extension_meta() -> serde_json::Value {
                 },
             },
             "hostCapabilityOperations": {
+                "hypothesis": ["attest_event"],
                 "process": [
                     "exec",
                     "list_shells",

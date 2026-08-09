@@ -1015,7 +1015,7 @@ pub(crate) fn register_missing_host_builtins(vm: &mut Vm) {
     sig = "host_mock(capability: string, op: string, response_or_config?: any, params?: dict) -> nil",
     category = "host"
 )]
-fn host_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+pub(crate) fn host_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let host_mock = parse_host_mock(args)?;
     validate_host_mock_registration(&host_mock)?;
     push_host_mock(host_mock);
