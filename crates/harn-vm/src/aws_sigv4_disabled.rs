@@ -19,6 +19,7 @@ pub(crate) struct AwsSigV4Input<'a> {
     pub timestamp: DateTime<Utc>,
 }
 
+#[allow(dead_code)] // Same carrier shape as the enabled signer; disabled calls always return Err.
 pub(crate) struct AwsSigV4SignedRequest {
     pub headers: BTreeMap<String, String>,
     pub authorization: String,
