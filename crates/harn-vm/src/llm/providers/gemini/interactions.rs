@@ -513,17 +513,28 @@ fn interactions_tools(opts: &LlmRequestPayload) -> Option<Value> {
 
 fn generation_config(opts: &LlmRequestPayload) -> Option<Map<String, Value>> {
     let mut config = Map::new();
+    // Gemini 3.6 Flash and 3.5 Flash-Lite deprecate these controls and will
+    // reject them on future model generations. Capability admission catches
+    // explicit portable options; this builder-side guard also protects
+    // catalog/model defaults and direct request construction.
+    let caps = crate::llm::capabilities::lookup(&opts.provider, &opts.model);
     if opts.max_tokens > 0 {
         config.insert("max_output_tokens".to_string(), json!(opts.max_tokens));
     }
-    if let Some(temperature) = opts.temperature {
-        config.insert("temperature".to_string(), json!(temperature));
+    if caps.temperature_supported {
+        if let Some(temperature) = opts.temperature {
+            config.insert("temperature".to_string(), json!(temperature));
+        }
     }
-    if let Some(top_p) = opts.top_p {
-        config.insert("top_p".to_string(), json!(top_p));
+    if caps.top_p_supported {
+        if let Some(top_p) = opts.top_p {
+            config.insert("top_p".to_string(), json!(top_p));
+        }
     }
-    if let Some(top_k) = opts.top_k {
-        config.insert("top_k".to_string(), json!(top_k));
+    if caps.top_k_supported {
+        if let Some(top_k) = opts.top_k {
+            config.insert("top_k".to_string(), json!(top_k));
+        }
     }
     if let Some(stop) = &opts.stop {
         config.insert("stop_sequences".to_string(), json!(stop));

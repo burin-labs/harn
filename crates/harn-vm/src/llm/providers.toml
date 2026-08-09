@@ -2607,7 +2607,8 @@ benchmarks = { swe_bench_verified = 49.3 }
 # verified 2026-07-02. Gemini 1.0 / 1.5 already retired; Gemini 2.0
 # Flash + Flash-Lite shut down 2026-06-01 per the deprecations page.
 # The 2.5 family remains served alongside the current 3.x lineup
-# (gemini-3.5-flash stable flagship, gemini-3.1-pro-preview,
+# (gemini-3.6-flash and gemini-3.5-flash-lite are the current GA routes,
+# followed by gemini-3.5-flash, gemini-3.1-pro-preview, and
 # gemini-3.1-flash-lite). Thinking tokens bill as output; implicit
 # caching is automatic (90% discount on cache hits), explicit caching
 # adds hourly storage.
@@ -2638,6 +2639,41 @@ pricing = { input_per_mtok = 0.10, output_per_mtok = 0.40, cache_read_per_mtok =
 tier = "small"
 open_weight = false
 strengths = ["speed", "cheap", "long_context", "summarization", "tool_use"]
+serving_tiers = [
+  { id = "flex", label = "Flex inference", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "research_preview", latency = "variable synchronous latency for latency-tolerant workloads", reliability = "best-effort availability; resource unavailability is possible", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"], note = "Flex is synchronous and distinct from Gemini Batch. Cache and batch discounts do not stack; cache-hit discount takes precedence where documented." },
+  { id = "priority", label = "Priority inference", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "priority" }, status = "research_preview", latency = "predictable low-latency serving for user-facing traffic", reliability = "traffic can gracefully downgrade to standard when dynamic priority limits are exceeded", unsuitable_workloads = ["batch"], note = "GenerateContent responses expose downgrade via x-gemini-service-tier." },
+]
+
+# Gemini 3.6 Flash — GA July 2026. The current Gemini API model guide lists a
+# 1M context window, 64k output ceiling, native tools, and $1.50/$7.50 pricing.
+# This model uses the Interactions live endpoint; its capability row also
+# removes the deprecated sampling knobs and maps Harn effort to thinking_level.
+[models."gemini-3.6-flash"]
+name = "Gemini 3.6 Flash"
+provider = "gemini"
+context_window = 1048576
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15 }
+tier = "frontier"
+open_weight = false
+strengths = ["speed", "long_context", "vision", "tool_use", "agentic"]
+complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kimi"]
+serving_tiers = [
+  { id = "flex", label = "Flex inference", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "research_preview", latency = "variable synchronous latency for latency-tolerant workloads", reliability = "best-effort availability; resource unavailability is possible", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"], note = "Flex is synchronous and distinct from Gemini Batch. Cache and batch discounts do not stack; cache-hit discount takes precedence where documented." },
+  { id = "priority", label = "Priority inference", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "priority" }, status = "research_preview", latency = "predictable low-latency serving for user-facing traffic", reliability = "traffic can gracefully downgrade to standard when dynamic priority limits are exceeded", unsuitable_workloads = ["batch"], note = "GenerateContent responses expose downgrade via x-gemini-service-tier." },
+]
+
+# Gemini 3.5 Flash-Lite — GA July 2026. Google positions this as the
+# throughput/latency route at $0.30/$2.50 per MTok with a 1M context window.
+[models."gemini-3.5-flash-lite"]
+name = "Gemini 3.5 Flash-Lite"
+provider = "gemini"
+context_window = 1048576
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 0.30, output_per_mtok = 2.50, cache_read_per_mtok = 0.03 }
+tier = "small"
+open_weight = false
+strengths = ["speed", "cheap", "long_context", "vision", "tool_use", "agentic"]
 serving_tiers = [
   { id = "flex", label = "Flex inference", mode = "synchronous", economics = "discounted", request = { param = "service_tier", value = "flex" }, discount_percent = 50, status = "research_preview", latency = "variable synchronous latency for latency-tolerant workloads", reliability = "best-effort availability; resource unavailability is possible", suitable_workloads = ["offline_eval", "corpus", "bulk_judge"], unsuitable_workloads = ["interactive_chat"], note = "Flex is synchronous and distinct from Gemini Batch. Cache and batch discounts do not stack; cache-hit discount takes precedence where documented." },
   { id = "priority", label = "Priority inference", mode = "synchronous", economics = "premium", request = { param = "service_tier", value = "priority" }, status = "research_preview", latency = "predictable low-latency serving for user-facing traffic", reliability = "traffic can gracefully downgrade to standard when dynamic priority limits are exceeded", unsuitable_workloads = ["batch"], note = "GenerateContent responses expose downgrade via x-gemini-service-tier." },
@@ -2707,6 +2743,26 @@ pricing = { input_per_mtok = 0.30, output_per_mtok = 2.50, cache_read_per_mtok =
 tier = "mid"
 open_weight = false
 strengths = ["speed", "long_context", "vision", "cheap", "tool_use"]
+complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kimi"]
+[models."google/gemini-3.6-flash"]
+name = "Gemini 3.6 Flash (via OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 1.50, output_per_mtok = 7.50, cache_read_per_mtok = 0.15 }
+tier = "frontier"
+open_weight = false
+strengths = ["speed", "long_context", "vision", "tool_use", "agentic"]
+complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kimi"]
+[models."google/gemini-3.5-flash-lite"]
+name = "Gemini 3.5 Flash-Lite (via OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 0.30, output_per_mtok = 2.50, cache_read_per_mtok = 0.03 }
+tier = "small"
+open_weight = false
+strengths = ["speed", "cheap", "long_context", "vision", "tool_use", "agentic"]
 complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kimi"]
 [models."google/gemini-3.5-flash"]
 name = "Gemini 3.5 Flash (via OpenRouter)"
