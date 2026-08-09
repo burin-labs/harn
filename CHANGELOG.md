@@ -9,6 +9,62 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.65
+
+### Changed
+
+- Unified LLM token, cost, cache, and serving-tier accounting behind one Rust
+  ledger. VM responses, provider-response events, traces, metrics, and provider
+  probes now project the same normalized values; LLM trace events use the
+  canonical `cache_read_tokens` and `cache_write_tokens` fields instead of the
+  older `cache_tokens` mirror.
+
+### Fixed
+
+- Fixed the stdlib retry/truncation/budget defect cluster (#6337):
+  `with_retry` no longer crashes on an RFC 9110 HTTP-date `Retry-After`
+  header or a non-numeric `retry_after_ms` hint — both Retry-After forms now
+  parse through one shared `std/net.http_retry_after_ms` owner that the
+  connector HTTP client also uses; `respect_retry_after` and `retry_on`
+  inside the documented `retry` sub-dict are honored with the same
+  policy-first precedence as every other knob; a disabled prompt cap
+  (`max_stdout_chars: 0` and friends) no longer emits a false `truncated`
+  boundary event for content that was fully retained; and
+  `std/llm/budget.budget_summary` now explains the same runtime-preferred
+  context window `recommend_max_output_tokens` actually uses and returns its
+  documented 8192-fallback assumption for unknown models instead of
+  throwing.
+- Fixed 22 latent panics where text was byte-sliced at offsets that could land
+  inside a multi-byte UTF-8 character — including template rendering of
+  non-ASCII expression bodies (`{{ éé }}`), `url_decode` with a multi-byte char
+  after `%`, REPL tab-completion after non-ASCII separators, LSP completions and
+  code actions, JUnit report parsing, provider transport error excerpts, and
+  model tool-call argument parsing. The whole class is now denied structurally:
+  `clippy::string_slice` is a workspace `deny`, and every remaining boundary-safe
+  slice carries a scoped `#[expect]` naming the invariant that makes it safe.
+- **`with_capability_fixtures` for `process.exec` again intercepts
+  `harness.tools.run_command` (#6347).** The typed capability cutover kept the
+  HOST_MOCKS alias for legacy process mocks, but capability fixtures only keyed
+  `tools`/`run_command`. Hosts that route foreground exec through hostlib
+  therefore ran real commands under fixtures that still declared
+  `capability: "process", method: "exec"`. Fixture dispatch now falls back to
+  that legacy key after an explicit `tools.run_command` fixture miss, and
+  records the call as the host `process.exec` operation so existing call-log
+  filters keep working.
+- `std/eval/sequential::bounded_cs` now evaluates bounded-support endpoints
+  exactly, so long all-lower-bound or all-upper-bound streams keep their
+  accumulated evidence instead of resetting to the full support.
+- Move the prompt-text ownership check out of the Rust compile job and run it with CI's shared Harn binary, removing a
+  four-minute merge-queue tail without reducing coverage.
+- Hardened run/session view string slicing against mid-character UTF-8 panics.
+  Fixture schema versions stay at harn.run_view.v1@1 / harn.session_view.v1@1.
+- ACP sessions now honor a project's `trusted_host_dispatch` declaration before
+  loading manifest triggers and hooks, using the same authority bridge as other
+  file-backed CLI execution paths.
+- Provider catalog v8 artifacts, generated JSON Schema, and ACP metadata now
+  advertise the matching `provider-catalog.v8.json` schema URI. A structural test
+  keeps the integer version and URI suffix synchronized on future schema bumps.
+
 ## v0.10.64
 
 ### Changed
