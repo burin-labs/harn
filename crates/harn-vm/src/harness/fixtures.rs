@@ -27,7 +27,8 @@ struct CapabilityFixtureInner {
 #[derive(Debug, Clone)]
 struct CapabilityFixtureResponse {
     when: Option<crate::value::DictMap>,
-    repeat: bool,
+    repeat: Option<bool>,
+    inferred_repeat: bool,
     result: Result<crate::VmValue, String>,
 }
 
@@ -131,7 +132,8 @@ impl CapabilityFixtureState {
         member: &str,
         response: Result<crate::VmValue, String>,
         when: Option<crate::value::DictMap>,
-        repeat: bool,
+        repeat: Option<bool>,
+        stable_by_default: bool,
     ) {
         let mut scopes = self.inner.lock().expect("capability fixtures poisoned");
         scopes.current.enabled = true;
@@ -139,16 +141,26 @@ impl CapabilityFixtureState {
         // that gate their host call on the capability manifest skip the call
         // and never reach the fixture.
         crate::stdlib::host::fixtured_operations::record_fixtured_host_operation(capability, member);
-        scopes
+        let queue = scopes
             .current
             .responses
             .entry((capability.to_string(), member.to_string()))
-            .or_default()
-            .push_back(CapabilityFixtureResponse {
-                when,
-                repeat,
-                result: response,
-            });
+            .or_default();
+        // Inference only applies to a lone stable read. As soon as another
+        // response targets the same method, every inferred response is an
+        // ordered one-shot script entry; explicit repeat values stay intact.
+        if !queue.is_empty() {
+            for fixture in queue.iter_mut().filter(|fixture| fixture.repeat.is_none()) {
+                fixture.inferred_repeat = false;
+            }
+        }
+        let inferred_repeat = repeat.is_none() && stable_by_default && queue.is_empty();
+        queue.push_back(CapabilityFixtureResponse {
+            when,
+            repeat,
+            inferred_repeat,
+            result: response,
+        });
     }
 
     pub(crate) fn dispatch(
@@ -232,7 +244,8 @@ impl CapabilityFixtureState {
             .or_else(|| queue.iter().position(|fixture| fixture.when.is_none()));
         match matched {
             Some(index) => {
-                let fixture = if queue[index].repeat {
+                let repeats = queue[index].repeat.unwrap_or(queue[index].inferred_repeat);
+                let fixture = if repeats {
                     Some(queue[index].clone())
                 } else {
                     queue.remove(index)
@@ -286,6 +299,7 @@ mod fixture_dispatch_tests {
             "exec",
             Ok(VmValue::String(arcstr::ArcStr::from("legacy-fixture"))),
             None,
+            None,
             false,
         );
 
@@ -317,12 +331,14 @@ mod fixture_dispatch_tests {
             "exec",
             Ok(VmValue::String(arcstr::ArcStr::from("legacy"))),
             None,
+            None,
             false,
         );
         fixtures.respond(
             "tools",
             "run_command",
             Ok(VmValue::String(arcstr::ArcStr::from("direct"))),
+            None,
             None,
             false,
         );
@@ -343,6 +359,30 @@ mod fixture_dispatch_tests {
         assert_eq!(calls[0].capability, "tools");
         assert_eq!(calls[0].member, "run_command");
         assert!(!calls[0].host_operation);
+        fixtures.pop_scope().expect("pop fixture scope");
+    }
+
+    #[test]
+    fn runtime_only_host_singleton_preserves_legacy_reuse() {
+        let fixtures = CapabilityFixtureState::default();
+        fixtures.push_scope();
+        fixtures.respond(
+            "dashboard",
+            "write_bulletin",
+            Ok(VmValue::String(arcstr::ArcStr::from("pending-review"))),
+            None,
+            None,
+            true,
+        );
+
+        let params = crate::value::DictMap::new();
+        for _ in 0..2 {
+            let value = fixtures
+                .dispatch_host("dashboard", "write_bulletin", &params)
+                .expect("runtime-only host fixture should remain installed")
+                .expect("fixture should succeed");
+            assert_eq!(value.display(), "pending-review");
+        }
         fixtures.pop_scope().expect("pop fixture scope");
     }
 }

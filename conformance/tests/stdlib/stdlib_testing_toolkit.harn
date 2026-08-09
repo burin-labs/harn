@@ -21,9 +21,53 @@ pipeline test_testing_toolkit(harness: Harness, task) {
   const fixture_result = with_capability_fixtures(
     harness.testing,
     [{capability: "runtime", method: "pipeline_input", result: {fixture: "minimal"}}],
-    { -> harness.runtime.pipeline_input() },
+    { ->
+      const first = harness.runtime.pipeline_input()
+      const second = harness.runtime.pipeline_input()
+      const calls = harness.testing.calls()
+      assert_eq(len(calls), 2)
+      assert_eq(calls[0].method, "pipeline_input")
+      assert_eq(calls[0].args, [])
+      // Legacy host-mock readers see mechanically projected aliases while
+      // migrations move to the canonical method/args fields.
+      assert_eq(calls[0].operation, calls[0].method)
+      assert_eq(calls[0].params, nil)
+      assert_eq(first, second)
+      first
+    },
   )
   assert_eq(fixture_result.fixture, "minimal")
+  const scripted_results = with_capability_fixtures(
+    harness.testing,
+    [
+      {capability: "runtime", method: "pipeline_input", result: {step: 1}},
+      {capability: "runtime", method: "pipeline_input", result: {step: 2}},
+    ],
+    { -> [harness.runtime.pipeline_input(), harness.runtime.pipeline_input()] },
+  )
+  assert_eq(scripted_results, [{step: 1}, {step: 2}])
+  with_capability_fixtures(
+    harness.testing,
+    [{capability: "runtime", method: "pipeline_input", result: {once: true}, repeat: false}],
+    { ->
+      assert_eq(harness.runtime.pipeline_input(), {once: true})
+      assert_throws(
+        { -> harness.runtime.pipeline_input() },
+        "repeat: false must override the reusable singleton default",
+      )
+    },
+  )
+  with_capability_fixtures(
+    harness.testing,
+    [{capability: "net", method: "get", result: {status: 200}}],
+    { ->
+      assert_eq(harness.net.get("https://example.invalid"), {status: 200})
+      assert_throws(
+        { -> harness.net.get("https://example.invalid") },
+        "volatile reads must remain one-shot unless repeat is explicit",
+      )
+    },
+  )
   // === LLM turn builders produce the shapes `llm_mock` accepts ===
   assert_eq(llm_text("hi"), {text: "hi"})
   assert_eq(llm_done(), {text: "##DONE##"})
