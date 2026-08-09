@@ -30,6 +30,52 @@ impl TempTestDir {
     }
 }
 
+#[test]
+fn affected_test_selection_follows_transitive_module_importers() {
+    let temp = TempTestDir::new();
+    temp.write(
+        "suite/lib/shared.harn",
+        "pub fn value() -> int { return 1 }",
+    );
+    temp.write(
+        "suite/test_direct.harn",
+        "import { value } from \"lib/shared.harn\"\npipeline test_direct(_task) { assert_eq(value(), 1) }",
+    );
+    temp.write(
+        "suite/test_unrelated.harn",
+        "pipeline test_unrelated(_task) { assert(true) }",
+    );
+
+    let selection = select_affected_test_files(
+        &[temp.path().join("suite")],
+        &[temp.path().join("suite/lib/shared.harn")],
+    );
+    assert_eq!(
+        selection,
+        AffectedTestFiles::Selected(vec![temp
+            .path()
+            .join("suite/test_direct.harn")
+            .canonicalize()
+            .unwrap()])
+    );
+}
+
+#[test]
+fn affected_test_selection_falls_back_for_unmodelled_harn_files() {
+    let temp = TempTestDir::new();
+    temp.write(
+        "suite/test_known.harn",
+        "pipeline test_known(_task) { assert(true) }",
+    );
+    temp.write("dynamic_helper.harn", "pub fn helper() -> int { return 1 }");
+
+    let selection = select_affected_test_files(
+        &[temp.path().join("suite")],
+        &[temp.path().join("dynamic_helper.harn")],
+    );
+    assert!(matches!(selection, AffectedTestFiles::Full { .. }));
+}
+
 #[tokio::test]
 async fn curated_paths_share_one_suite_and_deduplicate_overlaps() {
     let temp = TempTestDir::new();

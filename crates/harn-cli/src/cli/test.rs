@@ -137,4 +137,12 @@ pub(crate) struct TestArgs {
     /// in one compile-once scheduler invocation.
     #[arg(long = "test-path", value_name = "PATH")]
     pub test_paths: Vec<String>,
+    /// Run only user-test files affected by changes since this Git ref.
+    ///
+    /// Harn follows its resolved module graph from changed modules through all
+    /// transitive importers. It falls back to the complete requested suite when
+    /// the diff contains a deletion, rename, non-Harn file, or a module outside
+    /// the graph, so an uncertain impact plan never weakens coverage.
+    #[arg(long = "affected-from", value_name = "GIT_REF")]
+    pub affected_from: Option<String>,
 }
