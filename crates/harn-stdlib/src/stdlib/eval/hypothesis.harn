@@ -24,6 +24,7 @@ pub import {
   ExperimentIntent,
   ExperimentIntentRisk,
   ExperimentLane,
+  ExperimentPlacementCapability,
   ExperimentResourceBudget,
   HypothesisCitation,
   HypothesisPlan,

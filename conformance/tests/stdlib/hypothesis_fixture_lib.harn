@@ -3,11 +3,16 @@ import {
   ExperimentCapabilityManifest,
   ExperimentCompileContext,
   ExperimentIntent,
+  ExperimentPlacementCapability,
   ExperimentResourceBudget,
   InterventionAdapter,
   OutcomeAdapter,
   PopulationAdapter,
 } from "std/eval/hypothesis"
+
+pub fn hypothesis_fixture_placement() -> ExperimentPlacementCapability {
+  return {mode: "local", platform: "linux", requires_gpu: false, resource_class: "cpu-medium"}
+}
 
 pub fn hypothesis_fixture_capabilities() -> ExperimentCapabilityManifest {
   return {
@@ -23,6 +28,7 @@ pub fn hypothesis_fixture_capabilities() -> ExperimentCapabilityManifest {
     database_scopes: [],
     provider_ids: ["mock"],
     secret_refs: [],
+    placement: hypothesis_fixture_placement(),
     mutation: {reversible: true, rollback_adapter_id: nil, requires_approval: false},
   }
 }

@@ -109,6 +109,13 @@ pub type HypothesisNativeOperationDenied = {
 pub type HypothesisNativeOperationResult = HypothesisNativeOperationAccepted \
   | HypothesisNativeOperationDenied
 
+/**
+ * Return the versioned boundary contract for native hypothesis operation results.
+ *
+ * @effects: []
+ * @errors: []
+ * @api_stability: experimental
+ */
 pub fn hypothesis_native_operation_result_contract() -> VersionedContract<
   HypothesisNativeOperationResult
 > {

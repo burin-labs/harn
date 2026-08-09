@@ -21,6 +21,7 @@ import {
   ExperimentIntent,
   ExperimentIntentRisk,
   ExperimentLane,
+  ExperimentPlacementCapability,
   ExperimentResourceBudget,
   HypothesisCitation,
   HypothesisPlan,
@@ -201,7 +202,7 @@ fn __merge_capabilities(
   } else {
     nil
   }
-  return {
+  let merged: ExperimentCapabilityManifest = {
     tools: __sorted_union(baseline.tools, candidate.tools),
     capabilities: __merge_named_capabilities(baseline.capabilities, candidate.capabilities),
     workspace_roots: __sorted_union(baseline.workspace_roots, candidate.workspace_roots),
@@ -228,6 +229,38 @@ fn __merge_capabilities(
         || candidate.mutation.requires_approval,
     },
   }
+  if baseline.placement != nil {
+    merged.placement = baseline.placement
+  }
+  return merged
+}
+
+fn __placement_satisfied(
+  required: ExperimentPlacementCapability?,
+  ceiling: ExperimentPlacementCapability?,
+) -> bool {
+  if required == nil {
+    return true
+  }
+  if ceiling == nil {
+    return false
+  }
+  const mode_ok = required.mode == "any" || ceiling.mode == "any" || required.mode == ceiling.mode
+  const platform_ok = required.platform == "any"
+    || ceiling.platform == "any"
+    || required.platform
+    == ceiling.platform
+  const gpu_ok = !required.requires_gpu || ceiling.requires_gpu
+  const resource_ok = required.resource_class == nil
+    || required.resource_class
+    == ceiling.resource_class
+  return mode_ok && platform_ok && gpu_ok && resource_ok
+}
+
+fn __placement_well_formed(placement: ExperimentPlacementCapability?) -> bool {
+  return placement == nil
+    || placement.resource_class == nil
+    || trim(placement.resource_class) != ""
 }
 
 fn __budget_diagnostics(
@@ -297,6 +330,15 @@ fn __capability_ceiling_diagnostics(
   required: ExperimentCapabilityManifest,
   ceiling: ExperimentCapabilityManifest,
 ) -> list<ExperimentCompileDiagnostic> {
+  if !__placement_well_formed(ceiling.placement) {
+    return [
+      __diagnostic(
+        "experiment.invalid_placement",
+        "capability_ceiling.placement.resource_class",
+        "placement resource_class must be omitted or non-empty",
+      ),
+    ]
+  }
   let missing = __missing_values(required.tools, ceiling.tools)
   missing = missing + __missing_values(required.workspace_roots, ceiling.workspace_roots)
   missing = missing + __missing_values(required.read_only_roots, ceiling.read_only_roots)
@@ -336,6 +378,15 @@ fn __capability_ceiling_diagnostics(
       ),
     ]
   }
+  if !__placement_satisfied(required.placement, ceiling.placement) {
+    return [
+      __diagnostic(
+        "experiment.placement_ceiling",
+        "capability_ceiling.placement",
+        "required placement cannot be enforced by the registered host ceiling",
+      ),
+    ]
+  }
   return []
 }
 
@@ -351,6 +402,16 @@ fn __catalog_diagnostics(catalog: ExperimentAdapterCatalog) -> list<ExperimentCo
       ]
     }
     seen_interventions = seen_interventions + {[key]: true}
+    if !__placement_well_formed(adapter.capabilities.placement) {
+      diagnostics = diagnostics
+        + [
+        __diagnostic(
+          "experiment.invalid_placement",
+          "catalog.interventions",
+          "placement resource_class must be omitted or non-empty for '" + adapter.id + "'",
+        ),
+      ]
+    }
     if adapter.reversible != adapter.capabilities.mutation.reversible {
       diagnostics = diagnostics
         + [
@@ -835,6 +896,7 @@ fn __observe_only_plan(
     database_scopes: [],
     provider_ids: [],
     secret_refs: [],
+    placement: nil,
     mutation: {reversible: true, rollback_adapter_id: nil, requires_approval: false},
   }
   const design: ExperimentDesign = {
@@ -1044,6 +1106,25 @@ pub fn compile_experiment_intent(
             "experiment.rollback_owner_mismatch",
             "catalog.interventions",
             "baseline and candidate must name the same rollback adapter before their mutation capabilities can be merged",
+          ),
+        ],
+      ),
+    )
+  }
+  if json_stringify(baseline.capabilities.placement)
+    != json_stringify(
+    candidate.capabilities.placement,
+  ) {
+    return __receipt_failure(
+      intent_fingerprint,
+      catalog_fingerprint,
+      __failure(
+        "unsafe_plan",
+        [
+          __diagnostic(
+            "experiment.placement_mismatch",
+            "catalog.interventions",
+            "baseline and candidate must use the same placement policy so host differences cannot confound the comparison",
           ),
         ],
       ),
@@ -1268,6 +1349,7 @@ fn __validate_observe_only_plan(plan: ObserveOnlyHypothesisPlan, hypothesis_id: 
       && len(plan.design.capabilities.provider_ids) == 0
       && len(plan.design.capabilities.secret_refs)
       == 0
+      && plan.design.capabilities.placement == nil
       && !plan.design.approval_required
       && plan.design.approval_id == nil,
     "observe-only plan carries executable authority",
@@ -1297,6 +1379,17 @@ fn __validate_registered_plan(plan: RegisteredExperimentPlan, hypothesis_id: str
   if baseline == nil || candidate == nil || population == nil || primary == nil {
     throw "hypothesis compiler: invalid compiled plan: registered plan omits an adapter"
   }
+  __require_plan(
+    __placement_well_formed(baseline.capabilities.placement)
+      && __placement_well_formed(
+      candidate.capabilities.placement,
+    ),
+    "placement resource_class is empty",
+  )
+  __require_plan(
+    __same(baseline.capabilities.placement, candidate.capabilities.placement),
+    "baseline and candidate placement policies differ",
+  )
   const required = __merge_capabilities(baseline.capabilities, candidate.capabilities)
   __require_plan(__same(plan.design.capabilities, required), "capability manifest was modified")
   const no_risk_floor: ExperimentIntentRisk = {

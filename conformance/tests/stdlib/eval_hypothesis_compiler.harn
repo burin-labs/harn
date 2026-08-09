@@ -1,10 +1,11 @@
-import { compile_experiment_intent } from "std/eval/hypothesis"
+import { compile_experiment_intent, validate_compiled_hypothesis_plan } from "std/eval/hypothesis"
 import {
   hypothesis_fixture_budget,
   hypothesis_fixture_capabilities,
   hypothesis_fixture_context,
   hypothesis_fixture_intent,
   hypothesis_fixture_intervention,
+  hypothesis_fixture_placement,
 } from "./hypothesis_fixture_lib.harn"
 
 fn test_executable_compile() {
@@ -24,6 +25,33 @@ fn test_executable_compile() {
     "a named evidence mode resolves to transparent thresholds"
   require plan.design.evidence.promotion == "explicit_gate",
     "the evidence policy preserves canonical explicit gate promotion"
+  require plan.design.capabilities.placement
+    == hypothesis_fixture_capabilities().placement,
+    "the executable plan preserves its registered placement policy"
+  require validate_compiled_hypothesis_plan(plan), "the compiled placement validates on replay"
+  const candidate = plan.design.intervention
+  if candidate == nil {
+    throw "the executable plan omitted its candidate"
+  }
+  const drifted = plan
+    + {
+    design: plan.design
+      + {
+      intervention: candidate
+        + {
+        capabilities: candidate.capabilities
+          + {
+          placement: hypothesis_fixture_placement() + {platform: "macos"},
+        },
+      },
+    },
+  }
+  const replay = try {
+    validate_compiled_hypothesis_plan(drifted)
+  }
+  require is_err(replay), "replay refuses arm-specific placement drift"
+  require unwrap_err(replay).contains("placement policies differ"),
+    "replay names the placement invariant"
   const reordered = compile_experiment_intent(
     hypothesis_fixture_intent(),
     hypothesis_fixture_context(true),
@@ -114,6 +142,21 @@ fn test_fail_closed_boundaries() {
   }
   require capability_receipt.failure.kind == "unsafe_plan",
     "capability refusal is distinct from invalid model data"
+  const placement_ceiling = hypothesis_fixture_context()
+    + {
+    capability_ceiling: hypothesis_fixture_capabilities()
+      + {
+      placement: hypothesis_fixture_placement() + {platform: "macos"},
+    },
+  }
+  const placement_receipt = compile_experiment_intent(
+    hypothesis_fixture_intent(),
+    placement_ceiling,
+  )
+  require !placement_receipt.ok, "an incompatible host placement fails closed"
+  require placement_receipt.failure?.diagnostics?.[0]?.code
+    == "experiment.placement_ceiling",
+    "placement refusal is machine-readable"
   const baseline = hypothesis_fixture_intervention("baseline", 0)
   const candidate = hypothesis_fixture_intervention("candidate", 1)
   const rollback_context = hypothesis_fixture_context()
@@ -145,6 +188,54 @@ fn test_fail_closed_boundaries() {
   require rollback_receipt.failure?.diagnostics?.[0]?.code
     == "experiment.rollback_owner_mismatch",
     "rollback-owner rejection is machine-readable"
+  const placement_context = hypothesis_fixture_context()
+    + {
+    catalog: hypothesis_fixture_context().catalog
+      + {
+      interventions: [
+        baseline,
+        candidate
+          + {
+          capabilities: candidate.capabilities
+            + {
+            placement: hypothesis_fixture_placement() + {resource_class: "gpu-large"},
+          },
+        },
+      ],
+    },
+  }
+  const placement_mismatch = compile_experiment_intent(
+    hypothesis_fixture_intent(),
+    placement_context,
+  )
+  require !placement_mismatch.ok, "arm-specific placement confounding fails closed"
+  require placement_mismatch.failure?.diagnostics?.[0]?.code
+    == "experiment.placement_mismatch",
+    "arm placement mismatch is machine-readable"
+  const malformed_context = hypothesis_fixture_context()
+    + {
+    catalog: hypothesis_fixture_context().catalog
+      + {
+      interventions: [
+        baseline
+          + {
+          capabilities: baseline.capabilities
+            + {
+            placement: hypothesis_fixture_placement() + {resource_class: "  "},
+          },
+        },
+        candidate,
+      ],
+    },
+  }
+  const malformed_placement = compile_experiment_intent(
+    hypothesis_fixture_intent(),
+    malformed_context,
+  )
+  require !malformed_placement.ok, "blank placement resource classes fail closed"
+  require malformed_placement.failure?.diagnostics?.[0]?.code
+    == "experiment.invalid_placement",
+    "malformed placement is machine-readable"
 }
 
 pipeline default(harness: Harness, _task) {
