@@ -208,10 +208,23 @@ fn workflow() {
         ],
       },
       "rust-test": rust_test,
+      "security-tests-ready": {
+        "runs-on": "ubuntu-latest",
+        "timeout-minutes": 12,
+        needs: ["changes"],
+        permissions: {actions: "read", contents: "read"},
+        steps: [
+          {
+            name: "Wait for Linux security tests",
+            run: "./scripts/ci/wait_for_run_artifacts.sh harn-security.tar.zst",
+          },
+        ],
+      },
       "rust-security": {
         "runs-on": "ubuntu-latest",
-        needs: ["changes", "rust-check-inputs"],
-        if: "needs.changes.outputs.rust == 'true' && needs.rust-check-inputs.result == 'success'",
+        needs: ["changes", "security-tests-ready"],
+        if:
+          "needs.changes.outputs.rust == 'true' && needs.security-tests-ready.result == 'success'",
         steps: [
           {
             name: "Run Linux sandbox tests",
@@ -223,9 +236,22 @@ fn workflow() {
       },
       "harn-audit": {
         "runs-on": "ubuntu-latest",
-        needs: artifact_consumer_needs,
-        if: artifact_consumer_if,
-        steps: [],
+        needs: ["changes"],
+        if: "needs.changes.outputs.rust == 'true'",
+        steps: [
+          {name: "Build tree-sitter grammar for the parse sweep"},
+          {name: "Check generated parser is current", run: "make check-tree-sitter-parser"},
+          {
+            name: "Wait for shared Harn binary",
+            run: "./scripts/ci/wait_for_run_artifacts.sh harn-cli.tar.zst",
+          },
+          {name: "Download shared Harn binary"},
+          {name: "Verify shared Harn binary"},
+          {
+            name: "Run $" + "{{ matrix.step_name }}",
+            run: "./scripts/audit_gates.sh --tree-sitter-parser-preflighted",
+          },
+        ],
       },
       "ci-walltime-report": {
         "runs-on": "ubuntu-latest",
@@ -254,7 +280,7 @@ fn workflow() {
         ],
       },
       "ci-status": {
-        needs: ["rust-artifacts-ready", "ci-walltime-report"],
+        needs: ["rust-artifacts-ready", "security-tests-ready", "ci-walltime-report"],
         steps: [
           {
             name: "Verify required CI jobs",
@@ -263,11 +289,15 @@ fn workflow() {
               + gha_expression(
               "needs['rust-artifacts-ready'].result",
             )
+              + "\nsecurity_tests_ready_result=\""
+              + gha_expression(
+              "needs['security-tests-ready'].result",
+            )
               + "\"\nci_walltime_report_result=\""
               + gha_expression(
               "needs['ci-walltime-report'].result",
             )
-              + "\"\nif [ \"$rust_artifacts_ready_result\" != success ]; then echo 'Rust artifact handoff failed or skipped'; fi\nif [ \"$ci_walltime_report_result\" != success ]; then echo 'CI timing report failed or skipped'; fi\nif [ \"$rust_test_result\" = skipped ] && [ \"$COLOCATED_TESTS_DISABLED\" != true ]; then :; fi",
+              + "\"\nif [ \"$rust_artifacts_ready_result\" != success ]; then echo 'Rust artifact handoff failed or skipped'; fi\nif [ \"$security_tests_ready_result\" != success ]; then echo 'Linux security test input handoff failed or skipped'; fi\nif [ \"$ci_walltime_report_result\" != success ]; then echo 'CI timing report failed or skipped'; fi\nif [ \"$rust_test_result\" = skipped ] && [ \"$COLOCATED_TESTS_DISABLED\" != true ]; then :; fi",
           },
         ],
       },
@@ -531,12 +561,34 @@ pipeline test_rejects_serialized_live_artifact_handoff(harness: Harness, task) {
   )
   assert(
     errors.contains(
-      "ci.yml:rust-security must wait for the producer-owned security archive without delaying CLI consumers",
+      "ci.yml:rust-security must consume the live exact-commit security archive without waiting for producer completion",
     ),
   )
   assert(
     errors.contains(
       "ci.yml:ci-walltime-report must publish a non-empty fail-closed timing report off the conformance tail",
+    ),
+  )
+}
+
+@test
+pipeline test_rejects_parser_check_after_shared_binary_wait(harness: Harness, task) {
+  const valid = workflow()
+  const audit = valid.jobs["harn-audit"]
+  const invalid = {
+    ...valid,
+    jobs: {
+      ...valid.jobs,
+      "harn-audit": {
+        ...audit,
+        steps: audit.steps.filter({ step -> step.name != "Check generated parser is current" })
+          .to_list(),
+      },
+    },
+  }
+  assert(
+    ci_linux_lane_policy_errors(invalid).contains(
+      "ci.yml:harn-audit must overlap CLI-independent setup, then wait for and verify the exact shared Harn binary",
     ),
   )
 }
