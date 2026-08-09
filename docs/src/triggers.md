@@ -92,7 +92,7 @@ pub fn about_outages(harness: Harness, event: TriggerEvent) -> bool {
   const result = harness.llm.call(
     "Is this Slack message about a production outage?",
     nil,
-    {provider: "openai", model: "gpt-4o-mini"},
+    {provider: "openai", model: "gpt-5.4-mini"},
   )
   return contains(result.text.lower(), "yes")
 }

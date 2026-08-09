@@ -102,7 +102,7 @@ the language server is installed somewhere else.
 Start the debugger with:
 
 ```bash
-cargo run --bin harn-dap
+harn dap
 ```
 
 The DAP server communicates over stdin/stdout using the Debug Adapter

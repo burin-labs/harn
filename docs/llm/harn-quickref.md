@@ -3415,7 +3415,7 @@ fn about_outages(event: TriggerEvent) -> bool {
   const result = harness.llm.call(
     "Is this message about outages? " + event.kind,
     nil,
-    {provider: "mock", model: "gpt-4o-mini"},
+    {provider: "mock", model: "gpt-5.4-mini"},
   )
   return contains(result.text.lower(), "yes")
 }
@@ -4332,7 +4332,7 @@ compositions with a single typed primitive.
 const policy = routing_policy({
   chain: [
     {provider: "anthropic", model: "claude-opus-4-20250514"},
-    {provider: "openai",    model: "gpt-4o"},
+    {provider: "openai",    model: "gpt-5.4-mini"},
     {provider: "ollama",    model: "llama4:70b"},      // local fallback
   ],
   failover: {

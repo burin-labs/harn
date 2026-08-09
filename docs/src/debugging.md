@@ -13,8 +13,7 @@ drive it:
 harn dap
 ```
 
-(The standalone `harn-dap` binary alias and `cargo run --bin harn-dap` start the
-same server — `harn dap` just makes it reachable with only `harn` on your PATH.)
+The standalone `harn-dap` binary also starts the same server.
 
 In VS Code, the Harn extension contributes a `harn` debug configuration
 automatically. The equivalent `launch.json` entry is:

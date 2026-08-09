@@ -1,6 +1,16 @@
 # Language basics
 
-This guide covers the core syntax and semantics of Harn.
+This guide covers the core syntax and semantics of Harn. For a runnable
+program, start with an explicit entrypoint:
+
+```harn
+fn main(harness: Harness) {
+  harness.stdio.println("Hello from Harn")
+}
+```
+
+Top-level statements are also useful for short scripts and experiments. The
+explicit entrypoint is easier to reuse, test, and compose.
 
 ## Implicit pipeline
 

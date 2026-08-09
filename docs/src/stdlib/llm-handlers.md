@@ -241,7 +241,7 @@ once and pass it to `harness.llm.call(... routing: policy ...)` directly:
 const policy = routing_policy({
   chain: [
     {provider: "anthropic", model: "claude-opus-4-20250514"},
-    {provider: "openai",    model: "gpt-4o"},
+    {provider: "openai",    model: "gpt-5.4-mini"},
     {provider: "ollama",    model: "llama4:70b"},      // local fallback
   ],
   failover: {
@@ -429,7 +429,7 @@ const max_out = recommend_max_output_tokens({
   task_kind: "summarize",
 })
 
-if !fits_in_context(long_text, "gpt-4o") {
+if !fits_in_context(long_text, "gpt-5.4-mini") {
   // compress / summarize first
 }
 ```
@@ -502,7 +502,7 @@ agent_loop(harness, task, system, opts + {loop_until_done: true})
 ```harn,ignore
 import {safe_call, safe_field, with_case_insensitive_keys} from "std/llm/safe"
 
-const r = safe_call(prompt, system, {provider: "auto", model: "gpt-4o"})
+const r = safe_call(prompt, system, {provider: "auto", model: "gpt-5.4-mini"})
 if !r.ok { return r }
 
 const envelope = with_case_insensitive_keys(parse_json(r.value.text))
