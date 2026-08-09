@@ -1,0 +1,135 @@
+/** Read-first state machine for hypothesis workflow control. */
+import { validate_compiled_hypothesis_plan } from "std/eval/hypothesis/compiler"
+import { hypothesis_ledger_snapshot } from "std/eval/hypothesis/ledger"
+import { HypothesisLedgerSnapshotRead } from "std/eval/hypothesis/ledger_contracts"
+import { hypothesis_report } from "std/eval/hypothesis/report"
+import {
+  HypothesisWorkflowNotActionableReason,
+  HypothesisWorkflowRequest,
+  HypothesisWorkflowResult,
+  HypothesisWorkflowState,
+} from "std/eval/hypothesis/workflow_contracts"
+
+fn __state(read: HypothesisLedgerSnapshotRead) -> HypothesisWorkflowState {
+  if read.snapshot.plan == nil {
+    return "unregistered"
+  }
+  return read.snapshot.run_state ?? "registered"
+}
+
+fn __inspection(
+  hypothesis_id: string,
+  read: HypothesisLedgerSnapshotRead,
+) -> HypothesisWorkflowResult {
+  return {
+    schema: "harn.hypothesis.workflow_result.v1",
+    kind: "inspection",
+    action: "inspect",
+    hypothesis_id: hypothesis_id,
+    state: __state(read),
+    ledger: read,
+    report: hypothesis_report(read.snapshot),
+  }
+}
+
+fn __adapter_unavailable(
+  action: "start" | "resume" | "stand_down",
+  hypothesis_id: string,
+  read: HypothesisLedgerSnapshotRead,
+) -> HypothesisWorkflowResult {
+  return {
+    schema: "harn.hypothesis.workflow_result.v1",
+    kind: "adapter_unavailable",
+    action: action,
+    hypothesis_id: hypothesis_id,
+    state: __state(read),
+    required_adapter: "hypothesis.operation",
+    message:
+      "No native hypothesis operation adapter is registered; no lifecycle event was appended.",
+    ledger: read,
+    report: hypothesis_report(read.snapshot),
+  }
+}
+
+fn __not_actionable(
+  action: "start" | "resume" | "stand_down",
+  hypothesis_id: string,
+  reason: HypothesisWorkflowNotActionableReason,
+  read: HypothesisLedgerSnapshotRead,
+) -> HypothesisWorkflowResult {
+  return {
+    schema: "harn.hypothesis.workflow_result.v1",
+    kind: "not_actionable",
+    action: action,
+    hypothesis_id: hypothesis_id,
+    state: __state(read),
+    reason: reason,
+    ledger: read,
+    report: hypothesis_report(read.snapshot),
+  }
+}
+
+/**
+ * Inspect or request a native hypothesis workflow operation.
+ *
+ * This module does not simulate execution and this slice has no native
+ * operation adapter. Mutating actions return `adapter_unavailable` before
+ * append.
+ *
+ * @effects: [state.read@harness.runtime]
+ * @errors: [backend, validation]
+ * @api_stability: experimental
+ */
+pub fn hypothesis_workflow(
+  obs: HarnessObs,
+  request: HypothesisWorkflowRequest,
+) -> HypothesisWorkflowResult {
+  if request.kind == "start" {
+    const _ = validate_compiled_hypothesis_plan(request.plan)
+    if trim(request.run_id) == "" {
+      throw "hypothesis workflow: run_id must be non-empty"
+    }
+    const read = hypothesis_ledger_snapshot(obs, request.plan.hypothesis_id)
+    if read.snapshot.plan != nil
+      && read.snapshot.plan.fingerprint
+      != request.plan.fingerprint {
+      throw "hypothesis workflow: the aggregate already owns a different plan"
+    }
+    if request.plan.kind == "observe_only" {
+      return __not_actionable("start", request.plan.hypothesis_id, "observe_only", read)
+    }
+    const state = __state(read)
+    if contains(["completed", "cancelled", "failed", "invalid"], state) {
+      return __not_actionable("start", request.plan.hypothesis_id, "already_terminal", read)
+    }
+    if contains(["scheduled", "running", "paused"], state) {
+      return __not_actionable("start", request.plan.hypothesis_id, "already_started", read)
+    }
+    return __adapter_unavailable("start", request.plan.hypothesis_id, read)
+  }
+  const hypothesis_id = request.hypothesis_id
+  if trim(hypothesis_id) == "" {
+    throw "hypothesis workflow: hypothesis_id must be non-empty"
+  }
+  const read = hypothesis_ledger_snapshot(obs, hypothesis_id)
+  if request.kind == "inspect" {
+    return __inspection(hypothesis_id, read)
+  }
+  if request.kind == "stand_down" && trim(request.reason) == "" {
+    throw "hypothesis workflow: stand_down reason must be non-empty"
+  }
+  if read.snapshot.plan?.kind == "observe_only" {
+    return __not_actionable(request.kind, hypothesis_id, "observe_only", read)
+  }
+  const state = __state(read)
+  if state == "unregistered" || state == "registered" {
+    return __not_actionable(request.kind, hypothesis_id, "not_started", read)
+  }
+  if contains(["completed", "cancelled", "failed", "invalid"], state) {
+    return __not_actionable(request.kind, hypothesis_id, "already_terminal", read)
+  }
+  if request.kind == "resume" && state != "paused" {
+    return __not_actionable("resume", hypothesis_id, "not_paused", read)
+  }
+  return __adapter_unavailable(request.kind, hypothesis_id, read)
+}

@@ -52,6 +52,13 @@ pub type HypothesisRunState = "scheduled" \
   | "failed" \
   | "invalid"
 
+pub type HypothesisBudgetResource = "spend_usd" | "compute_ms" | "tokens" | "api_calls"
+
+pub type HypothesisRunCompletion = {kind: "statistical"} \
+  | {kind: "max_trials"} \
+  | {kind: "native_budget", resource: HypothesisBudgetResource, receipt_id: string} \
+  | {kind: "wall_clock", elapsed_ms: int, receipt_id: string}
+
 pub type HypothesisEventAuthorityKind = "plan_admission" \
   | "native_approval" \
   | "native_observation" \
@@ -72,6 +79,7 @@ pub type HypothesisRunTransition = {
   state: HypothesisRunState,
   reason: string?,
   receipt_ids: list<string>,
+  completion?: HypothesisRunCompletion,
 }
 
 pub type HypothesisObservationRecorded = {
@@ -181,6 +189,7 @@ pub type HypothesisLedgerSnapshot = {
   approval_status: "approved" | "denied" | nil,
   approval_id: string?,
   run_state: HypothesisRunState?,
+  completion?: HypothesisRunCompletion,
   decision: HypothesisDecisionRecorded?,
   observation_count: int,
   observed_arms: list<string>,
@@ -194,6 +203,19 @@ pub type HypothesisLedgerSnapshot = {
   total_tokens: int,
   total_api_calls: int,
   telemetry_degradations: list<string>,
+}
+
+pub type HypothesisLedgerIntegrity = {
+  scope: "retained_topic_chain",
+  verified: bool,
+  scanned_event_count: int,
+  last_hash: string?,
+}
+
+pub type HypothesisLedgerSnapshotRead = {
+  schema: "harn.hypothesis.ledger_snapshot.v1",
+  integrity: HypothesisLedgerIntegrity,
+  snapshot: HypothesisLedgerSnapshot,
 }
 
 /**

@@ -159,6 +159,20 @@ compare-and-append. It folds a read model from the same events, reapplies
 admission during replay, and verifies the retained underlying integrity chain
 when it reads. JSONL is an export, not a competing writer.
 
+Run completion is a closed contract rather than a free-form reason. Statistical
+completion requires a non-`RUNNING` canonical decision computed without
+pretending the budget is spent. Max-trial completion requires every frozen
+candidate-by-case-by-trial cell. Native budget and wall-clock completion require
+a receipt ID inside the fingerprinted, natively attested lifecycle event. Harn
+validates that binding; the host remains responsible for the external operation
+receipt store.
+
+The portable workflow projection is intentionally read-first. It can inspect
+the verified ledger and classify `start`, `resume`, and `stand_down` against the
+current state. This slice has no native operation adapter, so mutation requests
+return a typed `adapter_unavailable` result and append no lifecycle event. This
+is not an execution scheduler or queue.
+
 Integrity verification proves self-consistency from the retained topic genesis
 to its retained head. It detects edits to retained payloads and provenance, but
 without a separately trusted checkpoint it cannot detect tail deletion or a
@@ -220,6 +234,9 @@ following:
    reinterpretation or loss of tenant, provenance, receipt, or relationship.
 8. Pause, cancel, crash, and resume preserve evidence and enforce remaining
    spend. A UI-only cancellation flag is not sufficient.
+9. Early stopping cannot become exhaustion by setting a boolean: statistical,
+   exact max-trial, native budget, and wall-clock completion each satisfy their
+   own typed admission rule.
 
 Test counts, snapshots, and simulated launcher metadata do not establish these
 claims.
